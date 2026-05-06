@@ -11,8 +11,8 @@
 //!   custom request shape (e.g., to skip the `Action` intermediate entirely).
 
 use crate::core::{Action, Address, ChainId, TransactionRequest};
-use crate::lowering::{enrich_request_with_capabilities, enrich_with_usd, request_from_action};
 use crate::host::HostCapabilities;
+use crate::lowering::{enrich_request_with_capabilities, enrich_with_usd, request_from_action};
 use crate::policy::PolicyRequest;
 use std::sync::Arc;
 use thiserror::Error;

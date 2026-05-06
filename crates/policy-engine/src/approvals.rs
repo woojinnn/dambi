@@ -44,8 +44,10 @@ impl MockApprovals {
         raw: U256,
     ) -> Self {
         let amount = AmountSpec::from_raw(token.clone(), raw);
-        self.allowances
-            .insert(format!("{}/{}/{}", owner.as_str(), token.key(), spender.as_str()), amount);
+        self.allowances.insert(
+            format!("{}/{}/{}", owner.as_str(), token.key(), spender.as_str()),
+            amount,
+        );
         self
     }
 }
@@ -103,7 +105,8 @@ mod tests {
 
     #[test]
     fn mock_returns_recorded_allowance() {
-        let a = MockApprovals::new().with_allowance(&owner(), &usdt(), &spender(), U256::from(7u64));
+        let a =
+            MockApprovals::new().with_allowance(&owner(), &usdt(), &spender(), U256::from(7u64));
         let got = a.allowance(&owner(), &usdt(), &spender()).unwrap();
         assert_eq!(got.raw, "7");
         assert_eq!(got.token, usdt());
@@ -111,7 +114,8 @@ mod tests {
 
     #[test]
     fn mock_missing_allowance_errors() {
-        let a = MockApprovals::new().with_allowance(&owner(), &usdt(), &spender(), U256::from(7u64));
+        let a =
+            MockApprovals::new().with_allowance(&owner(), &usdt(), &spender(), U256::from(7u64));
         let err = a.allowance(&owner(), &usdc(), &spender()).unwrap_err();
         assert_eq!(
             err,
@@ -132,8 +136,11 @@ mod tests {
             decimals: usdt().decimals,
             is_native: false,
         };
-        let a = MockApprovals::new().with_allowance(&owner(), &usdt(), &spender(), U256::from(1u64));
+        let a =
+            MockApprovals::new().with_allowance(&owner(), &usdt(), &spender(), U256::from(1u64));
         assert!(a.allowance(&owner(), &usdt(), &spender()).is_ok());
-        assert!(a.allowance(&owner(), &usdt_other_chain, &spender()).is_err());
+        assert!(a
+            .allowance(&owner(), &usdt_other_chain, &spender())
+            .is_err());
     }
 }

@@ -21,15 +21,15 @@
 //!   oracle-enrichment → Cedar evaluator together.
 
 pub mod adapter;
-pub mod core;
-pub mod lowering;
 pub mod approvals;
-pub mod portfolio;
+pub mod core;
+pub mod host;
+pub mod lowering;
 pub mod oracle;
 pub mod pipeline;
 pub mod policy;
+pub mod portfolio;
 pub mod prelude;
-pub mod host;
 pub mod registry;
 pub mod stat_windows;
 
@@ -38,22 +38,24 @@ pub use adapter::{
     ContractTarget, MatchKey, SolidityFunction, SolidityFunctionSpec, StaticAdapterFactory,
     TypedAdapter,
 };
+pub use approvals::{Approvals, ApprovalsError, MockApprovals};
 pub use core::{
     Action, Address, AmountSpec, ChainId, MultiAction, SwapAction, Token, TransactionRequest,
     UsdValuation,
 };
+pub use host::{HostCapabilities, HostCapabilitiesBuilder};
 pub use lowering::{
     enrich_actions_with_usd, enrich_request_with_capabilities, enrich_with_usd,
     request_from_action, requests_from_action, requests_from_actions,
 };
-pub use approvals::{Approvals, ApprovalsError, MockApprovals};
-pub use host::{HostCapabilities, HostCapabilitiesBuilder};
-pub use portfolio::{MockPortfolio, Portfolio, PortfolioError};
 pub use oracle::{MockOracle, Oracle, OracleError};
 pub use pipeline::{EvaluationOutcome, Pipeline, PipelineError};
 pub use policy::{
-    MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyError, PolicyRequest, RequestKind, Severity,
-    Verdict,
+    MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyError, PolicyRequest, RequestKind,
+    Severity, Verdict,
 };
-pub use stat_windows::{MockStatWindows, ReservationId, StatDelta, StatKey, StatValue, StatWindows};
+pub use portfolio::{MockPortfolio, Portfolio, PortfolioError};
 pub use registry::{AdapterIndex, AdapterRegistry, MockAdapterRegistry, ResolverOutcome};
+pub use stat_windows::{
+    MockStatWindows, ReservationId, StatDelta, StatKey, StatValue, StatWindows,
+};

@@ -116,19 +116,17 @@ impl StatWindows for MockStatWindows {
                     }
                     snapshot = Some(match snapshot {
                         None => delta.value.clone(),
-                        Some(mut snapshot_value) => {
-                            match (&mut snapshot_value, &delta.value) {
-                                (StatValue::Decimal(left), StatValue::Decimal(right)) => {
-                                    *left = add_decimal_strings(left, right);
-                                    snapshot_value
-                                }
-                                (StatValue::Count(left), StatValue::Count(right)) => {
-                                    *left = left.saturating_add(*right);
-                                    snapshot_value
-                                }
-                                (other, _) => other.clone(),
+                        Some(mut snapshot_value) => match (&mut snapshot_value, &delta.value) {
+                            (StatValue::Decimal(left), StatValue::Decimal(right)) => {
+                                *left = add_decimal_strings(left, right);
+                                snapshot_value
                             }
-                        }
+                            (StatValue::Count(left), StatValue::Count(right)) => {
+                                *left = left.saturating_add(*right);
+                                snapshot_value
+                            }
+                            (other, _) => other.clone(),
+                        },
                     });
                 }
             }

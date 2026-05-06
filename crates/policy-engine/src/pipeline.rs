@@ -15,12 +15,13 @@
 use crate::core::{Action, TransactionRequest};
 use crate::host::HostCapabilities;
 use crate::lowering::{
-    compute_swap_window_deltas, enrich_tx_request_with_window_stats, request_for_tx, request_from_action,
+    compute_swap_window_deltas, enrich_tx_request_with_window_stats, request_for_tx,
+    request_from_action,
 };
 use crate::policy::{PolicyEngine, PolicyError, PolicyRequest, RequestKind, Verdict};
-use crate::stat_windows::StatKey;
-use crate::stat_windows::ReservationId;
 use crate::registry::{AdapterRegistry, ResolverOutcome};
+use crate::stat_windows::ReservationId;
+use crate::stat_windows::StatKey;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -50,11 +51,7 @@ pub struct EvaluationOutcome {
 }
 
 impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
-    pub fn new(
-        registry: &'a R,
-        host: HostCapabilities<'a>,
-        policies: &'a PolicyEngine,
-    ) -> Self {
+    pub fn new(registry: &'a R, host: HostCapabilities<'a>, policies: &'a PolicyEngine) -> Self {
         Pipeline {
             registry,
             host,
@@ -66,11 +63,16 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
         &self,
         tx: &TransactionRequest,
     ) -> Result<
-        (Vec<Action>, Vec<PolicyRequest>, PolicyRequest, Vec<(PolicyRequest, RequestKind)>),
+        (
+            Vec<Action>,
+            Vec<PolicyRequest>,
+            PolicyRequest,
+            Vec<(PolicyRequest, RequestKind)>,
+        ),
         PipelineError,
     > {
         let (outcome, adapter) = self.registry.resolve_with_adapter(tx);
-        
+
         let (leaves, leaf_requests) = match (outcome, adapter) {
             (ResolverOutcome::Ambiguous(ids), _) => {
                 return Err(PipelineError::Ambiguous(ids));
