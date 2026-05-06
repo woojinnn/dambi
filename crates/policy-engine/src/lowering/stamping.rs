@@ -11,10 +11,10 @@ use crate::context_keys::{
     EXTN_FN, EXTN_KEY, INPUT_FRACTION_OF_BALANCE_BPS, WINDOW_STATS,
 };
 use crate::core::{Action, AmountSpec, SwapAction, UsdValuation};
+use crate::host::stat_windows::{StatDelta, StatKey, StatValue};
 use crate::host::HostCapabilities;
-use crate::oracle::Oracle;
+use crate::host::Oracle;
 use crate::policy::PolicyRequest;
-use crate::stat_windows::{StatDelta, StatKey, StatValue};
 use alloy_primitives::U256;
 use serde_json::Value;
 

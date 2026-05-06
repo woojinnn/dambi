@@ -13,6 +13,7 @@
 //! `evaluate` instead projects the same window stats on demand in a single call.
 
 use crate::core::{Action, TransactionRequest};
+use crate::host::stat_windows::{ReservationId, StatDelta, StatKey};
 use crate::host::HostCapabilities;
 use crate::lowering::{
     compute_swap_window_deltas, enrich_actions_with_usd, enrich_request_with_capabilities,
@@ -20,9 +21,6 @@ use crate::lowering::{
 };
 use crate::policy::{PolicyEngine, PolicyError, PolicyRequest, RequestKind, Verdict};
 use crate::registry::{AdapterRegistry, ResolverOutcome};
-use crate::stat_windows::ReservationId;
-use crate::stat_windows::StatDelta;
-use crate::stat_windows::StatKey;
 use serde_json::{Map, Value};
 use thiserror::Error;
 

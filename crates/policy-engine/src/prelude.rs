@@ -20,14 +20,13 @@ pub use crate::adapter::{
     ContractTarget, MatchKey, SolidityFunction, SolidityFunctionSpec, StaticAdapterFactory,
     TypedAdapter,
 };
-pub use crate::approvals::{Approvals, ApprovalsError, MockApprovals};
 pub use crate::core::{
     Action, Address, AmountSpec, ChainId, MultiAction, SwapAction, Token, TransactionRequest,
     UsdValuation,
 };
 pub use crate::host::HostCapabilities;
+pub use crate::host::Oracle;
+pub use crate::host::{Approvals, ApprovalsError, MockApprovals};
+pub use crate::host::{MockPortfolio, Portfolio, PortfolioError, StatWindows};
 pub use crate::lowering::{enrich_actions_with_usd, requests_from_actions};
-pub use crate::oracle::Oracle;
 pub use crate::policy::PolicyRequest;
-pub use crate::portfolio::{MockPortfolio, Portfolio, PortfolioError};
-pub use crate::stat_windows::StatWindows;
