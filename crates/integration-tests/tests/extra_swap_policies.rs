@@ -183,7 +183,7 @@ mod fake_protocol_adapter {
 
     impl Adapter for FakeProtocolAdapter {
         fn id(&self) -> AdapterId {
-            AdapterId::new("test/fake-protocol@0.0.1")
+            AdapterId::new("test/fake-protocol@0.0.1").expect("static AdapterId is well-formed")
         }
         fn match_keys(&self) -> Vec<MatchKey> {
             vec![MatchKey::exact(

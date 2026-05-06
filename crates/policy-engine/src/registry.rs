@@ -197,7 +197,7 @@ mod tests {
 
     fn test_adapter(id: &str) -> Arc<dyn Adapter> {
         Arc::new(TestAdapter {
-            id: AdapterId::new(id),
+            id: AdapterId::new(id).expect("static AdapterId is well-formed"),
             keys: vec![MatchKey::exact(1, fixed_target(), [0xaa, 0xbb, 0xcc, 0xdd])],
         })
     }
@@ -208,7 +208,9 @@ mod tests {
         let outcome = reg.lookup(&sample_tx());
         assert_eq!(
             outcome,
-            ResolverOutcome::Resolved(AdapterId::new("test/a@1"))
+            ResolverOutcome::Resolved(
+                AdapterId::new("test/a@1").expect("static AdapterId is well-formed")
+            )
         );
     }
 

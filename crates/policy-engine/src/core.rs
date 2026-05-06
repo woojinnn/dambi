@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 /// EVM address as a lowercase hex string with 0x prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Address(pub String);
+pub struct Address(String);
 
 impl Address {
     pub fn new(s: &str) -> Result<Self, String> {
@@ -38,7 +38,7 @@ pub struct Token {
 
 impl Token {
     pub fn key(&self) -> String {
-        format!("{}:{}", self.chain_id, self.address.0.to_lowercase())
+        format!("{}:{}", self.chain_id, self.address.as_str().to_lowercase())
     }
 }
 
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn address_normalizes_to_lowercase_hex() {
         let a = Address::new("0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap();
-        assert_eq!(a.0, "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48");
+        assert_eq!(a.as_str(), "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48");
     }
 
     #[test]

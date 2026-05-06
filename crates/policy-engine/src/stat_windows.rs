@@ -15,21 +15,21 @@
 //! settled delta sticks forever). Production impls would timestamp
 //! settled entries and prune outside their window.
 
+use crate::context_keys::{SWAP_COUNT_24H, SWAP_VOLUME_USD_24H};
 use crate::core::Address;
 use crate::lowering::add_decimal_strings;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StatKey(pub String);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StatKey(&'static str);
 
 impl StatKey {
-    pub fn new(s: impl Into<String>) -> Self {
-        Self(s.into())
-    }
+    pub const SWAP_VOLUME_USD_24H: Self = Self(SWAP_VOLUME_USD_24H);
+    pub const SWAP_COUNT_24H: Self = Self(SWAP_COUNT_24H);
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn as_str(&self) -> &'static str {
+        self.0
     }
 }
 
@@ -137,7 +137,7 @@ impl StatWindows for MockStatWindows {
                 }
             }
             if let Some(value) = snapshot {
-                out.insert(key.clone(), value);
+                out.insert(*key, value);
             }
         }
 
@@ -204,17 +204,17 @@ mod tests {
     fn confirmed_value_is_visible_to_snapshot() {
         let ws = MockStatWindows::new();
         let owner = actor();
-        let key = StatKey::new("swap_volume_usd_24h");
+        let key = StatKey::SWAP_VOLUME_USD_24H;
         let reservation = ws.reserve(
             &owner,
             vec![StatDelta {
-                key: key.clone(),
+                key,
                 value: StatValue::Decimal("4000.00".into()),
             }],
         );
         ws.settle(reservation);
 
-        let snapshot = ws.snapshot(&owner, &[key.clone()]);
+        let snapshot = ws.snapshot(&owner, &[key]);
         assert_eq!(
             snapshot.get(&key),
             Some(&StatValue::Decimal("4000.0000".into()))
@@ -225,17 +225,17 @@ mod tests {
     fn reservation_value_is_visible_in_snapshot() {
         let ws = MockStatWindows::new();
         let owner = actor();
-        let key = StatKey::new("swap_count_24h");
+        let key = StatKey::SWAP_COUNT_24H;
 
         ws.reserve(
             &owner,
             vec![StatDelta {
-                key: key.clone(),
+                key,
                 value: StatValue::Count(3),
             }],
         );
 
-        let snapshot = ws.snapshot(&owner, &[key.clone()]);
+        let snapshot = ws.snapshot(&owner, &[key]);
         assert_eq!(snapshot.get(&key), Some(&StatValue::Count(3)));
     }
 
@@ -243,11 +243,11 @@ mod tests {
     fn settle_promotes_reservation_to_confirmed() {
         let ws = MockStatWindows::new();
         let owner = actor();
-        let key = StatKey::new("swap_volume_usd_24h");
+        let key = StatKey::SWAP_VOLUME_USD_24H;
         let reservation = ws.reserve(
             &owner,
             vec![StatDelta {
-                key: key.clone(),
+                key,
                 value: StatValue::Decimal("2500.00".into()),
             }],
         );
@@ -263,11 +263,11 @@ mod tests {
     fn settle_removes_reservation() {
         let ws = MockStatWindows::new();
         let owner = actor();
-        let key = StatKey::new("swap_volume_usd_24h");
+        let key = StatKey::SWAP_VOLUME_USD_24H;
         let reservation = ws.reserve(
             &owner,
             vec![StatDelta {
-                key: key.clone(),
+                key,
                 value: StatValue::Decimal("2500.00".into()),
             }],
         );
@@ -285,16 +285,16 @@ mod tests {
     fn release_drops_reservation_and_rolls_back_snapshot() {
         let ws = MockStatWindows::new();
         let owner = actor();
-        let key = StatKey::new("swap_count_24h");
+        let key = StatKey::SWAP_COUNT_24H;
         let reservation = ws.reserve(
             &owner,
             vec![StatDelta {
-                key: key.clone(),
+                key,
                 value: StatValue::Count(5),
             }],
         );
         ws.release(reservation);
-        assert_eq!(ws.snapshot(&owner, &[key.clone()]).get(&key), None);
+        assert_eq!(ws.snapshot(&owner, &[key]).get(&key), None);
         assert_eq!(ws.reservation_count(), 0);
     }
 
@@ -302,39 +302,39 @@ mod tests {
     fn mixing_decimal_and_count_deltas_sums_across_multiple_reservations() {
         let ws = MockStatWindows::new();
         let owner = actor();
-        let volume = StatKey::new("swap_volume_usd_24h");
-        let count = StatKey::new("swap_count_24h");
+        let volume = StatKey::SWAP_VOLUME_USD_24H;
+        let count = StatKey::SWAP_COUNT_24H;
 
         ws.reserve(
             &owner,
             vec![StatDelta {
-                key: volume.clone(),
+                key: volume,
                 value: StatValue::Decimal("10.00".into()),
             }],
         );
         ws.reserve(
             &owner,
             vec![StatDelta {
-                key: volume.clone(),
+                key: volume,
                 value: StatValue::Decimal("5.00".into()),
             }],
         );
         ws.reserve(
             &owner,
             vec![StatDelta {
-                key: count.clone(),
+                key: count,
                 value: StatValue::Count(2),
             }],
         );
         ws.reserve(
             &owner,
             vec![StatDelta {
-                key: count.clone(),
+                key: count,
                 value: StatValue::Count(3),
             }],
         );
 
-        let snapshot = ws.snapshot(&owner, &[volume.clone(), count.clone()]);
+        let snapshot = ws.snapshot(&owner, &[volume, count]);
         assert_eq!(
             snapshot.get(&volume),
             Some(&StatValue::Decimal("15.0000".into()))

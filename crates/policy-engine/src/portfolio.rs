@@ -36,17 +36,21 @@ impl MockPortfolio {
         Self::default()
     }
 
+    fn key_for_portfolio(owner: &Address, token: &Token) -> String {
+        format!("{}/{}", owner.as_str(), token.key())
+    }
+
     pub fn with_balance(mut self, owner: &Address, token: &Token, raw: U256) -> Self {
         let amount = AmountSpec::from_raw(token.clone(), raw);
         self.balances
-            .insert(format!("{}/{}", owner.as_str(), token.key()), amount);
+            .insert(Self::key_for_portfolio(owner, token), amount);
         self
     }
 }
 
 impl Portfolio for MockPortfolio {
     fn balance(&self, owner: &Address, token: &Token) -> Result<AmountSpec, PortfolioError> {
-        let key = format!("{}/{}", owner.as_str(), token.key());
+        let key = Self::key_for_portfolio(owner, token);
         self.balances
             .get(&key)
             .cloned()

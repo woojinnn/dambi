@@ -48,8 +48,10 @@ impl TokenLookup {
     }
 
     pub fn add(&mut self, token: Token) {
-        self.tokens
-            .insert((token.chain_id, token.address.0.to_lowercase()), token);
+        self.tokens.insert(
+            (token.chain_id, token.address.as_str().to_lowercase()),
+            token,
+        );
     }
 
     pub fn with(mut self, token: Token) -> Self {
@@ -61,7 +63,7 @@ impl TokenLookup {
     /// so adapters can still emit a structurally valid `Action`.
     pub fn get(&self, chain_id: ChainId, addr: &Address) -> Token {
         self.tokens
-            .get(&(chain_id, addr.0.to_lowercase()))
+            .get(&(chain_id, addr.as_str().to_lowercase()))
             .cloned()
             .unwrap_or_else(|| Token {
                 chain_id,

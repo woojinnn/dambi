@@ -8,8 +8,7 @@
 
 use crate::context_keys::{
     ACTOR_BALANCE_INPUT_TOKEN, ALLOWANCE_COVERS_INPUT, CURRENT_ALLOWANCE, EXTN_ARG, EXTN_DECIMAL,
-    EXTN_FN, EXTN_KEY, INPUT_FRACTION_OF_BALANCE_BPS, SWAP_COUNT_24H, SWAP_VOLUME_USD_24H,
-    WINDOW_STATS,
+    EXTN_FN, EXTN_KEY, INPUT_FRACTION_OF_BALANCE_BPS, WINDOW_STATS,
 };
 use crate::core::{Action, AmountSpec, SwapAction, UsdValuation};
 use crate::host::HostCapabilities;
@@ -149,13 +148,13 @@ pub fn compute_swap_window_deltas(leaves: &[Action]) -> Vec<StatDelta> {
     let mut deltas = Vec::new();
     if let Some(value) = swap_volume_24h {
         deltas.push(StatDelta {
-            key: StatKey::new(SWAP_VOLUME_USD_24H),
+            key: StatKey::SWAP_VOLUME_USD_24H,
             value: StatValue::Decimal(value),
         });
     }
     if swap_count_24h > 0 {
         deltas.push(StatDelta {
-            key: StatKey::new(SWAP_COUNT_24H),
+            key: StatKey::SWAP_COUNT_24H,
             value: StatValue::Count(swap_count_24h),
         });
     }
@@ -246,7 +245,7 @@ fn input_fraction_bps(input: &AmountSpec, balance: &AmountSpec) -> Option<i64> {
 }
 
 fn amount_raw_u256(raw: &str) -> U256 {
-    U256::from_str_radix(raw, 10).unwrap_or(U256::ZERO)
+    U256::from_str_radix(raw, 10).expect("invariant: amount raw string must be a valid U256")
 }
 
 fn inject_amount_usd(mut amount: AmountSpec, oracle: &dyn Oracle) -> Value {

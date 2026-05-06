@@ -1,25 +1,26 @@
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
+    enrich_actions_with_usd, enrich_request_with_capabilities, request_from_action, Adapter,
     Address, HostCapabilities, MockAdapterRegistry, MockApprovals, MockOracle, MockPortfolio,
-    Pipeline, PolicyEngine, RequestKind, Token, TransactionRequest, Verdict, request_from_action,
-    enrich_actions_with_usd, enrich_request_with_capabilities, PolicyRequest,
-    Adapter,
+    Pipeline, PolicyEngine, PolicyRequest, RequestKind, Token, TransactionRequest, Verdict,
 };
 use policy_engine_adapter_uniswap_v2::{
-    encode_swap_exact_eth_for_tokens, encode_swap_exact_tokens_for_tokens,
-    native_eth, SwapExactETHForTokensParams, SwapExactTokensForTokensParams,
+    encode_swap_exact_eth_for_tokens, encode_swap_exact_tokens_for_tokens, native_eth,
+    SwapExactETHForTokensParams, SwapExactTokensForTokensParams,
     UniswapV2SwapExactETHForTokensAdapter, UniswapV2SwapExactTokensForTokensAdapter,
     UNISWAP_V2_ROUTER_MAINNET,
 };
 use policy_engine_adapter_uniswap_v3::{
-    encode_exact_input_single, ExactInputSingleParams, UniswapV3MulticallAdapter,
-    SWAP_ROUTER_MAINNET, encode_multicall_deadline,
+    encode_exact_input_single, encode_multicall_deadline, ExactInputSingleParams,
+    UniswapV3MulticallAdapter, SWAP_ROUTER_MAINNET,
 };
 use std::str::FromStr;
 use std::sync::Arc;
 
-const POLICY_MAX_FRACTION: &str = include_str!("../../../policies/swap/max-fraction-of-balance-2000-bps.cedar");
-const POLICY_ALLOWANCE: &str = include_str!("../../../policies/swap/allowance-must-cover-input.cedar");
+const POLICY_MAX_FRACTION: &str =
+    include_str!("../../../policies/swap/max-fraction-of-balance-2000-bps.cedar");
+const POLICY_ALLOWANCE: &str =
+    include_str!("../../../policies/swap/allowance-must-cover-input.cedar");
 
 const FROM: &str = "0x0000000000000000000000000000000000000001";
 const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
@@ -45,7 +46,8 @@ fn full_oracle() -> MockOracle {
 }
 
 fn v2_registry() -> MockAdapterRegistry {
-    MockAdapterRegistry::new().with_adapter(Arc::new(UniswapV2SwapExactTokensForTokensAdapter::new()))
+    MockAdapterRegistry::new()
+        .with_adapter(Arc::new(UniswapV2SwapExactTokensForTokensAdapter::new()))
 }
 
 fn v2_eth_registry() -> MockAdapterRegistry {
@@ -119,7 +121,10 @@ fn v3_multicall_tx(first_input: U256, second_input: U256) -> TransactionRequest 
         from: from_address(),
         to: Address::new(SWAP_ROUTER_MAINNET).unwrap(),
         value_wei: "0".into(),
-        data: encode_multicall_deadline(U256::from(9_999_999_999u64), vec![v3_swap(first_input), v3_swap(second_input)]),
+        data: encode_multicall_deadline(
+            U256::from(9_999_999_999u64),
+            vec![v3_swap(first_input), v3_swap(second_input)],
+        ),
         gas: None,
         nonce: None,
     }
@@ -151,8 +156,11 @@ fn leaf_requests_from_adapter(
 fn balance_fraction_deny_when_fraction_exceeds_20_percent() {
     let policies = PolicyEngine::from_sources([POLICY_MAX_FRACTION]).unwrap();
     let oracle = full_oracle();
-    let pf = MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
-    let host = HostCapabilities::builder(&oracle).with_portfolio(&pf).build();
+    let pf =
+        MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
+    let host = HostCapabilities::builder(&oracle)
+        .with_portfolio(&pf)
+        .build();
 
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
@@ -161,7 +169,10 @@ fn balance_fraction_deny_when_fraction_exceeds_20_percent() {
     match pipe.evaluate(&tx).unwrap() {
         Verdict::Fail(matched) => {
             assert_eq!(matched.len(), 1);
-            assert_eq!(matched[0].policy_id, "user/max-fraction-of-balance-2000-bps");
+            assert_eq!(
+                matched[0].policy_id,
+                "user/max-fraction-of-balance-2000-bps"
+            );
             assert!(matches!(matched[0].origin, RequestKind::Leaf { index: 0 }));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
@@ -172,8 +183,11 @@ fn balance_fraction_deny_when_fraction_exceeds_20_percent() {
 fn balance_fraction_allows_when_fraction_is_under_20_percent() {
     let policies = PolicyEngine::from_sources([POLICY_MAX_FRACTION]).unwrap();
     let oracle = full_oracle();
-    let pf = MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
-    let host = HostCapabilities::builder(&oracle).with_portfolio(&pf).build();
+    let pf =
+        MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
+    let host = HostCapabilities::builder(&oracle)
+        .with_portfolio(&pf)
+        .build();
 
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
@@ -203,7 +217,9 @@ fn allowance_warn_fires_when_allowance_does_not_cover_input() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::ZERO,
     );
-    let host = HostCapabilities::builder(&oracle).with_approvals(&approvals).build();
+    let host = HostCapabilities::builder(&oracle)
+        .with_approvals(&approvals)
+        .build();
 
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
@@ -229,7 +245,9 @@ fn allowance_policy_passes_when_allowance_covers_input() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::from(250_000_000u64),
     );
-    let host = HostCapabilities::builder(&oracle).with_approvals(&approvals).build();
+    let host = HostCapabilities::builder(&oracle)
+        .with_approvals(&approvals)
+        .build();
 
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
@@ -247,7 +265,9 @@ fn allowance_policy_skips_native_input_token_for_v2_eth_swap() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::from(1_000_000_000_000_000_000u128),
     );
-    let host = HostCapabilities::builder(&oracle).with_approvals(&approvals).build();
+    let host = HostCapabilities::builder(&oracle)
+        .with_approvals(&approvals)
+        .build();
 
     let adapter = UniswapV2SwapExactETHForTokensAdapter::new();
     let tx = v2_eth_swap_tx(U256::from(1_000_000_000_000_000_000u64));
@@ -264,7 +284,8 @@ fn allowance_policy_skips_native_input_token_for_v2_eth_swap() {
 fn multicall_leaves_receive_capability_enrichment() {
     let policies = PolicyEngine::from_sources([POLICY_MAX_FRACTION, POLICY_ALLOWANCE]).unwrap();
     let oracle = full_oracle();
-    let pf = MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
+    let pf =
+        MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
     let approvals = MockApprovals::new().with_allowance(
         &from_address(),
         &usdt(),
@@ -293,10 +314,12 @@ fn multicall_leaves_receive_capability_enrichment() {
         Verdict::Fail(matched) => {
             assert!(matched
                 .iter()
-                .any(|m| m.policy_id == "user/max-fraction-of-balance-2000-bps" && matches!(m.origin, RequestKind::Leaf { index: 0 })));
+                .any(|m| m.policy_id == "user/max-fraction-of-balance-2000-bps"
+                    && matches!(m.origin, RequestKind::Leaf { index: 0 })));
             assert!(matched
                 .iter()
-                .any(|m| m.policy_id == "user/allowance-must-cover-input" && matches!(m.origin, RequestKind::Leaf { index: 0 })));
+                .any(|m| m.policy_id == "user/allowance-must-cover-input"
+                    && matches!(m.origin, RequestKind::Leaf { index: 0 })));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
     }

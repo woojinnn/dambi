@@ -122,6 +122,7 @@ impl Default for Adapter_ {
 impl Adapter for Adapter_ {
     fn id(&self) -> AdapterId {
         AdapterId::new("uniswap-v3/exactOutputSingle@0.1.0")
+            .expect("static AdapterId is well-formed")
     }
 
     fn match_keys(&self) -> Vec<MatchKey> {

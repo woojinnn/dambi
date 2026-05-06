@@ -46,6 +46,10 @@ impl MockApprovals {
         Self::default()
     }
 
+    fn key_for_approvals(owner: &Address, token: &Token, spender: &Address) -> String {
+        format!("{}/{}/{}", owner.as_str(), token.key(), spender.as_str())
+    }
+
     pub fn with_allowance(
         mut self,
         owner: &Address,
@@ -54,10 +58,8 @@ impl MockApprovals {
         raw: U256,
     ) -> Self {
         let amount = AmountSpec::from_raw(token.clone(), raw);
-        self.allowances.insert(
-            format!("{}/{}/{}", owner.as_str(), token.key(), spender.as_str()),
-            amount,
-        );
+        self.allowances
+            .insert(Self::key_for_approvals(owner, token, spender), amount);
         self
     }
 }
@@ -69,7 +71,7 @@ impl Approvals for MockApprovals {
         token: &Token,
         spender: &Address,
     ) -> Result<AmountSpec, ApprovalsError> {
-        let key = format!("{}/{}/{}", owner.as_str(), token.key(), spender.as_str());
+        let key = Self::key_for_approvals(owner, token, spender);
         self.allowances
             .get(&key)
             .cloned()

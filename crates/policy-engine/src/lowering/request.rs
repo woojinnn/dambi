@@ -71,7 +71,9 @@ pub fn request_for_tx(
 
         if let Action::Swap(s) = action {
             summary.protocols.push(s.protocol_id.clone());
-            summary.distinct_recipients.insert(s.recipient.0.clone());
+            summary
+                .distinct_recipients
+                .insert(s.recipient.as_str().to_string());
             if let Some(usd) = &s.input_amount.usd {
                 summary.total_input_usd = Some(match summary.total_input_usd {
                     Some(prev) => add_decimal_strings(&prev, &usd.value),
@@ -185,8 +187,8 @@ pub(super) fn action_context(action: &Action) -> Value {
             if let Some(fee) = s.fee_bips {
                 m.insert(FEE_BIPS.into(), Value::from(fee as i64));
             }
-            m.insert(TARGET.into(), Value::from(s.target.0.clone()));
-            m.insert(RECIPIENT.into(), Value::from(s.recipient.0.clone()));
+            m.insert(TARGET.into(), Value::from(s.target.as_str()));
+            m.insert(RECIPIENT.into(), Value::from(s.recipient.as_str()));
             m.insert(PROTOCOL_ID.into(), Value::from(s.protocol_id.clone()));
             Value::Object(m)
         }
@@ -210,7 +212,7 @@ pub(super) fn action_context(action: &Action) -> Value {
         } => {
             let mut m = serde_json::Map::new();
             m.insert(SELECTOR.into(), Value::from(selector.as_str()));
-            m.insert(TARGET.into(), Value::from(target.0.clone()));
+            m.insert(TARGET.into(), Value::from(target.as_str()));
             Value::Object(m)
         }
     }

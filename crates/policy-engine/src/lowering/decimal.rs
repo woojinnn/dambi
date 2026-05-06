@@ -5,7 +5,8 @@
 use alloy_primitives::U256;
 
 pub(crate) fn multiply_decimal_strings(raw: &str, decimals: u32, price: &str) -> String {
-    let raw_u = U256::from_str_radix(raw, 10).unwrap_or(U256::ZERO);
+    let raw_u = U256::from_str_radix(raw, 10)
+        .expect("invariant: raw amount string must be a valid U256 (AmountSpec::raw)");
 
     const PRICE_SCALE: u32 = 4;
     let price_int = decimal_to_fixed(price, PRICE_SCALE);
@@ -26,7 +27,8 @@ pub(crate) fn add_decimal_strings(left: &str, right: &str) -> String {
     let right_fixed = decimal_to_fixed(right, 4);
     let sum = left_fixed.saturating_add(right_fixed);
     fixed_to_decimal(
-        U256::from_str_radix(&sum.to_string(), 10).unwrap_or(U256::ZERO),
+        U256::from_str_radix(&sum.to_string(), 10)
+            .expect("invariant: decimal fixed-point sum must be a valid U256"),
         4,
     )
 }
@@ -44,7 +46,9 @@ pub(super) fn decimal_to_fixed(s: &str, scale: u32) -> u128 {
         frac_padded.truncate(scale as usize);
     }
     let combined = format!("{whole}{frac_padded}");
-    combined.parse::<u128>().unwrap_or(0)
+    combined
+        .parse::<u128>()
+        .expect("invariant: decimal fixed-point string must be a valid u128")
 }
 
 pub(super) fn fixed_to_decimal(value: U256, scale: u32) -> String {

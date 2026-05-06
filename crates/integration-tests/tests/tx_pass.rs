@@ -1,8 +1,8 @@
 use alloy_primitives::{Address as AlloyAddress, U256};
 use alloy_sol_types::SolValue;
 use policy_engine::{
-    Address, HostCapabilities, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, RequestKind,
-    Token, TransactionRequest, Verdict,
+    Address, HostCapabilities, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine,
+    RequestKind, Token, TransactionRequest, Verdict,
 };
 use policy_engine_adapters_bundle::{default_registry, uniswap_v2, uniswap_v3, universal_router};
 use std::str::FromStr;
@@ -211,13 +211,15 @@ fn tx_level_warning_and_leaf_deny_report_distinct_origins() {
     let oracle = oracle();
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
-    let verdict = pipe.evaluate(&v3_exact_input_single(200_000_000u64, 30_000)).unwrap();
+    let verdict = pipe
+        .evaluate(&v3_exact_input_single(200_000_000u64, 30_000))
+        .unwrap();
     match verdict {
         Verdict::Fail(matched) => {
             assert_eq!(matched.len(), 2);
             assert!(matched
                 .iter()
-                .any(|m| matches!(m.origin, RequestKind::Leaf { index: 0 })));        
+                .any(|m| matches!(m.origin, RequestKind::Leaf { index: 0 })));
             assert!(matched
                 .iter()
                 .any(|m| matches!(m.origin, RequestKind::Leaf { index: 0 })

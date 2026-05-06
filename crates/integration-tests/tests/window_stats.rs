@@ -1,7 +1,8 @@
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
-    Address, HostCapabilities, MockAdapterRegistry, MockOracle, MockStatWindows, Pipeline, PolicyEngine,
-    RequestKind, StatDelta, StatKey, StatValue, StatWindows, TransactionRequest, Verdict,
+    Address, HostCapabilities, MockAdapterRegistry, MockOracle, MockStatWindows, Pipeline,
+    PolicyEngine, RequestKind, StatDelta, StatKey, StatValue, StatWindows, TransactionRequest,
+    Verdict,
 };
 use policy_engine_adapter_uniswap_v2::{
     encode_swap_exact_tokens_for_tokens, SwapExactTokensForTokensParams,
@@ -36,7 +37,8 @@ fn oracle() -> MockOracle {
 }
 
 fn v2_registry() -> MockAdapterRegistry {
-    MockAdapterRegistry::new().with_adapter(Arc::new(UniswapV2SwapExactTokensForTokensAdapter::new()))
+    MockAdapterRegistry::new()
+        .with_adapter(Arc::new(UniswapV2SwapExactTokensForTokensAdapter::new()))
 }
 
 fn v2_swap_tx(amount_in: u64) -> TransactionRequest {
@@ -63,7 +65,7 @@ fn v2_swap_tx(amount_in: u64) -> TransactionRequest {
 }
 
 fn stats_key() -> StatKey {
-    StatKey::new("swap_volume_usd_24h")
+    StatKey::SWAP_VOLUME_USD_24H
 }
 
 #[test]
@@ -72,9 +74,7 @@ fn window_stats_snapshot_reflects_confirmed_history() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
 
     let actor = from_address();
@@ -90,7 +90,8 @@ fn window_stats_snapshot_reflects_confirmed_history() {
     let verdict = pipe.evaluate(&v2_swap_tx(1_100_000_000)).unwrap();
     match verdict {
         Verdict::Fail(matched) => {
-            assert!(matched.iter().any(|m| m.policy_id == "user/tx-window-swap-volume-usd-24h-cap-5000"
+            assert!(matched.iter().any(|m| m.policy_id
+                == "user/tx-window-swap-volume-usd-24h-cap-5000"
                 && matches!(m.origin, RequestKind::Tx)));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
@@ -103,9 +104,7 @@ fn window_stats_reservation_is_visible_to_next_evaluation() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -114,7 +113,9 @@ fn window_stats_reservation_is_visible_to_next_evaluation() {
     assert_eq!(first.verdict, Verdict::Pass);
     let volume_key = stats_key();
     assert_eq!(
-        stats.snapshot(&from_address(), &[volume_key.clone()]).get(&volume_key),
+        stats
+            .snapshot(&from_address(), &[volume_key.clone()])
+            .get(&volume_key),
         Some(&StatValue::Decimal("3000.0000".into()))
     );
 
@@ -135,9 +136,7 @@ fn window_cap_boundary_crossing_uses_projected_post_tx_state() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let actor = from_address();
 
@@ -155,7 +154,10 @@ fn window_cap_boundary_crossing_uses_projected_post_tx_state() {
         Verdict::Fail(matched) => {
             assert_eq!(matched.len(), 1);
             let match_info = &matched[0];
-            assert_eq!(match_info.policy_id, "user/tx-window-swap-volume-usd-24h-cap-5000");
+            assert_eq!(
+                match_info.policy_id,
+                "user/tx-window-swap-volume-usd-24h-cap-5000"
+            );
             assert!(matches!(match_info.origin, RequestKind::Tx));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
@@ -168,9 +170,7 @@ fn window_cap_enforce_sequential_reserved_evals() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -191,9 +191,7 @@ fn window_cap_evaluate_and_reservation_share_projected_state() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -230,9 +228,7 @@ fn window_cap_evaluate_with_reservation_releases_on_fail() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let actor = from_address();
     let seed = stats.reserve(
@@ -244,7 +240,9 @@ fn window_cap_evaluate_with_reservation_releases_on_fail() {
     );
     stats.settle(seed);
 
-    let outcome = pipe.evaluate_with_reservation(&v2_swap_tx(200_000_000)).unwrap();
+    let outcome = pipe
+        .evaluate_with_reservation(&v2_swap_tx(200_000_000))
+        .unwrap();
     assert!(matches!(outcome.verdict, Verdict::Fail(_)));
     assert!(outcome.reservation.is_none());
     assert_eq!(
@@ -259,9 +257,7 @@ fn window_stats_settle_promotes_reservations() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -281,9 +277,7 @@ fn window_stats_release_rolls_back_snapshot() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -303,9 +297,7 @@ fn window_stats_evaluation_does_not_reserve_on_fail() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let actor = from_address();
     let seed = stats.reserve(
@@ -331,7 +323,10 @@ fn window_stats_absent_without_capability() {
     let orc = oracle();
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&orc), &policies);
-    assert_eq!(pipe.evaluate(&v2_swap_tx(10_000_000_000)).unwrap(), Verdict::Pass);
+    assert_eq!(
+        pipe.evaluate(&v2_swap_tx(10_000_000_000)).unwrap(),
+        Verdict::Pass
+    );
 }
 
 #[test]
@@ -340,9 +335,7 @@ fn evaluate_does_not_create_window_reservations() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc)
-        .with_stats(&stats)
-        .build();
+    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 

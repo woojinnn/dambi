@@ -15,12 +15,134 @@ use thiserror::Error;
 
 /// Stable identifier for an adapter (e.g., `uniswap-v3/exactInputSingle@0.1.0`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AdapterId(pub String);
+pub struct AdapterId {
+    raw: String,
+    protocol_end: usize,
+    name_end: usize,
+    version_start: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AdapterIdParts<'a> {
+    pub protocol: &'a str,
+    pub name: &'a str,
+    pub version: Option<&'a str>,
+}
 
 impl AdapterId {
-    pub fn new(s: &str) -> Self {
-        AdapterId(s.into())
+    pub fn new(s: &str) -> Result<Self, AdapterIdError> {
+        let parsed = parse_adapter_id(s)?;
+        Ok(Self {
+            raw: s.to_string(),
+            protocol_end: parsed.protocol_end,
+            name_end: parsed.name_end,
+            version_start: parsed.version_start,
+        })
     }
+
+    pub fn parts(s: &str) -> Result<AdapterIdParts<'_>, AdapterIdError> {
+        let parsed = parse_adapter_id(s)?;
+        Ok(AdapterIdParts {
+            protocol: &s[..parsed.protocol_end],
+            name: &s[(parsed.protocol_end + 1)..parsed.name_end],
+            version: parsed.version_start.map(|start| &s[start..]),
+        })
+    }
+
+    pub fn protocol(&self) -> &str {
+        &self.raw[..self.protocol_end]
+    }
+
+    pub fn name(&self) -> &str {
+        &self.raw[(self.protocol_end + 1)..self.name_end]
+    }
+
+    pub fn version(&self) -> Option<&str> {
+        self.version_start.map(|start| &self.raw[start..])
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
+}
+
+#[derive(Debug, Error, PartialEq)]
+pub enum AdapterIdError {
+    #[error("adapter id is empty")]
+    Empty,
+    #[error("adapter id has missing protocol separator: expected <protocol>/<name>[@<version>]")]
+    MissingSeparator,
+    #[error("adapter id must include a protocol")]
+    MissingProtocol,
+    #[error("adapter id must include a name")]
+    MissingName,
+    #[error("adapter id has an empty version component")]
+    EmptyVersion,
+    #[error("adapter id has an invalid version '{version}'")]
+    InvalidVersion { version: String },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ParsedAdapterId {
+    protocol_end: usize,
+    name_end: usize,
+    version_start: Option<usize>,
+}
+
+fn parse_adapter_id(s: &str) -> Result<ParsedAdapterId, AdapterIdError> {
+    if s.is_empty() {
+        return Err(AdapterIdError::Empty);
+    }
+
+    let Some((protocol, tail)) = s.split_once('/') else {
+        return Err(AdapterIdError::MissingSeparator);
+    };
+    if protocol.is_empty() {
+        return Err(AdapterIdError::MissingProtocol);
+    }
+
+    if tail.is_empty() {
+        return Err(AdapterIdError::MissingName);
+    }
+
+    let protocol_len = protocol.len();
+    let (name, version_start) = if let Some((name, version)) = tail.split_once('@') {
+        if name.is_empty() {
+            return Err(AdapterIdError::MissingName);
+        }
+        if version.is_empty() {
+            return Err(AdapterIdError::EmptyVersion);
+        }
+        if !is_valid_version(version) {
+            return Err(AdapterIdError::InvalidVersion {
+                version: version.to_string(),
+            });
+        }
+        (name, Some(protocol_len + 1 + name.len() + 1))
+    } else {
+        (tail, None)
+    };
+
+    let name_end = protocol_len + 1 + name.len();
+    let name_start = protocol_len + 1;
+    if name_start >= name_end {
+        return Err(AdapterIdError::MissingName);
+    }
+
+    Ok(ParsedAdapterId {
+        protocol_end: protocol_len,
+        name_end,
+        version_start,
+    })
+}
+
+fn is_valid_version(version: &str) -> bool {
+    version.split('.').all(|segment| {
+        !segment.is_empty()
+            && segment
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    })
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -135,12 +257,7 @@ impl AdapterDescriptor {
 
     pub fn from_adapter(adapter: &dyn Adapter) -> Self {
         let id = adapter.id();
-        let protocol_id =
-            id.0.split('/')
-                .next()
-                .filter(|s| !s.is_empty())
-                .unwrap_or("unknown")
-                .to_string();
+        let protocol_id = id.protocol().to_string();
         Self {
             id,
             protocol_id,
@@ -220,7 +337,7 @@ pub trait TypedAdapter: Send + Sync + Default + Sized + 'static {
     }
 
     fn adapter_id() -> AdapterId {
-        AdapterId::new(Self::ADAPTER_ID)
+        AdapterId::new(Self::ADAPTER_ID).expect("static AdapterId is well-formed")
     }
 
     fn typed_match_keys(&self) -> Vec<MatchKey> {
@@ -236,9 +353,11 @@ pub trait TypedAdapter: Send + Sync + Default + Sized + 'static {
     }
 
     fn typed_descriptor(&self) -> AdapterDescriptor {
+        let id = Self::adapter_id();
+        let protocol_id = id.protocol().to_string();
         AdapterDescriptor::new(
-            Self::adapter_id(),
-            Self::PROTOCOL_ID,
+            id,
+            &protocol_id,
             Self::KIND,
             Self::FUNCTIONS
                 .iter()
@@ -303,12 +422,7 @@ pub trait Adapter: Send + Sync {
     /// adapters should override it with function signatures and action kinds.
     fn descriptor(&self) -> AdapterDescriptor {
         let id = self.id();
-        let protocol_id =
-            id.0.split('/')
-                .next()
-                .filter(|s| !s.is_empty())
-                .unwrap_or("unknown")
-                .to_string();
+        let protocol_id = id.protocol().to_string();
         AdapterDescriptor {
             id,
             protocol_id,
@@ -411,7 +525,10 @@ mod tests {
         let as_adapter: &dyn Adapter = &adapter;
         let target = Address::new("0x1111111111111111111111111111111111111111").unwrap();
 
-        assert_eq!(as_adapter.id(), AdapterId::new("test/typed-noop@0.0.1"));
+        assert_eq!(
+            as_adapter.id(),
+            AdapterId::new("test/typed-noop@0.0.1").expect("static AdapterId is well-formed")
+        );
         assert_eq!(
             as_adapter.match_keys(),
             vec![MatchKey::exact(1, target.clone(), [0xaa, 0xbb, 0xcc, 0xdd])]
@@ -429,11 +546,11 @@ mod tests {
         let factory = TypedNoopAdapter::factory();
         assert_eq!(
             factory.descriptor().id,
-            AdapterId::new("test/typed-noop@0.0.1")
+            AdapterId::new("test/typed-noop@0.0.1").expect("static AdapterId is well-formed")
         );
         assert_eq!(
             factory.create().id(),
-            AdapterId::new("test/typed-noop@0.0.1")
+            AdapterId::new("test/typed-noop@0.0.1").expect("static AdapterId is well-formed")
         );
     }
 }

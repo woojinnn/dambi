@@ -48,9 +48,13 @@ impl MockOracle {
         Self::default()
     }
 
+    fn key_for_oracle(token: &Token) -> String {
+        token.key()
+    }
+
     /// Insert a price for a token. The key is the token's chain-qualified key.
     pub fn with_price(mut self, token: &Token, valuation: UsdValuation) -> Self {
-        self.prices.insert(token.key(), valuation);
+        self.prices.insert(Self::key_for_oracle(token), valuation);
         self
     }
 
@@ -69,9 +73,9 @@ impl MockOracle {
 impl Oracle for MockOracle {
     fn price(&self, token: &Token) -> Result<UsdValuation, OracleError> {
         self.prices
-            .get(&token.key())
+            .get(&Self::key_for_oracle(token))
             .cloned()
-            .ok_or_else(|| OracleError::NoPrice(token.key()))
+            .ok_or_else(|| OracleError::NoPrice(Self::key_for_oracle(token)))
     }
 }
 

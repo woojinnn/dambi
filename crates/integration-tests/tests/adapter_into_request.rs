@@ -6,9 +6,9 @@
 
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
-    Action, Adapter, AdapterError, AdapterId, Address, HostCapabilities, MatchKey, MockAdapterRegistry,
-    MockOracle, Pipeline, PipelineError, PolicyEngine, PolicyRequest, SwapAction, Token,
-    TransactionRequest, Verdict,
+    Action, Adapter, AdapterError, AdapterId, Address, HostCapabilities, MatchKey,
+    MockAdapterRegistry, MockOracle, Pipeline, PipelineError, PolicyEngine, PolicyRequest,
+    SwapAction, Token, TransactionRequest, Verdict,
 };
 use policy_engine_adapter_uniswap_v3::{
     decode_exact_input_single, encode_exact_input_single, ExactInputSingleParams,
@@ -143,7 +143,7 @@ struct DirectAdapter;
 
 impl Adapter for DirectAdapter {
     fn id(&self) -> AdapterId {
-        AdapterId::new("test/direct-adapter@0.0.1")
+        AdapterId::new("test/direct-adapter@0.0.1").expect("static AdapterId is well-formed")
     }
 
     fn match_keys(&self) -> Vec<MatchKey> {
@@ -214,6 +214,7 @@ struct MetadataLengthAdapter {
 impl Adapter for MetadataLengthAdapter {
     fn id(&self) -> AdapterId {
         AdapterId::new("test/metadata-length-adapter@0.0.1")
+            .expect("static AdapterId is well-formed")
     }
 
     fn match_keys(&self) -> Vec<MatchKey> {
@@ -291,7 +292,10 @@ fn custom_adapter_errors_when_leaf_metadata_shorter_than_build_actions() {
     let err = pipeline.evaluate(&tx).unwrap_err();
     match err {
         PipelineError::AdapterBuild(message) => {
-            assert_eq!(message, "leaf_metadata length 1 does not match build_actions length 2")
+            assert_eq!(
+                message,
+                "leaf_metadata length 1 does not match build_actions length 2"
+            )
         }
         other => panic!("expected AdapterBuild, got {other:?}"),
     }
@@ -311,7 +315,10 @@ fn custom_adapter_errors_when_leaf_metadata_longer_than_build_actions() {
     let err = pipeline.evaluate(&tx).unwrap_err();
     match err {
         PipelineError::AdapterBuild(message) => {
-            assert_eq!(message, "leaf_metadata length 3 does not match build_actions length 2")
+            assert_eq!(
+                message,
+                "leaf_metadata length 3 does not match build_actions length 2"
+            )
         }
         other => panic!("expected AdapterBuild, got {other:?}"),
     }

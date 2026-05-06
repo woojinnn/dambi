@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(keys[0].chain_id, 1);
         assert_eq!(keys[0].selector, SELECTOR);
         assert_eq!(
-            keys[0].to.as_ref().unwrap().0.to_lowercase(),
+            keys[0].to.as_ref().unwrap().as_str().to_lowercase(),
             SWAP_ROUTER_MAINNET.to_lowercase()
         );
     }
