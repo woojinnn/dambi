@@ -250,14 +250,15 @@ impl PolicyEngine {
             &req.entities,
             &req.context,
         )?;
+
         match &mut verdict {
             Verdict::Pass => {}
             Verdict::Warn(matches) | Verdict::Fail(matches) => {
                 for matched in matches {
-                    matched.origin = origin.clone();
+                    matched.origin = origin;
+                }
                 }
             }
-        }
         Ok(verdict)
     }
 

@@ -1,9 +1,10 @@
 //! Stateful stat-windows capability — time/session-bounded counters
 //! the host maintains (cumulative swap USD, swap counts, distinct
-//! recipients, …). The engine sees a frozen snapshot at evaluation
-//! time and can reserve a delta that the host later settles or
-//! releases based on whether the user actually signs and the tx
-//! confirms on-chain.
+//! recipients, …). The engine reads a snapshot at evaluation time and can
+//! also fold a reservation-driven delta that represents the current
+//! tx's intent, so policy checks reason over projected post-this-tx values.
+//! Active reservations are included so concurrent callers observe in-flight
+//! intent as part of the same snapshot.
 //!
 //! v0.1: in-memory `MockStatWindows` only, no time-decay (every
 //! settled delta sticks forever). Production impls would timestamp
@@ -106,7 +107,7 @@ impl StatWindows for MockStatWindows {
         let confirmed = inner.confirmed.get(owner);
         for key in keys {
             let mut snapshot = confirmed.and_then(|stats| stats.get(key).cloned());
-            for (_, (reservation_owner, deltas)) in &inner.reservations {
+            for (reservation_owner, deltas) in inner.reservations.values() {
                 if reservation_owner != owner {
                     continue;
                 }

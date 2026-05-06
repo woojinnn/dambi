@@ -51,6 +51,13 @@ pub struct EvaluationOutcome {
     pub reservation: Option<ReservationId>,
 }
 
+type BuiltRequests = (
+    Vec<Action>,
+    Vec<PolicyRequest>,
+    PolicyRequest,
+    Vec<(PolicyRequest, RequestKind)>,
+);
+
 impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
     pub fn new(registry: &'a R, host: HostCapabilities<'a>, policies: &'a PolicyEngine) -> Self {
         Pipeline {
@@ -63,15 +70,7 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
     fn build_requests(
         &self,
         tx: &TransactionRequest,
-    ) -> Result<
-        (
-            Vec<Action>,
-            Vec<PolicyRequest>,
-            PolicyRequest,
-            Vec<(PolicyRequest, RequestKind)>,
-        ),
-        PipelineError,
-    > {
+    ) -> Result<BuiltRequests, PipelineError> {
         let (outcome, adapter) = self.registry.resolve_with_adapter(tx);
 
         let (leaves, metas) = match (outcome, adapter) {
@@ -96,11 +95,13 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
                     .map_err(|e| PipelineError::AdapterBuild(e.to_string()))?;
                 enrich_actions_with_usd(&mut leaves, self.host.oracle());
                 let metas = adapter.leaf_metadata(tx, &leaves);
-                debug_assert_eq!(
-                    metas.len(),
-                    leaves.len(),
-                    "leaf_metadata count must match build_actions count"
-                );
+                if metas.len() != leaves.len() {
+                    return Err(PipelineError::AdapterBuild(format!(
+                        "leaf_metadata length {} does not match build_actions length {}",
+                        metas.len(),
+                        leaves.len()
+                    )));
+                }
                 (leaves, metas)
             }
             (ResolverOutcome::Resolved(_), None) => {
@@ -108,15 +109,9 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
             }
         };
 
-        debug_assert_eq!(
-            metas.len(),
-            leaves.len(),
-            "leaf_metadata count must match build_actions count"
-        );
-
         let leaf_requests: Vec<PolicyRequest> = leaves
             .iter()
-            .zip(metas.into_iter())
+            .zip(metas)
             .map(|(action, meta)| {
                 let mut req = request_from_action(action);
                 enrich_request_with_capabilities(&mut req, action, &self.host);
@@ -140,6 +135,15 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
     ) -> Result<EvaluationOutcome, PipelineError> {
         let (leaves, leaf_requests, mut tx_request, mut requests_with_origin) =
             self.build_requests(tx)?;
+        let deltas = compute_swap_window_deltas(&leaves, &leaf_requests);
+        let mut reservation = self.host.stats().and_then(|stats| {
+            if deltas.is_empty() {
+                None
+            } else {
+                Some(stats.reserve(&tx.from, deltas.clone()))
+            }
+        });
+
         enrich_tx_request_with_window_stats(
             &mut tx_request,
             &tx.from,
@@ -147,40 +151,50 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
                 StatKey::new("swap_volume_usd_24h"),
                 StatKey::new("swap_count_24h"),
             ],
+            &[],
             &self.host,
         );
         if let Some(last_request) = requests_with_origin.last_mut() {
             *last_request = (tx_request, RequestKind::Tx);
         }
 
-        let verdict = self.policies.evaluate_requests(
+        let verdict = match self.policies.evaluate_requests(
             requests_with_origin
                 .iter()
-                .map(|(request, origin)| (request, origin.clone())),
-        )?;
-
-        let reservation = if !matches!(verdict, Verdict::Fail(_)) {
-            self.host.stats().map(|stats| {
-                let deltas = compute_swap_window_deltas(&leaves, &leaf_requests);
-                if deltas.is_empty() {
-                    None
-                } else {
-                    Some(stats.reserve(&tx.from, deltas))
+                .map(|(request, origin)| (request, *origin)),
+        ) {
+            Ok(verdict) => verdict,
+            Err(error) => {
+                if let Some(id) = reservation.take() {
+                    if let Some(stats) = self.host.stats() {
+                        stats.release(id);
+                    }
                 }
-            })
-        } else {
+                return Err(PipelineError::Policy(error));
+            }
+        };
+
+        let reservation = if matches!(verdict, Verdict::Fail(_)) {
+            if let Some(id) = reservation.take() {
+                if let Some(stats) = self.host.stats() {
+                    stats.release(id);
+                }
+            }
             None
+        } else {
+            reservation
         };
 
         Ok(EvaluationOutcome {
             verdict,
-            reservation: reservation.flatten(),
+            reservation,
         })
     }
 
     pub fn evaluate(&self, tx: &TransactionRequest) -> Result<Verdict, PipelineError> {
         let (_leaves, _leaf_requests, mut tx_request, mut requests_with_origin) =
             self.build_requests(tx)?;
+        let deltas = compute_swap_window_deltas(&_leaves, &_leaf_requests);
         enrich_tx_request_with_window_stats(
             &mut tx_request,
             &tx.from,
@@ -188,6 +202,7 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
                 StatKey::new("swap_volume_usd_24h"),
                 StatKey::new("swap_count_24h"),
             ],
+            &deltas,
             &self.host,
         );
         if let Some(last_request) = requests_with_origin.last_mut() {
@@ -197,7 +212,7 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
         Ok(self.policies.evaluate_requests(
             requests_with_origin
                 .iter()
-                .map(|(request, origin)| (request, origin.clone())),
+                .map(|(request, origin)| (request, *origin)),
         )?)
     }
 }

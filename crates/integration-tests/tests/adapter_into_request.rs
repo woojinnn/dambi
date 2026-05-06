@@ -206,6 +206,42 @@ impl Adapter for DirectAdapter {
     }
 }
 
+struct MetadataLengthAdapter {
+    leaves: usize,
+    meta_count: usize,
+}
+
+impl Adapter for MetadataLengthAdapter {
+    fn id(&self) -> AdapterId {
+        AdapterId::new("test/metadata-length-adapter@0.0.1")
+    }
+
+    fn match_keys(&self) -> Vec<MatchKey> {
+        vec![MatchKey::exact(
+            1,
+            Address::new(SWAP_ROUTER_MAINNET).unwrap(),
+            SELECTOR_EXACT_INPUT_SINGLE,
+        )]
+    }
+
+    fn build(&self, tx: &TransactionRequest) -> Result<Action, AdapterError> {
+        DirectAdapter.build(tx)
+    }
+
+    fn build_actions(&self, tx: &TransactionRequest) -> Result<Vec<Action>, AdapterError> {
+        let action = DirectAdapter.build(tx)?;
+        Ok((0..self.leaves).map(|_| action.clone()).collect())
+    }
+
+    fn leaf_metadata(
+        &self,
+        _tx: &TransactionRequest,
+        _leaves: &[Action],
+    ) -> Vec<Map<String, JsonValue>> {
+        (0..self.meta_count).map(|_| Map::new()).collect()
+    }
+}
+
 #[test]
 fn custom_adapter_can_override_into_request_to_skip_action() {
     let registry = MockAdapterRegistry::new().with_adapter(Arc::new(DirectAdapter));
@@ -239,6 +275,46 @@ fn custom_adapter_propagates_decode_failure() {
     };
     let err = pipeline.evaluate(&tx).unwrap_err();
     assert!(matches!(err, PipelineError::AdapterBuild(_)));
+}
+
+#[test]
+fn custom_adapter_errors_when_leaf_metadata_shorter_than_build_actions() {
+    let registry = MockAdapterRegistry::new().with_adapter(Arc::new(MetadataLengthAdapter {
+        leaves: 2,
+        meta_count: 1,
+    }));
+    let oracle = MockOracle::new();
+    let policies = PolicyEngine::from_sources([POLICY_TEXT]).unwrap();
+    let pipeline = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
+    let tx = build_swap_tx(U256::from(50_000_000u64));
+
+    let err = pipeline.evaluate(&tx).unwrap_err();
+    match err {
+        PipelineError::AdapterBuild(message) => {
+            assert_eq!(message, "leaf_metadata length 1 does not match build_actions length 2")
+        }
+        other => panic!("expected AdapterBuild, got {other:?}"),
+    }
+}
+
+#[test]
+fn custom_adapter_errors_when_leaf_metadata_longer_than_build_actions() {
+    let registry = MockAdapterRegistry::new().with_adapter(Arc::new(MetadataLengthAdapter {
+        leaves: 2,
+        meta_count: 3,
+    }));
+    let oracle = MockOracle::new();
+    let policies = PolicyEngine::from_sources([POLICY_TEXT]).unwrap();
+    let pipeline = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
+    let tx = build_swap_tx(U256::from(50_000_000u64));
+
+    let err = pipeline.evaluate(&tx).unwrap_err();
+    match err {
+        PipelineError::AdapterBuild(message) => {
+            assert_eq!(message, "leaf_metadata length 3 does not match build_actions length 2")
+        }
+        other => panic!("expected AdapterBuild, got {other:?}"),
+    }
 }
 
 // ---------------------------------------------------------------------------

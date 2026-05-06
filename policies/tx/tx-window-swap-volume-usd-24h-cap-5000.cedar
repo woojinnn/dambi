@@ -1,6 +1,8 @@
+// Evaluator stamps post-this-tx windowStats by projecting the current tx's
+// swap deltas before enforcing the 24h cap.
 @id("user/tx-window-swap-volume-usd-24h-cap-5000")
 @severity("deny")
-@reason("Cumulative 24h swap USD volume exceeds the configured cap")
+@reason("Cumulative projected 24h swap USD volume crosses the configured cap")
 forbid (principal, action == Action::"send_tx", resource)
 when {
   context has "windowStats"

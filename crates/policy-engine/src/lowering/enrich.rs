@@ -48,10 +48,14 @@ fn scaled_usd(raw: &str, decimals: u32, valuation: &UsdValuation) -> UsdValuatio
     }
 }
 
+/// Stamp tx-level `windowStats` so it reflects post-this-tx projected state.
+/// Callers can pass `pending_deltas` when they do not already hold a reservation
+/// so the snapshot is projected with this tx's intent.
 pub fn enrich_tx_request_with_window_stats(
     tx_request: &mut PolicyRequest,
     actor: &crate::core::Address,
     keys: &[StatKey],
+    pending_deltas: &[StatDelta],
     host: &HostCapabilities,
 ) {
     let Some(context) = tx_request.context.as_object_mut() else {
@@ -66,7 +70,25 @@ pub fn enrich_tx_request_with_window_stats(
     let mut window_stats = serde_json::Map::new();
 
     for key in keys {
-        if let Some(value) = snapshot.get(key) {
+        let mut value = snapshot.get(key).cloned();
+        for delta in pending_deltas.iter().filter(|delta| &delta.key == key) {
+            value = Some(match value {
+                None => delta.value.clone(),
+                Some(mut base) => match (&mut base, &delta.value) {
+                    (StatValue::Decimal(left), StatValue::Decimal(right)) => {
+                        *left = super::decimal::add_decimal_strings(left, right);
+                        base
+                    }
+                    (StatValue::Count(left), StatValue::Count(right)) => {
+                        *left = left.saturating_add(*right);
+                        base
+                    }
+                    (other, _) => other.clone(),
+                },
+            });
+        }
+
+        if let Some(value) = value {
             match value {
                 StatValue::Decimal(value) => {
                     window_stats.insert(
@@ -75,7 +97,7 @@ pub fn enrich_tx_request_with_window_stats(
                     );
                 }
                 StatValue::Count(value) => {
-                    window_stats.insert(key.as_str().into(), Value::from(*value));
+                    window_stats.insert(key.as_str().into(), Value::from(value));
                 }
             }
         }

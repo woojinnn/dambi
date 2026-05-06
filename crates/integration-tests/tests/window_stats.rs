@@ -118,17 +118,138 @@ fn window_stats_reservation_is_visible_to_next_evaluation() {
         Some(&StatValue::Decimal("3000.0000".into()))
     );
 
-    let second = pipe.evaluate(&tx).unwrap();
-    match second {
-        Verdict::Pass => {}
-        other => panic!("expected Verdict::Pass, got {other:?}"),
-    }
+    let second = pipe.evaluate(&v2_swap_tx(1_000_000_000)).unwrap();
+    assert_eq!(second, Verdict::Pass);
 
     assert_eq!(
         stats
             .snapshot(&from_address(), &[volume_key.clone()])
             .get(&volume_key),
         Some(&StatValue::Decimal("3000.0000".into()))
+    );
+}
+
+#[test]
+fn window_cap_boundary_crossing_uses_projected_post_tx_state() {
+    let policies = PolicyEngine::from_sources([POLICY_WINDOW_VOLUME_CAP]).unwrap();
+    let stats = MockStatWindows::new();
+    let orc = oracle();
+    let registry = v2_registry();
+    let host = HostCapabilities::builder(&orc)
+        .with_stats(&stats)
+        .build();
+    let pipe = Pipeline::new(&registry, host, &policies);
+    let actor = from_address();
+
+    let seed = stats.reserve(
+        &actor,
+        vec![StatDelta {
+            key: stats_key(),
+            value: StatValue::Decimal("4900.00".into()),
+        }],
+    );
+    stats.settle(seed);
+
+    let verdict = pipe.evaluate(&v2_swap_tx(200_000_000)).unwrap();
+    match verdict {
+        Verdict::Fail(matched) => {
+            assert_eq!(matched.len(), 1);
+            let match_info = &matched[0];
+            assert_eq!(match_info.policy_id, "user/tx-window-swap-volume-usd-24h-cap-5000");
+            assert!(matches!(match_info.origin, RequestKind::Tx));
+        }
+        other => panic!("expected Verdict::Fail, got {other:?}"),
+    }
+}
+
+#[test]
+fn window_cap_enforce_sequential_reserved_evals() {
+    let policies = PolicyEngine::from_sources([POLICY_WINDOW_VOLUME_CAP]).unwrap();
+    let stats = MockStatWindows::new();
+    let orc = oracle();
+    let registry = v2_registry();
+    let host = HostCapabilities::builder(&orc)
+        .with_stats(&stats)
+        .build();
+    let pipe = Pipeline::new(&registry, host, &policies);
+    let tx = v2_swap_tx(3_000_000_000);
+
+    let first = pipe.evaluate_with_reservation(&tx).unwrap();
+    assert_eq!(first.verdict, Verdict::Pass);
+    assert!(first.reservation.is_some());
+
+    let second = pipe.evaluate_with_reservation(&tx).unwrap();
+    match second.verdict {
+        Verdict::Fail(_) => {}
+        other => panic!("expected Verdict::Fail, got {other:?}"),
+    }
+}
+
+#[test]
+fn window_cap_evaluate_and_reservation_share_projected_state() {
+    let policies = PolicyEngine::from_sources([POLICY_WINDOW_VOLUME_CAP]).unwrap();
+    let stats = MockStatWindows::new();
+    let orc = oracle();
+    let registry = v2_registry();
+    let host = HostCapabilities::builder(&orc)
+        .with_stats(&stats)
+        .build();
+    let pipe = Pipeline::new(&registry, host, &policies);
+    let tx = v2_swap_tx(3_000_000_000);
+
+    let first = pipe.evaluate_with_reservation(&tx).unwrap();
+    assert_eq!(first.verdict, Verdict::Pass);
+    assert!(first.reservation.is_some());
+
+    let plain = pipe.evaluate(&tx).unwrap();
+    match plain {
+        Verdict::Fail(_) => {}
+        other => panic!("expected Verdict::Fail, got {other:?}"),
+    }
+
+    let second = pipe.evaluate_with_reservation(&tx).unwrap();
+    match second.verdict {
+        Verdict::Fail(_) => {}
+        other => panic!("expected Verdict::Fail, got {other:?}"),
+    }
+}
+
+#[test]
+fn window_cap_without_stats_capability_remains_fail_open() {
+    let policies = PolicyEngine::from_sources([POLICY_WINDOW_VOLUME_CAP]).unwrap();
+    let orc = oracle();
+    let registry = v2_registry();
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&orc), &policies);
+    let tx = v2_swap_tx(4_900_000_000);
+    assert_eq!(pipe.evaluate(&tx).unwrap(), Verdict::Pass);
+}
+
+#[test]
+fn window_cap_evaluate_with_reservation_releases_on_fail() {
+    let policies = PolicyEngine::from_sources([POLICY_WINDOW_VOLUME_CAP]).unwrap();
+    let stats = MockStatWindows::new();
+    let orc = oracle();
+    let registry = v2_registry();
+    let host = HostCapabilities::builder(&orc)
+        .with_stats(&stats)
+        .build();
+    let pipe = Pipeline::new(&registry, host, &policies);
+    let actor = from_address();
+    let seed = stats.reserve(
+        &actor,
+        vec![StatDelta {
+            key: stats_key(),
+            value: StatValue::Decimal("4900.00".into()),
+        }],
+    );
+    stats.settle(seed);
+
+    let outcome = pipe.evaluate_with_reservation(&v2_swap_tx(200_000_000)).unwrap();
+    assert!(matches!(outcome.verdict, Verdict::Fail(_)));
+    assert!(outcome.reservation.is_none());
+    assert_eq!(
+        stats.confirmed(&from_address(), &stats_key()),
+        Some(StatValue::Decimal("4900.0000".into()))
     );
 }
 
