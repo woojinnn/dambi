@@ -2,8 +2,8 @@
 //!
 //! The Universal Router is command-based: one outer `execute(...)` call can
 //! contain v2, v3, v4, payment, Permit2, and nested sub-plan commands. The
-//! adapter extracts supported swap commands into leaf `SwapAction`s so existing
-//! swap policies apply unchanged.
+//! adapter aggregates supported swap commands into a single `DexAction` so
+//! route-wide dex policies evaluate one policy action per router transaction.
 
 pub mod command_decode;
 pub mod commands;

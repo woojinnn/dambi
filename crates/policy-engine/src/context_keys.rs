@@ -12,46 +12,40 @@
 //! reference, and reference the new constant by name from any
 //! integration test that asserts on the field shape.
 
-// Tx-level top-level fields stamped by `lowering::request_for_tx`.
+// Common transaction/action fields stamped by request lowering.
 pub const CHAIN_ID: &str = "chainId";
 pub const FROM: &str = "from";
 pub const TO: &str = "to";
 pub const VALUE_WEI: &str = "valueWei";
 pub const SELECTOR: &str = "selector";
-pub const CHILD_COUNT: &str = "childCount";
-pub const KINDS: &str = "kinds";
-pub const PROTOCOLS_USED: &str = "protocolsUsed";
-pub const HAS_APPROVE: &str = "hasApprove";
-pub const HAS_UNKNOWN: &str = "hasUnknown";
-pub const DISTINCT_RECIPIENTS: &str = "distinctRecipients";
-pub const ALLOW_REVERT_COUNT: &str = "allowRevertCount";
-pub const TOTAL_INPUT_USD: &str = "totalInputUsd";
-pub const WINDOW_STATS: &str = "windowStats";
-// Leaf action context keys that are part of swap-specific lowering.
-pub const CHILD_KINDS: &str = "childKinds";
-pub const ALLOW_REVERT: &str = "allowRevert";
-
-// Leaf-swap context fields stamped by `lowering::request_from_action`.
-pub const INPUT_AMOUNT: &str = "inputAmount";
-pub const MIN_OUTPUT_AMOUNT: &str = "minOutputAmount";
-pub const FEE_BIPS: &str = "feeBips";
+pub const RAW_CALLDATA: &str = "rawCalldata";
 pub const TARGET: &str = "target";
-pub const RECIPIENT: &str = "recipient";
-pub const PROTOCOL_ID: &str = "protocolId";
 
-// Capability-stamped fields (Portfolio / Approvals).
-pub const ACTOR_BALANCE_INPUT_TOKEN: &str = "actorBalanceInputToken";
-pub const INPUT_FRACTION_OF_BALANCE_BPS: &str = "inputFractionOfBalanceBps";
-pub const CURRENT_ALLOWANCE: &str = "currentAllowance";
-pub const ALLOWANCE_COVERS_INPUT: &str = "allowanceCoversInput";
+// Dex action context fields stamped by `lowering::request_from_action`.
+pub const PROTOCOL_IDS: &str = "protocolIds";
+pub const INPUT_TOKENS: &str = "inputTokens";
+pub const OUTPUT_TOKENS: &str = "outputTokens";
+pub const TOTAL_INPUT_USD: &str = "totalInputUsd";
+pub const TOTAL_MIN_OUTPUT_USD: &str = "totalMinOutputUsd";
+pub const MAX_FEE_BPS: &str = "maxFeeBps";
+pub const HAS_ZERO_MIN_OUTPUT: &str = "hasZeroMinOutput";
+pub const HAS_EXTERNAL_RECIPIENT: &str = "hasExternalRecipient";
+pub const TOTAL_INPUT_FRACTION_OF_PORTFOLIO_BPS: &str = "totalInputFractionOfPortfolioBps";
+pub const ALLOWANCES_COVER_INPUTS: &str = "allowancesCoverInputs";
+pub const WINDOW_STATS: &str = "windowStats";
 
 // AmountSpec sub-record fields.
-pub const TOKEN_SYMBOL: &str = "tokenSymbol";
+pub const ADDRESS: &str = "address";
+pub const SYMBOL: &str = "symbol";
+pub const DECIMALS: &str = "decimals";
+pub const IS_NATIVE: &str = "isNative";
 pub const RAW: &str = "raw";
 pub const HUMAN: &str = "human";
 pub const USD: &str = "usd";
 pub const VALUE: &str = "value";
+pub const AS_OF_TS: &str = "asOfTs";
 pub const STALE_SEC: &str = "staleSec";
+pub const SOURCES: &str = "sources";
 
 // Cedar `__extn` extension call shape used to embed Decimal values.
 pub const EXTN_KEY: &str = "__extn";
@@ -60,17 +54,5 @@ pub const EXTN_ARG: &str = "arg";
 pub const EXTN_DECIMAL: &str = "decimal";
 
 // Stat-window keys consumed by lowering and stamped onto `windowStats`.
-pub const SWAP_VOLUME_USD_24H: &str = "swap_volume_usd_24h";
-pub const SWAP_COUNT_24H: &str = "swap_count_24h";
-
-// Universal Router metadata keys stamped by `Adapter::leaf_metadata`.
-pub mod ur {
-    pub const ROUTER: &str = "router";
-    pub const ROUTER_COMMAND_INDEX: &str = "routerCommandIndex";
-    pub const ROUTER_COMMAND: &str = "routerCommand";
-    pub const ALLOW_REVERT: &str = "allowRevert";
-    pub const ANALYSIS_DEPTH: &str = "analysisDepth";
-    pub const SUBPLAN_DEPTH: &str = "subplanDepth";
-    pub const HOOK_DATA_PRESENT: &str = "hookDataPresent";
-    pub const V4_ACTION: &str = "v4Action";
-}
+pub const SWAP_VOLUME_USD_24H: &str = "swapVolumeUsd24h";
+pub const SWAP_COUNT_24H: &str = "swapCount24h";

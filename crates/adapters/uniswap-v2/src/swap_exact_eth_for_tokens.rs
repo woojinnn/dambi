@@ -3,12 +3,11 @@
 //! `msg.value`, and the input token is native ETH.
 
 use crate::common::{
-    native_eth, shift_decimals, DecodeError, TokenLookup, UNISWAP_V2_ROUTER_MAINNET,
+    dex_swap_action, native_eth, DecodeError, TokenLookup, UNISWAP_V2_ROUTER_MAINNET,
 };
 use alloy_primitives::{Address as AlloyAddress, U256};
 use alloy_sol_types::{sol, SolCall};
 use policy_engine::prelude::*;
-use std::str::FromStr;
 
 sol! {
     function swapExactETHForTokens(
@@ -107,40 +106,24 @@ impl Adapter for Adapter_ {
         let input_token = native_eth(tx.chain_id);
         let output_token = self.tokens.get(tx.chain_id, &token_out_addr);
 
-        // amountIn comes from msg.value.
-        let amount_in_raw = tx.value_wei.clone();
-        let human_in = shift_decimals(&amount_in_raw, input_token.decimals);
-        let human_min_out = shift_decimals(&p.amount_out_min.to_string(), output_token.decimals);
-
-        Ok(Action::Swap(SwapAction {
-            protocol_id: "uniswap-v2".into(),
-            actor: tx.from.clone(),
-            target: tx.to.clone(),
-            value_wei: tx.value_wei.clone(),
-            input_token: input_token.clone(),
-            output_token: output_token.clone(),
-            input_amount: AmountSpec {
-                token: input_token,
-                raw: amount_in_raw,
-                human: Some(human_in),
-                usd: None,
-            },
-            min_output_amount: Some(AmountSpec {
-                token: output_token,
-                raw: p.amount_out_min.to_string(),
-                human: Some(human_min_out),
-                usd: None,
-            }),
-            recipient: recipient_addr,
-            deadline: u64::from_str(&p.deadline.to_string()).ok(),
-            fee_bips: Some(30),
-        }))
+        Ok(dex_swap_action(
+            tx,
+            "uniswap-v2",
+            input_token,
+            output_token,
+            tx.value_wei.clone(),
+            Some(p.amount_out_min.to_string()),
+            recipient_addr,
+            Some(30),
+            "uniswap-v2/swapExactETHForTokens",
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     fn sample_params() -> Params {
         Params {
@@ -178,13 +161,22 @@ mod tests {
             nonce: None,
         };
         match adapter.build(&tx).unwrap() {
-            Action::Swap(s) => {
-                assert!(s.input_token.is_native);
-                assert_eq!(s.input_token.symbol, "ETH");
-                assert_eq!(s.input_amount.raw, "1000000000000000000");
-                assert_eq!(s.output_token.symbol, "USDT");
+            Action::Dex(d) => {
+                assert_eq!(d.facts.protocol_ids, vec!["uniswap-v2".to_string()]);
+                assert!(d.facts.input_tokens[0].is_native);
+                assert_eq!(d.facts.input_tokens[0].symbol, "ETH");
+                assert_eq!(d.facts.output_tokens[0].symbol, "USDT");
+                assert_eq!(d.facts.max_fee_bps, Some(30));
+                assert!(d.facts.has_zero_min_output);
+                assert_eq!(d.oracle_requirements[0].kind, OracleRequirementKind::Input);
+                assert_eq!(d.oracle_requirements[0].raw_amount, "1000000000000000000");
+                assert_eq!(
+                    d.oracle_requirements[1].kind,
+                    OracleRequirementKind::MinOutput
+                );
+                assert_eq!(d.oracle_requirements[1].raw_amount, "0");
             }
-            _ => panic!("expected swap"),
+            _ => panic!("expected dex"),
         }
     }
 }

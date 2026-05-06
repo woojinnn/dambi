@@ -1,5 +1,5 @@
-//! End-to-end coverage for composite router expansion:
-//!   outer router calldata → leaf swap actions → unchanged swap policies.
+//! End-to-end coverage for composite router aggregation:
+//!   outer router calldata → aggregate Dex action → unchanged Dex policies.
 
 use alloy_primitives::{
     aliases::{I24, U24},
@@ -17,7 +17,7 @@ use policy_engine_adapter_uniswap_v3::{
 use policy_engine_adapters_bundle::{default_registry, universal_router};
 use std::str::FromStr;
 
-const POLICY_SRC: &str = include_str!("../../../policies/swap/max-swap-usd-100.cedar");
+const POLICY_SRC: &str = include_str!("../../../policies/dex/max-input-usd-100.cedar");
 
 const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
@@ -75,7 +75,7 @@ fn v3_path(token_a: &str, fee: u32, token_b: &str) -> Vec<u8> {
 }
 
 #[test]
-fn v3_multicall_leaf_swap_uses_existing_swap_policy() {
+fn v3_multicall_aggregate_dex_action_uses_existing_dex_policy() {
     let registry = default_registry();
     let oracle = oracle();
     let policies = engine();
@@ -95,11 +95,11 @@ fn v3_multicall_leaf_swap_uses_existing_swap_policy() {
 
     let verdict = pipe.evaluate(&tx).unwrap();
     assert!(matches!(verdict, Verdict::Fail(_)));
-    assert_eq!(verdict.matched()[0].policy_id, "user/max-swap-usd-100");
+    assert_eq!(verdict.matched()[0].policy_id, "user/max-input-usd-100");
 }
 
 #[test]
-fn universal_router_v3_leaf_swap_uses_existing_swap_policy() {
+fn universal_router_v3_aggregate_dex_action_uses_existing_dex_policy() {
     let input = (
         AlloyAddress::from_str(RECIPIENT).unwrap(),
         U256::from(200_000_000u64),
@@ -125,11 +125,11 @@ fn universal_router_v3_leaf_swap_uses_existing_swap_policy() {
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
     let verdict = pipe.evaluate(&tx).unwrap();
     assert!(matches!(verdict, Verdict::Fail(_)));
-    assert_eq!(verdict.matched()[0].policy_id, "user/max-swap-usd-100");
+    assert_eq!(verdict.matched()[0].policy_id, "user/max-input-usd-100");
 }
 
 #[test]
-fn universal_router_v4_leaf_swap_uses_existing_swap_policy() {
+fn universal_router_v4_aggregate_dex_action_uses_existing_dex_policy() {
     let pool_key = universal_router::PoolKey {
         currency0: AlloyAddress::from_str(USDT).unwrap(),
         currency1: AlloyAddress::from_str(WETH).unwrap(),
@@ -175,5 +175,5 @@ fn universal_router_v4_leaf_swap_uses_existing_swap_policy() {
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
     let verdict = pipe.evaluate(&tx).unwrap();
     assert!(matches!(verdict, Verdict::Fail(_)));
-    assert_eq!(verdict.matched()[0].policy_id, "user/max-swap-usd-100");
+    assert_eq!(verdict.matched()[0].policy_id, "user/max-input-usd-100");
 }

@@ -1,8 +1,8 @@
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
-    enrich_actions_with_usd, enrich_request_with_capabilities, request_from_action, Adapter,
-    Address, HostCapabilities, MockAdapterRegistry, MockApprovals, MockOracle, MockPortfolio,
-    Pipeline, PolicyEngine, PolicyRequest, RequestKind, Token, TransactionRequest, Verdict,
+    enrich_dex_action, Action, Adapter, Address, HostCapabilities, MockAdapterRegistry,
+    MockApprovals, MockOracle, MockPortfolio, Pipeline, PolicyEngine, PolicyRequest, RequestKind,
+    Token, TransactionRequest, Verdict,
 };
 use policy_engine_adapter_uniswap_v2::{
     encode_swap_exact_eth_for_tokens, encode_swap_exact_tokens_for_tokens, native_eth,
@@ -18,9 +18,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 const POLICY_MAX_FRACTION: &str =
-    include_str!("../../../policies/swap/max-fraction-of-balance-2000-bps.cedar");
+    include_str!("../../../policies/dex/max-input-fraction-of-portfolio-2000-bps.cedar");
 const POLICY_ALLOWANCE: &str =
-    include_str!("../../../policies/swap/allowance-must-cover-input.cedar");
+    include_str!("../../../policies/dex/allowance-must-cover-input.cedar");
 
 const FROM: &str = "0x0000000000000000000000000000000000000001";
 const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
@@ -130,26 +130,19 @@ fn v3_multicall_tx(first_input: U256, second_input: U256) -> TransactionRequest 
     }
 }
 
-fn leaf_requests_from_adapter(
+fn requests_from_adapter(
     adapter: &dyn Adapter,
     tx: &TransactionRequest,
     host: &HostCapabilities,
 ) -> Vec<PolicyRequest> {
-    let mut actions = adapter
-        .build_actions(tx)
-        .expect("adapter should build leaf actions");
-    enrich_actions_with_usd(&mut actions, host.oracle());
-    let metas = adapter.leaf_metadata(tx, &actions);
-    let mut out = Vec::with_capacity(actions.len());
-    for (action, meta) in actions.into_iter().zip(metas.into_iter()) {
-        let mut req = request_from_action(&action);
-        enrich_request_with_capabilities(&mut req, &action, host);
-        if let Some(context) = req.context.as_object_mut() {
-            context.extend(meta);
-        }
-        out.push(req);
+    let mut action = adapter
+        .build(tx)
+        .expect("adapter should build an aggregate action");
+    match &mut action {
+        Action::Dex(dex) => enrich_dex_action(dex, host),
+        Action::Other(_) => panic!("expected adapter to emit Dex action"),
     }
-    out
+    policy_engine::lowering::requests_from_action(&action)
 }
 
 #[test]
@@ -158,8 +151,7 @@ fn balance_fraction_deny_when_fraction_exceeds_20_percent() {
     let oracle = full_oracle();
     let pf =
         MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
-    let host = HostCapabilities::new(&oracle)
-        .with_portfolio(&pf);
+    let host = HostCapabilities::new(&oracle).with_portfolio(&pf);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(300_000_000u64));
@@ -169,9 +161,9 @@ fn balance_fraction_deny_when_fraction_exceeds_20_percent() {
             assert_eq!(matched.len(), 1);
             assert_eq!(
                 matched[0].policy_id,
-                "user/max-fraction-of-balance-2000-bps"
+                "user/max-input-fraction-of-portfolio-2000-bps"
             );
-            assert!(matches!(matched[0].origin, RequestKind::Leaf { index: 0 }));
+            assert!(matches!(matched[0].origin, RequestKind::Action));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
     }
@@ -183,8 +175,7 @@ fn balance_fraction_allows_when_fraction_is_under_20_percent() {
     let oracle = full_oracle();
     let pf =
         MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
-    let host = HostCapabilities::new(&oracle)
-        .with_portfolio(&pf);
+    let host = HostCapabilities::new(&oracle).with_portfolio(&pf);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(100_000_000u64));
@@ -213,8 +204,7 @@ fn allowance_warn_fires_when_allowance_does_not_cover_input() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::ZERO,
     );
-    let host = HostCapabilities::new(&oracle)
-        .with_approvals(&approvals);
+    let host = HostCapabilities::new(&oracle).with_approvals(&approvals);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(200_000_000u64));
@@ -223,7 +213,7 @@ fn allowance_warn_fires_when_allowance_does_not_cover_input() {
         Verdict::Warn(matched) => {
             assert_eq!(matched.len(), 1);
             assert_eq!(matched[0].policy_id, "user/allowance-must-cover-input");
-            assert!(matches!(matched[0].origin, RequestKind::Leaf { index: 0 }));
+            assert!(matches!(matched[0].origin, RequestKind::Action));
         }
         other => panic!("expected Verdict::Warn, got {other:?}"),
     }
@@ -239,8 +229,7 @@ fn allowance_policy_passes_when_allowance_covers_input() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::from(250_000_000u64),
     );
-    let host = HostCapabilities::new(&oracle)
-        .with_approvals(&approvals);
+    let host = HostCapabilities::new(&oracle).with_approvals(&approvals);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(200_000_000u64));
@@ -257,13 +246,20 @@ fn allowance_policy_skips_native_input_token_for_v2_eth_swap() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::from(1_000_000_000_000_000_000u128),
     );
-    let host = HostCapabilities::new(&oracle)
-        .with_approvals(&approvals);
+    let host = HostCapabilities::new(&oracle).with_approvals(&approvals);
     let adapter = UniswapV2SwapExactETHForTokensAdapter::new();
     let tx = v2_eth_swap_tx(U256::from(1_000_000_000_000_000_000u64));
-    let request = leaf_requests_from_adapter(&adapter, &tx, &host)[0].clone();
-    assert!(request.context.get("currentAllowance").is_none());
-    assert!(request.context.get("allowanceCoversInput").is_none());
+    let request = requests_from_adapter(&adapter, &tx, &host)
+        .into_iter()
+        .next()
+        .expect("expected one aggregate request");
+    assert_eq!(
+        request
+            .context
+            .get("allowancesCoverInputs")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
 
     let registry = v2_eth_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
@@ -271,7 +267,7 @@ fn allowance_policy_skips_native_input_token_for_v2_eth_swap() {
 }
 
 #[test]
-fn multicall_leaves_receive_capability_enrichment() {
+fn multicall_aggregate_action_receives_capability_enrichment() {
     let policies = PolicyEngine::from_sources([POLICY_MAX_FRACTION, POLICY_ALLOWANCE]).unwrap();
     let oracle = full_oracle();
     let pf =
@@ -288,26 +284,35 @@ fn multicall_leaves_receive_capability_enrichment() {
     let adapter = UniswapV3MulticallAdapter::new();
     let tx = v3_multicall_tx(U256::from(250_000_000u64), U256::from(100_000_000u64));
 
-    let requests = leaf_requests_from_adapter(&adapter, &tx, &host);
-    assert_eq!(requests.len(), 2);
-    assert!(requests.iter().all(|req| {
-        req.context.get("actorBalanceInputToken").is_some()
-            && req.context.get("currentAllowance").is_some()
-            && req.context.get("inputFractionOfBalanceBps").is_some()
-    }));
+    let requests = requests_from_adapter(&adapter, &tx, &host);
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(
+        request
+            .context
+            .get("totalInputFractionOfPortfolioBps")
+            .and_then(serde_json::Value::as_i64),
+        Some(3500)
+    );
+    assert_eq!(
+        request
+            .context
+            .get("allowancesCoverInputs")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
 
     let registry = v3_multicall_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     match pipe.evaluate(&tx).unwrap() {
         Verdict::Fail(matched) => {
-            assert!(matched
-                .iter()
-                .any(|m| m.policy_id == "user/max-fraction-of-balance-2000-bps"
-                    && matches!(m.origin, RequestKind::Leaf { index: 0 })));
+            assert!(matched.iter().any(|m| m.policy_id
+                == "user/max-input-fraction-of-portfolio-2000-bps"
+                && matches!(m.origin, RequestKind::Action)));
             assert!(matched
                 .iter()
                 .any(|m| m.policy_id == "user/allowance-must-cover-input"
-                    && matches!(m.origin, RequestKind::Leaf { index: 0 })));
+                    && matches!(m.origin, RequestKind::Action)));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
     }

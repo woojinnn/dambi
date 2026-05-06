@@ -1,11 +1,10 @@
 //! Uniswap V3 router `multicall` expansion.
 //!
 //! This adapter treats multicall as structural: each supported child calldata
-//! is decoded into its own leaf `Action`, and the pipeline evaluates the
-//! existing leaf policies against those actions.
+//! is decoded into a leaf DEX action and merged into one aggregate DEX action.
 
 use crate::{
-    common::{DecodeError, SWAP_ROUTER_MAINNET},
+    common::{merge_dex_actions, DecodeError, SWAP_ROUTER_MAINNET},
     exact_input, exact_input_single, exact_output, exact_output_single,
 };
 use alloy_sol_types::{sol, SolCall};
@@ -136,7 +135,7 @@ impl Adapter_ {
             if selector == SELECTOR_NO_DEADLINE || selector == SELECTOR_DEADLINE {
                 let nested =
                     decode(&child_tx.data).map_err(|e| AdapterError::BadCalldata(e.to_string()))?;
-                out.extend(self.expand_calls(&child_tx, nested.data, depth + 1)?);
+                out.push(self.build_from_calls(&child_tx, nested.data, depth + 1)?);
             } else if selector == exact_input_single::SELECTOR {
                 out.push(self.exact_input_single.build(&child_tx)?);
             } else if selector == exact_input::SELECTOR {
@@ -153,6 +152,16 @@ impl Adapter_ {
             }
         }
         Ok(out)
+    }
+
+    fn build_from_calls(
+        &self,
+        tx: &TransactionRequest,
+        calls: Vec<Vec<u8>>,
+        depth: usize,
+    ) -> Result<Action, AdapterError> {
+        let actions = self.expand_calls(tx, calls, depth)?;
+        merge_dex_actions(tx, actions, "multicall")
     }
 }
 
@@ -180,18 +189,8 @@ impl Adapter for Adapter_ {
     }
 
     fn build(&self, tx: &TransactionRequest) -> Result<Action, AdapterError> {
-        let actions = self.build_actions(tx)?;
-        Ok(Action::Multi(MultiAction {
-            actor: tx.from.clone(),
-            target: tx.to.clone(),
-            value_wei: tx.value_wei.clone(),
-            children: actions,
-        }))
-    }
-
-    fn build_actions(&self, tx: &TransactionRequest) -> Result<Vec<Action>, AdapterError> {
         let p = decode(&tx.data).map_err(|e| AdapterError::BadCalldata(e.to_string()))?;
-        self.expand_calls(tx, p.data, 0)
+        self.build_from_calls(tx, p.data, 0)
     }
 }
 
@@ -254,18 +253,31 @@ mod tests {
     }
 
     #[test]
-    fn build_actions_expands_supported_children() {
+    fn build_merges_supported_children_into_dex_action() {
         let adapter = Adapter_::new();
-        let actions = adapter
-            .build_actions(&tx(encode_deadline(
+        let action = adapter
+            .build(&tx(encode_deadline(
                 U256::from(1u64),
-                vec![swap(200_000_000)],
+                vec![swap(50_000_000), swap(200_000_000)],
             )))
             .unwrap();
-        assert_eq!(actions.len(), 1);
-        match &actions[0] {
-            Action::Swap(s) => assert_eq!(s.input_amount.raw, "200000000"),
-            other => panic!("expected swap, got {other:?}"),
+        match action {
+            Action::Dex(d) => {
+                assert_eq!(d.facts.protocol_ids, vec!["uniswap-v3"]);
+                assert_eq!(d.facts.input_tokens.len(), 1);
+                assert_eq!(d.facts.input_tokens[0].symbol, "USDT");
+                assert_eq!(d.facts.output_tokens.len(), 1);
+                assert_eq!(d.facts.output_tokens[0].symbol, "WETH");
+                assert_eq!(d.facts.max_fee_bps, Some(30));
+                assert_eq!(d.oracle_requirements.len(), 4);
+                assert_eq!(d.oracle_requirements[0].raw_amount, "50000000");
+                assert_eq!(d.oracle_requirements[2].raw_amount, "200000000");
+                assert_eq!(
+                    d.trace.steps,
+                    vec!["multicall", "exactInputSingle", "exactInputSingle"]
+                );
+            }
+            other => panic!("expected dex, got {other:?}"),
         }
     }
 }

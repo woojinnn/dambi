@@ -1,18 +1,17 @@
 //! Uniswap V3 SwapRouter `exactInputSingle` — everything for this one function:
 //! the `sol!` declaration, the encode/decode pair, and the `Adapter` impl that
-//! turns a matching `TransactionRequest` into a `SwapAction`.
+//! turns a matching `TransactionRequest` into a DEX action.
 //!
 //! Mainnet SwapRouter (the original V3 router with `deadline` in the params
 //! struct) lives at `0xE592427A0AEce92De3Edee1F18E0157C05861564`.
 
-use crate::common::{shift_decimals, DecodeError, TokenLookup, SWAP_ROUTER_MAINNET};
+use crate::common::{dex_swap_action, DecodeError, TokenLookup, SWAP_ROUTER_MAINNET};
 use alloy_primitives::{
     aliases::{U160, U24},
     Address as AlloyAddress, U256,
 };
 use alloy_sol_types::{sol, SolCall};
 use policy_engine::prelude::*;
-use std::str::FromStr;
 
 sol! {
     /// Solidity declaration of the V3 router's `exactInputSingle` params,
@@ -154,7 +153,7 @@ impl TypedAdapter for Adapter_ {
         "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))",
         SELECTOR,
     )];
-    const EMITTED_ACTIONS: &'static [ActionKind] = &[ActionKind::Swap];
+    const EMITTED_ACTIONS: &'static [ActionKind] = &[ActionKind::Dex];
 
     fn contract_targets(&self) -> Vec<ContractTarget> {
         self.chain_targets
@@ -173,39 +172,24 @@ impl TypedAdapter for Adapter_ {
         let input_token = self.tokens.get(tx.chain_id, &token_in_addr);
         let output_token = self.tokens.get(tx.chain_id, &token_out_addr);
 
-        let human_input = shift_decimals(&p.amount_in.to_string(), input_token.decimals);
-        let human_min_out =
-            shift_decimals(&p.amount_out_minimum.to_string(), output_token.decimals);
-
-        Ok(Action::Swap(SwapAction {
-            protocol_id: "uniswap-v3".into(),
-            actor: tx.from.clone(),
-            target: tx.to.clone(),
-            value_wei: tx.value_wei.clone(),
-            input_token: input_token.clone(),
-            output_token: output_token.clone(),
-            input_amount: AmountSpec {
-                token: input_token,
-                raw: p.amount_in.to_string(),
-                human: Some(human_input),
-                usd: None,
-            },
-            min_output_amount: Some(AmountSpec {
-                token: output_token.clone(),
-                raw: p.amount_out_minimum.to_string(),
-                human: Some(human_min_out),
-                usd: None,
-            }),
-            recipient: recipient_addr,
-            deadline: u64::from_str(&p.deadline.to_string()).ok(),
-            fee_bips: Some((p.fee / 100) as u32),
-        }))
+        Ok(dex_swap_action(
+            tx,
+            Self::PROTOCOL_ID,
+            input_token,
+            output_token,
+            p.amount_in.to_string(),
+            Some(p.amount_out_minimum.to_string()),
+            recipient_addr,
+            Some(p.fee / 100),
+            "exactInputSingle",
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     fn sample_params() -> Params {
         Params {
@@ -312,21 +296,30 @@ mod tests {
     }
 
     #[test]
-    fn build_emits_swap_action_with_known_tokens() {
+    fn build_emits_dex_action_with_known_tokens() {
         let adapter = Adapter_::new();
         let action = adapter
             .build(&build_tx(U256::from(200_000_000u64)))
             .unwrap();
         match action {
-            Action::Swap(s) => {
-                assert_eq!(s.protocol_id, "uniswap-v3");
-                assert_eq!(s.input_token.symbol, "USDT");
-                assert_eq!(s.output_token.symbol, "WETH");
-                assert_eq!(s.input_amount.raw, "200000000");
-                assert_eq!(s.input_amount.human.as_deref(), Some("200.000000"));
-                assert_eq!(s.fee_bips, Some(30));
+            Action::Dex(d) => {
+                assert_eq!(d.facts.protocol_ids, vec!["uniswap-v3"]);
+                assert_eq!(d.facts.input_tokens[0].symbol, "USDT");
+                assert_eq!(d.facts.output_tokens[0].symbol, "WETH");
+                assert_eq!(d.facts.max_fee_bps, Some(30));
+                assert!(d.facts.has_zero_min_output);
+                assert!(d.facts.has_external_recipient);
+                assert_eq!(d.oracle_requirements.len(), 2);
+                assert_eq!(d.oracle_requirements[0].kind, OracleRequirementKind::Input);
+                assert_eq!(d.oracle_requirements[0].raw_amount, "200000000");
+                assert_eq!(
+                    d.oracle_requirements[1].kind,
+                    OracleRequirementKind::MinOutput
+                );
+                assert_eq!(d.oracle_requirements[1].raw_amount, "0");
+                assert_eq!(d.trace.steps, vec!["exactInputSingle"]);
             }
-            _ => panic!("expected swap action"),
+            _ => panic!("expected dex action"),
         }
     }
 
@@ -345,8 +338,8 @@ mod tests {
             nonce: None,
         };
         match adapter.build(&tx).unwrap() {
-            Action::Swap(s) => assert_eq!(s.input_token.symbol, "UNKNOWN"),
-            _ => panic!("expected swap"),
+            Action::Dex(d) => assert_eq!(d.facts.input_tokens[0].symbol, "UNKNOWN"),
+            _ => panic!("expected dex"),
         }
     }
 

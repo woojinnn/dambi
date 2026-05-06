@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 const POLICY_WINDOW_VOLUME_CAP: &str =
-    include_str!("../../../policies/tx/tx-window-swap-volume-usd-24h-cap-5000.cedar");
+    include_str!("../../../policies/dex/window-swap-volume-usd-24h-cap-5000.cedar");
 const FROM: &str = "0x0000000000000000000000000000000000000001";
 const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
@@ -91,8 +91,8 @@ fn window_stats_snapshot_reflects_confirmed_history() {
     match verdict {
         Verdict::Fail(matched) => {
             assert!(matched.iter().any(|m| m.policy_id
-                == "user/tx-window-swap-volume-usd-24h-cap-5000"
-                && matches!(m.origin, RequestKind::Tx)));
+                == "user/window-swap-volume-usd-24h-cap-5000"
+                && matches!(m.origin, RequestKind::Action)));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
     }
@@ -156,9 +156,9 @@ fn window_cap_boundary_crossing_uses_projected_post_tx_state() {
             let match_info = &matched[0];
             assert_eq!(
                 match_info.policy_id,
-                "user/tx-window-swap-volume-usd-24h-cap-5000"
+                "user/window-swap-volume-usd-24h-cap-5000"
             );
-            assert!(matches!(match_info.origin, RequestKind::Tx));
+            assert!(matches!(match_info.origin, RequestKind::Action));
         }
         other => panic!("expected Verdict::Fail, got {other:?}"),
     }

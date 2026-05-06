@@ -1,0 +1,22 @@
+entity Wallet;
+entity Protocol;
+
+type Token = {
+  chainId: Long,
+  address: String,
+  symbol: String,
+  decimals: Long,
+  isNative: Bool,
+};
+
+type UsdValuation = {
+  value: decimal,
+  asOfTs: Long,
+  staleSec: Long,
+  sources: Set<String>,
+};
+
+type WindowStats = {
+  swapVolumeUsd24h?: decimal,
+  swapCount24h?: Long,
+};

@@ -1,6 +1,6 @@
 //! Universal Router `execute(bytes,bytes[])`.
 
-use crate::commands::{expand_commands, meta_to_map, RoutedAction};
+use crate::commands::{expand_commands, merge_dex_actions, RoutedAction};
 use crate::common::{TokenLookup, UNIVERSAL_ROUTER_MAINNET};
 use alloy_primitives::U256;
 use alloy_sol_types::{sol, SolCall};
@@ -111,7 +111,7 @@ impl TypedAdapter for Adapter_ {
             crate::execute_deadline::SELECTOR_EXECUTE_DEADLINE,
         ),
     ];
-    const EMITTED_ACTIONS: &'static [ActionKind] = &[ActionKind::Swap, ActionKind::Multi];
+    const EMITTED_ACTIONS: &'static [ActionKind] = &[ActionKind::Dex];
 
     fn contract_targets(&self) -> Vec<ContractTarget> {
         self.chain_targets
@@ -121,42 +121,15 @@ impl TypedAdapter for Adapter_ {
     }
 
     fn build_action(&self, tx: &TransactionRequest) -> Result<Action, AdapterError> {
-        let actions = self.build_leaf_actions(tx)?;
-        Ok(Action::Multi(MultiAction {
-            actor: tx.from.clone(),
-            target: tx.to.clone(),
-            value_wei: tx.value_wei.clone(),
-            children: actions,
-        }))
-    }
-
-    fn build_leaf_actions(&self, tx: &TransactionRequest) -> Result<Vec<Action>, AdapterError> {
-        Ok(self
-            .decode_routed_actions(tx)?
-            .into_iter()
-            .map(|r| r.action)
-            .collect())
-    }
-
-    fn typed_leaf_metadata(
-        &self,
-        tx: &TransactionRequest,
-        leaves: &[Action],
-    ) -> Vec<serde_json::Map<String, serde_json::Value>> {
-        let mut metas = vec![Default::default(); leaves.len()];
-        if let Ok(routed) = self.decode_routed_actions(tx) {
-            for (meta, routed_action) in metas.iter_mut().zip(routed.iter()) {
-                *meta = meta_to_map(&routed_action.meta);
-            }
-        }
-        metas
+        let routed_actions = self.decode_routed_actions(tx)?;
+        Ok(Action::Dex(merge_dex_actions(tx, routed_actions)?))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{V3_SWAP_EXACT_IN, V4_SWAP};
+    use crate::commands::{V2_SWAP_EXACT_IN, V3_SWAP_EXACT_IN, V4_SWAP};
     use crate::v4_actions::{V4_SETTLE_ALL, V4_SWAP_EXACT_IN_SINGLE, V4_TAKE_ALL};
     use alloy_primitives::{
         aliases::{I24, U24},
@@ -212,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn v3_exact_in_command_emits_swap_leaf() {
+    fn v3_exact_in_command_emits_aggregate_dex_action() {
         let input = (
             AlloyAddress::from_str(RECIPIENT).unwrap(),
             U256::from(200_000_000u64),
@@ -223,21 +196,36 @@ mod tests {
         )
             .abi_encode_sequence();
         let calldata = encode_execute(vec![V3_SWAP_EXACT_IN], vec![input]);
-        let actions = Adapter_::new().build_actions(&tx(calldata)).unwrap();
-        assert_eq!(actions.len(), 1);
-        match &actions[0] {
-            Action::Swap(s) => {
-                assert_eq!(s.protocol_id, "uniswap-v3");
-                assert_eq!(s.input_token.symbol, "USDT");
-                assert_eq!(s.output_token.symbol, "WETH");
-                assert_eq!(s.input_amount.raw, "200000000");
+        let action = Adapter_::new().build_action(&tx(calldata)).unwrap();
+        match &action {
+            Action::Dex(dex) => {
+                assert_eq!(dex.facts.protocol_ids, vec!["uniswap-v3"]);
+                assert_eq!(symbols(&dex.facts.input_tokens), vec!["USDT"]);
+                assert_eq!(symbols(&dex.facts.output_tokens), vec!["WETH"]);
+                assert_eq!(dex.oracle_requirements.len(), 2);
+                assert_eq!(
+                    dex.oracle_requirements
+                        .iter()
+                        .find(|r| r.kind == OracleRequirementKind::Input)
+                        .unwrap()
+                        .raw_amount,
+                    "200000000"
+                );
+                assert_eq!(dex.facts.max_fee_bps, Some(30));
+                assert!(dex.facts.has_zero_min_output);
+                assert!(dex.facts.has_external_recipient);
+                assert!(dex
+                    .trace
+                    .steps
+                    .iter()
+                    .any(|step| step.contains("V3_SWAP_EXACT_IN")));
             }
-            other => panic!("expected swap, got {other:?}"),
+            other => panic!("expected dex, got {other:?}"),
         }
     }
 
     #[test]
-    fn v4_exact_in_single_command_emits_swap_leaf() {
+    fn v4_exact_in_single_command_emits_aggregate_dex_action() {
         let pool_key = crate::v4_actions::PoolKey {
             currency0: AlloyAddress::from_str(USDT).unwrap(),
             currency1: AlloyAddress::from_str(WETH).unwrap(),
@@ -267,16 +255,95 @@ mod tests {
         let v4_input = (actions, params).abi_encode_sequence();
         let calldata = encode_execute(vec![V4_SWAP], vec![v4_input]);
 
-        let actions = Adapter_::new().build_actions(&tx(calldata)).unwrap();
-        assert_eq!(actions.len(), 1);
-        match &actions[0] {
-            Action::Swap(s) => {
-                assert_eq!(s.protocol_id, "uniswap-v4");
-                assert_eq!(s.input_token.symbol, "USDT");
-                assert_eq!(s.output_token.symbol, "WETH");
-                assert_eq!(s.fee_bips, Some(30));
+        let action = Adapter_::new().build_action(&tx(calldata)).unwrap();
+        match &action {
+            Action::Dex(dex) => {
+                assert_eq!(dex.facts.protocol_ids, vec!["uniswap-v4"]);
+                assert_eq!(symbols(&dex.facts.input_tokens), vec!["USDT"]);
+                assert_eq!(symbols(&dex.facts.output_tokens), vec!["WETH"]);
+                assert_eq!(
+                    dex.oracle_requirements
+                        .iter()
+                        .find(|r| r.kind == OracleRequirementKind::MinOutput)
+                        .unwrap()
+                        .raw_amount,
+                    "0"
+                );
+                assert_eq!(dex.facts.max_fee_bps, Some(30));
+                assert!(dex
+                    .trace
+                    .steps
+                    .iter()
+                    .any(|step| step.contains("V4_SWAP_EXACT_IN_SINGLE")));
             }
-            other => panic!("expected swap, got {other:?}"),
+            other => panic!("expected dex, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn multiple_swap_commands_merge_into_one_dex_action() {
+        let v3_input = (
+            AlloyAddress::from_str(RECIPIENT).unwrap(),
+            U256::from(200_000_000u64),
+            U256::from(100_000_000u64),
+            build_v3_path(USDT, 500, WETH),
+            true,
+            Vec::<U256>::new(),
+        )
+            .abi_encode_sequence();
+        let v2_input = (
+            AlloyAddress::from_str(RECIPIENT).unwrap(),
+            U256::from(300_000_000u64),
+            U256::ZERO,
+            vec![
+                AlloyAddress::from_str(USDT).unwrap(),
+                AlloyAddress::from_str(WETH).unwrap(),
+            ],
+            true,
+            Vec::<U256>::new(),
+        )
+            .abi_encode_sequence();
+        let calldata = encode_execute(
+            vec![V3_SWAP_EXACT_IN, V2_SWAP_EXACT_IN],
+            vec![v3_input, v2_input],
+        );
+
+        let action = Adapter_::new().build_action(&tx(calldata)).unwrap();
+        match &action {
+            Action::Dex(dex) => {
+                assert_eq!(dex.facts.protocol_ids, vec!["uniswap-v3", "uniswap-v2"]);
+                assert_eq!(symbols(&dex.facts.input_tokens), vec!["USDT"]);
+                assert_eq!(symbols(&dex.facts.output_tokens), vec!["WETH"]);
+                assert_eq!(dex.facts.max_fee_bps, Some(30));
+                assert!(dex.facts.has_zero_min_output);
+                assert_eq!(
+                    input_raw_amounts(&dex.oracle_requirements),
+                    vec!["200000000", "300000000"]
+                );
+                assert!(dex
+                    .trace
+                    .steps
+                    .iter()
+                    .any(|step| step.contains("V3_SWAP_EXACT_IN")));
+                assert!(dex
+                    .trace
+                    .steps
+                    .iter()
+                    .any(|step| step.contains("V2_SWAP_EXACT_IN")));
+            }
+            other => panic!("expected dex, got {other:?}"),
+        }
+    }
+
+    fn input_raw_amounts(requirements: &[OracleRequirement]) -> Vec<&str> {
+        requirements
+            .iter()
+            .filter(|requirement| requirement.kind == OracleRequirementKind::Input)
+            .map(|requirement| requirement.raw_amount.as_str())
+            .collect()
+    }
+
+    fn symbols(tokens: &[Token]) -> Vec<&str> {
+        tokens.iter().map(|token| token.symbol.as_str()).collect()
     }
 }

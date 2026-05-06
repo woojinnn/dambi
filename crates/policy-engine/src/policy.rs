@@ -13,7 +13,7 @@
 
 use cedar_policy::{
     Authorizer, Context, Decision as CedarDecision, Entities, EntityUid, Policy, PolicyId,
-    PolicySet, Request,
+    PolicySet, Request, Schema, ValidationMode, ValidationResult, Validator,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -101,7 +101,7 @@ pub enum Severity {
 /// fired, any *also*-fired warns are still reported (no info loss).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RequestKind {
-    Leaf { index: usize },
+    Action,
     Tx,
 }
 
@@ -121,9 +121,9 @@ pub struct MatchedPolicy {
 pub struct PolicyRequest {
     /// Cedar `EntityUid` for the principal — e.g., `Wallet::"0xUser"`.
     pub principal: String,
-    /// Cedar `EntityUid` for the action — e.g., `Action::"swap"`.
+    /// Cedar `EntityUid` for the action — e.g., `Action::"dex"`.
     pub action: String,
-    /// Cedar `EntityUid` for the resource — e.g., `Protocol::"uniswap-v3"`.
+    /// Cedar `EntityUid` for the resource — e.g., `Protocol::"dex-v3"`.
     pub resource: String,
     /// Cedar entities array (JSON form Cedar accepts).
     pub entities: JsonValue,
@@ -153,6 +153,10 @@ impl PolicyRequest {
 pub enum PolicyError {
     #[error("failed to parse Cedar policy: {0}")]
     Parse(String),
+    #[error("failed to parse Cedar schema: {0}")]
+    Schema(String),
+    #[error("failed to validate Cedar policy set against schema: {0}")]
+    Validation(String),
     #[error("failed to build Cedar request: {0}")]
     Request(String),
     #[error("failed to build Cedar context: {0}")]
@@ -167,6 +171,7 @@ pub enum PolicyError {
 #[derive(Debug)]
 pub struct PolicyEngine {
     policy_set: PolicySet,
+    schema: Option<Schema>,
     /// Per-policy-id severity, lifted from the `@severity(...)` annotation at
     /// parse time so we don't have to re-parse on every evaluation.
     severities: HashMap<String, Severity>,
@@ -198,7 +203,7 @@ impl PolicyEngine {
     /// Internal: build a `PolicyEngine` from already-collected policies.
     /// `text_combined` is one big Cedar source string (with baseline
     /// prepended).
-    fn build_from(text_combined: String) -> Result<Self, PolicyError> {
+    fn build_from(text_combined: String, schema: Option<Schema>) -> Result<Self, PolicyError> {
         let mut policy_set = PolicySet::new();
         let mut severities: HashMap<String, Severity> = HashMap::new();
         let mut reasons: HashMap<String, String> = HashMap::new();
@@ -211,8 +216,13 @@ impl PolicyEngine {
             ingest_policy(p, &mut policy_set, &mut severities, &mut reasons)?;
         }
 
+        if let Some(schema) = &schema {
+            validate_policy_set(&policy_set, schema)?;
+        }
+
         Ok(PolicyEngine {
             policy_set,
+            schema,
             severities,
             reasons,
         })
@@ -220,7 +230,7 @@ impl PolicyEngine {
 
     /// Evaluate a `PolicyRequest`. This is the preferred entry point.
     pub fn evaluate_request(&self, req: &PolicyRequest) -> Result<Verdict, PolicyError> {
-        self.evaluate_request_with_origin(req, RequestKind::Leaf { index: 0 })
+        self.evaluate_request_with_origin(req, RequestKind::Action)
     }
 
     /// Evaluate a `PolicyRequest` and annotate matches with the originating
@@ -281,12 +291,13 @@ impl PolicyEngine {
             .parse()
             .map_err(|e: cedar_policy::ParseErrors| PolicyError::EntityUid(e.to_string()))?;
 
-        let entities = Entities::from_json_value(entities_json.clone(), None)
+        let schema = self.schema.as_ref();
+        let entities = Entities::from_json_value(entities_json.clone(), schema)
             .map_err(|e| PolicyError::Entities(e.to_string()))?;
         let context = Context::from_json_value(context_json.clone(), None)
             .map_err(|e| PolicyError::Context(e.to_string()))?;
 
-        let request = Request::new(principal, action, resource, context, None)
+        let request = Request::new(principal, action, resource, context, schema)
             .map_err(|e| PolicyError::Request(e.to_string()))?;
 
         let auth = Authorizer::new();
@@ -323,7 +334,7 @@ impl PolicyEngine {
                 policy_id: pid_str.clone(),
                 reason: self.reasons.get(&pid_str).cloned(),
                 severity,
-                origin: RequestKind::Leaf { index: 0 },
+                origin: RequestKind::Action,
             });
         }
 
@@ -346,6 +357,27 @@ impl PolicyEngine {
         };
 
         Ok(verdict)
+    }
+}
+
+fn validate_policy_set(policy_set: &PolicySet, schema: &Schema) -> Result<(), PolicyError> {
+    let result = Validator::new(schema.clone()).validate(policy_set, ValidationMode::Strict);
+    if result.validation_passed() {
+        Ok(())
+    } else {
+        Err(PolicyError::Validation(validation_errors_message(&result)))
+    }
+}
+
+fn validation_errors_message(result: &ValidationResult) -> String {
+    let messages: Vec<String> = result
+        .validation_errors()
+        .map(ToString::to_string)
+        .collect();
+    if messages.is_empty() {
+        "unknown validation error".into()
+    } else {
+        messages.join("; ")
     }
 }
 
@@ -395,6 +427,7 @@ fn ingest_policy(
 #[derive(Debug, Default)]
 pub struct PolicyEngineBuilder {
     text_sources: Vec<String>,
+    schema_sources: Vec<String>,
 }
 
 impl PolicyEngineBuilder {
@@ -408,8 +441,28 @@ impl PolicyEngineBuilder {
         self
     }
 
+    /// Append Cedar schema text used to strict-validate policies at build time
+    /// and requests at evaluation time.
+    pub fn add_schema_text<S: Into<String>>(mut self, src: S) -> Self {
+        self.schema_sources.push(src.into());
+        self
+    }
+
     /// Finish the builder, producing a ready-to-evaluate `PolicyEngine`.
     pub fn build(self) -> Result<PolicyEngine, PolicyError> {
+        let schema = if self.schema_sources.is_empty() {
+            None
+        } else {
+            let mut combined_schema = String::new();
+            for src in &self.schema_sources {
+                combined_schema.push_str(src);
+                combined_schema.push('\n');
+            }
+            let (schema, _warnings) = Schema::from_cedarschema_str(&combined_schema)
+                .map_err(|e| PolicyError::Schema(e.to_string()))?;
+            Some(schema)
+        };
+
         let baseline = "@id(\"engine/baseline-allow\")\npermit(principal, action, resource);\n";
         let mut combined = String::new();
         combined.push_str(baseline);
@@ -417,7 +470,7 @@ impl PolicyEngineBuilder {
             combined.push_str(src);
             combined.push('\n');
         }
-        PolicyEngine::build_from(combined)
+        PolicyEngine::build_from(combined, schema)
     }
 }
 
@@ -434,25 +487,78 @@ mod tests {
                 "parents": []
             },
             {
-                "uid": { "type": "Protocol", "id": "uniswap-v3" },
+                "uid": { "type": "Protocol", "id": "dex-v3" },
                 "attrs": {},
                 "parents": []
             }
         ])
     }
 
-    fn context_swap(usd_value: &str) -> JsonValue {
+    fn context_dex(usd_value: &str) -> JsonValue {
         json!({
-            "inputAmount": {
-                "tokenSymbol": "USDT",
-                "raw": "200000000",
-                "human": "200.000000",
-                "usd": {
-                    "value": { "__extn": { "fn": "decimal", "arg": usd_value } },
-                    "staleSec": 5,
-                }
-            }
+            "target": "0x0000000000000000000000000000000000000002",
+            "valueWei": "0",
+            "protocolIds": ["uniswap-v3"],
+            "inputTokens": [],
+            "outputTokens": [],
+            "totalInputUsd": {
+                "value": { "__extn": { "fn": "decimal", "arg": usd_value } },
+                "asOfTs": 1,
+                "staleSec": 5,
+                "sources": ["mock"],
+            },
+            "hasZeroMinOutput": false,
+            "hasExternalRecipient": false,
         })
+    }
+
+    fn dex_schema() -> &'static str {
+        r#"
+            entity Wallet;
+            entity Protocol;
+
+            type Token = {
+                chainId: Long,
+                address: String,
+                symbol: String,
+                decimals: Long,
+                isNative: Bool,
+            };
+
+            type UsdValuation = {
+                value: decimal,
+                asOfTs: Long,
+                staleSec: Long,
+                sources: Set<String>,
+            };
+
+            type WindowStats = {
+                swapVolumeUsd24h?: decimal,
+                swapCount24h?: Long,
+            };
+
+            type DexContext = {
+                target: String,
+                valueWei: String,
+                protocolIds: Set<String>,
+                inputTokens: Set<Token>,
+                outputTokens: Set<Token>,
+                totalInputUsd?: UsdValuation,
+                totalMinOutputUsd?: UsdValuation,
+                maxFeeBps?: Long,
+                hasZeroMinOutput: Bool,
+                hasExternalRecipient: Bool,
+                totalInputFractionOfPortfolioBps?: Long,
+                allowancesCoverInputs?: Bool,
+                windowStats?: WindowStats,
+            };
+
+            action "dex" appliesTo {
+                principal: Wallet,
+                resource: Protocol,
+                context: DexContext,
+            };
+        "#
     }
 
     #[test]
@@ -461,10 +567,10 @@ mod tests {
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"swap""#,
-                r#"Protocol::"uniswap-v3""#,
+                r#"Action::"dex""#,
+                r#"Protocol::"dex""#,
                 &entities(),
-                &context_swap("50.00"),
+                &context_dex("50.00"),
             )
             .unwrap();
         assert_eq!(v, Verdict::Pass);
@@ -476,19 +582,19 @@ mod tests {
             @id("user/max-swap-usd-100")
             @severity("deny")
             @reason("USD value of swap exceeds 100")
-            forbid (principal, action == Action::"swap", resource)
+            forbid (principal, action == Action::"dex", resource)
             when {
-              context.inputAmount.usd.value.greaterThan(decimal("100.00"))
+              context.totalInputUsd.value.greaterThan(decimal("100.00"))
             };
         "#;
         let engine = PolicyEngine::from_sources([policy]).unwrap();
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"swap""#,
-                r#"Protocol::"uniswap-v3""#,
+                r#"Action::"dex""#,
+                r#"Protocol::"dex""#,
                 &entities(),
-                &context_swap("200.00"),
+                &context_dex("200.00"),
             )
             .unwrap();
         match v {
@@ -510,19 +616,19 @@ mod tests {
         let policy = r#"
             @id("user/max-swap-usd-100")
             @severity("deny")
-            forbid (principal, action == Action::"swap", resource)
+            forbid (principal, action == Action::"dex", resource)
             when {
-              context.inputAmount.usd.value.greaterThan(decimal("100.00"))
+              context.totalInputUsd.value.greaterThan(decimal("100.00"))
             };
         "#;
         let engine = PolicyEngine::from_sources([policy]).unwrap();
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"swap""#,
-                r#"Protocol::"uniswap-v3""#,
+                r#"Action::"dex""#,
+                r#"Protocol::"dex""#,
                 &entities(),
-                &context_swap("50.00"),
+                &context_dex("50.00"),
             )
             .unwrap();
         assert_eq!(v, Verdict::Pass);
@@ -534,19 +640,19 @@ mod tests {
             @id("user/large-swap-warning")
             @severity("warn")
             @reason("Large swap — please review")
-            forbid (principal, action == Action::"swap", resource)
+            forbid (principal, action == Action::"dex", resource)
             when {
-              context.inputAmount.usd.value.greaterThan(decimal("100.00"))
+              context.totalInputUsd.value.greaterThan(decimal("100.00"))
             };
         "#;
         let engine = PolicyEngine::from_sources([policy]).unwrap();
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"swap""#,
-                r#"Protocol::"uniswap-v3""#,
+                r#"Action::"dex""#,
+                r#"Protocol::"dex""#,
                 &entities(),
-                &context_swap("200.00"),
+                &context_dex("200.00"),
             )
             .unwrap();
         match v {
@@ -567,22 +673,22 @@ mod tests {
         let policy = r#"
             @id("user/large-swap-warning")
             @severity("warn")
-            forbid (principal, action == Action::"swap", resource)
-            when { context.inputAmount.usd.value.greaterThan(decimal("100.00")) };
+            forbid (principal, action == Action::"dex", resource)
+            when { context.totalInputUsd.value.greaterThan(decimal("100.00")) };
 
             @id("user/huge-swap-deny")
             @severity("deny")
-            forbid (principal, action == Action::"swap", resource)
-            when { context.inputAmount.usd.value.greaterThan(decimal("150.00")) };
+            forbid (principal, action == Action::"dex", resource)
+            when { context.totalInputUsd.value.greaterThan(decimal("150.00")) };
         "#;
         let engine = PolicyEngine::from_sources([policy]).unwrap();
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"swap""#,
-                r#"Protocol::"uniswap-v3""#,
+                r#"Action::"dex""#,
+                r#"Protocol::"dex""#,
                 &entities(),
-                &context_swap("200.00"),
+                &context_dex("200.00"),
             )
             .unwrap();
         match v {
@@ -612,5 +718,79 @@ mod tests {
         "#;
         let err = PolicyEngine::from_sources([policy]).unwrap_err();
         assert!(matches!(err, PolicyError::Parse(_)));
+    }
+
+    #[test]
+    fn schema_validation_rejects_policy_with_unknown_context_field() {
+        let policy = r#"
+            @id("bad/context-typo")
+            @severity("deny")
+            forbid (principal, action == Action::"dex", resource)
+            when { context.totalInputUSd.value.greaterThan(decimal("100.00")) };
+        "#;
+
+        let err = PolicyEngine::builder()
+            .add_schema_text(dex_schema())
+            .add_text(policy)
+            .build()
+            .unwrap_err();
+
+        assert!(matches!(err, PolicyError::Validation(_)));
+    }
+
+    #[test]
+    fn schema_validation_rejects_request_with_invalid_context_shape() {
+        let policy = r#"
+            @id("user/max-swap-usd-100")
+            @severity("deny")
+            forbid (principal, action == Action::"dex", resource)
+            when {
+              context has totalInputUsd &&
+              context.totalInputUsd.value.greaterThan(decimal("100.00"))
+            };
+        "#;
+        let engine = PolicyEngine::builder()
+            .add_schema_text(dex_schema())
+            .add_text(policy)
+            .build()
+            .unwrap();
+
+        let err = engine
+            .evaluate(
+                r#"Wallet::"0xUser""#,
+                r#"Action::"dex""#,
+                r#"Protocol::"dex""#,
+                &entities(),
+                &json!({}),
+            )
+            .unwrap_err();
+
+        assert!(matches!(err, PolicyError::Request(_)));
+    }
+
+    #[test]
+    fn evaluate_request_marks_matches_as_single_action_origin() {
+        let policy = r#"
+            @id("user/action-deny")
+            @severity("deny")
+            forbid (principal, action == Action::"dex", resource);
+        "#;
+        let engine = PolicyEngine::from_sources([policy]).unwrap();
+        let request = PolicyRequest::new(
+            r#"Wallet::"0xUser""#,
+            r#"Action::"dex""#,
+            r#"Protocol::"dex""#,
+            entities(),
+            context_dex("50.00"),
+        );
+
+        let verdict = engine.evaluate_request(&request).unwrap();
+
+        match verdict {
+            Verdict::Fail(matched) => {
+                assert_eq!(matched[0].origin, RequestKind::Action);
+            }
+            other => panic!("expected Verdict::Fail, got {other:?}"),
+        }
     }
 }

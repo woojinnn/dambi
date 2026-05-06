@@ -1,60 +1,50 @@
 use alloy_primitives::{Address as AlloyAddress, U256};
-use alloy_sol_types::SolValue;
 use policy_engine::{
     Address, HostCapabilities, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine,
     RequestKind, Token, TransactionRequest, Verdict,
 };
-use policy_engine_adapters_bundle::{default_registry, uniswap_v2, uniswap_v3, universal_router};
+use policy_engine_adapters_bundle::{default_registry, uniswap_v2, uniswap_v3};
 use std::str::FromStr;
 
-const POLICY_TX_CAP: &str = include_str!("../../../policies/tx/tx-total-input-usd-cap-500.cedar");
-const POLICY_TX_BLOCKLIST: &str = include_str!("../../../policies/tx/tx-blocklist.cedar");
-const POLICY_LEAF_FEE_BPS: &str = include_str!("../../../policies/swap/max-swap-fee-bps-100.cedar");
+const POLICY_DEX_CAP: &str = include_str!("../../../policies/dex/total-input-usd-cap-500.cedar");
+const POLICY_DEX_FEE_BPS: &str = include_str!("../../../policies/dex/max-fee-bps-100.cedar");
 
-const POLICY_TX_SHAPE: &str = r#"
-@id("user/tx-shape-check")
+const POLICY_DEX_SHAPE: &str = r#"
+@id("user/dex-shape-check")
 @severity("deny")
-@reason("send_tx context mismatch")
-forbid (principal, action == Action::"send_tx", resource)
+@reason("dex context mismatch")
+forbid (principal, action == Action::"dex", resource)
 when {
-    !(context.chainId == 1
-    && context.from == "0x0000000000000000000000000000000000000001"
-    && context.to == "0x7a250d5630b4cf539739df2c5dacb4c659f2488d"
+    !(context.target == "0x7a250d5630b4cf539739df2c5dacb4c659f2488d"
     && context.valueWei == "0"
-    && context.selector == "0x38ed1739"
-    && context.childCount == 1
-    && context.kinds == ["swap"]
-    && context.protocolsUsed == ["uniswap-v2"]
-    && context.hasApprove == false
-    && context.hasUnknown == false
-    && context.distinctRecipients == 1
-    && context has "totalInputUsd")
+    && context.protocolIds == ["uniswap-v2"]
+    && context.hasZeroMinOutput
+    && context has totalInputUsd)
 };
 "#;
 
-const POLICY_TX_WARNING: &str = r#"
-@id("user/tx-warning-input")
+const POLICY_DEX_WARNING: &str = r#"
+@id("user/dex-warning-input")
 @severity("warn")
-@reason("Transaction should warn on any tx input")
-forbid (principal, action == Action::"send_tx", resource)
+@reason("Dex action should warn on any priced input")
+forbid (principal, action == Action::"dex", resource)
 when {
-  context has "totalInputUsd" && context.totalInputUsd.greaterThan(decimal("0.00"))
+  context has totalInputUsd && context.totalInputUsd.value.greaterThan(decimal("0.00"))
 };
 "#;
 
-const POLICY_TX_ALLOW_REVERT: &str = r#"
-@id("user/tx-allow-revert-count")
+const POLICY_OTHER_BLOCKLIST: &str = r#"
+@id("user/other-target-blocklist")
 @severity("deny")
-@reason("Transaction has allowRevert leaves")
-forbid (principal, action == Action::"send_tx", resource)
+@reason("Other action target is blocklisted")
+forbid (principal, action == Action::"other", resource)
 when {
-  context has "allowRevertCount" && context.allowRevertCount == 1
+  context.target == "0x000000000000000000000000000000000000dead"
 };
 "#;
 
 const V2_ROUTER: &str = uniswap_v2::UNISWAP_V2_ROUTER_MAINNET;
 const V3_ROUTER: &str = uniswap_v3::SWAP_ROUTER_MAINNET;
-const UNIVERSAL_ROUTER: &str = universal_router::common::UNIVERSAL_ROUTER_MAINNET;
 
 const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const WETH: &str = "0xC02aaA39b223FE8D0a0e5C4F27eAD9083C756Cc2";
@@ -167,18 +157,10 @@ fn v3_exact_input_single_tx_data(amount_in: u64, fee: u32) -> Vec<u8> {
     uniswap_v3::encode_exact_input_single(&params)
 }
 
-fn v3_path(token_a: &str, fee: u32, token_b: &str) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(AlloyAddress::from_str(token_a).unwrap().as_slice());
-    out.extend_from_slice(&fee.to_be_bytes()[1..4]);
-    out.extend_from_slice(AlloyAddress::from_str(token_b).unwrap().as_slice());
-    out
-}
-
 #[test]
-fn single_v2_swap_under_cap_passes_and_shape_is_valid() {
+fn single_v2_swap_under_cap_passes_and_dex_shape_is_valid() {
     let registry = default_registry();
-    let policies = PolicyEngine::from_sources([POLICY_TX_SHAPE, POLICY_TX_CAP]).unwrap();
+    let policies = PolicyEngine::from_sources([POLICY_DEX_SHAPE, POLICY_DEX_CAP]).unwrap();
     let oracle = oracle();
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
@@ -187,9 +169,9 @@ fn single_v2_swap_under_cap_passes_and_shape_is_valid() {
 }
 
 #[test]
-fn multicall_v3_with_two_leaves_exceeds_tx_total_input_and_fails_on_tx_origin() {
+fn multicall_v3_aggregate_action_exceeds_total_input_and_fails_on_action_origin() {
     let registry = default_registry();
-    let policies = PolicyEngine::from_sources([POLICY_TX_CAP]).unwrap();
+    let policies = PolicyEngine::from_sources([POLICY_DEX_CAP]).unwrap();
     let oracle = oracle();
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
@@ -197,17 +179,17 @@ fn multicall_v3_with_two_leaves_exceeds_tx_total_input_and_fails_on_tx_origin() 
     match verdict {
         Verdict::Fail(matched) => {
             assert_eq!(matched.len(), 1);
-            assert_eq!(matched[0].policy_id, "user/tx-total-input-usd-cap-500");
-            assert!(matches!(matched[0].origin, RequestKind::Tx));
+            assert_eq!(matched[0].policy_id, "user/total-input-usd-cap-500");
+            assert!(matches!(matched[0].origin, RequestKind::Action));
         }
         _ => panic!("expected Verdict::Fail, got {verdict:?}"),
     }
 }
 
 #[test]
-fn tx_level_warning_and_leaf_deny_report_distinct_origins() {
+fn dex_warning_and_fee_deny_share_action_origin() {
     let registry = default_registry();
-    let policies = PolicyEngine::from_sources([POLICY_TX_WARNING, POLICY_LEAF_FEE_BPS]).unwrap();
+    let policies = PolicyEngine::from_sources([POLICY_DEX_WARNING, POLICY_DEX_FEE_BPS]).unwrap();
     let oracle = oracle();
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
@@ -219,22 +201,20 @@ fn tx_level_warning_and_leaf_deny_report_distinct_origins() {
             assert_eq!(matched.len(), 2);
             assert!(matched
                 .iter()
-                .any(|m| matches!(m.origin, RequestKind::Leaf { index: 0 })));
+                .all(|m| matches!(m.origin, RequestKind::Action)));
             assert!(matched
                 .iter()
-                .any(|m| matches!(m.origin, RequestKind::Leaf { index: 0 })
-                    && m.policy_id == "user/max-swap-fee-bps-100"));
+                .any(|m| m.policy_id == "user/max-fee-bps-100"));
             assert!(matched
                 .iter()
-                .any(|m| matches!(m.origin, RequestKind::Tx)
-                    && m.policy_id == "user/tx-warning-input"));
+                .any(|m| m.policy_id == "user/dex-warning-input"));
         }
         _ => panic!("expected Verdict::Fail, got {verdict:?}"),
     }
 }
 
 #[test]
-fn no_match_tx_generates_other_and_tx_requests_and_allows_when_no_policies() {
+fn no_match_tx_generates_other_action_and_allows_when_no_policies() {
     let registry = MockAdapterRegistry::new();
     let policies = PolicyEngine::from_sources(Vec::<&str>::new()).unwrap();
     let oracle = oracle();
@@ -254,9 +234,9 @@ fn no_match_tx_generates_other_and_tx_requests_and_allows_when_no_policies() {
 }
 
 #[test]
-fn pure_eth_transfer_without_selector_is_blocklisted_by_tx_resource() {
+fn unknown_target_other_action_can_be_blocklisted_by_other_policy() {
     let registry = MockAdapterRegistry::new();
-    let policies = PolicyEngine::from_sources([POLICY_TX_BLOCKLIST]).unwrap();
+    let policies = PolicyEngine::from_sources([POLICY_OTHER_BLOCKLIST]).unwrap();
     let oracle = oracle();
     let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
@@ -273,45 +253,8 @@ fn pure_eth_transfer_without_selector_is_blocklisted_by_tx_resource() {
     match pipe.evaluate(&tx).unwrap() {
         Verdict::Fail(matched) => {
             assert_eq!(matched.len(), 1);
-            assert_eq!(matched[0].policy_id, "user/tx-blocklist");
-            assert!(matches!(matched[0].origin, RequestKind::Tx));
-        }
-        v => panic!("expected Verdict::Fail, got {v:?}"),
-    }
-}
-
-#[test]
-fn universal_router_execute_allow_revert_metadata_is_counted_on_tx_request() {
-    let registry = default_registry();
-    let policies = PolicyEngine::from_sources([POLICY_TX_ALLOW_REVERT]).unwrap();
-    let oracle = oracle();
-    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
-
-    let input = (
-        AlloyAddress::from_str(RECIPIENT).unwrap(),
-        U256::from(50_000_000u64),
-        U256::ZERO,
-        v3_path(USDT, 3000, WETH),
-        true,
-        Vec::<U256>::new(),
-    )
-        .abi_encode_sequence();
-
-    let tx = TransactionRequest {
-        chain_id: 1,
-        from: Address::new(FROM).unwrap(),
-        to: Address::new(UNIVERSAL_ROUTER).unwrap(),
-        value_wei: "0".into(),
-        data: universal_router::encode_execute(vec![0x80], vec![input]),
-        gas: None,
-        nonce: None,
-    };
-
-    match pipe.evaluate(&tx).unwrap() {
-        Verdict::Fail(matched) => {
-            assert_eq!(matched.len(), 1);
-            assert_eq!(matched[0].policy_id, "user/tx-allow-revert-count");
-            assert!(matches!(matched[0].origin, RequestKind::Tx));
+            assert_eq!(matched[0].policy_id, "user/other-target-blocklist");
+            assert!(matches!(matched[0].origin, RequestKind::Action));
         }
         v => panic!("expected Verdict::Fail, got {v:?}"),
     }

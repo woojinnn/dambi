@@ -1,7 +1,7 @@
 //! Per-action decoders for the `V4_SWAP` command payload.
 
 use crate::common::{currency_to_policy_address, TokenLookup};
-use alloy_primitives::{aliases::U24, Address as AlloyAddress};
+use alloy_primitives::aliases::U24;
 use alloy_sol_types::sol;
 use policy_engine::prelude::*;
 
@@ -100,10 +100,6 @@ pub(crate) fn pool_key_tokens(
             tokens.get(chain_id, &currency0),
         )
     }
-}
-
-pub(crate) fn has_hook(pool_key: &PoolKey) -> bool {
-    pool_key.hooks != AlloyAddress::ZERO
 }
 
 pub(crate) fn v4_fee_bips(fee: U24) -> Option<u32> {

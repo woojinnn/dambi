@@ -21,6 +21,55 @@ pub fn native_eth(chain_id: ChainId) -> Token {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn dex_swap_action(
+    tx: &TransactionRequest,
+    protocol_id: &str,
+    input_token: Token,
+    output_token: Token,
+    input_raw: String,
+    min_output_raw: Option<String>,
+    recipient: Address,
+    max_fee_bps: Option<u32>,
+    trace_step: impl Into<String>,
+) -> Action {
+    let mut oracle_requirements = vec![OracleRequirement {
+        kind: OracleRequirementKind::Input,
+        token: input_token.clone(),
+        raw_amount: input_raw,
+    }];
+    if let Some(raw_amount) = min_output_raw.clone() {
+        oracle_requirements.push(OracleRequirement {
+            kind: OracleRequirementKind::MinOutput,
+            token: output_token.clone(),
+            raw_amount,
+        });
+    }
+
+    Action::Dex(DexAction {
+        actor: tx.from.clone(),
+        target: tx.to.clone(),
+        value_wei: tx.value_wei.clone(),
+        facts: DexFacts {
+            protocol_ids: vec![protocol_id.into()],
+            input_tokens: vec![input_token],
+            output_tokens: vec![output_token],
+            total_input_usd: None,
+            total_min_output_usd: None,
+            max_fee_bps,
+            has_zero_min_output: min_output_raw.as_deref() == Some("0"),
+            has_external_recipient: recipient != tx.from,
+            total_input_fraction_of_portfolio_bps: None,
+            allowances_cover_inputs: None,
+            window_stats: None,
+        },
+        oracle_requirements,
+        trace: DexTrace {
+            steps: vec![trace_step.into()],
+        },
+    })
+}
+
 pub struct TokenLookup {
     tokens: HashMap<(ChainId, String), Token>,
 }
@@ -142,5 +191,66 @@ mod tests {
     #[test]
     fn shift_decimals_basic() {
         assert_eq!(shift_decimals("1000000", 6), "1.000000");
+    }
+
+    #[test]
+    fn dex_swap_action_sets_aggregate_dex_fields() {
+        let tx = TransactionRequest {
+            chain_id: 1,
+            from: Address::new("0x0000000000000000000000000000000000000001").unwrap(),
+            to: Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
+            value_wei: "123".into(),
+            data: Vec::new(),
+            gas: None,
+            nonce: None,
+        };
+        let input_token = Token {
+            chain_id: 1,
+            address: Address::new("0x0000000000000000000000000000000000000010").unwrap(),
+            symbol: "IN".into(),
+            decimals: 18,
+            is_native: false,
+        };
+        let output_token = Token {
+            chain_id: 1,
+            address: Address::new("0x0000000000000000000000000000000000000020").unwrap(),
+            symbol: "OUT".into(),
+            decimals: 6,
+            is_native: false,
+        };
+
+        match dex_swap_action(
+            &tx,
+            "uniswap-v2",
+            input_token,
+            output_token,
+            "100".into(),
+            Some("0".into()),
+            Address::new("0x0000000000000000000000000000000000000002").unwrap(),
+            Some(30),
+            "uniswap-v2/test",
+        ) {
+            Action::Dex(d) => {
+                assert_eq!(d.actor, tx.from);
+                assert_eq!(d.target, tx.to);
+                assert_eq!(d.value_wei, "123");
+                assert_eq!(d.facts.protocol_ids, vec!["uniswap-v2".to_string()]);
+                assert_eq!(d.facts.input_tokens[0].symbol, "IN");
+                assert_eq!(d.facts.output_tokens[0].symbol, "OUT");
+                assert_eq!(d.facts.max_fee_bps, Some(30));
+                assert!(d.facts.has_zero_min_output);
+                assert!(d.facts.has_external_recipient);
+                assert_eq!(d.oracle_requirements.len(), 2);
+                assert_eq!(d.oracle_requirements[0].kind, OracleRequirementKind::Input);
+                assert_eq!(d.oracle_requirements[0].raw_amount, "100");
+                assert_eq!(
+                    d.oracle_requirements[1].kind,
+                    OracleRequirementKind::MinOutput
+                );
+                assert_eq!(d.oracle_requirements[1].raw_amount, "0");
+                assert_eq!(d.trace.steps, vec!["uniswap-v2/test".to_string()]);
+            }
+            _ => panic!("expected dex"),
+        }
     }
 }
