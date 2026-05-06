@@ -20,7 +20,7 @@ and an aggregator that exposes them as a "default registry".
 policy-engine/                        # workspace root (virtual)
 ├── Cargo.toml                        # [workspace] members + shared dep versions
 ├── docs/                             # design spec
-├── policies/                         # *.cedar / *.json policy artifacts, organized by action kind
+├── policies/                         # *.cedar policy artifacts, organized by action kind
 │   ├── swap/                         #   policies that target Action::"swap" (per-leaf)
 │   │   ├── max-swap-usd-100.cedar            (deny: input USD > 100, oracle-aware)
 │   │   ├── max-swap-fee-bps-100.cedar         (deny: feeBips > 100)
@@ -38,29 +38,29 @@ policy-engine/                        # workspace root (virtual)
 └── crates/
     ├── policy-engine/                # ① runtime — split into focused modules
     │     core.rs            Address, Token, TransactionRequest, Action, AmountSpec, UsdValuation
-    │     oracle.rs          Oracle trait + MockOracle
-    │     portfolio.rs       Portfolio trait + MockPortfolio (current actor balances)
-    │     approvals.rs       Approvals trait + MockApprovals (current ERC-20 allowances)
-    │     stat_windows.rs    StatWindows trait + MockStatWindows
+    │     host/              ←── directory module: host-provided capability traits + bag
+    │       mod.rs           HostCapabilities + builder
+    │       oracle.rs        Oracle trait + MockOracle
+    │       portfolio.rs     Portfolio trait + MockPortfolio (current actor balances)
+    │       approvals.rs     Approvals trait + MockApprovals (current ERC-20 allowances)
+    │       stat_windows.rs  StatWindows trait + MockStatWindows
     │                        + reserve / settle / release lifecycle
-    │     host.rs            HostCapabilities (oracle + optional portfolio/approvals/stats)
-    │                        + builder
     │     policy.rs          PolicyEngine, PolicyEngineBuilder, PolicyRequest, Verdict,
     │                        MatchedPolicy, RequestKind { Leaf{index}, Tx }
     │     adapter.rs         Adapter trait (build_actions + leaf_metadata) + AdapterId
-    │                        + AdapterError + MatchKey
+    │                        (typed: protocol/name/version) + AdapterError + MatchKey
     │     registry.rs        AdapterRegistry trait + ResolverOutcome
     │                        + AdapterIndex + MockAdapterRegistry
     │     context_keys.rs    Cedar context-field name constants (used by lowering)
-    │     lowering/          ←── directory module
+    │     lowering/          ←── directory module: domain → Cedar PolicyRequest
     │       mod.rs           module-level docs + curated re-exports
     │       decimal.rs       fixed-width decimal arithmetic helpers
     │       request.rs       request_from_action, request_for_tx,
     │                        requests_from_action[s], action_entities/context, amount_json
-    │       enrich.rs        enrich_with_usd, enrich_actions_with_usd,
-    │                        enrich_request_with_capabilities (+ stamp_portfolio_fields,
-    │                        stamp_approval_fields), enrich_tx_request_with_window_stats,
-    │                        compute_swap_window_deltas
+    │       stamping.rs      consumes host capabilities to stamp Cedar context:
+    │                        enrich_with_usd, enrich_request_with_capabilities
+    │                        (+ stamp_portfolio_fields, stamp_approval_fields),
+    │                        enrich_tx_request_with_window_stats, compute_swap_window_deltas
     │     pipeline.rs        Pipeline orchestrator + LoweredRequests + evaluate /
     │                        evaluate_with_reservation + EvaluationOutcome
     │     prelude.rs         curated import surface for adapter authors
@@ -163,7 +163,7 @@ Adding a new internal adapter is a three-step:
       .with_portfolio(&pf).with_approvals(&ap).with_stats(&w).build()
   ```
   - **`Oracle`** — token → USD valuation. `MockOracle` for tests/playground;
-    HTTP-backed impls slot into `oracle.rs` next to it.
+    HTTP-backed impls slot into `host/oracle.rs` next to it.
   - **`Portfolio`** — `(owner, token) → AmountSpec`. Lowering stamps
     `actorBalanceInputToken` and a precomputed `inputFractionOfBalanceBps`
     so policies can express "swap input ≤ 20 % of balance" without Cedar
@@ -215,6 +215,43 @@ Adding a new internal adapter is a three-step:
   the engine side surfaces at compile time. Cedar policy files keep
   their string literals — the contract is "the policy literal matches
   the constant value here".
+
+## v0.x quality posture
+
+A handful of follow-on PRs after the capability roadmap closed
+hardened the surface so silent corruption is no longer reachable
+through the supported APIs:
+
+- **`Address` is normalized-by-construction** — the field is private,
+  the only constructor goes through `AlloyAddress::from_str` and
+  re-formats lowercase hex. `MockStatWindows::confirmed: HashMap<Address, _>`
+  and the mock-capability lookup paths can no longer fragment on case.
+- **Decimal arithmetic fails fast** — `lowering::decimal::*` and
+  `amount_raw_u256` previously fell back to zero on parse failure,
+  turning a buggy adapter into a permissive policy verdict. They now
+  panic with an invariant message; producers (`AmountSpec::from_raw`,
+  oracle / `multiply_decimal_strings`) maintain the invariant.
+- **`StatKey` is closed-set** — `pub struct StatKey(&'static str)` with
+  associated `pub const SWAP_VOLUME_USD_24H` / `SWAP_COUNT_24H`; no
+  public `new`. Custom keys re-open via a future
+  `StatKey::custom(name: &'static str)` when a real need arrives.
+- **`AdapterId` is a parsed type** — `<protocol>/<name>(@<version>)?`
+  validated on construction, with typed `protocol()` / `name()` /
+  `version()` accessors. The previous best-effort
+  `id.0.split('/').next().unwrap_or("unknown")` derivation is gone.
+- **CedarJSON authoring surface dropped** (YAGNI) — Cedar text is the
+  v0.x supported policy authoring form. CedarJSON returns when
+  marketplace / signing arrives in v1; cedar-policy provides
+  `Policy::from_json` natively, so reintroduction is a few lines.
+- **Pipeline hard-fails on adapter contract violation** — if an
+  adapter returns `leaf_metadata.len() != build_actions().len()`,
+  `Pipeline::evaluate` returns `PipelineError::AdapterBuild` before
+  any policy fires (closes a release-mode bypass that `debug_assert`
+  alone allowed).
+- **Reserve-first window-stats projection** — `windowStats` always
+  reflects the post-this-tx state, so cap policies fire correctly on
+  the boundary tx and concurrent reservations serialize through
+  snapshot-includes-reservations.
 
 ## Running
 
