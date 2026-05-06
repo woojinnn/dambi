@@ -7,6 +7,12 @@
 
 use std::collections::HashSet;
 
+use crate::context_keys::{
+    ALLOW_REVERT, ALLOW_REVERT_COUNT, CHAIN_ID, CHILD_COUNT, CHILD_KINDS, DISTINCT_RECIPIENTS,
+    EXTN_ARG, EXTN_DECIMAL, EXTN_FN, EXTN_KEY, FEE_BIPS, FROM, HAS_APPROVE, HAS_UNKNOWN, HUMAN,
+    INPUT_AMOUNT, KINDS, MIN_OUTPUT_AMOUNT, PROTOCOLS_USED, PROTOCOL_ID, RAW, RECIPIENT, SELECTOR,
+    STALE_SEC, TARGET, TO, TOKEN_SYMBOL, TOTAL_INPUT_USD, USD, VALUE, VALUE_WEI,
+};
 use crate::core::{Action, AmountSpec, TransactionRequest};
 use crate::policy::PolicyRequest;
 use serde_json::{json, Value};
@@ -39,7 +45,7 @@ pub fn request_for_tx(
 
     let allow_revert_count = leaf_requests
         .iter()
-        .filter_map(|req| req.context.get("allowRevert").and_then(Value::as_bool))
+        .filter_map(|req| req.context.get(ALLOW_REVERT).and_then(Value::as_bool))
         .filter(|v| *v)
         .count() as i64;
 
@@ -78,17 +84,17 @@ pub fn request_for_tx(
     summary.protocols.dedup();
 
     let mut context = serde_json::Map::new();
-    context.insert("chainId".into(), Value::from(tx.chain_id as i64));
-    context.insert("from".into(), Value::from(tx.from.as_str()));
-    context.insert("to".into(), Value::from(tx.to.as_str()));
-    context.insert("valueWei".into(), Value::from(tx.value_wei.clone()));
+    context.insert(CHAIN_ID.into(), Value::from(tx.chain_id as i64));
+    context.insert(FROM.into(), Value::from(tx.from.as_str()));
+    context.insert(TO.into(), Value::from(tx.to.as_str()));
+    context.insert(VALUE_WEI.into(), Value::from(tx.value_wei.clone()));
     context.insert(
-        "selector".into(),
+        SELECTOR.into(),
         Value::from(tx.selector_hex().unwrap_or_else(|| "0x".into())),
     );
-    context.insert("childCount".into(), Value::from(leaves.len() as i64));
+    context.insert(CHILD_COUNT.into(), Value::from(leaves.len() as i64));
     context.insert(
-        "kinds".into(),
+        KINDS.into(),
         Value::Array(
             summary
                 .kinds
@@ -98,7 +104,7 @@ pub fn request_for_tx(
         ),
     );
     context.insert(
-        "protocolsUsed".into(),
+        PROTOCOLS_USED.into(),
         Value::Array(
             summary
                 .protocols
@@ -107,19 +113,22 @@ pub fn request_for_tx(
                 .collect(),
         ),
     );
-    context.insert("hasApprove".into(), Value::from(summary.has_approve));
-    context.insert("hasUnknown".into(), Value::from(summary.has_unknown));
+    context.insert(HAS_APPROVE.into(), Value::from(summary.has_approve));
+    context.insert(HAS_UNKNOWN.into(), Value::from(summary.has_unknown));
     context.insert(
-        "distinctRecipients".into(),
+        DISTINCT_RECIPIENTS.into(),
         Value::from(summary.distinct_recipients.len() as i64),
     );
-    context.insert("allowRevertCount".into(), Value::from(allow_revert_count));
+    context.insert(ALLOW_REVERT_COUNT.into(), Value::from(allow_revert_count));
 
     if let Some(total_input_usd) = summary.total_input_usd {
-        context.insert(
-            "totalInputUsd".into(),
-            json!({ "__extn": { "fn": "decimal", "arg": total_input_usd } }),
-        );
+        let mut extn_inner = serde_json::Map::new();
+        extn_inner.insert(EXTN_FN.into(), Value::from(EXTN_DECIMAL));
+        extn_inner.insert(EXTN_ARG.into(), Value::from(total_input_usd));
+        let mut total_input = serde_json::Map::new();
+        total_input.insert(EXTN_KEY.into(), Value::Object(extn_inner));
+
+        context.insert(TOTAL_INPUT_USD.into(), Value::Object(total_input));
     }
 
     let entities = json!([
@@ -158,7 +167,7 @@ pub(super) fn action_entities(action: &Action) -> Value {
     };
     let actor_id = action.actor().as_str();
     json!([
-        { "uid": { "type": "Wallet",   "id": actor_id },     "attrs": {}, "parents": [] },
+        { "uid": { "type": "Wallet",   "id": actor_id },   "attrs": {}, "parents": [] },
         { "uid": { "type": "Protocol", "id": resource_id },   "attrs": {}, "parents": [] },
     ])
 }
@@ -169,47 +178,61 @@ pub(super) fn action_context(action: &Action) -> Value {
     match action {
         Action::Swap(s) => {
             let mut m = serde_json::Map::new();
-            m.insert("inputAmount".into(), amount_json(&s.input_amount));
+            m.insert(INPUT_AMOUNT.into(), amount_json(&s.input_amount));
             if let Some(min) = &s.min_output_amount {
-                m.insert("minOutputAmount".into(), amount_json(min));
+                m.insert(MIN_OUTPUT_AMOUNT.into(), amount_json(min));
             }
             if let Some(fee) = s.fee_bips {
-                m.insert("feeBips".into(), Value::from(fee as i64));
+                m.insert(FEE_BIPS.into(), Value::from(fee as i64));
             }
-            m.insert("target".into(), Value::from(s.target.0.clone()));
-            m.insert("recipient".into(), Value::from(s.recipient.0.clone()));
-            m.insert("protocolId".into(), Value::from(s.protocol_id.clone()));
+            m.insert(TARGET.into(), Value::from(s.target.0.clone()));
+            m.insert(RECIPIENT.into(), Value::from(s.recipient.0.clone()));
+            m.insert(PROTOCOL_ID.into(), Value::from(s.protocol_id.clone()));
             Value::Object(m)
         }
-        Action::Multi(m) => json!({
-            "target": m.target.0,
-            "childCount": m.children.len() as i64,
-            "childKinds": m.children.iter().map(|a| Value::from(a.kind())).collect::<Vec<_>>(),
-        }),
+        Action::Multi(multi) => {
+            let mut m = serde_json::Map::new();
+            m.insert(CHILD_COUNT.into(), Value::from(multi.children.len() as i64));
+            m.insert(
+                CHILD_KINDS.into(),
+                Value::Array(
+                    multi
+                        .children
+                        .iter()
+                        .map(|a| Value::from(a.kind()))
+                        .collect(),
+                ),
+            );
+            Value::Object(m)
+        }
         Action::Other {
             selector, target, ..
-        } => json!({
-            "selector": selector,
-            "target":   target.0,
-        }),
+        } => {
+            let mut m = serde_json::Map::new();
+            m.insert(SELECTOR.into(), Value::from(selector.as_str()));
+            m.insert(TARGET.into(), Value::from(target.0.clone()));
+            Value::Object(m)
+        }
     }
 }
 
 pub(super) fn amount_json(a: &AmountSpec) -> Value {
     let mut m = serde_json::Map::new();
-    m.insert("tokenSymbol".into(), Value::from(a.token.symbol.clone()));
-    m.insert("raw".into(), Value::from(a.raw.clone()));
+    m.insert(TOKEN_SYMBOL.into(), Value::from(a.token.symbol.clone()));
+    m.insert(RAW.into(), Value::from(a.raw.clone()));
     if let Some(h) = &a.human {
-        m.insert("human".into(), Value::from(h.clone()));
+        m.insert(HUMAN.into(), Value::from(h.clone()));
     }
     if let Some(u) = &a.usd {
-        m.insert(
-            "usd".into(),
-            json!({
-                "value": { "__extn": { "fn": "decimal", "arg": u.value } },
-                "staleSec": u.stale_sec as i64,
-            }),
-        );
+        let mut value_extn = serde_json::Map::new();
+        let mut extn = serde_json::Map::new();
+        extn.insert(EXTN_FN.into(), Value::from(EXTN_DECIMAL));
+        extn.insert(EXTN_ARG.into(), Value::from(u.value.clone()));
+        value_extn.insert(EXTN_KEY.into(), Value::Object(extn));
+        let mut usd = serde_json::Map::new();
+        usd.insert(VALUE.into(), Value::Object(value_extn));
+        usd.insert(STALE_SEC.into(), Value::from(u.stale_sec as i64));
+        m.insert(USD.into(), Value::Object(usd));
     }
     Value::Object(m)
 }

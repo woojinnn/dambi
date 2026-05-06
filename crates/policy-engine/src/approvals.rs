@@ -1,6 +1,16 @@
-//! Allowance capability — current allowance of an actor over a token for a spender.
-//! Supplied by the host (wallet, indexer, RPC); consulted at lowering time and
-//! frozen into the `PolicyRequest` context for deterministic Cedar evaluation.
+//! Approval capability — current allowance lookup for `(owner, token, spender)`.
+//!  
+//! Lowering calls this trait while building swap leaf context and, when found,
+//! stores the resulting `AmountSpec` as `currentAllowance` plus
+//! `allowanceCoversInput`.
+//!  
+//! The lookup shape is explicitly `(owner, token, spender)` to match ERC-20
+//! approval semantics and to keep policy decisions aligned to a single caller
+//! authority.
+//!  
+//! Native ETH inputs bypass approval enrichment because no ERC-20 allowance can
+//! exist for the native asset; when native token inputs are detected, this
+//! capability path is intentionally skipped.
 
 use crate::core::{Address, AmountSpec, Token};
 use alloy_primitives::U256;

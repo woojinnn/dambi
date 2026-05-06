@@ -1,7 +1,18 @@
-//! Oracle abstraction + an in-memory mock implementation.
-//!
-//! v0.1 keeps the oracle synchronous and trivially mockable; nothing here
-//! reaches the network. The mock is what the playground and tests use.
+//! Oracle abstraction + valuation source contract for lowering.
+//!  
+//! Lowering asks the oracle for USD valuation before policy checks run, then
+//! threads that USD shape through `AmountSpec.usd`.
+//!  
+//! `AmountSpec.usd.value` is embedded as a decimal extension, and the
+//! associated `stale_sec` is preserved for policy-level freshness checks.
+//!  
+//! Implementations should return valuation data with a clear staleness policy;
+//! callers can test for freshness via policy `context has \"usd\"` checks or
+//! compare the staleness value directly when needed.
+//!  
+//! v0.1 keeps this synchronous and mockable; in-process tests and playgrounds
+//! use `MockOracle`, while real integrations are expected to provide their own
+//! transport-backed implementations.
 
 use crate::core::{Token, UsdValuation};
 use std::collections::HashMap;

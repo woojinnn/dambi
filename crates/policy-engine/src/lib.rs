@@ -22,6 +22,7 @@
 
 pub mod adapter;
 pub mod approvals;
+pub mod context_keys;
 pub mod core;
 pub mod host;
 pub mod lowering;

@@ -12,6 +12,7 @@
 //! from the pre-reservation snapshot (the reservation accounts for this tx intent).
 //! `evaluate` instead projects the same window stats on demand in a single call.
 
+use crate::context_keys::{SWAP_COUNT_24H, SWAP_VOLUME_USD_24H};
 use crate::core::{Action, TransactionRequest};
 use crate::host::HostCapabilities;
 use crate::lowering::{
@@ -58,7 +59,7 @@ pub(crate) struct LoweredRequests {
     pub tx_request: PolicyRequest,
 }
 
-const SWAP_WINDOW_KEY_NAMES: [&str; 2] = ["swap_volume_usd_24h", "swap_count_24h"];
+const SWAP_WINDOW_KEY_NAMES: [&str; 2] = [SWAP_VOLUME_USD_24H, SWAP_COUNT_24H];
 
 impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
     pub fn new(registry: &'a R, host: HostCapabilities<'a>, policies: &'a PolicyEngine) -> Self {

@@ -1,6 +1,15 @@
-//! Portfolio capability — current on-chain balance of an actor in a token.
-//! Supplied by the host (wallet, indexer, RPC); consulted at lowering time and
-//! frozen into the `PolicyRequest` context for deterministic Cedar evaluation.
+//! Portfolio capability — current on-chain balance of `(owner, token)`.
+//!  
+//! Lowering resolves balances via this trait at the request-construction stage
+//! and snapshots the returned `AmountSpec` into context under actor balance
+//! fields for deterministic policy evaluation.
+//!  
+//! The lookup key is a strict `(owner, token)` pair (including chain-aware
+//! token identity). A missing record is an explicit error and does not block
+//! evaluation; the context field is simply skipped.
+//!  
+//! When present, lowering also stamps `inputFractionOfBalanceBps` alongside the
+//! raw balance, exposing normalized input sizing as a policy-usable ratio.
 
 use crate::core::{Address, AmountSpec, Token};
 use alloy_primitives::U256;

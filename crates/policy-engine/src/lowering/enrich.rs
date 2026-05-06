@@ -6,13 +6,18 @@
 //! - `enrich_tx_request_with_window_stats`: add projected swap window keys.
 //!   Policies must guard `context has "windowStats"` before reading keys.
 
+use crate::context_keys::{
+    ACTOR_BALANCE_INPUT_TOKEN, ALLOWANCE_COVERS_INPUT, CURRENT_ALLOWANCE, EXTN_ARG, EXTN_DECIMAL,
+    EXTN_FN, EXTN_KEY, INPUT_FRACTION_OF_BALANCE_BPS, SWAP_COUNT_24H, SWAP_VOLUME_USD_24H,
+    WINDOW_STATS,
+};
 use crate::core::{Action, AmountSpec, SwapAction, UsdValuation};
 use crate::host::HostCapabilities;
 use crate::oracle::Oracle;
 use crate::policy::PolicyRequest;
 use crate::stat_windows::{StatDelta, StatKey, StatValue};
 use alloy_primitives::U256;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 /// Walk a swap action's amount specs and populate `usd` valuations from the
 /// oracle. Missing prices leave `usd` as `None` — fail-open by default; the
@@ -99,9 +104,16 @@ pub fn enrich_tx_request_with_window_stats(
         if let Some(value) = value {
             match value {
                 StatValue::Decimal(value) => {
+                    let mut extn = serde_json::Map::new();
+                    extn.insert(EXTN_FN.into(), Value::from(EXTN_DECIMAL));
+                    extn.insert(EXTN_ARG.into(), Value::from(value));
                     window_stats.insert(
                         key.as_str().into(),
-                        json!({ "__extn": { "fn": "decimal", "arg": value } }),
+                        Value::Object({
+                            let mut outer = serde_json::Map::new();
+                            outer.insert(EXTN_KEY.into(), Value::Object(extn));
+                            outer
+                        }),
                     );
                 }
                 StatValue::Count(value) => {
@@ -112,7 +124,7 @@ pub fn enrich_tx_request_with_window_stats(
     }
 
     if !window_stats.is_empty() {
-        context.insert("windowStats".into(), Value::Object(window_stats));
+        context.insert(WINDOW_STATS.into(), Value::Object(window_stats));
     }
 }
 
@@ -137,13 +149,13 @@ pub fn compute_swap_window_deltas(leaves: &[Action]) -> Vec<StatDelta> {
     let mut deltas = Vec::new();
     if let Some(value) = swap_volume_24h {
         deltas.push(StatDelta {
-            key: StatKey::new("swap_volume_usd_24h"),
+            key: StatKey::new(SWAP_VOLUME_USD_24H),
             value: StatValue::Decimal(value),
         });
     }
     if swap_count_24h > 0 {
         deltas.push(StatDelta {
-            key: StatKey::new("swap_count_24h"),
+            key: StatKey::new(SWAP_COUNT_24H),
             value: StatValue::Count(swap_count_24h),
         });
     }
@@ -181,12 +193,12 @@ fn stamp_portfolio_fields(
     };
     let balance_forced_usd = inject_amount_usd(balance.clone(), host.oracle());
     if let Value::Object(balance_obj) = balance_forced_usd {
-        context.insert("actorBalanceInputToken".into(), Value::Object(balance_obj));
+        context.insert(ACTOR_BALANCE_INPUT_TOKEN.into(), Value::Object(balance_obj));
     }
 
     if let Some(fraction_bps) = input_fraction_bps(&s.input_amount, &balance) {
         context.insert(
-            "inputFractionOfBalanceBps".into(),
+            INPUT_FRACTION_OF_BALANCE_BPS.into(),
             Value::from(fraction_bps),
         );
     }
@@ -206,12 +218,12 @@ fn stamp_approval_fields(
 
     let allowance_forced_usd = inject_amount_usd(allowance.clone(), host.oracle());
     if let Value::Object(allowance_obj) = allowance_forced_usd {
-        context.insert("currentAllowance".into(), Value::Object(allowance_obj));
+        context.insert(CURRENT_ALLOWANCE.into(), Value::Object(allowance_obj));
     }
     let allowance_covers_input =
         amount_raw_u256(&allowance.raw) >= amount_raw_u256(&s.input_amount.raw);
     context.insert(
-        "allowanceCoversInput".into(),
+        ALLOWANCE_COVERS_INPUT.into(),
         Value::from(allowance_covers_input),
     );
 }

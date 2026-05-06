@@ -7,6 +7,7 @@ use crate::common::{currency_to_policy_address, shift_decimals, TokenLookup};
 use alloy_primitives::{Address as AlloyAddress, U256};
 use alloy_sol_types::{sol, SolType};
 use policy_engine::prelude::*;
+use policy_engine::context_keys::ur;
 use serde_json::Value;
 
 type SubPlanInput = sol! { (bytes, bytes[]) };
@@ -151,27 +152,27 @@ pub(crate) fn expand_commands(
 
 pub(crate) fn meta_to_map(meta: &ActionMeta) -> serde_json::Map<String, Value> {
     let mut obj = serde_json::Map::new();
-    obj.insert("router".into(), Value::from("universal-router"));
+    obj.insert(ur::ROUTER.into(), Value::from("universal-router"));
     obj.insert(
-        "routerCommandIndex".into(),
+        ur::ROUTER_COMMAND_INDEX.into(),
         Value::from(meta.command_index as i64),
     );
     obj.insert(
-        "routerCommand".into(),
+        ur::ROUTER_COMMAND.into(),
         Value::from(format!("0x{:02x}", meta.command_type)),
     );
-    obj.insert("allowRevert".into(), Value::from(meta.allow_revert));
-    obj.insert("analysisDepth".into(), Value::from(meta.analysis_depth));
+    obj.insert(ur::ALLOW_REVERT.into(), Value::from(meta.allow_revert));
+    obj.insert(ur::ANALYSIS_DEPTH.into(), Value::from(meta.analysis_depth));
     obj.insert(
-        "subplanDepth".into(),
+        ur::SUBPLAN_DEPTH.into(),
         Value::from(meta.subplan_depth as i64),
     );
     obj.insert(
-        "hookDataPresent".into(),
+        ur::HOOK_DATA_PRESENT.into(),
         Value::from(meta.hook_data_present),
     );
     if let Some(action) = meta.v4_action {
-        obj.insert("v4Action".into(), Value::from(format!("0x{action:02x}")));
+        obj.insert(ur::V4_ACTION.into(), Value::from(format!("0x{action:02x}")));
     }
     obj
 }

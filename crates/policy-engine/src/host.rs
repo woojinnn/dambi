@@ -1,10 +1,18 @@
-//! Host-provided capability bag passed into adapters and the Pipeline.
-//!
-//! Construct once per evaluation pass via `HostCapabilities::new(oracle)`
-//! for oracle-only flows, or `HostCapabilities::builder(oracle)
-//! .with_portfolio(...).with_approvals(...).build()` for richer setups.
-//! Optional capabilities default to `None`; lowering enrichment skips
-//! fields that aren't supplied (fail-open).
+//! Host capability bag shared by adapter and pipeline at evaluation time.
+//!  
+//! The bag is intentionally tiny and opinionated: every policy run gets a
+//! short-lived `HostCapabilities` value with required and optional services
+//! attached by the caller.
+//!  
+//! `oracle` is required and always present because USD valuation is used by
+//! lowering paths that enrich amounts.
+//!  
+//! `portfolio` and `approvals` are optional enrichment inputs; if absent, the
+//! corresponding context fields are omitted so policy authors can guard with
+//! `context has ...` and decide fail-open vs fail-closed behavior.
+//!  
+//! `stats` is optional and only needed for window-key projection and
+//! reservation-aware policy checks.
 
 use crate::approvals::Approvals;
 use crate::oracle::Oracle;

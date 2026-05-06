@@ -3,9 +3,14 @@
 //! recipients, …). The engine reads a snapshot at evaluation time and can
 //! also fold a reservation-driven delta that represents the current
 //! tx's intent, so policy checks reason over projected post-this-tx values.
-//! Active reservations are included so concurrent callers observe in-flight
-//! intent as part of the same snapshot.
-//!
+//!  
+//! Snapshots include active reservations so concurrent callers can observe in-
+//! flight intent before commit, which is the reserve-first contract used by
+//! `Pipeline::evaluate_with_reservation`.
+//!  
+//! A confirmed reservation becomes durable history on `settle`, while `release`
+//! rolls back that reserved delta and reverts the projected view.
+//!  
 //! v0.1: in-memory `MockStatWindows` only, no time-decay (every
 //! settled delta sticks forever). Production impls would timestamp
 //! settled entries and prune outside their window.
