@@ -13,8 +13,8 @@
 //! than being silently downgraded to `Verdict::Allow`.
 
 use crate::core::{Action, TransactionRequest};
+use crate::host::HostCapabilities;
 use crate::lowering::{request_for_tx, request_from_action};
-use crate::oracle::Oracle;
 use crate::policy::{PolicyEngine, PolicyError, PolicyRequest, RequestKind, Verdict};
 use crate::registry::{AdapterRegistry, ResolverOutcome};
 use thiserror::Error;
@@ -32,21 +32,23 @@ pub enum PipelineError {
 /// Pipeline is generic over the registry type — `R: ?Sized` lets callers
 /// pass either a concrete `&MockAdapterRegistry` (monomorphized, fast) or a
 /// `&dyn AdapterRegistry` trait object (dynamic dispatch, swappable at
-/// runtime). The oracle stays Sized: `Adapter::into_request` takes
-/// `&dyn Oracle`, and unsizing `&O → &dyn Oracle` requires `O: Sized`.
-/// Callers wanting trait-object oracles can wrap in `Box<dyn Oracle>` and
-/// pass `&*oracle_box` (gets a `&dyn Oracle`).
-pub struct Pipeline<'a, R: AdapterRegistry + ?Sized, O: Oracle> {
+/// runtime). Host capabilities are passed as a small borrowed bundle to avoid
+/// `Pipeline::new` signature churn as capabilities expand.
+pub struct Pipeline<'a, R: AdapterRegistry + ?Sized> {
     pub registry: &'a R,
-    pub oracle: &'a O,
+    pub host: HostCapabilities<'a>,
     pub policies: &'a PolicyEngine,
 }
 
-impl<'a, R: AdapterRegistry + ?Sized, O: Oracle> Pipeline<'a, R, O> {
-    pub fn new(registry: &'a R, oracle: &'a O, policies: &'a PolicyEngine) -> Self {
+impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
+    pub fn new(
+        registry: &'a R,
+        host: HostCapabilities<'a>,
+        policies: &'a PolicyEngine,
+    ) -> Self {
         Pipeline {
             registry,
-            oracle,
+            host,
             policies,
         }
     }
@@ -78,7 +80,7 @@ impl<'a, R: AdapterRegistry + ?Sized, O: Oracle> Pipeline<'a, R, O> {
                     .build_actions(tx)
                     .map_err(|e| PipelineError::AdapterBuild(e.to_string()))?;
                 let leaf_requests = adapter
-                    .into_requests(tx, self.oracle)
+                    .into_requests(tx, &self.host)
                     .map_err(|e| PipelineError::AdapterBuild(e.to_string()))?;
                 (leaves, leaf_requests)
             }

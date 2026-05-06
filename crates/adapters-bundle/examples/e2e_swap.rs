@@ -9,7 +9,9 @@
 //!  - print the verdict
 
 use alloy_primitives::{Address as AlloyAddress, U256};
-use policy_engine::{Address, MockOracle, Pipeline, PolicyEngine, Token, TransactionRequest};
+use policy_engine::{
+    Address, HostCapabilities, MockOracle, Pipeline, PolicyEngine, Token, TransactionRequest,
+};
 use policy_engine_adapter_uniswap_v3::{
     encode_exact_input_single, ExactInputSingleParams, SWAP_ROUTER_MAINNET,
 };
@@ -46,7 +48,7 @@ fn main() {
 
     let policies = PolicyEngine::from_sources([POLICY_SRC]).expect("policy file should parse");
 
-    let pipeline = Pipeline::new(&registry, &oracle, &policies);
+    let pipeline = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
     for (label, amount_in) in [
         ("50 USDT (under cap)", U256::from(50_000_000u64)),

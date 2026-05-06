@@ -3,8 +3,8 @@
 
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
-    Address, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, Token, TransactionRequest,
-    Verdict,
+    Address, HostCapabilities, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, Token,
+    TransactionRequest, Verdict,
 };
 use policy_engine_adapter_uniswap_v3::{
     encode_exact_input_single, ExactInputSingleParams, UniswapV3ExactInputSingleAdapter,
@@ -92,7 +92,7 @@ fn swap_200_usdt_is_denied_over_100_cap() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(USDT_ADDR, WETH_ADDR, U256::from(200_000_000u64)); // 200 USDT
     let v = pipe.evaluate(&tx).expect("pipeline ok");
@@ -115,7 +115,7 @@ fn swap_50_usdt_is_allowed_under_cap() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(USDT_ADDR, WETH_ADDR, U256::from(50_000_000u64)); // 50 USDT
     let v = pipe.evaluate(&tx).expect("pipeline ok");
@@ -127,7 +127,7 @@ fn exactly_100_usdt_is_allowed_boundary_check() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(USDT_ADDR, WETH_ADDR, U256::from(100_000_000u64)); // 100 USDT
     let v = pipe.evaluate(&tx).expect("pipeline ok");
@@ -140,7 +140,7 @@ fn one_usdt_above_cap_is_denied() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(USDT_ADDR, WETH_ADDR, U256::from(100_000_001u64)); // 100.000001 USDT
     let v = pipe.evaluate(&tx).expect("pipeline ok");
@@ -155,7 +155,7 @@ fn swap_in_weth_priced_above_cap_is_denied() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     // 0.1 WETH @ $3000 = $300, above the 100 USD cap.
     let amount = U256::from(100_000_000_000_000_000u64); // 0.1 WETH (18 decimals)
@@ -170,7 +170,7 @@ fn swap_in_weth_below_cap_is_allowed() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     // 0.01 WETH @ $3000 = $30, well under the cap.
     let amount = U256::from(10_000_000_000_000_000u64); // 0.01 WETH
@@ -185,7 +185,7 @@ fn swap_in_usdc_above_cap_is_denied() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(USDC_ADDR, WETH_ADDR, U256::from(150_000_000u64)); // 150 USDC
     let v = pipe.evaluate(&tx).expect("pipeline ok");
@@ -202,7 +202,7 @@ fn missing_oracle_data_is_treated_as_allow_in_v01() {
     let reg = registry();
     let oracle = MockOracle::new(); // no prices
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(USDT_ADDR, WETH_ADDR, U256::from(200_000_000u64));
     let v = pipe.evaluate(&tx).expect("pipeline ok");
@@ -214,7 +214,7 @@ fn unknown_target_address_emits_other_action() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let mut tx = build_swap_tx(USDT_ADDR, WETH_ADDR, U256::from(200_000_000u64));
     tx.to = Address::new("0x000000000000000000000000000000000000dead").unwrap();
@@ -229,7 +229,7 @@ fn corrupt_calldata_returns_error() {
     let reg = registry();
     let oracle = full_oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     // Right selector + target so resolver matches, but truncated calldata so
     // `adapter.build` fails. The pipeline surfaces this as `AdapterBuild`.
@@ -256,7 +256,7 @@ fn stale_oracle_data_is_rejected_by_policy_guard() {
         .with_simple_price(&usdt(), "1.0000", 9999) // 9999s old
         .with_simple_price(&weth(), "3000.0000", 9999);
     let policies = engine();
-    let pipe = Pipeline::new(&reg, &oracle, &policies);
+    let pipe = Pipeline::new(&reg, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(USDT_ADDR, WETH_ADDR, U256::from(200_000_000u64));
     let v = pipe.evaluate(&tx).expect("pipeline ok");

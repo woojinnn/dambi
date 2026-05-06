@@ -3,8 +3,8 @@
 
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
-    Address, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, Token, TransactionRequest,
-    Verdict,
+    Address, HostCapabilities, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, Token,
+    TransactionRequest, Verdict,
 };
 use policy_engine_adapter_uniswap_v2::{
     encode_swap_exact_tokens_for_tokens, SwapExactTokensForTokensParams,
@@ -114,7 +114,7 @@ fn fee_cap_denies_v3_pool_with_300_bps() {
     let engine = PolicyEngine::from_sources([POLICY_FEE_CAP]).unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     // V3 fee 30000 (raw) → 300 bps in our adapter (fee / 100). Above 100 cap.
     let tx = v3_swap_tx(30_000, U256::from(1_000_000u64), U256::from(0u64));
@@ -126,7 +126,7 @@ fn fee_cap_allows_v3_pool_with_30_bps() {
     let engine = PolicyEngine::from_sources([POLICY_FEE_CAP]).unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     // V3 fee 3000 raw → 30 bps. Under cap.
     let tx = v3_swap_tx(3000, U256::from(1_000_000u64), U256::from(0u64));
@@ -138,7 +138,7 @@ fn fee_cap_allows_v2_at_30_bps() {
     let engine = PolicyEngine::from_sources([POLICY_FEE_CAP]).unwrap();
     let registry = v2_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     // V2 always emits 30 bps fee — well under cap.
     let tx = v2_swap_tx(U256::from(1_000_000u64), U256::from(0u64));
@@ -154,7 +154,7 @@ fn allowlist_passes_uniswap_v3() {
     let engine = PolicyEngine::from_sources([POLICY_ALLOWLIST]).unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let tx = v3_swap_tx(3000, U256::from(1_000_000u64), U256::from(0u64));
     assert_eq!(pipe.evaluate(&tx).unwrap(), Verdict::Pass);
@@ -165,7 +165,7 @@ fn allowlist_passes_uniswap_v2() {
     let engine = PolicyEngine::from_sources([POLICY_ALLOWLIST]).unwrap();
     let registry = v2_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let tx = v2_swap_tx(U256::from(1_000_000u64), U256::from(0u64));
     assert_eq!(pipe.evaluate(&tx).unwrap(), Verdict::Pass);
@@ -229,7 +229,7 @@ fn allowlist_denies_unknown_protocol() {
     let engine = PolicyEngine::from_sources([POLICY_ALLOWLIST]).unwrap();
     let registry = MockAdapterRegistry::new().with_adapter(Arc::new(FakeProtocolAdapter));
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let tx = TransactionRequest {
         chain_id: 1,
@@ -252,7 +252,7 @@ fn zero_min_output_warns_v3() {
     let engine = PolicyEngine::from_sources([POLICY_NO_ZERO_OUT]).unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let tx = v3_swap_tx(3000, U256::from(1_000_000u64), U256::ZERO);
     match pipe.evaluate(&tx).unwrap() {
@@ -269,7 +269,7 @@ fn zero_min_output_warns_v2() {
     let engine = PolicyEngine::from_sources([POLICY_NO_ZERO_OUT]).unwrap();
     let registry = v2_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let tx = v2_swap_tx(U256::from(1_000_000u64), U256::ZERO);
     assert!(matches!(pipe.evaluate(&tx).unwrap(), Verdict::Warn(_)));
@@ -280,7 +280,7 @@ fn nonzero_min_output_passes() {
     let engine = PolicyEngine::from_sources([POLICY_NO_ZERO_OUT]).unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let tx = v3_swap_tx(3000, U256::from(1_000_000u64), U256::from(1u64));
     assert_eq!(pipe.evaluate(&tx).unwrap(), Verdict::Pass);
@@ -295,7 +295,7 @@ fn usd_floor_denies_dust_output() {
     let engine = PolicyEngine::from_sources([POLICY_USD_FLOOR]).unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     // 1000 wei WETH → ~3 * 10^-15 USD, well below the $10 floor.
     let tx = v3_swap_tx(3000, U256::from(1_000_000u64), U256::from(1000u64));
@@ -307,7 +307,7 @@ fn usd_floor_passes_normal_swap() {
     let engine = PolicyEngine::from_sources([POLICY_USD_FLOOR]).unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     // 0.01 WETH ≈ 30 USD min output, above floor.
     let amount_out_min = U256::from(10_000_000_000_000_000u64); // 0.01 WETH
@@ -322,7 +322,7 @@ fn usd_floor_skips_when_oracle_missing() {
     let engine = PolicyEngine::from_sources([POLICY_USD_FLOOR]).unwrap();
     let registry = v3_registry();
     let oracle = MockOracle::new();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let tx = v3_swap_tx(3000, U256::from(1_000_000u64), U256::from(1000u64));
     assert_eq!(pipe.evaluate(&tx).unwrap(), Verdict::Pass);
@@ -346,7 +346,7 @@ fn all_four_policies_compose_for_normal_swap() {
     .unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     let amount_out_min = U256::from(10_000_000_000_000_000u64); // 0.01 WETH ≈ $30
     let tx = v3_swap_tx(3000, U256::from(50_000_000u64), amount_out_min);
@@ -364,7 +364,7 @@ fn all_four_policies_high_fee_deny_overrides_zero_min_warn() {
     .unwrap();
     let registry = v3_registry();
     let oracle = full_oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &engine);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
 
     // High fee (300 bps) AND zero minOut → fail variant carries BOTH the
     // deny entry (fee-cap) and the warn entry (no-zero-min-output).

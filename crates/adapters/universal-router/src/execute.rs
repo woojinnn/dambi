@@ -142,12 +142,12 @@ impl TypedAdapter for Adapter_ {
     fn lower_requests(
         &self,
         tx: &TransactionRequest,
-        oracle: &dyn Oracle,
+        host: &HostCapabilities,
     ) -> Result<Vec<PolicyRequest>, AdapterError> {
         let mut routed = self.decode_routed_actions(tx)?;
         let mut requests = Vec::with_capacity(routed.len());
         for routed_action in &mut routed {
-            enrich_with_usd(&mut routed_action.action, oracle);
+            enrich_with_usd(&mut routed_action.action, host.oracle());
             let mut req = request_from_action(&routed_action.action);
             add_meta(&mut req, &routed_action.meta);
             requests.push(req);

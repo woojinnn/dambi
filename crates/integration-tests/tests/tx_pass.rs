@@ -1,8 +1,8 @@
 use alloy_primitives::{Address as AlloyAddress, U256};
 use alloy_sol_types::SolValue;
 use policy_engine::{
-    Address, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, RequestKind, Token,
-    TransactionRequest, Verdict,
+    Address, HostCapabilities, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, RequestKind,
+    Token, TransactionRequest, Verdict,
 };
 use policy_engine_adapters_bundle::{default_registry, uniswap_v2, uniswap_v3, universal_router};
 use std::str::FromStr;
@@ -180,7 +180,7 @@ fn single_v2_swap_under_cap_passes_and_shape_is_valid() {
     let registry = default_registry();
     let policies = PolicyEngine::from_sources([POLICY_TX_SHAPE, POLICY_TX_CAP]).unwrap();
     let oracle = oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
     let tx = v2_swap_tx(50_000_000);
     assert_eq!(pipe.evaluate(&tx).unwrap(), Verdict::Pass);
@@ -191,7 +191,7 @@ fn multicall_v3_with_two_leaves_exceeds_tx_total_input_and_fails_on_tx_origin() 
     let registry = default_registry();
     let policies = PolicyEngine::from_sources([POLICY_TX_CAP]).unwrap();
     let oracle = oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
     let verdict = pipe.evaluate(&v3_multicall_tx()).unwrap();
     match verdict {
@@ -209,7 +209,7 @@ fn tx_level_warning_and_leaf_deny_report_distinct_origins() {
     let registry = default_registry();
     let policies = PolicyEngine::from_sources([POLICY_TX_WARNING, POLICY_LEAF_FEE_BPS]).unwrap();
     let oracle = oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
     let verdict = pipe.evaluate(&v3_exact_input_single(200_000_000u64, 30_000)).unwrap();
     match verdict {
@@ -236,7 +236,7 @@ fn no_match_tx_generates_other_and_tx_requests_and_allows_when_no_policies() {
     let registry = MockAdapterRegistry::new();
     let policies = PolicyEngine::from_sources(Vec::<&str>::new()).unwrap();
     let oracle = oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
     let tx = TransactionRequest {
         chain_id: 1,
@@ -256,7 +256,7 @@ fn pure_eth_transfer_without_selector_is_blocklisted_by_tx_resource() {
     let registry = MockAdapterRegistry::new();
     let policies = PolicyEngine::from_sources([POLICY_TX_BLOCKLIST]).unwrap();
     let oracle = oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
     let tx = TransactionRequest {
         chain_id: 1,
@@ -283,7 +283,7 @@ fn universal_router_execute_allow_revert_metadata_is_counted_on_tx_request() {
     let registry = default_registry();
     let policies = PolicyEngine::from_sources([POLICY_TX_ALLOW_REVERT]).unwrap();
     let oracle = oracle();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
 
     let input = (
         AlloyAddress::from_str(RECIPIENT).unwrap(),

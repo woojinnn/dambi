@@ -27,6 +27,7 @@ pub mod oracle;
 pub mod pipeline;
 pub mod policy;
 pub mod prelude;
+pub mod host;
 pub mod registry;
 
 pub use adapter::{
@@ -42,6 +43,7 @@ pub use lowering::{
     enrich_actions_with_usd, enrich_with_usd, request_from_action, requests_from_action,
     requests_from_actions,
 };
+pub use host::HostCapabilities;
 pub use oracle::{MockOracle, Oracle, OracleError};
 pub use pipeline::{Pipeline, PipelineError};
 pub use policy::{

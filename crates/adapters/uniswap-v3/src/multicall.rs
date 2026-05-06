@@ -197,10 +197,10 @@ impl Adapter for Adapter_ {
     fn into_requests(
         &self,
         tx: &TransactionRequest,
-        oracle: &dyn Oracle,
+        host: &HostCapabilities,
     ) -> Result<Vec<PolicyRequest>, AdapterError> {
         let mut actions = self.build_actions(tx)?;
-        enrich_actions_with_usd(&mut actions, oracle);
+        enrich_actions_with_usd(&mut actions, host.oracle());
         Ok(requests_from_actions(&actions))
     }
 }

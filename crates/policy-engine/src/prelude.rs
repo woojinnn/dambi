@@ -25,5 +25,6 @@ pub use crate::core::{
     UsdValuation,
 };
 pub use crate::lowering::{enrich_actions_with_usd, requests_from_actions};
+pub use crate::host::HostCapabilities;
 pub use crate::oracle::Oracle;
 pub use crate::policy::PolicyRequest;

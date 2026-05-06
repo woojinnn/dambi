@@ -7,7 +7,8 @@ use alloy_primitives::{
 };
 use alloy_sol_types::SolValue;
 use policy_engine::{
-    Address, MockOracle, Pipeline, PolicyEngine, Token, TransactionRequest, Verdict,
+    Address, HostCapabilities, MockOracle, Pipeline, PolicyEngine, Token, TransactionRequest,
+    Verdict,
 };
 use policy_engine_adapter_uniswap_v3::{
     encode_exact_input_single, encode_multicall_deadline, ExactInputSingleParams,
@@ -78,7 +79,7 @@ fn v3_multicall_leaf_swap_uses_existing_swap_policy() {
     let registry = default_registry();
     let oracle = oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
     let tx = TransactionRequest {
         chain_id: 1,
         from: Address::new("0x0000000000000000000000000000000000000001").unwrap(),
@@ -121,7 +122,7 @@ fn universal_router_v3_leaf_swap_uses_existing_swap_policy() {
     let registry = default_registry();
     let oracle = oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
     let verdict = pipe.evaluate(&tx).unwrap();
     assert!(matches!(verdict, Verdict::Fail(_)));
     assert_eq!(verdict.matched()[0].policy_id, "user/max-swap-usd-100");
@@ -171,7 +172,7 @@ fn universal_router_v4_leaf_swap_uses_existing_swap_policy() {
     let registry = default_registry();
     let oracle = oracle();
     let policies = engine();
-    let pipe = Pipeline::new(&registry, &oracle, &policies);
+    let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &policies);
     let verdict = pipe.evaluate(&tx).unwrap();
     assert!(matches!(verdict, Verdict::Fail(_)));
     assert_eq!(verdict.matched()[0].policy_id, "user/max-swap-usd-100");

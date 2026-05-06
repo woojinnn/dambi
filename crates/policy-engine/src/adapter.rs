@@ -12,7 +12,7 @@
 
 use crate::core::{Action, Address, ChainId, TransactionRequest};
 use crate::lowering::{enrich_with_usd, request_from_action};
-use crate::oracle::Oracle;
+use crate::host::HostCapabilities;
 use crate::policy::PolicyRequest;
 use std::sync::Arc;
 use thiserror::Error;
@@ -218,11 +218,11 @@ pub trait TypedAdapter: Send + Sync + Default + Sized + 'static {
     fn lower_requests(
         &self,
         tx: &TransactionRequest,
-        oracle: &dyn Oracle,
+        host: &HostCapabilities,
     ) -> Result<Vec<PolicyRequest>, AdapterError> {
         let mut actions = self.build_leaf_actions(tx)?;
         for action in &mut actions {
-            enrich_with_usd(action, oracle);
+            enrich_with_usd(action, host.oracle());
         }
         Ok(actions.iter().map(request_from_action).collect())
     }
@@ -292,9 +292,9 @@ where
     fn into_requests(
         &self,
         tx: &TransactionRequest,
-        oracle: &dyn Oracle,
+        host: &HostCapabilities,
     ) -> Result<Vec<PolicyRequest>, AdapterError> {
-        self.lower_requests(tx, oracle)
+        self.lower_requests(tx, host)
     }
 }
 
@@ -344,10 +344,10 @@ pub trait Adapter: Send + Sync {
     fn into_request(
         &self,
         tx: &TransactionRequest,
-        oracle: &dyn Oracle,
+        host: &HostCapabilities,
     ) -> Result<PolicyRequest, AdapterError> {
         let mut action = self.build(tx)?;
-        enrich_with_usd(&mut action, oracle);
+        enrich_with_usd(&mut action, host.oracle());
         Ok(request_from_action(&action))
     }
 
@@ -358,9 +358,9 @@ pub trait Adapter: Send + Sync {
     fn into_requests(
         &self,
         tx: &TransactionRequest,
-        oracle: &dyn Oracle,
+        host: &HostCapabilities,
     ) -> Result<Vec<PolicyRequest>, AdapterError> {
-        Ok(vec![self.into_request(tx, oracle)?])
+        Ok(vec![self.into_request(tx, host)?])
     }
 }
 

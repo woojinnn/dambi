@@ -10,7 +10,8 @@
 
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
-    Action, Adapter, AdapterError, AdapterId, Address, MatchKey, MockOracle, Oracle, PolicyEngine,
+    Action, Adapter, AdapterError, AdapterId, Address, HostCapabilities, MatchKey, MockOracle,
+    PolicyEngine,
     PolicyRequest, SwapAction, Token, TransactionRequest, Verdict,
 };
 use policy_engine_adapter_uniswap_v3::{
@@ -85,7 +86,7 @@ fn default_into_request_produces_evaluable_policy_request() {
     let oracle = full_oracle();
     let tx = build_swap_tx(U256::from(200_000_000u64));
 
-    let request: PolicyRequest = adapter.into_request(&tx, &oracle).unwrap();
+    let request: PolicyRequest = adapter.into_request(&tx, &HostCapabilities::new(&oracle)).unwrap();
 
     // Principal is derived from `tx.from` (action.actor()), not hardcoded.
     assert_eq!(
@@ -110,7 +111,7 @@ fn default_into_request_path_evaluates_to_deny_at_200_usdt() {
     let policies = PolicyEngine::from_sources([POLICY_TEXT]).unwrap();
 
     let tx = build_swap_tx(U256::from(200_000_000u64));
-    let request = adapter.into_request(&tx, &oracle).unwrap();
+    let request = adapter.into_request(&tx, &HostCapabilities::new(&oracle)).unwrap();
     let verdict = policies.evaluate_request(&request).unwrap();
 
     match verdict {
@@ -129,7 +130,7 @@ fn default_into_request_path_evaluates_to_allow_under_cap() {
     let policies = PolicyEngine::from_sources([POLICY_TEXT]).unwrap();
 
     let tx = build_swap_tx(U256::from(50_000_000u64));
-    let request = adapter.into_request(&tx, &oracle).unwrap();
+    let request = adapter.into_request(&tx, &HostCapabilities::new(&oracle)).unwrap();
     let verdict = policies.evaluate_request(&request).unwrap();
     assert_eq!(verdict, Verdict::Pass);
 }
@@ -186,7 +187,7 @@ impl Adapter for DirectAdapter {
     fn into_request(
         &self,
         tx: &TransactionRequest,
-        _oracle: &dyn Oracle,
+        _host: &HostCapabilities,
     ) -> Result<PolicyRequest, AdapterError> {
         // Skip the Action intermediate entirely: produce a Cedar context
         // directly from the decoded calldata, with USDT pegged at $1 by fiat.
@@ -228,12 +229,12 @@ fn custom_adapter_can_override_into_request_to_skip_action() {
 
     // 200 USDT → $200 → fail
     let tx = build_swap_tx(U256::from(200_000_000u64));
-    let request = adapter.into_request(&tx, &oracle).unwrap();
+    let request = adapter.into_request(&tx, &HostCapabilities::new(&oracle)).unwrap();
     assert!(policies.evaluate_request(&request).unwrap().is_failure());
 
     // 50 USDT → $50 → pass
     let tx = build_swap_tx(U256::from(50_000_000u64));
-    let request = adapter.into_request(&tx, &oracle).unwrap();
+    let request = adapter.into_request(&tx, &HostCapabilities::new(&oracle)).unwrap();
     assert_eq!(policies.evaluate_request(&request).unwrap(), Verdict::Pass);
 }
 
@@ -250,7 +251,7 @@ fn custom_adapter_propagates_decode_failure() {
         gas: None,
         nonce: None,
     };
-    let err = adapter.into_request(&tx, &oracle).unwrap_err();
+    let err = adapter.into_request(&tx, &HostCapabilities::new(&oracle)).unwrap_err();
     assert!(matches!(err, AdapterError::BadCalldata(_)));
 }
 
@@ -314,7 +315,7 @@ fn pipeline_accepts_dyn_adapter_registry() {
 
     let oracle = full_oracle();
     let policies = PolicyEngine::from_sources([POLICY_TEXT]).unwrap();
-    let pipeline = Pipeline::new(dyn_registry, &oracle, &policies);
+    let pipeline = Pipeline::new(dyn_registry, HostCapabilities::new(&oracle), &policies);
 
     let tx = build_swap_tx(U256::from(50_000_000u64));
     assert_eq!(pipeline.evaluate(&tx).unwrap(), Verdict::Pass);
@@ -342,7 +343,7 @@ fn pipeline_routes_through_custom_registry_impl() {
     let custom = AlwaysNoMatchRegistry;
     let oracle = full_oracle();
     let policies = PolicyEngine::from_sources([POLICY_TEXT]).unwrap();
-    let pipeline = Pipeline::new(&custom, &oracle, &policies);
+    let pipeline = Pipeline::new(&custom, HostCapabilities::new(&oracle), &policies);
 
     // No adapter resolved → Action::Other → swap-targeted forbid does not match → Pass.
     let tx = build_swap_tx(U256::from(200_000_000u64));

@@ -3,8 +3,8 @@
 
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
-    Address, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, Token, TransactionRequest,
-    Verdict,
+    Address, HostCapabilities, MockAdapterRegistry, MockOracle, Pipeline, PolicyEngine, Token,
+    TransactionRequest, Verdict,
 };
 use policy_engine_adapter_uniswap_v3::{
     encode_exact_input_single, ExactInputSingleParams, UniswapV3ExactInputSingleAdapter,
@@ -70,7 +70,7 @@ fn pipeline_with(engine: PolicyEngine) -> impl Fn(U256) -> policy_engine::policy
         .with_simple_price(&usdt_token(), "1.0000", 5)
         .with_simple_price(&weth_token(), "3000.0000", 8);
     move |amount_in| {
-        let pipe = Pipeline::new(&registry, &oracle, &engine);
+        let pipe = Pipeline::new(&registry, HostCapabilities::new(&oracle), &engine);
         pipe.evaluate(&build_swap_tx(amount_in))
             .expect("pipeline ok")
     }
