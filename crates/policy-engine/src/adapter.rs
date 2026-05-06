@@ -9,9 +9,9 @@
 //! - [`Adapter::leaf_metadata`] — optional per-leaf metadata injection.
 
 use crate::core::{Action, Address, ChainId, TransactionRequest};
+use serde_json::Map;
 use std::sync::Arc;
 use thiserror::Error;
-use serde_json::Map;
 
 /// Stable identifier for an adapter (e.g., `uniswap-v3/exactInputSingle@0.1.0`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -288,7 +288,6 @@ where
     ) -> Vec<Map<String, serde_json::Value>> {
         self.typed_leaf_metadata(tx, leaves)
     }
-
 }
 
 /// One adapter handles one (or a small set of) `(chain_id, to, selector)` keys

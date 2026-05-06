@@ -1,4 +1,12 @@
-use crate::core::{Action, AmountSpec, UsdValuation};
+//! Enrichment utilities that stamp optional policy context before evaluation.
+//!
+//! - `enrich_with_usd`: add input/minOutput USD valuation to swap actions.
+//! - `enrich_request_with_capabilities`: add portfolio + approval-derived
+//!   policy context for swap actions (only when capability data exists).
+//! - `enrich_tx_request_with_window_stats`: add projected swap window keys.
+//!   Policies must guard `context has "windowStats"` before reading keys.
+
+use crate::core::{Action, AmountSpec, SwapAction, UsdValuation};
 use crate::host::HostCapabilities;
 use crate::oracle::Oracle;
 use crate::policy::PolicyRequest;
@@ -108,33 +116,20 @@ pub fn enrich_tx_request_with_window_stats(
     }
 }
 
-pub fn compute_swap_window_deltas(
-    leaves: &[Action],
-    leaf_requests: &[PolicyRequest],
-) -> Vec<StatDelta> {
+pub fn compute_swap_window_deltas(leaves: &[Action]) -> Vec<StatDelta> {
     let mut swap_volume_24h: Option<String> = None;
     let mut swap_count_24h: i64 = 0;
 
-    let mut zip = leaves.iter().zip(leaf_requests.iter());
-    for (action, leaf_request) in zip.by_ref() {
-        if !matches!(action, Action::Swap(_)) {
+    for action in leaves {
+        let Action::Swap(s) = action else {
             continue;
-        }
+        };
         swap_count_24h = swap_count_24h.saturating_add(1);
 
-        let maybe_value = leaf_request
-            .context
-            .get("inputAmount")
-            .and_then(|input_amount| input_amount.get("usd"))
-            .and_then(|usd| usd.get("value"))
-            .and_then(|value| value.get("__extn"))
-            .and_then(|extn| extn.get("arg"))
-            .and_then(Value::as_str);
-
-        if let Some(value) = maybe_value {
+        if let Some(usd) = &s.input_amount.usd {
             swap_volume_24h = Some(match swap_volume_24h {
-                Some(previous) => super::decimal::add_decimal_strings(&previous, value),
-                None => value.to_string(),
+                Some(previous) => super::decimal::add_decimal_strings(&previous, &usd.value),
+                None => usd.value.clone(),
             });
         }
     }
@@ -163,47 +158,62 @@ pub fn enrich_request_with_capabilities(
     let Some(context) = request.context.as_object_mut() else {
         return;
     };
+    let Action::Swap(s) = action else {
+        return;
+    };
 
-    match action {
-        Action::Swap(s) => {
-            if let Some(portfolio) = host.portfolio() {
-                if let Ok(balance) = portfolio.balance(&s.actor, &s.input_token) {
-                    let balance_forced_usd = inject_amount_usd(balance.clone(), host.oracle());
-                    if let Value::Object(balance_obj) = balance_forced_usd {
-                        context.insert("actorBalanceInputToken".into(), Value::Object(balance_obj));
-                    }
-
-                    if let Some(fraction_bps) = input_fraction_bps(&s.input_amount, &balance) {
-                        context.insert(
-                            "inputFractionOfBalanceBps".into(),
-                            Value::from(fraction_bps),
-                        );
-                    }
-                }
-            }
-
-            if !s.input_token.is_native {
-                if let Some(approvals) = host.approvals() {
-                    if let Ok(allowance) = approvals.allowance(&s.actor, &s.input_token, &s.target)
-                    {
-                        let allowance_forced_usd =
-                            inject_amount_usd(allowance.clone(), host.oracle());
-                        if let Value::Object(allowance_obj) = allowance_forced_usd {
-                            context.insert("currentAllowance".into(), Value::Object(allowance_obj));
-                        }
-                        let allowance_covers_input =
-                            amount_raw_u256(&allowance.raw) >= amount_raw_u256(&s.input_amount.raw);
-                        context.insert(
-                            "allowanceCoversInput".into(),
-                            Value::from(allowance_covers_input),
-                        );
-                    }
-                }
-            }
-        }
-        Action::Multi(_) => {}
-        Action::Other { .. } => {}
+    stamp_portfolio_fields(context, s, host);
+    if !s.input_token.is_native {
+        stamp_approval_fields(context, s, host);
     }
+}
+
+fn stamp_portfolio_fields(
+    context: &mut serde_json::Map<String, Value>,
+    s: &SwapAction,
+    host: &HostCapabilities,
+) {
+    let Some(portfolio) = host.portfolio() else {
+        return;
+    };
+    let Ok(balance) = portfolio.balance(&s.actor, &s.input_token) else {
+        return;
+    };
+    let balance_forced_usd = inject_amount_usd(balance.clone(), host.oracle());
+    if let Value::Object(balance_obj) = balance_forced_usd {
+        context.insert("actorBalanceInputToken".into(), Value::Object(balance_obj));
+    }
+
+    if let Some(fraction_bps) = input_fraction_bps(&s.input_amount, &balance) {
+        context.insert(
+            "inputFractionOfBalanceBps".into(),
+            Value::from(fraction_bps),
+        );
+    }
+}
+
+fn stamp_approval_fields(
+    context: &mut serde_json::Map<String, Value>,
+    s: &SwapAction,
+    host: &HostCapabilities,
+) {
+    let Some(approvals) = host.approvals() else {
+        return;
+    };
+    let Ok(allowance) = approvals.allowance(&s.actor, &s.input_token, &s.target) else {
+        return;
+    };
+
+    let allowance_forced_usd = inject_amount_usd(allowance.clone(), host.oracle());
+    if let Value::Object(allowance_obj) = allowance_forced_usd {
+        context.insert("currentAllowance".into(), Value::Object(allowance_obj));
+    }
+    let allowance_covers_input =
+        amount_raw_u256(&allowance.raw) >= amount_raw_u256(&s.input_amount.raw);
+    context.insert(
+        "allowanceCoversInput".into(),
+        Value::from(allowance_covers_input),
+    );
 }
 
 fn input_fraction_bps(input: &AmountSpec, balance: &AmountSpec) -> Option<i64> {

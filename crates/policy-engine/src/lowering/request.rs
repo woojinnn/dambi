@@ -1,3 +1,10 @@
+//! Request builders for leaf actions and transaction-summary evaluations.
+//!
+//! `request_from_action` preserves per-leaf shape for action-level checks.
+//! `request_for_tx` builds a transaction summary request that aggregates leaf
+//! traits (kinds, recipients, protocols, totals) while preserving allowRevert
+//! data carried in leaf request context.
+
 use std::collections::HashSet;
 
 use crate::core::{Action, AmountSpec, TransactionRequest};
@@ -30,58 +37,45 @@ pub fn request_for_tx(
     let action = r#"Action::"send_tx""#.to_string();
     let resource = format!(r#"Address_::"{}""#, tx.to.as_str());
 
-    let kinds: Vec<String> = leaves.iter().map(|a| a.kind().to_string()).collect();
-    let mut protocols_used: Vec<String> = leaves
-        .iter()
-        .filter_map(|action| {
-            if let Action::Swap(s) = action {
-                Some(s.protocol_id.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
-    protocols_used.sort_unstable();
-    protocols_used.dedup();
-
-    let distinct_recipients = leaves
-        .iter()
-        .filter_map(|action| {
-            if let Action::Swap(s) = action {
-                Some(s.recipient.as_str())
-            } else {
-                None
-            }
-        })
-        .collect::<HashSet<_>>()
-        .len() as i64;
-
-    let has_approve = kinds.iter().any(|kind| kind == "approve");
-    let has_unknown = kinds.iter().any(|kind| kind == "other");
-
     let allow_revert_count = leaf_requests
         .iter()
         .filter_map(|req| req.context.get("allowRevert").and_then(Value::as_bool))
         .filter(|v| *v)
         .count() as i64;
 
-    let mut total_input_sum: Option<String> = None;
-    for req in leaf_requests {
-        let maybe_usd = req
-            .context
-            .get("inputAmount")
-            .and_then(|input| input.get("usd"))
-            .and_then(|usd| usd.get("value"))
-            .and_then(|value| value.get("__extn"))
-            .and_then(|extn| extn.get("arg"))
-            .and_then(Value::as_str);
-        if let Some(value) = maybe_usd {
-            total_input_sum = Some(match total_input_sum {
-                Some(prev) => add_decimal_strings(&prev, value),
-                None => value.to_string(),
-            });
+    #[derive(Default)]
+    struct LeafSummary {
+        kinds: Vec<String>,
+        protocols: Vec<String>,
+        distinct_recipients: HashSet<String>,
+        has_approve: bool,
+        has_unknown: bool,
+        total_input_usd: Option<String>,
+    }
+
+    let mut summary = LeafSummary::default();
+    for action in leaves {
+        let kind = action.kind();
+        summary.kinds.push(kind.to_string());
+        match kind {
+            "approve" => summary.has_approve = true,
+            "other" => summary.has_unknown = true,
+            _ => {}
+        }
+
+        if let Action::Swap(s) = action {
+            summary.protocols.push(s.protocol_id.clone());
+            summary.distinct_recipients.insert(s.recipient.0.clone());
+            if let Some(usd) = &s.input_amount.usd {
+                summary.total_input_usd = Some(match summary.total_input_usd {
+                    Some(prev) => add_decimal_strings(&prev, &usd.value),
+                    None => usd.value.clone(),
+                });
+            }
         }
     }
+    summary.protocols.sort_unstable();
+    summary.protocols.dedup();
 
     let mut context = serde_json::Map::new();
     context.insert("chainId".into(), Value::from(tx.chain_id as i64));
@@ -95,26 +89,33 @@ pub fn request_for_tx(
     context.insert("childCount".into(), Value::from(leaves.len() as i64));
     context.insert(
         "kinds".into(),
-        Value::Array(kinds.iter().map(|kind| Value::from(kind.clone())).collect()),
+        Value::Array(
+            summary
+                .kinds
+                .iter()
+                .map(|kind| Value::from(kind.clone()))
+                .collect(),
+        ),
     );
     context.insert(
         "protocolsUsed".into(),
         Value::Array(
-            protocols_used
+            summary
+                .protocols
                 .iter()
                 .map(|protocol| Value::from(protocol.as_str()))
                 .collect(),
         ),
     );
-    context.insert("hasApprove".into(), Value::from(has_approve));
-    context.insert("hasUnknown".into(), Value::from(has_unknown));
+    context.insert("hasApprove".into(), Value::from(summary.has_approve));
+    context.insert("hasUnknown".into(), Value::from(summary.has_unknown));
     context.insert(
         "distinctRecipients".into(),
-        Value::from(distinct_recipients),
+        Value::from(summary.distinct_recipients.len() as i64),
     );
     context.insert("allowRevertCount".into(), Value::from(allow_revert_count));
 
-    if let Some(total_input_usd) = total_input_sum {
+    if let Some(total_input_usd) = summary.total_input_usd {
         context.insert(
             "totalInputUsd".into(),
             json!({ "__extn": { "fn": "decimal", "arg": total_input_usd } }),

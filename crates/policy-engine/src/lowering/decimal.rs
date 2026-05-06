@@ -1,3 +1,7 @@
+//! Decimal helpers keep `multiply_decimal_strings` and `add_decimal_strings` at a
+//! fixed 4-decimal precision because Cedar extension decimals in this project are
+//! serialized to 4 fractional places.
+
 use alloy_primitives::U256;
 
 pub(crate) fn multiply_decimal_strings(raw: &str, decimals: u32, price: &str) -> String {

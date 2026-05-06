@@ -1,9 +1,11 @@
-//! Action lowering and enrichment.
+//! Lowering stages run in the pipeline sequence:
+//! 1. actions are built and USD-enriched (`enrich`),
+//! 2. each action is lowered to a leaf `PolicyRequest` (`request`),
+//! 3. per-leaf capability fields are attached (`enrich`),
+//! 4. tx-level summary request is assembled for policy-level checks (`request`).
 //!
-//! - `decimal` contains helper utilities for fixed-width decimal math.
-//! - `request` builds Cedar `PolicyRequest` objects from resolved actions.
-//! - `enrich` performs oracle and host capability enrichment on actions and
-//!   request payloads.
+//! `request_for_tx` is the only caller for tx-summary shape, while leaf
+//! request conversion stays in `request_from_action`.
 
 pub mod decimal;
 pub mod enrich;

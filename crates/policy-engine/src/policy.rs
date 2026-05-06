@@ -257,8 +257,8 @@ impl PolicyEngine {
                 for matched in matches {
                     matched.origin = origin;
                 }
-                }
             }
+        }
         Ok(verdict)
     }
 

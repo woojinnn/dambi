@@ -1,16 +1,16 @@
-//! Pipeline orchestrator wiring stages 1–4 together for v0.1.
+//! Pipeline orchestrator for v0.x.
 //!
-//! ```text
-//!   TransactionRequest
-//!     → Stage 1 (Adapter Resolver)
-//!     → Stage 2+3+4-prep (build/metadata lowering)
-//!     → Stage 4 (Cedar evaluator)
-//!     → Verdict
-//! ```
+//! Request flow:
+//! 1) Resolve adapter and build actions from a transaction.
+//! 2) Enrich actions with USD valuations, then attach leaf metadata.
+//! 3) Lower actions to leaf requests and stamp capability fields.
+//! 4) Build tx-level request summary and project stats window context.
+//! 5) Evaluate leaf + tx requests through Cedar.
 //!
-//! Each stage's output is the next stage's input. v0.1's failure model is
-//! fail-closed: most pipeline-level errors propagate as `Err(...)` rather
-//! than being silently downgraded to `Verdict::Allow`.
+//! `evaluate_with_reservation` uses reserve-first semantics: it reserves projected
+//! swap window deltas before policy evaluation and then evaluates tx context built
+//! from the pre-reservation snapshot (the reservation accounts for this tx intent).
+//! `evaluate` instead projects the same window stats on demand in a single call.
 
 use crate::core::{Action, TransactionRequest};
 use crate::host::HostCapabilities;
@@ -21,6 +21,7 @@ use crate::lowering::{
 use crate::policy::{PolicyEngine, PolicyError, PolicyRequest, RequestKind, Verdict};
 use crate::registry::{AdapterRegistry, ResolverOutcome};
 use crate::stat_windows::ReservationId;
+use crate::stat_windows::StatDelta;
 use crate::stat_windows::StatKey;
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -51,12 +52,13 @@ pub struct EvaluationOutcome {
     pub reservation: Option<ReservationId>,
 }
 
-type BuiltRequests = (
-    Vec<Action>,
-    Vec<PolicyRequest>,
-    PolicyRequest,
-    Vec<(PolicyRequest, RequestKind)>,
-);
+pub(crate) struct LoweredRequests {
+    pub leaves: Vec<Action>,
+    pub leaf_requests: Vec<PolicyRequest>,
+    pub tx_request: PolicyRequest,
+}
+
+const SWAP_WINDOW_KEY_NAMES: [&str; 2] = ["swap_volume_usd_24h", "swap_count_24h"];
 
 impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
     pub fn new(registry: &'a R, host: HostCapabilities<'a>, policies: &'a PolicyEngine) -> Self {
@@ -67,10 +69,7 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
         }
     }
 
-    fn build_requests(
-        &self,
-        tx: &TransactionRequest,
-    ) -> Result<BuiltRequests, PipelineError> {
+    fn build_requests(&self, tx: &TransactionRequest) -> Result<LoweredRequests, PipelineError> {
         let (outcome, adapter) = self.registry.resolve_with_adapter(tx);
 
         let (leaves, metas) = match (outcome, adapter) {
@@ -120,22 +119,24 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
             })
             .collect();
         let tx_request = request_for_tx(tx, &leaves, &leaf_requests);
-        let mut requests_with_origin = Vec::new();
-        for (idx, req) in leaf_requests.iter().enumerate() {
-            requests_with_origin.push((req.clone(), RequestKind::Leaf { index: idx }));
-        }
-        requests_with_origin.push((tx_request.clone(), RequestKind::Tx));
 
-        Ok((leaves, leaf_requests, tx_request, requests_with_origin))
+        Ok(LoweredRequests {
+            leaves,
+            leaf_requests,
+            tx_request,
+        })
     }
 
     pub fn evaluate_with_reservation(
         &self,
         tx: &TransactionRequest,
     ) -> Result<EvaluationOutcome, PipelineError> {
-        let (leaves, leaf_requests, mut tx_request, mut requests_with_origin) =
-            self.build_requests(tx)?;
-        let deltas = compute_swap_window_deltas(&leaves, &leaf_requests);
+        let LoweredRequests {
+            leaves,
+            leaf_requests,
+            tx_request,
+        } = self.build_requests(tx)?;
+        let deltas = compute_swap_window_deltas(&leaves);
         let mut reservation = self.host.stats().and_then(|stats| {
             if deltas.is_empty() {
                 None
@@ -143,43 +144,17 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
                 Some(stats.reserve(&tx.from, deltas.clone()))
             }
         });
-
-        enrich_tx_request_with_window_stats(
-            &mut tx_request,
-            &tx.from,
-            &[
-                StatKey::new("swap_volume_usd_24h"),
-                StatKey::new("swap_count_24h"),
-            ],
-            &[],
-            &self.host,
-        );
-        if let Some(last_request) = requests_with_origin.last_mut() {
-            *last_request = (tx_request, RequestKind::Tx);
-        }
-
-        let verdict = match self.policies.evaluate_requests(
-            requests_with_origin
-                .iter()
-                .map(|(request, origin)| (request, *origin)),
-        ) {
-            Ok(verdict) => verdict,
-            Err(error) => {
-                if let Some(id) = reservation.take() {
-                    if let Some(stats) = self.host.stats() {
-                        stats.release(id);
-                    }
+        let verdict =
+            match self.evaluate_with_window_stats(&tx.from, &leaf_requests, tx_request, &[]) {
+                Ok(verdict) => verdict,
+                Err(error) => {
+                    self.release_reservation(reservation.take());
+                    return Err(PipelineError::Policy(error));
                 }
-                return Err(PipelineError::Policy(error));
-            }
-        };
+            };
 
         let reservation = if matches!(verdict, Verdict::Fail(_)) {
-            if let Some(id) = reservation.take() {
-                if let Some(stats) = self.host.stats() {
-                    stats.release(id);
-                }
-            }
+            self.release_reservation(reservation.take());
             None
         } else {
             reservation
@@ -192,28 +167,50 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
     }
 
     pub fn evaluate(&self, tx: &TransactionRequest) -> Result<Verdict, PipelineError> {
-        let (_leaves, _leaf_requests, mut tx_request, mut requests_with_origin) =
-            self.build_requests(tx)?;
-        let deltas = compute_swap_window_deltas(&_leaves, &_leaf_requests);
+        let LoweredRequests {
+            leaves,
+            leaf_requests,
+            tx_request,
+        } = self.build_requests(tx)?;
+        let deltas = compute_swap_window_deltas(&leaves);
+
+        Ok(self.evaluate_with_window_stats(&tx.from, &leaf_requests, tx_request, &deltas)?)
+    }
+
+    fn evaluate_with_window_stats(
+        &self,
+        actor: &crate::core::Address,
+        leaf_requests: &[PolicyRequest],
+        mut tx_request: PolicyRequest,
+        pending_deltas: &[StatDelta],
+    ) -> Result<Verdict, PolicyError> {
+        let swap_window_keys = [
+            StatKey::new(SWAP_WINDOW_KEY_NAMES[0]),
+            StatKey::new(SWAP_WINDOW_KEY_NAMES[1]),
+        ];
+
         enrich_tx_request_with_window_stats(
             &mut tx_request,
-            &tx.from,
-            &[
-                StatKey::new("swap_volume_usd_24h"),
-                StatKey::new("swap_count_24h"),
-            ],
-            &deltas,
+            actor,
+            &swap_window_keys,
+            pending_deltas,
             &self.host,
         );
-        if let Some(last_request) = requests_with_origin.last_mut() {
-            *last_request = (tx_request, RequestKind::Tx);
-        }
 
-        Ok(self.policies.evaluate_requests(
-            requests_with_origin
-                .iter()
-                .map(|(request, origin)| (request, *origin)),
-        )?)
+        let mut tagged_requests = Vec::with_capacity(leaf_requests.len() + 1);
+        for (idx, request) in leaf_requests.iter().enumerate() {
+            tagged_requests.push((request.clone(), RequestKind::Leaf { index: idx }));
+        }
+        tagged_requests.push((tx_request, RequestKind::Tx));
+
+        self.policies
+            .evaluate_requests(tagged_requests.iter().map(|(req, kind)| (req, *kind)))
+    }
+
+    fn release_reservation(&self, reservation: Option<ReservationId>) {
+        if let (Some(id), Some(stats)) = (reservation, self.host.stats()) {
+            stats.release(id);
+        }
     }
 }
 
