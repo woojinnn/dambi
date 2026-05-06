@@ -158,10 +158,8 @@ fn balance_fraction_deny_when_fraction_exceeds_20_percent() {
     let oracle = full_oracle();
     let pf =
         MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
-    let host = HostCapabilities::builder(&oracle)
-        .with_portfolio(&pf)
-        .build();
-
+    let host = HostCapabilities::new(&oracle)
+        .with_portfolio(&pf);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(300_000_000u64));
@@ -185,10 +183,8 @@ fn balance_fraction_allows_when_fraction_is_under_20_percent() {
     let oracle = full_oracle();
     let pf =
         MockPortfolio::new().with_balance(&from_address(), &usdt(), U256::from(1_000_000_000u64));
-    let host = HostCapabilities::builder(&oracle)
-        .with_portfolio(&pf)
-        .build();
-
+    let host = HostCapabilities::new(&oracle)
+        .with_portfolio(&pf);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(100_000_000u64));
@@ -217,10 +213,8 @@ fn allowance_warn_fires_when_allowance_does_not_cover_input() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::ZERO,
     );
-    let host = HostCapabilities::builder(&oracle)
-        .with_approvals(&approvals)
-        .build();
-
+    let host = HostCapabilities::new(&oracle)
+        .with_approvals(&approvals);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(200_000_000u64));
@@ -245,10 +239,8 @@ fn allowance_policy_passes_when_allowance_covers_input() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::from(250_000_000u64),
     );
-    let host = HostCapabilities::builder(&oracle)
-        .with_approvals(&approvals)
-        .build();
-
+    let host = HostCapabilities::new(&oracle)
+        .with_approvals(&approvals);
     let registry = v2_registry();
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(U256::from(200_000_000u64));
@@ -265,10 +257,8 @@ fn allowance_policy_skips_native_input_token_for_v2_eth_swap() {
         &Address::new(UNISWAP_V2_ROUTER_MAINNET).unwrap(),
         U256::from(1_000_000_000_000_000_000u128),
     );
-    let host = HostCapabilities::builder(&oracle)
-        .with_approvals(&approvals)
-        .build();
-
+    let host = HostCapabilities::new(&oracle)
+        .with_approvals(&approvals);
     let adapter = UniswapV2SwapExactETHForTokensAdapter::new();
     let tx = v2_eth_swap_tx(U256::from(1_000_000_000_000_000_000u64));
     let request = leaf_requests_from_adapter(&adapter, &tx, &host)[0].clone();
@@ -292,11 +282,9 @@ fn multicall_leaves_receive_capability_enrichment() {
         &Address::new(SWAP_ROUTER_MAINNET).unwrap(),
         U256::from(220_000_000u64),
     );
-    let host = HostCapabilities::builder(&oracle)
+    let host = HostCapabilities::new(&oracle)
         .with_portfolio(&pf)
-        .with_approvals(&approvals)
-        .build();
-
+        .with_approvals(&approvals);
     let adapter = UniswapV3MulticallAdapter::new();
     let tx = v3_multicall_tx(U256::from(250_000_000u64), U256::from(100_000_000u64));
 

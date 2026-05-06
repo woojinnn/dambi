@@ -74,7 +74,7 @@ fn window_stats_snapshot_reflects_confirmed_history() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
 
     let actor = from_address();
@@ -104,7 +104,7 @@ fn window_stats_reservation_is_visible_to_next_evaluation() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -136,7 +136,7 @@ fn window_cap_boundary_crossing_uses_projected_post_tx_state() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let actor = from_address();
 
@@ -170,7 +170,7 @@ fn window_cap_enforce_sequential_reserved_evals() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -191,7 +191,7 @@ fn window_cap_evaluate_and_reservation_share_projected_state() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -228,7 +228,7 @@ fn window_cap_evaluate_with_reservation_releases_on_fail() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let actor = from_address();
     let seed = stats.reserve(
@@ -257,7 +257,7 @@ fn window_stats_settle_promotes_reservations() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -277,7 +277,7 @@ fn window_stats_release_rolls_back_snapshot() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 
@@ -297,7 +297,7 @@ fn window_stats_evaluation_does_not_reserve_on_fail() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let actor = from_address();
     let seed = stats.reserve(
@@ -335,7 +335,7 @@ fn evaluate_does_not_create_window_reservations() {
     let stats = MockStatWindows::new();
     let orc = oracle();
     let registry = v2_registry();
-    let host = HostCapabilities::builder(&orc).with_stats(&stats).build();
+    let host = HostCapabilities::new(&orc).with_stats(&stats);
     let pipe = Pipeline::new(&registry, host, &policies);
     let tx = v2_swap_tx(3_000_000_000);
 

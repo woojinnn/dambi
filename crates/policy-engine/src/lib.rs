@@ -39,9 +39,9 @@ pub use core::{
     UsdValuation,
 };
 pub use host::{
-    Approvals, ApprovalsError, HostCapabilities, HostCapabilitiesBuilder, MockApprovals,
-    MockOracle, MockPortfolio, MockStatWindows, Oracle, OracleError, Portfolio, PortfolioError,
-    ReservationId, StatDelta, StatKey, StatValue, StatWindows,
+    Approvals, ApprovalsError, HostCapabilities, MockApprovals, MockOracle, MockPortfolio,
+    MockStatWindows, Oracle, OracleError, Portfolio, PortfolioError, ReservationId, StatDelta,
+    StatKey, StatValue, StatWindows,
 };
 pub use lowering::{
     enrich_actions_with_usd, enrich_request_with_capabilities, enrich_with_usd,

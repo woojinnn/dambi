@@ -2,7 +2,8 @@
 //!
 //! This bag is intentionally tiny and opinionated: every policy run gets a
 //! short-lived `HostCapabilities` value with required and optional services
-//! attached by the caller.
+//! attached by the caller (for example:
+//! `HostCapabilities::new(&oracle).with_portfolio(&portfolio).with_stats(&stats)`).
 //!
 //! `oracle` is required and always present because USD valuation is used by
 //! lowering paths that enrich amounts.
@@ -40,13 +41,19 @@ impl<'a> HostCapabilities<'a> {
         }
     }
 
-    pub fn builder(oracle: &'a dyn oracle::Oracle) -> HostCapabilitiesBuilder<'a> {
-        HostCapabilitiesBuilder {
-            oracle,
-            portfolio: None,
-            approvals: None,
-            stats: None,
-        }
+    pub fn with_portfolio(mut self, portfolio: &'a dyn portfolio::Portfolio) -> Self {
+        self.portfolio = Some(portfolio);
+        self
+    }
+
+    pub fn with_approvals(mut self, approvals: &'a dyn approvals::Approvals) -> Self {
+        self.approvals = Some(approvals);
+        self
+    }
+
+    pub fn with_stats(mut self, stats: &'a dyn stat_windows::StatWindows) -> Self {
+        self.stats = Some(stats);
+        self
     }
 
     pub fn oracle(&self) -> &dyn oracle::Oracle {
@@ -63,40 +70,6 @@ impl<'a> HostCapabilities<'a> {
 
     pub fn stats(&self) -> Option<&dyn stat_windows::StatWindows> {
         self.stats
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct HostCapabilitiesBuilder<'a> {
-    oracle: &'a dyn oracle::Oracle,
-    portfolio: Option<&'a dyn portfolio::Portfolio>,
-    approvals: Option<&'a dyn approvals::Approvals>,
-    stats: Option<&'a dyn stat_windows::StatWindows>,
-}
-
-impl<'a> HostCapabilitiesBuilder<'a> {
-    pub fn with_portfolio(mut self, portfolio: &'a dyn portfolio::Portfolio) -> Self {
-        self.portfolio = Some(portfolio);
-        self
-    }
-
-    pub fn with_approvals(mut self, approvals: &'a dyn approvals::Approvals) -> Self {
-        self.approvals = Some(approvals);
-        self
-    }
-
-    pub fn with_stats(mut self, stats: &'a dyn stat_windows::StatWindows) -> Self {
-        self.stats = Some(stats);
-        self
-    }
-
-    pub fn build(self) -> HostCapabilities<'a> {
-        HostCapabilities {
-            oracle: self.oracle,
-            portfolio: self.portfolio,
-            approvals: self.approvals,
-            stats: self.stats,
-        }
     }
 }
 
