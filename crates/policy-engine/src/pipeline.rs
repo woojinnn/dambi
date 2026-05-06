@@ -13,9 +13,9 @@
 //! than being silently downgraded to `Verdict::Allow`.
 
 use crate::core::{Action, TransactionRequest};
-use crate::lowering::request_from_action;
+use crate::lowering::{request_for_tx, request_from_action};
 use crate::oracle::Oracle;
-use crate::policy::{PolicyEngine, PolicyError, Verdict};
+use crate::policy::{PolicyEngine, PolicyError, PolicyRequest, RequestKind, Verdict};
 use crate::registry::{AdapterRegistry, ResolverOutcome};
 use thiserror::Error;
 
@@ -54,7 +54,8 @@ impl<'a, R: AdapterRegistry + ?Sized, O: Oracle> Pipeline<'a, R, O> {
     pub fn evaluate(&self, tx: &TransactionRequest) -> Result<Verdict, PipelineError> {
         let (outcome, adapter) = self.registry.resolve_with_adapter(tx);
 
-        let requests = match (outcome, adapter) {
+        let mut requests: Vec<(&PolicyRequest, RequestKind)> = Vec::new();
+        let (leaves, leaf_requests) = match (outcome, adapter) {
             (ResolverOutcome::Ambiguous(ids), _) => {
                 return Err(PipelineError::Ambiguous(ids));
             }
@@ -68,16 +69,29 @@ impl<'a, R: AdapterRegistry + ?Sized, O: Oracle> Pipeline<'a, R, O> {
                     value_wei: tx.value_wei.clone(),
                     raw_calldata: format!("0x{}", hex::encode(&tx.data)),
                 };
-                vec![request_from_action(&action)]
+                let leaves = vec![action];
+                let leaf_requests = vec![request_from_action(&leaves[0])];
+                (leaves, leaf_requests)
             }
-            (ResolverOutcome::Resolved(_), Some(adapter)) => adapter
-                .into_requests(tx, self.oracle)
-                .map_err(|e| PipelineError::AdapterBuild(e.to_string()))?,
+            (ResolverOutcome::Resolved(_), Some(adapter)) => {
+                let leaves = adapter
+                    .build_actions(tx)
+                    .map_err(|e| PipelineError::AdapterBuild(e.to_string()))?;
+                let leaf_requests = adapter
+                    .into_requests(tx, self.oracle)
+                    .map_err(|e| PipelineError::AdapterBuild(e.to_string()))?;
+                (leaves, leaf_requests)
+            }
             (ResolverOutcome::Resolved(_), None) => {
                 unreachable!("Resolved outcome always carries an adapter")
             }
         };
+        for (idx, req) in leaf_requests.iter().enumerate() {
+            requests.push((req, RequestKind::Leaf { index: idx }));
+        }
+        let tx_request = request_for_tx(tx, &leaves, &leaf_requests);
+        requests.push((&tx_request, RequestKind::Tx));
 
-        Ok(self.policies.evaluate_requests(&requests)?)
+        Ok(self.policies.evaluate_requests(requests)?)
     }
 }

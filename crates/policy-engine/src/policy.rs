@@ -99,11 +99,18 @@ pub enum Severity {
 /// One `forbid` clause that fired during evaluation. Severity is preserved
 /// per-element so that, when a `Verdict::Fail` is produced because a deny
 /// fired, any *also*-fired warns are still reported (no info loss).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RequestKind {
+    Leaf { index: usize },
+    Tx,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchedPolicy {
     pub policy_id: String,
     pub reason: Option<String>,
     pub severity: Severity,
+    pub origin: RequestKind,
 }
 
 /// Self-contained Cedar evaluation input. `Adapter::into_request` produces
@@ -226,25 +233,43 @@ impl PolicyEngine {
 
     /// Evaluate a `PolicyRequest`. This is the preferred entry point.
     pub fn evaluate_request(&self, req: &PolicyRequest) -> Result<Verdict, PolicyError> {
-        self.evaluate(
+        self.evaluate_request_with_origin(req, RequestKind::Leaf { index: 0 })
+    }
+
+    /// Evaluate a `PolicyRequest` and annotate matches with the originating
+    /// request kind.
+    pub fn evaluate_request_with_origin(
+        &self,
+        req: &PolicyRequest,
+        origin: RequestKind,
+    ) -> Result<Verdict, PolicyError> {
+        let mut verdict = self.evaluate(
             &req.principal,
             &req.action,
             &req.resource,
             &req.entities,
             &req.context,
-        )
+        )?;
+        match &mut verdict {
+            Verdict::Pass => {}
+            Verdict::Warn(matches) | Verdict::Fail(matches) => {
+                for matched in matches {
+                    matched.origin = origin.clone();
+                }
+            }
+        }
+        Ok(verdict)
     }
 
-    /// Evaluate multiple leaf requests from one transaction and aggregate the
-    /// results with the same deny-overrides + warn-union rule as a single
-    /// request. An empty request set is treated as pass.
+    /// Evaluate requests from one transaction while preserving request kind.
+    /// A request list with empty input is treated as pass.
     pub fn evaluate_requests<'a, I>(&self, reqs: I) -> Result<Verdict, PolicyError>
     where
-        I: IntoIterator<Item = &'a PolicyRequest>,
+        I: IntoIterator<Item = (&'a PolicyRequest, RequestKind)>,
     {
         let verdicts = reqs
             .into_iter()
-            .map(|req| self.evaluate_request(req))
+            .map(|(req, origin)| self.evaluate_request_with_origin(req, origin))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Verdict::aggregate(verdicts))
     }
@@ -310,6 +335,7 @@ impl PolicyEngine {
                 policy_id: pid_str.clone(),
                 reason: self.reasons.get(&pid_str).cloned(),
                 severity,
+                origin: RequestKind::Leaf { index: 0 },
             });
         }
 

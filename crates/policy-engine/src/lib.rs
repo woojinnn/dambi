@@ -45,6 +45,7 @@ pub use lowering::{
 pub use oracle::{MockOracle, Oracle, OracleError};
 pub use pipeline::{Pipeline, PipelineError};
 pub use policy::{
-    MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyError, PolicyRequest, Severity, Verdict,
+    MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyError, PolicyRequest, RequestKind, Severity,
+    Verdict,
 };
 pub use registry::{AdapterIndex, AdapterRegistry, MockAdapterRegistry, ResolverOutcome};

@@ -12,6 +12,8 @@
 use crate::core::{Action, AmountSpec, SwapAction, UsdValuation};
 use crate::oracle::Oracle;
 use crate::policy::PolicyRequest;
+use std::collections::HashSet;
+use alloy_primitives::U256;
 use serde_json::{json, Value};
 
 // ---------------------------------------------------------------------------
@@ -81,6 +83,16 @@ pub(crate) fn multiply_decimal_strings(raw: &str, decimals: u32, price: &str) ->
     fixed_to_decimal(scaled, PRICE_SCALE)
 }
 
+pub(crate) fn add_decimal_strings(left: &str, right: &str) -> String {
+    let left_fixed = decimal_to_fixed(left, 4);
+    let right_fixed = decimal_to_fixed(right, 4);
+    let sum = left_fixed.saturating_add(right_fixed);
+    fixed_to_decimal(
+        alloy_primitives::U256::from_str_radix(&sum.to_string(), 10).unwrap_or(U256::ZERO),
+        4,
+    )
+}
+
 fn decimal_to_fixed(s: &str, scale: u32) -> u128 {
     let (whole, frac) = match s.split_once('.') {
         Some((w, f)) => (w, f),
@@ -131,6 +143,113 @@ pub fn request_from_action(action: &Action) -> PolicyRequest {
     let entities = action_entities(action);
     let context = action_context(action);
     PolicyRequest::new(principal, action_uid, resource, entities, context)
+}
+
+pub fn request_for_tx(
+    tx: &crate::core::TransactionRequest,
+    leaves: &[Action],
+    leaf_requests: &[PolicyRequest],
+) -> PolicyRequest {
+    let principal = format!(r#"Wallet::"{}""#, tx.from.as_str());
+    let action = r#"Action::"send_tx""#.to_string();
+    let resource = format!(r#"Address_::"{}""#, tx.to.as_str());
+
+    let kinds: Vec<String> = leaves.iter().map(|a| a.kind().to_string()).collect();
+    let mut protocols_used: Vec<String> = leaves
+        .iter()
+        .filter_map(|action| {
+            if let Action::Swap(s) = action {
+                Some(s.protocol_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    protocols_used.sort_unstable();
+    protocols_used.dedup();
+
+    let distinct_recipients = leaves
+        .iter()
+        .filter_map(|action| {
+            if let Action::Swap(s) = action {
+                Some(s.recipient.as_str())
+            } else {
+                None
+            }
+        })
+        .collect::<HashSet<_>>()
+        .len() as i64;
+
+    let has_approve = kinds.iter().any(|kind| kind == "approve");
+    let has_unknown = kinds.iter().any(|kind| kind == "other");
+
+    let allow_revert_count = leaf_requests
+        .iter()
+        .filter_map(|req| req.context.get("allowRevert").and_then(Value::as_bool))
+        .filter(|v| *v)
+        .count() as i64;
+
+    let mut total_input_sum: Option<String> = None;
+    for req in leaf_requests {
+        let maybe_usd = req
+            .context
+            .get("inputAmount")
+            .and_then(|input| input.get("usd"))
+            .and_then(|usd| usd.get("value"))
+            .and_then(|value| value.get("__extn"))
+            .and_then(|extn| extn.get("arg"))
+            .and_then(Value::as_str);
+        if let Some(value) = maybe_usd {
+            total_input_sum = Some(match total_input_sum {
+                Some(prev) => add_decimal_strings(&prev, value),
+                None => value.to_string(),
+            });
+        }
+    }
+
+    let mut context = serde_json::Map::new();
+    context.insert("chainId".into(), Value::from(tx.chain_id as i64));
+    context.insert("from".into(), Value::from(tx.from.as_str()));
+    context.insert("to".into(), Value::from(tx.to.as_str()));
+    context.insert("valueWei".into(), Value::from(tx.value_wei.clone()));
+    context.insert(
+        "selector".into(),
+        Value::from(tx.selector_hex().unwrap_or_else(|| "0x".into())),
+    );
+    context.insert("childCount".into(), Value::from(leaves.len() as i64));
+    context.insert(
+        "kinds".into(),
+        Value::Array(kinds.iter().map(|kind| Value::from(kind.clone())).collect()),
+    );
+    context.insert(
+        "protocolsUsed".into(),
+        Value::Array(
+            protocols_used
+                .iter()
+                .map(|protocol| Value::from(protocol.as_str()))
+                .collect(),
+        ),
+    );
+    context.insert("hasApprove".into(), Value::from(has_approve));
+    context.insert("hasUnknown".into(), Value::from(has_unknown));
+    context.insert(
+        "distinctRecipients".into(),
+        Value::from(distinct_recipients),
+    );
+    context.insert("allowRevertCount".into(), Value::from(allow_revert_count));
+
+    if let Some(total_input_usd) = total_input_sum {
+        context.insert(
+            "totalInputUsd".into(),
+            json!({ "__extn": { "fn": "decimal", "arg": total_input_usd } }),
+        );
+    }
+
+    let entities = json!([
+        { "uid": { "type": "Wallet", "id": tx.from.as_str() }, "attrs": {}, "parents": [] },
+        { "uid": { "type": "Address_", "id": tx.to.as_str() }, "attrs": {}, "parents": [] },
+    ]);
+    PolicyRequest::new(principal, action, resource, entities, Value::Object(context))
 }
 
 /// Build one or more leaf `PolicyRequest`s from an action tree. `Multi`
