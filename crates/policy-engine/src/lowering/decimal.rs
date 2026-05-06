@@ -4,12 +4,21 @@
 
 use alloy_primitives::U256;
 
-pub(crate) fn multiply_decimal_strings(raw: &str, decimals: u32, price: &str) -> String {
-    let raw_u = U256::from_str_radix(raw, 10)
-        .expect("invariant: raw amount string must be a valid U256 (AmountSpec::raw)");
+const DECIMAL_SCALE: u32 = 4;
 
-    const PRICE_SCALE: u32 = 4;
-    let price_int = decimal_to_fixed(price, PRICE_SCALE);
+#[cfg(test)]
+pub(crate) fn multiply_decimal_strings(raw: &str, decimals: u32, price: &str) -> String {
+    try_multiply_decimal_strings(raw, decimals, price)
+        .unwrap_or_else(|| zero_decimal(DECIMAL_SCALE))
+}
+
+pub(crate) fn try_multiply_decimal_strings(
+    raw: &str,
+    decimals: u32,
+    price: &str,
+) -> Option<String> {
+    let raw_u = U256::from_str_radix(raw, 10).ok()?;
+    let price_int = decimal_to_fixed(price, DECIMAL_SCALE)?;
 
     let product = raw_u.saturating_mul(U256::from(price_int));
     let scale = U256::from(10u64).pow(U256::from(decimals));
@@ -19,25 +28,45 @@ pub(crate) fn multiply_decimal_strings(raw: &str, decimals: u32, price: &str) ->
         product / scale
     };
 
-    fixed_to_decimal(scaled, PRICE_SCALE)
+    Some(fixed_to_decimal(scaled, DECIMAL_SCALE))
 }
 
 pub(crate) fn add_decimal_strings(left: &str, right: &str) -> String {
-    let left_fixed = decimal_to_fixed(left, 4);
-    let right_fixed = decimal_to_fixed(right, 4);
-    let sum = left_fixed.saturating_add(right_fixed);
-    fixed_to_decimal(
-        U256::from_str_radix(&sum.to_string(), 10)
-            .expect("invariant: decimal fixed-point sum must be a valid U256"),
-        4,
-    )
+    match (
+        decimal_to_fixed(left, DECIMAL_SCALE),
+        decimal_to_fixed(right, DECIMAL_SCALE),
+    ) {
+        (Some(left_fixed), Some(right_fixed)) => fixed_to_decimal(
+            U256::from(left_fixed.saturating_add(right_fixed)),
+            DECIMAL_SCALE,
+        ),
+        (Some(left_fixed), None) => fixed_to_decimal(U256::from(left_fixed), DECIMAL_SCALE),
+        (None, Some(right_fixed)) => fixed_to_decimal(U256::from(right_fixed), DECIMAL_SCALE),
+        (None, None) => zero_decimal(DECIMAL_SCALE),
+    }
 }
 
-pub(super) fn decimal_to_fixed(s: &str, scale: u32) -> u128 {
+pub(crate) fn try_add_decimal_strings(left: &str, right: &str) -> Option<String> {
+    let left_fixed = decimal_to_fixed(left, DECIMAL_SCALE)?;
+    let right_fixed = decimal_to_fixed(right, DECIMAL_SCALE)?;
+    Some(fixed_to_decimal(
+        U256::from(left_fixed.saturating_add(right_fixed)),
+        DECIMAL_SCALE,
+    ))
+}
+
+pub(super) fn decimal_to_fixed(s: &str, scale: u32) -> Option<u128> {
     let (whole, frac) = match s.split_once('.') {
         Some((w, f)) => (w, f),
         None => (s, ""),
     };
+    if whole.is_empty() && frac.is_empty() {
+        return None;
+    }
+    if !whole.chars().all(|ch| ch.is_ascii_digit()) || !frac.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+
     let mut frac_padded = String::from(frac);
     while frac_padded.len() < scale as usize {
         frac_padded.push('0');
@@ -46,9 +75,7 @@ pub(super) fn decimal_to_fixed(s: &str, scale: u32) -> u128 {
         frac_padded.truncate(scale as usize);
     }
     let combined = format!("{whole}{frac_padded}");
-    combined
-        .parse::<u128>()
-        .expect("invariant: decimal fixed-point string must be a valid u128")
+    combined.parse::<u128>().ok()
 }
 
 pub(super) fn fixed_to_decimal(value: U256, scale: u32) -> String {
@@ -66,6 +93,10 @@ pub(super) fn fixed_to_decimal(value: U256, scale: u32) -> String {
     } else {
         format!("{whole}.{frac}")
     }
+}
+
+fn zero_decimal(scale: u32) -> String {
+    fixed_to_decimal(U256::from(0u64), scale)
 }
 
 #[cfg(test)]
@@ -95,13 +126,32 @@ mod tests {
 
     #[test]
     fn decimal_to_fixed_pads_short_fraction() {
-        assert_eq!(super::decimal_to_fixed("1.5", 4), 15000);
-        assert_eq!(super::decimal_to_fixed("1", 4), 10000);
-        assert_eq!(super::decimal_to_fixed("0", 4), 0);
+        assert_eq!(super::decimal_to_fixed("1.5", 4), Some(15000));
+        assert_eq!(super::decimal_to_fixed("1", 4), Some(10000));
+        assert_eq!(super::decimal_to_fixed("0", 4), Some(0));
     }
 
     #[test]
     fn decimal_to_fixed_truncates_long_fraction() {
-        assert_eq!(super::decimal_to_fixed("1.123456", 4), 11234);
+        assert_eq!(super::decimal_to_fixed("1.123456", 4), Some(11234));
+    }
+
+    #[test]
+    fn decimal_to_fixed_rejects_malformed_decimal() {
+        assert_eq!(super::decimal_to_fixed("not-a-decimal", 4), None);
+        assert_eq!(super::decimal_to_fixed("1.12x", 4), None);
+    }
+
+    #[test]
+    fn multiply_decimal_strings_returns_zero_for_malformed_input() {
+        assert_eq!(multiply_decimal_strings("not-a-u256", 6, "1.00"), "0.0000");
+        assert_eq!(multiply_decimal_strings("1000000", 6, "bad"), "0.0000");
+    }
+
+    #[test]
+    fn add_decimal_strings_skips_malformed_operand() {
+        assert_eq!(add_decimal_strings("1.00", "bad"), "1.0000");
+        assert_eq!(add_decimal_strings("bad", "2.00"), "2.0000");
+        assert_eq!(add_decimal_strings("bad", "also-bad"), "0.0000");
     }
 }

@@ -7,7 +7,7 @@
 //! This module re-exports the trait surface and supporting types an
 //! adapter implementation typically needs: the `Adapter` trait, `AdapterId`,
 //! `AdapterError`, `MatchKey`, the domain types (`Action`, `Token`,
-//! `TransactionRequest`, `AmountSpec`, `UsdValuation`, `SwapAction`), and
+//! `TransactionRequest`, `AmountSpec`, `UsdValuation`, `DexAction`), and
 //! the `Oracle` trait + `PolicyRequest` (used by the policy evaluator surface).
 //!
 //! `alloy_primitives` and `alloy_sol_types` are *not* re-exported. The
@@ -21,12 +21,18 @@ pub use crate::adapter::{
     TypedAdapter,
 };
 pub use crate::core::{
-    Action, Address, AmountSpec, ChainId, MultiAction, SwapAction, Token, TransactionRequest,
-    UsdValuation,
+    Action, Address, AmountSpec, ChainId, DexAction, DexFacts, DexTrace, OracleRequirement,
+    OracleRequirementKind, OtherAction, Token, TransactionRequest, UsdValuation,
+    WindowStatsContext,
 };
 pub use crate::host::HostCapabilities;
 pub use crate::host::Oracle;
 pub use crate::host::{Approvals, ApprovalsError, MockApprovals};
-pub use crate::host::{MockPortfolio, Portfolio, PortfolioError, StatWindows};
-pub use crate::lowering::{enrich_actions_with_usd, requests_from_actions};
+pub use crate::host::{
+    MockPortfolio, Portfolio, PortfolioError, StatDelta, StatKey, StatValue, StatWindows,
+};
+pub use crate::lowering::{
+    compute_dex_window_deltas, enrich_dex_action, enrich_dex_action_base, enrich_dex_window_stats,
+    requests_from_actions,
+};
 pub use crate::policy::PolicyRequest;

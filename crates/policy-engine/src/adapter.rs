@@ -5,15 +5,12 @@
 //! Two responsibilities:
 //! - [`Adapter::build`] — protocol-specific decoding: parsed calldata →
 //!   semantic [`Action`].
-//! - [`Adapter::build_actions`] — optional multi-leaf expansion.
-//! - [`Adapter::leaf_metadata`] — optional per-leaf metadata injection.
 
 use crate::core::{Action, Address, ChainId, TransactionRequest};
-use serde_json::Map;
 use std::sync::Arc;
 use thiserror::Error;
 
-/// Stable identifier for an adapter (e.g., `uniswap-v3/exactInputSingle@0.1.0`).
+/// Stable identifier for an adapter (e.g., `dex-v3/exactInputSingle@0.1.0`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AdapterId {
     raw: String,
@@ -163,8 +160,7 @@ pub enum AdapterKind {
 /// Semantic action families an adapter may emit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionKind {
-    Swap,
-    Multi,
+    Dex,
     Other,
 }
 
@@ -323,19 +319,6 @@ pub trait TypedAdapter: Send + Sync + Default + Sized + 'static {
 
     fn build_action(&self, tx: &TransactionRequest) -> Result<Action, AdapterError>;
 
-    fn build_leaf_actions(&self, tx: &TransactionRequest) -> Result<Vec<Action>, AdapterError> {
-        Ok(vec![self.build_action(tx)?])
-    }
-
-    fn typed_leaf_metadata(
-        &self,
-        tx: &TransactionRequest,
-        leaves: &[Action],
-    ) -> Vec<Map<String, serde_json::Value>> {
-        let _ = (tx, leaves);
-        leaves.iter().map(|_| Default::default()).collect()
-    }
-
     fn adapter_id() -> AdapterId {
         AdapterId::new(Self::ADAPTER_ID).expect("static AdapterId is well-formed")
     }
@@ -395,18 +378,6 @@ where
     fn build(&self, tx: &TransactionRequest) -> Result<Action, AdapterError> {
         self.build_action(tx)
     }
-
-    fn build_actions(&self, tx: &TransactionRequest) -> Result<Vec<Action>, AdapterError> {
-        self.build_leaf_actions(tx)
-    }
-
-    fn leaf_metadata(
-        &self,
-        tx: &TransactionRequest,
-        leaves: &[Action],
-    ) -> Vec<Map<String, serde_json::Value>> {
-        self.typed_leaf_metadata(tx, leaves)
-    }
 }
 
 /// One adapter handles one (or a small set of) `(chain_id, to, selector)` keys
@@ -437,23 +408,6 @@ pub trait Adapter: Send + Sync {
     /// the resolver has selected this adapter, so the implementation may
     /// assume the calldata starts with the matching selector.
     fn build(&self, tx: &TransactionRequest) -> Result<Action, AdapterError>;
-
-    /// Construct zero or more semantic leaf actions. Simple adapters keep the
-    /// default one-action behavior; composite routers override this.
-    fn build_actions(&self, tx: &TransactionRequest) -> Result<Vec<Action>, AdapterError> {
-        Ok(vec![self.build(tx)?])
-    }
-
-    /// Optional protocol-specific metadata to stamp into each leaf request context.
-    /// Defaults to one empty map per leaf.
-    fn leaf_metadata(
-        &self,
-        tx: &TransactionRequest,
-        leaves: &[Action],
-    ) -> Vec<Map<String, serde_json::Value>> {
-        let _ = tx;
-        leaves.iter().map(|_| Default::default()).collect()
-    }
 }
 
 /// A single `(chain_id, to, selector)` pattern an adapter matches.
@@ -486,6 +440,7 @@ impl MatchKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::OtherAction;
 
     #[derive(Default)]
     struct TypedNoopAdapter;
@@ -509,13 +464,13 @@ mod tests {
         }
 
         fn build_action(&self, tx: &TransactionRequest) -> Result<Action, AdapterError> {
-            Ok(Action::Other {
+            Ok(Action::Other(OtherAction {
                 actor: tx.from.clone(),
                 target: tx.to.clone(),
                 selector: "0xaabbccdd".into(),
                 value_wei: tx.value_wei.clone(),
                 raw_calldata: hex::encode(&tx.data),
-            })
+            }))
         }
     }
 

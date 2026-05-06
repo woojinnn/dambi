@@ -3,12 +3,11 @@
 //! `tokenOut`); see Uniswap V3 docs §SwapRouter.
 
 use crate::common::{
-    decode_v3_path, shift_decimals, DecodeError, TokenLookup, SWAP_ROUTER_MAINNET,
+    decode_v3_path, dex_swap_action, DecodeError, TokenLookup, SWAP_ROUTER_MAINNET,
 };
 use alloy_primitives::{Address as AlloyAddress, U256};
 use alloy_sol_types::{sol, SolCall};
 use policy_engine::prelude::*;
-use std::str::FromStr;
 
 sol! {
     #[derive(Debug)]
@@ -117,45 +116,26 @@ impl Adapter for Adapter_ {
         let input_token = self.tokens.get(tx.chain_id, &token_in_addr);
         let output_token = self.tokens.get(tx.chain_id, &token_out_addr);
 
-        let fee_bips_avg = if fees.is_empty() {
-            None
-        } else {
-            let sum: u32 = fees.iter().sum();
-            Some(sum / (fees.len() as u32) / 100)
-        };
+        let max_fee_bps = fees.iter().max().map(|fee| fee / 100);
 
-        let human_in_max = shift_decimals(&p.amount_in_maximum.to_string(), input_token.decimals);
-        let human_out = shift_decimals(&p.amount_out.to_string(), output_token.decimals);
-
-        Ok(Action::Swap(SwapAction {
-            protocol_id: "uniswap-v3".into(),
-            actor: tx.from.clone(),
-            target: tx.to.clone(),
-            value_wei: tx.value_wei.clone(),
-            input_token: input_token.clone(),
-            output_token: output_token.clone(),
-            input_amount: AmountSpec {
-                token: input_token,
-                raw: p.amount_in_maximum.to_string(),
-                human: Some(human_in_max),
-                usd: None,
-            },
-            min_output_amount: Some(AmountSpec {
-                token: output_token,
-                raw: p.amount_out.to_string(),
-                human: Some(human_out),
-                usd: None,
-            }),
-            recipient: recipient_addr,
-            deadline: u64::from_str(&p.deadline.to_string()).ok(),
-            fee_bips: fee_bips_avg,
-        }))
+        Ok(dex_swap_action(
+            tx,
+            "uniswap-v3",
+            input_token,
+            output_token,
+            p.amount_in_maximum.to_string(),
+            Some(p.amount_out.to_string()),
+            recipient_addr,
+            max_fee_bps,
+            "exactOutput",
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     fn build_path(token_a: &str, fee: u32, token_b: &str) -> Vec<u8> {
         let mut out = Vec::with_capacity(43);
@@ -206,13 +186,18 @@ mod tests {
             nonce: None,
         };
         match adapter.build(&tx).unwrap() {
-            Action::Swap(s) => {
+            Action::Dex(d) => {
                 // Path was [WETH, fee, USDT] but exact-out reads it reversed:
                 // input = USDT (last), output = WETH (first).
-                assert_eq!(s.input_token.symbol, "USDT");
-                assert_eq!(s.output_token.symbol, "WETH");
+                assert_eq!(d.facts.protocol_ids, vec!["uniswap-v3"]);
+                assert_eq!(d.facts.input_tokens[0].symbol, "USDT");
+                assert_eq!(d.facts.output_tokens[0].symbol, "WETH");
+                assert_eq!(d.facts.max_fee_bps, Some(30));
+                assert_eq!(d.oracle_requirements[0].raw_amount, "4000000000");
+                assert_eq!(d.oracle_requirements[1].raw_amount, "1000000000000000000");
+                assert_eq!(d.trace.steps, vec!["exactOutput"]);
             }
-            _ => panic!("expected swap"),
+            _ => panic!("expected dex"),
         }
     }
 }

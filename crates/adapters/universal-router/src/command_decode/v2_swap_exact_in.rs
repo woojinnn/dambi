@@ -23,17 +23,16 @@ pub(crate) fn decode(
     }
     let token_in = token(tokens, tx.chain_id, *path.first().unwrap());
     let token_out = token(tokens, tx.chain_id, *path.last().unwrap());
-    Ok(RoutedAction {
-        action: swap_action(
-            tx,
-            "uniswap-v2",
-            token_in,
-            token_out,
-            amount_in,
-            amount_out_min,
-            map_recipient(tx, recipient),
-            Some(30),
-        ),
-        meta,
-    })
+    let action = swap_action(
+        tx,
+        "uniswap-v2",
+        token_in,
+        token_out,
+        amount_in,
+        amount_out_min,
+        map_recipient(tx, recipient),
+        Some(30),
+        &meta,
+    );
+    Ok(RoutedAction { action, meta })
 }

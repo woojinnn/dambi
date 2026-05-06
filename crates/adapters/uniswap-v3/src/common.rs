@@ -3,7 +3,7 @@
 //! when they emit `Action`, and decimal helpers.
 
 use policy_engine::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// SwapRouter (the original Uniswap V3 router) on mainnet.
 pub const SWAP_ROUTER_MAINNET: &str = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
@@ -79,6 +79,121 @@ impl Default for TokenLookup {
     fn default() -> Self {
         Self::with_mainnet_defaults()
     }
+}
+
+/// Build the aggregate DEX action emitted by a single decoded swap call.
+#[allow(clippy::too_many_arguments)]
+pub fn dex_swap_action(
+    tx: &TransactionRequest,
+    protocol_id: &str,
+    input_token: Token,
+    output_token: Token,
+    input_raw: String,
+    min_output_raw: Option<String>,
+    recipient: Address,
+    max_fee_bps: Option<u32>,
+    trace_step: impl Into<String>,
+) -> Action {
+    let mut oracle_requirements = vec![OracleRequirement {
+        kind: OracleRequirementKind::Input,
+        token: input_token.clone(),
+        raw_amount: input_raw,
+    }];
+
+    if let Some(raw_amount) = min_output_raw.clone() {
+        oracle_requirements.push(OracleRequirement {
+            kind: OracleRequirementKind::MinOutput,
+            token: output_token.clone(),
+            raw_amount,
+        });
+    }
+
+    Action::Dex(DexAction {
+        actor: tx.from.clone(),
+        target: tx.to.clone(),
+        value_wei: tx.value_wei.clone(),
+        facts: DexFacts {
+            protocol_ids: vec![protocol_id.into()],
+            input_tokens: vec![input_token],
+            output_tokens: vec![output_token],
+            max_fee_bps,
+            has_zero_min_output: min_output_raw.as_deref() == Some("0"),
+            has_external_recipient: recipient != tx.from,
+            ..DexFacts::default()
+        },
+        oracle_requirements,
+        trace: DexTrace {
+            steps: vec![trace_step.into()],
+        },
+    })
+}
+
+/// Merge child DEX actions from a structural router call into one aggregate.
+pub fn merge_dex_actions(
+    tx: &TransactionRequest,
+    actions: Vec<Action>,
+    trace_step: impl Into<String>,
+) -> Result<Action, AdapterError> {
+    let mut protocol_ids = Vec::new();
+    let mut seen_protocol_ids = HashSet::new();
+    let mut input_tokens = Vec::new();
+    let mut seen_input_tokens = HashSet::new();
+    let mut output_tokens = Vec::new();
+    let mut seen_output_tokens = HashSet::new();
+    let mut oracle_requirements = Vec::new();
+    let mut trace_steps = vec![trace_step.into()];
+    let mut max_fee_bps: Option<u32> = None;
+    let mut has_zero_min_output = false;
+    let mut has_external_recipient = false;
+
+    for action in actions {
+        let Action::Dex(dex) = action else {
+            return Err(AdapterError::BadCalldata(format!(
+                "multicall child emitted non-dex action: {}",
+                action.kind()
+            )));
+        };
+
+        for protocol_id in dex.facts.protocol_ids {
+            if seen_protocol_ids.insert(protocol_id.clone()) {
+                protocol_ids.push(protocol_id);
+            }
+        }
+        for token in dex.facts.input_tokens {
+            if seen_input_tokens.insert(token.key()) {
+                input_tokens.push(token);
+            }
+        }
+        for token in dex.facts.output_tokens {
+            if seen_output_tokens.insert(token.key()) {
+                output_tokens.push(token);
+            }
+        }
+        if let Some(fee) = dex.facts.max_fee_bps {
+            max_fee_bps = Some(max_fee_bps.map_or(fee, |current| current.max(fee)));
+        }
+        has_zero_min_output |= dex.facts.has_zero_min_output;
+        has_external_recipient |= dex.facts.has_external_recipient;
+        oracle_requirements.extend(dex.oracle_requirements);
+        trace_steps.extend(dex.trace.steps);
+    }
+
+    Ok(Action::Dex(DexAction {
+        actor: tx.from.clone(),
+        target: tx.to.clone(),
+        value_wei: tx.value_wei.clone(),
+        facts: DexFacts {
+            protocol_ids,
+            input_tokens,
+            output_tokens,
+            max_fee_bps,
+            has_zero_min_output,
+            has_external_recipient,
+            ..DexFacts::default()
+        },
+        oracle_requirements,
+        trace: DexTrace { steps: trace_steps },
+    }))
 }
 
 /// Shift `value` (decimal string of an integer) right by `decimals` places to

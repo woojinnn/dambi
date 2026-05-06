@@ -38,8 +38,7 @@ pub(crate) fn decode(
 
     let mut out = Vec::new();
     for (idx, action) in actions.iter().copied().enumerate() {
-        let mut meta = base_meta.clone();
-        meta.v4_action = Some(action);
+        let meta = base_meta.clone().with_action_label(v4_action_label(action));
         let input = params[idx].to_vec();
         match action {
             V4_SWAP_EXACT_IN_SINGLE => {
@@ -61,4 +60,26 @@ pub(crate) fn decode(
         }
     }
     Ok(out)
+}
+
+fn v4_action_label(action: u8) -> &'static str {
+    match action {
+        V4_SWAP_EXACT_IN_SINGLE => "V4_SWAP_EXACT_IN_SINGLE",
+        V4_SWAP_EXACT_IN => "V4_SWAP_EXACT_IN",
+        V4_SWAP_EXACT_OUT_SINGLE => "V4_SWAP_EXACT_OUT_SINGLE",
+        V4_SWAP_EXACT_OUT => "V4_SWAP_EXACT_OUT",
+        V4_SETTLE => "V4_SETTLE",
+        V4_SETTLE_ALL => "V4_SETTLE_ALL",
+        V4_SETTLE_PAIR => "V4_SETTLE_PAIR",
+        V4_TAKE => "V4_TAKE",
+        V4_TAKE_ALL => "V4_TAKE_ALL",
+        V4_TAKE_PORTION => "V4_TAKE_PORTION",
+        V4_TAKE_PAIR => "V4_TAKE_PAIR",
+        V4_CLOSE_CURRENCY => "V4_CLOSE_CURRENCY",
+        V4_CLEAR_OR_TAKE => "V4_CLEAR_OR_TAKE",
+        V4_SWEEP => "V4_SWEEP",
+        V4_WRAP => "V4_WRAP",
+        V4_UNWRAP => "V4_UNWRAP",
+        _ => "UNKNOWN_V4_ACTION",
+    }
 }

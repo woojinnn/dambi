@@ -1,8 +1,7 @@
 //! Approval capability — current allowance lookup for `(owner, token, spender)`.
 //!  
-//! Lowering calls this trait while building swap leaf context and, when found,
-//! stores the resulting `AmountSpec` as `currentAllowance` plus
-//! `allowanceCoversInput`.
+//! Lowering calls this trait while building DEX context and, when found,
+//! folds the result into the aggregate `allowancesCoverInputs` field.
 //!  
 //! The lookup shape is explicitly `(owner, token, spender)` to match ERC-20
 //! approval semantics and to keep policy decisions aligned to a single caller

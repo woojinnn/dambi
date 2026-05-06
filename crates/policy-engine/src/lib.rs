@@ -12,8 +12,7 @@
 //!   Concrete adapter implementations live in *their own crates* under
 //!   `crates/adapters/<name>/`.
 //! - **`registry`**: adapter resolution traits and the in-memory registry.
-//! - **`lowering`**: `Action`/`Action::Multi` expansion, USD enrichment, and
-//!   `PolicyRequest` construction.
+//! - **`lowering`**: `Action` enrichment and `PolicyRequest` construction.
 //! - **`prelude`**: the curated import surface adapter authors use
 //!   (`use policy_engine::prelude::*;`).
 //! - **`pipeline`**: the orchestrator that wires resolver → adapter →
@@ -28,6 +27,7 @@ pub mod pipeline;
 pub mod policy;
 pub mod prelude;
 pub mod registry;
+pub mod schema;
 
 pub use adapter::{
     ActionKind, Adapter, AdapterDescriptor, AdapterError, AdapterFactory, AdapterId, AdapterKind,
@@ -35,8 +35,9 @@ pub use adapter::{
     TypedAdapter,
 };
 pub use core::{
-    Action, Address, AmountSpec, ChainId, MultiAction, SwapAction, Token, TransactionRequest,
-    UsdValuation,
+    Action, Address, AmountSpec, ChainId, DexAction, DexFacts, DexTrace, OracleRequirement,
+    OracleRequirementKind, OtherAction, Token, TransactionRequest, UsdValuation,
+    WindowStatsContext,
 };
 pub use host::{
     Approvals, ApprovalsError, HostCapabilities, MockApprovals, MockOracle, MockPortfolio,
@@ -44,7 +45,7 @@ pub use host::{
     StatKey, StatValue, StatWindows,
 };
 pub use lowering::{
-    enrich_actions_with_usd, enrich_request_with_capabilities, enrich_with_usd,
+    compute_dex_window_deltas, enrich_dex_action, enrich_dex_action_base, enrich_dex_window_stats,
     request_from_action, requests_from_action, requests_from_actions,
 };
 pub use pipeline::{EvaluationOutcome, Pipeline, PipelineError};
@@ -53,3 +54,4 @@ pub use policy::{
     Severity, Verdict,
 };
 pub use registry::{AdapterIndex, AdapterRegistry, MockAdapterRegistry, ResolverOutcome};
+pub use schema::PolicySchemaComposer;

@@ -41,7 +41,7 @@ pub enum ResolverOutcome {
 pub trait AdapterRegistry: Send + Sync {
     /// Resolve a transaction to an adapter. When the outcome is `Resolved`,
     /// the second tuple element carries the adapter `Arc` so the caller can
-    /// invoke `build_actions` and keep sequencing in the pipeline without a
+    /// invoke `build` and keep sequencing in the pipeline without a
     /// second lookup. For `NoMatch` / `Ambiguous`, the second element is `None`.
     fn resolve_with_adapter(
         &self,
@@ -142,6 +142,7 @@ impl AdapterRegistry for MockAdapterRegistry {
             }
         }
     }
+
     // `lookup` uses the trait's default impl (calls `resolve_with_adapter`).
 }
 
@@ -149,7 +150,7 @@ impl AdapterRegistry for MockAdapterRegistry {
 mod tests {
     use super::*;
     use crate::adapter::{Adapter, AdapterError};
-    use crate::core::{Action, TransactionRequest};
+    use crate::core::{Action, OtherAction, TransactionRequest};
 
     /// Minimal in-crate adapter used only to exercise the registry. Doesn't
     /// touch ABI decoding or oracle data — it just claims a fixed set of
@@ -167,13 +168,13 @@ mod tests {
             self.keys.clone()
         }
         fn build(&self, tx: &TransactionRequest) -> Result<Action, AdapterError> {
-            Ok(Action::Other {
+            Ok(Action::Other(OtherAction {
                 actor: tx.from.clone(),
                 target: tx.to.clone(),
                 selector: tx.selector_hex().unwrap_or_else(|| "0x".into()),
                 value_wei: tx.value_wei.clone(),
                 raw_calldata: format!("0x{}", hex::encode(&tx.data)),
-            })
+            }))
         }
     }
 

@@ -11,7 +11,7 @@ pub(crate) fn decode(
     tx: &TransactionRequest,
     tokens: &TokenLookup,
     input: &[u8],
-    mut meta: ActionMeta,
+    meta: ActionMeta,
 ) -> Result<RoutedAction, AdapterError> {
     let p = <V4ExactInputParams as SolValue>::abi_decode_sequence(input, true)
         .map_err(|e| AdapterError::BadCalldata(e.to_string()))?;
@@ -27,21 +27,16 @@ pub(crate) fn decode(
         .iter()
         .map(|k| u32_from_u24(k.fee))
         .collect::<Vec<_>>();
-    meta.hook_data_present = p
-        .path
-        .iter()
-        .any(|k| k.hooks != alloy_primitives::Address::ZERO || !k.hookData.is_empty());
-    Ok(RoutedAction {
-        action: swap_action(
-            tx,
-            "uniswap-v4",
-            tokens.get(tx.chain_id, &token_in_addr),
-            tokens.get(tx.chain_id, &token_out_addr),
-            U256::from(p.amountIn),
-            U256::from(p.amountOutMinimum),
-            tx.from.clone(),
-            v4_fee_bips_avg(&fees),
-        ),
-        meta,
-    })
+    let action = swap_action(
+        tx,
+        "uniswap-v4",
+        tokens.get(tx.chain_id, &token_in_addr),
+        tokens.get(tx.chain_id, &token_out_addr),
+        U256::from(p.amountIn),
+        U256::from(p.amountOutMinimum),
+        tx.from.clone(),
+        v4_fee_bips_avg(&fees),
+        &meta,
+    );
+    Ok(RoutedAction { action, meta })
 }

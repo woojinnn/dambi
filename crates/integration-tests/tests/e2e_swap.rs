@@ -13,7 +13,7 @@ use policy_engine_adapter_uniswap_v3::{
 use std::str::FromStr;
 use std::sync::Arc;
 
-const POLICY_SRC: &str = include_str!("../../../policies/swap/max-swap-usd-100.cedar");
+const POLICY_SRC: &str = include_str!("../../../policies/dex/max-input-usd-100.cedar");
 
 const USDT_ADDR: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const USDC_ADDR: &str = "0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -100,10 +100,10 @@ fn swap_200_usdt_is_denied_over_100_cap() {
     match v {
         Verdict::Fail(matched) => {
             assert_eq!(matched.len(), 1);
-            assert_eq!(matched[0].policy_id, "user/max-swap-usd-100");
+            assert_eq!(matched[0].policy_id, "user/max-input-usd-100");
             assert_eq!(
                 matched[0].reason.as_deref(),
-                Some("USD value of swap input exceeds 100")
+                Some("USD value of Dex input exceeds 100")
             );
         }
         _ => panic!("expected Verdict::Fail, got {v:?}"),
@@ -195,8 +195,8 @@ fn swap_in_usdc_above_cap_is_denied() {
 
 #[test]
 fn missing_oracle_data_is_treated_as_allow_in_v01() {
-    // Same swap but oracle has no price for USDT → `inputAmount.usd` is None
-    // → policy guard `context.inputAmount has "usd"` is false → no forbid
+    // Same swap but oracle has no price for USDT → `totalInputUsd` is omitted
+    // → policy guard `context has totalInputUsd` is false → no forbid
     // fires → allow. (This is the explicit fail-open behavior of this policy.
     // A fail-closed variant would deny here.)
     let reg = registry();

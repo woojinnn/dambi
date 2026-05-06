@@ -1,5 +1,5 @@
-//! Extra swap policy battery — verifies the 4 additional policies under
-//! `policies/swap/` evaluate correctly across V3 and V2 adapters.
+//! Extra Dex policy battery — verifies the 4 additional policies under
+//! `policies/dex/` evaluate correctly across V3 and V2 adapters.
 
 use alloy_primitives::{Address as AlloyAddress, U256};
 use policy_engine::{
@@ -17,10 +17,10 @@ use policy_engine_adapter_uniswap_v3::{
 use std::str::FromStr;
 use std::sync::Arc;
 
-const POLICY_FEE_CAP: &str = include_str!("../../../policies/swap/max-swap-fee-bps-100.cedar");
-const POLICY_ALLOWLIST: &str = include_str!("../../../policies/swap/uniswap-only-allowlist.cedar");
-const POLICY_NO_ZERO_OUT: &str = include_str!("../../../policies/swap/no-zero-min-output.cedar");
-const POLICY_USD_FLOOR: &str = include_str!("../../../policies/swap/min-output-usd-floor.cedar");
+const POLICY_FEE_CAP: &str = include_str!("../../../policies/dex/max-fee-bps-100.cedar");
+const POLICY_ALLOWLIST: &str = include_str!("../../../policies/dex/uniswap-only-allowlist.cedar");
+const POLICY_NO_ZERO_OUT: &str = include_str!("../../../policies/dex/no-zero-min-output.cedar");
+const POLICY_USD_FLOOR: &str = include_str!("../../../policies/dex/min-output-usd-floor.cedar");
 
 const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
@@ -106,7 +106,7 @@ fn v2_swap_tx(amount_in: U256, amount_out_min: U256) -> TransactionRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Policy 1: max-swap-fee-bps-100  (deny when feeBips > 100)
+// Policy 1: max-fee-bps-100  (deny when maxFeeBps > 100)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -171,12 +171,13 @@ fn allowlist_passes_uniswap_v2() {
     assert_eq!(pipe.evaluate(&tx).unwrap(), Verdict::Pass);
 }
 
-/// A test-only adapter that emits a `Swap` with a non-allowlisted protocolId.
+/// A test-only adapter that emits a Dex action with a non-allowlisted protocol id.
 /// Validates that the allowlist policy actually fires for unknown protocols.
 mod fake_protocol_adapter {
     use super::*;
     use policy_engine::{
-        Action, Adapter, AdapterError, AdapterId, AmountSpec, MatchKey, SwapAction,
+        Action, Adapter, AdapterError, AdapterId, DexAction, DexFacts, DexTrace, MatchKey,
+        OracleRequirement, OracleRequirementKind,
     };
 
     pub struct FakeProtocolAdapter;
@@ -195,28 +196,33 @@ mod fake_protocol_adapter {
         fn build(&self, tx: &TransactionRequest) -> Result<Action, AdapterError> {
             let usdt = usdt_token();
             let weth = weth_token();
-            Ok(Action::Swap(SwapAction {
-                protocol_id: "fake-dex".into(),
+            Ok(Action::Dex(DexAction {
                 actor: tx.from.clone(),
                 target: tx.to.clone(),
                 value_wei: tx.value_wei.clone(),
-                input_token: usdt.clone(),
-                output_token: weth.clone(),
-                input_amount: AmountSpec {
-                    token: usdt,
-                    raw: "1000000".into(),
-                    human: Some("1.000000".into()),
-                    usd: None,
+                facts: DexFacts {
+                    protocol_ids: vec!["fake-dex".into()],
+                    input_tokens: vec![usdt.clone()],
+                    output_tokens: vec![weth.clone()],
+                    max_fee_bps: Some(0),
+                    has_zero_min_output: false,
+                    ..DexFacts::default()
                 },
-                min_output_amount: Some(AmountSpec {
-                    token: weth,
-                    raw: "330000000000000".into(),
-                    human: Some("0.000330000000000000".into()),
-                    usd: None,
-                }),
-                recipient: Address::from_alloy(AlloyAddress::from_str(RECIPIENT).unwrap()),
-                deadline: None,
-                fee_bips: Some(0),
+                oracle_requirements: vec![
+                    OracleRequirement {
+                        kind: OracleRequirementKind::Input,
+                        token: usdt,
+                        raw_amount: "1000000".into(),
+                    },
+                    OracleRequirement {
+                        kind: OracleRequirementKind::MinOutput,
+                        token: weth,
+                        raw_amount: "330000000000000".into(),
+                    },
+                ],
+                trace: DexTrace {
+                    steps: vec!["fake-protocol aggregate dex action".into()],
+                },
             }))
         }
     }
@@ -244,7 +250,7 @@ fn allowlist_denies_unknown_protocol() {
 }
 
 // ---------------------------------------------------------------------------
-// Policy 3: no-zero-min-output  (warn when minOutputAmount.raw == "0")
+// Policy 3: no-zero-min-output  (warn when hasZeroMinOutput is true)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -287,7 +293,7 @@ fn nonzero_min_output_passes() {
 }
 
 // ---------------------------------------------------------------------------
-// Policy 4: min-output-usd-floor  (deny when minOutputAmount.usd < $10)
+// Policy 4: min-output-usd-floor  (deny when totalMinOutputUsd < $10)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -317,8 +323,8 @@ fn usd_floor_passes_normal_swap() {
 
 #[test]
 fn usd_floor_skips_when_oracle_missing() {
-    // No prices in the oracle → minOutputAmount.usd is omitted by the lowering
-    // step, so the policy's `has "usd"` guard fails and the swap passes.
+    // No prices in the oracle → totalMinOutputUsd is omitted by the lowering
+    // step, so the policy's `context has totalMinOutputUsd` guard fails.
     let engine = PolicyEngine::from_sources([POLICY_USD_FLOOR]).unwrap();
     let registry = v3_registry();
     let oracle = MockOracle::new();
@@ -373,7 +379,7 @@ fn all_four_policies_high_fee_deny_overrides_zero_min_warn() {
         Verdict::Fail(matched) => {
             assert!(matched
                 .iter()
-                .any(|m| m.policy_id == "user/max-swap-fee-bps-100"));
+                .any(|m| m.policy_id == "user/max-fee-bps-100"));
             assert!(matched
                 .iter()
                 .any(|m| m.policy_id == "user/no-zero-min-output"));

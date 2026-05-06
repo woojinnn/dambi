@@ -3,12 +3,10 @@
 use crate::command_decode::{
     v2_swap_exact_in, v2_swap_exact_out, v3_swap_exact_in, v3_swap_exact_out, v4_swap,
 };
-use crate::common::{currency_to_policy_address, shift_decimals, TokenLookup};
+use crate::common::{currency_to_policy_address, TokenLookup};
 use alloy_primitives::{Address as AlloyAddress, U256};
 use alloy_sol_types::{sol, SolType};
-use policy_engine::context_keys::ur;
 use policy_engine::prelude::*;
-use serde_json::Value;
 
 type SubPlanInput = sol! { (bytes, bytes[]) };
 
@@ -45,13 +43,41 @@ const ACTION_ADDRESS_THIS: &str = "0x0000000000000000000000000000000000000002";
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActionMeta {
-    pub(crate) command_index: usize,
-    pub(crate) command_type: u8,
     pub(crate) allow_revert: bool,
-    pub(crate) analysis_depth: &'static str,
-    pub(crate) subplan_depth: usize,
-    pub(crate) v4_action: Option<u8>,
-    pub(crate) hook_data_present: bool,
+    command_label: &'static str,
+    action_label: Option<&'static str>,
+}
+
+impl ActionMeta {
+    fn new(command: u8, allow_revert: bool) -> Self {
+        Self {
+            allow_revert,
+            command_label: command_label(command),
+            action_label: None,
+        }
+    }
+
+    pub(crate) fn with_action_label(mut self, action_label: &'static str) -> Self {
+        self.action_label = Some(action_label);
+        self
+    }
+
+    fn function_label(&self) -> &'static str {
+        self.action_label.unwrap_or(self.command_label)
+    }
+
+    pub(crate) fn trace_label(&self) -> String {
+        match self.action_label {
+            Some(action_label) => format!(
+                "command={} action={} allowRevert={}",
+                self.command_label, action_label, self.allow_revert
+            ),
+            None => format!(
+                "command={} allowRevert={}",
+                self.command_label, self.allow_revert
+            ),
+        }
+    }
 }
 
 pub(crate) struct RoutedAction {
@@ -89,15 +115,7 @@ pub(crate) fn expand_commands(
     for (idx, raw_command) in commands.iter().copied().enumerate() {
         let allow_revert = raw_command & FLAG_ALLOW_REVERT != 0;
         let command = raw_command & COMMAND_TYPE_MASK;
-        let meta = ActionMeta {
-            command_index: idx,
-            command_type: command,
-            allow_revert,
-            analysis_depth: "leaf",
-            subplan_depth: depth,
-            v4_action: None,
-            hook_data_present: false,
-        };
+        let meta = ActionMeta::new(command, allow_revert);
         let input = &inputs[idx];
 
         match command {
@@ -138,7 +156,7 @@ pub(crate) fn expand_commands(
             | V4_INITIALIZE_POOL
             | V4_POSITION_MANAGER_CALL => {
                 // Recognized non-swap commands. They are intentionally
-                // ignored by the swap-policy leaf pass.
+                // ignored by the dex aggregation pass.
             }
             other => {
                 return Err(AdapterError::BadCalldata(format!(
@@ -150,36 +168,21 @@ pub(crate) fn expand_commands(
     Ok(out)
 }
 
-pub(crate) fn meta_to_map(meta: &ActionMeta) -> serde_json::Map<String, Value> {
-    let mut obj = serde_json::Map::new();
-    obj.insert(ur::ROUTER.into(), Value::from("universal-router"));
-    obj.insert(
-        ur::ROUTER_COMMAND_INDEX.into(),
-        Value::from(meta.command_index as i64),
-    );
-    obj.insert(
-        ur::ROUTER_COMMAND.into(),
-        Value::from(format!("0x{:02x}", meta.command_type)),
-    );
-    obj.insert(ur::ALLOW_REVERT.into(), Value::from(meta.allow_revert));
-    obj.insert(ur::ANALYSIS_DEPTH.into(), Value::from(meta.analysis_depth));
-    obj.insert(
-        ur::SUBPLAN_DEPTH.into(),
-        Value::from(meta.subplan_depth as i64),
-    );
-    obj.insert(
-        ur::HOOK_DATA_PRESENT.into(),
-        Value::from(meta.hook_data_present),
-    );
-    if let Some(action) = meta.v4_action {
-        obj.insert(ur::V4_ACTION.into(), Value::from(format!("0x{action:02x}")));
-    }
-    obj
-}
-
 pub(crate) fn token(tokens: &TokenLookup, chain_id: ChainId, address: AlloyAddress) -> Token {
     let addr = currency_to_policy_address(address);
     tokens.get(chain_id, &addr)
+}
+
+fn command_label(command: u8) -> &'static str {
+    match command {
+        V3_SWAP_EXACT_IN => "V3_SWAP_EXACT_IN",
+        V3_SWAP_EXACT_OUT => "V3_SWAP_EXACT_OUT",
+        V2_SWAP_EXACT_IN => "V2_SWAP_EXACT_IN",
+        V2_SWAP_EXACT_OUT => "V2_SWAP_EXACT_OUT",
+        V4_SWAP => "V4_SWAP",
+        EXECUTE_SUB_PLAN => "EXECUTE_SUB_PLAN",
+        _ => "UNKNOWN_COMMAND",
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -192,32 +195,114 @@ pub(crate) fn swap_action(
     min_output_amount: U256,
     recipient: Address,
     fee_bips: Option<u32>,
+    meta: &ActionMeta,
 ) -> Action {
-    let human_input = shift_decimals(&input_amount.to_string(), input_token.decimals);
-    let human_min_out = shift_decimals(&min_output_amount.to_string(), output_token.decimals);
-    Action::Swap(SwapAction {
-        protocol_id: protocol_id.into(),
+    Action::Dex(DexAction {
         actor: tx.from.clone(),
         target: tx.to.clone(),
         value_wei: tx.value_wei.clone(),
-        input_token: input_token.clone(),
-        output_token: output_token.clone(),
-        input_amount: AmountSpec {
-            token: input_token,
-            raw: input_amount.to_string(),
-            human: Some(human_input),
-            usd: None,
+        facts: DexFacts {
+            protocol_ids: vec![protocol_id.into()],
+            input_tokens: vec![input_token.clone()],
+            output_tokens: vec![output_token.clone()],
+            max_fee_bps: fee_bips,
+            has_zero_min_output: min_output_amount == U256::ZERO,
+            has_external_recipient: recipient != tx.from,
+            ..DexFacts::default()
         },
-        min_output_amount: Some(AmountSpec {
-            token: output_token,
-            raw: min_output_amount.to_string(),
-            human: Some(human_min_out),
-            usd: None,
-        }),
-        recipient,
-        deadline: None,
-        fee_bips,
+        oracle_requirements: vec![
+            OracleRequirement {
+                kind: OracleRequirementKind::Input,
+                token: input_token,
+                raw_amount: input_amount.to_string(),
+            },
+            OracleRequirement {
+                kind: OracleRequirementKind::MinOutput,
+                token: output_token,
+                raw_amount: min_output_amount.to_string(),
+            },
+        ],
+        trace: DexTrace {
+            steps: vec![format!(
+                "protocol={} function={} allowRevert={}",
+                protocol_id,
+                meta.function_label(),
+                meta.allow_revert
+            )],
+        },
     })
+}
+
+pub(crate) fn merge_dex_actions(
+    tx: &TransactionRequest,
+    routed_actions: Vec<RoutedAction>,
+) -> Result<DexAction, AdapterError> {
+    let mut facts = DexFacts::default();
+    let mut oracle_requirements = Vec::new();
+    let mut trace_steps = Vec::new();
+
+    for routed in routed_actions {
+        let RoutedAction { action, meta } = routed;
+        let dex = match action {
+            Action::Dex(dex) => dex,
+            other => {
+                return Err(AdapterError::BadCalldata(format!(
+                    "Universal Router routed non-Dex action: {}",
+                    other.kind()
+                )));
+            }
+        };
+
+        for protocol_id in dex.facts.protocol_ids {
+            push_unique_string(&mut facts.protocol_ids, protocol_id);
+        }
+        for token in dex.facts.input_tokens {
+            push_unique_token(&mut facts.input_tokens, token);
+        }
+        for token in dex.facts.output_tokens {
+            push_unique_token(&mut facts.output_tokens, token);
+        }
+
+        if let Some(fee_bps) = dex.facts.max_fee_bps {
+            facts.max_fee_bps = Some(facts.max_fee_bps.map_or(fee_bps, |max| max.max(fee_bps)));
+        }
+        facts.has_zero_min_output |= dex.facts.has_zero_min_output;
+        facts.has_external_recipient |= dex.facts.has_external_recipient;
+        oracle_requirements.extend(dex.oracle_requirements);
+
+        let route_label = meta.trace_label();
+        if dex.trace.steps.is_empty() {
+            trace_steps.push(route_label);
+        } else {
+            trace_steps.extend(
+                dex.trace
+                    .steps
+                    .into_iter()
+                    .map(|step| format!("{route_label}: {step}")),
+            );
+        }
+    }
+
+    Ok(DexAction {
+        actor: tx.from.clone(),
+        target: tx.to.clone(),
+        value_wei: tx.value_wei.clone(),
+        facts,
+        oracle_requirements,
+        trace: DexTrace { steps: trace_steps },
+    })
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+fn push_unique_token(tokens: &mut Vec<Token>, token: Token) {
+    if !tokens.iter().any(|existing| existing.key() == token.key()) {
+        tokens.push(token);
+    }
 }
 
 pub(crate) fn decode_v3_path(path: &[u8]) -> Result<(Vec<AlloyAddress>, Vec<u32>), AdapterError> {

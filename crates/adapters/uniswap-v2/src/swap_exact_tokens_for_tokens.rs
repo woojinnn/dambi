@@ -1,11 +1,10 @@
 //! Uniswap V2 Router02 `swapExactTokensForTokens(uint256 amountIn,
 //! uint256 amountOutMin, address[] path, address to, uint256 deadline)`.
 
-use crate::common::{shift_decimals, DecodeError, TokenLookup, UNISWAP_V2_ROUTER_MAINNET};
+use crate::common::{dex_swap_action, DecodeError, TokenLookup, UNISWAP_V2_ROUTER_MAINNET};
 use alloy_primitives::{Address as AlloyAddress, U256};
 use alloy_sol_types::{sol, SolCall};
 use policy_engine::prelude::*;
-use std::str::FromStr;
 
 sol! {
     function swapExactTokensForTokens(
@@ -109,39 +108,24 @@ impl Adapter for Adapter_ {
         let input_token = self.tokens.get(tx.chain_id, &token_in_addr);
         let output_token = self.tokens.get(tx.chain_id, &token_out_addr);
 
-        let human_in = shift_decimals(&p.amount_in.to_string(), input_token.decimals);
-        let human_min_out = shift_decimals(&p.amount_out_min.to_string(), output_token.decimals);
-
-        Ok(Action::Swap(SwapAction {
-            protocol_id: "uniswap-v2".into(),
-            actor: tx.from.clone(),
-            target: tx.to.clone(),
-            value_wei: tx.value_wei.clone(),
-            input_token: input_token.clone(),
-            output_token: output_token.clone(),
-            input_amount: AmountSpec {
-                token: input_token,
-                raw: p.amount_in.to_string(),
-                human: Some(human_in),
-                usd: None,
-            },
-            min_output_amount: Some(AmountSpec {
-                token: output_token,
-                raw: p.amount_out_min.to_string(),
-                human: Some(human_min_out),
-                usd: None,
-            }),
-            recipient: recipient_addr,
-            deadline: u64::from_str(&p.deadline.to_string()).ok(),
-            // V2 LP fee is a uniform 30 bps; not encoded in calldata.
-            fee_bips: Some(30),
-        }))
+        Ok(dex_swap_action(
+            tx,
+            "uniswap-v2",
+            input_token,
+            output_token,
+            p.amount_in.to_string(),
+            Some(p.amount_out_min.to_string()),
+            recipient_addr,
+            Some(30),
+            "uniswap-v2/swapExactTokensForTokens",
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     fn sample_params() -> Params {
         Params {
@@ -178,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn build_emits_swap_with_v2_protocol_id_and_30bp_fee() {
+    fn build_emits_dex_with_v2_protocol_id_and_30bp_fee() {
         let adapter = Adapter_::new();
         let tx = TransactionRequest {
             chain_id: 1,
@@ -190,13 +174,21 @@ mod tests {
             nonce: None,
         };
         match adapter.build(&tx).unwrap() {
-            Action::Swap(s) => {
-                assert_eq!(s.protocol_id, "uniswap-v2");
-                assert_eq!(s.input_token.symbol, "USDT");
-                assert_eq!(s.output_token.symbol, "WETH");
-                assert_eq!(s.fee_bips, Some(30));
+            Action::Dex(d) => {
+                assert_eq!(d.facts.protocol_ids, vec!["uniswap-v2".to_string()]);
+                assert_eq!(d.facts.input_tokens[0].symbol, "USDT");
+                assert_eq!(d.facts.output_tokens[0].symbol, "WETH");
+                assert_eq!(d.facts.max_fee_bps, Some(30));
+                assert!(d.facts.has_zero_min_output);
+                assert_eq!(d.oracle_requirements[0].kind, OracleRequirementKind::Input);
+                assert_eq!(d.oracle_requirements[0].raw_amount, "200000000");
+                assert_eq!(
+                    d.oracle_requirements[1].kind,
+                    OracleRequirementKind::MinOutput
+                );
+                assert_eq!(d.oracle_requirements[1].raw_amount, "0");
             }
-            _ => panic!("expected swap"),
+            _ => panic!("expected dex"),
         }
     }
 }

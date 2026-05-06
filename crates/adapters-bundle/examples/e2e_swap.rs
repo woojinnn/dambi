@@ -3,9 +3,9 @@
 //! Demonstrates the v0.1 pipeline end-to-end:
 //!  - encode an `exactInputSingle` calldata for 200 USDT → WETH on mainnet
 //!  - resolve through the mock adapter registry
-//!  - decode + emit a Swap action
-//!  - inject USD valuations from the mock oracle
-//!  - evaluate the "max 100 USD per swap" Cedar policy
+//!  - decode + emit an aggregate Dex action
+//!  - inject aggregate USD valuations from the mock oracle
+//!  - evaluate the "max 100 USD per Dex input" Cedar policy
 //!  - print the verdict
 
 use alloy_primitives::{Address as AlloyAddress, U256};
@@ -22,7 +22,7 @@ const USDT_ADDR: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const WETH_ADDR: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const RECIPIENT: &str = "0x1111111111111111111111111111111111111111";
 
-const POLICY_SRC: &str = include_str!("../../../policies/swap/max-swap-usd-100.cedar");
+const POLICY_SRC: &str = include_str!("../../../policies/dex/max-input-usd-100.cedar");
 
 fn main() {
     let usdt = Token {
