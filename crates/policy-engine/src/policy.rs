@@ -475,9 +475,9 @@ fn ingest_policy(
 
 /// Builder for `PolicyEngine`.
 ///
-/// Accepts text Cedar sources and JSON-encoded `CedarJSON` policy objects,
-/// mixed in any order. Always injects the baseline permit policy so that
-/// absence of any matched `forbid` evaluates to allow.
+/// Accepts text Cedar policy sources via `add_text`. Always injects the
+/// baseline permit policy so absence of any matched `forbid` evaluates
+/// to allow.
 #[derive(Debug)]
 pub struct PolicyEngineBuilder {
     text_sources: Vec<String>,
@@ -507,9 +507,6 @@ impl PolicyEngineBuilder {
 
     /// Append one or more text Cedar policies. Multiple `forbid`/`permit`
     /// clauses in the string are fine — they'll all be parsed.
-    ///
-    /// In v0.x, Cedar text is the supported authoring surface; `CedarJSON` support
-    /// is deferred to marketplace/signing in v1.
     #[must_use]
     pub fn add_text<S: Into<String>>(mut self, src: S) -> Self {
         self.text_sources.push(src.into());
