@@ -202,7 +202,7 @@ pub enum PolicyError {
 #[derive(Debug)]
 pub struct PolicyEngine {
     policy_set: PolicySet,
-    schema: Option<Schema>,
+    schema: Schema,
     /// Per-policy-id severity, lifted from the `@severity(...)` annotation at
     /// parse time so we don't have to re-parse on every evaluation.
     severities: HashMap<String, Severity>,
@@ -239,7 +239,7 @@ impl PolicyEngine {
     /// Internal: build a `PolicyEngine` from already-collected policies.
     /// `text_combined` is one big Cedar source string (with baseline
     /// prepended).
-    fn build_from(text_combined: &str, schema: Option<Schema>) -> Result<Self, PolicyError> {
+    fn build_from(text_combined: &str, schema: Schema) -> Result<Self, PolicyError> {
         let mut policy_set = PolicySet::new();
         let mut severities: HashMap<String, Severity> = HashMap::new();
         let mut reasons: HashMap<String, String> = HashMap::new();
@@ -252,9 +252,7 @@ impl PolicyEngine {
             ingest_policy(p, &mut policy_set, &mut severities, &mut reasons)?;
         }
 
-        if let Some(schema) = &schema {
-            validate_policy_set(&policy_set, schema)?;
-        }
+        validate_policy_set(&policy_set, &schema)?;
 
         Ok(Self {
             policy_set,
@@ -344,13 +342,15 @@ impl PolicyEngine {
             .parse()
             .map_err(|e: cedar_policy::ParseErrors| PolicyError::EntityUid(e.to_string()))?;
 
-        let schema = self.schema.as_ref();
-        let entities = Entities::from_json_value(entities_json.clone(), schema)
+        let entities = Entities::from_json_value(entities_json.clone(), Some(&self.schema))
             .map_err(|e| PolicyError::Entities(e.to_string()))?;
-        let context = Context::from_json_value(context_json.clone(), None)
-            .map_err(|e| PolicyError::Context(e.to_string()))?;
+        let context = Context::from_json_value(
+            context_json.clone(),
+            Some((&self.schema, &action)),
+        )
+        .map_err(|e| PolicyError::Context(e.to_string()))?;
 
-        let request = Request::new(principal, action, resource, context, schema)
+        let request = Request::new(principal, action, resource, context, Some(&self.schema))
             .map_err(|e| PolicyError::Request(e.to_string()))?;
 
         let auth = Authorizer::new();
@@ -539,18 +539,15 @@ impl PolicyEngineBuilder {
     /// Returns an error when schema parsing, policy parsing, or policy
     /// validation fails.
     pub fn build(self) -> Result<PolicyEngine, PolicyError> {
-        let schema = if self.schema_sources.is_empty() {
-            None
-        } else {
-            let mut combined_schema = String::new();
-            for src in &self.schema_sources {
-                combined_schema.push_str(src);
-                combined_schema.push('\n');
-            }
-            let (schema, _warnings) = Schema::from_cedarschema_str(&combined_schema)
-                .map_err(|e| PolicyError::Schema(e.to_string()))?;
-            Some(schema)
-        };
+        // schema_sources is non-empty by construction (PolicyEngineBuilder::new()
+        // pre-loads the bundled schema and there is no public path that empties it).
+        let mut combined_schema = String::new();
+        for src in &self.schema_sources {
+            combined_schema.push_str(src);
+            combined_schema.push('\n');
+        }
+        let (schema, _warnings) = Schema::from_cedarschema_str(&combined_schema)
+            .map_err(|e| PolicyError::Schema(e.to_string()))?;
 
         let baseline = "@id(\"engine/baseline-allow\")\npermit(principal, action, resource);\n";
         let mut combined = String::new();
@@ -833,7 +830,10 @@ mod tests {
             )
             .unwrap_err();
 
-        assert!(matches!(err, PolicyError::Request(_)));
+        // Passing the schema to Context::from_json_value moves missing-required-attr
+        // detection into context construction (the layer below Request::new), so the
+        // error attribution is PolicyError::Context, not PolicyError::Request.
+        assert!(matches!(err, PolicyError::Context(_)));
     }
 
     #[test]
