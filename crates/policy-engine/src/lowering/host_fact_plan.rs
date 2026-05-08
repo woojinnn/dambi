@@ -88,8 +88,34 @@ pub fn required_host_facts(action: &Action) -> HostFactPlan {
                     .push((dex.actor.clone(), token.clone(), dex.target.clone()));
             }
         }
-        Action::Other(_) | Action::Permit2(_) | Action::Eip2612(_) | Action::Eip712Other(_) => {
-            // Filled in subsequent tasks.
+        Action::Permit2(p) => {
+            let mut seen = std::collections::HashSet::new();
+            for approval in &p.approvals {
+                if seen.insert(approval.token.key()) {
+                    plan.tokens_for_oracle.push(approval.token.clone());
+                }
+                plan.sig_oracle_requirements.push(OracleRequirement {
+                    kind: crate::core::OracleRequirementKind::Input,
+                    token: approval.token.clone(),
+                    raw_amount: approval.amount.clone(),
+                });
+            }
+            plan.clock_required = true;
+        }
+        Action::Eip2612(p) => {
+            plan.tokens_for_oracle.push(p.token.clone());
+            plan.sig_oracle_requirements.push(OracleRequirement {
+                kind: crate::core::OracleRequirementKind::Input,
+                token: p.token.clone(),
+                raw_amount: p.value.clone(),
+            });
+            plan.clock_required = true;
+        }
+        Action::Eip712Other(_) => {
+            plan.clock_required = true;
+        }
+        Action::Other(_) => {
+            // No host facts needed; user policies decide based on calldata + selector.
         }
     }
     plan
@@ -197,6 +223,139 @@ mod tests {
 
         assert!(!plan.clock_required);
         assert!(plan.sig_oracle_requirements.is_empty());
+    }
+
+    use crate::core::{
+        ChainId as CId, Eip2612Action, Eip712OtherAction, Eip712Domain, Eip712TypedData,
+        Permit2Action, Permit2Approval, Permit2PermitKind,
+    };
+
+    fn permit2_action_two_tokens() -> Action {
+        let signer = addr("0x2222222222222222222222222222222222222222");
+        let spender = addr("0x3333333333333333333333333333333333333333");
+        let permit2 = addr("0x000000000022D473030F116dDEE9F6B43aC78BA3");
+        Action::Permit2(Permit2Action {
+            signer: signer.clone(),
+            chain_id: 1 as CId,
+            domain_chain_id: 1 as CId,
+            verifying_contract: permit2,
+            primary_type: "PermitBatch".into(),
+            permit_kind: Permit2PermitKind::PermitBatch,
+            spender: spender.clone(),
+            token: weth(),
+            amount: "1000000000000000000".into(),
+            expiration: 1_700_000_000,
+            sig_deadline: 1_700_000_000,
+            nonce: "0".into(),
+            approvals: vec![
+                Permit2Approval {
+                    token: weth(),
+                    amount: "1000000000000000000".into(),
+                    expiration: 1_700_000_000,
+                    nonce: "0".into(),
+                },
+                Permit2Approval {
+                    token: usdc(),
+                    amount: "1000000000".into(),
+                    expiration: 1_700_000_000,
+                    nonce: "1".into(),
+                },
+            ],
+            is_unlimited: false,
+            nonce_valid: true,
+            witness_present: false,
+            total_approved_usd: None,
+        })
+    }
+
+    #[test]
+    fn permit2_plan_collects_per_approval_oracle_and_clock() {
+        let action = permit2_action_two_tokens();
+        let plan = required_host_facts(&action);
+
+        let oracle_addrs: Vec<_> = plan
+            .tokens_for_oracle
+            .iter()
+            .map(|t| t.address.as_str().to_lowercase())
+            .collect();
+        assert!(oracle_addrs.contains(&weth().address.as_str().to_lowercase()));
+        assert!(oracle_addrs.contains(&usdc().address.as_str().to_lowercase()));
+
+        // No on-chain reads for sig evaluation.
+        assert!(plan.balances.is_empty());
+        assert!(plan.allowances.is_empty());
+
+        // Clock is needed for deadline.
+        assert!(plan.clock_required);
+
+        // sig_oracle_requirements: one per approval.
+        assert_eq!(plan.sig_oracle_requirements.len(), 2);
+        assert!(plan
+            .sig_oracle_requirements
+            .iter()
+            .all(|r| matches!(r.kind, OracleRequirementKind::Input)));
+    }
+
+    #[test]
+    fn eip2612_plan_collects_single_token_and_clock() {
+        let signer = addr("0x4444444444444444444444444444444444444444");
+        let action = Action::Eip2612(Eip2612Action {
+            signer: signer.clone(),
+            owner: signer.clone(),
+            chain_id: 1 as CId,
+            domain_chain_id: 1 as CId,
+            verifying_contract: usdc().address.clone(),
+            primary_type: "Permit".into(),
+            spender: addr("0x5555555555555555555555555555555555555555"),
+            token: usdc(),
+            is_unlimited: false,
+            nonce_valid: true,
+            value: "100000000".into(),
+            deadline: 1_700_000_000,
+            nonce: "0".into(),
+            total_approved_usd: None,
+        });
+        let plan = required_host_facts(&action);
+
+        assert_eq!(plan.tokens_for_oracle.len(), 1);
+        assert_eq!(plan.tokens_for_oracle[0].symbol, "USDC");
+        assert!(plan.balances.is_empty());
+        assert!(plan.allowances.is_empty());
+        assert!(plan.clock_required);
+        assert_eq!(plan.sig_oracle_requirements.len(), 1);
+    }
+
+    #[test]
+    fn eip712_other_plan_only_clock() {
+        let signer = addr("0x6666666666666666666666666666666666666666");
+        let action = Action::Eip712Other(Eip712OtherAction {
+            signer,
+            chain_id: 1 as CId,
+            domain_chain_id: 1 as CId,
+            verifying_contract: addr("0x7777777777777777777777777777777777777777"),
+            primary_type: "Mail".into(),
+            domain_name: None,
+            domain_version: None,
+            domain_salt: None,
+            types_json: "{}".into(),
+            message_json: "{}".into(),
+        });
+        let plan = required_host_facts(&action);
+
+        assert!(plan.tokens_for_oracle.is_empty());
+        assert!(plan.balances.is_empty());
+        assert!(plan.allowances.is_empty());
+        assert!(plan.clock_required);
+        assert!(plan.sig_oracle_requirements.is_empty());
+    }
+
+    // Unused but imported via `use crate::core::Eip712Domain` — drop the
+    // unused warning by referencing the type. (Removing the import once the
+    // sig tests grow to need it is fine; for now this stub prevents
+    // dead-code warnings.)
+    #[allow(dead_code)]
+    fn _silence_eip712_imports() -> (Eip712TypedData, Eip712Domain) {
+        unimplemented!()
     }
 
     #[test]
