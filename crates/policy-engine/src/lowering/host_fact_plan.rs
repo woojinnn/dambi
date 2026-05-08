@@ -64,8 +64,19 @@ pub fn required_host_facts(action: &Action) -> HostFactPlan {
     let mut plan = HostFactPlan::default();
     match action {
         Action::Dex(dex) => {
-            // Oracle: union of input + output tokens (deduped by chain-qualified key).
+            // Oracle: derive from `dex.oracle_requirements` so the plan matches
+            // exactly what enrichment will consult (lowering/stamping/dex.rs:64,
+            // :164). Falling back to `input_tokens`/`output_tokens` would miss
+            // tokens when adapter populated only `oracle_requirements`.
             let mut seen = std::collections::HashSet::new();
+            for req in &dex.oracle_requirements {
+                if seen.insert(req.token.key()) {
+                    plan.tokens_for_oracle.push(req.token.clone());
+                }
+            }
+            // Defensive: also surface any input/output tokens that didn't make
+            // it into `oracle_requirements` (shouldn't happen for well-formed
+            // adapters, but cheap to guard).
             for token in dex
                 .facts
                 .input_tokens
@@ -77,15 +88,34 @@ pub fn required_host_facts(action: &Action) -> HostFactPlan {
                 }
             }
 
-            // Balance + allowance: actor against each non-native input token.
-            // Allowances target the contract that received the calldata (DEX router/Permit2).
-            for token in &dex.facts.input_tokens {
-                if token.is_native {
+            // Balance + allowance: actor against each non-native Input token
+            // from `oracle_requirements`. Using the same source of truth keeps
+            // plan/enrichment aligned.
+            let mut bal_seen = std::collections::HashSet::new();
+            for req in &dex.oracle_requirements {
+                if !matches!(req.kind, crate::core::OracleRequirementKind::Input) {
                     continue;
                 }
-                plan.balances.push((dex.actor.clone(), token.clone()));
+                if req.token.is_native {
+                    continue;
+                }
+                if !bal_seen.insert(req.token.key()) {
+                    continue;
+                }
+                plan.balances.push((dex.actor.clone(), req.token.clone()));
                 plan.allowances
-                    .push((dex.actor.clone(), token.clone(), dex.target.clone()));
+                    .push((dex.actor.clone(), req.token.clone(), dex.target.clone()));
+            }
+            // Fallback: if no Input requirements, use facts.input_tokens.
+            if plan.balances.is_empty() {
+                for token in &dex.facts.input_tokens {
+                    if token.is_native {
+                        continue;
+                    }
+                    plan.balances.push((dex.actor.clone(), token.clone()));
+                    plan.allowances
+                        .push((dex.actor.clone(), token.clone(), dex.target.clone()));
+                }
             }
         }
         Action::Permit2(p) => {
@@ -98,6 +128,17 @@ pub fn required_host_facts(action: &Action) -> HostFactPlan {
                     kind: crate::core::OracleRequirementKind::Input,
                     token: approval.token.clone(),
                     raw_amount: approval.amount.clone(),
+                });
+            }
+            // Fallback when `approvals` is empty (some Permit2 variants
+            // pre-decode): surface the representative `p.token`/`p.amount`
+            // so USD policies still get an oracle hint.
+            if p.approvals.is_empty() {
+                plan.tokens_for_oracle.push(p.token.clone());
+                plan.sig_oracle_requirements.push(OracleRequirement {
+                    kind: crate::core::OracleRequirementKind::Input,
+                    token: p.token.clone(),
+                    raw_amount: p.amount.clone(),
                 });
             }
             plan.clock_required = true;
@@ -237,8 +278,8 @@ mod tests {
     }
 
     use crate::core::{
-        ChainId as CId, Eip2612Action, Eip712Domain, Eip712OtherAction, Eip712TypedData,
-        Permit2Action, Permit2Approval, Permit2PermitKind,
+        ChainId as CId, Eip2612Action, Eip712OtherAction, Permit2Action, Permit2Approval,
+        Permit2PermitKind,
     };
 
     fn permit2_action_two_tokens() -> Action {
@@ -360,13 +401,78 @@ mod tests {
         assert!(plan.sig_oracle_requirements.is_empty());
     }
 
-    // Unused but imported via `use crate::core::Eip712Domain` — drop the
-    // unused warning by referencing the type. (Removing the import once the
-    // sig tests grow to need it is fine; for now this stub prevents
-    // dead-code warnings.)
-    #[allow(dead_code)]
-    fn _silence_eip712_imports() -> (Eip712TypedData, Eip712Domain) {
-        unimplemented!()
+    #[test]
+    fn permit2_with_empty_approvals_falls_back_to_representative() {
+        let signer = addr("0x2222222222222222222222222222222222222222");
+        let permit2 = addr("0x000000000022D473030F116dDEE9F6B43aC78BA3");
+        let action = Action::Permit2(Permit2Action {
+            signer,
+            chain_id: 1 as CId,
+            domain_chain_id: 1 as CId,
+            verifying_contract: permit2,
+            primary_type: "PermitTransferFrom".into(),
+            permit_kind: Permit2PermitKind::PermitTransferFrom,
+            spender: addr("0x3333333333333333333333333333333333333333"),
+            token: weth(),
+            amount: "1000000000000000000".into(),
+            expiration: 0,
+            sig_deadline: 1_700_000_000,
+            nonce: "0".into(),
+            approvals: vec![], // empty — exercise the fallback
+            is_unlimited: false,
+            nonce_valid: true,
+            witness_present: false,
+            total_approved_usd: None,
+        });
+        let plan = required_host_facts(&action);
+        assert_eq!(plan.tokens_for_oracle.len(), 1);
+        assert_eq!(plan.tokens_for_oracle[0].symbol, "WETH");
+        assert_eq!(plan.sig_oracle_requirements.len(), 1);
+        assert_eq!(
+            plan.sig_oracle_requirements[0].raw_amount,
+            "1000000000000000000"
+        );
+        assert!(plan.clock_required);
+    }
+
+    #[test]
+    fn dex_plan_uses_oracle_requirements_when_input_tokens_empty() {
+        // Regression: earlier draft underplanned facts when an adapter
+        // populated `oracle_requirements` but left `input_tokens` empty.
+        let actor = addr("0x1111111111111111111111111111111111111111");
+        let target = addr("0xE592427A0AEce92De3Edee1F18E0157C05861564");
+        let action = Action::Dex(DexAction {
+            actor: actor.clone(),
+            target: target.clone(),
+            value_wei: "0".into(),
+            facts: DexFacts {
+                protocol_ids: vec!["uniswap_v3".into()],
+                input_tokens: vec![], // empty
+                output_tokens: vec![],
+                ..Default::default()
+            },
+            oracle_requirements: vec![OracleRequirement {
+                kind: OracleRequirementKind::Input,
+                token: weth(),
+                raw_amount: "1000000000000000000".into(),
+            }],
+            trace: DexTrace::default(),
+        });
+        let plan = required_host_facts(&action);
+        assert_eq!(
+            plan.tokens_for_oracle.len(),
+            1,
+            "WETH must be planned via oracle_requirements"
+        );
+        assert_eq!(plan.tokens_for_oracle[0].symbol, "WETH");
+        assert_eq!(
+            plan.balances.len(),
+            1,
+            "balance must derive from Input requirements"
+        );
+        assert_eq!(plan.balances[0].0, actor);
+        assert_eq!(plan.allowances.len(), 1);
+        assert_eq!(plan.allowances[0].2, target);
     }
 
     #[test]

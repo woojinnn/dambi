@@ -119,7 +119,16 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
     pub fn build_action_for(&self, request: &Request) -> Result<Action, PipelineError> {
         match request {
             Request::Tx(tx) => self.build_action(tx),
-            Request::Sig(sig) => self.build_signature_action(sig),
+            Request::Sig(sig) => {
+                // Mirror `evaluate_sig`: validate typed data before adapter
+                // dispatch so external orchestrators receive the same
+                // PipelineError::Lowering boundary error they would get from a
+                // full evaluation. Without this, planning succeeds for a
+                // signature that evaluation later rejects.
+                validate_typed_data(&sig.typed_data)
+                    .map_err(|e| PipelineError::Lowering(e.to_string()))?;
+                self.build_signature_action(sig)
+            }
         }
     }
 
