@@ -85,6 +85,7 @@ fn signature_policy_schemas_accept_v1_contexts() {
           context.sigDeadlineDeltaSec <= 3600 &&
           context.nonceValid &&
           !context.isUnlimited &&
+          !context.witnessPresent &&
           context.approvalCount >= 1 &&
           context has totalApprovedUsd &&
           context.totalApprovedUsd.value.lessThanOrEqual(decimal("100.00"))

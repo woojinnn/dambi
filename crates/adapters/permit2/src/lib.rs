@@ -82,6 +82,9 @@ impl SignatureAdapter for Permit2Adapter {
                     Permit2PermitKind::PermitSingle,
                     Permit2PermitKind::PermitBatch,
                     Permit2PermitKind::PermitTransferFrom,
+                    Permit2PermitKind::PermitBatchTransferFrom,
+                    Permit2PermitKind::PermitWitnessTransferFrom,
+                    Permit2PermitKind::PermitBatchWitnessTransferFrom,
                 ]
                 .into_iter()
                 .map({
@@ -109,6 +112,11 @@ impl SignatureAdapter for Permit2Adapter {
             Permit2PermitKind::PermitSingle => self.decode_single(sig)?,
             Permit2PermitKind::PermitBatch => self.decode_batch(sig)?,
             Permit2PermitKind::PermitTransferFrom => self.decode_transfer(sig)?,
+            Permit2PermitKind::PermitBatchTransferFrom => self.decode_batch_transfer(sig)?,
+            Permit2PermitKind::PermitWitnessTransferFrom => self.decode_witness_transfer(sig)?,
+            Permit2PermitKind::PermitBatchWitnessTransferFrom => {
+                self.decode_batch_witness_transfer(sig)?
+            }
         };
         Ok(Action::Permit2(decoded))
     }
@@ -127,6 +135,7 @@ impl Permit2Adapter {
             spender,
             sig_deadline,
             vec![approval],
+            false,
         )
     }
 
@@ -148,11 +157,44 @@ impl Permit2Adapter {
             spender,
             sig_deadline,
             approvals,
+            false,
         )
     }
 
     fn decode_transfer(&self, sig: &SignatureRequest) -> Result<Permit2Action, AdapterError> {
+        self.decode_transfer_kind(sig, Permit2PermitKind::PermitTransferFrom, false)
+    }
+
+    fn decode_batch_transfer(&self, sig: &SignatureRequest) -> Result<Permit2Action, AdapterError> {
+        self.decode_batch_transfer_kind(sig, Permit2PermitKind::PermitBatchTransferFrom, false)
+    }
+
+    fn decode_witness_transfer(
+        &self,
+        sig: &SignatureRequest,
+    ) -> Result<Permit2Action, AdapterError> {
+        self.decode_transfer_kind(sig, Permit2PermitKind::PermitWitnessTransferFrom, true)
+    }
+
+    fn decode_batch_witness_transfer(
+        &self,
+        sig: &SignatureRequest,
+    ) -> Result<Permit2Action, AdapterError> {
+        self.decode_batch_transfer_kind(
+            sig,
+            Permit2PermitKind::PermitBatchWitnessTransferFrom,
+            true,
+        )
+    }
+
+    fn decode_transfer_kind(
+        &self,
+        sig: &SignatureRequest,
+        permit_kind: Permit2PermitKind,
+        require_witness: bool,
+    ) -> Result<Permit2Action, AdapterError> {
         let message = object(&sig.typed_data.message, "message")?;
+        let witness_present = self.witness_present(message, require_witness)?;
         let permitted = object_field(message, "permitted")?;
         let token = self
             .tokens
@@ -164,16 +206,72 @@ impl Permit2Adapter {
         let approval = Permit2Approval {
             token,
             amount,
-            expiration: deadline,
+            // TransferFrom shapes do not carry per-permit expirations; only the
+            // signature deadline is available at the top level.
+            expiration: 0,
             nonce,
         };
         self.action_from_parts(
             sig,
-            Permit2PermitKind::PermitTransferFrom,
+            permit_kind,
             spender,
             deadline,
             vec![approval],
+            witness_present,
         )
+    }
+
+    fn decode_batch_transfer_kind(
+        &self,
+        sig: &SignatureRequest,
+        permit_kind: Permit2PermitKind,
+        require_witness: bool,
+    ) -> Result<Permit2Action, AdapterError> {
+        let message = object(&sig.typed_data.message, "message")?;
+        let witness_present = self.witness_present(message, require_witness)?;
+        let permitted = array_field(message, "permitted")?;
+        let nonce = u256_string_field(message, "nonce")?;
+        let approvals = permitted
+            .iter()
+            .map(|value| {
+                object(value, "permitted[]").and_then(|item| {
+                    let token = self
+                        .tokens
+                        .get(sig.chain_id, &address_field(item, "token")?);
+                    Ok(Permit2Approval {
+                        token,
+                        amount: u256_string_field(item, "amount")?,
+                        // TransferFrom shapes do not carry per-permit
+                        // expirations; only the signature deadline is available
+                        // at the top level.
+                        expiration: 0,
+                        nonce: nonce.clone(),
+                    })
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let deadline = u64_field(message, "deadline")?;
+        let spender = address_field(message, "spender")?;
+        self.action_from_parts(
+            sig,
+            permit_kind,
+            spender,
+            deadline,
+            approvals,
+            witness_present,
+        )
+    }
+
+    fn witness_present(
+        &self,
+        message: &Map<String, Value>,
+        require_witness: bool,
+    ) -> Result<bool, AdapterError> {
+        let witness_present = message.contains_key("witness");
+        if require_witness && !witness_present {
+            return Err(AdapterError::BadCalldata("missing field witness".into()));
+        }
+        Ok(witness_present)
     }
 
     fn approval_from_details(
@@ -197,6 +295,7 @@ impl Permit2Adapter {
         spender: Address,
         sig_deadline: u64,
         approvals: Vec<Permit2Approval>,
+        witness_present: bool,
     ) -> Result<Permit2Action, AdapterError> {
         let representative = representative_approval(&approvals)?;
         let is_unlimited = approvals
@@ -222,6 +321,7 @@ impl Permit2Adapter {
             approvals,
             is_unlimited,
             nonce_valid,
+            witness_present,
             total_approved_usd: None,
         })
     }

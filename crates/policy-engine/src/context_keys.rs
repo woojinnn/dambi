@@ -89,6 +89,8 @@ pub const APPROVAL_COUNT: &str = "approvalCount";
 pub const NONCE_VALID: &str = "nonceValid";
 /// Unlimited approval marker.
 pub const IS_UNLIMITED: &str = "isUnlimited";
+/// Permit2 witness payload marker.
+pub const WITNESS_PRESENT: &str = "witnessPresent";
 /// Whether Permit2 human amount was clamped at Cedar's decimal ceiling.
 pub const AMOUNT_HUMAN_CLAMPED_AT_CEILING: &str = "amountHumanClampedAtCeiling";
 /// Total approved USD valuation.

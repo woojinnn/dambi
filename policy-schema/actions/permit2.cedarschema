@@ -13,6 +13,7 @@ type Permit2Context = {
 
   nonceValid: Bool,
   isUnlimited: Bool,
+  witnessPresent: Bool,
   amountHumanClampedAtCeiling: Bool,
 
   totalApprovedUsd?: UsdValuation,

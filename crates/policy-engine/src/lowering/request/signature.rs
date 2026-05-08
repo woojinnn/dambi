@@ -6,7 +6,7 @@ use crate::context_keys::{
     IS_UNLIMITED, MESSAGE_JSON, NONCE, NONCE_VALID, NOW_TS, OWNER, PERMIT_KIND, PRIMARY_TYPE,
     REQUEST_CHAIN_ID, SIGNER, SIG_DEADLINE, SIG_DEADLINE_DELTA_SEC, SPENDER, TOKEN,
     TOTAL_APPROVED_USD, TYPES_JSON, VALUE_HUMAN, VALUE_HUMAN_CLAMPED_AT_CEILING,
-    VERIFYING_CONTRACT,
+    VERIFYING_CONTRACT, WITNESS_PRESENT,
 };
 use crate::core::{Eip2612Action, Eip712OtherAction, Permit2Action};
 use crate::lowering::decimal::token_amount_human_decimal;
@@ -105,6 +105,7 @@ fn permit2_context(action: &Permit2Action, now_ts: u64) -> Result<Value, PolicyE
     );
     context.insert(NONCE_VALID.into(), Value::from(action.nonce_valid));
     context.insert(IS_UNLIMITED.into(), Value::from(action.is_unlimited));
+    context.insert(WITNESS_PRESENT.into(), Value::from(action.witness_present));
     context.insert(
         AMOUNT_HUMAN_CLAMPED_AT_CEILING.into(),
         Value::from(amount_clamped),

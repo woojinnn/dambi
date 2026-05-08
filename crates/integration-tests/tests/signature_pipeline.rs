@@ -1,8 +1,8 @@
 use policy_engine::{
-    Action, AdapterError, AdapterId, Address, HostCapabilities, MockAdapterRegistry, MockClock,
-    MockOracle, MockSignatureRegistry, Permit2Action, Permit2Approval, Permit2PermitKind, Pipeline,
-    PipelineError, PolicyEngine, Request, SignatureAdapter, SignatureMatchKey, SignatureRequest,
-    Token, TransactionRequest, Verdict,
+    Action, AdapterError, AdapterId, Address, Eip2612Action, HostCapabilities, MockAdapterRegistry,
+    MockClock, MockOracle, MockSignatureRegistry, Permit2Action, Permit2Approval,
+    Permit2PermitKind, Pipeline, PipelineError, PolicyEngine, Request, SignatureAdapter,
+    SignatureMatchKey, SignatureRequest, Token, TransactionRequest, Verdict,
 };
 use policy_engine_adapters_bundle::default_signature_registry;
 use serde_json::{json, Value};
@@ -20,6 +20,8 @@ const PERMIT2_CHAIN: &str =
 const PERMIT2_NONCE: &str = include_str!("../../../policies/signature/_shared/nonce-sanity.cedar");
 const PERMIT2_HUMAN_MAX: &str =
     include_str!("../../../policies/signature/permit2/max-human-amount-50.cedar");
+const PERMIT2_WITNESS_BLOCKLIST: &str =
+    include_str!("../../../policies/signature/permit2/witness-blocklist.cedar");
 
 const EIP2612_SPENDER_ALLOWLIST: &str =
     include_str!("../../../policies/signature/_shared/spender-allowlist.cedar");
@@ -60,6 +62,14 @@ fn permit2_single() -> SignatureRequest {
 
 fn permit2_batch() -> SignatureRequest {
     load_signature("permit2_permit_batch.json")
+}
+
+fn permit2_batch_transfer() -> SignatureRequest {
+    load_signature("permit2_permit_batch_transfer_from.json")
+}
+
+fn permit2_witness_transfer() -> SignatureRequest {
+    load_signature("permit2_permit_witness_transfer_from.json")
 }
 
 fn eip2612_permit() -> SignatureRequest {
@@ -165,7 +175,7 @@ fn eip2612_set_message(field: &str, value: Value) -> SignatureRequest {
     sig
 }
 
-fn assert_lowering_error(error: PipelineError, expected: &str) {
+fn assert_lowering_error(error: &PipelineError, expected: &str) {
     match error {
         PipelineError::Lowering(message) => assert!(
             message.contains(expected),
@@ -188,6 +198,25 @@ fn permit2_spender_allowlist_passes_and_fails() {
     assert_fail_id(
         evaluate(denied, PERMIT2_SPENDER_ALLOWLIST),
         "user/signature/permit2/spender-allowlist",
+    );
+}
+
+#[test]
+fn permit2_batch_transfer_from_spender_allowlist_fails_for_unlisted_spender() {
+    let mut denied = permit2_batch_transfer();
+    denied.typed_data.message["spender"] = json!("0x2222222222222222222222222222222222222222");
+
+    assert_fail_id(
+        evaluate(denied, PERMIT2_SPENDER_ALLOWLIST),
+        "user/signature/permit2/spender-allowlist",
+    );
+}
+
+#[test]
+fn permit2_witness_transfer_fails_witness_blocklist() {
+    assert_fail_id(
+        evaluate(permit2_witness_transfer(), PERMIT2_WITNESS_BLOCKLIST),
+        "user/signature/permit2/witness-blocklist",
     );
 }
 
@@ -259,6 +288,21 @@ fn permit2_human_amount_cap_passes_and_fails() {
 }
 
 #[test]
+fn typed_data_validation_rejects_missing_eip712_domain_type() {
+    let mut sig = permit2_single();
+    sig.typed_data
+        .types
+        .as_object_mut()
+        .expect("fixture types is object")
+        .remove("EIP712Domain");
+
+    let error =
+        evaluate_result(sig, "").expect_err("missing EIP712Domain definition must fail early");
+
+    assert_lowering_error(&error, "MissingEip712Domain");
+}
+
+#[test]
 fn typed_data_validation_rejects_missing_primary_type() {
     let mut sig = permit2_single();
     sig.typed_data.primary_type = "MissingPrimaryType".into();
@@ -266,7 +310,7 @@ fn typed_data_validation_rejects_missing_primary_type() {
     let error = evaluate_result(sig, "")
         .expect_err("missing primaryType definition must fail at pipeline boundary");
 
-    assert_lowering_error(error, "types missing primaryType MissingPrimaryType");
+    assert_lowering_error(&error, "types missing primaryType MissingPrimaryType");
 }
 
 #[test]
@@ -281,13 +325,64 @@ fn typed_data_validation_rejects_missing_message_field() {
     let error =
         evaluate_result(sig, "").expect_err("missing declared message field must fail early");
 
-    assert_lowering_error(error, "message missing primaryType field spender");
+    assert_lowering_error(&error, "message missing primaryType field spender");
+}
+
+#[test]
+fn typed_data_validation_rejects_invalid_solidity_type() {
+    let mut sig = permit2_single();
+    sig.typed_data.types["PermitSingle"][2]["type"] = json!("uint257");
+
+    let error = evaluate_result(sig, "").expect_err("invalid Solidity type must fail early");
+
+    assert_lowering_error(&error, "InvalidType");
+    assert_lowering_error(&error, "uint257");
+}
+
+#[test]
+fn typed_data_validation_rejects_missing_referenced_type() {
+    let mut sig = permit2_single();
+    sig.typed_data.types["PermitDetails"][0]["type"] = json!("blockchain");
+
+    let error = evaluate_result(sig, "").expect_err("missing referenced type must fail early");
+
+    assert_lowering_error(&error, "MissingReferencedType");
+    assert_lowering_error(&error, "blockchain");
+}
+
+#[test]
+fn typed_data_validation_rejects_type_cycle() {
+    let mut sig = eip712_other();
+    sig.typed_data.primary_type = "Node".into();
+    sig.typed_data.types = json!({
+        "EIP712Domain": [
+            { "name": "name", "type": "string" },
+            { "name": "version", "type": "string" },
+            { "name": "chainId", "type": "uint256" },
+            { "name": "verifyingContract", "type": "address" }
+        ],
+        "Node": [
+            { "name": "children", "type": "Node[]" }
+        ]
+    });
+    sig.typed_data.message = json!({
+        "children": []
+    });
+
+    let error = evaluate_result(sig, "").expect_err("type cycle must fail early");
+
+    assert_lowering_error(&error, "TypeCycle");
+    assert_lowering_error(&error, "Node");
 }
 
 #[test]
 fn typed_data_validation_allows_well_formed_signature_to_dispatch() {
     assert_eq!(
         evaluate_result(permit2_single(), "").unwrap(),
+        Verdict::Pass
+    );
+    assert_eq!(
+        evaluate_result(eip2612_permit(), "").unwrap(),
         Verdict::Pass
     );
 }
@@ -332,6 +427,43 @@ impl SignatureAdapter for MalformedAmountAdapter {
             approvals: vec![approval],
             is_unlimited: false,
             nonce_valid: true,
+            witness_present: false,
+            total_approved_usd: None,
+        }))
+    }
+}
+
+#[derive(Debug)]
+struct OwnerMismatchEip2612Adapter;
+
+impl SignatureAdapter for OwnerMismatchEip2612Adapter {
+    fn id(&self) -> AdapterId {
+        AdapterId::new("test/eip2612-owner-mismatch@1").unwrap()
+    }
+
+    fn match_keys(&self) -> Vec<SignatureMatchKey> {
+        vec![SignatureMatchKey::exact(
+            1,
+            Address::new(USDC_ADDRESS).unwrap(),
+            "Permit",
+        )]
+    }
+
+    fn build(&self, sig: &SignatureRequest) -> Result<Action, AdapterError> {
+        Ok(Action::Eip2612(Eip2612Action {
+            signer: sig.signer.clone(),
+            owner: Address::new("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap(),
+            chain_id: sig.chain_id,
+            domain_chain_id: sig.typed_data.domain.chain_id,
+            verifying_contract: sig.typed_data.domain.verifying_contract.clone(),
+            primary_type: sig.typed_data.primary_type.clone(),
+            spender: Address::new("0x1111111111111111111111111111111111111111").unwrap(),
+            token: usdc(),
+            is_unlimited: false,
+            nonce_valid: true,
+            value: "50000000".into(),
+            deadline: 1600,
+            nonce: "1".into(),
             total_approved_usd: None,
         }))
     }
@@ -345,7 +477,7 @@ fn malformed_signature_amount_returns_pipeline_error() {
     let error =
         evaluate_result_with_registry(permit2_single(), "", &clock, &sig_registry).unwrap_err();
 
-    assert_lowering_error(error, "not-a-u256");
+    assert_lowering_error(&error, "not-a-u256");
 }
 
 #[test]
@@ -413,17 +545,55 @@ fn eip2612_spender_allowlist_passes_and_fails() {
 }
 
 #[test]
-fn eip2612_spender_allowlist_classifies_when_owner_differs_from_signer() {
-    let mut allowed = eip2612_permit();
-    allowed.typed_data.message["owner"] = json!("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-    assert_eq!(evaluate(allowed, EIP2612_SPENDER_ALLOWLIST), Verdict::Pass);
+fn eip2612_signer_owner_match_permits_policy_evaluation() {
+    assert_eq!(
+        evaluate(eip2612_permit(), EIP2612_SPENDER_ALLOWLIST),
+        Verdict::Pass
+    );
+}
 
+#[test]
+fn eip2612_signer_owner_mismatch_fails_adapter_build() {
     let mut denied = eip2612_permit();
     denied.typed_data.message["owner"] = json!("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-    denied.typed_data.message["spender"] = json!("0x2222222222222222222222222222222222222222");
+
+    let error =
+        evaluate_result(denied, EIP2612_SPENDER_ALLOWLIST).expect_err("adapter must reject owner");
+
+    match error {
+        PipelineError::AdapterBuild(message) => {
+            assert!(message.contains("message.owner"));
+            assert!(message.contains("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+            assert!(message.contains("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        }
+        other => panic!("expected PipelineError::AdapterBuild, got {other:?}"),
+    }
+}
+
+#[test]
+fn eip2612_owner_match_policy_remains_defense_in_depth() {
+    const OWNER_MATCH: &str = r#"
+@id("test/signature/eip2612/owner-match")
+@severity("deny")
+forbid (
+  principal is Wallet,
+  action == Action::"signature.eip2612",
+  resource is Protocol
+)
+when {
+  context.owner != context.base.signer
+};
+"#;
+    let clock = MockClock::with_fixed(1000);
+    let sig_registry =
+        MockSignatureRegistry::new().with_adapter(Arc::new(OwnerMismatchEip2612Adapter));
+
+    // Redundant with adapter-level enforcement; kept as belt-and-braces
+    // defense in case the adapter is bypassed via Action construction in tests.
     assert_fail_id(
-        evaluate(denied, EIP2612_SPENDER_ALLOWLIST),
-        "user/signature/eip2612/spender-allowlist",
+        evaluate_result_with_registry(eip2612_permit(), OWNER_MATCH, &clock, &sig_registry)
+            .expect("pipeline ok"),
+        "test/signature/eip2612/owner-match",
     );
 }
 

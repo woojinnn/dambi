@@ -13,26 +13,33 @@
         { "name": "chainId", "type": "uint256" },
         { "name": "verifyingContract", "type": "address" }
       ],
-      "PermitTransferFrom": [
+      "PermitWitnessTransferFrom": [
         { "name": "permitted", "type": "TokenPermissions" },
         { "name": "spender", "type": "address" },
         { "name": "nonce", "type": "uint256" },
-        { "name": "deadline", "type": "uint256" }
+        { "name": "deadline", "type": "uint256" },
+        { "name": "witness", "type": "ExampleWitness" }
       ],
       "TokenPermissions": [
         { "name": "token", "type": "address" },
         { "name": "amount", "type": "uint256" }
+      ],
+      "ExampleWitness": [
+        { "name": "data", "type": "bytes32" }
       ]
     },
-    "primaryType": "PermitTransferFrom",
+    "primaryType": "PermitWitnessTransferFrom",
     "message": {
       "permitted": {
         "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
         "amount": "10000000000000000"
       },
       "spender": "0x1111111111111111111111111111111111111111",
-      "nonce": 3,
-      "deadline": 1600
+      "nonce": 5,
+      "deadline": 1600,
+      "witness": {
+        "data": "0x1111111111111111111111111111111111111111111111111111111111111111"
+      }
     }
   }
 }

@@ -28,6 +28,12 @@ const UINT256_MAX_DEC: &str =
     "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
 /// EIP-2612 Permit adapter.
+///
+/// The engine trusts the caller's claim of signer and does not recover ECDSA
+/// signatures. Owner enforcement catches host misconfiguration and one phishing
+/// class where a dapp claims a victim owner while the wallet signs under an
+/// attacker session key, but it cannot protect against a malicious host lying
+/// about both `SignatureRequest::signer` and `message.owner`.
 #[derive(Debug, Clone)]
 pub struct Eip2612Adapter {
     tokens: TokenLookup,
@@ -72,6 +78,19 @@ impl SignatureAdapter for Eip2612Adapter {
             .collect()
     }
 
+    /// Build an EIP-2612 action from typed data.
+    ///
+    /// `SignatureRequest::signer` is the address whose permit this is: the
+    /// EIP-2612 owner. For ERC-1271 or smart-wallet flows where the ECDSA key
+    /// differs from the on-chain owner, the host MUST resolve and pass the owner
+    /// address as signer before invoking the engine; the engine does not itself
+    /// recover signatures.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AdapterError::BadCalldata`] when the primary type is not
+    /// `Permit`, the permit message fields are malformed, or `message.owner`
+    /// differs from `SignatureRequest::signer`.
     fn build(&self, sig: &SignatureRequest) -> Result<Action, AdapterError> {
         if !sig.primary_type().eq_ignore_ascii_case("Permit") {
             return Err(AdapterError::BadCalldata(format!(
@@ -86,6 +105,13 @@ impl SignatureAdapter for Eip2612Adapter {
                 AdapterError::BadCalldata(format!("invalid message.owner: {reason}"))
             }
         })?;
+        if owner != sig.signer {
+            return Err(AdapterError::BadCalldata(format!(
+                "message.owner {} does not match SignatureRequest.signer {}",
+                owner.as_str(),
+                sig.signer.as_str()
+            )));
+        }
         let spender = address_field(message, "spender")?;
         let value = u256_string_field(message, "value")?;
         let deadline = u64_field(message, "deadline")?;

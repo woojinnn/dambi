@@ -13,36 +13,39 @@
         { "name": "chainId", "type": "uint256" },
         { "name": "verifyingContract", "type": "address" }
       ],
-      "PermitBatch": [
-        { "name": "details", "type": "PermitDetails[]" },
+      "PermitBatchWitnessTransferFrom": [
+        { "name": "permitted", "type": "TokenPermissions[]" },
         { "name": "spender", "type": "address" },
-        { "name": "sigDeadline", "type": "uint256" }
+        { "name": "nonce", "type": "uint256" },
+        { "name": "deadline", "type": "uint256" },
+        { "name": "witness", "type": "ExampleWitness" }
       ],
-      "PermitDetails": [
+      "TokenPermissions": [
         { "name": "token", "type": "address" },
-        { "name": "amount", "type": "uint160" },
-        { "name": "expiration", "type": "uint48" },
-        { "name": "nonce", "type": "uint48" }
+        { "name": "amount", "type": "uint256" }
+      ],
+      "ExampleWitness": [
+        { "name": "data", "type": "bytes32" }
       ]
     },
-    "primaryType": "PermitBatch",
+    "primaryType": "PermitBatchWitnessTransferFrom",
     "message": {
-      "details": [
+      "permitted": [
         {
           "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-          "amount": "10000000000000000",
-          "expiration": 4600,
-          "nonce": 1
+          "amount": "10000000000000000"
         },
         {
           "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-          "amount": "50000000",
-          "expiration": 4600,
-          "nonce": 2
+          "amount": "50000000"
         }
       ],
       "spender": "0x1111111111111111111111111111111111111111",
-      "sigDeadline": 1600
+      "nonce": 6,
+      "deadline": 1600,
+      "witness": {
+        "data": "0x2222222222222222222222222222222222222222222222222222222222222222"
+      }
     }
   }
 }

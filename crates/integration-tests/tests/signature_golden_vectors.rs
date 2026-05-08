@@ -1,6 +1,6 @@
 use policy_engine::{
-    Action, Eip712OtherAction, Permit2PermitKind, SignatureAdapter, SignatureRegistry,
-    SignatureRequest, SignatureResolverOutcome,
+    Action, AdapterError, Eip712OtherAction, Permit2PermitKind, SignatureAdapter,
+    SignatureRegistry, SignatureRequest, SignatureResolverOutcome,
 };
 use policy_engine_adapters_bundle::default_signature_registry;
 use std::{fs, path::Path};
@@ -75,6 +75,80 @@ fn permit2_permit_transfer_from_decodes_to_action() {
     assert_eq!(action.permit_kind, Permit2PermitKind::PermitTransferFrom);
     assert_eq!(action.nonce, "3");
     assert_eq!(action.sig_deadline, 1600);
+    assert_eq!(action.expiration, 0);
+    assert!(!action.witness_present);
+}
+
+#[test]
+fn permit2_permit_batch_transfer_from_decodes_to_action() {
+    let registry = default_signature_registry();
+    let sig = load_signature("permit2_permit_batch_transfer_from.json");
+    let adapter = resolved_adapter(&registry, &sig);
+    let action = adapter.build(&sig).expect("Permit2 batch transfer decodes");
+
+    let Action::Permit2(action) = action else {
+        panic!("expected Action::Permit2");
+    };
+    assert_eq!(
+        action.permit_kind,
+        Permit2PermitKind::PermitBatchTransferFrom
+    );
+    assert_eq!(action.approvals.len(), 2);
+    assert!(action
+        .approvals
+        .iter()
+        .all(|approval| approval.expiration == 0));
+    assert_eq!(action.nonce, "4");
+    assert_eq!(action.sig_deadline, 1600);
+    assert_eq!(action.token.symbol, "USDC");
+    assert_eq!(action.amount, "50000000");
+    assert!(!action.witness_present);
+}
+
+#[test]
+fn permit2_permit_witness_transfer_from_decodes_to_action() {
+    let registry = default_signature_registry();
+    let sig = load_signature("permit2_permit_witness_transfer_from.json");
+    let adapter = resolved_adapter(&registry, &sig);
+    let action = adapter
+        .build(&sig)
+        .expect("Permit2 witness transfer decodes");
+
+    let Action::Permit2(action) = action else {
+        panic!("expected Action::Permit2");
+    };
+    assert_eq!(
+        action.permit_kind,
+        Permit2PermitKind::PermitWitnessTransferFrom
+    );
+    assert_eq!(action.approvals.len(), 1);
+    assert_eq!(action.nonce, "5");
+    assert_eq!(action.sig_deadline, 1600);
+    assert_eq!(action.expiration, 0);
+    assert!(action.witness_present);
+}
+
+#[test]
+fn permit2_permit_batch_witness_transfer_from_decodes_to_action() {
+    let registry = default_signature_registry();
+    let sig = load_signature("permit2_permit_batch_witness_transfer_from.json");
+    let adapter = resolved_adapter(&registry, &sig);
+    let action = adapter
+        .build(&sig)
+        .expect("Permit2 batch witness transfer decodes");
+
+    let Action::Permit2(action) = action else {
+        panic!("expected Action::Permit2");
+    };
+    assert_eq!(
+        action.permit_kind,
+        Permit2PermitKind::PermitBatchWitnessTransferFrom
+    );
+    assert_eq!(action.approvals.len(), 2);
+    assert_eq!(action.nonce, "6");
+    assert_eq!(action.sig_deadline, 1600);
+    assert_eq!(action.token.symbol, "USDC");
+    assert!(action.witness_present);
 }
 
 #[test]
@@ -102,13 +176,31 @@ fn eip2612_permit_decodes_to_action() {
 }
 
 #[test]
-fn eip2612_permit_decodes_owner_from_message_when_signer_differs() {
+fn eip2612_permit_rejects_owner_when_signer_differs() {
     let registry = default_signature_registry();
     let mut sig = load_signature("eip2612_permit.json");
     sig.typed_data.message["owner"] =
         serde_json::json!("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     let adapter = resolved_adapter(&registry, &sig);
-    let action = adapter.build(&sig).expect("EIP-2612 fixture decodes");
+
+    let err = adapter
+        .build(&sig)
+        .expect_err("EIP-2612 owner/signer mismatch must fail");
+
+    let AdapterError::BadCalldata(message) = err;
+    assert!(message.contains("message.owner"));
+    assert!(message.contains("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+    assert!(message.contains("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+}
+
+#[test]
+fn eip2612_permit_allows_owner_when_signer_matches() {
+    let registry = default_signature_registry();
+    let sig = load_signature("eip2612_permit.json");
+    let adapter = resolved_adapter(&registry, &sig);
+    let action = adapter
+        .build(&sig)
+        .expect("EIP-2612 signer/owner match decodes");
 
     let Action::Eip2612(action) = action else {
         panic!("expected Action::Eip2612");
@@ -119,7 +211,7 @@ fn eip2612_permit_decodes_owner_from_message_when_signer_differs() {
     );
     assert_eq!(
         action.owner.as_str(),
-        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
 }
 

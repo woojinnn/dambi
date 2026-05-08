@@ -3,7 +3,7 @@
 use alloy_primitives::{Address as AlloyAddress, U256};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
 
 /// EVM address as a lowercase hex string with 0x prefix.
@@ -237,6 +237,8 @@ pub struct Permit2Action {
     pub is_unlimited: bool,
     /// Structural nonce sanity flag.
     pub nonce_valid: bool,
+    /// Whether the Permit2 typed data includes a witness payload.
+    pub witness_present: bool,
     /// Oracle-derived total approved USD value, when available.
     pub total_approved_usd: Option<UsdValuation>,
 }
@@ -253,6 +255,15 @@ pub enum Permit2PermitKind {
     /// Permit2 `PermitTransferFrom`.
     #[serde(rename = "PermitTransferFrom")]
     PermitTransferFrom,
+    /// Permit2 `PermitBatchTransferFrom`.
+    #[serde(rename = "PermitBatchTransferFrom")]
+    PermitBatchTransferFrom,
+    /// Permit2 `PermitWitnessTransferFrom`.
+    #[serde(rename = "PermitWitnessTransferFrom")]
+    PermitWitnessTransferFrom,
+    /// Permit2 `PermitBatchWitnessTransferFrom`.
+    #[serde(rename = "PermitBatchWitnessTransferFrom")]
+    PermitBatchWitnessTransferFrom,
 }
 
 impl Permit2PermitKind {
@@ -263,6 +274,9 @@ impl Permit2PermitKind {
             Self::PermitSingle => "PermitSingle",
             Self::PermitBatch => "PermitBatch",
             Self::PermitTransferFrom => "PermitTransferFrom",
+            Self::PermitBatchTransferFrom => "PermitBatchTransferFrom",
+            Self::PermitWitnessTransferFrom => "PermitWitnessTransferFrom",
+            Self::PermitBatchWitnessTransferFrom => "PermitBatchWitnessTransferFrom",
         }
     }
 
@@ -275,6 +289,12 @@ impl Permit2PermitKind {
             Some(Self::PermitBatch)
         } else if s.eq_ignore_ascii_case(Self::PermitTransferFrom.as_str()) {
             Some(Self::PermitTransferFrom)
+        } else if s.eq_ignore_ascii_case(Self::PermitBatchTransferFrom.as_str()) {
+            Some(Self::PermitBatchTransferFrom)
+        } else if s.eq_ignore_ascii_case(Self::PermitWitnessTransferFrom.as_str()) {
+            Some(Self::PermitWitnessTransferFrom)
+        } else if s.eq_ignore_ascii_case(Self::PermitBatchWitnessTransferFrom.as_str()) {
+            Some(Self::PermitBatchWitnessTransferFrom)
         } else {
             None
         }
@@ -297,7 +317,12 @@ pub struct Permit2Approval {
 /// Semantic EIP-2612 permit signature action.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Eip2612Action {
-    /// Wallet that is being asked to sign.
+    /// Address whose permit this is.
+    ///
+    /// For EIP-2612 this is the permit owner. For ERC-1271/smart-wallet flows
+    /// where the ECDSA key differs from the on-chain owner, the host MUST
+    /// resolve and pass the owner address as signer before invoking the engine;
+    /// the engine does not itself recover signatures.
     pub signer: Address,
     /// Owner carried inside the permit message.
     pub owner: Address,
@@ -546,13 +571,43 @@ pub enum TypedDataError {
         /// Missing message field.
         field: String,
     },
+    /// The `types` map did not declare the EIP-712 domain type.
+    #[error("MissingEip712Domain: typedData.types missing EIP712Domain")]
+    MissingEip712Domain,
+    /// A declared field type was not a valid Solidity EIP-712 type string.
+    #[error(
+        "InvalidType: typedData.types[{primary_type}].{field_name} has invalid type {type_string}"
+    )]
+    InvalidType {
+        /// Type containing the invalid field declaration.
+        primary_type: String,
+        /// Field whose type was invalid.
+        field_name: String,
+        /// Invalid type string.
+        type_string: String,
+    },
+    /// A custom type reference pointed to a type not declared in `types`.
+    #[error("MissingReferencedType: {referenced_from} references missing type {missing_type}")]
+    MissingReferencedType {
+        /// Type containing the missing reference.
+        referenced_from: String,
+        /// Missing referenced type name.
+        missing_type: String,
+    },
+    /// The custom type graph contains a cycle.
+    #[error("TypeCycle: typedData type graph contains a cycle at {type_name}")]
+    TypeCycle {
+        /// Type detected on the active DFS stack.
+        type_name: String,
+    },
 }
 
 /// Validate the EIP-712 typed-data shape needed before adapter dispatch.
 ///
-/// This checks only the top-level primary type contract: `types` must define
-/// the declared `primaryType`, every primary-type entry must carry `name` and
-/// `type` strings, and `message` must contain each declared primary-type field.
+/// This checks the declared `EIP712Domain`, validates reachable field type
+/// strings, rejects missing reachable custom types and cycles, and preserves the
+/// top-level primary type contract that `message` must contain each declared
+/// primary-type field.
 ///
 /// # Errors
 ///
@@ -560,15 +615,22 @@ pub enum TypedDataError {
 pub fn validate_typed_data(td: &Eip712TypedData) -> Result<(), TypedDataError> {
     let primary_type = td.primary_type.as_str();
     let types = td.types.as_object().ok_or(TypedDataError::TypesNotObject)?;
-    let entries = types
-        .get(primary_type)
-        .ok_or_else(|| TypedDataError::MissingPrimaryType {
-            primary_type: primary_type.into(),
-        })?
-        .as_array()
-        .ok_or_else(|| TypedDataError::PrimaryTypeNotArray {
-            primary_type: primary_type.into(),
-        })?;
+
+    if !types.contains_key(EIP712_DOMAIN_TYPE) {
+        return Err(TypedDataError::MissingEip712Domain);
+    }
+
+    let mut visit_states = HashMap::new();
+    walk_typed_data_type(
+        EIP712_DOMAIN_TYPE,
+        None,
+        primary_type,
+        types,
+        &mut visit_states,
+    )?;
+    walk_typed_data_type(primary_type, None, primary_type, types, &mut visit_states)?;
+
+    let entries = typed_data_type_entries(types, primary_type, None, primary_type)?;
     let message = td
         .message
         .as_object()
@@ -599,6 +661,197 @@ pub fn validate_typed_data(td: &Eip712TypedData) -> Result<(), TypedDataError> {
     }
 
     Ok(())
+}
+
+const EIP712_DOMAIN_TYPE: &str = "EIP712Domain";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VisitState {
+    Visiting,
+    Visited,
+}
+
+fn walk_typed_data_type(
+    type_name: &str,
+    referenced_from: Option<&str>,
+    primary_type: &str,
+    types: &serde_json::Map<String, Value>,
+    visit_states: &mut HashMap<String, VisitState>,
+) -> Result<(), TypedDataError> {
+    match visit_states.get(type_name) {
+        Some(VisitState::Visiting) => {
+            return Err(TypedDataError::TypeCycle {
+                type_name: type_name.into(),
+            });
+        }
+        Some(VisitState::Visited) => return Ok(()),
+        None => {}
+    }
+
+    let entries = typed_data_type_entries(types, type_name, referenced_from, primary_type)?;
+    visit_states.insert(type_name.into(), VisitState::Visiting);
+
+    for referenced_type in typed_data_custom_references(type_name, entries)? {
+        walk_typed_data_type(
+            &referenced_type,
+            Some(type_name),
+            primary_type,
+            types,
+            visit_states,
+        )?;
+    }
+
+    visit_states.insert(type_name.into(), VisitState::Visited);
+    Ok(())
+}
+
+fn typed_data_type_entries<'a>(
+    types: &'a serde_json::Map<String, Value>,
+    type_name: &str,
+    referenced_from: Option<&str>,
+    primary_type: &str,
+) -> Result<&'a Vec<Value>, TypedDataError> {
+    let Some(value) = types.get(type_name) else {
+        if type_name == primary_type {
+            return Err(TypedDataError::MissingPrimaryType {
+                primary_type: primary_type.into(),
+            });
+        }
+        return Err(TypedDataError::MissingReferencedType {
+            referenced_from: referenced_from.unwrap_or(primary_type).into(),
+            missing_type: type_name.into(),
+        });
+    };
+    value
+        .as_array()
+        .ok_or_else(|| TypedDataError::PrimaryTypeNotArray {
+            primary_type: type_name.into(),
+        })
+}
+
+fn typed_data_custom_references(
+    type_name: &str,
+    entries: &[Value],
+) -> Result<Vec<String>, TypedDataError> {
+    let mut references = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let entry = entry
+            .as_object()
+            .ok_or_else(|| TypedDataError::FieldNotObject {
+                primary_type: type_name.into(),
+                index,
+            })?;
+        let field_name = entry.get("name").and_then(Value::as_str).ok_or_else(|| {
+            TypedDataError::FieldNameNotString {
+                primary_type: type_name.into(),
+                index,
+            }
+        })?;
+        let type_string = entry.get("type").and_then(Value::as_str).ok_or_else(|| {
+            TypedDataError::FieldTypeNotString {
+                primary_type: type_name.into(),
+                index,
+            }
+        })?;
+
+        match parse_solidity_type(type_string) {
+            Ok(Some(referenced_type)) => references.push(referenced_type.into()),
+            Ok(None) => {}
+            Err(()) => {
+                return Err(TypedDataError::InvalidType {
+                    primary_type: type_name.into(),
+                    field_name: field_name.into(),
+                    type_string: type_string.into(),
+                });
+            }
+        }
+    }
+    Ok(references)
+}
+
+fn parse_solidity_type(type_string: &str) -> Result<Option<&str>, ()> {
+    let base = strip_array_suffixes(type_string)?;
+    if is_primitive_solidity_type(base) {
+        return Ok(None);
+    }
+    if is_invalid_primitive_like_type(base) {
+        return Err(());
+    }
+    if is_custom_type_name(base) {
+        return Ok(Some(base));
+    }
+    Err(())
+}
+
+fn strip_array_suffixes(mut type_string: &str) -> Result<&str, ()> {
+    if type_string.is_empty() {
+        return Err(());
+    }
+
+    while type_string.ends_with(']') {
+        let Some(open_index) = type_string.rfind('[') else {
+            return Err(());
+        };
+        let length = &type_string[(open_index + 1)..(type_string.len() - 1)];
+        if !length.is_empty() && !length.chars().all(|ch| ch.is_ascii_digit()) {
+            return Err(());
+        }
+        type_string = &type_string[..open_index];
+        if type_string.is_empty() {
+            return Err(());
+        }
+    }
+
+    if type_string.contains('[') || type_string.contains(']') {
+        return Err(());
+    }
+
+    Ok(type_string)
+}
+
+fn is_primitive_solidity_type(base: &str) -> bool {
+    matches!(base, "address" | "bool" | "string" | "bytes")
+        || fixed_bytes_width(base).is_some_and(|width| (1..=32).contains(&width))
+        || integer_width(base, "uint").is_some_and(valid_integer_width)
+        || integer_width(base, "int").is_some_and(valid_integer_width)
+}
+
+fn is_invalid_primitive_like_type(base: &str) -> bool {
+    if matches!(base, "uint" | "int") {
+        return true;
+    }
+    integer_width(base, "uint").is_some_and(|width| !valid_integer_width(width))
+        || integer_width(base, "int").is_some_and(|width| !valid_integer_width(width))
+        || fixed_bytes_width(base).is_some_and(|width| !(1..=32).contains(&width))
+}
+
+fn integer_width(base: &str, prefix: &str) -> Option<u16> {
+    let suffix = base.strip_prefix(prefix)?;
+    if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    suffix.parse().ok()
+}
+
+fn fixed_bytes_width(base: &str) -> Option<u16> {
+    let suffix = base.strip_prefix("bytes")?;
+    if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    suffix.parse().ok()
+}
+
+fn valid_integer_width(width: u16) -> bool {
+    (8..=256).contains(&width) && width % 8 == 0
+}
+
+fn is_custom_type_name(base: &str) -> bool {
+    let mut chars = base.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 /// EIP-712 domain fields used by v1 signature policies.
