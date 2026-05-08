@@ -34,11 +34,15 @@ module.exports = {
     extensions: ['.ts', '.tsx', '.js', '.json'],
     alias: {
       '@lib': path.resolve(sourceDir, 'lib'),
+      '@background': path.resolve(sourceDir, 'background'),
     },
     fallback: {
       buffer: require.resolve('buffer/'),
       process: require.resolve('process/browser'),
     },
+  },
+  experiments: {
+    asyncWebAssembly: true,
   },
   module: {
     rules: [
@@ -55,6 +59,10 @@ module.exports = {
         test: /\.tsx?$/,
         loader: 'ts-loader',
         exclude: /node_modules/,
+      },
+      {
+        test: /\.wasm$/,
+        type: 'asset/resource',
       },
     ],
   },
