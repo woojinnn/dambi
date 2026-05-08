@@ -1,0 +1,15 @@
+type Eip712OtherContext = {
+  base: SignatureBaseContext,
+
+  domainName?: String,
+  domainVersion?: String,
+  domainSalt?: String,
+  typesJson: String,
+  messageJson: String,
+};
+
+action "signature.eip712_other" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: Eip712OtherContext,
+};

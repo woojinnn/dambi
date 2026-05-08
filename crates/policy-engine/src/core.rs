@@ -2,7 +2,9 @@
 
 use alloy_primitives::{Address as AlloyAddress, U256};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
+use serde_json::Value;
+use std::{collections::HashMap, str::FromStr};
+use thiserror::Error;
 
 /// EVM address as a lowercase hex string with 0x prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -32,7 +34,13 @@ impl Address {
     }
 }
 
-/// Chain id (EIP-155).
+/// Engine chain id.
+///
+/// EIP-712 permits `chainId` to be encoded as a `uint256`, but v1.1 narrows
+/// it to `u64`, which covers practical EVM chain ids as of this release. At
+/// the Cedar request boundary this value narrows again to Cedar `Long` (`i64`);
+/// callers that need to reject oversized ids should do so before building an
+/// engine request.
 pub type ChainId = u64;
 
 /// Token metadata as the engine sees it.
@@ -196,6 +204,201 @@ pub struct OtherAction {
     pub raw_calldata: String,
 }
 
+/// Semantic Permit2 signature action emitted by the Permit2 EIP-712 adapter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Permit2Action {
+    /// Wallet that is being asked to sign.
+    pub signer: Address,
+    /// Chain id supplied by the wallet request.
+    pub chain_id: ChainId,
+    /// Chain id embedded in the EIP-712 domain.
+    pub domain_chain_id: ChainId,
+    /// EIP-712 verifying contract.
+    pub verifying_contract: Address,
+    /// EIP-712 primary type.
+    pub primary_type: String,
+    /// Permit2 permit shape.
+    pub permit_kind: Permit2PermitKind,
+    /// Spender authorized by the permit.
+    pub spender: Address,
+    /// Representative token selected for single-token policy checks.
+    pub token: Token,
+    /// Representative raw approval amount as a decimal integer string.
+    pub amount: String,
+    /// Representative approval expiration timestamp.
+    pub expiration: u64,
+    /// Signature deadline timestamp.
+    pub sig_deadline: u64,
+    /// Representative nonce as a decimal integer string.
+    pub nonce: String,
+    /// All approvals decoded from the signature.
+    pub approvals: Vec<Permit2Approval>,
+    /// Whether any approval carries the Permit2 unlimited uint160 amount.
+    pub is_unlimited: bool,
+    /// Structural nonce sanity flag.
+    pub nonce_valid: bool,
+    /// Whether the Permit2 typed data includes a witness payload.
+    pub witness_present: bool,
+    /// Oracle-derived total approved USD value, when available.
+    pub total_approved_usd: Option<UsdValuation>,
+}
+
+/// Permit2 permit shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Permit2PermitKind {
+    /// Permit2 `PermitSingle`.
+    #[serde(rename = "PermitSingle")]
+    PermitSingle,
+    /// Permit2 `PermitBatch`.
+    #[serde(rename = "PermitBatch")]
+    PermitBatch,
+    /// Permit2 `PermitTransferFrom`.
+    #[serde(rename = "PermitTransferFrom")]
+    PermitTransferFrom,
+    /// Permit2 `PermitBatchTransferFrom`.
+    #[serde(rename = "PermitBatchTransferFrom")]
+    PermitBatchTransferFrom,
+    /// Permit2 `PermitWitnessTransferFrom`.
+    #[serde(rename = "PermitWitnessTransferFrom")]
+    PermitWitnessTransferFrom,
+    /// Permit2 `PermitBatchWitnessTransferFrom`.
+    #[serde(rename = "PermitBatchWitnessTransferFrom")]
+    PermitBatchWitnessTransferFrom,
+}
+
+impl Permit2PermitKind {
+    /// Return the EIP-712 primary-type label for this Permit2 shape.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PermitSingle => "PermitSingle",
+            Self::PermitBatch => "PermitBatch",
+            Self::PermitTransferFrom => "PermitTransferFrom",
+            Self::PermitBatchTransferFrom => "PermitBatchTransferFrom",
+            Self::PermitWitnessTransferFrom => "PermitWitnessTransferFrom",
+            Self::PermitBatchWitnessTransferFrom => "PermitBatchWitnessTransferFrom",
+        }
+    }
+
+    /// Parse a Permit2 primary type label, case-insensitively.
+    // `str::eq_ignore_ascii_case` is not const-callable, so this fn cannot be
+    // const despite the clippy suggestion.
+    #[allow(clippy::missing_const_for_fn)]
+    #[must_use]
+    pub fn from_primary_type(s: &str) -> Option<Self> {
+        if s.eq_ignore_ascii_case(Self::PermitSingle.as_str()) {
+            Some(Self::PermitSingle)
+        } else if s.eq_ignore_ascii_case(Self::PermitBatch.as_str()) {
+            Some(Self::PermitBatch)
+        } else if s.eq_ignore_ascii_case(Self::PermitTransferFrom.as_str()) {
+            Some(Self::PermitTransferFrom)
+        } else if s.eq_ignore_ascii_case(Self::PermitBatchTransferFrom.as_str()) {
+            Some(Self::PermitBatchTransferFrom)
+        } else if s.eq_ignore_ascii_case(Self::PermitWitnessTransferFrom.as_str()) {
+            Some(Self::PermitWitnessTransferFrom)
+        } else if s.eq_ignore_ascii_case(Self::PermitBatchWitnessTransferFrom.as_str()) {
+            Some(Self::PermitBatchWitnessTransferFrom)
+        } else {
+            None
+        }
+    }
+}
+
+/// One Permit2 approval item decoded from typed data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Permit2Approval {
+    /// Token being approved.
+    pub token: Token,
+    /// Raw approval amount as a decimal integer string.
+    pub amount: String,
+    /// Approval expiration timestamp.
+    pub expiration: u64,
+    /// Permit nonce as a decimal integer string.
+    pub nonce: String,
+}
+
+/// Semantic EIP-2612 permit signature action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Eip2612Action {
+    /// Address whose permit this is.
+    ///
+    /// For EIP-2612 this is the permit owner. For ERC-1271/smart-wallet flows
+    /// where the ECDSA key differs from the on-chain owner, the host MUST
+    /// resolve and pass the owner address as signer before invoking the engine;
+    /// the engine does not itself recover signatures.
+    pub signer: Address,
+    /// Owner carried inside the permit message.
+    pub owner: Address,
+    /// Chain id supplied by the wallet request.
+    pub chain_id: ChainId,
+    /// Chain id embedded in the EIP-712 domain.
+    pub domain_chain_id: ChainId,
+    /// EIP-712 verifying contract.
+    pub verifying_contract: Address,
+    /// EIP-712 primary type.
+    pub primary_type: String,
+    /// Spender authorized by the permit.
+    pub spender: Address,
+    /// Token contract being approved.
+    pub token: Token,
+    /// Whether the value is uint256 max.
+    pub is_unlimited: bool,
+    /// Structural nonce sanity flag.
+    pub nonce_valid: bool,
+    /// Raw approval value as a decimal integer string.
+    pub value: String,
+    /// Permit deadline timestamp.
+    pub deadline: u64,
+    /// Permit nonce as a decimal integer string.
+    pub nonce: String,
+    /// Oracle-derived total approved USD value, when available.
+    pub total_approved_usd: Option<UsdValuation>,
+}
+
+/// Catch-all action for unmatched EIP-712 signatures.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Eip712OtherAction {
+    /// Wallet that is being asked to sign.
+    pub signer: Address,
+    /// Chain id supplied by the wallet request.
+    pub chain_id: ChainId,
+    /// Chain id embedded in the EIP-712 domain.
+    pub domain_chain_id: ChainId,
+    /// EIP-712 verifying contract.
+    pub verifying_contract: Address,
+    /// EIP-712 primary type.
+    pub primary_type: String,
+    /// Optional domain name.
+    pub domain_name: Option<String>,
+    /// Optional domain version.
+    pub domain_version: Option<String>,
+    /// Optional domain salt.
+    pub domain_salt: Option<String>,
+    /// Raw EIP-712 types JSON serialized as compact JSON text.
+    pub types_json: String,
+    /// Raw EIP-712 message JSON serialized as compact JSON text.
+    pub message_json: String,
+}
+
+impl Eip712OtherAction {
+    /// Construct the catch-all action from an unmatched signature request.
+    #[must_use]
+    pub fn from_request(sig: &SignatureRequest) -> Self {
+        Self {
+            signer: sig.signer.clone(),
+            chain_id: sig.chain_id,
+            domain_chain_id: sig.typed_data.domain.chain_id,
+            verifying_contract: sig.typed_data.domain.verifying_contract.clone(),
+            primary_type: sig.typed_data.primary_type.clone(),
+            domain_name: sig.typed_data.domain.name.clone(),
+            domain_version: sig.typed_data.domain.version.clone(),
+            domain_salt: sig.typed_data.domain.salt.clone(),
+            types_json: json_to_compact_string(&sig.typed_data.types),
+            message_json: json_to_compact_string(&sig.typed_data.message),
+        }
+    }
+}
+
 /// Semantic action emitted by adapters.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,6 +409,15 @@ pub enum Action {
     /// Fallback action for unrecognized calls.
     #[serde(rename = "other")]
     Other(OtherAction),
+    /// Permit2 EIP-712 signature action.
+    #[serde(rename = "permit2")]
+    Permit2(Permit2Action),
+    /// EIP-2612 Permit EIP-712 signature action.
+    #[serde(rename = "eip2612")]
+    Eip2612(Eip2612Action),
+    /// Catch-all unmatched EIP-712 signature action.
+    #[serde(rename = "eip712Other")]
+    Eip712Other(Eip712OtherAction),
 }
 
 impl Action {
@@ -215,6 +427,9 @@ impl Action {
         match self {
             Self::Dex(_) => "dex",
             Self::Other(_) => "other",
+            Self::Permit2(_) => "signature.permit2",
+            Self::Eip2612(_) => "signature.eip2612",
+            Self::Eip712Other(_) => "signature.eip712_other",
         }
     }
 
@@ -224,6 +439,9 @@ impl Action {
         match self {
             Self::Dex(d) => &d.target,
             Self::Other(o) => &o.target,
+            Self::Permit2(p) => &p.verifying_contract,
+            Self::Eip2612(p) => &p.verifying_contract,
+            Self::Eip712Other(o) => &o.verifying_contract,
         }
     }
 
@@ -233,8 +451,20 @@ impl Action {
         match self {
             Self::Dex(d) => &d.actor,
             Self::Other(o) => &o.actor,
+            Self::Permit2(p) => &p.signer,
+            Self::Eip2612(p) => &p.signer,
+            Self::Eip712Other(o) => &o.signer,
         }
     }
+}
+
+/// Top-level policy-engine request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Request {
+    /// EVM transaction request.
+    Tx(TransactionRequest),
+    /// EIP-712 signature request.
+    Sig(SignatureRequest),
 }
 
 /// Unsigned transaction request presented to the policy engine.
@@ -257,6 +487,397 @@ pub struct TransactionRequest {
     pub gas: Option<u64>,
     /// Account nonce, when known.
     pub nonce: Option<u64>,
+}
+
+/// Off-chain EIP-712 signature request presented to the policy engine.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureRequest {
+    /// EVM chain id selected by the wallet request.
+    pub chain_id: ChainId,
+    /// Wallet that is being asked to sign.
+    pub signer: Address,
+    /// Typed data payload.
+    pub typed_data: Eip712TypedData,
+}
+
+impl SignatureRequest {
+    /// Borrow the EIP-712 primary type.
+    #[must_use]
+    pub fn primary_type(&self) -> &str {
+        &self.typed_data.primary_type
+    }
+}
+
+/// EIP-712 typed-data payload.
+// `serde_json::Value` carries an f64 number variant, so `Eq` is intentionally
+// not derived — the clippy suggestion to add `Eq` is a false positive here.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Eip712TypedData {
+    /// EIP-712 domain.
+    pub domain: Eip712Domain,
+    /// EIP-712 primary type.
+    pub primary_type: String,
+    /// EIP-712 type map.
+    pub types: serde_json::Value,
+    /// EIP-712 message object.
+    pub message: serde_json::Value,
+}
+
+/// Error returned when an EIP-712 typed-data payload is structurally invalid.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum TypedDataError {
+    /// The `types` field was not a JSON object.
+    #[error("typedData.types must be a JSON object")]
+    TypesNotObject,
+    /// The primary type was not present in `types`.
+    #[error("typedData.types missing primaryType {primary_type}")]
+    MissingPrimaryType {
+        /// Missing primary type name.
+        primary_type: String,
+    },
+    /// The primary type entry was not an array.
+    #[error("typedData.types[{primary_type}] must be an array")]
+    PrimaryTypeNotArray {
+        /// Primary type name.
+        primary_type: String,
+    },
+    /// One primary type field entry was not an object.
+    #[error("typedData.types[{primary_type}][{index}] must be an object")]
+    FieldNotObject {
+        /// Primary type name.
+        primary_type: String,
+        /// Field entry index.
+        index: usize,
+    },
+    /// One primary type field entry had no string `name`.
+    #[error("typedData.types[{primary_type}][{index}].name must be a string")]
+    FieldNameNotString {
+        /// Primary type name.
+        primary_type: String,
+        /// Field entry index.
+        index: usize,
+    },
+    /// One primary type field entry had no string `type`.
+    #[error("typedData.types[{primary_type}][{index}].type must be a string")]
+    FieldTypeNotString {
+        /// Primary type name.
+        primary_type: String,
+        /// Field entry index.
+        index: usize,
+    },
+    /// The `message` field was not a JSON object.
+    #[error("typedData.message must be a JSON object")]
+    MessageNotObject,
+    /// The message object did not contain a field declared by the primary type.
+    #[error("typedData.message missing primaryType field {field}")]
+    MissingMessageField {
+        /// Missing message field.
+        field: String,
+    },
+    /// The `types` map did not declare the EIP-712 domain type.
+    #[error("MissingEip712Domain: typedData.types missing EIP712Domain")]
+    MissingEip712Domain,
+    /// A declared field type was not a valid Solidity EIP-712 type string.
+    #[error(
+        "InvalidType: typedData.types[{primary_type}].{field_name} has invalid type {type_string}"
+    )]
+    InvalidType {
+        /// Type containing the invalid field declaration.
+        primary_type: String,
+        /// Field whose type was invalid.
+        field_name: String,
+        /// Invalid type string.
+        type_string: String,
+    },
+    /// A custom type reference pointed to a type not declared in `types`.
+    #[error("MissingReferencedType: {referenced_from} references missing type {missing_type}")]
+    MissingReferencedType {
+        /// Type containing the missing reference.
+        referenced_from: String,
+        /// Missing referenced type name.
+        missing_type: String,
+    },
+    /// The custom type graph contains a cycle.
+    #[error("TypeCycle: typedData type graph contains a cycle at {type_name}")]
+    TypeCycle {
+        /// Type detected on the active DFS stack.
+        type_name: String,
+    },
+}
+
+/// Validate the EIP-712 typed-data shape needed before adapter dispatch.
+///
+/// This checks the declared `EIP712Domain`, validates reachable field type
+/// strings, rejects missing reachable custom types and cycles, and preserves the
+/// top-level primary type contract that `message` must contain each declared
+/// primary-type field.
+///
+/// # Errors
+///
+/// Returns [`TypedDataError`] when the payload is structurally invalid.
+pub fn validate_typed_data(td: &Eip712TypedData) -> Result<(), TypedDataError> {
+    let primary_type = td.primary_type.as_str();
+    let types = td.types.as_object().ok_or(TypedDataError::TypesNotObject)?;
+
+    if !types.contains_key(EIP712_DOMAIN_TYPE) {
+        return Err(TypedDataError::MissingEip712Domain);
+    }
+
+    let mut visit_states = HashMap::new();
+    walk_typed_data_type(
+        EIP712_DOMAIN_TYPE,
+        None,
+        primary_type,
+        types,
+        &mut visit_states,
+    )?;
+    walk_typed_data_type(primary_type, None, primary_type, types, &mut visit_states)?;
+
+    let entries = typed_data_type_entries(types, primary_type, None, primary_type)?;
+    let message = td
+        .message
+        .as_object()
+        .ok_or(TypedDataError::MessageNotObject)?;
+
+    for (index, entry) in entries.iter().enumerate() {
+        let entry = entry
+            .as_object()
+            .ok_or_else(|| TypedDataError::FieldNotObject {
+                primary_type: primary_type.into(),
+                index,
+            })?;
+        let name = entry.get("name").and_then(Value::as_str).ok_or_else(|| {
+            TypedDataError::FieldNameNotString {
+                primary_type: primary_type.into(),
+                index,
+            }
+        })?;
+        entry.get("type").and_then(Value::as_str).ok_or_else(|| {
+            TypedDataError::FieldTypeNotString {
+                primary_type: primary_type.into(),
+                index,
+            }
+        })?;
+        if !message.contains_key(name) {
+            return Err(TypedDataError::MissingMessageField { field: name.into() });
+        }
+    }
+
+    Ok(())
+}
+
+const EIP712_DOMAIN_TYPE: &str = "EIP712Domain";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VisitState {
+    Visiting,
+    Visited,
+}
+
+fn walk_typed_data_type(
+    type_name: &str,
+    referenced_from: Option<&str>,
+    primary_type: &str,
+    types: &serde_json::Map<String, Value>,
+    visit_states: &mut HashMap<String, VisitState>,
+) -> Result<(), TypedDataError> {
+    match visit_states.get(type_name) {
+        Some(VisitState::Visiting) => {
+            return Err(TypedDataError::TypeCycle {
+                type_name: type_name.into(),
+            });
+        }
+        Some(VisitState::Visited) => return Ok(()),
+        None => {}
+    }
+
+    let entries = typed_data_type_entries(types, type_name, referenced_from, primary_type)?;
+    visit_states.insert(type_name.into(), VisitState::Visiting);
+
+    for referenced_type in typed_data_custom_references(type_name, entries)? {
+        walk_typed_data_type(
+            &referenced_type,
+            Some(type_name),
+            primary_type,
+            types,
+            visit_states,
+        )?;
+    }
+
+    visit_states.insert(type_name.into(), VisitState::Visited);
+    Ok(())
+}
+
+fn typed_data_type_entries<'a>(
+    types: &'a serde_json::Map<String, Value>,
+    type_name: &str,
+    referenced_from: Option<&str>,
+    primary_type: &str,
+) -> Result<&'a Vec<Value>, TypedDataError> {
+    let Some(value) = types.get(type_name) else {
+        if type_name == primary_type {
+            return Err(TypedDataError::MissingPrimaryType {
+                primary_type: primary_type.into(),
+            });
+        }
+        return Err(TypedDataError::MissingReferencedType {
+            referenced_from: referenced_from.unwrap_or(primary_type).into(),
+            missing_type: type_name.into(),
+        });
+    };
+    value
+        .as_array()
+        .ok_or_else(|| TypedDataError::PrimaryTypeNotArray {
+            primary_type: type_name.into(),
+        })
+}
+
+fn typed_data_custom_references(
+    type_name: &str,
+    entries: &[Value],
+) -> Result<Vec<String>, TypedDataError> {
+    let mut references = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let entry = entry
+            .as_object()
+            .ok_or_else(|| TypedDataError::FieldNotObject {
+                primary_type: type_name.into(),
+                index,
+            })?;
+        let field_name = entry.get("name").and_then(Value::as_str).ok_or_else(|| {
+            TypedDataError::FieldNameNotString {
+                primary_type: type_name.into(),
+                index,
+            }
+        })?;
+        let type_string = entry.get("type").and_then(Value::as_str).ok_or_else(|| {
+            TypedDataError::FieldTypeNotString {
+                primary_type: type_name.into(),
+                index,
+            }
+        })?;
+
+        match parse_solidity_type(type_string) {
+            Ok(Some(referenced_type)) => references.push(referenced_type.into()),
+            Ok(None) => {}
+            Err(()) => {
+                return Err(TypedDataError::InvalidType {
+                    primary_type: type_name.into(),
+                    field_name: field_name.into(),
+                    type_string: type_string.into(),
+                });
+            }
+        }
+    }
+    Ok(references)
+}
+
+fn parse_solidity_type(type_string: &str) -> Result<Option<&str>, ()> {
+    let base = strip_array_suffixes(type_string)?;
+    if is_primitive_solidity_type(base) {
+        return Ok(None);
+    }
+    if is_invalid_primitive_like_type(base) {
+        return Err(());
+    }
+    if is_custom_type_name(base) {
+        return Ok(Some(base));
+    }
+    Err(())
+}
+
+fn strip_array_suffixes(mut type_string: &str) -> Result<&str, ()> {
+    if type_string.is_empty() {
+        return Err(());
+    }
+
+    while type_string.ends_with(']') {
+        let Some(open_index) = type_string.rfind('[') else {
+            return Err(());
+        };
+        let length = &type_string[(open_index + 1)..(type_string.len() - 1)];
+        if !length.is_empty() && !length.chars().all(|ch| ch.is_ascii_digit()) {
+            return Err(());
+        }
+        type_string = &type_string[..open_index];
+        if type_string.is_empty() {
+            return Err(());
+        }
+    }
+
+    if type_string.contains('[') || type_string.contains(']') {
+        return Err(());
+    }
+
+    Ok(type_string)
+}
+
+fn is_primitive_solidity_type(base: &str) -> bool {
+    matches!(base, "address" | "bool" | "string" | "bytes")
+        || fixed_bytes_width(base).is_some_and(|width| (1..=32).contains(&width))
+        || integer_width(base, "uint").is_some_and(valid_integer_width)
+        || integer_width(base, "int").is_some_and(valid_integer_width)
+}
+
+fn is_invalid_primitive_like_type(base: &str) -> bool {
+    if matches!(base, "uint" | "int") {
+        return true;
+    }
+    integer_width(base, "uint").is_some_and(|width| !valid_integer_width(width))
+        || integer_width(base, "int").is_some_and(|width| !valid_integer_width(width))
+        || fixed_bytes_width(base).is_some_and(|width| !(1..=32).contains(&width))
+}
+
+fn integer_width(base: &str, prefix: &str) -> Option<u16> {
+    let suffix = base.strip_prefix(prefix)?;
+    if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    suffix.parse().ok()
+}
+
+fn fixed_bytes_width(base: &str) -> Option<u16> {
+    let suffix = base.strip_prefix("bytes")?;
+    if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    suffix.parse().ok()
+}
+
+fn valid_integer_width(width: u16) -> bool {
+    (8..=256).contains(&width) && width.is_multiple_of(8)
+}
+
+fn is_custom_type_name(base: &str) -> bool {
+    let mut chars = base.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+/// EIP-712 domain fields used by v1 signature policies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Eip712Domain {
+    /// Optional domain name.
+    pub name: Option<String>,
+    /// Optional domain version.
+    pub version: Option<String>,
+    /// EIP-712 domain chain id.
+    pub chain_id: ChainId,
+    /// EIP-712 verifying contract.
+    pub verifying_contract: Address,
+    /// Optional domain salt.
+    pub salt: Option<String>,
+}
+
+fn json_to_compact_string(value: &serde_json::Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "null".into())
 }
 
 impl TransactionRequest {
