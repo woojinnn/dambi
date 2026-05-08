@@ -4,9 +4,13 @@
 export interface OracleEntry {
   /** `${chainId}:${address.toLowerCase()}` — matches engine `Token::key()`. */
   token_key: string;
+  /** TS-side convenience field requested by Plan 4 fact fetchers. */
+  usd_price: number;
+  /** WASM bridge DTO field consumed by `evaluate_json`. */
   usd_per_unit: string;
+  /** Unix seconds, matching HostSnapshotDto. */
   as_of_ts: number;
-  stale_sec?: number;
+  stale_sec: number;
   sources?: string[];
 }
 

@@ -1,67 +1,113 @@
-import Browser from 'webextension-polyfill';
+import { priceLastUpdatedAt } from './coingecko-client';
 
-const STORAGE_KEY = 'oracle:price-cache';
 const TTL_MS = 60_000;
+const hitUpdatedAt = new WeakMap<ReadonlyMap<string, number>, Map<string, number>>();
 
-interface CachedEntry {
-  usd: string;
-  asOfTs: number;
-  cachedAtMs: number;
-}
-
-type CacheShape = Record<string, CachedEntry>; // key = `${chainId}:${addressLower}`
-
-function key(chainId: number, address: string): string {
-  return `${chainId}:${address.toLowerCase()}`;
-}
-
-async function load(): Promise<CacheShape> {
-  const stored = await Browser.storage.local.get(STORAGE_KEY);
-  return ((stored as Record<string, unknown>)[STORAGE_KEY] as CacheShape) ?? {};
-}
-
-async function save(cache: CacheShape): Promise<void> {
-  await Browser.storage.local.set({ [STORAGE_KEY]: cache });
+interface CachedPrice {
+  usd_price: number;
+  last_updated_at: number;
+  cached_at: number;
 }
 
 export interface CacheLookup {
-  hits: Map<string, CachedEntry>;
+  hits: Map<string, number>;
   misses: string[];
 }
 
+function storageKey(chainId: number, address: string): string {
+  return `price:${chainId}:${address.toLowerCase()}`;
+}
+
+function storageArea(): chrome.storage.LocalStorageArea | undefined {
+  return globalThis.chrome?.storage?.local;
+}
+
+async function storageGet(keys: string[]): Promise<Record<string, CachedPrice | undefined>> {
+  const area = storageArea();
+  if (!area || keys.length === 0) return {};
+  try {
+    return (await area.get(keys)) as Record<string, CachedPrice | undefined>;
+  } catch {
+    return {};
+  }
+}
+
+async function storageSet(entries: Record<string, CachedPrice>): Promise<void> {
+  const area = storageArea();
+  if (!area || Object.keys(entries).length === 0) return;
+  try {
+    await area.set(entries);
+  } catch {
+    // Cache writes are best-effort; callers must not fail closed on storage.
+  }
+}
+
+async function storageRemove(keys: string[]): Promise<void> {
+  const area = storageArea();
+  if (!area || keys.length === 0) return;
+  try {
+    await area.remove(keys);
+  } catch {
+    // Best-effort test/helper cleanup.
+  }
+}
+
+export function cachedPriceLastUpdatedAt(
+  hits: ReadonlyMap<string, number>,
+  address: string,
+): number | undefined {
+  return hitUpdatedAt.get(hits)?.get(address.toLowerCase());
+}
+
 export async function lookup(
-  facts: ReadonlyArray<{ chainId: number; address: string }>,
+  chainId: number,
+  addresses: readonly string[],
   nowMs: number = Date.now(),
 ): Promise<CacheLookup> {
-  const cache = await load();
-  const hits = new Map<string, CachedEntry>();
+  const normalized = [...new Set(addresses.map((address) => address.toLowerCase()))];
+  const stored = await storageGet(normalized.map((address) => storageKey(chainId, address)));
+  const hits = new Map<string, number>();
+  const updated = new Map<string, number>();
   const misses: string[] = [];
-  for (const f of facts) {
-    const k = key(f.chainId, f.address);
-    const entry = cache[k];
-    if (entry && nowMs - entry.cachedAtMs < TTL_MS) {
-      hits.set(k, entry);
+
+  for (const address of normalized) {
+    const entry = stored[storageKey(chainId, address)];
+    if (entry && nowMs - entry.cached_at <= TTL_MS) {
+      hits.set(address, entry.usd_price);
+      updated.set(address, entry.last_updated_at);
     } else {
-      misses.push(k);
+      misses.push(address);
     }
   }
+
+  hitUpdatedAt.set(hits, updated);
   return { hits, misses };
 }
 
 export async function store(
-  entries: ReadonlyArray<{ chainId: number; address: string; usd: string; asOfTs: number }>,
+  chainId: number,
+  priceMap: ReadonlyMap<string, number>,
   nowMs: number = Date.now(),
+  lastUpdatedAtByAddress?: ReadonlyMap<string, number>,
 ): Promise<void> {
-  if (entries.length === 0) return;
-  const cache = await load();
-  for (const e of entries) {
-    cache[key(e.chainId, e.address)] = { usd: e.usd, asOfTs: e.asOfTs, cachedAtMs: nowMs };
+  const entries: Record<string, CachedPrice> = {};
+  for (const [address, usdPrice] of priceMap) {
+    const lower = address.toLowerCase();
+    entries[storageKey(chainId, lower)] = {
+      usd_price: usdPrice,
+      last_updated_at:
+        lastUpdatedAtByAddress?.get(lower) ?? priceLastUpdatedAt(priceMap, lower) ?? nowMs,
+      cached_at: nowMs,
+    };
   }
-  await save(cache);
+  await storageSet(entries);
 }
 
-export async function clearAll(): Promise<void> {
-  await Browser.storage.local.remove(STORAGE_KEY);
+export async function clearAll(
+  chainId: number,
+  addresses: readonly string[],
+): Promise<void> {
+  await storageRemove(addresses.map((address) => storageKey(chainId, address)));
 }
 
-export const __test_internals__ = { TTL_MS };
+export const __test_internals__ = { TTL_MS, storageKey };

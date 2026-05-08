@@ -2,15 +2,15 @@ import {
   readAllowances,
   readBalances,
   type Address,
-} from '@background/chains/rpc-client';
-import { buildOracleSnapshot } from '@background/oracle/oracle-snapshot';
+} from '../chains/rpc-client';
+import { buildOracleSnapshot, type OracleNeed } from '../oracle/oracle-snapshot';
 import type {
   AllowanceEntry,
   BalanceEntry,
   HostSnapshot,
   OracleEntry,
   WindowEntry,
-} from '@background/types/host-snapshot';
+} from '../types/host-snapshot';
 
 export interface TokenLite {
   chain_id: number;
@@ -21,18 +21,19 @@ export interface TokenLite {
 }
 
 export interface OracleRequirementLite {
-  kind: 'input' | 'minOutput';
+  kind: string;
   token: TokenLite;
   raw_amount: string;
 }
+
+export type SigOracleRequirement = OracleNeed | OracleRequirementLite;
 
 export interface Tier1Plan {
   tokens_for_oracle: TokenLite[];
   balances: { owner: string; token: TokenLite }[];
   allowances: { owner: string; token: TokenLite; spender: string }[];
   clock_required: boolean;
-  /** Mirrors the engine's HostFactPlan field (Codex round-3 finding). */
-  sig_oracle_requirements: OracleRequirementLite[];
+  sig_oracle_requirements: SigOracleRequirement[];
 }
 
 export interface Tier1FetchResult {
@@ -44,94 +45,138 @@ export interface Tier1FetchResult {
 
 const TIER1_OUTER_TIMEOUT_MS = 2_000;
 
-/**
- * Run all Tier-1 host fetches in parallel and assemble a partial
- * HostSnapshot. Failures (RPC reverts, CoinGecko 429s) become absent
- * entries — never zero. The orchestrator merges in `windows` (Tier 2)
- * and the final `now_ts` later.
- *
- * An outer AbortController caps the entire fetch at TIER1_OUTER_TIMEOUT_MS
- * so a stalled fallback URL or saturated CoinGecko free tier doesn't blow
- * past the design's host-fact-fetch budget.
- */
-export async function fetchTier1(
+function emptyResult(nowMs: number): Tier1FetchResult {
+  return {
+    oracle: [],
+    balances: [],
+    allowances: [],
+    now_ts: Math.floor(nowMs / 1000),
+  };
+}
+
+function oracleNeedFromToken(token: TokenLite): OracleNeed {
+  return {
+    chainId: token.chain_id,
+    address: token.address,
+    isNative: token.is_native,
+  };
+}
+
+function oracleNeedFromRequirement(requirement: SigOracleRequirement): OracleNeed {
+  if ('token' in requirement) return oracleNeedFromToken(requirement.token);
+  return requirement;
+}
+
+async function fetchBalances(plan: Tier1Plan): Promise<(bigint | undefined)[]> {
+  const out: (bigint | undefined)[] = new Array(plan.balances.length).fill(undefined);
+  const groups = new Map<
+    string,
+    { chainId: number; owner: string; indexes: number[]; tokens: Address[] }
+  >();
+
+  plan.balances.forEach((fact, index) => {
+    const key = `${fact.token.chain_id}:${fact.owner.toLowerCase()}`;
+    const group =
+      groups.get(key) ??
+      { chainId: fact.token.chain_id, owner: fact.owner, indexes: [], tokens: [] };
+    group.indexes.push(index);
+    group.tokens.push(fact.token.address as Address);
+    groups.set(key, group);
+  });
+
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      try {
+        const values = await readBalances(group.chainId, group.owner as Address, group.tokens);
+        values.forEach((value, offset) => {
+          out[group.indexes[offset]] = value;
+        });
+      } catch {
+        // Leave this group undefined.
+      }
+    }),
+  );
+  return out;
+}
+
+async function fetchAllowances(plan: Tier1Plan): Promise<(bigint | undefined)[]> {
+  const out: (bigint | undefined)[] = new Array(plan.allowances.length).fill(undefined);
+  const groups = new Map<
+    string,
+    { chainId: number; owner: string; indexes: number[]; tokens: Address[]; spenders: Address[] }
+  >();
+
+  plan.allowances.forEach((fact, index) => {
+    const key = `${fact.token.chain_id}:${fact.owner.toLowerCase()}`;
+    const group =
+      groups.get(key) ??
+      { chainId: fact.token.chain_id, owner: fact.owner, indexes: [], tokens: [], spenders: [] };
+    group.indexes.push(index);
+    group.tokens.push(fact.token.address as Address);
+    group.spenders.push(fact.spender as Address);
+    groups.set(key, group);
+  });
+
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      try {
+        const values = await readAllowances(
+          group.chainId,
+          group.owner as Address,
+          group.tokens,
+          group.spenders,
+        );
+        values.forEach((value, offset) => {
+          out[group.indexes[offset]] = value;
+        });
+      } catch {
+        // Leave this group undefined.
+      }
+    }),
+  );
+  return out;
+}
+
+async function fetchTier1Work(
   plan: Tier1Plan,
-  fetchImpl: typeof fetch = fetch,
-  nowMs: number = Date.now(),
+  fetchImpl: typeof fetch,
+  nowMs: number,
+  signal: AbortSignal,
 ): Promise<Tier1FetchResult> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), TIER1_OUTER_TIMEOUT_MS);
   const guardedFetch: typeof fetch = (input, init) =>
-    fetchImpl(input, { ...init, signal: controller.signal });
+    fetchImpl(input, { ...init, signal });
 
-  const oraclePromise = buildOracleSnapshot(
-    plan.tokens_for_oracle.map((t) => ({
-      chainId: t.chain_id,
-      address: t.address,
-      isNative: t.is_native,
-    })),
-    guardedFetch,
-    nowMs,
-  );
+  const oracleNeeds = [
+    ...plan.tokens_for_oracle.map(oracleNeedFromToken),
+    ...plan.sig_oracle_requirements.map(oracleNeedFromRequirement),
+  ];
 
-  const balancesPromise = readBalances(
-    plan.balances.map((b) => ({
-      owner: b.owner as Address,
-      token: b.token.address as Address,
-      chainId: b.token.chain_id,
-    })),
-  );
-
-  const allowancesPromise = readAllowances(
-    plan.allowances.map((a) => ({
-      owner: a.owner as Address,
-      token: a.token.address as Address,
-      spender: a.spender as Address,
-      chainId: a.token.chain_id,
-    })),
-  );
-
-  let oracle: Awaited<typeof oraclePromise>;
-  let balances: Awaited<typeof balancesPromise>;
-  let allowances: Awaited<typeof allowancesPromise>;
-  try {
-    [oracle, balances, allowances] = await Promise.all([
-      oraclePromise,
-      balancesPromise,
-      allowancesPromise,
-    ]);
-  } finally {
-    clearTimeout(timeoutId);
-  }
-  if (controller.signal.aborted) {
-    return {
-      oracle: [],
-      balances: [],
-      allowances: [],
-      now_ts: Math.floor(nowMs / 1000),
-    };
-  }
+  const [oracle, balances, allowances] = await Promise.all([
+    buildOracleSnapshot(oracleNeeds, guardedFetch, nowMs),
+    fetchBalances(plan),
+    fetchAllowances(plan),
+  ]);
 
   const balanceEntries: BalanceEntry[] = [];
-  plan.balances.forEach((b, i) => {
-    const v = balances[i];
-    if (v === undefined) return;
+  plan.balances.forEach((fact, index) => {
+    const value = balances[index];
+    if (value === undefined) return;
     balanceEntries.push({
-      owner: b.owner.toLowerCase(),
-      token_key: `${b.token.chain_id}:${b.token.address.toLowerCase()}`,
-      balance: v.toString(),
+      owner: fact.owner.toLowerCase(),
+      token_key: `${fact.token.chain_id}:${fact.token.address.toLowerCase()}`,
+      balance: value.toString(),
     });
   });
 
   const allowanceEntries: AllowanceEntry[] = [];
-  plan.allowances.forEach((a, i) => {
-    const v = allowances[i];
-    if (v === undefined) return;
+  plan.allowances.forEach((fact, index) => {
+    const value = allowances[index];
+    if (value === undefined) return;
     allowanceEntries.push({
-      owner: a.owner.toLowerCase(),
-      token_key: `${a.token.chain_id}:${a.token.address.toLowerCase()}`,
-      spender: a.spender.toLowerCase(),
-      allowance: v.toString(),
+      owner: fact.owner.toLowerCase(),
+      token_key: `${fact.token.chain_id}:${fact.token.address.toLowerCase()}`,
+      spender: fact.spender.toLowerCase(),
+      allowance: value.toString(),
     });
   });
 
@@ -143,7 +188,30 @@ export async function fetchTier1(
   };
 }
 
-/** Merge Tier-1 result + window entries + clock into a full HostSnapshot. */
+export async function fetchTier1(
+  plan: Tier1Plan,
+  fetchImpl: typeof fetch = fetch,
+  nowMs: number = Date.now(),
+): Promise<Tier1FetchResult> {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<Tier1FetchResult>((resolve) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      resolve(emptyResult(nowMs));
+    }, TIER1_OUTER_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([
+      fetchTier1Work(plan, fetchImpl, nowMs, controller.signal).catch(() => emptyResult(nowMs)),
+      timeout,
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 export function intoHostSnapshot(
   tier1: Tier1FetchResult,
   windows: WindowEntry[] = [],

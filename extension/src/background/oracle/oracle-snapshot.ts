@@ -1,6 +1,13 @@
-import { fetchNativeUsdPrices, fetchUsdPrices } from './coingecko-client';
-import { lookup, store } from './price-cache';
-import type { OracleEntry } from '@background/types/host-snapshot';
+import {
+  fetchNativeUsdPrices,
+  fetchUsdPrices,
+  nativePriceLastUpdatedAt,
+  priceLastUpdatedAt,
+} from './coingecko-client';
+import { cachedPriceLastUpdatedAt, lookup, store } from './price-cache';
+import type { OracleEntry } from '../types/host-snapshot';
+
+export const NATIVE_TOKEN_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
 export interface OracleNeed {
   chainId: number;
@@ -8,12 +15,38 @@ export interface OracleNeed {
   isNative?: boolean;
 }
 
-/**
- * Build a snapshot of oracle entries covering every (chainId, address) in
- * `needs`. Cache hits returned directly; misses split into ERC-20 contract
- * path and native /simple/price path. Tokens with no price available are
- * simply absent from the result (engine fail-open per optional-fact contract).
- */
+interface NormalizedNeed {
+  chainId: number;
+  address: string;
+  isNative: boolean;
+}
+
+function tokenKey(chainId: number, address: string): string {
+  return `${chainId}:${address.toLowerCase()}`;
+}
+
+function staleSec(nowMs: number, lastUpdatedAtMs: number): number {
+  return Math.max(0, Math.floor((nowMs - lastUpdatedAtMs) / 1000));
+}
+
+function entry(
+  chainId: number,
+  address: string,
+  usdPrice: number,
+  lastUpdatedAtMs: number,
+  nowMs: number,
+  sources: string[],
+): OracleEntry {
+  return {
+    token_key: tokenKey(chainId, address),
+    usd_price: usdPrice,
+    usd_per_unit: String(usdPrice),
+    as_of_ts: Math.floor(lastUpdatedAtMs / 1000),
+    stale_sec: staleSec(nowMs, lastUpdatedAtMs),
+    sources,
+  };
+}
+
 export async function buildOracleSnapshot(
   needs: readonly OracleNeed[],
   fetchImpl: typeof fetch = fetch,
@@ -21,93 +54,91 @@ export async function buildOracleSnapshot(
 ): Promise<OracleEntry[]> {
   if (needs.length === 0) return [];
 
-  // Dedup preserves the isNative flag — earlier draft dropped it, which
-  // would silently lose USD coverage for native swaps.
-  const dedup = new Map<string, OracleNeed>();
-  for (const n of needs) {
-    dedup.set(`${n.chainId}:${n.address.toLowerCase()}`, {
-      chainId: n.chainId,
-      address: n.address.toLowerCase(),
-      isNative: !!n.isNative,
+  const dedup = new Map<string, NormalizedNeed>();
+  for (const need of needs) {
+    const address = need.address.toLowerCase();
+    dedup.set(tokenKey(need.chainId, address), {
+      chainId: need.chainId,
+      address,
+      isNative: Boolean(need.isNative),
     });
   }
-  const all = [...dedup.values()];
 
-  const { hits, misses } = await lookup(all, nowMs);
-
-  // Split misses into ERC-20 vs native paths. Native sentinel is preserved
-  // so it threads back into OracleEntry.token_key for engine lookup.
-  const missByChainErc20 = new Map<number, string[]>();
-  const nativeMissChains = new Set<number>();
-  const nativeSentinelByChain = new Map<number, string>();
-  for (const k of misses) {
-    const need = dedup.get(k);
-    if (!need) continue;
-    if (need.isNative) {
-      nativeMissChains.add(need.chainId);
-      nativeSentinelByChain.set(need.chainId, need.address);
-    } else {
-      const list = missByChainErc20.get(need.chainId) ?? [];
-      list.push(need.address);
-      missByChainErc20.set(need.chainId, list);
-    }
+  const needsByChain = new Map<number, NormalizedNeed[]>();
+  for (const need of dedup.values()) {
+    const chainNeeds = needsByChain.get(need.chainId) ?? [];
+    chainNeeds.push(need);
+    needsByChain.set(need.chainId, chainNeeds);
   }
-
-  const [erc20FetchResults, nativeFetchResults] = await Promise.all([
-    Promise.all(
-      [...missByChainErc20.entries()].map(async ([chainId, addrs]) => {
-        const prices = await fetchUsdPrices(chainId, addrs, fetchImpl);
-        return { chainId, prices };
-      }),
-    ),
-    nativeMissChains.size > 0
-      ? fetchNativeUsdPrices([...nativeMissChains], fetchImpl)
-      : Promise.resolve([] as ReadonlyArray<Awaited<ReturnType<typeof fetchNativeUsdPrices>>[number]>),
-  ]);
 
   const out: OracleEntry[] = [];
-  const toStore: { chainId: number; address: string; usd: string; asOfTs: number }[] = [];
-  const nowSec = Math.floor(nowMs / 1000);
+  const erc20Misses = new Map<number, string[]>();
+  const nativeMisses = new Map<number, string>();
 
-  // Hits first.
-  for (const [k, entry] of hits) {
-    out.push({
-      token_key: k,
-      usd_per_unit: entry.usd,
-      as_of_ts: entry.asOfTs,
-      sources: ['coingecko'],
-      stale_sec: Math.max(0, nowSec - entry.asOfTs),
-    });
-  }
-  // ERC-20 misses.
-  for (const { chainId, prices } of erc20FetchResults) {
-    for (const p of prices) {
-      const staleSec = Math.max(0, nowSec - p.asOfTs);
-      out.push({
-        token_key: `${chainId}:${p.address}`,
-        usd_per_unit: p.usd,
-        as_of_ts: p.asOfTs,
-        sources: ['coingecko'],
-        stale_sec: staleSec,
-      });
-      toStore.push({ chainId, address: p.address, usd: p.usd, asOfTs: p.asOfTs });
-    }
-  }
-  // Native misses — thread sentinel address back into token_key.
-  for (const np of nativeFetchResults) {
-    const sentinel = nativeSentinelByChain.get(np.chainId);
-    if (!sentinel) continue;
-    const staleSec = Math.max(0, nowSec - np.asOfTs);
-    out.push({
-      token_key: `${np.chainId}:${sentinel}`,
-      usd_per_unit: np.usd,
-      as_of_ts: np.asOfTs,
-      sources: ['coingecko-native'],
-      stale_sec: staleSec,
-    });
-    toStore.push({ chainId: np.chainId, address: sentinel, usd: np.usd, asOfTs: np.asOfTs });
-  }
+  await Promise.all(
+    [...needsByChain.entries()].map(async ([chainId, chainNeeds]) => {
+      const addresses = chainNeeds.map((need) => need.address);
+      const { hits, misses } = await lookup(chainId, addresses, nowMs);
+      for (const [address, usdPrice] of hits) {
+        out.push(
+          entry(
+            chainId,
+            address,
+            usdPrice,
+            cachedPriceLastUpdatedAt(hits, address) ?? nowMs,
+            nowMs,
+            ['coingecko'],
+          ),
+        );
+      }
 
-  if (toStore.length > 0) await store(toStore, nowMs);
+      for (const address of misses) {
+        const need = chainNeeds.find((candidate) => candidate.address === address);
+        if (!need) continue;
+        if (need.isNative) {
+          nativeMisses.set(chainId, address);
+        } else {
+          const chainMisses = erc20Misses.get(chainId) ?? [];
+          chainMisses.push(address);
+          erc20Misses.set(chainId, chainMisses);
+        }
+      }
+    }),
+  );
+
+  const [erc20Results, nativeResults] = await Promise.all([
+    Promise.all(
+      [...erc20Misses.entries()].map(async ([chainId, addresses]) => ({
+        chainId,
+        prices: await fetchUsdPrices(chainId, addresses, fetchImpl),
+      })),
+    ),
+    nativeMisses.size > 0
+      ? fetchNativeUsdPrices([...nativeMisses.keys()], fetchImpl)
+      : Promise.resolve(new Map<number, number>()),
+  ]);
+
+  await Promise.all(
+    erc20Results.map(async ({ chainId, prices }) => {
+      const lastUpdated = new Map<string, number>();
+      for (const [address, usdPrice] of prices) {
+        const updatedAt = priceLastUpdatedAt(prices, address) ?? nowMs;
+        lastUpdated.set(address, updatedAt);
+        out.push(entry(chainId, address, usdPrice, updatedAt, nowMs, ['coingecko']));
+      }
+      await store(chainId, prices, nowMs, lastUpdated);
+    }),
+  );
+
+  await Promise.all(
+    [...nativeResults.entries()].map(async ([chainId, usdPrice]) => {
+      const address = nativeMisses.get(chainId);
+      if (!address) return;
+      const updatedAt = nativePriceLastUpdatedAt(nativeResults, chainId) ?? nowMs;
+      out.push(entry(chainId, address, usdPrice, updatedAt, nowMs, ['coingecko-native']));
+      await store(chainId, new Map([[address, usdPrice]]), nowMs, new Map([[address, updatedAt]]));
+    }),
+  );
+
   return out;
 }

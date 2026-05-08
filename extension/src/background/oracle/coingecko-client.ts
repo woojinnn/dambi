@@ -1,130 +1,123 @@
-import { chainConfig } from '@background/chains/chain-config';
+import { chainConfig } from '../chains/chain-config';
 
 const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 const MAX_BATCH = 30;
 
-export interface CoinGeckoPrice {
-  /** Lowercased token contract address. */
-  address: string;
-  /** USD price as a decimal string. */
-  usd: string;
-  /** Server-reported `last_updated_at` (unix seconds) if available. */
-  asOfTs: number;
+const tokenUpdatedAt = new WeakMap<ReadonlyMap<string, number>, Map<string, number>>();
+const nativeUpdatedAt = new WeakMap<ReadonlyMap<number, number>, Map<number, number>>();
+
+export function priceLastUpdatedAt(
+  prices: ReadonlyMap<string, number>,
+  address: string,
+): number | undefined {
+  return tokenUpdatedAt.get(prices)?.get(address.toLowerCase());
 }
 
-export interface CoinGeckoNativePrice {
-  chainId: number;
-  usd: string;
-  asOfTs: number;
+export function nativePriceLastUpdatedAt(
+  prices: ReadonlyMap<number, number>,
+  chainId: number,
+): number | undefined {
+  return nativeUpdatedAt.get(prices)?.get(chainId);
+}
+
+function unixSecondsToMs(value: number | undefined): number {
+  return typeof value === 'number' ? value * 1000 : Date.now();
 }
 
 /**
- * Fetch USD prices for ERC-20 tokens on one chain. Tokens absent from
- * CoinGecko are simply omitted from the result (never represented as 0).
- * Network failures and HTTP errors return empty arrays — never throws.
+ * Fetch USD prices for ERC-20 tokens on one chain. Results are keyed by
+ * lowercased contract address. Network failures, HTTP errors, malformed JSON,
+ * and unsupported chains all return an empty Map — never throw.
  */
 export async function fetchUsdPrices(
   chainId: number,
   addresses: readonly string[],
   fetchImpl: typeof fetch = fetch,
-): Promise<readonly CoinGeckoPrice[]> {
-  if (addresses.length === 0) return [];
-  const platform = chainConfig(chainId).coingeckoPlatform;
-  const out: CoinGeckoPrice[] = [];
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const updated = new Map<string, number>();
+  tokenUpdatedAt.set(out, updated);
 
-  // Dedupe input to avoid wasting CoinGecko free-tier rate budget.
-  const unique = Array.from(new Set(addresses.map((a) => a.toLowerCase())));
+  try {
+    if (addresses.length === 0) return out;
+    const platform = chainConfig(chainId).coingeckoPlatform;
+    const unique = [...new Set(addresses.map((address) => address.toLowerCase()))];
 
-  for (let i = 0; i < unique.length; i += MAX_BATCH) {
-    const slice = unique.slice(i, i + MAX_BATCH);
-    const url = new URL(`${COINGECKO_BASE}/simple/token_price/${platform}`);
-    url.searchParams.set('contract_addresses', slice.join(','));
-    url.searchParams.set('vs_currencies', 'usd');
-    url.searchParams.set('include_last_updated_at', 'true');
+    for (let i = 0; i < unique.length; i += MAX_BATCH) {
+      const batch = unique.slice(i, i + MAX_BATCH);
+      const url = new URL(`${COINGECKO_BASE}/simple/token_price/${platform}`);
+      url.searchParams.set('contract_addresses', batch.join(','));
+      url.searchParams.set('vs_currencies', 'usd');
+      url.searchParams.set('include_last_updated_at', 'true');
 
-    let response: Response;
-    try {
-      response = await fetchImpl(url.toString(), {
+      const response = await fetchImpl(url.toString(), {
         signal: AbortSignal.timeout(5_000),
       });
-    } catch {
-      continue;
-    }
-    if (!response.ok) continue;
+      if (!response.ok) return new Map<string, number>();
 
-    let body: Record<string, { usd?: number; last_updated_at?: number }>;
-    try {
-      body = (await response.json()) as Record<
+      const body = (await response.json()) as Record<
         string,
         { usd?: number; last_updated_at?: number }
       >;
-    } catch {
-      continue;
+      for (const [address, entry] of Object.entries(body)) {
+        if (typeof entry.usd !== 'number') continue;
+        const lower = address.toLowerCase();
+        out.set(lower, entry.usd);
+        updated.set(lower, unixSecondsToMs(entry.last_updated_at));
+      }
     }
-
-    for (const [address, entry] of Object.entries(body)) {
-      if (typeof entry?.usd !== 'number') continue;
-      out.push({
-        address: address.toLowerCase(),
-        usd: entry.usd.toString(),
-        asOfTs: entry.last_updated_at ?? Math.floor(Date.now() / 1000),
-      });
-    }
+    return out;
+  } catch {
+    return new Map<string, number>();
   }
-  return out;
 }
 
 /**
- * Fetch USD prices for native chain assets via /simple/price?ids=. Each
- * chain's native coin id comes from `chainConfig(chainId).coingeckoNativeId`.
- * Multiple chains can share a coin id (op + base both use 'ethereum').
+ * Fetch USD prices for native chain assets via /simple/price?ids=. Multiple
+ * chains can share one CoinGecko id, so the returned Map is keyed by chain id.
  */
 export async function fetchNativeUsdPrices(
   chainIds: readonly number[],
   fetchImpl: typeof fetch = fetch,
-): Promise<readonly CoinGeckoNativePrice[]> {
-  if (chainIds.length === 0) return [];
-  const idsByCoin = new Map<string, number[]>();
-  for (const cid of chainIds) {
-    const id = chainConfig(cid).coingeckoNativeId;
-    const list = idsByCoin.get(id) ?? [];
-    list.push(cid);
-    idsByCoin.set(id, list);
-  }
-  const ids = [...idsByCoin.keys()];
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const updated = new Map<number, number>();
+  nativeUpdatedAt.set(out, updated);
 
-  const url = new URL(`${COINGECKO_BASE}/simple/price`);
-  url.searchParams.set('ids', ids.join(','));
-  url.searchParams.set('vs_currencies', 'usd');
-  url.searchParams.set('include_last_updated_at', 'true');
+  try {
+    if (chainIds.length === 0) return out;
+    const idsByCoin = new Map<string, number[]>();
+    for (const chainId of new Set(chainIds)) {
+      const coinId = chainConfig(chainId).coingeckoNativeId;
+      const chains = idsByCoin.get(coinId) ?? [];
+      chains.push(chainId);
+      idsByCoin.set(coinId, chains);
+    }
 
-  let response: Response;
-  try {
-    response = await fetchImpl(url.toString(), { signal: AbortSignal.timeout(5_000) });
-  } catch {
-    return [];
-  }
-  if (!response.ok) return [];
-  let body: Record<string, { usd?: number; last_updated_at?: number }>;
-  try {
-    body = (await response.json()) as Record<
+    const url = new URL(`${COINGECKO_BASE}/simple/price`);
+    url.searchParams.set('ids', [...idsByCoin.keys()].join(','));
+    url.searchParams.set('vs_currencies', 'usd');
+    url.searchParams.set('include_last_updated_at', 'true');
+
+    const response = await fetchImpl(url.toString(), {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return new Map<number, number>();
+
+    const body = (await response.json()) as Record<
       string,
       { usd?: number; last_updated_at?: number }
     >;
-  } catch {
-    return [];
-  }
-  const out: CoinGeckoNativePrice[] = [];
-  for (const [coinId, entry] of Object.entries(body)) {
-    if (typeof entry?.usd !== 'number') continue;
-    const cidsForCoin = idsByCoin.get(coinId) ?? [];
-    for (const cid of cidsForCoin) {
-      out.push({
-        chainId: cid,
-        usd: entry.usd.toString(),
-        asOfTs: entry.last_updated_at ?? Math.floor(Date.now() / 1000),
-      });
+    for (const [coinId, entry] of Object.entries(body)) {
+      if (typeof entry.usd !== 'number') continue;
+      const chains = idsByCoin.get(coinId) ?? [];
+      for (const chainId of chains) {
+        out.set(chainId, entry.usd);
+        updated.set(chainId, unixSecondsToMs(entry.last_updated_at));
+      }
     }
+    return out;
+  } catch {
+    return new Map<number, number>();
   }
-  return out;
 }

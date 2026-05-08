@@ -33,85 +33,61 @@ export function rpcClient(chainId: number): PublicClient {
   return client;
 }
 
-export interface BalanceFact {
-  owner: Address;
-  token: Address;
-  chainId: number;
-}
-
-export interface AllowanceFact {
-  owner: Address;
-  token: Address;
-  spender: Address;
-  chainId: number;
-}
-
 export async function readBalances(
-  facts: readonly BalanceFact[],
+  chainId: number,
+  walletAddress: Address,
+  tokenAddresses: readonly Address[],
 ): Promise<readonly (bigint | undefined)[]> {
-  if (facts.length === 0) return [];
-  const byChain = new Map<number, BalanceFact[]>();
-  for (const f of facts) {
-    const list = byChain.get(f.chainId) ?? [];
-    list.push(f);
-    byChain.set(f.chainId, list);
+  if (tokenAddresses.length === 0) return [];
+  let client: PublicClient;
+  try {
+    client = rpcClient(chainId);
+  } catch {
+    return tokenAddresses.map(() => undefined);
   }
-  const out: (bigint | undefined)[] = new Array(facts.length).fill(undefined);
-  await Promise.all(
-    [...byChain.entries()].map(async ([chainId, perChain]) => {
-      const client = rpcClient(chainId);
-      const results = await Promise.allSettled(
-        perChain.map((f) =>
-          client.readContract({
-            address: f.token,
-            abi: ERC20_ABI,
-            functionName: 'balanceOf',
-            args: [f.owner],
-          }),
-        ),
-      );
-      for (let i = 0; i < perChain.length; i++) {
-        const idx = facts.indexOf(perChain[i]);
-        const r = results[i];
-        if (r.status === 'fulfilled') out[idx] = r.value as bigint;
-      }
-    }),
+  const results = await Promise.allSettled(
+    tokenAddresses.map((token) =>
+      client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [walletAddress],
+      }),
+    ),
   );
-  return out;
+  return results.map((result) =>
+    result.status === 'fulfilled' ? (result.value as bigint) : undefined,
+  );
 }
 
 export async function readAllowances(
-  facts: readonly AllowanceFact[],
+  chainId: number,
+  walletAddress: Address,
+  tokenAddresses: readonly Address[],
+  spenders: readonly Address[],
 ): Promise<readonly (bigint | undefined)[]> {
-  if (facts.length === 0) return [];
-  const byChain = new Map<number, AllowanceFact[]>();
-  for (const f of facts) {
-    const list = byChain.get(f.chainId) ?? [];
-    list.push(f);
-    byChain.set(f.chainId, list);
+  if (tokenAddresses.length === 0) return [];
+  let client: PublicClient;
+  try {
+    client = rpcClient(chainId);
+  } catch {
+    return tokenAddresses.map(() => undefined);
   }
-  const out: (bigint | undefined)[] = new Array(facts.length).fill(undefined);
-  await Promise.all(
-    [...byChain.entries()].map(async ([chainId, perChain]) => {
-      const client = rpcClient(chainId);
-      const results = await Promise.allSettled(
-        perChain.map((f) =>
-          client.readContract({
-            address: f.token,
-            abi: ERC20_ABI,
-            functionName: 'allowance',
-            args: [f.owner, f.spender],
-          }),
-        ),
-      );
-      for (let i = 0; i < perChain.length; i++) {
-        const idx = facts.indexOf(perChain[i]);
-        const r = results[i];
-        if (r.status === 'fulfilled') out[idx] = r.value as bigint;
-      }
+  const results = await Promise.allSettled(
+    tokenAddresses.map((token, index) => {
+      const spender = spenders[index];
+      if (!spender) return Promise.reject(new Error('missing spender'));
+      return client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: 'allowance',
+        args: [walletAddress, spender],
+      });
     }),
   );
-  return out;
+  return results.map((result) =>
+    result.status === 'fulfilled' ? (result.value as bigint) : undefined,
+  );
 }
 
 export async function readDecimals(
