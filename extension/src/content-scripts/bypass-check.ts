@@ -53,20 +53,11 @@ function checkMetaMaskBypass(messageData: any): void {
         hostname,
         message: String(message ?? ''),
       });
-    } else if (checkMethod(item, 'wallet_sendCalls')) {
-      const [options] = item.params ?? [];
-      const { from = '0x0000000000000000000000000000000000000000', calls } = options ?? {};
-      if (!calls) continue;
-      for (const call of calls) {
-        forwardBypassed({
-          type: RequestType.TRANSACTION,
-          bypassed: true,
-          hostname,
-          chainId: metamaskChainId,
-          transaction: { from, ...call },
-        });
-      }
     }
+    // wallet_sendCalls (EIP-5792) is intentionally NOT observed in v1.
+    // Plan 5/6 may revisit batch-evaluation semantics; until then, treating
+    // each call as a bypassed transaction would surface confusing
+    // half-evaluated state to the SW.
   }
 }
 

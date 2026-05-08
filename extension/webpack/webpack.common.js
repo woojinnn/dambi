@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const CopyPlugin = require('copy-webpack-plugin');
 const Dotenv = require('dotenv-webpack');
 const WextManifestWebpackPlugin = require('wext-manifest-webpack-plugin');
@@ -36,6 +37,7 @@ module.exports = {
     },
     fallback: {
       buffer: require.resolve('buffer/'),
+      process: require.resolve('process/browser'),
     },
   },
   module: {
@@ -59,6 +61,9 @@ module.exports = {
   plugins: [
     new WextManifestWebpackPlugin(),
     new Dotenv({ path: path.resolve(__dirname, '..', '.env'), safe: false, silent: true }),
+    // ProvidePlugin for `process` so readable-stream's `process.nextTick` etc.
+    // resolve at runtime even in code paths that don't import it explicitly.
+    new webpack.ProvidePlugin({ process: 'process/browser' }),
     new CopyPlugin({
       patterns: [{ from: path.resolve(__dirname, '..', 'public'), to: distDir }],
     }),

@@ -12,44 +12,57 @@ console.log('Scopeball SW alive at', new Date().toISOString());
 
 Browser.runtime.onConnect.addListener((port) => {
   if (port.name !== Identifier.CONTENT_SCRIPT) return;
+
   port.onMessage.addListener((message: Message) => {
-    void handleMessage(message, port);
+    handleMessage(message, port);
   });
 });
 
-async function handleMessage(message: Message, port: Browser.Runtime.Port): Promise<void> {
-  // Plan 3 skeleton: log + auto-allow. Plan 5 replaces with real
-  // engine-driven verdict resolution.
-  const bypassed = 'bypassed' in message.data && !!message.data.bypassed;
-
+function handleMessage(message: Message, port: Browser.Runtime.Port): void {
   if (isTransaction(message)) {
     console.log('[Scopeball] tx', {
       hostname: message.data.hostname,
       chainId: message.data.chainId,
       to: message.data.transaction.to,
-      data: String(message.data.transaction.data ?? '').slice(0, 10),
-      bypassed,
+      data: message.data.transaction.data?.slice(0, 10),
+      bypassed: Boolean(message.data.bypassed),
     });
   } else if (isTypedSignature(message)) {
     console.log('[Scopeball] typed-sig', {
       hostname: message.data.hostname,
       chainId: message.data.chainId,
-      primaryType: (message.data.typedData as any)?.primaryType,
-      bypassed,
+      primaryType:
+        message.data.typedData &&
+        typeof message.data.typedData === 'object' &&
+        'primaryType' in message.data.typedData
+          ? message.data.typedData.primaryType
+          : undefined,
+      bypassed: Boolean(message.data.bypassed),
     });
   } else if (isUntypedSignature(message)) {
     console.log('[Scopeball] personal-sign', {
       hostname: message.data.hostname,
       messageLen: message.data.message.length,
-      bypassed,
+      bypassed: Boolean(message.data.bypassed),
+    });
+  } else if (message.data.type === 'tx-hash-report') {
+    console.log('[Scopeball] tx-hash', {
+      hostname: message.data.hostname,
+      requestId: message.data.requestId,
+      txHash: message.data.txHash,
+    });
+  } else if (message.data.type === 'raw-transaction-advisory') {
+    console.warn('[Scopeball] raw-tx advisory', {
+      hostname: message.data.hostname,
+      rawPreview: message.data.rawPreview,
+    });
+  } else if (message.data.type === 'provider-frozen-warning') {
+    console.error('[Scopeball] provider frozen', {
+      hostname: message.data.hostname,
+      providerName: message.data.providerName,
     });
   }
-  if (!bypassed) {
-    const response: MessageResponse = { requestId: message.requestId, data: true };
-    try {
-      port.postMessage(response);
-    } catch {
-      /* dApp tab gone */
-    }
-  }
+
+  const response: MessageResponse = { requestId: message.requestId, data: true };
+  port.postMessage(response);
 }
