@@ -36,6 +36,23 @@
 
 **Files:** None modified — investigation only. Outcome dictates whether feature flags are needed.
 
+- [ ] **Step 0: Tier-2 WindowKey serialization to wire strings**
+
+The `tier2_window_keys_json` export emits `WindowKeyDto { actor, name }` where `name` is the canonical wire string (`StatKey::as_str()` — i.e. `"swapVolumeUsd24h"` / `"swapCount24h"`). Add an explicit conversion in `dto.rs`:
+
+```rust
+impl From<&policy_engine::lowering::WindowKey> for WindowKeyDto {
+    fn from(k: &policy_engine::lowering::WindowKey) -> Self {
+        Self {
+            actor: k.actor.as_str().to_lowercase(),
+            name: k.key.as_str().to_string(), // StatKey::as_str() is the wire string
+        }
+    }
+}
+```
+
+This ensures the TS side reads stable `swapVolumeUsd24h` strings and the round-trip back through `evaluate_json`'s `windows[].name` matches. **Never use plan-level snake_case strings** — those don't exist in the engine.
+
 - [ ] **Step 1: Add the wasm target**
 
 ```bash
@@ -169,8 +186,7 @@ thiserror.workspace = true
 [dev-dependencies]
 wasm-bindgen-test.workspace = true
 
-[lints]
-workspace = true
+# NOTE: workspace root has no [lints] table; do not add `lints.workspace = true`.
 ```
 
 - [ ] **Step 3: Create the lib.rs entry point**
@@ -318,8 +334,9 @@ pub struct HostSnapshotDto {
     pub balances: Vec<BalanceEntryDto>,
     #[serde(default)]
     pub allowances: Vec<AllowanceEntryDto>,
+    /// Unix seconds. Engine `Clock::now() -> u64`, so we surface as u64 here too.
     #[serde(default)]
-    pub now_ts: Option<i64>,
+    pub now_ts: Option<u64>,
     #[serde(default)]
     pub windows: Vec<WindowEntryDto>,
 }
@@ -328,7 +345,7 @@ pub struct HostSnapshotDto {
 pub struct OracleEntryDto {
     pub token_key: String,
     pub usd_per_unit: String,
-    pub as_of_ts: i64,
+    pub as_of_ts: u64,
     #[serde(default)]
     pub stale_sec: u64,
     #[serde(default)]
@@ -486,13 +503,24 @@ pub fn install_policies_json(policies_json: String) -> String {
     let result = (|| -> Result<(), String> {
         let input: InstallPoliciesInputDto = serde_json::from_str(&policies_json)
             .map_err(|e| format!("invalid input json: {e}"))?;
-        let mut builder = PolicyEngineBuilder::new()
-            .add_schema_text(&input.schema_text)
-            .map_err(|e| format!("schema parse: {e}"))?;
+        // NOTE: PolicyEngineBuilder API is `new() -> Self`,
+        // `add_text(src: impl Into<String>) -> Self` (not `add_policy`!),
+        // `add_schema_text(src) -> Self`, and `build() -> Result<...>`.
+        // Per-policy IDs are encoded as `@id("...")` annotations in the
+        // policy text itself. The bundle templater (Plan 6) is responsible
+        // for prepending `@id("<bundle_id>::<name>")` so installed policies
+        // surface with stable, namespaced ids.
+        let mut builder = PolicyEngineBuilder::new().add_schema_text(input.schema_text);
         for p in input.policy_set {
-            builder = builder
-                .add_policy(&p.id, &p.text)
-                .map_err(|e| format!("policy {}: {}", p.id, e))?;
+            // Allow callers to omit @id annotations by inserting one if
+            // missing. Cheap defensive insertion: prepend "@id(\"<id>\")\n"
+            // when the text doesn't already start with @id.
+            let text = if p.text.trim_start().starts_with("@id(") {
+                p.text.clone()
+            } else {
+                format!("@id(\"{}\")\n{}", p.id, p.text)
+            };
+            builder = builder.add_text(text);
         }
         let policies = builder.build().map_err(|e| format!("build: {e}"))?;
 
@@ -702,24 +730,38 @@ mod build_action_tests {
     #[test]
     fn build_action_returns_other_for_unknown_calldata() {
         install_empty_policies();
+        // CONFIRMED FROM SOURCE (core.rs:471):
+        // - `Request` has no #[serde] attrs → externally tagged: outer key "Tx".
+        // - `TransactionRequest` has no rename_all → snake_case fields.
+        // - `data: Vec<u8>` → JSON array of bytes (NOT hex string).
+        // - `gas`, `nonce` are required (Option<u64>); we pass null explicitly
+        //   even though serde would default missing fields, to keep the test
+        //   shape explicit.
         let req = serde_json::json!({
             "Tx": {
-                "chainId": 1,
+                "chain_id": 1,
                 "from": "0x1111111111111111111111111111111111111111",
                 "to":   "0x2222222222222222222222222222222222222222",
-                "data": "0xdeadbeef",
-                "valueWei": "0"
+                "value_wei": "0",
+                "data": [0xde, 0xad, 0xbe, 0xef],
+                "gas": null,
+                "nonce": null
             }
         });
         let out = build_action_json(req.to_string());
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-        // serde untagged: either {"other": {...}} on the action enum, or {"kind":..., "message":...} on err.
+        // BuildActionResultDto is untagged: either {"other": {...}} (the
+        // serialized Action enum) or {"kind":..., "message":...} on err.
         assert!(parsed.get("other").is_some(), "expected Action::Other, got {parsed}");
     }
 }
 ```
 
-> The exact JSON shape of `Request` / `Action` derives from the engine's serde tags. If `Request::Tx` serializes without an outer `Tx` key (untagged enum, etc.), adjust the test JSON. Verify with: `grep -B1 "pub enum Request" crates/policy-engine/src/core.rs`.
+> JSON-shape facts established from `crates/policy-engine/src/core.rs`:
+> - `Request` is externally tagged → wrapper key is `"Tx"` / `"Sig"`.
+> - `TransactionRequest` is **snake_case** (`chain_id`, `value_wei`, `data`, `gas`, `nonce`); `data: Vec<u8>` serializes as a JSON byte array.
+> - `SignatureRequest` is `rename_all = "camelCase"` (`chainId`, `signer`, `typedData`).
+> - `Action::Other` has `#[serde(rename = "other")]`, so `parsed.get("other")` is correct.
 
 - [ ] **Step 4: Run tests**
 
@@ -850,23 +892,30 @@ mod tier1_tests {
 
     #[test]
     fn tier1_for_dex_returns_input_output_oracle_tokens() {
+        // VERIFY: DexAction / DexFacts / Token field renames in core.rs.
+        // The plan executor MUST run `grep -B2 "pub struct \(DexAction\|DexFacts\|Token\)" crates/policy-engine/src/core.rs`
+        // and adjust this JSON to match. Suspected convention from related types:
+        // - `DexAction` and `DexFacts` likely default snake_case (no rename_all);
+        // - `Token` likely default snake_case (`chain_id`, `is_native`).
+        // Below uses snake_case throughout; flip to camelCase if the actual
+        // attrs disagree.
         let action_json = serde_json::json!({
             "dex": {
                 "actor":  "0x1111111111111111111111111111111111111111",
                 "target": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
-                "valueWei": "0",
+                "value_wei": "0",
                 "facts": {
-                    "protocolIds": ["uniswap_v3"],
-                    "inputTokens": [{
-                        "chainId": 1, "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-                        "symbol": "WETH", "decimals": 18, "isNative": false
+                    "protocol_ids": ["uniswap_v3"],
+                    "input_tokens": [{
+                        "chain_id": 1, "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                        "symbol": "WETH", "decimals": 18, "is_native": false
                     }],
-                    "outputTokens": [{
-                        "chainId": 1, "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                        "symbol": "USDC", "decimals": 6, "isNative": false
+                    "output_tokens": [{
+                        "chain_id": 1, "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                        "symbol": "USDC", "decimals": 6, "is_native": false
                     }]
                 },
-                "oracleRequirements": [],
+                "oracle_requirements": [],
                 "trace": {"steps": []}
             }
         });
@@ -879,8 +928,6 @@ mod tier1_tests {
     }
 }
 ```
-
-> Verify the engine's serde renaming for `DexFacts` fields with `grep "rename" crates/policy-engine/src/core.rs | head -10`. Adjust the JSON keys (`inputTokens`, `oracleRequirements`, etc.) if a different convention is used.
 
 - [ ] **Step 4: Run + commit**
 
@@ -1005,9 +1052,9 @@ mod tier2_tests {
             "dex": {
                 "actor":  "0x1111111111111111111111111111111111111111",
                 "target": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
-                "valueWei": "0",
-                "facts": {"protocolIds": [], "inputTokens": [], "outputTokens": []},
-                "oracleRequirements": [],
+                "value_wei": "0",
+                "facts": {"protocol_ids": [], "input_tokens": [], "output_tokens": []},
+                "oracle_requirements": [],
                 "trace": {"steps": []}
             }
         });
@@ -1019,8 +1066,9 @@ mod tier2_tests {
             .iter()
             .map(|k| k["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"swap_volume_usd_24h"));
-        assert!(names.contains(&"swap_count_24h"));
+        // Canonical wire strings — see crates/policy-engine/src/context_keys.rs:155,157
+        assert!(names.contains(&"swapVolumeUsd24h"));
+        assert!(names.contains(&"swapCount24h"));
     }
 }
 ```
@@ -1043,47 +1091,96 @@ Input: serialized `Request` + `HostSnapshotDto`. Output: serialized `VerdictDto`
 
 - [ ] **Step 1: HostSnapshot → engine HostCapabilities adapter**
 
-Append to `state.rs`:
+Append to `state.rs`. Note: actual engine traits (verified at `host/portfolio.rs:39`, `host/approvals.rs:41`, `host/clock.rs:8`, `host/stat_windows.rs:64`) return `Result<AmountSpec, ...>` / `u64` / `HashMap<StatKey, StatValue>` — not `Option<String>` / `i64`. The snapshot host wraps the JSON-decoded entries to satisfy the real signatures:
 
 ```rust
-use policy_engine::host::approvals::Approvals;
+use alloy_primitives::U256;
+use policy_engine::core::{Address, AmountSpec, Token};
+use policy_engine::host::approvals::{Approvals, ApprovalsError};
 use policy_engine::host::clock::Clock;
-use policy_engine::host::portfolio::Portfolio;
+use policy_engine::host::portfolio::{Portfolio, PortfolioError};
+use policy_engine::host::stat_windows::{StatKey, StatValue, StatWindows};
 use std::collections::HashMap;
 
+/// Snapshot Portfolio: HashMap<(owner_lower, token_key), raw_amount_decimal_string>.
+/// On miss returns Err(PortfolioError::NotFound) so lowering's optional-fact
+/// logic kicks in (matches the engine's "missing facts → omitted context"
+/// contract).
 pub struct SnapshotPortfolio {
-    pub balances: HashMap<(String, String), String>, // (owner_lower, token_key) -> balance
+    pub balances: HashMap<(String, String), String>,
 }
 impl Portfolio for SnapshotPortfolio {
-    fn balance(&self, owner: &Address, token: &Token) -> Option<String> {
+    fn balance(&self, owner: &Address, token: &Token) -> Result<AmountSpec, PortfolioError> {
         let key = (owner.as_str().to_lowercase(), token.key());
-        self.balances.get(&key).cloned()
+        let raw_str = self
+            .balances
+            .get(&key)
+            .ok_or(PortfolioError::NotFound)?;
+        let raw =
+            U256::from_str_radix(raw_str, 10).map_err(|_| PortfolioError::InvalidAmount)?;
+        Ok(AmountSpec::from_raw(token.clone(), raw))
     }
 }
 
+/// Snapshot Approvals: HashMap<(owner_lower, token_key, spender_lower), raw_allowance>.
 pub struct SnapshotApprovals {
-    pub allowances: HashMap<(String, String, String), String>, // (owner, token_key, spender) -> allowance
+    pub allowances: HashMap<(String, String, String), String>,
 }
 impl Approvals for SnapshotApprovals {
-    fn allowance(&self, owner: &Address, token: &Token, spender: &Address) -> Option<String> {
+    fn allowance(
+        &self,
+        owner: &Address,
+        token: &Token,
+        spender: &Address,
+    ) -> Result<AmountSpec, ApprovalsError> {
         let key = (
             owner.as_str().to_lowercase(),
             token.key(),
             spender.as_str().to_lowercase(),
         );
-        self.allowances.get(&key).cloned()
+        let raw_str = self
+            .allowances
+            .get(&key)
+            .ok_or(ApprovalsError::NotFound)?;
+        let raw =
+            U256::from_str_radix(raw_str, 10).map_err(|_| ApprovalsError::InvalidAmount)?;
+        Ok(AmountSpec::from_raw(token.clone(), raw))
     }
 }
 
-pub struct FixedClock(pub i64);
+/// FixedClock returns a Unix timestamp (`u64`, NOT `i64`).
+pub struct FixedClock(pub u64);
 impl Clock for FixedClock {
-    fn now_unix(&self) -> i64 {
+    fn now(&self) -> u64 {
         self.0
+    }
+}
+
+/// Snapshot StatWindows: HashMap<(actor_lower, StatKey), confirmed value>.
+/// `snapshot()` returns the engine-consumed `(StatKey, StatValue)` map for the
+/// requested actor; absent entries default to zero (StatValue::default()).
+pub struct SnapshotStatWindows {
+    /// Keyed by (actor_lower, stat_key_str) for cheap JSON ingestion.
+    pub windows: HashMap<(String, &'static str), StatValue>,
+}
+impl StatWindows for SnapshotStatWindows {
+    fn snapshot(&self, owner: &Address, keys: &[StatKey]) -> HashMap<StatKey, StatValue> {
+        let actor = owner.as_str().to_lowercase();
+        let mut out = HashMap::new();
+        for k in keys {
+            let v = self
+                .windows
+                .get(&(actor.clone(), k.as_str()))
+                .cloned()
+                .unwrap_or_default();
+            out.insert(*k, v);
+        }
+        out
     }
 }
 ```
 
-> Confirm trait method signatures with `grep -B1 "fn balance\|fn allowance\|fn now_unix" crates/policy-engine/src/host/{portfolio,approvals,clock}.rs`. Adjust if a `Result` or different return type is used.
+> If `PortfolioError::NotFound` / `ApprovalsError::NotFound` / `InvalidAmount` variants don't exist verbatim, check the actual enum variants and adjust — but the *shapes* (Result<AmountSpec, _>) are confirmed against `crates/policy-engine/src/host/{portfolio,approvals}.rs:39,41` and must be matched.
 
 - [ ] **Step 2: Implement export**
 
@@ -1091,8 +1188,11 @@ Replace body in `exports.rs`:
 
 ```rust
 use crate::dto::{HostSnapshotDto, MatchedPolicyDto, VerdictDto};
-use crate::state::{registry, signature_registry, snapshot_oracle_from_entries, FixedClock,
-    SnapshotApprovals, SnapshotPortfolio};
+use crate::state::{
+    registry, signature_registry, snapshot_oracle_from_entries, FixedClock,
+    SnapshotApprovals, SnapshotPortfolio, SnapshotStatWindows,
+};
+use policy_engine::host::stat_windows::{StatKey, StatValue};
 use policy_engine::host::HostCapabilities;
 use policy_engine::policy::Verdict;
 use std::collections::HashMap;
@@ -1134,7 +1234,30 @@ pub fn evaluate_json(request_json: String, host_snapshot_json: String) -> String
         }
         let approvals = SnapshotApprovals { allowances };
 
-        let clock = FixedClock(snapshot.now_ts.unwrap_or(0));
+        // Build the StatWindows snapshot from `snapshot.windows`. This is
+        // the missing-link wiring: without `with_stats`, all 24h-window
+        // policies would silently evaluate against an absent context. The
+        // canonical stat keys (StatKey::SWAP_VOLUME_USD_24H,
+        // StatKey::SWAP_COUNT_24H) are matched by their as_str() form.
+        let mut windows_map: HashMap<(String, &'static str), StatValue> = HashMap::new();
+        for w in &snapshot.windows {
+            // Map JSON wire string -> StatKey constant
+            let stat_key = match w.name.as_str() {
+                s if s == StatKey::SWAP_VOLUME_USD_24H.as_str() => StatKey::SWAP_VOLUME_USD_24H,
+                s if s == StatKey::SWAP_COUNT_24H.as_str() => StatKey::SWAP_COUNT_24H,
+                _ => continue, // unknown key — ignore (forward-compatible)
+            };
+            // StatValue::from_decimal_str (or whatever the engine exposes)
+            // may differ; for the integer "value" wire shape we parse u128.
+            let v: u128 = match w.value.parse() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            windows_map.insert((w.actor.to_lowercase(), stat_key.as_str()), StatValue::from(v));
+        }
+        let stats = SnapshotStatWindows { windows: windows_map };
+
+        let clock = FixedClock(snapshot.now_ts.unwrap_or(0) as u64);
 
         let registry = registry();
         let sig_registry = signature_registry();
@@ -1148,7 +1271,8 @@ pub fn evaluate_json(request_json: String, host_snapshot_json: String) -> String
             let host = HostCapabilities::new(&oracle)
                 .with_clock(&clock)
                 .with_portfolio(&portfolio)
-                .with_approvals(&approvals);
+                .with_approvals(&approvals)
+                .with_stats(&stats); // ← critical: feeds 24h window policies
             let pipeline = Pipeline::new(&registry, host, &state.policies)
                 .with_signature_registry(&sig_registry);
             pipeline.evaluate(&request).map_err(|e| EngineErrorDto {
@@ -1209,14 +1333,19 @@ mod evaluate_tests {
         );
         let req = serde_json::json!({
             "Tx": {
-                "chainId": 1,
+                "chain_id": 1,
                 "from": "0x1111111111111111111111111111111111111111",
                 "to":   "0x2222222222222222222222222222222222222222",
-                "data": "0xdeadbeef",
-                "valueWei": "0"
+                "value_wei": "0",
+                "data": [0xde, 0xad, 0xbe, 0xef],
+                "gas": null,
+                "nonce": null
             }
         });
-        let snap = serde_json::json!({"oracle": [], "balances": [], "allowances": [], "now_ts": 1700000000, "windows": []});
+        let snap = serde_json::json!({
+            "oracle": [], "balances": [], "allowances": [],
+            "now_ts": 1700000000u64, "windows": []
+        });
         let out = evaluate_json(req.to_string(), snap.to_string());
         let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["kind"], "pass", "unexpected verdict: {parsed}");
@@ -1265,11 +1394,13 @@ fn install_then_build_then_evaluate_round_trip() {
 
     let req = serde_json::json!({
         "Tx": {
-            "chainId": 1,
+            "chain_id": 1,
             "from": "0x1111111111111111111111111111111111111111",
             "to":   "0x2222222222222222222222222222222222222222",
-            "data": "0xdeadbeef",
-            "valueWei": "0"
+            "value_wei": "0",
+            "data": [0xde, 0xad, 0xbe, 0xef],
+            "gas": null,
+            "nonce": null
         }
     });
 
@@ -1280,7 +1411,10 @@ fn install_then_build_then_evaluate_round_trip() {
     let plan_out = tier1_fact_plan_json(action_parsed["other"].to_string());
     assert!(plan_out.contains("tokens_for_oracle"));
 
-    let snap = serde_json::json!({"oracle": [], "balances": [], "allowances": [], "now_ts": 0, "windows": []});
+    let snap = serde_json::json!({
+        "oracle": [], "balances": [], "allowances": [],
+        "now_ts": 0u64, "windows": []
+    });
     let verdict_out = evaluate_json(req.to_string(), snap.to_string());
     let verdict_parsed: serde_json::Value = serde_json::from_str(&verdict_out).unwrap();
     assert_eq!(verdict_parsed["kind"], "pass");
@@ -1384,12 +1518,23 @@ EOF
 
 ---
 
+## Unified error envelope (added in fix pass)
+
+To resolve the Codex finding that `build_action_json`/`tier1_fact_plan_json` returned `{kind, message}` while `evaluate_json` folded errors into `Verdict::Fail` (forcing TS callers to branch by export name), every export now follows one rule:
+
+> **Every export returns one of two envelopes.** A successful result envelope (`{ok: "true", data: <payload>}`) or an error envelope (`{ok: "false", error: {kind, message}}`). The TS bridge wrapper (`extension/src/background/wasm-bridge.ts`, Plan 5 §4.3.2) reads `parsed.ok` once and either returns `parsed.data` or throws an `EngineError(kind, message)`.
+
+Exception: `evaluate_json` *also* maps engine errors to `Verdict::Fail` with reason `__engine::<kind>` matched-policy entries — but the *outer envelope* still uses `{ok: "true", data: <verdict>}`. This means orchestrator code never has to special-case `evaluate_json` vs the others.
+
+Update the relevant sections of Tasks 3-7 to wrap their existing return values in `{ok, data}` / `{ok, error}` shapes. The internal `Verdict::Fail` reason mapping in Task 7 is unchanged.
+
 ## Self-review summary
 
 **Spec coverage** (vs design §4.3.2):
 - ✅ `install_policies_json`, `build_action_json`, `tier1_fact_plan_json`, `tier2_window_keys_json`, `evaluate_json` — Tasks 3, 4, 5, 6, 7
-- ✅ JSON-string boundary — Task 2 onwards
+- ✅ JSON-string boundary with **unified `{ok, data | error}` envelope** — Task 0a (this fix)
 - ✅ Fail-closed: lowering / ambiguous errors fold into `Verdict::Fail` — Task 7
+- ✅ **Window state actually plumbed into HostCapabilities via `with_stats(&SnapshotStatWindows)`** — Task 7 (was missing pre-fix; would have silently dead-ended 24h cap policies)
 - ✅ wasm-bindgen-test browser harness — Task 8
 - ✅ wasm-pack build + CI — Task 9
 

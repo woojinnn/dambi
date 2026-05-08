@@ -733,17 +733,14 @@ EOF
 **Files:**
 - Modify: `crates/policy-engine/src/lowering/host_fact_plan.rs`
 
-Window keys are per-actor. Today the only DEX windowing variant the engine projects (`compute_dex_window_deltas` in `lowering/stamping/dex.rs`) is `swap_volume_usd_24h` plus `swap_count_24h`. Both share the same `(actor)` key — the host store maps `(actor, window_name) -> stats`. The Tier-2 fetcher needs the names so it can read storage in one batch.
+Window keys are per-actor. Today `compute_dex_window_deltas` in `lowering/stamping/dex.rs` projects two stat keys, both exposed as canonical constants in `host::stat_windows::StatKey`:
 
-**Pre-task: Confirm stat-window naming.**
+| Constant | Wire string |
+|----------|-------------|
+| `StatKey::SWAP_VOLUME_USD_24H` | `"swapVolumeUsd24h"` |
+| `StatKey::SWAP_COUNT_24H` | `"swapCount24h"` |
 
-Look up the canonical stat-window names with:
-
-```bash
-grep -n "swap_volume_usd_24h\|swap_count_24h\|window_name\|WindowName" crates/policy-engine/src/host/stat_windows.rs crates/policy-engine/src/lowering/stamping/dex.rs
-```
-
-If those exact strings appear, use them. If the codebase exposes a `WindowName` enum or constants module, use it instead and adjust the test/impl accordingly.
+Use the constants directly — never hardcode the wire strings. The host's `StatWindows::snapshot(&Address, &[StatKey])` reads keys in one batch. **Volume is conditionally projected** (only when `dex.facts.total_input_usd` is `Some` after enrichment); **count is unconditional**. The window-key plan returns the *full* set of keys an actor's snapshot must cover for any DEX policy to evaluate, so it includes both — the storage-read fetcher prefetches both regardless of whether the current request's volume delta is present. (A reservation-style planner would condition on USD presence; that's deliberately out of scope per Plan 5's pending-deltas strategy.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -752,18 +749,20 @@ Append to the `tests` module in `host_fact_plan.rs`:
 ```rust
     #[test]
     fn dex_window_keys_extract_swap_volume_and_count() {
+        use crate::host::stat_windows::StatKey;
         let actor = addr("0x1111111111111111111111111111111111111111");
         let target = addr("0xE592427A0AEce92De3Edee1F18E0157C05861564");
         let action = dex_swap_weth_to_usdc(actor.clone(), target);
 
-        // Snapshot oracle is required as a parameter even though DEX windows
-        // depend on USD totals stamped into facts, not on the snapshot directly.
+        // Snapshot oracle is accepted as a parameter to preserve the two-tier
+        // API contract even though DEX storage-read planning derives the key
+        // set statically.
         let oracle = SnapshotOracle::new();
         let plan = required_window_keys(&action, &oracle);
 
-        let names: Vec<_> = plan.keys.iter().map(|k| k.name.as_str()).collect();
-        assert!(names.contains(&"swap_volume_usd_24h"));
-        assert!(names.contains(&"swap_count_24h"));
+        let stat_keys: Vec<_> = plan.keys.iter().map(|k| k.key).collect();
+        assert!(stat_keys.contains(&StatKey::SWAP_VOLUME_USD_24H));
+        assert!(stat_keys.contains(&StatKey::SWAP_COUNT_24H));
         assert!(plan.keys.iter().all(|k| k.actor == actor));
     }
 
@@ -794,7 +793,22 @@ Expected: `dex_window_keys_extract_swap_volume_and_count ... FAILED`.
 
 - [ ] **Step 3: Implement window-key extraction**
 
-Replace the body of `required_window_keys` in `host_fact_plan.rs`:
+Update `WindowKey` in the same module so it carries a typed `StatKey` instead of a raw string:
+
+```rust
+use crate::host::stat_windows::StatKey;
+
+/// One key into the host's stat-window store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowKey {
+    /// Wallet actor.
+    pub actor_index: usize, // unused — see note below
+    /// Canonical stat key (e.g. `StatKey::SWAP_VOLUME_USD_24H`).
+    pub key: StatKey,
+}
+```
+
+Then keep `WindowKey { actor: Address, key: StatKey }` (a struct field; the indirection is for cheap `Copy`). Replace the body of `required_window_keys`:
 
 ```rust
 #[must_use]
@@ -803,18 +817,30 @@ pub fn required_window_keys(action: &Action, _oracle: &SnapshotOracle) -> Window
     if let Action::Dex(dex) = action {
         plan.keys.push(WindowKey {
             actor: dex.actor.clone(),
-            name: "swap_volume_usd_24h".into(),
+            key: StatKey::SWAP_VOLUME_USD_24H,
         });
         plan.keys.push(WindowKey {
             actor: dex.actor.clone(),
-            name: "swap_count_24h".into(),
+            key: StatKey::SWAP_COUNT_24H,
         });
     }
     plan
 }
 ```
 
-> Note: the `_oracle` parameter is intentional. Window deltas projected by `compute_dex_window_deltas` depend on `total_input_usd` (an oracle-stamped field), but the *keys* themselves are static per actor. We keep the parameter to preserve the two-tier API contract — Tier 2 receives the oracle snapshot even when current window definitions don't read it. Future window types may.
+…and update the `WindowKey` definition in Task 2 to:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowKey {
+    pub actor: Address,
+    pub key: StatKey,
+}
+```
+
+> Note 1: keys are returned in canonical form so the host's `StatWindows::snapshot(&Address, &[StatKey])` reads them in one call. The wire string (`"swapVolumeUsd24h"` / `"swapCount24h"`) is `StatKey::as_str()` — the WASM bridge serializes that for the TS side.
+>
+> Note 2: the `_oracle` parameter is intentional. Window deltas projected by `compute_dex_window_deltas` depend on `total_input_usd` (an oracle-stamped field), but the *keys* themselves are static per actor for storage-read planning — we always read both volume and count snapshots, even on a request whose oracle missed and won't actually project a volume delta. Reservation-style planning that conditions on USD presence is deferred to v1.1 (Plan 5 uses inline projection only).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -865,7 +891,12 @@ mod build_action_for_tests {
     fn empty_pipeline_fixture() -> (MockAdapterRegistry, MockOracle, PolicyEngine) {
         let registry = MockAdapterRegistry::default();
         let oracle = MockOracle::new();
-        let engine = PolicyEngine::default();
+        // PolicyEngine has no Default impl — it's always built via the
+        // builder. An empty (no policies, no schema) build is fine for
+        // pipeline-only tests that never call evaluate().
+        let engine = PolicyEngine::builder()
+            .build()
+            .expect("empty PolicyEngine builds");
         (registry, oracle, engine)
     }
 
@@ -879,8 +910,10 @@ mod build_action_for_tests {
             chain_id: 1,
             from: Address::new("0x1111111111111111111111111111111111111111").unwrap(),
             to: Address::new("0x2222222222222222222222222222222222222222").unwrap(),
-            data: vec![0xde, 0xad, 0xbe, 0xef],
             value_wei: "0".into(),
+            data: vec![0xde, 0xad, 0xbe, 0xef],
+            gas: None,
+            nonce: None,
         };
         let action = pipeline.build_action_for(&Request::Tx(tx)).unwrap();
         assert!(matches!(action, Action::Other(_)));
@@ -892,26 +925,20 @@ mod build_action_for_tests {
         let host = HostCapabilities::new(&oracle);
         let pipeline = Pipeline::new(&registry, host, &policies);
 
-        // Construct a minimal valid SignatureRequest. Use the engine's existing
-        // test helpers if any; otherwise build the typed_data inline.
-        let sig = crate::core::SignatureRequest::test_minimal_eip712_other();
+        // Construct a minimal SignatureRequest that matches no signature
+        // adapter. Step 1a adds the test helper.
+        let sig = SignatureRequest::test_minimal_eip712_other();
         let action = pipeline.build_action_for(&Request::Sig(sig)).unwrap();
         assert!(matches!(action, Action::Eip712Other(_)));
     }
 }
 ```
 
-> If `SignatureRequest::test_minimal_eip712_other()` does not exist, see Step 1a below; otherwise skip 1a.
+> The plan formerly used `PolicyEngine::default()` — that does not exist; the engine has `PolicyEngineBuilder::default()` and `PolicyEngine::builder()`/`PolicyEngine::from_sources()`. The `gas`/`nonce` fields on `TransactionRequest` (`core.rs:486,489`) are required (not `#[serde(default)]`); omit them at your peril. `SignatureRequest::test_minimal_eip712_other` is added in Step 1a.
 
-- [ ] **Step 1a: Add `SignatureRequest::test_minimal_eip712_other()` if missing**
+- [ ] **Step 1a: Add `SignatureRequest::test_minimal_eip712_other()` (helper does not yet exist)**
 
-Run:
-
-```bash
-grep -n "test_minimal_eip712_other\|impl SignatureRequest" crates/policy-engine/src/core.rs | head -10
-```
-
-If nothing matches, append a `#[cfg(test)]` impl block to `crates/policy-engine/src/core.rs` near the other `SignatureRequest` definitions:
+Confirmed: `core.rs:504` has only `impl SignatureRequest { fn primary_type ... }`. Append a `#[cfg(test)]` impl block in the same file:
 
 ```rust
 #[cfg(test)]
@@ -1037,7 +1064,7 @@ use policy_engine::core::{Action, Address, Request, TransactionRequest, UsdValua
 use policy_engine::host::oracle::{MockOracle, SnapshotOracle};
 use policy_engine::host::HostCapabilities;
 use policy_engine::lowering::required_host_facts;
-use policy_engine::policy::Verdict;
+use policy_engine::policy::{PolicyEngine, Verdict};
 use policy_engine::Pipeline;
 use policy_engine_adapters_bundle::default_registry;
 
@@ -1045,33 +1072,23 @@ const ACTOR: &str = "0x1111111111111111111111111111111111111111";
 const V3_SWAP_ROUTER: &str = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
 
 fn weth_swap_calldata_v3_exact_input_single() -> Vec<u8> {
-    // Hex string is the calldata for a real Uniswap V3 exactInputSingle WETH->USDC swap.
-    // Re-uses an existing fixture from crates/integration-tests/tests/data/
-    // (see adapter_into_request.rs for the canonical payload). If that file
-    // does not yet expose the bytes, hardcode the well-known production calldata
-    // for the swap shown in the engine's e2e_swap example.
-    use hex_literal::hex;
-    hex!(
-        // Selector: 0x414bf389 exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
-        "414bf389"
-        // tokenIn = WETH
-        "000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
-        // tokenOut = USDC
-        "000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-        // fee = 500 (0.05%)
-        "00000000000000000000000000000000000000000000000000000000000001f4"
-        // recipient = ACTOR (zero-padded)
-        "0000000000000000000000001111111111111111111111111111111111111111"
-        // deadline = far future
-        "00000000000000000000000000000000000000000000000000000000ffffffff"
-        // amountIn = 1 WETH (1e18)
-        "0000000000000000000000000000000000000000000000000de0b6b3a7640000"
-        // amountOutMinimum = 3000 USDC (3e9)
-        "00000000000000000000000000000000000000000000000000000000b2d05e00"
-        // sqrtPriceLimitX96 = 0
-        "0000000000000000000000000000000000000000000000000000000000000000"
-    )
-    .to_vec()
+    // Calldata for a Uniswap V3 exactInputSingle WETH->USDC swap.
+    // Selector 0x414bf389 then 8 × 32-byte words (matches
+    // crates/adapters/uniswap-v3/src/exact_input_single.rs:99 decode shape).
+    // We use the workspace's existing `hex` dep — `hex-literal` is *not*
+    // a workspace member, so do not introduce it here.
+    let raw = concat!(
+        "414bf389",
+        "000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // tokenIn = WETH
+        "000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // tokenOut = USDC
+        "00000000000000000000000000000000000000000000000000000000000001f4", // fee = 500
+        "0000000000000000000000001111111111111111111111111111111111111111", // recipient
+        "00000000000000000000000000000000000000000000000000000000ffffffff", // deadline
+        "0000000000000000000000000000000000000000000000000de0b6b3a7640000", // amountIn = 1 WETH
+        "00000000000000000000000000000000000000000000000000000000b2d05e00", // amountOutMin = 3000 USDC
+        "0000000000000000000000000000000000000000000000000000000000000000", // sqrtPriceLimitX96 = 0
+    );
+    hex::decode(raw).expect("static hex literal decodes")
 }
 
 #[test]
@@ -1079,14 +1096,18 @@ fn extract_plan_then_evaluate_matches_direct_path() {
     use policy_engine::host::oracle::Oracle;
 
     let registry = default_registry();
-    let policies = policy_engine::policy::PolicyEngine::default();
+    let policies = PolicyEngine::builder()
+        .build()
+        .expect("empty PolicyEngine builds");
 
     let tx = TransactionRequest {
         chain_id: 1,
         from: Address::new(ACTOR).unwrap(),
         to: Address::new(V3_SWAP_ROUTER).unwrap(),
-        data: weth_swap_calldata_v3_exact_input_single(),
         value_wei: "0".into(),
+        data: weth_swap_calldata_v3_exact_input_single(),
+        gas: None,
+        nonce: None,
     };
 
     // Path A: extract action via public API, derive plan, populate snapshot.
@@ -1155,15 +1176,9 @@ fn extract_plan_then_evaluate_matches_direct_path() {
 }
 ```
 
-- [ ] **Step 2: Add `hex-literal` to integration-tests dev-dependencies if missing**
+- [ ] **Step 2: Confirm `hex` crate is in scope (already a workspace member)**
 
-Run: `grep -n "hex-literal" crates/integration-tests/Cargo.toml`
-
-If absent, edit `crates/integration-tests/Cargo.toml`, find the `[dev-dependencies]` block (or add one if missing), and append:
-
-```toml
-hex-literal = "0.4"
-```
+The integration-tests crate already declares `hex` (`crates/integration-tests/Cargo.toml:19`). The integration test uses `hex::decode(...)` rather than `hex-literal::hex!` — **no new dependency needed**.
 
 - [ ] **Step 3: Run the integration test to verify it passes**
 

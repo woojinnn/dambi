@@ -47,7 +47,7 @@
 
 We need a deterministic structural fingerprint of a Cedar policy that ignores literal values at slot positions. The fingerprint is a JSON tree where every literal becomes a placeholder string `"<slot>"`. Comparing two fingerprints yields AST equivalence with literal values free to vary.
 
-- [ ] **Step 1: Confirm cedar-policy AST surface**
+- [ ] **Step 1: Confirm cedar-policy AST surface AND record a golden snapshot**
 
 ```bash
 cargo doc -p cedar-policy --no-deps --open 2>/dev/null
@@ -55,7 +55,15 @@ cargo doc -p cedar-policy --no-deps --open 2>/dev/null
 
 Look for `Policy::ast()` or similar. As of cedar-policy 4.x, `cedar_policy::Policy` exposes `to_json()` which serializes the AST in stable form. Use that.
 
-If `to_json` is not exposed in 4.x, use `cedar_policy_core::ast::Policy` (re-exported via `cedar_policy::Policy`) and walk via the public CST APIs. The plan below assumes `Policy::to_json()` is available — adjust to whatever the executor confirms.
+If `to_json` is not exposed in 4.x, use `cedar_policy_core::ast::Policy` (re-exported via `cedar_policy::Policy`) and walk via the public CST APIs.
+
+**Golden-test gate (added in fix pass)**: before writing any blanker logic, capture the *actual* JSON shape `Policy::to_json()` emits for each Cedar literal kind (long, bool, string, entity ref, decimal, set literal, record literal). Save those snapshots under `crates/policy_engine_wasm/tests/cedar_ast_golden/{long,bool,string,entity,decimal,set,record}.json`. The blanker's literal-key list is then derived *from those snapshots* — never from a guess. The Plan 6 Task 1 unit tests assert that:
+
+1. Every golden snapshot has at least one node whose key matches a blanker entry (so we know we're catching them).
+2. Two policies that differ *only at literal positions* of each kind produce identical fingerprints.
+3. Two policies that differ in *any structural way* (`when { false || x }` vs `when { x }`, `permit` vs `forbid`, swapped scope, severity-annotation flip) produce different fingerprints.
+
+If the cedar JSON schema changes between releases, the golden snapshots fail loudly and the blanker is updated rather than silently passing/failing legitimate templates.
 
 - [ ] **Step 2: Add the export**
 
@@ -223,8 +231,12 @@ Add to `dependencies`:
 ```json
 "jszip": "^3.10.1",
 "@noble/hashes": "^1.4.0",
-"@noble/curves": "^1.4.0"
+"canonicalize": "^2.0.0"
 ```
+
+> Notes:
+> - `@noble/curves` is **not** added because viem 2 already ships `@noble/curves`'s ed25519 — webpack dedupes via `peerDependencies` resolution. Import it via `viem/utils` or `viem/accounts` paths to share the chunk. (Avoids duplicate ed25519 in the SW bundle.)
+> - `canonicalize` is the RFC 8785 (JCS) implementation; both signer and verifier share it so byte-equality is mechanical. Replaces the hand-rolled `canonicalJson` in both files.
 
 Run `yarn install`.
 
@@ -281,6 +293,7 @@ echo "extension/scripts/catalog-dev/*.sk" >> .gitignore
 ```typescript
 // extension/src/background/marketplace/catalog-client.ts
 import { ed25519 } from '@noble/curves/ed25519';
+import canonicalize from 'canonicalize';
 
 // Dev publisher key. Production builds replace this constant with a
 // pinned root key per release channel.
@@ -317,19 +330,17 @@ export async function fetchAndVerifyCatalog(
   }
 
   const { signature, ...rest } = raw;
-  const canonical = canonicalJson(rest);
-  const ok = ed25519.verify(hexToBytes(signature), new TextEncoder().encode(canonical), hexToBytes(raw.publisher_pubkey));
+  // RFC 8785 canonicalization — shared with sign-catalog.js so byte
+  // equality is guaranteed by the same library on both ends.
+  const canonical = canonicalize(rest);
+  if (canonical === undefined) throw new Error('catalog body did not canonicalize');
+  const ok = ed25519.verify(
+    hexToBytes(signature),
+    new TextEncoder().encode(canonical),
+    hexToBytes(raw.publisher_pubkey),
+  );
   if (!ok) throw new Error('catalog signature verification failed');
   return raw;
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const keys = Object.keys(value as object).sort();
-  return `{${keys
-    .map((k) => `${JSON.stringify(k)}:${canonicalJson((value as any)[k])}`)
-    .join(',')}}`;
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -571,15 +582,36 @@ git commit -m "feat(extension): bundle fetch (sha256 + sandbox)"
 - [ ] **Step 1: params-validator.ts**
 
 ```typescript
+/// Each ParamSchema variant carries an optional `default` value of the right
+/// type. The marketplace UI uses defaults when installing without a per-param
+/// edit pass; SettingsPage edits the active values post-install.
 export type ParamSchema =
-  | { type: 'integer'; min: number; max: number }
-  | { type: 'address' }
-  | { type: 'enum'; values: readonly string[] }
-  | { type: 'string'; maxLen: number; allowedChars: string }
-  | { type: 'array'; items: ParamSchema; maxItems: number };
+  | { type: 'integer'; min: number; max: number; default?: number }
+  | { type: 'address'; default?: string }
+  | { type: 'enum'; values: readonly string[]; default?: string }
+  | { type: 'string'; maxLen: number; allowedChars: string; default?: string }
+  | { type: 'array'; items: ParamSchema; maxItems: number; default?: unknown[] };
 
 export type ParamsSchema = Record<string, ParamSchema>;
 export type ParamValues = Record<string, unknown>;
+
+/// Build a ParamValues object from a schema's defaults. Throws if any param
+/// lacks a default and no override is supplied. The MarketplacePage uses
+/// this to install bundles without forcing the user through an edit form
+/// before the bundle is even on disk; SettingsPage edits afterward.
+export function defaultsFor(schema: ParamsSchema, overrides: ParamValues = {}): ParamValues {
+  const out: ParamValues = { ...overrides };
+  for (const [key, decl] of Object.entries(schema)) {
+    if (key in out) continue;
+    if (decl.default === undefined) {
+      throw new Error(
+        `param "${key}" has no default and was not supplied at install time`,
+      );
+    }
+    out[key] = decl.default;
+  }
+  return out;
+}
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
 
@@ -655,9 +687,14 @@ export function renderCedarLiteral(decl: ParamSchema, value: unknown): string {
       return s;
     }
     case 'address': {
+      // The repo schema (policy-schema/core.cedarschema) does NOT declare
+      // an `EthereumAddress` entity type — addresses are plain `String`
+      // fields throughout the action contexts. Render as a Cedar string
+      // literal. (Future: introduce a dedicated entity type and migrate
+      // contexts; out of v1 scope.)
       const v = String(value);
       if (!/^0x[a-fA-F0-9]{40}$/.test(v)) throw new Error(`address regex fail: ${v}`);
-      return `EthereumAddress::"${v.toLowerCase()}"`;
+      return JSON.stringify(v.toLowerCase());
     }
     case 'enum': {
       const v = String(value);
@@ -767,6 +804,27 @@ import type { ParamSchema, ParamsSchema, ParamValues } from './params-validator'
 
 const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
 
+/// Regex anchors that bound a legal slot position in template text.
+/// A `{{x}}` placeholder MUST appear immediately to the right of one of:
+/// - a comparison operator (`==`, `!=`, `<`, `<=`, `>`, `>=`)
+/// - the `in` keyword
+/// - inside a `Set` / `Record` literal `[...]` or `{...}`
+///
+/// This prevents an attacker from making the entire `when` body the slot
+/// (`when { {{cap}} }`) — Codex's documented Plan 6 limitation. The check
+/// inspects the characters immediately preceding the placeholder; if no
+/// anchor matches, install fails up-front with a clear error.
+const ALLOWED_PRECEDING = [
+  /==\s*$/,
+  /!=\s*$/,
+  /<=\s*$/,
+  />=\s*$/,
+  /<\s*$/,
+  />\s*$/,
+  /\bin\s+$/,
+  /[,\[]\s*$/, // inside set / array literal
+];
+
 export interface RenderInput {
   policyId: string;
   templateText: string;
@@ -774,7 +832,31 @@ export interface RenderInput {
   paramValues: ParamValues;
 }
 
+/// Walk the template, locate each `{{name}}`, and assert the preceding
+/// characters match a whitelisted Cedar context. Throws on any violation.
+function assertSlotPositions(template: string): void {
+  // Strip line + block comments first so we don't false-match inside them.
+  const stripped = template
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const match of stripped.matchAll(PLACEHOLDER_RE)) {
+    const before = stripped.slice(0, match.index ?? 0);
+    if (!ALLOWED_PRECEDING.some((rx) => rx.test(before))) {
+      throw new Error(
+        `slot {{${match[1]}}} appears in a non-whitelisted position. Slots may only fill ` +
+          `the right-hand side of comparison operators (==, !=, <, >, <=, >=), the right ` +
+          `operand of \`in\`, or elements of a set/record literal.`,
+      );
+    }
+  }
+}
+
 export async function renderAndVerify(input: RenderInput): Promise<string> {
+  // Layer 0 (added in fix pass): structural slot-position whitelist.
+  // Rejects templates where a slot fills an unsafe AST position (e.g., the
+  // entire `when` body). Cheap defense-in-depth before AST equivalence.
+  assertSlotPositions(input.templateText);
+
   const sentinelText = substituteSentinels(input.templateText, input.paramsSchema);
   const sentinelFingerprint = await fingerprintOf(input.policyId, sentinelText);
 
@@ -816,7 +898,7 @@ function sentinelLiteral(decl: ParamSchema, _name: string): string {
     case 'integer':
       return '0';
     case 'address':
-      return `EthereumAddress::"0x0000000000000000000000000000000000000000"`;
+      return JSON.stringify('0x0000000000000000000000000000000000000000');
     case 'enum':
     case 'string':
       return '"x"';
@@ -975,7 +1057,7 @@ export async function listAvailable(): Promise<CatalogBundleEntry[]> {
 
 export async function installBundle(
   bundle: CatalogBundleEntry,
-  paramValues: ParamValues,
+  paramOverrides: ParamValues = {},
 ): Promise<void> {
   const fetched = await fetchBundle(bundle.bundle_url, bundle.bundle_sha256);
   if (fetched.manifest.bundle_id !== bundle.bundle_id) {
@@ -986,6 +1068,8 @@ export async function installBundle(
   }
 
   const paramsSchema: ParamsSchema = JSON.parse(fetched.paramsSchemaJson);
+  // Apply schema defaults; throws if any param has no default AND no override.
+  const paramValues = defaultsFor(paramsSchema, paramOverrides);
   validateParams(paramsSchema, paramValues);
 
   const renderedPolicySet: { id: string; text: string }[] = [];
@@ -1163,9 +1247,11 @@ export function MarketplacePage(): JSX.Element {
     setBusy(b.bundle_id);
     setError(null);
     try {
-      // For v1 the marketplace installs with default param values from the
-      // schema; per-bundle settings tab edits them after install.
-      await installBundle(b, {});
+      // installBundle will read the bundle's params.schema.json and apply
+      // `defaultsFor(schema)` internally — install fails up-front if any
+      // param has no `default` set, surfacing a clean UI error rather than
+      // a confusing later validateParams failure.
+      await installBundle(b);
     } catch (e: any) {
       setError(e.message ?? String(e));
     } finally {
@@ -1426,6 +1512,11 @@ const path = require('path');
 const { sha256 } = require('@noble/hashes/sha256');
 const JSZip = require('jszip');
 
+// Deterministic timestamp for zip entries — re-running sign-bundle.js on the
+// same input must produce a byte-identical zip (and therefore identical
+// sha256). Without this, JSZip uses Date.now() per entry → hash drifts.
+const FIXED_DATE = new Date('2026-01-01T00:00:00Z');
+
 async function main() {
   const [, , bundleDir] = process.argv;
   if (!bundleDir) {
@@ -1434,14 +1525,26 @@ async function main() {
   }
   const zip = new JSZip();
   function addFile(rel) {
-    zip.file(rel, fs.readFileSync(path.join(bundleDir, rel)));
+    zip.file(rel, fs.readFileSync(path.join(bundleDir, rel)), {
+      date: FIXED_DATE,
+      unixPermissions: 0o644,
+    });
   }
-  // Walk for manifest.json and params.schema.json (top level) plus everything in policies/.
-  for (const f of ['manifest.json', 'params.schema.json']) addFile(f);
-  for (const f of fs.readdirSync(path.join(bundleDir, 'policies'))) {
-    addFile(path.join('policies', f));
-  }
-  const bytes = await zip.generateAsync({ type: 'uint8array' });
+
+  // Sorted file list — readdirSync order is filesystem-dependent. Sorting
+  // makes the zip's central directory identical across machines.
+  const files = ['manifest.json', 'params.schema.json'];
+  const policiesDir = path.join(bundleDir, 'policies');
+  const policyFiles = fs.readdirSync(policiesDir).sort();
+  for (const f of policyFiles) files.push(path.join('policies', f));
+  files.sort();
+  for (const f of files) addFile(f);
+
+  const bytes = await zip.generateAsync({
+    type: 'uint8array',
+    compression: 'STORE', // no compression → no compressor-version drift
+    streamFiles: false,
+  });
   const sha = Buffer.from(sha256(bytes)).toString('hex');
   const outZip = `${bundleDir}.zip`;
   fs.writeFileSync(outZip, bytes);
@@ -1458,13 +1561,7 @@ main();
 #!/usr/bin/env node
 const fs = require('fs');
 const { ed25519 } = require('@noble/curves/ed25519');
-
-function canonicalJson(value) {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const keys = Object.keys(value).sort();
-  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
-}
+const canonicalize = require('canonicalize');
 
 const [, , inputPath, skPath, outPath] = process.argv;
 if (!inputPath || !skPath || !outPath) {
@@ -1475,7 +1572,13 @@ const sk = Uint8Array.from(Buffer.from(fs.readFileSync(skPath, 'utf8').trim(), '
 const unsigned = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
 const pkHex = Buffer.from(ed25519.getPublicKey(sk)).toString('hex');
 const rest = { ...unsigned, publisher_pubkey: pkHex };
-const sig = ed25519.sign(new TextEncoder().encode(canonicalJson(rest)), sk);
+// RFC 8785 (JCS): byte-identical to catalog-client.ts's verify path.
+const canonical = canonicalize(rest);
+if (canonical === undefined) {
+  console.error('catalog body did not canonicalize');
+  process.exit(3);
+}
+const sig = ed25519.sign(new TextEncoder().encode(canonical), sk);
 const signed = { ...rest, signature: Buffer.from(sig).toString('hex') };
 fs.writeFileSync(outPath, JSON.stringify(signed, null, 2));
 console.log(`signed catalog written to ${outPath}`);

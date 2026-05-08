@@ -78,6 +78,7 @@ Create `extension/package.json`:
     "@metamask/post-message-stream": "^8.1.0",
     "eth-rpc-errors": "^4.0.3",
     "object-hash": "^3.0.0",
+    "readable-stream": "^4.5.2",
     "viem": "^2.13.7",
     "webextension-polyfill": "^0.12.0"
   },
@@ -167,7 +168,19 @@ extension/.yarn/
 extension/.env
 ```
 
-- [ ] **Step 4: Install deps**
+- [ ] **Step 4: Force `node_modules` linker (avoid PnP)**
+
+Yarn 4 defaults to PnP (`pnp` linker), which breaks `wext-manifest-loader`, `wext-manifest-webpack-plugin`, and many older webpack plugins that resolve via `require.resolve` over the filesystem. Pin to classic `node_modules`:
+
+```bash
+mkdir -p extension/.yarn
+cat > extension/.yarnrc.yml <<'YAML'
+nodeLinker: node-modules
+enableScripts: true
+YAML
+```
+
+- [ ] **Step 5: Install deps**
 
 ```bash
 cd extension && yarn install 2>&1 | tail -10
@@ -330,6 +343,8 @@ cd extension && yarn build:chrome 2>&1 | tail -10
 ```
 
 Expected: error `Cannot resolve manifest.json`. Move on to Task 3.
+
+> **Manifest emission verification gate (added in fix pass)**: after Task 3 builds, the executor MUST verify that `dist/chrome/manifest.json` is produced *as a real JSON file at the dist root* (not just `js/manifest.js`). `wext-manifest-webpack-plugin` is responsible for that emission — but its config under Yarn-Berry-with-node-modules-linker has historically been finicky. If the file is missing, switch the manifest entry from `manifest: ...` to `__manifest__: ...` per the plugin's docs and re-test before continuing.
 
 - [ ] **Step 6: Commit**
 
@@ -573,16 +588,19 @@ export function generateRequestId(data: MessageData): string {
   }
 }
 
+/// Hard end-to-end timeout per design §3.2 (3s). Fail-closed: timeout
+/// returns `false` so the original RPC is rejected, never silently passed.
+const HARD_TIMEOUT_MS = 3_000;
+
 /// Send a message over a `WindowPostMessageStream` and resolve with the
-/// matching `MessageResponse.data` (boolean). Times out after 30s
-/// (fail-closed: returns `false` so the original RPC is rejected).
+/// matching `MessageResponse.data` (boolean).
 export function sendToStreamAndAwaitResponse(stream: Duplex, data: MessageData): Promise<boolean> {
   const requestId = generateRequestId(data);
   return new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => {
       stream.off('data', cb);
       resolve(false);
-    }, 30_000);
+    }, HARD_TIMEOUT_MS);
     const cb = (response: MessageResponse) => {
       if (response.requestId !== requestId) return;
       clearTimeout(timer);
@@ -604,7 +622,7 @@ export function sendToPortAndAwaitResponse(
     const timer = setTimeout(() => {
       port.onMessage.removeListener(cb);
       resolve(false);
-    }, 30_000);
+    }, HARD_TIMEOUT_MS);
     const cb = (response: MessageResponse) => {
       if (response.requestId !== requestId) return;
       clearTimeout(timer);
@@ -649,7 +667,6 @@ git commit -m "feat(extension): shared identifiers, message types, request-id ha
 ```typescript
 import { WindowPostMessageStream } from '@metamask/post-message-stream';
 import { ethErrors } from 'eth-rpc-errors';
-import { createWalletClient, custom, type Hex } from 'viem';
 import { Identifier, PROVIDER_MARKER } from '@lib/identifier';
 import { sendToStreamAndAwaitResponse } from '@lib/messages';
 import { RequestType } from '@lib/types';
@@ -674,11 +691,21 @@ const REJECT_SIG = ethErrors.provider.userRejectedRequest(
   'Scopeball: signature blocked by policy',
 );
 
+/// Read chainId without pulling in viem (~250 KB). Falls back to
+/// provider.chainId synchronously if the request method isn't available.
+async function readChainId(provider: any): Promise<number> {
+  try {
+    const cid = await provider.request({ method: 'eth_chainId' });
+    return Number.parseInt(String(cid), 16);
+  } catch {
+    return Number(provider.chainId ?? 1);
+  }
+}
+
 async function checkTransaction(provider: any, params: any[]): Promise<boolean> {
   const [transaction] = params ?? [];
   if (!transaction) return true;
-  const client = createWalletClient({ transport: custom(provider) });
-  const chainId = await client.getChainId();
+  const chainId = await readChainId(provider);
   return sendToStreamAndAwaitResponse(stream, {
     type: RequestType.TRANSACTION,
     chainId,
@@ -690,15 +717,16 @@ async function checkTransaction(provider: any, params: any[]): Promise<boolean> 
 async function checkTypedSignature(provider: any, params: any[]): Promise<boolean> {
   const [address, typedDataStr] = params ?? [];
   if (!address || !typedDataStr) return true;
-  const typedData = typeof typedDataStr === 'string' ? JSON.parse(typedDataStr) : typedDataStr;
-  const client = createWalletClient({ transport: custom(provider) });
-  const chainId = await client.getChainId();
+  // Forward the raw typedData payload (string OR object) to the background;
+  // engine validate_typed_data is the canonical validator. We intentionally
+  // do NOT JSON.parse here — that's the SW's job (per design §3.3).
+  const chainId = await readChainId(provider);
   return sendToStreamAndAwaitResponse(stream, {
     type: RequestType.TYPED_SIGNATURE,
     chainId,
     hostname: location.hostname,
     address,
-    typedData,
+    typedData: typedDataStr,
   });
 }
 
@@ -716,22 +744,23 @@ async function checkUntypedSignature(params: any[]): Promise<boolean> {
   });
 }
 
-async function checkWalletSendCalls(provider: any, params: any[]): Promise<boolean> {
-  const [options] = params ?? [];
-  if (!options?.calls) return true;
-  const from = options.from ?? '0x0000000000000000000000000000000000000000';
-  const client = createWalletClient({ transport: custom(provider) });
-  const chainId = await client.getChainId();
-  for (const call of options.calls) {
-    const ok = await sendToStreamAndAwaitResponse(stream, {
-      type: RequestType.TRANSACTION,
-      chainId,
-      hostname: location.hostname,
-      transaction: { from, ...call },
+/// `eth_sendRawTransaction`: the calldata is already signed bytes; we cannot
+/// gate without ABI-decoding the signed envelope (deferred to v1.1). Per
+/// design §4.1, log + non-blocking advisory toast, then pass through.
+function logRawTransaction(params: any[]): void {
+  try {
+    const raw = String(params?.[0] ?? '');
+    stream.write({
+      requestId: 'raw-tx-' + raw.slice(0, 18),
+      data: {
+        type: 'raw-transaction-advisory',
+        hostname: location.hostname,
+        rawPreview: raw.slice(0, 18),
+      },
     });
-    if (!ok) return false;
+  } catch {
+    /* logging is best-effort */
   }
-  return true;
 }
 
 function proxyEthereumProvider(provider: any): void {
@@ -757,10 +786,13 @@ function proxyEthereumProvider(provider: any): void {
       } else if (method === 'eth_sign' || method === 'personal_sign') {
         isOk = await checkUntypedSignature(params);
         if (!isOk) throw REJECT_SIG;
-      } else if (method === 'wallet_sendCalls') {
-        isOk = await checkWalletSendCalls(provider, params);
-        if (!isOk) throw REJECT_TX;
+      } else if (method === 'eth_sendRawTransaction') {
+        // v1: pass-through with advisory log (design §4.1).
+        logRawTransaction(params);
       }
+      // Note: wallet_sendCalls (EIP-5792) is intentionally NOT gated in v1;
+      // the design defers it to v1.1. Removing it from the inpage gate avoids
+      // shipping untested batch-evaluate semantics.
       return Reflect.apply(target, thisArg, args);
     },
   };
@@ -786,8 +818,8 @@ function proxyEthereumProvider(provider: any): void {
           if (!(await checkTypedSignature(provider, params))) return reject(REJECT_SIG);
         } else if (method === 'eth_sign' || method === 'personal_sign') {
           if (!(await checkUntypedSignature(params))) return reject(REJECT_SIG);
-        } else if (method === 'wallet_sendCalls') {
-          if (!(await checkWalletSendCalls(provider, params))) return reject(REJECT_TX);
+        } else if (method === 'eth_sendRawTransaction') {
+          logRawTransaction(params);
         }
         return Reflect.apply(target, thisArg, args);
       } catch (err) {
@@ -828,51 +860,104 @@ function proxyEthereumProvider(provider: any): void {
     });
     Object.defineProperty(provider, PROVIDER_MARKER, { value: true, writable: false });
   } catch (e) {
-    // Some providers freeze themselves; nothing we can do.
-    console.warn('Scopeball: failed to wrap provider', e);
+    // Frozen / non-configurable provider. Surface this as a hard signal so
+    // downstream code (and SW telemetry) knows we cannot gate this provider —
+    // do NOT silently pass through.
+    console.error('Scopeball: provider is frozen and cannot be wrapped', e);
+    try {
+      stream.write({
+        requestId: 'frozen-provider-' + Date.now().toString(16),
+        data: {
+          type: 'provider-frozen-warning',
+          hostname: location.hostname,
+          providerName: provider?.constructor?.name ?? 'unknown',
+        },
+      });
+    } catch {
+      /* ignore */
+    }
+    // The smoke test (Task 9) MUST treat any frozen-provider event as a
+    // failure to prevent silent regressions.
+  }
+}
+
+/// Per-source polling: track each candidate source independently. Stop
+/// polling a source only after it's been seen + wrapped at least once.
+/// This fixes the Codex finding that "polling stopped as soon as
+/// window.ethereum exists" — late-injected `providers[]` and Coinbase /
+/// Liquality entries kept arriving but were never proxied.
+const KNOWN_SOURCES = [
+  'ethereum',
+  'coinbaseWalletExtension',
+  'eth',
+  'rsk',
+  'bsc',
+  'polygon',
+  'arbitrum',
+  'fuse',
+  'avalanche',
+  'optimism',
+] as const;
+const seenSources = new Set<string>();
+
+function discoverAndProxyAll(): void {
+  for (const k of KNOWN_SOURCES) {
+    const p = window[k];
+    if (!p) continue;
+    proxyEthereumProvider(p);
+    seenSources.add(k);
+    // window.ethereum can also expose a multi-provider array.
+    if (k === 'ethereum' && Array.isArray((p as any).providers)) {
+      for (const sub of (p as any).providers) proxyEthereumProvider(sub);
+    }
   }
 }
 
 let pollHandle: number | undefined;
 
-function discoverAndProxyAll(): void {
-  if (window.ethereum) {
-    proxyEthereumProvider(window.ethereum);
-    if (Array.isArray(window.ethereum?.providers)) {
-      for (const p of window.ethereum.providers) proxyEthereumProvider(p);
-    }
-    if (pollHandle !== undefined) {
-      clearInterval(pollHandle);
-      pollHandle = undefined;
-    }
-  }
-  proxyEthereumProvider(window.coinbaseWalletExtension);
-  for (const k of [
-    'eth',
-    'rsk',
-    'bsc',
-    'polygon',
-    'arbitrum',
-    'fuse',
-    'avalanche',
-    'optimism',
-  ]) {
-    proxyEthereumProvider(window[k]);
-  }
+// EIP-6963: explicit re-announce with a separate UUID so dApps that select by
+// announced metadata can choose the wrapped provider deterministically.
+const SCOPEBALL_RDNS = 'dev.scopeball.wrapper';
+function reannounceWrapped(detail: any, originalInfo: any): void {
+  if (!detail?.provider) return;
+  proxyEthereumProvider(detail.provider);
+  // Re-emit the announcement under our own UUID so consumers see "two"
+  // providers — original + wrapped — and can route preference via the UI.
+  // The wrapped one shares the underlying instance (already proxied), so
+  // either selection routes through us.
+  const info = {
+    uuid: 'scopeball-' + (originalInfo?.uuid ?? Math.random().toString(36).slice(2)),
+    name: 'Scopeball (wraps ' + (originalInfo?.name ?? 'provider') + ')',
+    icon:
+      originalInfo?.icon ?? 'data:image/svg+xml;base64,' /* TODO: scopeball icon */,
+    rdns: SCOPEBALL_RDNS,
+  };
+  window.dispatchEvent(
+    new CustomEvent('eip6963:announceProvider', {
+      detail: Object.freeze({ info: Object.freeze(info), provider: detail.provider }),
+    }),
+  );
 }
 
-// EIP-6963: announced providers.
 window.addEventListener('eip6963:announceProvider', (event: Event) => {
   const detail = (event as CustomEvent).detail;
-  if (detail?.provider) {
-    proxyEthereumProvider(detail.provider);
-  }
+  // Skip our own re-announcements (rdns === SCOPEBALL_RDNS).
+  if (detail?.info?.rdns === SCOPEBALL_RDNS) return;
+  reannounceWrapped(detail, detail?.info);
 });
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 
-// Polling fallback for legacy non-6963 setups.
+// Bounded polling for legacy non-6963 sources. Cap at 30s wall time so we
+// don't run forever on pages without wallets.
 discoverAndProxyAll();
-pollHandle = window.setInterval(discoverAndProxyAll, 100);
+const POLL_DEADLINE_MS = Date.now() + 30_000;
+pollHandle = window.setInterval(() => {
+  discoverAndProxyAll();
+  if (Date.now() > POLL_DEADLINE_MS) {
+    clearInterval(pollHandle);
+    pollHandle = undefined;
+  }
+}, 100);
 ```
 
 - [ ] **Step 2: Build to verify compilation**

@@ -128,6 +128,8 @@ export interface ChainConfig {
   multicall3: `0x${string}`;
   /** CoinGecko platform slug for /simple/token_price/{platform}. */
   coingeckoPlatform: string;
+  /** CoinGecko coin id for /simple/price (native asset; ETH uses 'ethereum'). */
+  coingeckoNativeId: string;
 }
 
 const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11' as const;
@@ -147,6 +149,7 @@ export const CHAINS: Record<number, ChainConfig> = {
     ),
     multicall3: MULTICALL3,
     coingeckoPlatform: 'ethereum',
+    coingeckoNativeId: 'ethereum',
   },
   10: {
     id: 10,
@@ -157,6 +160,7 @@ export const CHAINS: Record<number, ChainConfig> = {
     ),
     multicall3: MULTICALL3,
     coingeckoPlatform: 'optimistic-ethereum',
+    coingeckoNativeId: 'ethereum',
   },
   137: {
     id: 137,
@@ -167,6 +171,7 @@ export const CHAINS: Record<number, ChainConfig> = {
     ),
     multicall3: MULTICALL3,
     coingeckoPlatform: 'polygon-pos',
+    coingeckoNativeId: 'matic-network',
   },
   8453: {
     id: 8453,
@@ -177,6 +182,7 @@ export const CHAINS: Record<number, ChainConfig> = {
     ),
     multicall3: MULTICALL3,
     coingeckoPlatform: 'base',
+    coingeckoNativeId: 'ethereum',
   },
   42161: {
     id: 42161,
@@ -187,6 +193,7 @@ export const CHAINS: Record<number, ChainConfig> = {
     ),
     multicall3: MULTICALL3,
     coingeckoPlatform: 'arbitrum-one',
+    coingeckoNativeId: 'ethereum',
   },
 };
 
@@ -251,10 +258,12 @@ import {
   fallback,
   http,
   parseAbi,
-  type Address,
   type PublicClient,
 } from 'viem';
 import { chainConfig } from './chain-config';
+
+// Re-export Address so consumers don't double-import from viem.
+export type { Address } from 'viem';
 
 const ERC20_ABI = parseAbi([
   'function balanceOf(address) view returns (uint256)',
@@ -278,6 +287,8 @@ export function rpcClient(chainId: number): PublicClient {
   clientCache.set(chainId, client);
   return client;
 }
+
+import type { Address } from 'viem';
 
 export interface BalanceFact {
   owner: Address;
@@ -522,6 +533,63 @@ export async function fetchUsdPrices(
       if (typeof entry?.usd !== 'number') continue;
       out.push({
         address: address.toLowerCase(),
+        usd: entry.usd.toString(),
+        asOfTs: entry.last_updated_at ?? Math.floor(Date.now() / 1000),
+      });
+    }
+  }
+  return out;
+}
+
+/// Fetch USD price for a list of *native* assets (one per chain). CoinGecko's
+/// /simple/token_price endpoint only handles ERC-20 contracts; native assets
+/// (ETH, MATIC, etc.) need /simple/price?ids=...&vs_currencies=usd.
+export interface CoinGeckoNativePrice {
+  chainId: number;
+  usd: string;
+  asOfTs: number;
+}
+
+export async function fetchNativeUsdPrices(
+  chainIds: readonly number[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<readonly CoinGeckoNativePrice[]> {
+  if (chainIds.length === 0) return [];
+  // Dedupe by coin id — multiple chains can share an id (op + base both 'ethereum').
+  const idsByCoin = new Map<string, number[]>();
+  for (const cid of chainIds) {
+    const id = chainConfig(cid).coingeckoNativeId;
+    const list = idsByCoin.get(id) ?? [];
+    list.push(cid);
+    idsByCoin.set(id, list);
+  }
+  const ids = [...idsByCoin.keys()];
+
+  const url = new URL(`${COINGECKO_BASE}/simple/price`);
+  url.searchParams.set('ids', ids.join(','));
+  url.searchParams.set('vs_currencies', 'usd');
+  url.searchParams.set('include_last_updated_at', 'true');
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url.toString(), { signal: AbortSignal.timeout(5_000) });
+  } catch {
+    return [];
+  }
+  if (!response.ok) return [];
+  let body: Record<string, { usd?: number; last_updated_at?: number }>;
+  try {
+    body = await response.json();
+  } catch {
+    return [];
+  }
+  const out: CoinGeckoNativePrice[] = [];
+  for (const [coinId, entry] of Object.entries(body)) {
+    if (typeof entry?.usd !== 'number') continue;
+    const cidsForCoin = idsByCoin.get(coinId) ?? [];
+    for (const cid of cidsForCoin) {
+      out.push({
+        chainId: cid,
         usd: entry.usd.toString(),
         asOfTs: entry.last_updated_at ?? Math.floor(Date.now() / 1000),
       });
@@ -802,13 +870,14 @@ export interface HostSnapshot {
 - [ ] **Step 2: oracle-snapshot.ts**
 
 ```typescript
-import { fetchUsdPrices } from './coingecko-client';
+import { fetchUsdPrices, fetchNativeUsdPrices } from './coingecko-client';
 import { lookup, store } from './price-cache';
 import type { OracleEntry } from '@background/types/host-snapshot';
 
 export interface OracleNeed {
   chainId: number;
   address: string;
+  isNative?: boolean;
 }
 
 /// Build a snapshot of oracle entries covering every (chainId, address)
@@ -860,14 +929,19 @@ export async function buildOracleSnapshot(
       stale_sec: Math.max(0, Math.floor((nowMs - entry.cachedAtMs) / 1000)),
     });
   }
+  const nowSec = Math.floor(nowMs / 1000);
   for (const { chainId, prices } of fetchedByChain) {
     for (const p of prices) {
+      // stale_sec is data freshness — wall-time delta from CoinGecko's
+      // `last_updated_at`, not a flat 0 on fresh fetch. The CoinGecko
+      // datapoint can be hours old even when our cache says "fresh".
+      const staleSec = Math.max(0, nowSec - p.asOfTs);
       out.push({
         token_key: `${chainId}:${p.address}`,
         usd_per_unit: p.usd,
         as_of_ts: p.asOfTs,
         sources: ['coingecko'],
-        stale_sec: 0,
+        stale_sec: staleSec,
       });
       toStore.push({ chainId, address: p.address, usd: p.usd, asOfTs: p.asOfTs });
     }

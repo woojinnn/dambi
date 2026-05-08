@@ -208,9 +208,26 @@ console.log(`Copied wasm bundle → ${wasmDest}`);
 
 - [ ] **Step 2: Write the loader**
 
+> **Critical (fix pass)**: Chrome MV3 service workers do **not** support runtime dynamic `import()` of arbitrary URLs — the original plan's `await import(/*webpackIgnore*/ JS_URL)` would fail with `SyntaxError` in production. The fix is *static* webpack import of the wasm-pack `--target web` glue module: webpack inlines the JS glue into the SW chunk at build time. The `.wasm` binary is fetched at runtime by the glue's `init()` function — that fetch *is* allowed in MV3 SW; only module imports are not.
+
+Add to `webpack/webpack.common.js`:
+
+```javascript
+// at module.exports root level
+experiments: { asyncWebAssembly: true, syncWebAssembly: false },
+// inside module.exports.module.rules
+{ test: /\.wasm$/, type: 'asset/resource' },
+```
+
+Then `wasm-bridge.ts`:
+
 ```typescript
 // extension/src/background/wasm-bridge.ts
 import Browser from 'webextension-polyfill';
+// Static import — webpack bundles the wasm-pack `--target web` glue into the
+// SW chunk at build time. `init` is the default export; named exports are the
+// `#[wasm_bindgen]` functions.
+import init, * as wasmExports from '../wasm/policy_engine_wasm';
 
 interface WasmExports {
   install_policies_json(input: string): string;
@@ -218,44 +235,64 @@ interface WasmExports {
   tier1_fact_plan_json(input: string): string;
   tier2_window_keys_json(action: string, oracle: string): string;
   evaluate_json(req: string, snap: string): string;
+  parse_policy_ast_json(policy_id: string, text: string): string; // Plan 6
 }
 
 let cachedExports: WasmExports | null = null;
 let inflightLoad: Promise<WasmExports> | null = null;
 
-const WASM_URL = Browser.runtime.getURL('wasm/policy_engine_wasm_bg.wasm');
-const JS_URL = Browser.runtime.getURL('wasm/policy_engine_wasm.js');
+// .wasm artifact path (web_accessible_resource — covered by manifest in Task 4).
+const WASM_BG_URL = Browser.runtime.getURL('wasm/policy_engine_wasm_bg.wasm');
 
 async function load(): Promise<WasmExports> {
   if (cachedExports) return cachedExports;
   if (inflightLoad) return inflightLoad;
   inflightLoad = (async () => {
-    const mod = await import(/* webpackIgnore: true */ JS_URL);
-    await mod.default(WASM_URL);
-    cachedExports = mod as unknown as WasmExports;
+    await init(WASM_BG_URL); // fetch + compile + instantiate
+    cachedExports = wasmExports as unknown as WasmExports;
     return cachedExports;
   })();
   return inflightLoad;
 }
 
-export async function buildAction(requestJson: string): Promise<string> {
-  return (await load()).build_action_json(requestJson);
+interface OkEnvelope<T> { ok: 'true'; data: T; }
+interface ErrEnvelope { ok: 'false'; error: { kind: string; message: string }; }
+type Envelope<T> = OkEnvelope<T> | ErrEnvelope;
+
+class EngineError extends Error {
+  constructor(readonly kind: string, readonly message: string) { super(`${kind}: ${message}`); }
 }
-export async function tier1FactPlan(actionJson: string): Promise<string> {
-  return (await load()).tier1_fact_plan_json(actionJson);
+
+function unwrap<T>(json: string): T {
+  const parsed = JSON.parse(json) as Envelope<T>;
+  if (parsed.ok === 'true') return parsed.data;
+  throw new EngineError(parsed.error.kind, parsed.error.message);
 }
-export async function tier2WindowKeys(actionJson: string, oracleJson: string): Promise<string> {
-  return (await load()).tier2_window_keys_json(actionJson, oracleJson);
+
+export async function buildAction(requestJson: string): Promise<unknown> {
+  return unwrap((await load()).build_action_json(requestJson));
 }
-export async function evaluate(requestJson: string, snapshotJson: string): Promise<string> {
-  return (await load()).evaluate_json(requestJson, snapshotJson);
+export async function tier1FactPlan(actionJson: string): Promise<unknown> {
+  return unwrap((await load()).tier1_fact_plan_json(actionJson));
 }
-export async function installPolicies(input: string): Promise<string> {
-  return (await load()).install_policies_json(input);
+export async function tier2WindowKeys(actionJson: string, oracleJson: string): Promise<unknown> {
+  return unwrap((await load()).tier2_window_keys_json(actionJson, oracleJson));
 }
+export async function evaluate(requestJson: string, snapshotJson: string): Promise<unknown> {
+  // evaluate_json wraps engine errors into Verdict::Fail internally; the
+  // outer envelope still uses {ok:"true", data:Verdict}.
+  return unwrap((await load()).evaluate_json(requestJson, snapshotJson));
+}
+export async function installPolicies(input: string): Promise<void> {
+  unwrap((await load()).install_policies_json(input));
+}
+export async function parsePolicyAst(policyId: string, text: string): Promise<unknown> {
+  return unwrap((await load()).parse_policy_ast_json(policyId, text));
+}
+export { EngineError };
 ```
 
-> The `webpackIgnore: true` directive is critical: webpack must not try to bundle the wasm-pack-generated JS (it does its own dynamic `WebAssembly.instantiate` call internally that webpack's wasm-loader fights with).
+> Build script (Plan 5 Task 2 / 3 copy step) must place `policy_engine_wasm.js` and `policy_engine_wasm_bg.wasm` at `extension/src/wasm/` (so the static import resolves at build time) AND copy the `.wasm` to `extension/public/wasm/` (so `Browser.runtime.getURL` finds it at runtime).
 
 - [ ] **Step 3: Add CSP to the manifest**
 
@@ -431,6 +468,10 @@ const TTL_MS = 5 * 60_000;
 
 export interface PendingDelta {
   requestId: string;
+  /** EVM chain id of the underlying request — required so the receipt
+   *  poller queries the correct RPC. Earlier draft missed this field;
+   *  L2 swaps would have been polled on mainnet and silently expired. */
+  chainId: number;
   actor: string;
   windowEntries: { name: string; value: string }[];
   enqueuedAtMs: number;
@@ -457,11 +498,45 @@ export async function setTxHash(requestId: string, txHash: string): Promise<void
   await save(list);
 }
 
-export async function commitByTxHash(txHash: string): Promise<void> {
+/// Commit a confirmed pending delta into the long-lived window store.
+/// Removes the entry from `pending-deltas` AND adds its `windowEntries`
+/// to `windows:committed` keyed by (actor, window_name). The Tier-2
+/// snapshot the orchestrator builds reads `confirmed + sum(pending)` for
+/// each actor, so committed totals correctly drive 24h cap evaluation
+/// after this call.
+export async function commitByTxHash(
+  txHash: string,
+  entry: { chainId: number; actor: string; windowEntries: { name: string; value: string }[] },
+): Promise<void> {
   const list = await load();
   await save(list.filter((d) => d.txHash !== txHash));
-  // Real commit into long-lived window storage happens elsewhere; this just removes
-  // the pending entry once a receipt confirms it.
+
+  const COMMITTED_KEY = 'windows:committed';
+  const committed =
+    ((await Browser.storage.local.get(COMMITTED_KEY))[COMMITTED_KEY] as
+      | Record<string, Record<string, string>>
+      | undefined) ?? {};
+  const actor = entry.actor.toLowerCase();
+  committed[actor] = committed[actor] ?? {};
+  for (const w of entry.windowEntries) {
+    const prev = BigInt(committed[actor][w.name] ?? '0');
+    committed[actor][w.name] = (prev + BigInt(w.value)).toString();
+  }
+  await Browser.storage.local.set({ [COMMITTED_KEY]: committed });
+}
+
+/// Read committed window state for an actor. Used by the orchestrator's
+/// snapshot builder alongside `pendingForActor`.
+export async function committedForActor(
+  actor: string,
+): Promise<{ name: string; value: string }[]> {
+  const COMMITTED_KEY = 'windows:committed';
+  const committed =
+    ((await Browser.storage.local.get(COMMITTED_KEY))[COMMITTED_KEY] as
+      | Record<string, Record<string, string>>
+      | undefined) ?? {};
+  const entries = committed[actor.toLowerCase()] ?? {};
+  return Object.entries(entries).map(([name, value]) => ({ name, value }));
 }
 
 export async function discardExpired(nowMs: number = Date.now()): Promise<void> {
@@ -514,17 +589,19 @@ async function poll(): Promise<void> {
 
   for (const entry of stored) {
     if (!entry.txHash) continue;
-    // Naive: poll mainnet (chainId 1). For real multichain we'd track which
-    // chain each pending tx is on. The orchestrator stores chainId alongside
-    // pending entries; extend `PendingDelta` to carry it for v1.1.
+    // Use the chainId stored on the entry — fixes the earlier hardcoded-
+    // mainnet bug. Each chain has its own RPC client (cached in rpc-client.ts).
     try {
-      const receipt = await rpcClient(1).getTransactionReceipt({
+      const receipt = await rpcClient(entry.chainId).getTransactionReceipt({
         hash: entry.txHash as `0x${string}`,
       });
+      // viem returns null for not-yet-mined; only commit on confirmed success.
       if (receipt && receipt.status === 'success') {
-        await commitByTxHash(entry.txHash);
-        // TODO Plan 6: actually advance long-lived window counters here.
+        await commitByTxHash(entry.txHash, entry);
       }
+      // Note: receipt === null is *not* an error — tx is still pending. We
+      // intentionally do not extend TTL on null; the 5-minute discardExpired
+      // sweep handles permanent drops.
     } catch {
       // RPC failure: leave the entry in place; next poll retries.
     }
@@ -588,17 +665,29 @@ export async function decideMessage(message: Message): Promise<{
   await pendingPut(pending);
 
   try {
-    const verdict = await withTimeout(runLifecycle(message), HARD_TIMEOUT_MS, {
-      kind: 'fail',
-      matched: [
-        {
-          policy_id: '__engine::timeout',
-          reason: `Engine took longer than ${HARD_TIMEOUT_MS}ms`,
-          severity: 'deny',
-          origin: 'engine_error',
-        },
-      ],
-    });
+    const { result: verdict, timedOut } = await withTimeout(
+      runLifecycle(message),
+      HARD_TIMEOUT_MS,
+      {
+        kind: 'fail' as const,
+        matched: [
+          {
+            policy_id: '__engine::timeout',
+            reason: `Engine took longer than ${HARD_TIMEOUT_MS}ms`,
+            severity: 'deny',
+            origin: 'engine_error',
+          },
+        ],
+      },
+    );
+    // If the fast-path timed out, mark the requestId as already-rejected so
+    // any later side effect from the still-running lifecycle (reservePending,
+    // etc.) becomes a no-op via the guard in runLifecycle's tail.
+    if (timedOut) {
+      await Browser.storage.session.set({
+        [`requests:rejected:${message.requestId}`]: true,
+      });
+    }
 
     await auditAppend({
       requestId: message.requestId,
@@ -641,37 +730,52 @@ async function runLifecycle(message: Message): Promise<VerdictDto> {
   const tier2Raw = await tier2WindowKeys(JSON.stringify(actionParsed), oracleEntriesJson);
   const tier2 = JSON.parse(tier2Raw) as { keys: { actor: string; name: string }[] };
 
-  // Read pending deltas for the actor; merge into the snapshot's windows array.
+  // Build the windows snapshot: confirmed + sum(pending). The actor casing
+  // is normalized to lowercase everywhere to match the SnapshotStatWindows
+  // lookup key in the WASM bridge (Plan 2 §state.rs).
   const actor = inferActor(message);
-  const pending = actor ? await pendingForActor(actor) : [];
-  const windows: HostSnapshot['windows'] = pending.map((e) => ({
-    actor: actor!.toLowerCase(),
-    name: e.name,
-    value: e.value,
-  }));
-  for (const k of tier2.keys) {
-    if (!windows.some((w) => w.name === k.name && w.actor === k.actor.toLowerCase())) {
-      windows.push({ actor: k.actor.toLowerCase(), name: k.name, value: '0' });
+  const actorLower = actor ? actor.toLowerCase() : null;
+  const windowsMap = new Map<string, bigint>(); // name → committed+pending sum
+  if (actorLower) {
+    for (const e of await committedForActor(actorLower)) {
+      windowsMap.set(e.name, BigInt(e.value));
+    }
+    for (const e of await pendingForActor(actorLower)) {
+      windowsMap.set(e.name, (windowsMap.get(e.name) ?? 0n) + BigInt(e.value));
     }
   }
+  // Ensure every key returned by tier2 is present, defaulting to 0.
+  for (const k of tier2.keys) {
+    if (!windowsMap.has(k.name)) windowsMap.set(k.name, 0n);
+  }
+  const windows: HostSnapshot['windows'] = actorLower
+    ? [...windowsMap.entries()].map(([name, value]) => ({
+        actor: actorLower,
+        name,
+        value: value.toString(),
+      }))
+    : [];
 
   const snapshot = intoHostSnapshot(tier1, windows);
   const verdictRaw = await evaluate(requestJson, JSON.stringify(snapshot));
   const verdict = JSON.parse(verdictRaw) as VerdictDto;
 
-  if (verdict.kind !== 'fail' && actor) {
-    // Provisional pending-delta reservation for DEX swaps. The actual
-    // delta values come from compute_dex_window_deltas in the engine;
-    // for v1 we conservatively reserve `total_input_usd` as a placeholder
-    // that the orchestrator computes from the action JSON.
+  // Reservation guard against fast-path-timeout side effects: if the
+  // outer `decideMessage` already failed-closed and stored the rejection
+  // sentinel, skip the reservation. This prevents the lifecycle from
+  // adding a window delta for a transaction the user never saw.
+  const rejectedKey = `requests:rejected:${message.requestId}`;
+  const rejected = (await Browser.storage.session.get(rejectedKey))[rejectedKey];
+  if (verdict.kind !== 'fail' && actor && !rejected) {
     const dexUsd = extractDexInputUsd(actionParsed);
-    if (dexUsd) {
+    if (dexUsd && isTransaction(message)) {
       await reservePending({
         requestId: message.requestId,
+        chainId: message.data.chainId,
         actor,
         windowEntries: [
-          { name: 'swap_volume_usd_24h', value: dexUsd },
-          { name: 'swap_count_24h', value: '1' },
+          { name: 'swapVolumeUsd24h', value: dexUsd },
+          { name: 'swapCount24h', value: '1' },
         ],
         enqueuedAtMs: Date.now(),
       });
@@ -691,29 +795,55 @@ function extractDexInputUsd(actionParsed: any): string | undefined {
   return dex?.facts?.totalInputUsd?.value;
 }
 
-function encodeRequestForEngine(message: Message): string {
+function hexToBytes(hex: string | undefined): number[] {
+  if (!hex) return [];
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  if (clean.length % 2 !== 0) return [];
+  const out: number[] = new Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function encodeRequestForEngine(message: Message): string | null {
   if (isTransaction(message)) {
+    // CONFIRMED FROM SOURCE (core.rs:471): TransactionRequest is snake_case
+    // (no rename_all), `data` is Vec<u8> (JSON byte array, not hex string),
+    // `gas` and `nonce` are Option<u64>. The outer Request enum is
+    // externally tagged → wrapper key "Tx".
     return JSON.stringify({
       Tx: {
-        chainId: message.data.chainId,
+        chain_id: message.data.chainId,
         from: message.data.transaction.from,
         to: message.data.transaction.to,
-        data: message.data.transaction.data,
-        valueWei: message.data.transaction.value ?? '0',
+        value_wei: message.data.transaction.value ?? '0',
+        data: hexToBytes(message.data.transaction.data),
+        gas: null,
+        nonce: null,
       },
     });
   }
   if (isTypedSignature(message)) {
+    // SignatureRequest IS rename_all = "camelCase" (core.rs:493) — different
+    // convention from TransactionRequest. typedData may arrive as a string
+    // (per inpage proxy) — parse here so the engine's validate_typed_data
+    // sees a JSON object.
+    let typedData = message.data.typedData;
+    if (typeof typedData === 'string') {
+      try { typedData = JSON.parse(typedData); }
+      catch { return null; /* malformed → fail-closed at lifecycle */ }
+    }
     return JSON.stringify({
       Sig: {
         chainId: message.data.chainId,
         signer: message.data.address,
-        typedData: message.data.typedData,
+        typedData,
       },
     });
   }
-  // Untyped signature → treat as Action::Other from the engine's perspective.
-  return JSON.stringify({ Tx: { chainId: 1, from: '', to: '', data: '0x', valueWei: '0' } });
+  // Untyped signature (eth_sign / personal_sign): the engine has no first-class
+  // path for raw bytes. Return null so decideMessage fails closed with a
+  // distinct reason — never fabricate a fake transaction.
+  return null;
 }
 
 function redactEnvelopeForStorage(message: Message): unknown {
@@ -748,17 +878,46 @@ function failFromError(kind: string, parsed: any): VerdictDto {
   };
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
-  ]);
+/// Race a promise against a timeout. The lifecycle promise itself runs to
+/// completion in the background even after timeout — the orchestrator
+/// MUST also pass an AbortSignal-based mechanism to suppress side effects
+/// (reservePending, etc.) in `runLifecycle`. See the timeout-aware
+/// reservation guard at the call-site.
+async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<{
+  result: T;
+  timedOut: boolean;
+}> {
+  let timedOut = false;
+  const timeoutPromise = new Promise<{ result: T; timedOut: true }>((resolve) =>
+    setTimeout(() => {
+      timedOut = true;
+      resolve({ result: fallback, timedOut: true });
+    }, ms),
+  );
+  const wrapped = p.then((result) => ({ result, timedOut }));
+  return Promise.race([wrapped, timeoutPromise]);
 }
 
+/// Persist a pending Warn decision so it survives SW termination. The confirm
+/// window's reply uses runtime.sendMessage (which wakes the SW if dead);
+/// the SW handler reads the persisted state and resolves the lifecycle.
 async function openVerdictWindowAndAwait(
   requestId: string,
   verdict: VerdictDto,
 ): Promise<boolean> {
+  const PENDING_DECISION_KEY = 'requests:pending-decisions';
+
+  // Persist the {requestId, verdict, status: "awaiting"} record. The SW-side
+  // global listener (installed at SW boot, see background/index.ts) reads
+  // this on incoming "scopeball:verdict-decision" messages so a SW that died
+  // and was resurrected by the click can still resolve the lifecycle.
+  const all =
+    ((await Browser.storage.session.get(PENDING_DECISION_KEY))[PENDING_DECISION_KEY] as
+      | Record<string, { verdict: VerdictDto; status: 'awaiting' | 'decided'; ok?: boolean }>
+      | undefined) ?? {};
+  all[requestId] = { verdict, status: 'awaiting' };
+  await Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
+
   const params = new URLSearchParams({ requestId, verdict: JSON.stringify(verdict) });
   const url = Browser.runtime.getURL(`confirm.html?${params.toString()}`);
   const win = await Browser.windows.create({
@@ -770,28 +929,51 @@ async function openVerdictWindowAndAwait(
   });
 
   return new Promise<boolean>((resolve) => {
-    const listener = (
-      _msg: any,
-      sender: Browser.Runtime.MessageSender,
-      sendResponse: (r: { ok: boolean }) => void,
-    ) => {
-      if (_msg?.type !== 'scopeball:verdict-decision') return;
-      if (_msg.requestId !== requestId) return;
-      Browser.runtime.onMessage.removeListener(listener);
-      Browser.windows.remove(win.id!).catch(() => {});
-      sendResponse({ ok: true });
-      resolve(_msg.ok);
+    let settled = false;
+    const cleanup = (): void => {
+      Browser.runtime.onMessage.removeListener(messageListener);
+      Browser.windows.onRemoved.removeListener(closeListener);
     };
-    Browser.runtime.onMessage.addListener(listener);
+    const settle = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      Browser.windows.remove(win.id!).catch(() => {});
+      resolve(ok);
+    };
 
-    // If the user closes the window without deciding, treat as cancel.
-    Browser.windows.onRemoved.addListener(function onClose(closedId) {
-      if (closedId === win.id) {
-        Browser.windows.onRemoved.removeListener(onClose);
-        Browser.runtime.onMessage.removeListener(listener);
-        resolve(false);
+    const messageListener = (msg: any) => {
+      if (msg?.type !== 'scopeball:verdict-decision') return;
+      if (msg.requestId !== requestId) return;
+      settle(!!msg.ok);
+    };
+    const closeListener = (closedId: number) => {
+      if (closedId === win.id) settle(false); // user closed → cancel
+    };
+    Browser.runtime.onMessage.addListener(messageListener);
+    Browser.windows.onRemoved.addListener(closeListener);
+
+    // If the SW dies and is later resurrected, the resurrection path
+    // re-reads `requests:pending-decisions` and resolves any "decided"
+    // entries. Belt-and-suspenders: also poll the storage every 250ms.
+    const pollHandle = setInterval(async () => {
+      const fresh = (await Browser.storage.session.get(PENDING_DECISION_KEY))[
+        PENDING_DECISION_KEY
+      ] as
+        | Record<string, { status: string; ok?: boolean }>
+        | undefined;
+      const rec = fresh?.[requestId];
+      if (rec?.status === 'decided') {
+        clearInterval(pollHandle);
+        settle(!!rec.ok);
       }
-    });
+    }, 250);
+    // Settle's cleanup also clears this interval.
+    const origCleanup = cleanup;
+    (cleanup as any) = (): void => {
+      clearInterval(pollHandle);
+      origCleanup();
+    };
   });
 }
 ```
@@ -951,11 +1133,31 @@ const params = new URLSearchParams(window.location.search);
 const requestId = params.get('requestId') ?? '';
 const verdict = JSON.parse(params.get('verdict') ?? '{"kind":"fail"}');
 
-function reply(ok: boolean): void {
-  Browser.runtime
-    .sendMessage({ type: 'scopeball:verdict-decision', requestId, ok })
-    .catch(() => {})
-    .finally(() => window.close());
+async function reply(ok: boolean): Promise<void> {
+  // Two-channel reply for SW-restart durability:
+  // 1. Direct runtime message (wakes SW if needed; arrives at the in-flight
+  //    listener if the SW is alive).
+  // 2. Persisted decision in chrome.storage.session — the SW's poll loop
+  //    sees this even if the message arrived during SW death and was lost.
+  try {
+    const KEY = 'requests:pending-decisions';
+    const all =
+      ((await Browser.storage.session.get(KEY))[KEY] as
+        | Record<string, { status: string; ok?: boolean }>
+        | undefined) ?? {};
+    if (all[requestId]) {
+      all[requestId] = { ...all[requestId], status: 'decided', ok };
+      await Browser.storage.session.set({ [KEY]: all });
+    }
+  } catch {
+    /* best-effort */
+  }
+  try {
+    await Browser.runtime.sendMessage({ type: 'scopeball:verdict-decision', requestId, ok });
+  } catch {
+    /* best-effort */
+  }
+  window.close();
 }
 
 const root = createRoot(document.getElementById('root')!);
