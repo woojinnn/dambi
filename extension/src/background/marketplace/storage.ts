@@ -19,16 +19,26 @@ export async function listInstalled(): Promise<InstalledBundle[]> {
   return v ?? [];
 }
 
+/**
+ * Insert or update an installed bundle. First-install pubkey pinning is
+ * enforced: subsequent updates MUST be signed by the same author pubkey
+ * as the original install.
+ *
+ * Known limitation: there is no key-rotation escape hatch. If a legitimate
+ * author rotates their key, every existing user is locked out of updates
+ * until they manually uninstall and reinstall. Plan 6+ may add a signed
+ * `key-rotation.json` companion in the catalog (signature by both old +
+ * new keys) to authorize rotation; for v1 the user-uninstall-reinstall
+ * path is the only route.
+ */
 export async function upsert(bundle: InstalledBundle): Promise<void> {
   const list = await listInstalled();
   const i = list.findIndex((b) => b.bundle_id === bundle.bundle_id);
   if (i >= 0) {
-    // First-install pubkey pinning: refuse if pubkey differs from the
-    // previously-pinned value.
     if (list[i].author_pubkey !== bundle.author_pubkey) {
       throw new Error(
         `bundle ${bundle.bundle_id} previously installed under a different ` +
-          `author pubkey; refuse update`,
+          `author pubkey; refuse update (uninstall manually to override)`,
       );
     }
     list[i] = bundle;

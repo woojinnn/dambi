@@ -22,9 +22,13 @@ export function renderCedarLiteral(decl: ParamSchema, value: unknown): string {
       return JSON.stringify(v.toLowerCase());
     }
     case 'enum': {
-      const v = String(value);
-      if (!decl.values.includes(v)) throw new Error(`enum value fail: ${v}`);
-      return JSON.stringify(v);
+      // Reject non-string inputs explicitly so a number that happens to
+      // coerce to an allowed string can't sneak through.
+      if (typeof value !== 'string') {
+        throw new Error(`enum value must be a string, got ${typeof value}`);
+      }
+      if (!decl.values.includes(value)) throw new Error(`enum value fail: ${value}`);
+      return JSON.stringify(value);
     }
     case 'string': {
       const v = String(value);

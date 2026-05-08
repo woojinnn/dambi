@@ -1,6 +1,15 @@
 import type JSZip from 'jszip';
 
-const ALLOWED_TOPLEVEL = new Set(['manifest.json', 'params.schema.json', 'README.md', 'LICENSE']);
+const ALLOWED_TOPLEVEL = new Set([
+  'manifest.json',
+  'params.schema.json',
+  'README.md',
+  'README.txt',
+  'LICENSE',
+  'LICENSE.md',
+  'LICENSE.txt',
+  'CHANGELOG.md',
+]);
 const POLICY_PATH_RE = /^policies\/[A-Za-z0-9_.-]+\.cedar\.tmpl$/;
 
 export interface BundleManifestPaths {
