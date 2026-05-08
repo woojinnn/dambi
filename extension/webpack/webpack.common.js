@@ -34,6 +34,9 @@ module.exports = {
     alias: {
       '@lib': path.resolve(sourceDir, 'lib'),
     },
+    fallback: {
+      buffer: require.resolve('buffer/'),
+    },
   },
   module: {
     rules: [
