@@ -509,6 +509,47 @@ impl SignatureRequest {
     }
 }
 
+#[cfg(test)]
+impl SignatureRequest {
+    /// Minimal EIP-712 signature request that no adapter will match. Used by
+    /// pipeline tests that exercise the catch-all `Action::Eip712Other` path.
+    #[must_use]
+    pub fn test_minimal_eip712_other() -> Self {
+        use serde_json::json;
+        Self {
+            chain_id: 1,
+            signer: Address::new("0x6666666666666666666666666666666666666666").unwrap(),
+            typed_data: Eip712TypedData {
+                domain: Eip712Domain {
+                    chain_id: 1,
+                    verifying_contract: Address::new(
+                        "0x7777777777777777777777777777777777777777",
+                    )
+                    .unwrap(),
+                    name: None,
+                    version: None,
+                    salt: None,
+                },
+                primary_type: "Mail".into(),
+                types: json!({
+                    "EIP712Domain": [
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"}
+                    ],
+                    "Mail": [
+                        {"name": "from", "type": "address"},
+                        {"name": "to", "type": "address"}
+                    ]
+                }),
+                message: json!({
+                    "from": "0x6666666666666666666666666666666666666666",
+                    "to":   "0x8888888888888888888888888888888888888888"
+                }),
+            },
+        }
+    }
+}
+
 /// EIP-712 typed-data payload.
 // `serde_json::Value` carries an f64 number variant, so `Eq` is intentionally
 // not derived — the clippy suggestion to add `Eq` is a false positive here.

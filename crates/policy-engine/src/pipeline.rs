@@ -102,6 +102,27 @@ impl<'a, R: AdapterRegistry + ?Sized> Pipeline<'a, R> {
         self
     }
 
+    /// Build the semantic [`Action`] for a request without enrichment, lowering,
+    /// or evaluation.
+    ///
+    /// Wraps the existing private TX and signature builders behind the unified
+    /// [`Request`] surface. Used by external orchestrators (notably the Chrome
+    /// extension's WASM bridge) that want to derive a [`HostFactPlan`] from
+    /// the bare action and prefetch host data before evaluation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PipelineError::Ambiguous`] if multiple adapters resolve, and
+    /// [`PipelineError::AdapterBuild`] if the matched adapter fails to build.
+    ///
+    /// [`HostFactPlan`]: crate::lowering::HostFactPlan
+    pub fn build_action_for(&self, request: &Request) -> Result<Action, PipelineError> {
+        match request {
+            Request::Tx(tx) => self.build_action(tx),
+            Request::Sig(sig) => self.build_signature_action(sig),
+        }
+    }
+
     fn build_action(&self, tx: &TransactionRequest) -> Result<Action, PipelineError> {
         let (outcome, adapter) = self.registry.resolve_with_adapter(tx);
 
@@ -272,5 +293,53 @@ impl<'a> From<&'a Request> for PipelineRequest<'a> {
             Request::Tx(tx) => Self::Tx(tx),
             Request::Sig(sig) => Self::Sig(sig),
         }
+    }
+}
+
+#[cfg(test)]
+mod build_action_for_tests {
+    use super::*;
+    use crate::core::{Address, Request, SignatureRequest, TransactionRequest};
+    use crate::host::{oracle::MockOracle, HostCapabilities};
+    use crate::policy::PolicyEngine;
+    use crate::registry::MockAdapterRegistry;
+
+    fn empty_pipeline_fixture() -> (MockAdapterRegistry, MockOracle, PolicyEngine) {
+        let registry = MockAdapterRegistry::default();
+        let oracle = MockOracle::new();
+        let engine = PolicyEngine::builder()
+            .build()
+            .expect("empty PolicyEngine builds");
+        (registry, oracle, engine)
+    }
+
+    #[test]
+    fn build_action_for_tx_returns_other_when_no_adapter_matches() {
+        let (registry, oracle, policies) = empty_pipeline_fixture();
+        let host = HostCapabilities::new(&oracle);
+        let pipeline = Pipeline::new(&registry, host, &policies);
+
+        let tx = TransactionRequest {
+            chain_id: 1,
+            from: Address::new("0x1111111111111111111111111111111111111111").unwrap(),
+            to: Address::new("0x2222222222222222222222222222222222222222").unwrap(),
+            value_wei: "0".into(),
+            data: vec![0xde, 0xad, 0xbe, 0xef],
+            gas: None,
+            nonce: None,
+        };
+        let action = pipeline.build_action_for(&Request::Tx(tx)).unwrap();
+        assert!(matches!(action, Action::Other(_)));
+    }
+
+    #[test]
+    fn build_action_for_sig_returns_eip712_other_when_no_adapter_matches() {
+        let (registry, oracle, policies) = empty_pipeline_fixture();
+        let host = HostCapabilities::new(&oracle);
+        let pipeline = Pipeline::new(&registry, host, &policies);
+
+        let sig = SignatureRequest::test_minimal_eip712_other();
+        let action = pipeline.build_action_for(&Request::Sig(sig)).unwrap();
+        assert!(matches!(action, Action::Eip712Other(_)));
     }
 }
