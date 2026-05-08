@@ -182,6 +182,18 @@ MV3 service workers can be terminated after ~30s idle. The orchestrator treats e
 
 The Warn modal opens via `chrome.windows.create({type: "popup"})` — a separate browser window, not the action popup. This window holds an open port to the SW; while the port is connected, the SW stays alive.
 
+#### 4.3.1a Fact fetchers — RPC and price clients
+
+Background-side fact fetchers fill the host snapshot before evaluation:
+
+- **RpcClient** — viem `PublicClient` per chain, constructed with `batch: { multicall: true }` so all `eth_call`s issued within a short window collapse into a single `Multicall3.aggregate3` request. Tier-1 demand from `required_host_facts` typically yields N `balanceOf` + M `allowance` + N `decimals` reads — with batching, **one RPC round-trip total**, not 2N+M. Multicall3 is at `0xcA11bde05977b3631167028862bE2a173976CA11` on every supported chain (viem ships the deployment registry). Each chain has a `(main, free)` URL pair: `main` is keyed (Alchemy/Infura, optional user-provided), `free` is a public fallback that the client falls through to on `main` failure. ERC-20 metadata reads (`name`/`symbol`/`decimals`) wrap each call in its own `try`/`catch` because non-standard ERC-20s exist (USDT historically returned `bytes32` for `symbol`, etc.).
+
+- **PriceClient** — CoinGecko free-tier client (no API key) batching token addresses per platform per request (up to ~30 contracts/call). Results cached in `chrome.storage.local` keyed by `(chainId, lowercased_address)` with 60-second TTL. On rate-limit or network failure, the affected token's price is `undefined` — the orchestrator passes a partial `OracleSnapshot` to WASM and the engine's lowering omits `total_input_usd` for that DEX action, propagating the field-absent fail-open contract documented in the engine README. Never fall back to `0` or arbitrary defaults; `undefined` is the only safe sentinel.
+
+  v1.1 path: add Chainlink `AggregatorV3Interface` reads for ETH/BTC/USDC/DAI on chains with active feeds, primary; CoinGecko remains the fallback for everything else. Chainlink reads share the same multicall batching as RPC reads.
+
+A combined fact fetch (`fetchTier1(actor, plan)`) issues all RPC and price requests in parallel, awaits with a per-source timeout, and assembles the `HostSnapshot` JSON the WASM bridge consumes.
+
 #### 4.3.2 WASM boundary
 
 One JSON-string boundary. Policies are installed once per session and held inside the WASM module; per-request calls exchange only the request, plans, and snapshots:
@@ -394,14 +406,21 @@ policy-engine/
 ├── crates/
 │   └── policy-engine/             # existing; gets build_action + required_host_facts
 ├── extension/                     # new
-│   ├── manifest.json
+│   ├── manifest.json              # __chrome__/__firefox__ prefixed for wext-manifest-loader
 │   ├── inpage/
 │   ├── content-script/
 │   ├── background/
 │   │   ├── orchestrator.ts
 │   │   ├── wasm-bridge.ts
-│   │   ├── rpc-client.ts
-│   │   ├── price-client.ts
+│   │   ├── chains/                # per-chain config, RPC URL fallback list
+│   │   │   ├── chain-config.ts
+│   │   │   └── rpc-client.ts      # viem PublicClient with batch.multicall=true
+│   │   ├── oracle/
+│   │   │   ├── coingecko-client.ts
+│   │   │   ├── price-cache.ts     # chrome.storage.local TTL 60s
+│   │   │   └── oracle-snapshot.ts
+│   │   ├── facts/
+│   │   │   └── tier1-fetcher.ts   # combines RPC + Oracle in parallel
 │   │   ├── catalog-client.ts
 │   │   └── storage.ts
 │   ├── ui/                        # popup + options pages

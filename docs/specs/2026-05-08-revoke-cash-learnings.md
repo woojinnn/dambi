@@ -135,6 +135,63 @@ if (approvedMessages.includes(message.requestId)) return false;
 
 Once a user clicks "approve" on a verdict modal for a given request hash, the same request hash incoming again (e.g. dApp retry) bypasses the modal. Combined with `object-hash`-derived `requestId` from the transaction itself, this is **how they prevent dialog spam on dApp retries**. We should adopt this — but back it with `chrome.storage.session` rather than the in-memory array since SW restart will lose it.
 
+### 2.8 viem `batch: { multicall: true }` for on-chain reads
+
+`src/lib/chains/Chain.ts:155–163`:
+
+```ts
+createViemPublicClient(overrideUrl?: string): PublicClient {
+  return createPublicClient({
+    pollingInterval: 4 * SECOND,
+    chain:     this.getViemChainConfig(),
+    transport: http(overrideUrl ?? this.getRpcUrl()),
+    batch:     { multicall: true },   // ← key
+  });
+}
+```
+
+`batch.multicall` makes viem auto-coalesce all `eth_call`s issued within a short window into a single `Multicall3.aggregate3` call (contract address `0xcA11bde05977b3631167028862bE2a173976CA11` on every supported chain). For our Tier-1 host fetch — typically `balanceOf` × N tokens + `allowance` × M (owner, spender, token) tuples + `decimals` × N — this collapses *N+M+N* RPC requests into **one**. Direct gain on §3.2's "Host fact fetch ≤ 1.5s p95" budget.
+
+We should set this on every `PublicClient` we create. The Multicall3 deployment list lives in viem's chain configs already, so no extra registry needed.
+
+### 2.9 Per-chain RPC URL with paid+free fallback
+
+`src/lib/chains/Chain.ts:95–104`:
+
+```ts
+getRpcUrls(): string[] {
+  const baseRpcUrls     = getChain(this.chainId)?.rpc ?? [];
+  const specifiedRpcUrls = [this.options.rpc?.main].flat().filter(...);
+  return [...specifiedRpcUrls, ...baseRpcUrls];
+}
+```
+
+Each chain has a `main` URL (Alchemy or Infura, keyed) and a `free` fallback (`arb1.arbitrum.io/rpc`, `api.mainnet.abs.xyz`, etc.). The list is exposed in priority order; clients try `main`, fall back on failure. API keys are baked at build time via `dotenv-webpack` reading `.env`, with `.example.env` committed for newcomers.
+
+Pattern for us:
+
+```
+extension/lib/chains/
+├── chain-config.ts       // per-chain RPC list, native token, multicall3 address
+├── rpc-client.ts         // viem PublicClient factory with batch.multicall enabled
+└── env.ts                // process.env.ALCHEMY_API_KEY etc., optional
+```
+
+If user provides their own Alchemy/Infura key in extension settings → use it. Otherwise → free public RPC. Failure → fall through ordered list. This makes the extension usable out of the box without forcing an API-key signup.
+
+### 2.10 ERC-20 metadata fault tolerance
+
+`src/lib/utils/tokens.ts:120–154`:
+
+```ts
+const getTokenSymbol = async (address, client) => {
+  try { return await client.readContract({ address, abi: BASIC_ERC20, functionName: 'symbol' }); }
+  catch { return undefined; }
+};
+```
+
+Each of `name`, `symbol`, `decimals` is wrapped in its own `try/catch` returning `undefined`. Reason: non-standard ERC-20s exist in the wild — USDT historically returned `bytes32` instead of `string`, some tokens skip `name()`, NFTs sometimes pretend to be ERC-20s. **Per-call fault tolerance, not per-token.** We must follow this pattern for our metadata fetches: *one missing field doesn't tank the whole evaluation.*
+
 ---
 
 ## 3. Things they punt on (we already plan to fix)
@@ -147,6 +204,54 @@ Once a user clicks "approve" on a verdict modal for a given request hash, the sa
 | Hardcoded allowlists | `HostnameAllowList[WarningType.LISTING] = ['opensea.io', ...]` in code | Marketplace bundles can ship and version their own allowlists |
 | No quantitative caps | They block on "is this an approval at all" — no notion of "approval up to $X" | DEX policies cover USD caps, fee bps caps, 24h volume windows; signature policies cover per-sig USD cap and unlimited-approval block |
 | Chain ID staleness | `metamaskChainId` updated only by listening to `chainChanged` events; default 1 (mainnet) | Always read chain at request time via the proxied provider |
+
+---
+
+## 3a. Where revoke.cash punts and we have to design from scratch — Oracle / USD pricing
+
+A full-text search of the revoke.cash codebase for `usd`, `coingecko`, `coinpaprika`, `chainlink`, `aggregator`, `priceFeed`, and `fetch(` confirms: **revoke.cash does not consult any USD price source.** The only HTTP fetch in the entire extension is `whois.revoke.cash` for spender-address metadata (display names like "Uniswap Universal Router"). No price oracles, no USD value computation, no Chainlink reads.
+
+This is consistent with their decision model: warnings are *binary* ("this is a token approval to spender X") rather than *quantitative* ("this approval is worth $14,200, exceeding your $5,000 cap"). Revoke.cash never asks "how much is this in USD?" so it never needs an oracle.
+
+We do — every DEX policy with a USD threshold (`max-input-usd-100`, `total-input-usd-cap-500`, `min-output-usd-floor`) and every signature policy with a per-sig USD cap requires `Oracle::quote(token) → USD`. Nothing in revoke.cash is reusable here. We design the oracle layer ourselves.
+
+### Oracle MVP design
+
+Source candidates evaluated:
+
+| Source | Pros | Cons |
+|--------|------|------|
+| **CoinGecko free tier** (Recommended) | No key, broad EVM token coverage, REST simple | 30 req/min rate limit, new tokens may lag |
+| DefiLlama coins API | Free, no key, includes DEX-pool-derived prices | Less battle-tested |
+| 1inch Spot API | Real DEX-aggregated price (close to swappable) | API key required (free tier OK) |
+| Chainlink on-chain feeds | Trustless, no external HTTP dep | Major tokens only, eth_call latency, chain-coverage gaps |
+| Hybrid Chainlink+CoinGecko | Trust for majors, coverage for the rest | Implementation complexity |
+
+**MVP picks CoinGecko free tier**, with v1.1 path to add Chainlink as a primary for ETH/BTC/USDC/DAI on chains that have feeds (and CoinGecko stays as the fallback for everything else).
+
+Concrete shape:
+
+```
+extension/background/oracle/
+├── coingecko-client.ts     // GET /api/v3/simple/token_price/{platform}/?contract_addresses=...&vs_currencies=usd
+├── price-cache.ts          // chrome.storage.local with 60s TTL keyed by (chainId, address)
+└── oracle-snapshot.ts      // build the OracleSnapshot DTO the WASM bridge expects
+```
+
+Behavior:
+
+- Cache key: `(chainId, token_address.toLowerCase())`. TTL 60s.
+- Cache miss → CoinGecko request batched per platform (CoinGecko's `contract_addresses` param accepts up to ~30 addresses per call).
+- Network failure or rate-limit hit → return `undefined` for affected tokens. Do **not** fall back to "$0" or arbitrary defaults.
+- `OracleSnapshot.usd_per_unit(token)` returning `None` propagates through lowering as the **field-omitted** pattern: `total_input_usd` is simply not stamped into Cedar context.
+- User policies are expected to gate on `context has totalInputUsd && context.totalInputUsd > 100 then forbid` (the engine README's recommended idiom). Missing oracle data → policy fails open, but policy author can choose `if context has totalInputUsd then forbid_above_100 else forbid` for fail-closed semantics.
+
+Two security-relevant non-goals for v1:
+
+- **No on-chain price recomputation** — we trust CoinGecko's number. A dApp can't manipulate it via the swap they're requesting (price feed comes from independent market, not from our local node), but CoinGecko itself is a centralized trust anchor. Documented as such; v1.1 Chainlink primary closes this for major tokens.
+- **No price for unknown tokens** — if the token is brand new and CoinGecko has no entry, we have no USD. This is the explicit fail-open path. Policies that absolutely must apply (e.g. unknown-token blocklist) should be expressed as "if `context has totalInputUsd` is false → forbid."
+
+This oracle layer is entirely extension-side; the engine remains source-of-truth for *which* tokens to price (via §3.3 `required_host_facts(&Action).tokens_for_oracle`).
 
 ---
 
