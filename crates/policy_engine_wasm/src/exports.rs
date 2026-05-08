@@ -432,6 +432,58 @@ mod tests {
     }
 
     #[test]
+    fn install_overrides_existing_single_id_with_entry_id() {
+        let policy = r#"
+            @id("evil/untrusted")
+            @severity("deny")
+            @reason("blocked")
+            forbid(principal, action == Action::"other", resource);
+        "#;
+        let install_output = install_policies_json(
+            json!({
+                "schema_text": "",
+                "policy_set": [{
+                    "id": "bundle::block-other",
+                    "text": policy
+                }]
+            })
+            .to_string(),
+        );
+        let install: Value = serde_json::from_str(&install_output).unwrap();
+        assert_eq!(install["ok"], true, "{install}");
+
+        let output = evaluate_json(
+            tx_request_json().to_string(),
+            empty_snapshot_json().to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["kind"], "fail", "{parsed}");
+        assert_eq!(
+            parsed["data"]["matched"][0]["policy_id"], "bundle::block-other",
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn policy_entry_id_is_escaped_when_injected() {
+        let source = r#"
+            @severity("deny")
+            forbid(principal, action == Action::"other", resource);
+        "#;
+        let rewritten = namespace_policy_text(r#"bundle::quote"id"#, source);
+        assert!(
+            rewritten.contains(r#"@id("bundle::quote\"id")"#),
+            "{rewritten}"
+        );
+        assert!(
+            !rewritten.contains("@id(\"bundle::quote\"id\")"),
+            "{rewritten}"
+        );
+    }
+
+    #[test]
     fn id_guard_ignores_commented_ids() {
         let policy = r#"
             // @id("commented-out")

@@ -103,10 +103,20 @@ async function decideInner(message: Message): Promise<DecisionResult> {
     });
 
     if (verdict.kind === 'pass') return { ok: true, verdict };
-    if (verdict.kind === 'fail') return { ok: false, verdict };
-    // Warn: TODO Plan 5 verdict modal. v0 falls back to fail-closed.
-    // (Plan 5 verdict modal lands in the next iteration.)
-    return { ok: false, verdict };
+    if (verdict.kind === 'fail') {
+      // Surface the matched policies in a popup so the user understands
+      // why the dApp's transaction returned 4001. The popup is
+      // informational — Fail decisions don't take user input.
+      void openVerdictWindow(message.requestId, message.data.hostname, verdict);
+      return { ok: false, verdict };
+    }
+    // Warn: open the modal and await the user's Trust-and-proceed / Cancel.
+    const userOk = await openVerdictWindowAndAwait(
+      message.requestId,
+      message.data.hostname,
+      verdict,
+    );
+    return { ok: userOk, verdict };
   } catch (err) {
     const verdict = engineErrorVerdict(err);
     await auditAppend({
@@ -319,4 +329,123 @@ async function withTimeout<T>(
 export async function recordTxHash(requestId: string, txHash: string): Promise<void> {
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return;
   await setTxHash(requestId, txHash);
+}
+
+const PENDING_DECISION_KEY = 'requests:pending-decisions';
+
+/**
+ * Open the verdict modal as a separate Chrome window. Caller is informational —
+ * use this for Fail verdicts where the user has nothing to decide; the popup
+ * just explains why the dApp's request returned 4001.
+ */
+async function openVerdictWindow(
+  requestId: string,
+  hostname: string,
+  verdict: VerdictDto,
+): Promise<void> {
+  const url = buildConfirmUrl(requestId, hostname, verdict);
+  try {
+    await Browser.windows.create({
+      url,
+      type: 'popup',
+      width: 520,
+      height: 480,
+      focused: true,
+    });
+  } catch {
+    /* user closed, popup blocked, etc. — best-effort UI */
+  }
+}
+
+/**
+ * Open the verdict modal and await the user's choice. Used for Warn
+ * verdicts. Survives SW restart via storage.session decision durability.
+ */
+async function openVerdictWindowAndAwait(
+  requestId: string,
+  hostname: string,
+  verdict: VerdictDto,
+): Promise<boolean> {
+  const all =
+    (((await Browser.storage.session.get(PENDING_DECISION_KEY)) as Record<string, unknown>)[
+      PENDING_DECISION_KEY
+    ] as Record<string, { verdict: VerdictDto; status: string; ok?: boolean }> | undefined) ??
+    {};
+  all[requestId] = { verdict, status: 'awaiting' };
+  await Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
+
+  const url = buildConfirmUrl(requestId, hostname, verdict);
+  let win: Browser.Windows.Window;
+  try {
+    win = await Browser.windows.create({
+      url,
+      type: 'popup',
+      width: 520,
+      height: 480,
+      focused: true,
+    });
+  } catch {
+    return false;
+  }
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let pollHandle: ReturnType<typeof setInterval> | undefined;
+
+    const settle = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      Browser.runtime.onMessage.removeListener(messageListener);
+      Browser.windows.onRemoved.removeListener(closeListener);
+      if (pollHandle !== undefined) clearInterval(pollHandle);
+      // Best-effort window cleanup (may already be closed).
+      if (win.id !== undefined) {
+        Browser.windows.remove(win.id).catch(() => {});
+      }
+      resolve(ok);
+    };
+
+    const messageListener = (msg: unknown): void => {
+      const m = msg as { type?: string; requestId?: string; ok?: boolean } | null;
+      if (!m || m.type !== 'scopeball:verdict-decision') return;
+      if (m.requestId !== requestId) return;
+      settle(!!m.ok);
+    };
+    const closeListener = (closedId: number): void => {
+      if (closedId === win.id) settle(false);
+    };
+    Browser.runtime.onMessage.addListener(messageListener);
+    Browser.windows.onRemoved.addListener(closeListener);
+
+    // Backup poll for the persisted decision in case the runtime message
+    // drops during a SW death window. 5-min deadline so we don't run
+    // forever if the user walked away.
+    const POLL_DEADLINE_MS = 5 * 60_000;
+    const pollDeadline = Date.now() + POLL_DEADLINE_MS;
+    pollHandle = setInterval(async () => {
+      if (Date.now() > pollDeadline) {
+        settle(false);
+        return;
+      }
+      const fresh =
+        (((await Browser.storage.session.get(PENDING_DECISION_KEY)) as Record<string, unknown>)[
+          PENDING_DECISION_KEY
+        ] as Record<string, { status: string; ok?: boolean }> | undefined) ?? {};
+      const rec = fresh[requestId];
+      if (rec?.status === 'decided') settle(!!rec.ok);
+    }, 250);
+
+    // Phase-2 timeout heartbeat: extend the inpage stream's 3s phase-1
+    // timer so the user has time to read and decide.
+    Browser.runtime.sendMessage({ kind: 'awaiting-user', requestId }).catch(() => {});
+  });
+}
+
+function buildConfirmUrl(requestId: string, hostname: string, verdict: VerdictDto): string {
+  const params = new URLSearchParams({
+    requestId,
+    hostname,
+    verdict: JSON.stringify(verdict),
+  });
+  return Browser.runtime.getURL(`confirm.html?${params.toString()}`);
 }

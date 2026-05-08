@@ -309,16 +309,25 @@ function proxyEthereumProvider(provider: Eip1193Provider | undefined): void {
             }
 
             const request = (payloadOrMethod ?? {}) as JsonRpcRequest;
+            const method = request.method;
+            const params = paramsArray(request.params);
+
             if (typeof callbackOrParams !== 'function') {
-              return Reflect.apply(target, thisArg, args);
+              if (!method) return Reflect.apply(target, thisArg, args);
+              return (async () => {
+                await ensureAllowed(provider, method, params);
+                const result = Reflect.apply(target, thisArg, args);
+                if (method === 'eth_sendTransaction') {
+                  reportTransactionHash(params, result);
+                }
+                return result;
+              })();
             }
 
             if (typeof provider.sendAsync === 'function') {
               return provider.sendAsync(request, callbackOrParams);
             }
 
-            const method = request.method;
-            const params = paramsArray(request.params);
             void (async () => {
               try {
                 await ensureAllowed(provider, method, params);

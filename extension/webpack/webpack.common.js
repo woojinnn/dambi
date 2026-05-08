@@ -23,6 +23,7 @@ module.exports = {
       'injected',
       'proxy-injected-providers.ts',
     ),
+    'confirm/index': path.join(sourceDir, 'confirm', 'index.ts'),
     manifest: path.join(sourceDir, 'manifest.json'),
   },
   output: {
@@ -59,6 +60,10 @@ module.exports = {
         test: /\.tsx?$/,
         loader: 'ts-loader',
         exclude: /node_modules/,
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
       },
       {
         test: /\.wasm$/,

@@ -45,6 +45,8 @@
       "matches": ["<all_urls>"],
       "resources": [
         "js/injected/proxy-injected-providers.js",
+        "js/confirm/index.js",
+        "confirm.html",
         "wasm/policy_engine_wasm_bg.wasm",
         "default-policies/schema.cedarschema",
         "default-policies/policy-set.json"
@@ -53,6 +55,8 @@
   ],
   "__firefox__web_accessible_resources": [
     "js/injected/proxy-injected-providers.js",
+    "js/confirm/index.js",
+    "confirm.html",
     "wasm/policy_engine_wasm_bg.wasm",
     "default-policies/schema.cedarschema",
     "default-policies/policy-set.json"
