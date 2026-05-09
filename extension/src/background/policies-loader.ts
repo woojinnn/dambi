@@ -39,50 +39,55 @@ async function installFiltered(enabledIds: readonly string[]): Promise<void> {
 }
 
 /**
- * One-shot install at SW boot. Reads enabled-ids from storage (the boot
- * path is single-threaded; no race with toggles). On reject, clears
- * `installed`/`inflight` so the next call retries instead of re-throwing
- * the cached rejection.
+ * One-shot install at SW boot. Reads enabled-ids from storage. Boot
+ * may overlap with popup-driven `reinstallAllPolicies` calls if the
+ * popup opens before prewarm finishes — we identity-check `inflight`
+ * before clearing so an older IIFE never wipes a newer one's pointer.
+ *
+ * On reject, clears `installed`/`inflight` so the next call retries
+ * instead of re-throwing the cached rejection.
  */
 export async function ensureDefaultPoliciesInstalled(): Promise<void> {
   if (installed) return;
   if (inflight) return inflight;
-  inflight = (async () => {
+  const promise = (async () => {
     const enabledIds = await getEnabledIds();
     await installFiltered(enabledIds);
     installed = true;
   })();
+  inflight = promise;
   try {
-    await inflight;
+    await promise;
   } catch (err) {
     installed = false;
-    inflight = null;
+    if (inflight === promise) inflight = null;
     throw err;
-  } finally {
-    if (installed) inflight = null;
   }
+  if (inflight === promise) inflight = null;
 }
 
 /**
  * Reinstall the engine with exactly the passed `ids` enabled. Used by
  * the popup's apply queue (`policy-selection.ts`) — the queue passes
- * the desired ids verbatim to avoid storage races. On reject, clears
- * `installed`/`inflight`.
+ * the desired ids verbatim to avoid storage races.
+ *
+ * On reject, clears `installed`/`inflight`. Identity-checks `inflight`
+ * before clearing so this call's promise can never be stomped by a
+ * concurrently-resolving `ensureDefaultPoliciesInstalled` IIFE.
  */
 export async function reinstallAllPolicies(ids: readonly string[]): Promise<void> {
   installed = false;
-  inflight = null;
-  inflight = (async () => {
+  const promise = (async () => {
     await installFiltered(ids);
     installed = true;
   })();
+  inflight = promise;
   try {
-    await inflight;
+    await promise;
   } catch (err) {
     installed = false;
-    inflight = null;
+    if (inflight === promise) inflight = null;
     throw err;
-  } finally {
-    if (installed) inflight = null;
   }
+  if (inflight === promise) inflight = null;
 }

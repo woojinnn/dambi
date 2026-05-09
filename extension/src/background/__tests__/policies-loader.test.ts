@@ -117,4 +117,56 @@ describe('policies-loader (filtered install)', () => {
     ).sort();
     expect(ids).toEqual(['acme::v1/guard', 'default::dex/a']);
   });
+
+  it('ensureDefaultPoliciesInstalled also filters marketplace contributions', async () => {
+    mocks.localStore.set('policy-selection:enabled-ids', ['acme::v1/guard']);
+    mocks.aggregatedPolicySet.mockResolvedValue([
+      {
+        id: 'acme::v1/guard',
+        text: '@id("acme::v1/guard") @severity("warn") @reason("g") forbid (principal, action, resource);',
+      },
+    ]);
+    const { ensureDefaultPoliciesInstalled } = await import('../policies-loader');
+    await ensureDefaultPoliciesInstalled();
+    expect(mocks.installPolicies).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.installPolicies.mock.calls[0][0].policy_set.map((p: { id: string }) => p.id),
+    ).toEqual(['acme::v1/guard']);
+  });
+
+  it('reinstallAllPolicies during a still-resolving ensureDefaultPoliciesInstalled does not let the older IIFE stomp the newer one', async () => {
+    mocks.localStore.set('policy-selection:enabled-ids', ['default::dex/a']);
+
+    // Hold the first installPolicies until we say so.
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolveStarted) => {
+      mocks.installPolicies.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveStarted();
+            releaseFirst = resolve;
+          }),
+      );
+    });
+    mocks.installPolicies.mockResolvedValueOnce(undefined); // second call resolves immediately
+
+    const { ensureDefaultPoliciesInstalled, reinstallAllPolicies } = await import(
+      '../policies-loader'
+    );
+    const ensureP = ensureDefaultPoliciesInstalled();
+    await firstStarted; // ensure's IIFE is parked inside installPolicies
+    const reinstallP = reinstallAllPolicies(['default::dex/b']);
+    // Release the older (ensure) call first; new (reinstall) call should
+    // already be queued behind it on the WASM side. After both settle,
+    // installPolicies must have been called twice and the LAST call's
+    // policy_set must be the reinstall ids.
+    releaseFirst();
+    await Promise.all([ensureP, reinstallP]);
+
+    expect(mocks.installPolicies).toHaveBeenCalledTimes(2);
+    const lastCallIds = mocks.installPolicies.mock.calls[1][0].policy_set.map(
+      (p: { id: string }) => p.id,
+    );
+    expect(lastCallIds).toEqual(['default::dex/b']);
+  });
 });
