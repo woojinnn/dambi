@@ -102,13 +102,15 @@ main {
   margin: 12px 0 6px;
 }
 
+.row-wrap {
+  border-bottom: 1px solid #1c1c24;
+}
 .row {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 8px;
   align-items: start;
   padding: 6px 0;
-  border-bottom: 1px solid #1c1c24;
 }
 .row .meta {
   display: flex;
@@ -123,6 +125,9 @@ main {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .row .reason {
   font-size: 11px;
@@ -130,6 +135,52 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.caret {
+  color: var(--muted);
+  font-size: 10px;
+  width: 10px;
+  display: inline-block;
+  user-select: none;
+}
+.caret.open {
+  color: var(--accent);
+}
+
+.details {
+  padding: 6px 0 10px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px dashed #2a2a35;
+  margin-top: 4px;
+}
+.detail-label {
+  font-weight: 600;
+  color: var(--fg);
+  margin-right: 4px;
+}
+.detail-source {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.detail-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding-left: 4px;
+}
+.rule-reason {
+  color: var(--fg);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .badge {

@@ -24,7 +24,8 @@ const state: {
   searchTerm: string;
   status: 'idle' | 'applying' | 'error';
   errorText: string;
-} = { catalog: null, searchTerm: '', status: 'idle', errorText: '' };
+  expanded: Set<string>;
+} = { catalog: null, searchTerm: '', status: 'idle', errorText: '', expanded: new Set() };
 
 async function fetchCatalog(): Promise<Catalog> {
   // Guard against a wedged service worker — if no response arrives in
@@ -115,6 +116,7 @@ function renderRow(p: CatalogPolicy, enabledSet: Set<string>): HTMLDivElement {
   const reasons = distinctReasons(p);
   const reasonText = reasons[0] ?? '(no reason annotation)';
   const moreCount = reasons.length - 1;
+  const isExpanded = state.expanded.has(p.id);
 
   const checkbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
   checkbox.checked = enabledSet.has(p.id);
@@ -126,8 +128,15 @@ function renderRow(p: CatalogPolicy, enabledSet: Set<string>): HTMLDivElement {
     void applyIds([...next]);
   });
 
+  const caret = el('span', {
+    class: `caret ${isExpanded ? 'open' : ''}`,
+    text: isExpanded ? '▾' : '▸',
+  });
+
+  const idLine = el('div', { class: 'id' }, [caret, el('span', { text: p.id })]);
+
   const meta = el('div', { class: 'meta' }, [
-    el('div', { class: 'id', text: p.id }),
+    idLine,
     el('div', { class: 'reason' }, [
       badge(p.dominantSeverity),
       reasonText,
@@ -136,12 +145,47 @@ function renderRow(p: CatalogPolicy, enabledSet: Set<string>): HTMLDivElement {
         : []),
     ]),
   ]);
+  meta.style.cursor = 'pointer';
+  meta.setAttribute('role', 'button');
+  meta.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+  meta.setAttribute('aria-label', `Toggle details for ${p.id}`);
+  meta.addEventListener('click', () => {
+    if (state.expanded.has(p.id)) state.expanded.delete(p.id);
+    else state.expanded.add(p.id);
+    render();
+  });
 
   const onlyBtn = el('button', { class: 'only', text: 'Only this' });
   onlyBtn.setAttribute('aria-label', `Enable only ${p.id}`);
-  onlyBtn.addEventListener('click', () => void applyIds([p.id]));
+  onlyBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    void applyIds([p.id]);
+  });
 
-  return el('div', { class: 'row' }, [checkbox, meta, onlyBtn]);
+  const row = el('div', { class: 'row' }, [checkbox, meta, onlyBtn]);
+  if (isExpanded) {
+    const ruleNodes = p.rules.map((r) =>
+      el('div', { class: 'rule' }, [
+        badge(r.severity),
+        el('span', { class: 'rule-reason', text: r.reason }),
+      ]),
+    );
+    const details = el('div', { class: 'details' }, [
+      el('div', { class: 'detail-source' }, [
+        el('span', { class: 'detail-label', text: 'Source: ' }),
+        el('span', { text: p.sourceLabel }),
+      ]),
+      el('div', { class: 'detail-rules' }, [
+        el('span', {
+          class: 'detail-label',
+          text: `Rules (${p.rules.length}):`,
+        }),
+        ...ruleNodes,
+      ]),
+    ]);
+    return el('div', { class: 'row-wrap' }, [row, details]);
+  }
+  return el('div', { class: 'row-wrap' }, [row]);
 }
 
 function render(): void {
