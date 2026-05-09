@@ -19,16 +19,23 @@ use abi_resolver::openchain::{OpenchainIndex, SignatureCandidate};
 use abi_resolver::resolver::{ResolveOutcome, Resolver, Source};
 use abi_resolver::sourcify::SourcifyIndex;
 use abi_resolver::sqlite_index::SqliteSourcifyIndex;
+use abi_resolver::subdecode::opcode_stream::OpcodeTable;
 use abi_resolver::subdecode::opcode_stream::{
     dispatch as dispatch_opcode_stream, DecodedStep, StepDecodeError,
 };
+use abi_resolver::subdecode::protocols::pancake_ur::{
+    is_pancake_universal_router, PANCAKE_UR_TABLE,
+};
+use abi_resolver::subdecode::protocols::uniswap_v3::format_packed_path;
 use abi_resolver::subdecode::protocols::universal_router::{
-    extract_commands_and_inputs, is_universal_router_execute, UNISWAP_UR_TABLE,
+    extract_commands_and_inputs, is_uniswap_universal_router, is_universal_router_execute,
+    UNISWAP_UR_TABLE,
 };
 use abi_resolver::subdecode::protocols::v4_router::{
     extract_actions_and_params as extract_v4_actions_and_params, V4_ROUTER_TABLE,
 };
 use abi_resolver::subdecode::recurse::{extract_subcalls, is_self_multicall};
+use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::Address;
 use axum::{
     extract::State,
@@ -240,6 +247,35 @@ const MAX_SUBDECODE_DEPTH: u32 = 4;
 /// the response.
 const MAX_SUBDECODE_CHILDREN: usize = 64;
 
+/// Pick the right Universal Router opcode table for `(chain, target)` after
+/// confirming the selector is one of the public `execute(...)` overloads.
+///
+/// Returns `Some(table)` only when both:
+/// - the selector matches a UR `execute` selector, AND
+/// - the target address is on a router-specific allowlist (Uniswap or
+///   Pancake).
+///
+/// Unknown UR-shaped routers (forks not yet registered) get `None` —
+/// the orchestrator then leaves the inner `(commands, inputs)` as raw
+/// bytes rather than risking a silent misdecode against the wrong opcode
+/// table.
+fn pick_ur_opcode_table(
+    chain_id: u64,
+    target: &Address,
+    selector: &[u8; 4],
+) -> Option<&'static OpcodeTable> {
+    if !is_universal_router_execute(selector) {
+        return None;
+    }
+    if is_uniswap_universal_router(chain_id, target) {
+        return Some(&UNISWAP_UR_TABLE);
+    }
+    if is_pancake_universal_router(chain_id, target) {
+        return Some(&PANCAKE_UR_TABLE);
+    }
+    None
+}
+
 async fn decode(State(state): State<AppState>, Json(req): Json<DecodeRequest>) -> Response {
     let address = match Address::from_str(req.address.trim()) {
         Ok(a) => a,
@@ -317,11 +353,15 @@ fn decode_recursive(
                             .collect()
                     })
                     .unwrap_or_default()
-            } else if is_universal_router_execute(&selector_bytes) {
-                // Cat B — dispatch each opcode against the Uniswap UR table.
+            } else if let Some(table) = pick_ur_opcode_table(chain_id, target, &selector_bytes) {
+                // Cat B — dispatch each opcode against the matching UR table.
+                // Role-gated: Uniswap UR vs Pancake UR vs (unknown UR fork
+                // → no dispatch). Avoids silent misdecode where two routers
+                // share the `execute(...)` selector but disagree on opcode
+                // semantics.
                 extract_commands_and_inputs(&r.decoded)
                     .map(|(commands, inputs)| {
-                        let steps = dispatch_opcode_stream(&commands, &inputs, &UNISWAP_UR_TABLE);
+                        let steps = dispatch_opcode_stream(&commands, &inputs, table);
                         steps
                             .into_iter()
                             .take(MAX_SUBDECODE_CHILDREN)
@@ -387,12 +427,30 @@ fn step_to_response(step: DecodedStep, depth: u32) -> DecodeResponse {
         step.name.to_string()
     };
 
-    // Compute V4_SWAP nested children before consuming `step.args` below.
-    let nested_children = if step.opcode == 0x10 && depth < MAX_SUBDECODE_DEPTH {
+    // Compute nested children before consuming `step.args` below.
+    let nested_children = if depth >= MAX_SUBDECODE_DEPTH {
+        Vec::new()
+    } else if step.opcode == 0x10 {
+        // V4_SWAP — re-dispatch the inner (actions, params) against the V4Router
+        // action table.
         extract_v4_actions_and_params(&step)
             .map(|(actions, params)| {
                 let v4_steps = dispatch_opcode_stream(&actions, &params, &V4_ROUTER_TABLE);
                 v4_steps
+                    .into_iter()
+                    .take(MAX_SUBDECODE_CHILDREN)
+                    .map(|s| step_to_response(s, depth + 1))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else if step.opcode == 0x21 {
+        // EXECUTE_SUB_PLAN — same `(bytes commands, bytes[] inputs)` shape as
+        // the outer execute(...) entrypoint, dispatched recursively against
+        // the same Uniswap UR table (Cat B self-recursion).
+        extract_v4_actions_and_params(&step)
+            .map(|(commands, inputs)| {
+                let sub_steps = dispatch_opcode_stream(&commands, &inputs, &UNISWAP_UR_TABLE);
+                sub_steps
                     .into_iter()
                     .take(MAX_SUBDECODE_CHILDREN)
                     .map(|s| step_to_response(s, depth + 1))
@@ -406,7 +464,10 @@ fn step_to_response(step: DecodedStep, depth: u32) -> DecodeResponse {
     let (signature, args) = match (step.args, step.error) {
         (Some(decoded_args), _) => (
             format!("{}(...)", step.name),
-            decoded_args.into_iter().map(arg_to_api).collect(),
+            decoded_args
+                .into_iter()
+                .map(|a| step_arg_to_api(step.opcode, a))
+                .collect(),
         ),
         (None, Some(StepDecodeError::UnknownOpcode)) => (
             format!("UNKNOWN(raw 0x{} bytes)", hex::encode(&step.raw_input)),
@@ -445,6 +506,27 @@ fn raw_input_arg(input: &[u8]) -> ApiArg {
         sol_type: "bytes".into(),
         value: format!("0x{}", hex::encode(input)),
     }
+}
+
+/// Same as [`arg_to_api`], but with awareness of which opcode produced the
+/// step. Used to enrich specific args that carry non-standard encodings
+/// (e.g. the `path` bytes on V3_SWAP_EXACT_IN / V3_SWAP_EXACT_OUT, which is
+/// a packed token-fee-token sequence — Cat C1).
+fn step_arg_to_api(opcode: u8, a: DecodedArg) -> ApiArg {
+    // V3_SWAP_EXACT_IN / V3_SWAP_EXACT_OUT both carry a packed `path` bytes
+    // arg. When we recognise it, surface the friendly token-fee chain.
+    if matches!(opcode, 0x00 | 0x01) && a.name == "path" {
+        if let DynSolValue::Bytes(ref bytes) = a.value {
+            if let Some(friendly) = format_packed_path(bytes) {
+                return ApiArg {
+                    name: a.name,
+                    sol_type: a.sol_type,
+                    value: friendly,
+                };
+            }
+        }
+    }
+    arg_to_api(a)
 }
 
 #[derive(Serialize)]

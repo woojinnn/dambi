@@ -22,6 +22,8 @@
 //! recognised by name but kept as raw bytes for now. Adding their schemas
 //! is independent of the engine.
 
+use alloy_primitives::Address;
+
 use crate::subdecode::opcode_stream::{OpcodeEntry, OpcodeTable};
 
 /// Uniswap UR command bytes use the high bit (`0x80`) for `allowRevert`.
@@ -312,10 +314,43 @@ pub const EXECUTE_DEADLINE_SELECTOR: [u8; 4] = [0x35, 0x93, 0x56, 0x4c];
 pub const EXECUTE_SELECTOR: [u8; 4] = [0x24, 0x85, 0x6b, 0xc3];
 
 /// True when the selector matches one of the public Universal Router
-/// `execute` overloads.
+/// `execute` overloads. **Selector match alone is not enough to safely
+/// dispatch** — the same selector is shared by every UR fork (Pancake,
+/// OKX, …) but each fork has its own opcode table. Use
+/// [`is_uniswap_universal_router`] in tandem so the orchestrator only
+/// applies [`UNISWAP_UR_TABLE`] to addresses we trust.
 #[must_use]
 pub fn is_universal_router_execute(selector: &[u8; 4]) -> bool {
     matches!(*selector, EXECUTE_DEADLINE_SELECTOR | EXECUTE_SELECTOR)
+}
+
+/// Allowlist of Uniswap Universal Router deployments — `(chain_id, address)`.
+/// New deploys can be added here as they're verified.
+const UNISWAP_UR_ADDRESSES: &[(u64, Address)] = &[
+    // Ethereum mainnet — original Universal Router (in our curated bundle).
+    (
+        1,
+        Address::new(
+            *b"\x66\xa9\x89\x3c\xc0\x7d\x91\xd9\x56\x44\xae\xdd\x05\xd0\x3f\x95\xe1\xdb\xa8\xaf",
+        ),
+    ),
+    // Ethereum mainnet — V4-supporting Universal Router (not on Sourcify
+    // yet; Etherscan-verified).
+    (
+        1,
+        Address::new(
+            *b"\x4c\x82\xd1\xfb\xfe\x28\xc9\x77\xcb\xb5\x8d\x8c\x7f\xf8\xfc\xf9\xf7\x0a\x2c\xca",
+        ),
+    ),
+];
+
+/// Returns true when `(chain_id, target)` matches a known Uniswap Universal
+/// Router deployment we trust to use the [`UNISWAP_UR_TABLE`] dispatch shape.
+#[must_use]
+pub fn is_uniswap_universal_router(chain_id: u64, target: &Address) -> bool {
+    UNISWAP_UR_ADDRESSES
+        .iter()
+        .any(|(chain, addr)| *chain == chain_id && addr == target)
 }
 
 /// Pull the `(commands, inputs)` pair out of a decoded `execute(...)` call.

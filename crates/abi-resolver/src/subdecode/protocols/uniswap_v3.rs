@@ -13,6 +13,26 @@
 
 use alloy_primitives::Address;
 
+/// Render a Uniswap V3 packed path as a human-readable token-fee chain, e.g.
+/// `0xC02a…cc2 --[fee=500]--> 0xa0b8…b48 --[fee=3000]--> 0xdac1…ec7`.
+///
+/// Used by the orchestrator to enrich the `path` argument on V3-style swap
+/// steps (UR opcodes V3_SWAP_EXACT_IN / V3_SWAP_EXACT_OUT, and the V3
+/// SwapRouter's `exactInput` / `exactOutput`). Returns `None` when the bytes
+/// don't parse as a V3 packed path so callers can fall back to raw hex.
+#[must_use]
+pub fn format_packed_path(path: &[u8]) -> Option<String> {
+    let (tokens, fees) = decode_v3_path(path).ok()?;
+    let mut s = String::new();
+    for (i, token) in tokens.iter().enumerate() {
+        if i > 0 {
+            s.push_str(&format!(" --[fee={}]--> ", fees[i - 1]));
+        }
+        s.push_str(&format!("0x{}", hex::encode(token.0)));
+    }
+    Some(s)
+}
+
 /// Error from decoding a Uniswap V3 packed path.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PathDecodeError {
