@@ -207,6 +207,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   // Phase B: derive Tier-1 plan and fetch facts.
   const plan = (await tier1FactPlan(actionParsed)) as Tier1Plan;
   const tier1 = await fetchTier1(plan);
+  warnMissingOracleEntries(message, plan, tier1.oracle);
 
   // Phase C: tier-2 window keys derived from oracle snapshot.
   const tier2 = await tier2WindowKeys(actionParsed, tier1.oracle);
@@ -247,6 +248,49 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   const verdict = await evaluate(JSON.parse(requestJson), snapshot);
   const dexWindowEntries = computeDexWindowEntries(actionParsed, tier1.oracle);
   return dexWindowEntries ? { verdict, dexWindowEntries } : { verdict };
+}
+
+function warnMissingOracleEntries(
+  message: Message,
+  plan: Tier1Plan,
+  oracleEntries: OracleEntry[],
+): void {
+  const requested = plannedOracleTokenKeys(plan);
+  if (requested.length === 0) return;
+
+  const resolved = new Set(
+    oracleEntries.map((entry) => entry.token_key.toLowerCase()),
+  );
+  const missing = requested.filter((tokenKey) => !resolved.has(tokenKey));
+  if (missing.length === 0) return;
+
+  console.warn(
+    "[Scopeball SW] oracle_requirements declared but no entries returned — dex/USD policies will silently miss",
+    {
+      requestId: message.requestId,
+      hostname: message.data.hostname,
+      requested,
+      missing,
+    },
+  );
+}
+
+function plannedOracleTokenKeys(plan: Tier1Plan): string[] {
+  const keys = new Set<string>();
+  const addToken = (token: { chain_id: number; address: string }): void => {
+    keys.add(`${token.chain_id}:${token.address.toLowerCase()}`);
+  };
+
+  for (const token of plan.tokens_for_oracle) addToken(token);
+  for (const requirement of plan.sig_oracle_requirements) {
+    if ("token" in requirement) {
+      addToken(requirement.token);
+    } else {
+      keys.add(`${requirement.chainId}:${requirement.address.toLowerCase()}`);
+    }
+  }
+
+  return [...keys];
 }
 
 function inferActor(message: Message): string | undefined {

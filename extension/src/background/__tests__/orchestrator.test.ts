@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RequestType, type Message } from '@lib/types';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RequestType, type Message } from "@lib/types";
 
-const OWNER = '0x1111111111111111111111111111111111111111';
-const ROUTER = '0x2222222222222222222222222222222222222222';
-const WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+const OWNER = "0x1111111111111111111111111111111111111111";
+const ROUTER = "0x2222222222222222222222222222222222222222";
+const WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+const USDT = "0xdac17f958d2ee523a2206206994597c13d831ec7";
 
 const mocks = vi.hoisted(() => {
   class MockEngineError extends Error {
@@ -27,7 +28,7 @@ const mocks = vi.hoisted(() => {
     if (keys === undefined || keys === null)
       return Object.fromEntries(store.entries());
     const out: Record<string, unknown> = {};
-    if (typeof keys === 'string') {
+    if (typeof keys === "string") {
       out[keys] = store.get(keys);
       return out;
     }
@@ -115,26 +116,26 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('webextension-polyfill', () => ({ default: mocks.browser }));
-vi.mock('../policies-loader', () => ({
+vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
+vi.mock("../policies-loader", () => ({
   ensureDefaultPoliciesInstalled: mocks.ensureDefaultPoliciesInstalled,
 }));
-vi.mock('../facts/tier1-fetcher', () => ({
+vi.mock("../facts/tier1-fetcher", () => ({
   fetchTier1: mocks.fetchTier1,
   intoHostSnapshot: mocks.intoHostSnapshot,
 }));
-vi.mock('../pending-deltas', () => ({
+vi.mock("../pending-deltas", () => ({
   committedForActor: mocks.committedForActor,
   pendingForActor: mocks.pendingForActor,
   reservePending: mocks.reservePending,
   setTxHash: mocks.setTxHash,
 }));
-vi.mock('../storage', () => ({
+vi.mock("../storage", () => ({
   pendingPut: mocks.pendingPut,
   pendingDelete: mocks.pendingDelete,
   auditAppend: mocks.auditAppend,
 }));
-vi.mock('../wasm-bridge', () => ({
+vi.mock("../wasm-bridge", () => ({
   buildAction: mocks.buildAction,
   evaluate: mocks.evaluate,
   EngineError: mocks.MockEngineError,
@@ -142,32 +143,32 @@ vi.mock('../wasm-bridge', () => ({
   tier2WindowKeys: mocks.tier2WindowKeys,
 }));
 
-import { decideMessage } from '../orchestrator';
+import { decideMessage } from "../orchestrator";
 
-function txMessage(requestId = 'req-1'): Message {
+function txMessage(requestId = "req-1"): Message {
   return {
     requestId,
     data: {
       type: RequestType.TRANSACTION,
       chainId: 1,
-      hostname: 'app.example',
+      hostname: "app.example",
       transaction: {
         from: OWNER,
         to: ROUTER,
-        value: '0xde0b6b3a7640000',
-        data: '0x',
+        value: "0xde0b6b3a7640000",
+        data: "0x",
       },
     },
   } as Message;
 }
 
-function untypedMessage(requestId = 'sig-1'): Message {
+function untypedMessage(requestId = "sig-1"): Message {
   return {
     requestId,
     data: {
       type: RequestType.UNTYPED_SIGNATURE,
-      hostname: 'app.example',
-      message: 'sign this opaque payload',
+      hostname: "app.example",
+      message: "sign this opaque payload",
     },
   };
 }
@@ -177,9 +178,9 @@ function dexAction(): Record<string, unknown> {
     dex: {
       actor: OWNER,
       target: ROUTER,
-      value_wei: '0',
+      value_wei: "0",
       facts: {
-        protocol_ids: ['uniswap_v3'],
+        protocol_ids: ["uniswap_v3"],
         input_tokens: [],
         output_tokens: [],
         total_input_usd: null,
@@ -193,15 +194,15 @@ function dexAction(): Record<string, unknown> {
       },
       oracle_requirements: [
         {
-          kind: 'input',
+          kind: "input",
           token: {
             chain_id: 1,
             address: WETH,
-            symbol: 'WETH',
+            symbol: "WETH",
             decimals: 18,
             is_native: false,
           },
-          raw_amount: '1000000000000000000',
+          raw_amount: "1000000000000000000",
         },
       ],
       trace: { steps: [] },
@@ -209,9 +210,19 @@ function dexAction(): Record<string, unknown> {
   };
 }
 
+function tokenLite(address: string, symbol: string, decimals = 18) {
+  return {
+    chain_id: 1,
+    address,
+    symbol,
+    decimals,
+    is_native: false,
+  };
+}
+
 function setupDexPass(
-  verdict: { kind: 'pass' | 'warn' | 'fail'; matched?: unknown[] } = {
-    kind: 'pass',
+  verdict: { kind: "pass" | "warn" | "fail"; matched?: unknown[] } = {
+    kind: "pass",
   },
 ) {
   mocks.buildAction.mockResolvedValue(dexAction());
@@ -227,7 +238,7 @@ function setupDexPass(
       {
         token_key: `1:${WETH}`,
         usd_price: 3500,
-        usd_per_unit: '3500',
+        usd_per_unit: "3500",
         as_of_ts: 1,
         stale_sec: 0,
       },
@@ -242,11 +253,11 @@ function setupDexPass(
 
 function approve(requestId: string, ok: boolean): void {
   for (const listener of [...mocks.runtimeMessageListeners]) {
-    listener({ type: 'scopeball:verdict-decision', requestId, ok });
+    listener({ type: "scopeball:verdict-decision", requestId, ok });
   }
 }
 
-describe('orchestrator', () => {
+describe("orchestrator", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -258,7 +269,7 @@ describe('orchestrator', () => {
     mocks.pendingForActor.mockResolvedValue([]);
   });
 
-  it('normalizes hex transaction value before asking the engine to build an action', async () => {
+  it("normalizes hex transaction value before asking the engine to build an action", async () => {
     setupDexPass();
 
     await expect(decideMessage(txMessage())).resolves.toMatchObject({
@@ -268,13 +279,13 @@ describe('orchestrator', () => {
     expect(mocks.buildAction).toHaveBeenCalledWith(
       expect.objectContaining({
         Tx: expect.objectContaining({
-          value_wei: '1000000000000000000',
+          value_wei: "1000000000000000000",
         }),
       }),
     );
   });
 
-  it('reserves pending DEX window deltas after a passing decision', async () => {
+  it("reserves pending DEX window deltas after a passing decision", async () => {
     setupDexPass();
 
     await expect(decideMessage(txMessage())).resolves.toMatchObject({
@@ -283,18 +294,18 @@ describe('orchestrator', () => {
 
     expect(mocks.reservePending).toHaveBeenCalledWith(
       expect.objectContaining({
-        requestId: 'req-1',
+        requestId: "req-1",
         actor: OWNER,
         chainId: 1,
         windowEntries: [
-          { name: 'swapVolumeUsd24h', value: '3500.0000' },
-          { name: 'swapCount24h', value: '1' },
+          { name: "swapVolumeUsd24h", value: "3500.0000" },
+          { name: "swapCount24h", value: "1" },
         ],
       }),
     );
   });
 
-  it('still reserves the DEX count delta when oracle input USD is unavailable', async () => {
+  it("still reserves the DEX count delta when oracle input USD is unavailable", async () => {
     setupDexPass();
     mocks.fetchTier1.mockResolvedValue({
       oracle: [],
@@ -309,16 +320,52 @@ describe('orchestrator', () => {
 
     expect(mocks.reservePending).toHaveBeenCalledWith(
       expect.objectContaining({
-        requestId: 'req-1',
-        windowEntries: [{ name: 'swapCount24h', value: '1' }],
+        requestId: "req-1",
+        windowEntries: [{ name: "swapCount24h", value: "1" }],
       }),
     );
   });
 
-  it('opens a warning decision window and reserves only after user approval', async () => {
+  it("warns when planned oracle requirements are missing from the tier1 snapshot", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setupDexPass();
+    mocks.tier1FactPlan.mockResolvedValue({
+      tokens_for_oracle: [tokenLite(WETH, "WETH"), tokenLite(USDT, "USDT", 6)],
+      balances: [],
+      allowances: [],
+      clock_required: false,
+      sig_oracle_requirements: [],
+    });
+    mocks.fetchTier1.mockResolvedValue({
+      oracle: [],
+      balances: [],
+      allowances: [],
+    });
+
+    await expect(decideMessage(txMessage("oracle-gap-1"))).resolves.toMatchObject(
+      {
+        ok: true,
+        verdict: { kind: "pass" },
+      },
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[Scopeball SW] oracle_requirements declared but no entries returned — dex/USD policies will silently miss",
+      {
+        requestId: "oracle-gap-1",
+        hostname: "app.example",
+        requested: [`1:${WETH}`, `1:${USDT}`],
+        missing: [`1:${WETH}`, `1:${USDT}`],
+      },
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("opens a warning decision window and reserves only after user approval", async () => {
     setupDexPass({
-      kind: 'warn',
-      matched: [{ policy_id: 'policy::warn', severity: 'warn', origin: 'tx' }],
+      kind: "warn",
+      matched: [{ policy_id: "policy::warn", severity: "warn", origin: "tx" }],
     });
     const awaitingUser = vi.fn();
 
@@ -329,18 +376,18 @@ describe('orchestrator', () => {
 
     expect(awaitingUser).toHaveBeenCalledTimes(1);
     expect(mocks.reservePending).not.toHaveBeenCalled();
-    approve('req-1', true);
+    approve("req-1", true);
 
     await expect(result).resolves.toMatchObject({ ok: true });
     expect(mocks.reservePending).toHaveBeenCalledTimes(1);
   });
 
-  it('turns engine timeout into a user-confirmable warning', async () => {
+  it("turns engine timeout into a user-confirmable warning", async () => {
     vi.useFakeTimers();
     mocks.buildAction.mockReturnValue(new Promise(() => undefined));
     const awaitingUser = vi.fn();
 
-    const result = decideMessage(txMessage('timeout-1'), {
+    const result = decideMessage(txMessage("timeout-1"), {
       onAwaitingUser: awaitingUser,
     });
     await vi.advanceTimersByTimeAsync(3_000);
@@ -349,27 +396,27 @@ describe('orchestrator', () => {
     );
 
     expect(awaitingUser).toHaveBeenCalledTimes(1);
-    approve('timeout-1', true);
+    approve("timeout-1", true);
 
     await expect(result).resolves.toMatchObject({
       ok: true,
-      verdict: { kind: 'warn' },
+      verdict: { kind: "warn" },
     });
     expect(mocks.reservePending).not.toHaveBeenCalled();
   });
 
-  it('lets the user explicitly approve unsupported untyped signatures', async () => {
+  it("lets the user explicitly approve unsupported untyped signatures", async () => {
     const result = decideMessage(untypedMessage(), { onAwaitingUser: vi.fn() });
     await vi.waitFor(() =>
       expect(mocks.browser.windows.create).toHaveBeenCalledTimes(1),
     );
 
     expect(mocks.buildAction).not.toHaveBeenCalled();
-    approve('sig-1', true);
+    approve("sig-1", true);
 
     await expect(result).resolves.toMatchObject({
       ok: true,
-      verdict: { kind: 'warn' },
+      verdict: { kind: "warn" },
     });
   });
 });
