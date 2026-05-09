@@ -70,6 +70,14 @@ function warnDimensionFallback(
   });
 }
 
+function warnOracleEntryFallback(need: OracleNeed, reason: string): void {
+  console.warn("[Scopeball SW] tier1 oracle entry fell back", {
+    dimension: "oracle",
+    token_key: oracleNeedTokenKey(need),
+    reason,
+  });
+}
+
 async function withDimensionTimeout<T>(
   dimension: Tier1Dimension,
   promise: Promise<T>,
@@ -100,6 +108,59 @@ async function withDimensionTimeout<T>(
 
     warnDimensionFallback(dimension, fallbackReason(outcome.reason));
     return fallback;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+function dedupeOracleNeeds(needs: readonly OracleNeed[]): OracleNeed[] {
+  const dedup = new Map<string, OracleNeed>();
+  for (const need of needs) {
+    const address = need.address.toLowerCase();
+    dedup.set(oracleNeedTokenKey({ ...need, address }), { ...need, address });
+  }
+  return [...dedup.values()];
+}
+
+function oracleNeedTokenKey(need: OracleNeed): string {
+  return `${need.chainId}:${need.address.toLowerCase()}`;
+}
+
+async function fetchOracleSnapshotPartial(
+  needs: readonly OracleNeed[],
+  fetchImpl: typeof fetch,
+  nowMs: number,
+  budgetMs: number,
+  onTimeout?: () => void,
+): Promise<OracleEntry[]> {
+  const uniqueNeeds = dedupeOracleNeeds(needs);
+  if (uniqueNeeds.length === 0) return [];
+
+  const collected: OracleEntry[] = [];
+  const fetches = uniqueNeeds.map(async (need) => {
+    try {
+      const entries = await buildOracleSnapshot([need], fetchImpl, nowMs);
+      const tokenKey = oracleNeedTokenKey(need);
+      collected.push(
+        ...entries.filter((entry) => entry.token_key.toLowerCase() === tokenKey),
+      );
+    } catch (reason) {
+      warnOracleEntryFallback(need, fallbackReason(reason));
+    }
+  });
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<"timed-out">((resolve) => {
+    timeoutId = setTimeout(() => resolve("timed-out"), budgetMs);
+  });
+
+  try {
+    const outcome = await Promise.race([Promise.allSettled(fetches), timeout]);
+    if (outcome === "timed-out") {
+      onTimeout?.();
+      warnDimensionFallback("oracle", "timeout");
+    }
+    return collected.slice();
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
@@ -233,10 +294,11 @@ async function fetchTier1Work(
   ];
 
   const [oracle, balances, allowances] = await Promise.all([
-    withDimensionTimeout(
-      "oracle",
-      buildOracleSnapshot(oracleNeeds, guardedFetch, nowMs),
-      [],
+    fetchOracleSnapshotPartial(
+      oracleNeeds,
+      guardedFetch,
+      nowMs,
+      DIM_BUDGET_MS,
       abortOracle,
     ),
     withDimensionTimeout("balances", fetchBalances(plan), []),
