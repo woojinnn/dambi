@@ -90,4 +90,22 @@ forbid (principal, action, resource);`;
     expect(meta.rules[0].reason).toBe('a\nb\\c"dA');
     expect(meta.rules[1].reason).toBe('\\q passthrough');
   });
+
+  it('decodes \\r, \\t, and astral \\u{...} codepoints; passes through out-of-range codepoints', () => {
+    const text = `@severity("warn") @reason("a\\rb\\tc\\u{1F600}") forbid (principal, action, resource);
+@severity("warn") @reason("oob\\u{110000}") forbid (principal, action, resource);`;
+    const meta = parsePolicyMeta(text);
+    expect(meta.rules[0].reason).toBe('a\rb\tc\u{1F600}');
+    expect(meta.rules[1].reason).toBe('oob\\u{110000}');
+  });
+
+  it('keeps backslash-quote inside a string from prematurely closing it', () => {
+    const text = `@severity("warn") @reason("close\\";then") forbid (principal, action, resource);
+@severity("deny") @reason("next") forbid (principal, action, resource);`;
+    const meta = parsePolicyMeta(text);
+    expect(meta.rules).toEqual([
+      { severity: 'warn', reason: 'close";then' },
+      { severity: 'deny', reason: 'next' },
+    ]);
+  });
 });

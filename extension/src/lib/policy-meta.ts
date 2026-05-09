@@ -54,7 +54,9 @@ function unescape(value: string): string {
     if (body === 't') return '\t';
     if (body.startsWith('u{')) {
       const hex = body.slice(2, -1);
-      return String.fromCodePoint(parseInt(hex, 16));
+      const cp = parseInt(hex, 16);
+      if (cp > 0x10ffff) return match;
+      return String.fromCodePoint(cp);
     }
     if (body.startsWith('u')) {
       return String.fromCharCode(parseInt(body.slice(1), 16));
