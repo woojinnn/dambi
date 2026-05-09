@@ -37,8 +37,17 @@ stream.on("data", async (message: Message) => {
     "[Scopeball-bridge] received from inpage:",
     message.data.type,
     message.requestId,
+    "frame:", location.href,
   );
-  const port = Browser.runtime.connect({ name: Identifier.CONTENT_SCRIPT });
+  let port: Browser.Runtime.Port;
+  try {
+    port = Browser.runtime.connect({ name: Identifier.CONTENT_SCRIPT });
+    console.log("[Scopeball-bridge] port connected for", message.requestId);
+  } catch (err) {
+    console.error("[Scopeball-bridge] port.connect failed for", message.requestId, err);
+    stream.write({ requestId: message.requestId, data: true });
+    return;
+  }
   const data: Message["data"] = {
     ...message.data,
     hostname: location.hostname,
@@ -48,7 +57,12 @@ stream.on("data", async (message: Message) => {
       stream.write({ requestId: message.requestId, kind: "awaiting-user" });
     }
   });
+  port.onDisconnect.addListener(() => {
+    console.warn("[Scopeball-bridge] port disconnected for", message.requestId, Browser.runtime.lastError);
+  });
+  console.log("[Scopeball-bridge] posting to SW for", message.requestId);
   const ok = await sendToPortAndAwaitResponse(port, data);
+  console.log("[Scopeball-bridge] SW responded for", message.requestId, "ok:", ok);
   stream.write({ requestId: message.requestId, data: ok });
   port.disconnect();
 });

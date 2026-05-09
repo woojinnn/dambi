@@ -33,9 +33,11 @@ Browser.runtime.onStartup.addListener(() => {
 });
 
 Browser.runtime.onConnect.addListener((port) => {
+  console.log("[Scopeball SW] port connect, name:", port.name);
   if (port.name !== Identifier.CONTENT_SCRIPT) return;
 
   port.onMessage.addListener((message: Message) => {
+    console.log("[Scopeball SW] received message:", message.data?.type, message.requestId);
     void handleMessage(message, port);
   });
 });
