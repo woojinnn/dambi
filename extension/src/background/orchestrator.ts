@@ -1,22 +1,22 @@
-import Browser from 'webextension-polyfill';
-import { ensureDefaultPoliciesInstalled } from './policies-loader';
+import Browser from "webextension-polyfill";
+import { ensureDefaultPoliciesInstalled } from "./policies-loader";
 import {
   fetchTier1,
   intoHostSnapshot,
   type Tier1Plan,
-} from './facts/tier1-fetcher';
+} from "./facts/tier1-fetcher";
 import {
   committedForActor,
   pendingForActor,
   reservePending,
   setTxHash,
-} from './pending-deltas';
+} from "./pending-deltas";
 import {
   auditAppend,
   pendingDelete,
   pendingPut,
   type PendingRequest,
-} from './storage';
+} from "./storage";
 import {
   buildAction,
   evaluate,
@@ -24,14 +24,14 @@ import {
   tier1FactPlan,
   tier2WindowKeys,
   type VerdictDto,
-} from './wasm-bridge';
+} from "./wasm-bridge";
 import {
   isTransaction,
   isTypedSignature,
   isUntypedSignature,
   type Message,
-} from '@lib/types';
-import type { OracleEntry } from './types/host-snapshot';
+} from "@lib/types";
+import type { OracleEntry } from "./types/host-snapshot";
 
 const HARD_TIMEOUT_MS = 3_000;
 
@@ -103,8 +103,8 @@ async function decideInner(
   const pending: PendingRequest = {
     requestId: message.requestId,
     hostname: message.data.hostname,
-    type: message.data.type as PendingRequest['type'],
-    bypassed: 'bypassed' in message.data && !!message.data.bypassed,
+    type: message.data.type as PendingRequest["type"],
+    bypassed: "bypassed" in message.data && !!message.data.bypassed,
     envelope: redactEnvelope(message),
     enqueuedAtMs: Date.now(),
   };
@@ -117,12 +117,13 @@ async function decideInner(
       { verdict: buildTimeoutVerdict() },
     );
     const { verdict } = lifecycle;
+    console.log("[Scopeball SW] verdict for", message.requestId, message.data.type, "=", verdict.kind, verdict.matched?.map((m) => m.policy_id));
 
     let ok = false;
-    if (verdict.kind === 'pass') {
+    if (verdict.kind === "pass") {
       await reserveDexDeltaIfNeeded(message, lifecycle.dexWindowEntries);
       ok = true;
-    } else if (verdict.kind === 'fail') {
+    } else if (verdict.kind === "fail") {
       // Surface the matched policies in a popup so the user understands
       // why the dApp's transaction returned 4001. The popup is
       // informational — Fail decisions don't take user input.
@@ -144,6 +145,7 @@ async function decideInner(
     return { ok, verdict };
   } catch (err) {
     const verdict = engineErrorVerdict(err);
+    console.warn("[Scopeball SW] decide error for", message.requestId, message.data.type, err);
     await appendAudit(message, pending.type, verdict);
     return { ok: false, verdict };
   } finally {
@@ -153,7 +155,7 @@ async function decideInner(
 
 async function appendAudit(
   message: Message,
-  type: PendingRequest['type'],
+  type: PendingRequest["type"],
   verdict: VerdictDto,
 ): Promise<void> {
   await auditAppend({
@@ -193,7 +195,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     }
     return {
       verdict: engineErrorVerdict(
-        new EngineError('unsupported', 'request type is not yet evaluable'),
+        new EngineError("unsupported", "request type is not yet evaluable"),
       ),
     };
   }
@@ -264,9 +266,9 @@ function computeDexWindowEntries(
   const dexInputUsd = computeDexInputUsd(dex, oracleEntries);
   const entries: WindowEntryDelta[] = [];
   if (dexInputUsd) {
-    entries.push({ name: 'swapVolumeUsd24h', value: dexInputUsd });
+    entries.push({ name: "swapVolumeUsd24h", value: dexInputUsd });
   }
-  entries.push({ name: 'swapCount24h', value: '1' });
+  entries.push({ name: "swapCount24h", value: "1" });
   return entries;
 }
 
@@ -286,12 +288,12 @@ function computeDexInputUsd(
   let found = false;
   for (const requirementValue of requirements) {
     const requirement = asRecord(requirementValue);
-    if (!requirement || requirement.kind !== 'input') continue;
+    if (!requirement || requirement.kind !== "input") continue;
     const token = asRecord(requirement.token);
     const tokenKey = token ? tokenKeyFromRecord(token) : undefined;
     const raw = parseUnsignedDecimal(requirement.raw_amount);
     const decimals =
-      typeof token?.decimals === 'number' ? token.decimals : undefined;
+      typeof token?.decimals === "number" ? token.decimals : undefined;
     const price = tokenKey ? prices.get(tokenKey) : undefined;
     if (raw === undefined || decimals === undefined || !price) continue;
 
@@ -305,7 +307,7 @@ function computeDexInputUsd(
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
 }
@@ -317,13 +319,13 @@ function asArray(value: unknown): unknown[] {
 function tokenKeyFromRecord(
   token: Record<string, unknown>,
 ): string | undefined {
-  if (typeof token.chain_id !== 'number' || typeof token.address !== 'string')
+  if (typeof token.chain_id !== "number" || typeof token.address !== "string")
     return undefined;
   return `${token.chain_id}:${token.address.toLowerCase()}`;
 }
 
 function parseUnsignedDecimal(value: unknown): bigint | undefined {
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) return undefined;
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return undefined;
   try {
     return BigInt(value);
   } catch {
@@ -345,28 +347,28 @@ function multiplyRawByUsd(
 }
 
 function decimalToFixed(value: string): bigint | undefined {
-  const parts = value.split('.');
+  const parts = value.split(".");
   if (parts.length > 2) return undefined;
-  const [whole, fraction = ''] = parts;
-  if (whole === '' && fraction === '') return undefined;
+  const [whole, fraction = ""] = parts;
+  if (whole === "" && fraction === "") return undefined;
   if (!/^\d*$/.test(whole) || !/^\d*$/.test(fraction)) return undefined;
   const padded = `${fraction}0000`.slice(0, 4);
   try {
-    return BigInt(`${whole || '0'}${padded}`);
+    return BigInt(`${whole || "0"}${padded}`);
   } catch {
     return undefined;
   }
 }
 
 function fixedToDecimal(value: bigint): string {
-  const raw = value.toString().padStart(5, '0');
+  const raw = value.toString().padStart(5, "0");
   const whole = raw.slice(0, -4);
   const fraction = raw.slice(-4);
   return `${whole}.${fraction}`;
 }
 
 function addWindowValues(name: string, left: string, right: string): string {
-  if (name === 'swapVolumeUsd24h') {
+  if (name === "swapVolumeUsd24h") {
     const leftFixed = decimalToFixed(left);
     const rightFixed = decimalToFixed(right);
     if (leftFixed === undefined) return right;
@@ -377,12 +379,12 @@ function addWindowValues(name: string, left: string, right: string): string {
 }
 
 function zeroWindowValue(name: string): string {
-  return name === 'swapVolumeUsd24h' ? '0.0000' : '0';
+  return name === "swapVolumeUsd24h" ? "0.0000" : "0";
 }
 
 function hexToBytes(hex: string | undefined): number[] {
   if (!hex) return [];
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
   if (clean.length % 2 !== 0) return [];
   const out: number[] = new Array(clean.length / 2);
   for (let i = 0; i < out.length; i++)
@@ -406,7 +408,7 @@ function encodeRequestForEngine(message: Message): string | null {
   }
   if (isTypedSignature(message)) {
     let typedData = message.data.typedData;
-    if (typeof typedData === 'string') {
+    if (typeof typedData === "string") {
       try {
         typedData = JSON.parse(typedData);
       } catch {
@@ -425,8 +427,8 @@ function encodeRequestForEngine(message: Message): string | null {
 }
 
 function quantityToDecimal(value: string | undefined): string {
-  if (!value) return '0';
-  if (!value.toLowerCase().startsWith('0x')) return value;
+  if (!value) return "0";
+  if (!value.toLowerCase().startsWith("0x")) return value;
   try {
     return BigInt(value).toString();
   } catch {
@@ -456,13 +458,13 @@ function redactEnvelope(message: Message): unknown {
 
 function buildTimeoutVerdict(): VerdictDto {
   return {
-    kind: 'warn',
+    kind: "warn",
     matched: [
       {
-        policy_id: '__engine::timeout',
+        policy_id: "__engine::timeout",
         reason: `Engine took longer than ${HARD_TIMEOUT_MS}ms`,
-        severity: 'warn',
-        origin: 'engine_error',
+        severity: "warn",
+        origin: "engine_error",
       },
     ],
   };
@@ -470,29 +472,29 @@ function buildTimeoutVerdict(): VerdictDto {
 
 function unsupportedUntypedSignatureVerdict(): VerdictDto {
   return {
-    kind: 'warn',
+    kind: "warn",
     matched: [
       {
-        policy_id: '__engine::unsupported_untyped_signature',
-        reason: 'Untyped signatures cannot be fully evaluated yet',
-        severity: 'warn',
-        origin: 'engine_error',
+        policy_id: "__engine::unsupported_untyped_signature",
+        reason: "Untyped signatures cannot be fully evaluated yet",
+        severity: "warn",
+        origin: "engine_error",
       },
     ],
   };
 }
 
 function engineErrorVerdict(err: unknown): VerdictDto {
-  const kind = err instanceof EngineError ? err.kind : 'unexpected';
+  const kind = err instanceof EngineError ? err.kind : "unexpected";
   const message = err instanceof Error ? err.message : String(err);
   return {
-    kind: 'fail',
+    kind: "fail",
     matched: [
       {
         policy_id: `__engine::${kind}`,
         reason: message,
-        severity: 'deny',
-        origin: 'engine_error',
+        severity: "deny",
+        origin: "engine_error",
       },
     ],
   };
@@ -523,7 +525,7 @@ export async function recordTxHash(
   await setTxHash(requestId, txHash);
 }
 
-const PENDING_DECISION_KEY = 'requests:pending-decisions';
+const PENDING_DECISION_KEY = "requests:pending-decisions";
 
 /**
  * Open the verdict modal as a separate Chrome window. Caller is informational —
@@ -539,7 +541,7 @@ async function openVerdictWindow(
   try {
     await Browser.windows.create({
       url,
-      type: 'popup',
+      type: "popup",
       width: 520,
       height: 480,
       focused: true,
@@ -568,7 +570,7 @@ async function openVerdictWindowAndAwait(
     )[PENDING_DECISION_KEY] as
       | Record<string, { verdict: VerdictDto; status: string; ok?: boolean }>
       | undefined) ?? {};
-  all[requestId] = { verdict, status: 'awaiting' };
+  all[requestId] = { verdict, status: "awaiting" };
   await Browser.storage.session.set({ [PENDING_DECISION_KEY]: all });
 
   const url = buildConfirmUrl(requestId, hostname, verdict);
@@ -576,7 +578,7 @@ async function openVerdictWindowAndAwait(
   try {
     win = await Browser.windows.create({
       url,
-      type: 'popup',
+      type: "popup",
       width: 520,
       height: 480,
       focused: true,
@@ -608,7 +610,7 @@ async function openVerdictWindowAndAwait(
         requestId?: string;
         ok?: boolean;
       } | null;
-      if (!m || m.type !== 'scopeball:verdict-decision') return;
+      if (!m || m.type !== "scopeball:verdict-decision") return;
       if (m.requestId !== requestId) return;
       settle(!!m.ok);
     };
@@ -638,7 +640,7 @@ async function openVerdictWindowAndAwait(
           | Record<string, { status: string; ok?: boolean }>
           | undefined) ?? {};
       const rec = fresh[requestId];
-      if (rec?.status === 'decided') settle(!!rec.ok);
+      if (rec?.status === "decided") settle(!!rec.ok);
     }, 250);
 
     // Phase-2 timeout heartbeat: extend the inpage stream's 3s phase-1

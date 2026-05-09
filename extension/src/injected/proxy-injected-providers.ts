@@ -147,28 +147,49 @@ async function checkWalletSendCalls(
 ): Promise<boolean> {
   const envelope = asRecord(params[0]);
   const calls = Array.isArray(envelope?.calls) ? envelope.calls : [];
+  console.log("[Scopeball-proxy] wallet_sendCalls envelope:", {
+    chainId: envelope?.chainId,
+    from: envelope?.from,
+    callCount: calls.length,
+    calls: calls.map((c: unknown) => {
+      const r = asRecord(c);
+      return r
+        ? { to: r.to, hasData: typeof r.data === "string", value: r.value }
+        : c;
+    }),
+  });
   if (calls.length === 0) return true;
 
   const chainId =
     parseChainId(envelope?.chainId) ?? (await readChainId(provider));
   let isAllowed = true;
 
-  for (const callValue of calls) {
-    const call = asRecord(callValue);
-    if (!call) continue;
+  for (let i = 0; i < calls.length; i++) {
+    const call = asRecord(calls[i]);
+    if (!call) {
+      console.log("[Scopeball-proxy] call", i, "skipped (not record)");
+      continue;
+    }
 
-    const transaction = {
+    const transaction: Record<string, unknown> = {
       ...call,
       from: call.from ?? envelope?.from,
     };
+    console.log("[Scopeball-proxy] call", i, "→ checkTransaction", {
+      to: transaction.to,
+      from: transaction.from,
+      chainId,
+    });
     const isCallAllowed = await checkTransaction(
       provider,
       [transaction],
       chainId,
     );
+    console.log("[Scopeball-proxy] call", i, "verdict:", isCallAllowed);
     if (!isCallAllowed) isAllowed = false;
   }
 
+  console.log("[Scopeball-proxy] wallet_sendCalls final isAllowed:", isAllowed);
   return isAllowed;
 }
 
