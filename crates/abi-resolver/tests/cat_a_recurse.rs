@@ -1,4 +1,4 @@
-//! Cat A — recursive sub-call extraction integration tests.
+//! Recursive sub-call extraction integration tests.
 //!
 //! Builds a real `multicall(bytes[])` calldata wrapping two `approve(...)`
 //! sub-calls, then verifies the resolver + sub-decode helpers produce the

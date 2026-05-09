@@ -1,4 +1,4 @@
-//! Uniswap V4 router opcode table (Cat B nested under UR's V4_SWAP).
+//! Uniswap V4 router opcode table (opcode-dispatched, nested under UR's V4_SWAP).
 //!
 //! When the Universal Router executes opcode `0x10 V4_SWAP`, the inner
 //! `inputs[i]` is a `(bytes actions, bytes[] params)` pair driven by V4

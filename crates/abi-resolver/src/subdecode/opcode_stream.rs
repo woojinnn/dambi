@@ -1,4 +1,4 @@
-//! Cat B — opcode-stream dispatcher.
+//! Opcode-stream dispatcher.
 //!
 //! Several routers encode a sequence of operations as parallel arrays:
 //!
@@ -86,7 +86,7 @@ pub enum StepDecodeError {
     NoSchema,
 }
 
-/// One decoded step of a Cat B opcode stream.
+/// One decoded step of a opcode stream.
 #[derive(Debug, Clone)]
 pub struct DecodedStep {
     /// Index in the parent `commands` byte string.

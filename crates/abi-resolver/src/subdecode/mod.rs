@@ -1,26 +1,21 @@
 //! Sub-decoders for non-standard ABI payloads.
 //!
-//! [`crate::decode`] handles the standard ABI portion of calldata. Many DeFi
-//! protocols additionally pack a sub-format *inside* a `bytes` argument — for
-//! example, the Uniswap V3 packed swap path inside `exactInput.params.path`.
-//! This module holds parsers for those sub-formats so callers can produce a
-//! structurally complete decode without each caller re-implementing the same
-//! parser.
+//! [`crate::decode`] handles the standard-ABI portion of calldata; many DeFi
+//! protocols additionally pack a sub-format *inside* a `bytes` argument. We
+//! classify those sub-formats by **what kind of payload** the bytes carry:
 //!
-//! Layout:
+//! | Kind                | Payload shape                                                         | Module             |
+//! |---------------------|------------------------------------------------------------------------|--------------------|
+//! | recursive           | another standard-ABI calldata (selector + args)                        | [`recurse`]        |
+//! | opcode-dispatched   | parallel `(commands, inputs[])` driven by an opcode table              | [`opcode_stream`]  |
+//! | packed              | bespoke layout (e.g. `[token20][fee3][token20]…` for V3 paths)         | [`protocols`]      |
+//! | enum-tagged         | first word = `kind`, tail decoded per-kind (e.g. Balancer `userData`)  | _todo_             |
+//! | caller-dependent    | schema known only to the receiving contract (e.g. V4 `hookData`)       | _todo_             |
+//! | opaque              | no schema known and likely no canonical one (raw blob)                 | (graceful default) |
 //!
-//! - [`protocols`] — per-protocol parsers (e.g. Uniswap V3 packed path,
-//!   Universal Router opcode table).
-//! - [`recurse`] — Cat A: recognise multicall-style wrappers and extract the
-//!   inner sub-calldata so the orchestrator can recurse with the same
-//!   resolver.
-//! - [`opcode_stream`] — Cat B: dispatch the parallel `(commands, inputs)`
-//!   shape used by the Uniswap / Pancake Universal Routers and the V4
-//!   PositionManager.
-//!
-//! Generic engine pieces for the remaining categories (enum-tagged
-//! discriminators, hook-data fallbacks) will live alongside as they're
-//! filled in.
+//! Each sub-decoder feeds the orchestrator (web-server) a tree of
+//! `DecodeResponse` children so the structure surfaces in the UI. Unknown
+//! payloads fall back to opaque hex without further interpretation.
 
 pub mod opcode_stream;
 pub mod protocols;

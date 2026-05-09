@@ -215,7 +215,7 @@ enum DecodeResponse {
         selector: String,
         args: Vec<ApiArg>,
         /// Recursively decoded sub-calls. Populated when the outer call is one
-        /// of the recognised self-call multicall wrappers (Cat A); otherwise
+        /// of the recognised self-call multicall wrappers (recursive); otherwise
         /// empty and omitted from JSON.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         children: Vec<DecodeResponse>,
@@ -240,7 +240,7 @@ fn err(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(ApiError { error: msg.into() })).into_response()
 }
 
-/// Cap the depth of Cat A recursion. Real multicall trees are 1–2 deep; this
+/// Cap the depth of recursive sub-decoding. Real multicall trees are 1–2 deep; this
 /// guards against pathological input.
 const MAX_SUBDECODE_DEPTH: u32 = 4;
 /// Cap the number of sub-calls per node so a malicious payload can't fan out
@@ -342,7 +342,7 @@ fn decode_recursive(
             let children = if depth >= MAX_SUBDECODE_DEPTH {
                 Vec::new()
             } else if let Some(rule) = lookup_recurse_rule(&selector_bytes) {
-                // Cat A — generalized recursion (self-multicall, named-target,
+                // Recursive — generalized recursion (self-multicall, named-target,
                 // address-bytes tuples).
                 extract_children(&r.decoded, rule, *target)
                     .map(|children| {
@@ -362,7 +362,7 @@ fn decode_recursive(
                     })
                     .unwrap_or_default()
             } else if let Some(table) = pick_ur_opcode_table(chain_id, target, &selector_bytes) {
-                // Cat B — dispatch each opcode against the matching UR table.
+                // Opcode dispatch —  each opcode against the matching UR table.
                 // Role-gated: Uniswap UR vs Pancake UR vs (unknown UR fork
                 // → no dispatch). Avoids silent misdecode where two routers
                 // share the `execute(...)` selector but disagree on opcode
@@ -415,7 +415,7 @@ fn arg_to_api(a: DecodedArg) -> ApiArg {
     }
 }
 
-/// Convert a Cat B opcode step into a synthetic `DecodeResponse::Resolved`
+/// Convert a opcode step into a synthetic `DecodeResponse::Resolved`
 /// so the existing tree renderer can display it inline with real ABI calls.
 ///
 /// `source = "ur_command"` flags it as a synthesised entry rather than a
@@ -466,7 +466,7 @@ fn step_to_response(
     } else if step.opcode == 0x21 {
         // EXECUTE_SUB_PLAN — same `(bytes commands, bytes[] inputs)` shape as
         // the outer execute(...) entrypoint, dispatched recursively against
-        // the same Uniswap UR table (Cat B self-recursion).
+        // the same Uniswap UR table (self-recursive opcode dispatch).
         extract_v4_actions_and_params(&step)
             .map(|(commands, inputs)| {
                 let sub_steps = dispatch_opcode_stream(&commands, &inputs, &UNISWAP_UR_TABLE);

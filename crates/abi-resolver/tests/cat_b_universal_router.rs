@@ -1,8 +1,8 @@
-//! Cat B — Universal Router opcode dispatch integration tests.
+//! Opcode dispatch — Universal Router opcode dispatch integration tests.
 //!
 //! Builds a real `execute(bytes,bytes[],uint256)` calldata containing a
 //! WRAP_ETH + V3_SWAP_EXACT_IN + UNWRAP_WETH sequence, then verifies the
-//! Cat B engine + Uniswap UR table together decode the inner opcode steps.
+//! opcode-dispatch engine + Uniswap UR table together decode the inner opcode steps.
 
 use abi_resolver::{
     decode::DecodedCall,
@@ -120,7 +120,7 @@ fn execute_outer_resolves_and_inner_steps_dispatch() {
     assert_eq!(extracted_cmds, commands);
     assert_eq!(extracted_inputs, inputs);
 
-    // Cat B dispatch.
+    // opcode dispatch.
     let steps = dispatch(&extracted_cmds, &extracted_inputs, &UNISWAP_UR_TABLE);
     assert_eq!(steps.len(), 3);
     assert_eq!(steps[0].name, "WRAP_ETH");

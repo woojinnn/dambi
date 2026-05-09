@@ -1,4 +1,4 @@
-//! Cat A — recursive sub-call extraction.
+//! Recursive sub-call extraction (selector → child calldata).
 //!
 //! Several router patterns wrap an array of further calldata in a single
 //! `bytes[]` argument and execute each entry as a self-call. Examples:
@@ -62,7 +62,7 @@ pub fn extract_subcalls(decoded: &DecodedCall) -> Option<Vec<Vec<u8>>> {
 }
 
 // ---------------------------------------------------------------------------
-// Cat A — generalized recursion patterns
+// Generalized recursion patterns — recognise selectors whose calldata wraps further sub-calls
 // ---------------------------------------------------------------------------
 //
 // Beyond `multicall(bytes[])` self-call recursion, several router shapes wrap
@@ -103,10 +103,10 @@ pub struct ChildCall {
     pub calldata: Vec<u8>,
 }
 
-/// Cat A recursion rule — describes how to extract the children of a known
+/// Recursion rule — describes how to extract the children of a known
 /// outer-call selector.
 #[derive(Debug, Clone, Copy)]
-pub enum CatARule {
+pub enum RecurseRule {
     /// `bytes[]` arg N. Target is the parent's `to` address (self-call).
     SelfArrayBytes { array_arg: usize },
     /// `bytes` arg N is calldata for `address` arg M.
@@ -125,7 +125,7 @@ pub enum CatARule {
 /// Look up the recursion rule for a selector. Returns `None` for selectors
 /// we don't recognise; the orchestrator then leaves the children empty.
 #[must_use]
-pub fn lookup_recurse_rule(selector: &[u8; 4]) -> Option<CatARule> {
+pub fn lookup_recurse_rule(selector: &[u8; 4]) -> Option<RecurseRule> {
     match *selector {
         // Self-multicall variants — last arg is `bytes[]`.
         MULTICALL_BYTES_ARRAY | MULTICALL_UINT256_BYTES_ARRAY | MULTICALL_BYTES32_BYTES_ARRAY => {
@@ -137,19 +137,19 @@ pub fn lookup_recurse_rule(selector: &[u8; 4]) -> Option<CatARule> {
             // [`extract_subcalls`]. Encode that semantically: `array_arg`
             // is the LAST arg, signalled by `usize::MAX` and resolved by the
             // extractor below.
-            Some(CatARule::SelfArrayBytes {
+            Some(RecurseRule::SelfArrayBytes {
                 array_arg: usize::MAX,
             })
         }
-        SUSHI_SNWAP_SELECTOR => Some(CatARule::NamedTarget {
+        SUSHI_SNWAP_SELECTOR => Some(RecurseRule::NamedTarget {
             target_arg: 5,
             payload_arg: 6,
         }),
-        ONEINCH_V5_SWAP_SELECTOR => Some(CatARule::NamedTarget {
+        ONEINCH_V5_SWAP_SELECTOR => Some(RecurseRule::NamedTarget {
             target_arg: 0,
             payload_arg: 3,
         }),
-        MORPHO_BUNDLER_MULTICALL_SELECTOR => Some(CatARule::AddressBytesTuples {
+        MORPHO_BUNDLER_MULTICALL_SELECTOR => Some(RecurseRule::AddressBytesTuples {
             array_arg: 0,
             target_field: 0,
             payload_field: 1,
@@ -163,11 +163,11 @@ pub fn lookup_recurse_rule(selector: &[u8; 4]) -> Option<CatARule> {
 #[must_use]
 pub fn extract_children(
     decoded: &DecodedCall,
-    rule: CatARule,
+    rule: RecurseRule,
     parent_target: Address,
 ) -> Option<Vec<ChildCall>> {
     match rule {
-        CatARule::SelfArrayBytes { array_arg } => {
+        RecurseRule::SelfArrayBytes { array_arg } => {
             let arg = if array_arg == usize::MAX {
                 decoded.args.last()?
             } else {
@@ -188,7 +188,7 @@ pub fn extract_children(
             }
             Some(out)
         }
-        CatARule::NamedTarget {
+        RecurseRule::NamedTarget {
             target_arg,
             payload_arg,
         } => {
@@ -205,7 +205,7 @@ pub fn extract_children(
                 calldata: payload,
             }])
         }
-        CatARule::AddressBytesTuples {
+        RecurseRule::AddressBytesTuples {
             array_arg,
             target_field,
             payload_field,

@@ -1,4 +1,4 @@
-//! Uniswap Universal Router opcode table (Cat B).
+//! Uniswap Universal Router opcode table (opcode-dispatched).
 //!
 //! Each entry maps an opcode (after applying the table's `mask` — see
 //! [`UNISWAP_UR_TABLE`]) to its name and a list of candidate Solidity tuple
@@ -249,7 +249,7 @@ const ENTRIES: &[OpcodeEntry] = &[
         name: "V3_POSITION_MANAGER_PERMIT",
         // Input is a complete calldata for the V3 NonfungiblePositionManager
         // (selector + ABI args), `address(V3_POSITION_MANAGER).call(inputs)`
-        // upstream. Decoding it cleanly needs Cat A nested recursion through
+        // upstream. Decoding it cleanly needs recursive sub-decoding through
         // the resolver against the NPM ABI — out of PR3 scope.
         input_signatures: &[],
             input_json_abi: None,
@@ -275,7 +275,7 @@ const ENTRIES: &[OpcodeEntry] = &[
         name: "V4_POSITION_MANAGER_CALL",
         // Input is a complete calldata for V4 PositionManager
         // (selector + args), forwarded via `.call(inputs)` upstream. Decoding
-        // requires Cat A nested recursion through the resolver — same reason
+        // requires recursive sub-decoding through the resolver — same reason
         // as 0x11 / 0x12.
         input_signatures: &[],
             input_json_abi: None,
@@ -286,7 +286,7 @@ const ENTRIES: &[OpcodeEntry] = &[
         // Top-level shape is `(bytes commands, bytes[] inputs)` — the same
         // pair shape as the outer `execute(...)` entrypoint. The orchestrator
         // would ideally re-dispatch this through the same UR opcode table
-        // (self-recursive Cat B); for now we surface the inner pair so the
+        // (self-recursive opcode-dispatched); for now we surface the inner pair so the
         // user can at least see the nested commands byte stream.
         input_signatures: &["(bytes commands, bytes[] inputs)"],
         input_json_abi: None,

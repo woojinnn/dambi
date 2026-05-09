@@ -1,4 +1,4 @@
-//! PancakeSwap (Infinity) Universal Router opcode table (Cat B).
+//! PancakeSwap (Infinity) Universal Router opcode table (opcode-dispatched).
 //!
 //! Source: `pancakeswap/infinity-universal-router @ main`:
 //! - `src/libraries/Commands.sol`  — opcode constants (mask `0x3f`)

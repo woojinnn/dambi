@@ -1,4 +1,4 @@
-//! Cat B nested — UR `V4_SWAP` opcode dispatching its inner V4Router action
+//! Nested opcode dispatch — UR `V4_SWAP` opcode re-dispatching its inner V4Router
 //! stream.
 //!
 //! Builds a UR `V4_SWAP` step's `(bytes actions, bytes[] params)` payload
