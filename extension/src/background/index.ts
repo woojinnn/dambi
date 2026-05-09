@@ -90,6 +90,9 @@ interface SetEnabledIdsRequest {
 }
 type PopupRequest = PolicyCatalogRequest | SetEnabledIdsRequest;
 
+// webextension-polyfill's listener type accepts `true | void | Promise<any>`,
+// not `boolean`. Returning `undefined` (bare `return;`) closes the channel
+// just like a literal `false` would — do not "fix" it back to `return false`.
 Browser.runtime.onMessage.addListener(
   (message: unknown, _sender, sendResponse: (r: unknown) => void) => {
     const req = message as Partial<PopupRequest> | null;
@@ -107,8 +110,18 @@ Browser.runtime.onMessage.addListener(
       return true; // keep the channel open for the async response
     }
 
-    if (req.type === 'set-enabled-ids' && Array.isArray(req.ids)) {
-      const ids = req.ids.filter((id): id is string => typeof id === 'string');
+    if (req.type === 'set-enabled-ids') {
+      // Reject malformed `ids` instead of silently coercing to []. A
+      // non-array, or an array containing non-strings, would otherwise
+      // disable all policies without telling the caller.
+      if (!Array.isArray(req.ids) || !req.ids.every((id) => typeof id === 'string')) {
+        sendResponse({
+          ok: false,
+          error: { kind: 'invalid_request', message: 'ids must be string[]' },
+        });
+        return true;
+      }
+      const ids = req.ids;
       void applyEnabledIds(ids, reinstallAllPolicies)
         .then((result) => sendResponse(result))
         .catch((err: unknown) =>
