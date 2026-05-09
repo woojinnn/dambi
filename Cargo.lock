@@ -1977,6 +1977,7 @@ dependencies = [
 name = "policy-engine-adapter-uniswap-v3"
 version = "0.1.0"
 dependencies = [
+ "abi-resolver",
  "alloy-primitives",
  "alloy-sol-types",
  "hex",
@@ -1988,6 +1989,7 @@ dependencies = [
 name = "policy-engine-adapter-universal-router"
 version = "0.1.0"
 dependencies = [
+ "abi-resolver",
  "alloy-primitives",
  "alloy-sol-types",
  "hex",
