@@ -1,23 +1,31 @@
-import { WindowPostMessageStream } from '@metamask/post-message-stream';
-import Browser from 'webextension-polyfill';
-import { Identifier } from '@lib/identifier';
-import { sendToPortAndAwaitResponse } from '@lib/messages';
-import type { Message, StreamResponse } from '@lib/types';
+import { WindowPostMessageStream } from "@metamask/post-message-stream";
+import Browser from "webextension-polyfill";
+import { Identifier } from "@lib/identifier";
+import { sendToPortAndAwaitResponse } from "@lib/messages";
+import type { Message, StreamResponse } from "@lib/types";
+
+console.log('[Scopeball-bridge] alive on', location.href);
 
 const stream = new WindowPostMessageStream({
   name: Identifier.CONTENT_SCRIPT,
   target: Identifier.INPAGE,
 }) as WindowPostMessageStream & {
-  on(event: 'data', callback: (message: Message) => void): void;
+  on(event: "data", callback: (message: Message) => void): void;
   write(data: StreamResponse): boolean;
 };
 
-stream.on('data', async (message: Message) => {
+console.log('[Scopeball-bridge] stream listener installed');
+
+stream.on("data", async (message: Message) => {
+  console.log('[Scopeball-bridge] received from inpage:', message.data.type, message.requestId);
   const port = Browser.runtime.connect({ name: Identifier.CONTENT_SCRIPT });
-  const data: Message['data'] = { ...message.data, hostname: location.hostname };
+  const data: Message["data"] = {
+    ...message.data,
+    hostname: location.hostname,
+  };
   port.onMessage.addListener((msg: any) => {
-    if (msg?.kind === 'awaiting-user' && msg.requestId === message.requestId) {
-      stream.write({ requestId: message.requestId, kind: 'awaiting-user' });
+    if (msg?.kind === "awaiting-user" && msg.requestId === message.requestId) {
+      stream.write({ requestId: message.requestId, kind: "awaiting-user" });
     }
   });
   const ok = await sendToPortAndAwaitResponse(port, data);

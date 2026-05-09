@@ -36,10 +36,14 @@ type WritableStream = WindowPostMessageStream & {
   write(data: unknown): void;
 };
 
+console.log('[Scopeball-proxy] init on', location.href, 'world:', typeof (globalThis as { chrome?: unknown }).chrome === 'undefined' ? 'MAIN' : 'ISOLATED');
+
 const stream = new WindowPostMessageStream({
   name: Identifier.INPAGE,
   target: Identifier.CONTENT_SCRIPT,
 }) as WritableStream;
+
+console.log('[Scopeball-proxy] stream ready');
 
 const REJECT_TX = ethErrors.provider.userRejectedRequest(
   "Scopeball: transaction blocked by policy",
