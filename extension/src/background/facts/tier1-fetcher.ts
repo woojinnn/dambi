@@ -2,15 +2,18 @@ import {
   readAllowances,
   readBalances,
   type Address,
-} from '../chains/rpc-client';
-import { buildOracleSnapshot, type OracleNeed } from '../oracle/oracle-snapshot';
+} from "../chains/rpc-client";
+import {
+  buildOracleSnapshot,
+  type OracleNeed,
+} from "../oracle/oracle-snapshot";
 import type {
   AllowanceEntry,
   BalanceEntry,
   HostSnapshot,
   OracleEntry,
   WindowEntry,
-} from '../types/host-snapshot';
+} from "../types/host-snapshot";
 
 export interface TokenLite {
   chain_id: number;
@@ -43,15 +46,63 @@ export interface Tier1FetchResult {
   now_ts: number;
 }
 
-const TIER1_OUTER_TIMEOUT_MS = 2_000;
+// Keep each dimension below the former 2s outer cap while preserving siblings.
+const DIM_BUDGET_MS = 1_500;
+type Tier1Dimension = "oracle" | "balances" | "allowances";
 
-function emptyResult(nowMs: number): Tier1FetchResult {
-  return {
-    oracle: [],
-    balances: [],
-    allowances: [],
-    now_ts: Math.floor(nowMs / 1000),
-  };
+type DimensionOutcome<T> =
+  | { status: "fulfilled"; value: T }
+  | { status: "rejected"; reason: unknown }
+  | { status: "timed-out" };
+
+function fallbackReason(reason: unknown): string {
+  if (reason instanceof Error) return `${reason.name}: ${reason.message}`;
+  return String(reason);
+}
+
+function warnDimensionFallback(
+  dimension: Tier1Dimension,
+  reason: string,
+): void {
+  console.warn("[Scopeball SW] tier1 dimension fell back", {
+    dimension,
+    reason,
+  });
+}
+
+async function withDimensionTimeout<T>(
+  dimension: Tier1Dimension,
+  promise: Promise<T>,
+  fallback: T,
+  onTimeout?: () => void,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<DimensionOutcome<T>>((resolve) => {
+    timeoutId = setTimeout(
+      () => resolve({ status: "timed-out" }),
+      DIM_BUDGET_MS,
+    );
+  });
+  const work = promise.then(
+    (value): DimensionOutcome<T> => ({ status: "fulfilled", value }),
+    (reason): DimensionOutcome<T> => ({ status: "rejected", reason }),
+  );
+
+  try {
+    const outcome = await Promise.race([work, timeout]);
+    if (outcome.status === "fulfilled") return outcome.value;
+
+    if (outcome.status === "timed-out") {
+      onTimeout?.();
+      warnDimensionFallback(dimension, "timeout");
+      return fallback;
+    }
+
+    warnDimensionFallback(dimension, fallbackReason(outcome.reason));
+    return fallback;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
 }
 
 function oracleNeedFromToken(token: TokenLite): OracleNeed {
@@ -62,13 +113,17 @@ function oracleNeedFromToken(token: TokenLite): OracleNeed {
   };
 }
 
-function oracleNeedFromRequirement(requirement: SigOracleRequirement): OracleNeed {
-  if ('token' in requirement) return oracleNeedFromToken(requirement.token);
+function oracleNeedFromRequirement(
+  requirement: SigOracleRequirement,
+): OracleNeed {
+  if ("token" in requirement) return oracleNeedFromToken(requirement.token);
   return requirement;
 }
 
 async function fetchBalances(plan: Tier1Plan): Promise<(bigint | undefined)[]> {
-  const out: (bigint | undefined)[] = new Array(plan.balances.length).fill(undefined);
+  const out: (bigint | undefined)[] = new Array(plan.balances.length).fill(
+    undefined,
+  );
   const groups = new Map<
     string,
     { chainId: number; owner: string; indexes: number[]; tokens: Address[] }
@@ -76,9 +131,12 @@ async function fetchBalances(plan: Tier1Plan): Promise<(bigint | undefined)[]> {
 
   plan.balances.forEach((fact, index) => {
     const key = `${fact.token.chain_id}:${fact.owner.toLowerCase()}`;
-    const group =
-      groups.get(key) ??
-      { chainId: fact.token.chain_id, owner: fact.owner, indexes: [], tokens: [] };
+    const group = groups.get(key) ?? {
+      chainId: fact.token.chain_id,
+      owner: fact.owner,
+      indexes: [],
+      tokens: [],
+    };
     group.indexes.push(index);
     group.tokens.push(fact.token.address as Address);
     groups.set(key, group);
@@ -87,7 +145,11 @@ async function fetchBalances(plan: Tier1Plan): Promise<(bigint | undefined)[]> {
   await Promise.all(
     [...groups.values()].map(async (group) => {
       try {
-        const values = await readBalances(group.chainId, group.owner as Address, group.tokens);
+        const values = await readBalances(
+          group.chainId,
+          group.owner as Address,
+          group.tokens,
+        );
         values.forEach((value, offset) => {
           out[group.indexes[offset]] = value;
         });
@@ -99,18 +161,32 @@ async function fetchBalances(plan: Tier1Plan): Promise<(bigint | undefined)[]> {
   return out;
 }
 
-async function fetchAllowances(plan: Tier1Plan): Promise<(bigint | undefined)[]> {
-  const out: (bigint | undefined)[] = new Array(plan.allowances.length).fill(undefined);
+async function fetchAllowances(
+  plan: Tier1Plan,
+): Promise<(bigint | undefined)[]> {
+  const out: (bigint | undefined)[] = new Array(plan.allowances.length).fill(
+    undefined,
+  );
   const groups = new Map<
     string,
-    { chainId: number; owner: string; indexes: number[]; tokens: Address[]; spenders: Address[] }
+    {
+      chainId: number;
+      owner: string;
+      indexes: number[];
+      tokens: Address[];
+      spenders: Address[];
+    }
   >();
 
   plan.allowances.forEach((fact, index) => {
     const key = `${fact.token.chain_id}:${fact.owner.toLowerCase()}`;
-    const group =
-      groups.get(key) ??
-      { chainId: fact.token.chain_id, owner: fact.owner, indexes: [], tokens: [], spenders: [] };
+    const group = groups.get(key) ?? {
+      chainId: fact.token.chain_id,
+      owner: fact.owner,
+      indexes: [],
+      tokens: [],
+      spenders: [],
+    };
     group.indexes.push(index);
     group.tokens.push(fact.token.address as Address);
     group.spenders.push(fact.spender as Address);
@@ -143,8 +219,13 @@ async function fetchTier1Work(
   nowMs: number,
   signal: AbortSignal,
 ): Promise<Tier1FetchResult> {
+  const oracleController = new AbortController();
+  const abortOracle = () => oracleController.abort();
+  if (signal.aborted) abortOracle();
+  else signal.addEventListener("abort", abortOracle, { once: true });
+
   const guardedFetch: typeof fetch = (input, init) =>
-    fetchImpl(input, { ...init, signal });
+    fetchImpl(input, { ...init, signal: oracleController.signal });
 
   const oracleNeeds = [
     ...plan.tokens_for_oracle.map(oracleNeedFromToken),
@@ -152,10 +233,17 @@ async function fetchTier1Work(
   ];
 
   const [oracle, balances, allowances] = await Promise.all([
-    buildOracleSnapshot(oracleNeeds, guardedFetch, nowMs),
-    fetchBalances(plan),
-    fetchAllowances(plan),
+    withDimensionTimeout(
+      "oracle",
+      buildOracleSnapshot(oracleNeeds, guardedFetch, nowMs),
+      [],
+      abortOracle,
+    ),
+    withDimensionTimeout("balances", fetchBalances(plan), []),
+    withDimensionTimeout("allowances", fetchAllowances(plan), []),
   ]);
+
+  signal.removeEventListener("abort", abortOracle);
 
   const balanceEntries: BalanceEntry[] = [];
   plan.balances.forEach((fact, index) => {
@@ -193,23 +281,7 @@ export async function fetchTier1(
   fetchImpl: typeof fetch = fetch,
   nowMs: number = Date.now(),
 ): Promise<Tier1FetchResult> {
-  const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<Tier1FetchResult>((resolve) => {
-    timeoutId = setTimeout(() => {
-      controller.abort();
-      resolve(emptyResult(nowMs));
-    }, TIER1_OUTER_TIMEOUT_MS);
-  });
-
-  try {
-    return await Promise.race([
-      fetchTier1Work(plan, fetchImpl, nowMs, controller.signal).catch(() => emptyResult(nowMs)),
-      timeout,
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  return fetchTier1Work(plan, fetchImpl, nowMs, new AbortController().signal);
 }
 
 export function intoHostSnapshot(
