@@ -25,7 +25,7 @@ impl<'de> Deserialize<'de> for Address {
         D: Deserializer<'de>,
     {
         let raw = String::deserialize(deserializer)?;
-        Address::new(&raw).map_err(serde::de::Error::custom)
+        Self::new(&raw).map_err(serde::de::Error::custom)
     }
 }
 
