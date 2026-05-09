@@ -5,3 +5,4 @@
 //! callers with richer error types should map errors at their boundary.
 
 pub mod uniswap_v3;
+pub mod universal_router;

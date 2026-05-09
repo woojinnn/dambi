@@ -12,7 +12,7 @@ export interface DecodedArg {
 export type DecodeResponse =
   | {
       outcome: 'resolved'
-      source: 'sourcify_curated' | 'sourcify_db' | 'openchain'
+      source: 'sourcify_curated' | 'sourcify_db' | 'openchain' | 'ur_command'
       function_name: string
       signature: string
       selector: string

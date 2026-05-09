@@ -9,6 +9,7 @@ const SOURCE_LABEL: Record<string, string> = {
   sourcify_curated: 'Sourcify (curated bundle)',
   sourcify_db: 'Sourcify DB dump',
   openchain: 'openchain (selector match)',
+  ur_command: 'Universal Router opcode',
 }
 
 export function DecodeResult({ result, error }: Props) {

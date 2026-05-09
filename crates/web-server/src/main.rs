@@ -19,6 +19,12 @@ use abi_resolver::openchain::{OpenchainIndex, SignatureCandidate};
 use abi_resolver::resolver::{ResolveOutcome, Resolver, Source};
 use abi_resolver::sourcify::SourcifyIndex;
 use abi_resolver::sqlite_index::SqliteSourcifyIndex;
+use abi_resolver::subdecode::opcode_stream::{
+    dispatch as dispatch_opcode_stream, DecodedStep, StepDecodeError,
+};
+use abi_resolver::subdecode::protocols::universal_router::{
+    extract_commands_and_inputs, is_universal_router_execute, UNISWAP_UR_TABLE,
+};
 use abi_resolver::subdecode::recurse::{extract_subcalls, is_self_multicall};
 use alloy_primitives::Address;
 use axum::{
@@ -44,62 +50,80 @@ use tower_http::trace::TraceLayer;
 
 const SOURCIFY_BUNDLE: &[u8] = include_bytes!("../../abi-resolver/data/sourcify.json");
 
+/// Address-agnostic selector → signature seed list used as the third resolver
+/// tier. Each entry is reached only when neither tier 1 (curated
+/// `sourcify.json`) nor tier 2 (SQLite Sourcify dump) had `(chain, address,
+/// selector)` for the request.
+///
+/// The seed exists to keep common DeFi entrypoints decodable even on contract
+/// addresses that aren't on Sourcify yet — for example a freshly deployed
+/// Universal Router that's only verified on Etherscan. Without it, calldata
+/// against such addresses falls back to `NotFound`.
 fn seed_signatures() -> &'static [([u8; 4], &'static str)] {
     &[
-        ([0x09, 0x5e, 0xa7, 0xb3], "approve(address,uint256)"),
-        ([0xa9, 0x05, 0x9c, 0xbb], "transfer(address,uint256)"),
+        ([0x09, 0x5e, 0xa7, 0xb3], "approve(address spender, uint256 amount)"),
+        ([0xa9, 0x05, 0x9c, 0xbb], "transfer(address to, uint256 amount)"),
         (
             [0x23, 0xb8, 0x72, 0xdd],
-            "transferFrom(address,address,uint256)",
+            "transferFrom(address from, address to, uint256 amount)",
         ),
-        ([0x70, 0xa0, 0x82, 0x31], "balanceOf(address)"),
+        ([0x70, 0xa0, 0x82, 0x31], "balanceOf(address account)"),
         (
             [0x41, 0x4b, 0xf3, 0x89],
-            "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))",
+            "exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params)",
         ),
         (
             [0xc0, 0x4b, 0x8d, 0x59],
-            "exactInput((bytes,address,uint256,uint256,uint256))",
+            "exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum) params)",
         ),
-        ([0xac, 0x96, 0x50, 0xd8], "multicall(bytes[])"),
-        ([0x5a, 0xe4, 0x01, 0xdc], "multicall(uint256,bytes[])"),
+        ([0xac, 0x96, 0x50, 0xd8], "multicall(bytes[] data)"),
+        (
+            [0x5a, 0xe4, 0x01, 0xdc],
+            "multicall(uint256 deadline, bytes[] data)",
+        ),
         (
             [0x38, 0xed, 0x17, 0x39],
-            "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
+            "swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)",
         ),
         (
             [0x7f, 0xf3, 0x6a, 0xb5],
-            "swapExactETHForTokens(uint256,address[],address,uint256)",
+            "swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline)",
         ),
         (
             [0xb6, 0xf9, 0xde, 0x95],
-            "swapExactETHForTokensSupportingFeeOnTransferTokens(uint256,address[],address,uint256)",
+            "swapExactETHForTokensSupportingFeeOnTransferTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline)",
         ),
         (
             [0x79, 0x1a, 0xc9, 0x47],
-            "swapExactTokensForETHSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)",
+            "swapExactTokensForETHSupportingFeeOnTransferTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)",
         ),
-        ([0x24, 0x85, 0x6b, 0xc3], "execute(bytes,bytes[])"),
+        (
+            [0x24, 0x85, 0x6b, 0xc3],
+            "execute(bytes commands, bytes[] inputs)",
+        ),
         (
             [0x35, 0x93, 0x56, 0x4c],
-            "execute(bytes,bytes[],uint256)",
+            "execute(bytes commands, bytes[] inputs, uint256 deadline)",
         ),
         (
             [0x61, 0x7b, 0xa0, 0x37],
-            "supply(address,uint256,address,uint16)",
+            "supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)",
         ),
-        ([0x69, 0x32, 0x8d, 0xec], "withdraw(address,uint256,address)"),
+        (
+            [0x69, 0x32, 0x8d, 0xec],
+            "withdraw(address asset, uint256 amount, address to)",
+        ),
         (
             [0xa4, 0x15, 0xbc, 0xad],
-            "borrow(address,uint256,uint256,uint16,address)",
+            "borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)",
         ),
         (
             [0x57, 0x3a, 0xde, 0x81],
-            "repay(address,uint256,uint256,address)",
+            "repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)",
         ),
         (
             [0x37, 0x4f, 0x43, 0x5d],
-            "multicall((address,bytes,uint256,bool,bytes32)[])",
+            "multicall((address target, bytes data, uint256 value, bool skipRevert, bytes32 callbackHash)[] calls)",
         ),
     ]
 }
@@ -276,7 +300,10 @@ fn decode_recursive(
         ResolveOutcome::Resolved(r) => {
             let mut selector_bytes = [0u8; 4];
             selector_bytes.copy_from_slice(&calldata[..4]);
-            let children = if depth < MAX_SUBDECODE_DEPTH && is_self_multicall(&selector_bytes) {
+            let children = if depth >= MAX_SUBDECODE_DEPTH {
+                Vec::new()
+            } else if is_self_multicall(&selector_bytes) {
+                // Cat A — recurse on each entry of bytes[].
                 extract_subcalls(&r.decoded)
                     .map(|subs| {
                         subs.into_iter()
@@ -284,6 +311,18 @@ fn decode_recursive(
                             .map(|sub| {
                                 decode_recursive(resolver, chain_id, target, &sub, depth + 1)
                             })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else if is_universal_router_execute(&selector_bytes) {
+                // Cat B — dispatch each opcode against the Uniswap UR table.
+                extract_commands_and_inputs(&r.decoded)
+                    .map(|(commands, inputs)| {
+                        let steps = dispatch_opcode_stream(&commands, &inputs, &UNISWAP_UR_TABLE);
+                        steps
+                            .into_iter()
+                            .take(MAX_SUBDECODE_CHILDREN)
+                            .map(step_to_response)
                             .collect()
                     })
                     .unwrap_or_default()
@@ -322,6 +361,64 @@ fn arg_to_api(a: DecodedArg) -> ApiArg {
         value: format_value_named(&a.value, &a.components),
         name: a.name,
         sol_type: a.sol_type,
+    }
+}
+
+/// Convert a Cat B opcode step into a synthetic `DecodeResponse::Resolved`
+/// so the existing tree renderer can display it inline with real ABI calls.
+///
+/// `source = "ur_command"` flags it as a synthesised entry rather than a
+/// signature-DB hit. When the step's input couldn't be ABI-decoded (unknown
+/// opcode, no schema yet, decode failure), we surface the raw input as a
+/// single fake arg so users still see the bytes.
+fn step_to_response(step: DecodedStep) -> DecodeResponse {
+    let selector = format!("0x{:02x}", step.opcode);
+    let function_name = if step.allow_revert {
+        format!("{} (allowRevert)", step.name)
+    } else {
+        step.name.to_string()
+    };
+    let (signature, args) = match (step.args, step.error) {
+        (Some(decoded_args), _) => (
+            format!("{}(...)", step.name),
+            decoded_args.into_iter().map(arg_to_api).collect(),
+        ),
+        (None, Some(StepDecodeError::UnknownOpcode)) => (
+            format!("UNKNOWN(raw 0x{} bytes)", hex::encode(&step.raw_input)),
+            vec![raw_input_arg(&step.raw_input)],
+        ),
+        (None, Some(StepDecodeError::NoSchema)) => (
+            format!("{}(... schema TBD)", step.name),
+            vec![raw_input_arg(&step.raw_input)],
+        ),
+        (None, Some(StepDecodeError::AbiDecode(msg))) => (
+            format!("{}(... ABI decode failed: {msg})", step.name),
+            vec![raw_input_arg(&step.raw_input)],
+        ),
+        (None, Some(StepDecodeError::BadSignature(msg))) => (
+            format!("{}(bad table signature: {msg})", step.name),
+            vec![raw_input_arg(&step.raw_input)],
+        ),
+        (None, None) => (
+            format!("{}(...)", step.name),
+            vec![raw_input_arg(&step.raw_input)],
+        ),
+    };
+    DecodeResponse::Resolved {
+        source: "ur_command",
+        function_name,
+        signature,
+        selector,
+        args,
+        children: Vec::new(),
+    }
+}
+
+fn raw_input_arg(input: &[u8]) -> ApiArg {
+    ApiArg {
+        name: "raw_input".into(),
+        sol_type: "bytes".into(),
+        value: format!("0x{}", hex::encode(input)),
     }
 }
 
