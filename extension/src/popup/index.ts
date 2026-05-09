@@ -90,7 +90,12 @@ async function applyIds(ids: string[]): Promise<void> {
     state.status = 'error';
     state.errorText = `${result.error.kind}: ${result.error.message}`;
   }
-  state.catalog = await fetchCatalog();
+  try {
+    state.catalog = await fetchCatalog();
+  } catch (err) {
+    state.status = 'error';
+    state.errorText = `refresh failed: ${String(err)}`;
+  }
   render();
 }
 
@@ -101,6 +106,7 @@ function renderRow(p: CatalogPolicy, enabledSet: Set<string>): HTMLDivElement {
 
   const checkbox = el('input', { type: 'checkbox' }) as HTMLInputElement;
   checkbox.checked = enabledSet.has(p.id);
+  checkbox.setAttribute('aria-label', `Enable policy ${p.id}`);
   checkbox.addEventListener('change', () => {
     const next = new Set(enabledSet);
     if (checkbox.checked) next.add(p.id);
@@ -120,6 +126,7 @@ function renderRow(p: CatalogPolicy, enabledSet: Set<string>): HTMLDivElement {
   ]);
 
   const onlyBtn = el('button', { class: 'only', text: 'Only this' });
+  onlyBtn.setAttribute('aria-label', `Enable only ${p.id}`);
   onlyBtn.addEventListener('click', () => void applyIds([p.id]));
 
   return el('div', { class: 'row' }, [checkbox, meta, onlyBtn]);
@@ -131,7 +138,15 @@ function render(): void {
   root.replaceChildren();
 
   if (!state.catalog) {
-    root.appendChild(el('main', {}, [el('p', { text: 'Loading…' })]));
+    const placeholder = state.status === 'error'
+      ? `Error: ${state.errorText}`
+      : 'Loading…';
+    root.appendChild(el('main', {}, [el('p', { text: placeholder })]));
+    if (state.status === 'error') {
+      root.appendChild(
+        el('footer', {}, [el('span', { class: 'status error', text: 'Failed to load catalog' })]),
+      );
+    }
     return;
   }
 
