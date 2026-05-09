@@ -1,19 +1,29 @@
 import { chainConfig } from "../chains/chain-config";
+import { nativeFallbackTokenKey, tokenKey } from "./token-key";
 
 const COINGECKO_BASE = "https://api.coingecko.com/api/v3";
 const MAX_BATCH = 30;
 
+interface OracleFetchErrorOptions {
+  readonly status?: number;
+  readonly cause?: unknown;
+  readonly tokenKeys?: readonly string[];
+}
+
 export class OracleFetchError extends Error {
+  readonly status: number | undefined;
+  readonly cause: unknown;
+  readonly tokenKeys: readonly string[] | undefined;
+
   constructor(
     message: string,
-    readonly opts: {
-      readonly status?: number;
-      readonly cause?: unknown;
-      readonly tokenKeys?: readonly string[];
-    } = {},
+    opts: OracleFetchErrorOptions = {},
   ) {
     super(message);
     this.name = "OracleFetchError";
+    this.status = opts.status;
+    this.cause = opts.cause;
+    this.tokenKeys = opts.tokenKeys;
   }
 }
 
@@ -48,7 +58,7 @@ function tokenKeysForAddresses(
   chainId: number,
   addresses: readonly string[],
 ): string[] {
-  return addresses.map((address) => `${chainId}:${address.toLowerCase()}`);
+  return addresses.map((address) => tokenKey({ chainId, address }));
 }
 
 async function responseErrorCause(response: Response): Promise<unknown> {
@@ -151,7 +161,9 @@ export async function fetchUsdPrices(
 export async function fetchNativeUsdPrices(
   chainIds: readonly number[],
   fetchImpl: typeof fetch = fetch,
-  tokenKeys: readonly string[] = chainIds.map((chainId) => `${chainId}:native`),
+  // Callers with request-token addresses pass canonical tokenKey values;
+  // chain-only native price calls intentionally fall back to "<chainId>:native".
+  tokenKeys: readonly string[] = chainIds.map(nativeFallbackTokenKey),
 ): Promise<Map<number, number>> {
   const out = new Map<number, number>();
   const updated = new Map<number, number>();

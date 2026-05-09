@@ -362,6 +362,51 @@ describe("orchestrator", () => {
     warnSpy.mockRestore();
   });
 
+  it("warns only for unresolved oracle requirements when part of the tier1 snapshot resolves", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    setupDexPass();
+    mocks.tier1FactPlan.mockResolvedValue({
+      tokens_for_oracle: [tokenLite(WETH, "WETH"), tokenLite(USDT, "USDT", 6)],
+      balances: [],
+      allowances: [],
+      clock_required: false,
+      sig_oracle_requirements: [],
+    });
+    mocks.fetchTier1.mockResolvedValue({
+      oracle: [
+        {
+          token_key: `1:${WETH}`,
+          usd_price: 3500,
+          usd_per_unit: "3500",
+          as_of_ts: 1,
+          stale_sec: 0,
+        },
+      ],
+      balances: [],
+      allowances: [],
+    });
+
+    await expect(decideMessage(txMessage("oracle-gap-2"))).resolves.toMatchObject(
+      {
+        ok: true,
+        verdict: { kind: "pass" },
+      },
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[Scopeball SW] oracle_requirements declared but no entries returned — dex/USD policies will silently miss",
+      {
+        requestId: "oracle-gap-2",
+        hostname: "app.example",
+        requested: [`1:${WETH}`, `1:${USDT}`],
+        missing: [`1:${USDT}`],
+      },
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it("opens a warning decision window and reserves only after user approval", async () => {
     setupDexPass({
       kind: "warn",

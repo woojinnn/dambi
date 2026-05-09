@@ -6,6 +6,7 @@ import {
   priceLastUpdatedAt,
 } from "./coingecko-client";
 import { cachedPriceLastUpdatedAt, lookup, store } from "./price-cache";
+import { nativeFallbackTokenKey, tokenKey } from "./token-key";
 import type { OracleEntry } from "../types/host-snapshot";
 
 export const NATIVE_TOKEN_ADDRESS =
@@ -23,18 +24,14 @@ interface NormalizedNeed {
   isNative: boolean;
 }
 
-function tokenKey(chainId: number, address: string): string {
-  return `${chainId}:${address.toLowerCase()}`;
-}
-
 function warnCoinGeckoFetchFailed(
   err: OracleFetchError,
   tokenKeys?: readonly string[],
 ): void {
   console.warn("[Scopeball SW] CoinGecko fetch failed", {
-    tokenKeys: err.opts.tokenKeys ?? tokenKeys,
-    status: err.opts.status,
-    cause: String(err.opts.cause),
+    tokenKeys: err.tokenKeys ?? tokenKeys,
+    status: err.status,
+    cause: String(err.cause),
   });
 }
 
@@ -49,7 +46,7 @@ async function fetchUsdPricesOrEmpty(
     if (err instanceof OracleFetchError) {
       warnCoinGeckoFetchFailed(
         err,
-        addresses.map((address) => tokenKey(chainId, address)),
+        addresses.map((address) => tokenKey({ chainId, address })),
       );
       return new Map<string, number>();
     }
@@ -66,7 +63,9 @@ async function fetchNativeUsdPricesOrEmpty(
   const chainIds = [...nativeMisses.keys()];
   const tokenKeys = chainIds.map((chainId) => {
     const address = nativeMisses.get(chainId);
-    return address ? tokenKey(chainId, address) : `${chainId}:native`;
+    return address
+      ? tokenKey({ chainId, address, isNative: true })
+      : nativeFallbackTokenKey(chainId);
   });
 
   try {
@@ -93,7 +92,7 @@ function entry(
   sources: string[],
 ): OracleEntry {
   return {
-    token_key: tokenKey(chainId, address),
+    token_key: tokenKey({ chainId, address }),
     usd_price: usdPrice,
     usd_per_unit: String(usdPrice),
     as_of_ts: Math.floor(lastUpdatedAtMs / 1000),
@@ -112,7 +111,7 @@ export async function buildOracleSnapshot(
   const dedup = new Map<string, NormalizedNeed>();
   for (const need of needs) {
     const address = need.address.toLowerCase();
-    dedup.set(tokenKey(need.chainId, address), {
+    dedup.set(tokenKey({ ...need, address }), {
       chainId: need.chainId,
       address,
       isNative: Boolean(need.isNative),

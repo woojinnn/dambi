@@ -92,4 +92,56 @@ describe("fetchTier1 partial oracle preservation", () => {
       `1:${ETHEREUM_KEY}`,
     ]);
   });
+
+  it("preserves resolved sig_oracle_requirements entries before the dimension timeout", async () => {
+    const earlyPrice: OracleEntry = {
+      token_key: `1:${ETHEREUM_KEY}`,
+      usd_price: 3500,
+      usd_per_unit: "3500",
+      as_of_ts: 10,
+      stale_sec: 0,
+      sources: ["test"],
+    };
+
+    oracleMocks.buildOracleSnapshot.mockImplementation(
+      (needs: readonly OracleNeed[]) => {
+        const tokenKeys = needs.map((need) => need.address.toLowerCase());
+        if (tokenKeys.includes(TETHER_KEY)) {
+          return new Promise<OracleEntry[]>(() => undefined);
+        }
+        if (tokenKeys.includes(ETHEREUM_KEY)) {
+          return new Promise<OracleEntry[]>((resolve) => {
+            setTimeout(() => resolve([earlyPrice]), 50);
+          });
+        }
+        return Promise.resolve([]);
+      },
+    );
+
+    const resultPromise = fetchTier1(
+      plan({
+        sig_oracle_requirements: [
+          {
+            kind: "input",
+            token: token(ETHEREUM_KEY),
+            raw_amount: "1000000000000000000",
+          },
+          {
+            kind: "input",
+            token: token(TETHER_KEY),
+            raw_amount: "2000000000000000000",
+          },
+        ],
+      }),
+      vi.fn() as unknown as typeof fetch,
+      10_000,
+    );
+
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    const result = await resultPromise;
+    expect(result.oracle.map((entry) => entry.token_key)).toEqual([
+      `1:${ETHEREUM_KEY}`,
+    ]);
+  });
 });

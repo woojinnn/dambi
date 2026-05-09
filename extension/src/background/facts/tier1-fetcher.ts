@@ -7,6 +7,7 @@ import {
   buildOracleSnapshot,
   type OracleNeed,
 } from "../oracle/oracle-snapshot";
+import { tokenKey } from "../oracle/token-key";
 import type {
   AllowanceEntry,
   BalanceEntry,
@@ -52,8 +53,26 @@ type Tier1Dimension = "oracle" | "balances" | "allowances";
 
 type DimensionOutcome<T> =
   | { status: "fulfilled"; value: T }
-  | { status: "rejected"; reason: unknown }
-  | { status: "timed-out" };
+  | { status: "rejected"; reason: unknown };
+
+async function raceWithTimeout<T>(
+  work: Promise<T>,
+  budgetMs: number,
+): Promise<{ timedOut: false; value: T } | { timedOut: true }> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ timedOut: true }>((resolve) => {
+    timeoutId = setTimeout(() => resolve({ timedOut: true }), budgetMs);
+  });
+  const wrappedWork = work.then(
+    (value): { timedOut: false; value: T } => ({ timedOut: false, value }),
+  );
+
+  try {
+    return await Promise.race([wrappedWork, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
 
 function fallbackReason(reason: unknown): string {
   if (reason instanceof Error) return `${reason.name}: ${reason.message}`;
@@ -73,7 +92,7 @@ function warnDimensionFallback(
 function warnOracleEntryFallback(need: OracleNeed, reason: string): void {
   console.warn("[Scopeball SW] tier1 oracle entry fell back", {
     dimension: "oracle",
-    token_key: oracleNeedTokenKey(need),
+    token_key: tokenKey(need),
     reason,
   });
 }
@@ -84,46 +103,31 @@ async function withDimensionTimeout<T>(
   fallback: T,
   onTimeout?: () => void,
 ): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<DimensionOutcome<T>>((resolve) => {
-    timeoutId = setTimeout(
-      () => resolve({ status: "timed-out" }),
-      DIM_BUDGET_MS,
-    );
-  });
   const work = promise.then(
     (value): DimensionOutcome<T> => ({ status: "fulfilled", value }),
     (reason): DimensionOutcome<T> => ({ status: "rejected", reason }),
   );
+  const outcome = await raceWithTimeout(work, DIM_BUDGET_MS);
 
-  try {
-    const outcome = await Promise.race([work, timeout]);
-    if (outcome.status === "fulfilled") return outcome.value;
-
-    if (outcome.status === "timed-out") {
-      onTimeout?.();
-      warnDimensionFallback(dimension, "timeout");
-      return fallback;
-    }
-
-    warnDimensionFallback(dimension, fallbackReason(outcome.reason));
+  if (outcome.timedOut) {
+    onTimeout?.();
+    warnDimensionFallback(dimension, "timeout");
     return fallback;
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
+
+  if (outcome.value.status === "fulfilled") return outcome.value.value;
+
+  warnDimensionFallback(dimension, fallbackReason(outcome.value.reason));
+  return fallback;
 }
 
 function dedupeOracleNeeds(needs: readonly OracleNeed[]): OracleNeed[] {
   const dedup = new Map<string, OracleNeed>();
   for (const need of needs) {
     const address = need.address.toLowerCase();
-    dedup.set(oracleNeedTokenKey({ ...need, address }), { ...need, address });
+    dedup.set(tokenKey({ ...need, address }), { ...need, address });
   }
   return [...dedup.values()];
-}
-
-function oracleNeedTokenKey(need: OracleNeed): string {
-  return `${need.chainId}:${need.address.toLowerCase()}`;
 }
 
 async function fetchOracleSnapshotPartial(
@@ -140,30 +144,23 @@ async function fetchOracleSnapshotPartial(
   const fetches = uniqueNeeds.map(async (need) => {
     try {
       const entries = await buildOracleSnapshot([need], fetchImpl, nowMs);
-      const tokenKey = oracleNeedTokenKey(need);
+      const expectedTokenKey = tokenKey(need);
       collected.push(
-        ...entries.filter((entry) => entry.token_key.toLowerCase() === tokenKey),
+        ...entries.filter(
+          (entry) => entry.token_key.toLowerCase() === expectedTokenKey,
+        ),
       );
     } catch (reason) {
       warnOracleEntryFallback(need, fallbackReason(reason));
     }
   });
 
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<"timed-out">((resolve) => {
-    timeoutId = setTimeout(() => resolve("timed-out"), budgetMs);
-  });
-
-  try {
-    const outcome = await Promise.race([Promise.allSettled(fetches), timeout]);
-    if (outcome === "timed-out") {
-      onTimeout?.();
-      warnDimensionFallback("oracle", "timeout");
-    }
-    return collected.slice();
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  const outcome = await raceWithTimeout(Promise.allSettled(fetches), budgetMs);
+  if (outcome.timedOut) {
+    onTimeout?.();
+    warnDimensionFallback("oracle", "timeout");
   }
+  return collected.slice();
 }
 
 function oracleNeedFromToken(token: TokenLite): OracleNeed {
@@ -313,7 +310,11 @@ async function fetchTier1Work(
     if (value === undefined) return;
     balanceEntries.push({
       owner: fact.owner.toLowerCase(),
-      token_key: `${fact.token.chain_id}:${fact.token.address.toLowerCase()}`,
+      token_key: tokenKey({
+        chainId: fact.token.chain_id,
+        address: fact.token.address,
+        isNative: fact.token.is_native,
+      }),
       balance: value.toString(),
     });
   });
@@ -324,7 +325,11 @@ async function fetchTier1Work(
     if (value === undefined) return;
     allowanceEntries.push({
       owner: fact.owner.toLowerCase(),
-      token_key: `${fact.token.chain_id}:${fact.token.address.toLowerCase()}`,
+      token_key: tokenKey({
+        chainId: fact.token.chain_id,
+        address: fact.token.address,
+        isNative: fact.token.is_native,
+      }),
       spender: fact.spender.toLowerCase(),
       allowance: value.toString(),
     });

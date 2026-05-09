@@ -5,6 +5,7 @@ import {
   intoHostSnapshot,
   type Tier1Plan,
 } from "./facts/tier1-fetcher";
+import { tokenKey } from "./oracle/token-key";
 import {
   committedForActor,
   pendingForActor,
@@ -277,8 +278,17 @@ function warnMissingOracleEntries(
 
 function plannedOracleTokenKeys(plan: Tier1Plan): string[] {
   const keys = new Set<string>();
-  const addToken = (token: { chain_id: number; address: string }): void => {
-    keys.add(`${token.chain_id}:${token.address.toLowerCase()}`);
+  const addToken = (token: {
+    chain_id: number;
+    address: string;
+    is_native?: boolean;
+  }): void => {
+    keys.add(
+      tokenKey({
+        chainId: token.chain_id,
+        address: token.address,
+      }),
+    );
   };
 
   for (const token of plan.tokens_for_oracle) addToken(token);
@@ -286,7 +296,7 @@ function plannedOracleTokenKeys(plan: Tier1Plan): string[] {
     if ("token" in requirement) {
       addToken(requirement.token);
     } else {
-      keys.add(`${requirement.chainId}:${requirement.address.toLowerCase()}`);
+      keys.add(tokenKey(requirement));
     }
   }
 
@@ -363,7 +373,7 @@ function tokenKeyFromRecord(
 ): string | undefined {
   if (typeof token.chain_id !== "number" || typeof token.address !== "string")
     return undefined;
-  return `${token.chain_id}:${token.address.toLowerCase()}`;
+  return tokenKey({ chainId: token.chain_id, address: token.address });
 }
 
 function parseUnsignedDecimal(value: unknown): bigint | undefined {

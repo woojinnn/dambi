@@ -51,12 +51,15 @@ describe("coingecko-client", () => {
   });
 
   it("rejects with OracleFetchError when fetch throws", async () => {
+    const cause = new TypeError("network down");
     vi.stubGlobal("fetch", () =>
-      Promise.reject(new TypeError("network down")),
+      Promise.reject(cause),
     );
 
     await expect(fetchUsdPrices(1, [WETH])).rejects.toMatchObject({
       name: "OracleFetchError",
+      cause,
+      tokenKeys: [`1:${WETH}`],
     });
   });
 
@@ -68,7 +71,9 @@ describe("coingecko-client", () => {
 
     await expect(fetchUsdPrices(1, [WETH])).rejects.toMatchObject({
       name: "OracleFetchError",
-      opts: expect.objectContaining({ status: 429 }),
+      status: 429,
+      cause: "rate limited",
+      tokenKeys: [`1:${WETH}`],
     });
   });
 
