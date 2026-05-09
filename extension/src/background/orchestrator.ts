@@ -205,6 +205,14 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     string,
     unknown
   >;
+  console.log(
+    "[Scopeball SW] action for",
+    message.requestId,
+    "to:",
+    isTransaction(message) ? message.data.transaction.to : undefined,
+    "→",
+    actionParsed,
+  );
 
   // Phase B: derive Tier-1 plan and fetch facts.
   const plan = (await tier1FactPlan(actionParsed)) as Tier1Plan;
