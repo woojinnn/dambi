@@ -76,13 +76,21 @@ async function runApply(ids: string[], reinstall: ReinstallFn): Promise<ApplyRes
  *
  * Serialization: at most one in-flight reinstall + a single tail slot.
  * Rapid toggles collapse — newer calls overwrite the queued tail; ALL
- * queued resolvers settle with the tail's result.
+ * queued resolvers (including the head's promise) settle with the
+ * tail's result, so a caller can observe `{ok:false}` even when its own
+ * runApply succeeded — the popup's UI needs the latest engine state,
+ * which the tail represents.
+ *
+ * The IIFE captures the FIRST caller's `reinstall` callback; queued
+ * calls' `reinstall` parameters are ignored. Pass a stable, idempotent
+ * module-scoped reference (`reinstallAllPolicies`) at every call site.
  *
  * Storage semantics: ENABLED_KEY is written by `runApply` with the same
- * ids it passes to `reinstall()`, so the loader receives ids verbatim
+ * ids it passes to `reinstall(ids)`, so the loader receives ids verbatim
  * via the callback parameter (it MUST NOT re-read storage to decide
- * what to install). APPLIED_KEY is updated only after a successful
- * reinstall, leaving the previous applied set intact on failure.
+ * what to install — that would race with rapid toggles). APPLIED_KEY is
+ * updated only after a successful reinstall, leaving the previous
+ * applied set intact on failure.
  */
 export async function applyEnabledIds(
   ids: string[],

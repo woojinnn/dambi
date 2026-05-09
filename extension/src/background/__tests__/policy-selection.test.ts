@@ -173,4 +173,27 @@ describe('policy-selection', () => {
     expect(r2.ok).toBe(false);
     if (!r2.ok) expect(r2.error.kind).toBe('install_failed');
   });
+
+  it('settles queued resolvers when storage.local.set throws inside runApply', async () => {
+    const reinstall = vi.fn(
+      (_ids: string[]) => new Promise<void>((resolve) => setTimeout(resolve, 5)),
+    );
+    // Make the SECOND set() call (the tail's ENABLED_KEY write) throw.
+    let setCount = 0;
+    const originalSet = mocks.browser.storage.local.set;
+    mocks.browser.storage.local.set = vi.fn(async (entries: Record<string, unknown>) => {
+      setCount += 1;
+      if (setCount === 3) throw new Error('storage_failed: quota exceeded');
+      return originalSet(entries);
+    });
+
+    const p1 = applyEnabledIds(['default::dex/a'], reinstall);
+    const p2 = applyEnabledIds(['default::dex/b'], reinstall);
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.ok).toBe(false);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.error.kind).toBe('storage_failed');
+
+    mocks.browser.storage.local.set = originalSet;
+  });
 });
