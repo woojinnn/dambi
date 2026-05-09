@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "0.1.0",
+  "description": "scopeball 어댑터가 사용하는 chain × 라우터/풀/토큰 주소 정적 레지스트리. crates/adapters/<name>/src/common.rs 의 라우터 주소 상수와 TokenLookup::with_*_defaults() 토큰 정의에서 1:1 추출. 본 파일은 Rust 빌드와 분리되어 운영자가 갱신 가능; production 시 manifest 기반 capability 로 대체될 수 있다.",
+  "chains": [
+    { "chainId": 1, "name": "Ethereum mainnet", "nativeSymbol": "ETH" },
+    { "chainId": 56, "name": "BNB Smart Chain (BSC)", "nativeSymbol": "BNB" },
+    { "chainId": 8453, "name": "Base", "nativeSymbol": "ETH" }
+  ],
+  "routers": [
+    {
+      "protocolId": "uniswap-v2",
+      "chainId": 1,
+      "address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "kind": "router",
+      "label": "Uniswap V2 Router02",
+      "source": "crates/adapters/uniswap-v2/src/common.rs::UNISWAP_V2_ROUTER_MAINNET"
+    },
+    {
+      "protocolId": "uniswap-v3",
+      "chainId": 1,
+      "address": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "kind": "router",
+      "label": "Uniswap V3 SwapRouter",
+      "source": "crates/adapters/uniswap-v3/src/common.rs::SWAP_ROUTER_MAINNET"
+    },
+    {
+      "protocolId": "uniswap-universal-router",
+      "chainId": 1,
+      "address": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "kind": "router",
+      "label": "Uniswap Universal Router",
+      "source": "crates/adapters/universal-router/src/common.rs::UNIVERSAL_ROUTER_MAINNET",
+      "notes": "Mainnet UR — V2/V3/V4 swap commands + permit2 + wrap/unwrap 등 ~20 opcode"
+    },
+    {
+      "protocolId": "pancakeswap-amm",
+      "chainId": 56,
+      "address": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "kind": "router",
+      "label": "PancakeSwap V2 Router",
+      "source": "crates/adapters/pancakeswap-amm/src/common.rs::PANCAKESWAP_V2_ROUTER_BSC"
+    },
+    {
+      "protocolId": "pancakeswap-v3",
+      "chainId": 56,
+      "address": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "kind": "router",
+      "label": "PancakeSwap V3 SwapRouter",
+      "source": "crates/adapters/pancakeswap-v3/src/common.rs::PANCAKESWAP_V3_SWAP_ROUTER_BSC",
+      "notes": "PancakeSwap 의 SmartRouterV3 (0x13f4EA83...) 와는 별개; SmartRouter 는 다중-프로토콜 어그리게이터로 v0.1 범위 외"
+    },
+    {
+      "protocolId": "aerodrome-v1",
+      "chainId": 8453,
+      "address": "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43",
+      "kind": "router",
+      "label": "Aerodrome V1 Router",
+      "source": "crates/adapters/aerodrome-v1/src/common.rs::AERODROME_V1_ROUTER_BASE",
+      "notes": "Solidly fork — Route { from, to, stable, factory } 배열 사용"
+    },
+    {
+      "protocolId": "aerodrome-slipstream",
+      "chainId": 8453,
+      "address": "0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5",
+      "kind": "router",
+      "label": "Aerodrome Slipstream SwapRouter",
+      "source": "crates/adapters/aerodrome-slipstream/src/common.rs::AERODROME_SLIPSTREAM_SWAP_ROUTER_BASE",
+      "notes": "V3 형태이지만 params 안에 int24 tickSpacing (uint24 fee 가 아님)"
+    }
+  ],
+  "pools": [
+    {
+      "protocolId": "pancakeswap-stableswap",
+      "chainId": 56,
+      "address": "0x4f3126d5de26413abdcf6948943fb9d0847d9818",
+      "kind": "stableswap-pool",
+      "label": "PancakeSwap StableSwap USDT/USDC two-pool",
+      "coins": [
+        {
+          "chainId": 56,
+          "address": "0x55d398326f99059ff775485246999027b3197955",
+          "symbol": "USDT",
+          "decimals": 18,
+          "isNative": false
+        },
+        {
+          "chainId": 56,
+          "address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+          "symbol": "USDC",
+          "decimals": 18,
+          "isNative": false
+        }
+      ],
+      "source": "crates/adapters/pancakeswap-stableswap/src/common.rs::seeded_bsc_pools",
+      "notes": "v0.1 illustrative — production 시 매니페스트 기반 capability 로 교체"
+    },
+    {
+      "protocolId": "pancakeswap-stableswap",
+      "chainId": 56,
+      "address": "0x36842f8fb99d55477c0da638af5ceb6bbf86aa98",
+      "kind": "stableswap-pool",
+      "label": "PancakeSwap StableSwap USDT/BUSD/USDC three-pool",
+      "coins": [
+        {
+          "chainId": 56,
+          "address": "0x55d398326f99059ff775485246999027b3197955",
+          "symbol": "USDT",
+          "decimals": 18,
+          "isNative": false
+        },
+        {
+          "chainId": 56,
+          "address": "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+          "symbol": "BUSD",
+          "decimals": 18,
+          "isNative": false
+        },
+        {
+          "chainId": 56,
+          "address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+          "symbol": "USDC",
+          "decimals": 18,
+          "isNative": false
+        }
+      ],
+      "source": "crates/adapters/pancakeswap-stableswap/src/common.rs::seeded_bsc_pools",
+      "notes": "v0.1 illustrative"
+    }
+  ],
+  "verifyingContracts": [
+    {
+      "protocolId": "permit2",
+      "address": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "kind": "permit2",
+      "label": "Uniswap Permit2",
+      "source": "crates/adapters/permit2/src/lib.rs::PERMIT2_ADDRESS",
+      "notes": "표준 Permit2 — 모든 chain 에서 동일 주소 (CREATE2 deterministic deployment)"
+    }
+  ],
+  "tokens": [
+    {
+      "chainId": 1,
+      "address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+      "symbol": "USDT",
+      "decimals": 6,
+      "isNative": false,
+      "source": "crates/adapters/uniswap-v2/src/common.rs::TokenLookup::with_mainnet_defaults"
+    },
+    {
+      "chainId": 1,
+      "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "symbol": "USDC",
+      "decimals": 6,
+      "isNative": false,
+      "source": "crates/adapters/uniswap-v2/src/common.rs::TokenLookup::with_mainnet_defaults"
+    },
+    {
+      "chainId": 1,
+      "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "symbol": "WETH",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/uniswap-v2/src/common.rs::TokenLookup::with_mainnet_defaults"
+    },
+    {
+      "chainId": 1,
+      "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "symbol": "ETH",
+      "decimals": 18,
+      "isNative": true,
+      "source": "crates/adapters/uniswap-v2/src/common.rs::native_eth"
+    },
+
+    {
+      "chainId": 56,
+      "address": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+      "symbol": "WBNB",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/pancakeswap-amm/src/common.rs::TokenLookup::with_bsc_defaults"
+    },
+    {
+      "chainId": 56,
+      "address": "0x55d398326f99059ff775485246999027b3197955",
+      "symbol": "USDT",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/pancakeswap-amm/src/common.rs::TokenLookup::with_bsc_defaults",
+      "notes": "BSC USDT 는 18 decimals (Ethereum mainnet USDT 6 decimals 와 다른 컨트랙트)"
+    },
+    {
+      "chainId": 56,
+      "address": "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+      "symbol": "BUSD",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/pancakeswap-amm/src/common.rs::TokenLookup::with_bsc_defaults"
+    },
+    {
+      "chainId": 56,
+      "address": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
+      "symbol": "CAKE",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/pancakeswap-amm/src/common.rs::TokenLookup::with_bsc_defaults"
+    },
+    {
+      "chainId": 56,
+      "address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+      "symbol": "USDC",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/pancakeswap-stableswap/src/common.rs::seeded_bsc_pools"
+    },
+    {
+      "chainId": 56,
+      "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "symbol": "BNB",
+      "decimals": 18,
+      "isNative": true,
+      "source": "crates/adapters/pancakeswap-amm/src/common.rs::native_bnb"
+    },
+
+    {
+      "chainId": 8453,
+      "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "symbol": "USDC",
+      "decimals": 6,
+      "isNative": false,
+      "source": "crates/adapters/aerodrome-v1/src/common.rs::TokenLookup::with_base_defaults"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x4200000000000000000000000000000000000006",
+      "symbol": "WETH",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/aerodrome-v1/src/common.rs::TokenLookup::with_base_defaults"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+      "symbol": "AERO",
+      "decimals": 18,
+      "isNative": false,
+      "source": "crates/adapters/aerodrome-v1/src/common.rs::TokenLookup::with_base_defaults"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "symbol": "ETH",
+      "decimals": 18,
+      "isNative": true,
+      "source": "crates/adapters/aerodrome-v1/src/common.rs::native_eth"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+[package]
+name = "policy-engine-adapter-pancakeswap-v3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PancakeSwap V3 SwapRouter swap-function adapters for policy-engine"
+
+[dependencies]
+policy-engine.workspace = true
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
+thiserror.workspace = true
+hex.workspace = true

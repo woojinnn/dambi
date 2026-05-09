@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/core.schema.json",
+  "title": "scopeball 정책 엔진 핵심 도메인 타입",
+  "description": "scopeball 워크스페이스의 crates/policy-engine/src/core.rs 가 정의하는 primitive 도메인 타입을 JSON Schema 형태로 표현한다. Address / Hex / ChainId / Token / UsdValuation / WindowStatsContext / OracleRequirement / OracleRequirementKind / DexTrace / AmountSpec 모두 Rust 의 serde 기본 직렬화 규칙(snake_case) 을 따른다. 하위 스키마(dex-facts, action variants, dispatch 등)가 본 파일의 $defs 를 $ref 로 참조한다.",
+  "type": "object",
+  "$defs": {
+    "Address": {
+      "title": "Address",
+      "description": "EVM 주소를 0x prefix + 40자 hex 문자열로 표현. crates/policy-engine/src/core.rs::Address 가 alloy_primitives::Address::from_str 결과를 lowercase 로 정규화하므로 본 스키마도 lowercase 만 허용한다.",
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{40}$"
+    },
+    "Hex": {
+      "title": "Hex",
+      "description": "0x prefix 가 붙은 가변 길이 hex 바이트열. 길이 제약 없음. selector(4 byte) / raw calldata 등에서 사용.",
+      "type": "string",
+      "pattern": "^0x([0-9a-fA-F]{2})*$"
+    },
+    "Selector": {
+      "title": "Selector",
+      "description": "Solidity 함수 4-byte selector. 0x + 8 hex char 고정 길이.",
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{8}$"
+    },
+    "ChainId": {
+      "title": "ChainId",
+      "description": "EVM chain id. crates/policy-engine/src/core.rs 의 type alias 는 u64. JSON 에선 정수로 직렬화된다.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "DecimalString4": {
+      "title": "DecimalString4",
+      "description": "Cedar Decimal 확장이 사용하는 4-소수점 고정 정밀도 decimal 문자열. UsdValuation.value 가 이 형식을 사용한다 (예: \"1234.5600\"). 내부적으로 f64 drift 를 피하려고 문자열로 보관.",
+      "type": "string",
+      "pattern": "^-?\\d+\\.\\d{1,4}$"
+    },
+    "Token": {
+      "title": "Token",
+      "description": "엔진이 보는 토큰 메타데이터. 어댑터의 TokenLookup 이 캐싱하는 정보. is_native 가 true 면 chain 의 네이티브 자산(ETH/BNB 등) 을 의미한다.",
+      "type": "object",
+      "properties": {
+        "chain_id": { "$ref": "#/$defs/ChainId", "description": "토큰이 속한 EVM chain id." },
+        "address": { "$ref": "#/$defs/Address", "description": "토큰 컨트랙트 주소. 네이티브 자산은 0xeeee...eeee sentinel 사용." },
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "description": "사람이 읽는 심볼 (예: \"USDC\", \"WETH\", \"BNB\")."
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "토큰의 소수점 자릿수. 보통 6 (USDC/USDT mainnet) / 18 (ETH/대부분 ERC-20)."
+        },
+        "is_native": {
+          "type": "boolean",
+          "description": "네이티브 자산 여부. true 면 address 는 sentinel 0xeeee...eeee 가 일반적."
+        }
+      },
+      "required": ["chain_id", "address", "symbol", "decimals", "is_native"],
+      "additionalProperties": false
+    },
+    "UsdValuation": {
+      "title": "UsdValuation",
+      "description": "오라클이 산출한 USD 평가액과 출처/신선도 메타. value 는 4-소수점 decimal 문자열로 보관하며, host enrichment 단계가 이 값을 채운다 (어댑터는 None 으로 둔다).",
+      "type": "object",
+      "properties": {
+        "value": { "$ref": "#/$defs/DecimalString4", "description": "USD 가치, 4-소수점 decimal 문자열 (예: \"1234.5600\")." },
+        "as_of_ts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "평가액 산출 시점 Unix timestamp (초)."
+        },
+        "sources": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "평가에 기여한 데이터 소스 식별자 목록 (예: [\"chainlink\", \"uniswap-twap\"])."
+        },
+        "stale_sec": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "평가 후 경과 시간(초). 정책에서 staleness 검사에 사용."
+        }
+      },
+      "required": ["value", "as_of_ts", "sources", "stale_sec"],
+      "additionalProperties": false
+    },
+    "AmountSpec": {
+      "title": "AmountSpec",
+      "description": "토큰과 묶인 수량. raw 는 wei-스케일 정수 문자열, human 은 raw / 10^decimals 의 가독 표현, usd 는 오라클 평가가 가능했을 때만 채워진다.",
+      "type": "object",
+      "properties": {
+        "token": { "$ref": "#/$defs/Token", "description": "수량이 표시된 토큰." },
+        "raw": {
+          "type": "string",
+          "pattern": "^\\d+$",
+          "description": "wei-스케일 raw 정수를 decimal 문자열로 (U256 전 범위 보존)."
+        },
+        "human": {
+          "type": ["string", "null"],
+          "description": "raw / 10^decimals 의 사람이 읽는 decimal 문자열. host 가 채울 수 있고 어댑터는 보통 null."
+        },
+        "usd": {
+          "anyOf": [
+            { "$ref": "#/$defs/UsdValuation" },
+            { "type": "null" }
+          ],
+          "description": "오라클 산출 USD 가치. 오라클이 없거나 가격 미존재면 null."
+        }
+      },
+      "required": ["token", "raw"],
+      "additionalProperties": false
+    },
+    "OracleRequirementKind": {
+      "title": "OracleRequirementKind",
+      "description": "OracleRequirement 가 어느 측의 평가를 요구하는지. \"input\" 은 입력 토큰 측, \"minOutput\" 은 minimum output 측.",
+      "type": "string",
+      "enum": ["input", "minOutput"]
+    },
+    "OracleRequirement": {
+      "title": "OracleRequirement",
+      "description": "어댑터가 host enrichment 에 요청하는 오라클 lookup 한 건. host 는 token 을 raw_amount 만큼 평가하여 DexFacts.total_input_usd / total_min_output_usd 를 채운다.",
+      "type": "object",
+      "properties": {
+        "kind": { "$ref": "#/$defs/OracleRequirementKind" },
+        "token": { "$ref": "#/$defs/Token", "description": "평가할 토큰." },
+        "raw_amount": {
+          "type": "string",
+          "pattern": "^\\d+$",
+          "description": "wei-스케일 raw 수량 decimal 문자열."
+        }
+      },
+      "required": ["kind", "token", "raw_amount"],
+      "additionalProperties": false
+    },
+    "WindowStatsContext": {
+      "title": "WindowStatsContext",
+      "description": "host 의 StatWindows 가 투영한 24시간 롤링 통계. 둘 다 host 가 채울 수 있고, host 가 없으면 둘 다 null.",
+      "type": "object",
+      "properties": {
+        "swap_volume_usd_24h": {
+          "anyOf": [
+            { "$ref": "#/$defs/DecimalString4" },
+            { "type": "null" }
+          ],
+          "description": "24시간 swap 누적 USD 거래액 (4-소수점 decimal 문자열)."
+        },
+        "swap_count_24h": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "24시간 swap 누적 건수."
+        }
+      },
+      "required": ["swap_volume_usd_24h", "swap_count_24h"],
+      "additionalProperties": false
+    },
+    "DexTrace": {
+      "title": "DexTrace",
+      "description": "어댑터가 DexAction 을 빌드한 과정의 사람-읽기용 trace. Cedar 정책에 노출되지 않으며 audit/디버깅 채널 전용. 어댑터별로 다른 형식의 문자열 라인을 누적.",
+      "type": "object",
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "순서 보존된 trace 라인. 각 라인은 어댑터 식별자/함수명/추정 fee 등을 포함."
+        }
+      },
+      "required": ["steps"],
+      "additionalProperties": false
+    }
+  }
+}

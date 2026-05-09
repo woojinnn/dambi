@@ -1,0 +1,494 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "0.1.0",
+  "description": "scopeball 어댑터의 분류기 lookup 테이블. (chain_id, target, selector) 또는 (chain_id, verifying_contract, primary_type) 조합으로 어댑터 후보를 식별한다. 본 파일은 crates/adapters/<name>/src/*.rs 의 SELECTOR 상수와 라우터 주소를 1:1 추출하여 손으로 작성한 데이터 파일이며, 정합성은 docs/protocols/<name>.md 와 crates/integration-tests 의 selector_pin 테스트로 보장된다.",
+  "groups": {
+    "constant-product": "V2-shape — path/Route 기반 6-함수 패턴. uniswap-v2, pancakeswap-amm, aerodrome-v1.",
+    "concentrated-liquidity": "V3-shape — params struct + packed bytes path + multicall. uniswap-v3, pancakeswap-v3, aerodrome-slipstream.",
+    "stableswap": "Curve-style 풀 단위 exchange. pancakeswap-stableswap.",
+    "meta-router": "Universal Router — N 프로토콜 commands 디스패처.",
+    "signature": "EIP-712 서명 — selector 가 아닌 primary type 으로 매칭."
+  },
+  "transactionEntries": [
+    {
+      "chainId": 1,
+      "target": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "selector": "0x38ed1739",
+      "protocolId": "uniswap-v2",
+      "adapterId": "uniswap-v2/swapExactTokensForTokens@0.1.0",
+      "functionName": "swapExactTokensForTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_30_bps"
+    },
+    {
+      "chainId": 1,
+      "target": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "selector": "0x8803dbee",
+      "protocolId": "uniswap-v2",
+      "adapterId": "uniswap-v2/swapTokensForExactTokens@0.1.0",
+      "functionName": "swapTokensForExactTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_30_bps"
+    },
+    {
+      "chainId": 1,
+      "target": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "selector": "0x7ff36ab5",
+      "protocolId": "uniswap-v2",
+      "adapterId": "uniswap-v2/swapExactETHForTokens@0.1.0",
+      "functionName": "swapExactETHForTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_30_bps",
+      "notes": "payable; amountIn = msg.value"
+    },
+    {
+      "chainId": 1,
+      "target": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "selector": "0xfb3bdb41",
+      "protocolId": "uniswap-v2",
+      "adapterId": "uniswap-v2/swapETHForExactTokens@0.1.0",
+      "functionName": "swapETHForExactTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_30_bps",
+      "notes": "payable; msg.value = amountInMax"
+    },
+    {
+      "chainId": 1,
+      "target": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "selector": "0x18cbafe5",
+      "protocolId": "uniswap-v2",
+      "adapterId": "uniswap-v2/swapExactTokensForETH@0.1.0",
+      "functionName": "swapExactTokensForETH",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_30_bps"
+    },
+    {
+      "chainId": 1,
+      "target": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+      "selector": "0x4a25d94a",
+      "protocolId": "uniswap-v2",
+      "adapterId": "uniswap-v2/swapTokensForExactETH@0.1.0",
+      "functionName": "swapTokensForExactETH",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_30_bps"
+    },
+
+    {
+      "chainId": 56,
+      "target": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "selector": "0x38ed1739",
+      "protocolId": "pancakeswap-amm",
+      "adapterId": "pancakeswap-amm/swapExactTokensForTokens@0.1.0",
+      "functionName": "swapExactTokensForTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_25_bps"
+    },
+    {
+      "chainId": 56,
+      "target": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "selector": "0x8803dbee",
+      "protocolId": "pancakeswap-amm",
+      "adapterId": "pancakeswap-amm/swapTokensForExactTokens@0.1.0",
+      "functionName": "swapTokensForExactTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_25_bps"
+    },
+    {
+      "chainId": 56,
+      "target": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "selector": "0x7ff36ab5",
+      "protocolId": "pancakeswap-amm",
+      "adapterId": "pancakeswap-amm/swapExactETHForTokens@0.1.0",
+      "functionName": "swapExactETHForTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_25_bps",
+      "notes": "payable; native asset = BNB on BSC"
+    },
+    {
+      "chainId": 56,
+      "target": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "selector": "0xfb3bdb41",
+      "protocolId": "pancakeswap-amm",
+      "adapterId": "pancakeswap-amm/swapETHForExactTokens@0.1.0",
+      "functionName": "swapETHForExactTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_25_bps",
+      "notes": "payable"
+    },
+    {
+      "chainId": 56,
+      "target": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "selector": "0x18cbafe5",
+      "protocolId": "pancakeswap-amm",
+      "adapterId": "pancakeswap-amm/swapExactTokensForETH@0.1.0",
+      "functionName": "swapExactTokensForETH",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_25_bps"
+    },
+    {
+      "chainId": 56,
+      "target": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+      "selector": "0x4a25d94a",
+      "protocolId": "pancakeswap-amm",
+      "adapterId": "pancakeswap-amm/swapTokensForExactETH@0.1.0",
+      "functionName": "swapTokensForExactETH",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "constant_25_bps"
+    },
+
+    {
+      "chainId": 8453,
+      "target": "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43",
+      "selector": "0xcac88ea9",
+      "protocolId": "aerodrome-v1",
+      "adapterId": "aerodrome-v1/swapExactTokensForTokens@0.1.0",
+      "functionName": "swapExactTokensForTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "estimate_stable_5_volatile_30",
+      "notes": "Route[] (Solidly fork) — selector 가 V2 와 다름; per-leg max(stable?5:30) bps 추정"
+    },
+    {
+      "chainId": 8453,
+      "target": "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43",
+      "selector": "0x903638a4",
+      "protocolId": "aerodrome-v1",
+      "adapterId": "aerodrome-v1/swapExactETHForTokens@0.1.0",
+      "functionName": "swapExactETHForTokens",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "estimate_stable_5_volatile_30",
+      "notes": "payable"
+    },
+    {
+      "chainId": 8453,
+      "target": "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43",
+      "selector": "0xc6b7f1b6",
+      "protocolId": "aerodrome-v1",
+      "adapterId": "aerodrome-v1/swapExactTokensForETH@0.1.0",
+      "functionName": "swapExactTokensForETH",
+      "actionKind": "dex",
+      "group": "constant-product",
+      "feePolicy": "estimate_stable_5_volatile_30"
+    },
+
+    {
+      "chainId": 1,
+      "target": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "selector": "0x414bf389",
+      "protocolId": "uniswap-v3",
+      "adapterId": "uniswap-v3/exactInputSingle@0.1.0",
+      "functionName": "exactInputSingle",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_fee_div_100"
+    },
+    {
+      "chainId": 1,
+      "target": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "selector": "0xc04b8d59",
+      "protocolId": "uniswap-v3",
+      "adapterId": "uniswap-v3/exactInput@0.1.0",
+      "functionName": "exactInput",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_packed_path_max_fee"
+    },
+    {
+      "chainId": 1,
+      "target": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "selector": "0xdb3e2198",
+      "protocolId": "uniswap-v3",
+      "adapterId": "uniswap-v3/exactOutputSingle@0.1.0",
+      "functionName": "exactOutputSingle",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_fee_div_100"
+    },
+    {
+      "chainId": 1,
+      "target": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "selector": "0xf28c0498",
+      "protocolId": "uniswap-v3",
+      "adapterId": "uniswap-v3/exactOutput@0.1.0",
+      "functionName": "exactOutput",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_packed_path_max_fee"
+    },
+    {
+      "chainId": 1,
+      "target": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "selector": "0xac9650d8",
+      "protocolId": "uniswap-v3",
+      "adapterId": "uniswap-v3/multicall@0.1.0",
+      "functionName": "multicall",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "merged_max_across_children",
+      "notes": "multicall(bytes[]) — 자식 calldata 재귀 디코드 → merge_dex_actions"
+    },
+    {
+      "chainId": 1,
+      "target": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "selector": "0x5ae401dc",
+      "protocolId": "uniswap-v3",
+      "adapterId": "uniswap-v3/multicall@0.1.0",
+      "functionName": "multicall",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "merged_max_across_children",
+      "notes": "multicall(uint256 deadline, bytes[]) — deadline 변형"
+    },
+
+    {
+      "chainId": 56,
+      "target": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "selector": "0x414bf389",
+      "protocolId": "pancakeswap-v3",
+      "adapterId": "pancakeswap-v3/exactInputSingle@0.1.0",
+      "functionName": "exactInputSingle",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_fee_div_100"
+    },
+    {
+      "chainId": 56,
+      "target": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "selector": "0xc04b8d59",
+      "protocolId": "pancakeswap-v3",
+      "adapterId": "pancakeswap-v3/exactInput@0.1.0",
+      "functionName": "exactInput",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_packed_path_max_fee"
+    },
+    {
+      "chainId": 56,
+      "target": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "selector": "0xdb3e2198",
+      "protocolId": "pancakeswap-v3",
+      "adapterId": "pancakeswap-v3/exactOutputSingle@0.1.0",
+      "functionName": "exactOutputSingle",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_fee_div_100"
+    },
+    {
+      "chainId": 56,
+      "target": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "selector": "0xf28c0498",
+      "protocolId": "pancakeswap-v3",
+      "adapterId": "pancakeswap-v3/exactOutput@0.1.0",
+      "functionName": "exactOutput",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "calldata_packed_path_max_fee"
+    },
+    {
+      "chainId": 56,
+      "target": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "selector": "0xac9650d8",
+      "protocolId": "pancakeswap-v3",
+      "adapterId": "pancakeswap-v3/multicall@0.1.0",
+      "functionName": "multicall",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "merged_max_across_children"
+    },
+    {
+      "chainId": 56,
+      "target": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+      "selector": "0x5ae401dc",
+      "protocolId": "pancakeswap-v3",
+      "adapterId": "pancakeswap-v3/multicall@0.1.0",
+      "functionName": "multicall",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "merged_max_across_children",
+      "notes": "deadline 변형"
+    },
+
+    {
+      "chainId": 8453,
+      "target": "0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5",
+      "selector": "0xa026383e",
+      "protocolId": "aerodrome-slipstream",
+      "adapterId": "aerodrome-slipstream/exactInputSingle@0.1.0",
+      "functionName": "exactInputSingle",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "none_tickspacing_only",
+      "notes": "params 안에 int24 tickSpacing (uint24 fee 가 아님) — selector 가 V3 의 exactInputSingle 과 다름; max_fee_bps=None"
+    },
+    {
+      "chainId": 8453,
+      "target": "0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5",
+      "selector": "0xc04b8d59",
+      "protocolId": "aerodrome-slipstream",
+      "adapterId": "aerodrome-slipstream/exactInput@0.1.0",
+      "functionName": "exactInput",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "none_tickspacing_only",
+      "notes": "exactInput 의 selector 는 packed path 가 bytes 형태라 V3 와 동일 — chain_id+target 으로 구분"
+    },
+    {
+      "chainId": 8453,
+      "target": "0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5",
+      "selector": "0xc714e838",
+      "protocolId": "aerodrome-slipstream",
+      "adapterId": "aerodrome-slipstream/exactOutputSingle@0.1.0",
+      "functionName": "exactOutputSingle",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "none_tickspacing_only"
+    },
+    {
+      "chainId": 8453,
+      "target": "0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5",
+      "selector": "0xf28c0498",
+      "protocolId": "aerodrome-slipstream",
+      "adapterId": "aerodrome-slipstream/exactOutput@0.1.0",
+      "functionName": "exactOutput",
+      "actionKind": "dex",
+      "group": "concentrated-liquidity",
+      "feePolicy": "none_tickspacing_only",
+      "notes": "exactOutput 의 selector 는 V3 와 동일"
+    },
+
+    {
+      "chainId": 56,
+      "target": "0x4f3126d5de26413abdcf6948943fb9d0847d9818",
+      "selector": "0x5b41b908",
+      "protocolId": "pancakeswap-stableswap",
+      "adapterId": "pancakeswap-stableswap/exchange@0.1.0",
+      "functionName": "exchange",
+      "actionKind": "dex",
+      "group": "stableswap",
+      "feePolicy": "constant_4_bps_estimate",
+      "notes": "USDT/USDC two-pool"
+    },
+    {
+      "chainId": 56,
+      "target": "0x36842f8fb99d55477c0da638af5ceb6bbf86aa98",
+      "selector": "0x5b41b908",
+      "protocolId": "pancakeswap-stableswap",
+      "adapterId": "pancakeswap-stableswap/exchange@0.1.0",
+      "functionName": "exchange",
+      "actionKind": "dex",
+      "group": "stableswap",
+      "feePolicy": "constant_4_bps_estimate",
+      "notes": "USDT/BUSD/USDC three-pool"
+    },
+
+    {
+      "chainId": 1,
+      "target": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "selector": "0x24856bc3",
+      "protocolId": "uniswap-universal-router",
+      "adapterId": "uniswap/universal-router@0.1.0",
+      "functionName": "execute",
+      "actionKind": "dex",
+      "group": "meta-router",
+      "feePolicy": "merged_max_across_subprotocols",
+      "notes": "execute(bytes commands, bytes[] inputs) — opcode 디스패처. V2/V3/V4 sub-swap + permit/wrap 등 ~20 opcode"
+    },
+    {
+      "chainId": 1,
+      "target": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "selector": "0x3593564c",
+      "protocolId": "uniswap-universal-router",
+      "adapterId": "uniswap/universal-router@0.1.0",
+      "functionName": "execute",
+      "actionKind": "dex",
+      "group": "meta-router",
+      "feePolicy": "merged_max_across_subprotocols",
+      "notes": "execute(bytes,bytes[],uint256) deadline 오버로드"
+    }
+  ],
+  "signatureEntries": [
+    {
+      "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "primaryType": "PermitSingle",
+      "protocolId": "permit2",
+      "adapterId": "permit2/eip712@0.1.0",
+      "actionKind": "permit2",
+      "group": "signature",
+      "notes": "표준 Permit2 주소; chain 무관"
+    },
+    {
+      "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "primaryType": "PermitBatch",
+      "protocolId": "permit2",
+      "adapterId": "permit2/eip712@0.1.0",
+      "actionKind": "permit2",
+      "group": "signature"
+    },
+    {
+      "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "primaryType": "PermitTransferFrom",
+      "protocolId": "permit2",
+      "adapterId": "permit2/eip712@0.1.0",
+      "actionKind": "permit2",
+      "group": "signature"
+    },
+    {
+      "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "primaryType": "PermitBatchTransferFrom",
+      "protocolId": "permit2",
+      "adapterId": "permit2/eip712@0.1.0",
+      "actionKind": "permit2",
+      "group": "signature"
+    },
+    {
+      "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "primaryType": "PermitWitnessTransferFrom",
+      "protocolId": "permit2",
+      "adapterId": "permit2/eip712@0.1.0",
+      "actionKind": "permit2",
+      "group": "signature",
+      "notes": "witness 변형 — 정책의 witness blocklist 검사 대상"
+    },
+    {
+      "verifyingContract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+      "primaryType": "PermitBatchWitnessTransferFrom",
+      "protocolId": "permit2",
+      "adapterId": "permit2/eip712@0.1.0",
+      "actionKind": "permit2",
+      "group": "signature"
+    },
+    {
+      "verifyingContract": null,
+      "verifyingContractKind": "any-eip2612-token",
+      "primaryType": "Permit",
+      "protocolId": "eip2612",
+      "adapterId": "eip2612/permit@0.1.0",
+      "actionKind": "eip2612",
+      "group": "signature",
+      "notes": "verifyingContract 는 토큰 컨트랙트 (USDC, DAI 등) 마다 다르므로 단일 주소가 아니다. 어댑터는 자체 TokenLookup 에 등록된 모든 토큰의 주소에 대해 매칭한다. 후보 주소 목록은 registries.json.tokens 의 isNative=false 항목을 참조하라. 미등록 토큰은 매칭 실패 → eip712Other catch-all"
+    }
+  ],
+  "fallback": {
+    "transactionUnmatched": {
+      "actionKind": "other",
+      "notes": "어떤 transactionEntry 와도 매칭되지 않으면 어댑터 빌드 안 하고 파이프라인이 직접 OtherAction 합성"
+    },
+    "signatureUnmatched": {
+      "actionKind": "eip712Other",
+      "notes": "어떤 signatureEntry 와도 매칭되지 않으면 파이프라인이 SignatureRequest 로부터 Eip712OtherAction::from_request() 직접 합성"
+    }
+  }
+}

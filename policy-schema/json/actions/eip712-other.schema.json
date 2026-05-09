@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/actions/eip712-other.schema.json",
+  "title": "Eip712OtherAction",
+  "description": "Permit2 / EIP-2612 어댑터에도 매칭되지 않은 EIP-712 서명에 대한 catch-all fallback. crates/policy-engine/src/core.rs::Eip712OtherAction. 파이프라인이 SignatureRegistry 에서 미매칭일 때 직접 합성한다. Cedar 평가 시 Action::\"signature.eip712_other\" 액션 id 로 평가된다.",
+  "type": "object",
+  "properties": {
+    "signer": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "서명자 (host 가 제공)."
+    },
+    "chain_id": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/ChainId",
+      "description": "wallet 요청 chain id."
+    },
+    "domain_chain_id": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/ChainId",
+      "description": "EIP-712 domain.chainId."
+    },
+    "verifying_contract": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "EIP-712 verifying_contract. 정책의 allowlist 검사 대상."
+    },
+    "primary_type": {
+      "type": "string",
+      "description": "EIP-712 primary type."
+    },
+    "domain_name": {
+      "type": ["string", "null"],
+      "description": "선택적 EIP-712 domain.name."
+    },
+    "domain_version": {
+      "type": ["string", "null"],
+      "description": "선택적 EIP-712 domain.version."
+    },
+    "domain_salt": {
+      "type": ["string", "null"],
+      "description": "선택적 EIP-712 domain.salt (32-byte hex)."
+    },
+    "types_json": {
+      "type": "string",
+      "description": "EIP-712 types 맵을 compact JSON 문자열로 직렬화한 값. 정책에서 raw 검사용."
+    },
+    "message_json": {
+      "type": "string",
+      "description": "EIP-712 message 객체를 compact JSON 문자열로 직렬화한 값."
+    }
+  },
+  "required": [
+    "signer",
+    "chain_id",
+    "domain_chain_id",
+    "verifying_contract",
+    "primary_type",
+    "domain_name",
+    "domain_version",
+    "domain_salt",
+    "types_json",
+    "message_json"
+  ],
+  "additionalProperties": false
+}

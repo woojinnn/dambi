@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/actions/eip2612.schema.json",
+  "title": "Eip2612Action",
+  "description": "EIP-2612 Permit 서명 액션. crates/policy-engine/src/core.rs::Eip2612Action. ERC-20 토큰 컨트랙트 자체가 verifying_contract 가 되며 단일 spender 로 단일 토큰 단일 금액 approval. Cedar 평가 시 Action::\"signature.eip2612\" 액션 id 로 평가된다.",
+  "type": "object",
+  "properties": {
+    "signer": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "서명자 (host 가 제공). EIP-2612 의 owner 와 일치해야 함; 어댑터는 owner != signer 인 요청을 거부한다."
+    },
+    "owner": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "permit 메시지 안에 명시된 owner. signer 와 일치해야 한다."
+    },
+    "chain_id": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/ChainId",
+      "description": "wallet 요청 chain id."
+    },
+    "domain_chain_id": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/ChainId",
+      "description": "EIP-712 domain.chainId. chain_id 와 일치 검사."
+    },
+    "verifying_contract": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "EIP-712 verifying_contract. EIP-2612 의 경우 토큰 자체의 컨트랙트 주소."
+    },
+    "primary_type": {
+      "type": "string",
+      "description": "보통 \"Permit\". 어댑터가 case-insensitive 매칭."
+    },
+    "spender": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "approval 위임 대상."
+    },
+    "token": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Token",
+      "description": "approval 대상 토큰. 어댑터의 TokenLookup 으로 verifying_contract 를 토큰 메타로 해상."
+    },
+    "is_unlimited": {
+      "type": "boolean",
+      "description": "value == uint256 max 면 true (unlimited approval)."
+    },
+    "nonce_valid": {
+      "type": "boolean",
+      "description": "nonce == uint256 max 이면 false (구조적 nonce sanity)."
+    },
+    "value": {
+      "type": "string",
+      "pattern": "^\\d+$",
+      "description": "raw 승인 수량 decimal 문자열."
+    },
+    "deadline": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "permit 만료 timestamp (초)."
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^\\d+$",
+      "description": "permit nonce decimal 문자열."
+    },
+    "total_approved_usd": {
+      "anyOf": [
+        { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/UsdValuation" },
+        { "type": "null" }
+      ],
+      "description": "host 오라클이 산출한 USD 환산 승인액. 오라클 부재 시 null."
+    }
+  },
+  "required": [
+    "signer",
+    "owner",
+    "chain_id",
+    "domain_chain_id",
+    "verifying_contract",
+    "primary_type",
+    "spender",
+    "token",
+    "is_unlimited",
+    "nonce_valid",
+    "value",
+    "deadline",
+    "nonce",
+    "total_approved_usd"
+  ],
+  "additionalProperties": false
+}

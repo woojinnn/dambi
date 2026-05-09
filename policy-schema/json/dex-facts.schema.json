@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/dex-facts.schema.json",
+  "title": "DexFacts",
+  "description": "DEX swap 액션에 대해 어댑터 + host enrichment 가 함께 채우는 11개 집계 필드. crates/policy-engine/src/core.rs::DexFacts 정의에 1:1 대응한다. 어댑터는 6개 필드(protocol_ids, input_tokens, output_tokens, max_fee_bps, has_zero_min_output, has_external_recipient) 를 채우고, host enrichment 가 나머지 5개 (total_input_usd, total_min_output_usd, total_input_fraction_of_portfolio_bps, allowances_cover_inputs, window_stats) 를 채운다. Cedar DexContext 가 본 구조의 직접 표현이다.",
+  "type": "object",
+  "properties": {
+    "protocol_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "라우트에 등장한 프로토콜 식별자. 일반 어댑터는 1원소 (예: [\"uniswap-v2\"]), Universal Router 의 멀티콜은 합집합 (예: [\"uniswap-v2\", \"uniswap-v3\"])."
+    },
+    "input_tokens": {
+      "type": "array",
+      "items": { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Token" },
+      "description": "라우트가 소비하는 입력 토큰들. 단일 hop 은 1원소, 멀티콜 머지 후엔 중복 제거된 합집합."
+    },
+    "output_tokens": {
+      "type": "array",
+      "items": { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Token" },
+      "description": "라우트가 산출하는 출력 토큰들."
+    },
+    "total_input_usd": {
+      "anyOf": [
+        { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/UsdValuation" },
+        { "type": "null" }
+      ],
+      "description": "host 의 오라클이 산출한 입력 측 USD 합. 오라클 부재 시 null."
+    },
+    "total_min_output_usd": {
+      "anyOf": [
+        { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/UsdValuation" },
+        { "type": "null" }
+      ],
+      "description": "host 의 오라클이 산출한 minimum output 측 USD 합. 오라클 부재 시 null."
+    },
+    "max_fee_bps": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "라우트의 leg-wise 최대 수수료(bps). 어댑터에 따라 calldata 인코딩(V3 fee/100) / 상수(V2 30, PancakeSwap V2 25) / 추정(Aerodrome stable 5 또는 volatile 30) / null(Slipstream — calldata 에 fee 없음). 정책 측에서는 정확한 실행가가 아닌 보수적 상한으로 해석해야 한다."
+    },
+    "has_zero_min_output": {
+      "type": "boolean",
+      "description": "라우트의 어떤 leg 라도 minimum output == 0 이면 true. 슬리피지 가드 우회 검사에 사용."
+    },
+    "has_external_recipient": {
+      "type": "boolean",
+      "description": "actor 와 다른 주소가 swap 출력 수령인이면 true. 자금 빼돌리기 방지 정책에 사용."
+    },
+    "total_input_fraction_of_portfolio_bps": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "description": "host Portfolio 가 채우는 입력 / 포트폴리오 비율 (basis points). 5000 == 50%."
+    },
+    "allowances_cover_inputs": {
+      "type": ["boolean", "null"],
+      "description": "host Approvals 가 채우는, 모든 비-네이티브 입력의 allowance 충족 여부."
+    },
+    "window_stats": {
+      "anyOf": [
+        { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/WindowStatsContext" },
+        { "type": "null" }
+      ],
+      "description": "host StatWindows 가 채우는 24시간 롤링 통계."
+    }
+  },
+  "required": [
+    "protocol_ids",
+    "input_tokens",
+    "output_tokens",
+    "total_input_usd",
+    "total_min_output_usd",
+    "max_fee_bps",
+    "has_zero_min_output",
+    "has_external_recipient",
+    "total_input_fraction_of_portfolio_bps",
+    "allowances_cover_inputs",
+    "window_stats"
+  ],
+  "additionalProperties": false
+}

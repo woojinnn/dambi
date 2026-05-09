@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/action.schema.json",
+  "title": "Action",
+  "description": "scopeball 정책 엔진이 다루는 5종 액션의 union. crates/policy-engine/src/core.rs::Action enum 의 serde 직렬화 결과 (externally tagged) 를 표현한다. 각 변형은 단일 키 객체 형태로 표현되며 키 이름이 변형 식별자 (\"dex\" / \"other\" / \"permit2\" / \"eip2612\" / \"eip712Other\") 이다.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "dex": { "$ref": "https://scopeball.local/policy-schema/json/actions/dex.schema.json" }
+      },
+      "required": ["dex"],
+      "additionalProperties": false,
+      "description": "Action::Dex(DexAction). DEX 라우터/풀 calldata 디코딩 결과. Cedar 액션 id: Action::\"dex\"."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "other": { "$ref": "https://scopeball.local/policy-schema/json/actions/other.schema.json" }
+      },
+      "required": ["other"],
+      "additionalProperties": false,
+      "description": "Action::Other(OtherAction). 어떤 어댑터에도 매칭되지 않은 fallback. Cedar 액션 id: Action::\"other\"."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "permit2": { "$ref": "https://scopeball.local/policy-schema/json/actions/permit2.schema.json" }
+      },
+      "required": ["permit2"],
+      "additionalProperties": false,
+      "description": "Action::Permit2(Permit2Action). Permit2 EIP-712 서명. Cedar 액션 id: Action::\"signature.permit2\"."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "eip2612": { "$ref": "https://scopeball.local/policy-schema/json/actions/eip2612.schema.json" }
+      },
+      "required": ["eip2612"],
+      "additionalProperties": false,
+      "description": "Action::Eip2612(Eip2612Action). EIP-2612 Permit 서명. Cedar 액션 id: Action::\"signature.eip2612\"."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "eip712Other": { "$ref": "https://scopeball.local/policy-schema/json/actions/eip712-other.schema.json" }
+      },
+      "required": ["eip712Other"],
+      "additionalProperties": false,
+      "description": "Action::Eip712Other(Eip712OtherAction). 미매칭 EIP-712 서명 catch-all. Cedar 액션 id: Action::\"signature.eip712_other\"."
+    }
+  ]
+}

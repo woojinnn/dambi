@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/actions/permit2.schema.json",
+  "title": "Permit2Action",
+  "description": "Permit2 EIP-712 서명 액션. crates/policy-engine/src/core.rs::Permit2Action. 6종 primary type (PermitSingle / PermitBatch / PermitTransferFrom / PermitBatchTransferFrom / PermitWitnessTransferFrom / PermitBatchWitnessTransferFrom) 모두 동일한 평면 구조로 노출되며 permit_kind 필드로 구분한다. Cedar 평가 시 Action::\"signature.permit2\" 액션 id 로 평가된다.",
+  "type": "object",
+  "properties": {
+    "signer": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "서명을 수행하는 wallet 주소 (host 가 SignatureRequest.signer 로 제공)."
+    },
+    "chain_id": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/ChainId",
+      "description": "wallet 요청에 명시된 chain id."
+    },
+    "domain_chain_id": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/ChainId",
+      "description": "EIP-712 domain 안에 인코딩된 chain id. 정책은 chain_id 와 domain_chain_id 의 일치를 검사할 수 있다."
+    },
+    "verifying_contract": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "EIP-712 verifying contract. Permit2 표준 주소는 0x000000000022d473030f116ddee9f6b43ac78ba3."
+    },
+    "primary_type": {
+      "type": "string",
+      "description": "EIP-712 primary type 문자열 (예: \"PermitSingle\")."
+    },
+    "permit_kind": { "$ref": "#/$defs/Permit2PermitKind" },
+    "spender": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "permit 이 위임하는 spender 주소. 정책의 spender allowlist 검사 대상."
+    },
+    "token": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Token",
+      "description": "단일-토큰 정책 검사를 위한 대표 토큰 (batch 의 경우 첫 토큰)."
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^\\d+$",
+      "description": "raw 승인 수량 decimal 문자열. uint160 max 이면 unlimited 로 분류 (is_unlimited=true)."
+    },
+    "expiration": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "approval 만료 timestamp (초)."
+    },
+    "sig_deadline": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "서명 자체의 만료 timestamp (초). 정책의 deadline 검사 대상."
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^\\d+$",
+      "description": "permit nonce decimal 문자열. uint256 max == 사용된 nonce 로 nonce_valid 가 false 가 됨."
+    },
+    "approvals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Permit2Approval" },
+      "description": "전체 approvals (PermitBatch 등 멀티-토큰 시 N>1)."
+    },
+    "is_unlimited": {
+      "type": "boolean",
+      "description": "approvals 중 어느 하나라도 unlimited (uint160 max) 이면 true."
+    },
+    "nonce_valid": {
+      "type": "boolean",
+      "description": "구조적 nonce sanity. nonce == uint256 max 이면 false."
+    },
+    "witness_present": {
+      "type": "boolean",
+      "description": "Permit2Witness 변형 (PermitWitnessTransferFrom 계열) 인지. 정책의 witness blocklist 에 사용."
+    },
+    "total_approved_usd": {
+      "anyOf": [
+        { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/UsdValuation" },
+        { "type": "null" }
+      ],
+      "description": "host 오라클이 산출한 모든 approvals USD 합. 오라클 부재 시 null."
+    }
+  },
+  "required": [
+    "signer",
+    "chain_id",
+    "domain_chain_id",
+    "verifying_contract",
+    "primary_type",
+    "permit_kind",
+    "spender",
+    "token",
+    "amount",
+    "expiration",
+    "sig_deadline",
+    "nonce",
+    "approvals",
+    "is_unlimited",
+    "nonce_valid",
+    "witness_present",
+    "total_approved_usd"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Permit2PermitKind": {
+      "title": "Permit2PermitKind",
+      "description": "Permit2 의 6종 EIP-712 primary type. 직렬화된 enum 변형명 그대로 사용한다.",
+      "type": "string",
+      "enum": [
+        "PermitSingle",
+        "PermitBatch",
+        "PermitTransferFrom",
+        "PermitBatchTransferFrom",
+        "PermitWitnessTransferFrom",
+        "PermitBatchWitnessTransferFrom"
+      ]
+    },
+    "Permit2Approval": {
+      "title": "Permit2Approval",
+      "description": "Permit2 의 단일 approval 항목. PermitBatch 인 경우 approvals 배열이 N>1 이 된다.",
+      "type": "object",
+      "properties": {
+        "token": { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Token" },
+        "amount": {
+          "type": "string",
+          "pattern": "^\\d+$",
+          "description": "raw 승인 수량 decimal 문자열."
+        },
+        "expiration": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "approval 만료 timestamp (초)."
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^\\d+$",
+          "description": "permit nonce decimal 문자열."
+        }
+      },
+      "required": ["token", "amount", "expiration", "nonce"],
+      "additionalProperties": false
+    }
+  }
+}

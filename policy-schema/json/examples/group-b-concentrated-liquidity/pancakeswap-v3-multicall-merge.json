@@ -1,0 +1,85 @@
+{
+  "dex": {
+    "actor": "0x0000000000000000000000000000000000000001",
+    "target": "0x1b81d678ffb9c0263b24a97847620c99d213eb14",
+    "value_wei": "0",
+    "facts": {
+      "protocol_ids": ["pancakeswap-v3"],
+      "input_tokens": [
+        {
+          "chain_id": 56,
+          "address": "0x55d398326f99059ff775485246999027b3197955",
+          "symbol": "USDT",
+          "decimals": 18,
+          "is_native": false
+        }
+      ],
+      "output_tokens": [
+        {
+          "chain_id": 56,
+          "address": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+          "symbol": "WBNB",
+          "decimals": 18,
+          "is_native": false
+        }
+      ],
+      "total_input_usd": null,
+      "total_min_output_usd": null,
+      "max_fee_bps": 100,
+      "has_zero_min_output": true,
+      "has_external_recipient": true,
+      "total_input_fraction_of_portfolio_bps": null,
+      "allowances_cover_inputs": null,
+      "window_stats": null
+    },
+    "oracle_requirements": [
+      {
+        "kind": "input",
+        "token": {
+          "chain_id": 56,
+          "address": "0x55d398326f99059ff775485246999027b3197955",
+          "symbol": "USDT",
+          "decimals": 18,
+          "is_native": false
+        },
+        "raw_amount": "50000000000000000"
+      },
+      {
+        "kind": "minOutput",
+        "token": {
+          "chain_id": 56,
+          "address": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+          "symbol": "WBNB",
+          "decimals": 18,
+          "is_native": false
+        },
+        "raw_amount": "0"
+      },
+      {
+        "kind": "input",
+        "token": {
+          "chain_id": 56,
+          "address": "0x55d398326f99059ff775485246999027b3197955",
+          "symbol": "USDT",
+          "decimals": 18,
+          "is_native": false
+        },
+        "raw_amount": "200000000000000000"
+      },
+      {
+        "kind": "minOutput",
+        "token": {
+          "chain_id": 56,
+          "address": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+          "symbol": "WBNB",
+          "decimals": 18,
+          "is_native": false
+        },
+        "raw_amount": "0"
+      }
+    ],
+    "trace": {
+      "steps": ["multicall", "exactInputSingle", "exactInputSingle"]
+    }
+  }
+}

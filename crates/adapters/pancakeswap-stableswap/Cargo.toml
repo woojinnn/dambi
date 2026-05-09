@@ -1,0 +1,13 @@
+[package]
+name = "policy-engine-adapter-pancakeswap-stableswap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PancakeSwap StableSwap (Curve-style exchange) pool adapter for policy-engine"
+
+[dependencies]
+policy-engine.workspace = true
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
+thiserror.workspace = true
+hex.workspace = true

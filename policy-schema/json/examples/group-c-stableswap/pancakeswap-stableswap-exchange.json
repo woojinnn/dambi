@@ -1,0 +1,65 @@
+{
+  "dex": {
+    "actor": "0x0000000000000000000000000000000000000001",
+    "target": "0x4f3126d5de26413abdcf6948943fb9d0847d9818",
+    "value_wei": "0",
+    "facts": {
+      "protocol_ids": ["pancakeswap-stableswap"],
+      "input_tokens": [
+        {
+          "chain_id": 56,
+          "address": "0x55d398326f99059ff775485246999027b3197955",
+          "symbol": "USDT",
+          "decimals": 18,
+          "is_native": false
+        }
+      ],
+      "output_tokens": [
+        {
+          "chain_id": 56,
+          "address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+          "symbol": "USDC",
+          "decimals": 18,
+          "is_native": false
+        }
+      ],
+      "total_input_usd": null,
+      "total_min_output_usd": null,
+      "max_fee_bps": 4,
+      "has_zero_min_output": false,
+      "has_external_recipient": false,
+      "total_input_fraction_of_portfolio_bps": null,
+      "allowances_cover_inputs": null,
+      "window_stats": null
+    },
+    "oracle_requirements": [
+      {
+        "kind": "input",
+        "token": {
+          "chain_id": 56,
+          "address": "0x55d398326f99059ff775485246999027b3197955",
+          "symbol": "USDT",
+          "decimals": 18,
+          "is_native": false
+        },
+        "raw_amount": "100000000000000000000"
+      },
+      {
+        "kind": "minOutput",
+        "token": {
+          "chain_id": 56,
+          "address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+          "symbol": "USDC",
+          "decimals": 18,
+          "is_native": false
+        },
+        "raw_amount": "99000000000000000000"
+      }
+    ],
+    "trace": {
+      "steps": [
+        "exchange pool=0x4f3126d5de26413abdcf6948943fb9d0847d9818 i=0 j=1 dx=100000000000000000000 min_dy=99000000000000000000 (fee_estimate=4bps)"
+      ]
+    }
+  }
+}

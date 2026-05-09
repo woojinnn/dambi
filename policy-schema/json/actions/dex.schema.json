@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/actions/dex.schema.json",
+  "title": "DexAction",
+  "description": "DEX 라우터/풀 calldata 디코딩 결과. crates/policy-engine/src/core.rs::DexAction. 한 트랜잭션은 하나의 DexAction 만 산출한다 — 멀티콜이나 Universal Router 도 merge_dex_actions() 후 단일 DexAction 으로 머지된다. Cedar 평가 시 Action::\"dex\" 액션 id 로 평가된다.",
+  "type": "object",
+  "properties": {
+    "actor": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "트랜잭션을 시작한 wallet (TransactionRequest.from)."
+    },
+    "target": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "calldata 를 받은 컨트랙트 주소 (TransactionRequest.to). 보통 라우터, StableSwap 의 경우 풀 주소."
+    },
+    "value_wei": {
+      "type": "string",
+      "pattern": "^\\d+$",
+      "description": "트랜잭션에 첨부된 네이티브 자산 wei (decimal 문자열). swapExactETHForTokens 의 amountIn 으로 활용되기도 함."
+    },
+    "facts": { "$ref": "https://scopeball.local/policy-schema/json/dex-facts.schema.json" },
+    "oracle_requirements": {
+      "type": "array",
+      "items": { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/OracleRequirement" },
+      "description": "어댑터가 host enrichment 에 요청하는 오라클 lookup 목록. 보통 입력 1건 + minOutput 1건."
+    },
+    "trace": { "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/DexTrace" }
+  },
+  "required": ["actor", "target", "value_wei", "facts", "oracle_requirements", "trace"],
+  "additionalProperties": false
+}

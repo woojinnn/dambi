@@ -1,0 +1,15 @@
+{
+  "name": "scopeball-policy-schema-json",
+  "version": "0.1.0",
+  "private": true,
+  "description": "scopeball 정책 엔진의 JSON Schema 정의 + dispatch / registries / examples / docs. Rust 어댑터 출력의 언어-독립 사양.",
+  "scripts": {
+    "validate:schema": "ajv compile --spec=draft2020 -s 'core.schema.json' -r 'dex-facts.schema.json' -r 'actions/dex.schema.json' -r 'actions/other.schema.json' -r 'actions/permit2.schema.json' -r 'actions/eip2612.schema.json' -r 'actions/eip712-other.schema.json' -s 'action.schema.json'",
+    "validate:examples": "ajv validate --spec=draft2020 -s action.schema.json -r 'core.schema.json' -r 'dex-facts.schema.json' -r 'actions/dex.schema.json' -r 'actions/other.schema.json' -r 'actions/permit2.schema.json' -r 'actions/eip2612.schema.json' -r 'actions/eip712-other.schema.json' -d 'examples/**/*.json'",
+    "validate": "npm run validate:schema && npm run validate:examples"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-cli": "^5.0.0"
+  }
+}

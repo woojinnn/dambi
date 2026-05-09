@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scopeball.local/policy-schema/json/actions/other.schema.json",
+  "title": "OtherAction",
+  "description": "어떤 어댑터에도 매칭되지 않은 calldata 의 fallback 액션. crates/policy-engine/src/core.rs::OtherAction. Cedar 평가 시 Action::\"other\" 액션 id 로 평가되며, 정책에서 알려지지 않은 호출에 대한 deny-by-default 가드 등에 활용된다.",
+  "type": "object",
+  "properties": {
+    "actor": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "트랜잭션을 시작한 wallet (TransactionRequest.from)."
+    },
+    "target": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Address",
+      "description": "호출 대상 컨트랙트 주소."
+    },
+    "selector": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Selector",
+      "description": "calldata 의 첫 4바이트 selector hex (예: \"0xdeadbeef\")."
+    },
+    "value_wei": {
+      "type": "string",
+      "pattern": "^\\d+$",
+      "description": "msg.value (wei, decimal 문자열)."
+    },
+    "raw_calldata": {
+      "$ref": "https://scopeball.local/policy-schema/json/core.schema.json#/$defs/Hex",
+      "description": "전체 calldata hex. fallback 정책이 직접 검사할 수 있도록 보존."
+    }
+  },
+  "required": ["actor", "target", "selector", "value_wei", "raw_calldata"],
+  "additionalProperties": false
+}
