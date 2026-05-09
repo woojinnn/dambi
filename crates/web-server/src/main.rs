@@ -29,7 +29,7 @@ use abi_resolver::subdecode::protocols::pancake_ur::{
 use abi_resolver::subdecode::protocols::uniswap_v3::format_packed_path;
 use abi_resolver::subdecode::protocols::universal_router::{
     extract_commands_and_inputs, is_uniswap_universal_router, is_universal_router_execute,
-    UNISWAP_UR_TABLE,
+    v3_position_manager_address, v4_position_manager_address, UNISWAP_UR_TABLE,
 };
 use abi_resolver::subdecode::protocols::v4_router::{
     extract_actions_and_params as extract_v4_actions_and_params, V4_ROUTER_TABLE,
@@ -373,7 +373,7 @@ fn decode_recursive(
                         steps
                             .into_iter()
                             .take(MAX_SUBDECODE_CHILDREN)
-                            .map(|step| step_to_response(step, depth + 1))
+                            .map(|step| step_to_response(step, depth + 1, resolver, chain_id))
                             .collect()
                     })
                     .unwrap_or_default()
@@ -423,11 +423,23 @@ fn arg_to_api(a: DecodedArg) -> ApiArg {
 /// opcode, no schema yet, decode failure), we surface the raw input as a
 /// single fake arg so users still see the bytes.
 ///
-/// When the step is `V4_SWAP` (UR opcode `0x10`) and was decoded against the
-/// `(bytes actions, bytes[] params)` schema, we recurse one more level using
-/// the V4Router action table so the inner SWAP_EXACT_IN / SETTLE / TAKE
-/// sequence shows up as nested children in the tree.
-fn step_to_response(step: DecodedStep, depth: u32) -> DecodeResponse {
+/// Nested-decode cases:
+/// - `V4_SWAP` (UR opcode `0x10`) re-dispatches its inner
+///   `(bytes actions, bytes[] params)` against [`V4_ROUTER_TABLE`].
+/// - `EXECUTE_SUB_PLAN` (UR opcode `0x21`) re-dispatches the inner
+///   `(bytes commands, bytes[] inputs)` against the same Uniswap UR table.
+/// - `V3_POSITION_MANAGER_PERMIT` / `V3_POSITION_MANAGER_CALL` (UR opcodes
+///   `0x11` / `0x12`) — input is a complete calldata for the V3 NPM
+///   contract; we recurse via the resolver against the chain's NPM address
+///   so the call is decoded against the NPM ABI.
+/// - `V4_POSITION_MANAGER_CALL` (UR opcode `0x14`) — same as above against
+///   the V4 PositionManager.
+fn step_to_response(
+    step: DecodedStep,
+    depth: u32,
+    resolver: &Resolver,
+    chain_id: u64,
+) -> DecodeResponse {
     let selector = format!("0x{:02x}", step.opcode);
     let function_name = if step.allow_revert {
         format!("{} (allowRevert)", step.name)
@@ -447,7 +459,7 @@ fn step_to_response(step: DecodedStep, depth: u32) -> DecodeResponse {
                 v4_steps
                     .into_iter()
                     .take(MAX_SUBDECODE_CHILDREN)
-                    .map(|s| step_to_response(s, depth + 1))
+                    .map(|s| step_to_response(s, depth + 1, resolver, chain_id))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
@@ -461,10 +473,30 @@ fn step_to_response(step: DecodedStep, depth: u32) -> DecodeResponse {
                 sub_steps
                     .into_iter()
                     .take(MAX_SUBDECODE_CHILDREN)
-                    .map(|s| step_to_response(s, depth + 1))
+                    .map(|s| step_to_response(s, depth + 1, resolver, chain_id))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
+    } else if matches!(step.opcode, 0x11 | 0x12 | 0x14) && !step.raw_input.is_empty() {
+        // V3 / V4 PositionManager call — input is full calldata that the UR
+        // contract dispatches via `address(NPM/PM).call(inputs)`. Recurse
+        // against the chain-specific PositionManager address so the resolver
+        // matches the NPM/PM ABI rather than UR's.
+        let pm_addr = if step.opcode == 0x14 {
+            v4_position_manager_address(chain_id)
+        } else {
+            v3_position_manager_address(chain_id)
+        };
+        match pm_addr {
+            Some(addr) => vec![decode_recursive(
+                resolver,
+                chain_id,
+                &addr,
+                &step.raw_input,
+                depth + 1,
+            )],
+            None => Vec::new(),
+        }
     } else {
         Vec::new()
     };

@@ -353,6 +353,86 @@ pub fn is_uniswap_universal_router(chain_id: u64, target: &Address) -> bool {
         .any(|(chain, addr)| *chain == chain_id && addr == target)
 }
 
+/// Per-chain Uniswap V3 NonfungiblePositionManager addresses. The same
+/// contract is `CREATE2`-deployed at the same address on most EVM chains
+/// (mainnet/arbitrum/optimism/polygon/base/etc.) but the address registry
+/// stays explicit so we don't blindly recurse against unknown chains.
+const V3_NPM_ADDRESSES: &[(u64, Address)] = &[
+    // Ethereum mainnet, Polygon, Arbitrum, Optimism, Base — all share this
+    // CREATE2 address.
+    (
+        1,
+        Address::new(
+            *b"\xc3\x64\x42\xb4\xa4\x52\x2e\x87\x13\x99\xcd\x71\x7a\xbd\xd8\x47\xab\x11\xfe\x88",
+        ),
+    ),
+];
+
+/// Per-chain Uniswap V4 PositionManager addresses (different per chain — V4
+/// is fresh-deployed without CREATE2 colocation).
+const V4_PM_ADDRESSES: &[(u64, Address)] = &[
+    // Ethereum mainnet
+    (
+        1,
+        Address::new(
+            *b"\xbd\x21\x65\x13\xd7\x4c\x8c\xf1\x4c\xf4\x74\x7e\x6a\xaa\x64\x20\xff\x64\xee\x9e",
+        ),
+    ),
+    // Optimism
+    (
+        10,
+        Address::new(
+            *b"\x3c\x3e\xa4\xb5\x7a\x46\x24\x1e\x54\x61\x0e\x5f\x02\x2e\x5c\x45\x85\x9a\x10\x17",
+        ),
+    ),
+    // Polygon
+    (
+        137,
+        Address::new(
+            *b"\x1e\xc2\xeb\xf4\xf3\x7e\x73\x63\xfd\xfe\x35\x51\x60\x24\x25\xaf\x0b\x3c\xee\xf9",
+        ),
+    ),
+    // Arbitrum One
+    (
+        42161,
+        Address::new(
+            *b"\xd8\x8f\x38\xf9\x30\xb7\x95\x2f\x2d\xb2\x43\x2c\xb0\x02\xe7\xab\xbf\x3d\xd8\x69",
+        ),
+    ),
+    // Base
+    (
+        8453,
+        Address::new(
+            *b"\x7c\x5f\x5a\x4b\xbd\x8f\xd6\x31\x84\x57\x75\x25\x32\x61\x23\xb5\x19\x42\x9b\xdc",
+        ),
+    ),
+    // Blast
+    (
+        81457,
+        Address::new(
+            *b"\x4a\xd2\xf4\xcc\xa2\x68\x2c\xbb\x5b\x95\x0d\x66\x0d\xd4\x58\xa1\xd3\xf1\xba\xad",
+        ),
+    ),
+];
+
+/// Look up the V3 NonfungiblePositionManager address for `chain_id`.
+#[must_use]
+pub fn v3_position_manager_address(chain_id: u64) -> Option<Address> {
+    V3_NPM_ADDRESSES
+        .iter()
+        .find(|(chain, _)| *chain == chain_id)
+        .map(|(_, addr)| *addr)
+}
+
+/// Look up the V4 PositionManager address for `chain_id`.
+#[must_use]
+pub fn v4_position_manager_address(chain_id: u64) -> Option<Address> {
+    V4_PM_ADDRESSES
+        .iter()
+        .find(|(chain, _)| *chain == chain_id)
+        .map(|(_, addr)| *addr)
+}
+
 /// Pull the `(commands, inputs)` pair out of a decoded `execute(...)` call.
 ///
 /// Both UR overloads put `commands` at arg index 0 and `inputs` at arg index

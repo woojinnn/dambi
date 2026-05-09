@@ -86,6 +86,12 @@ pub const SUSHI_SNWAP_SELECTOR: [u8; 4] = [0x5f, 0x3b, 0xd1, 0xc8];
 /// Morpho Bundler `multicall((address,bytes,uint256,bool,bytes32)[])`.
 pub const MORPHO_BUNDLER_MULTICALL_SELECTOR: [u8; 4] = [0x37, 0x4f, 0x43, 0x5d];
 
+/// 1inch AggregationRouter V5
+/// `swap(address executor, (address,address,address,address,uint256,uint256,uint256) desc, bytes permit, bytes data)`.
+/// `executor` (arg 0) is the target the router `.call(data)` against;
+/// `data` (arg 3) is the executor's calldata.
+pub const ONEINCH_V5_SWAP_SELECTOR: [u8; 4] = [0x12, 0xaa, 0x3c, 0xaf];
+
 /// One sub-call extracted from a decoded outer call — `(target, calldata)`.
 #[derive(Debug, Clone)]
 pub struct ChildCall {
@@ -138,6 +144,10 @@ pub fn lookup_recurse_rule(selector: &[u8; 4]) -> Option<CatARule> {
         SUSHI_SNWAP_SELECTOR => Some(CatARule::NamedTarget {
             target_arg: 5,
             payload_arg: 6,
+        }),
+        ONEINCH_V5_SWAP_SELECTOR => Some(CatARule::NamedTarget {
+            target_arg: 0,
+            payload_arg: 3,
         }),
         MORPHO_BUNDLER_MULTICALL_SELECTOR => Some(CatARule::AddressBytesTuples {
             array_arg: 0,
