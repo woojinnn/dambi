@@ -236,6 +236,10 @@ function render(): void {
   root.appendChild(el('footer', {}, [el('span', { class: statusClass, text: statusText })]));
 }
 
+// Show the "Loading…" shell synchronously so the popup never appears
+// empty while the first message round-trip to the SW is in flight.
+render();
+
 void (async () => {
   try {
     state.catalog = await fetchCatalog();
