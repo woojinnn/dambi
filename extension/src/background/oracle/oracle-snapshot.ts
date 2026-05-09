@@ -1,13 +1,15 @@
 import {
+  OracleFetchError,
   fetchNativeUsdPrices,
   fetchUsdPrices,
   nativePriceLastUpdatedAt,
   priceLastUpdatedAt,
-} from './coingecko-client';
-import { cachedPriceLastUpdatedAt, lookup, store } from './price-cache';
-import type { OracleEntry } from '../types/host-snapshot';
+} from "./coingecko-client";
+import { cachedPriceLastUpdatedAt, lookup, store } from "./price-cache";
+import type { OracleEntry } from "../types/host-snapshot";
 
-export const NATIVE_TOKEN_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+export const NATIVE_TOKEN_ADDRESS =
+  "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 export interface OracleNeed {
   chainId: number;
@@ -23,6 +25,59 @@ interface NormalizedNeed {
 
 function tokenKey(chainId: number, address: string): string {
   return `${chainId}:${address.toLowerCase()}`;
+}
+
+function warnCoinGeckoFetchFailed(
+  err: OracleFetchError,
+  tokenKeys?: readonly string[],
+): void {
+  console.warn("[Scopeball SW] CoinGecko fetch failed", {
+    tokenKeys: err.opts.tokenKeys ?? tokenKeys,
+    status: err.opts.status,
+    cause: String(err.opts.cause),
+  });
+}
+
+async function fetchUsdPricesOrEmpty(
+  chainId: number,
+  addresses: readonly string[],
+  fetchImpl: typeof fetch,
+): Promise<Map<string, number>> {
+  try {
+    return await fetchUsdPrices(chainId, addresses, fetchImpl);
+  } catch (err) {
+    if (err instanceof OracleFetchError) {
+      warnCoinGeckoFetchFailed(
+        err,
+        addresses.map((address) => tokenKey(chainId, address)),
+      );
+      return new Map<string, number>();
+    }
+    throw err;
+  }
+}
+
+async function fetchNativeUsdPricesOrEmpty(
+  nativeMisses: ReadonlyMap<number, string>,
+  fetchImpl: typeof fetch,
+): Promise<Map<number, number>> {
+  if (nativeMisses.size === 0) return new Map<number, number>();
+
+  const chainIds = [...nativeMisses.keys()];
+  const tokenKeys = chainIds.map((chainId) => {
+    const address = nativeMisses.get(chainId);
+    return address ? tokenKey(chainId, address) : `${chainId}:native`;
+  });
+
+  try {
+    return await fetchNativeUsdPrices(chainIds, fetchImpl, tokenKeys);
+  } catch (err) {
+    if (err instanceof OracleFetchError) {
+      warnCoinGeckoFetchFailed(err, tokenKeys);
+      return new Map<number, number>();
+    }
+    throw err;
+  }
 }
 
 function staleSec(nowMs: number, lastUpdatedAtMs: number): number {
@@ -87,13 +142,15 @@ export async function buildOracleSnapshot(
             usdPrice,
             cachedPriceLastUpdatedAt(hits, address) ?? nowMs,
             nowMs,
-            ['coingecko'],
+            ["coingecko"],
           ),
         );
       }
 
       for (const address of misses) {
-        const need = chainNeeds.find((candidate) => candidate.address === address);
+        const need = chainNeeds.find(
+          (candidate) => candidate.address === address,
+        );
         if (!need) continue;
         if (need.isNative) {
           nativeMisses.set(chainId, address);
@@ -110,12 +167,10 @@ export async function buildOracleSnapshot(
     Promise.all(
       [...erc20Misses.entries()].map(async ([chainId, addresses]) => ({
         chainId,
-        prices: await fetchUsdPrices(chainId, addresses, fetchImpl),
+        prices: await fetchUsdPricesOrEmpty(chainId, addresses, fetchImpl),
       })),
     ),
-    nativeMisses.size > 0
-      ? fetchNativeUsdPrices([...nativeMisses.keys()], fetchImpl)
-      : Promise.resolve(new Map<number, number>()),
+    fetchNativeUsdPricesOrEmpty(nativeMisses, fetchImpl),
   ]);
 
   await Promise.all(
@@ -124,7 +179,9 @@ export async function buildOracleSnapshot(
       for (const [address, usdPrice] of prices) {
         const updatedAt = priceLastUpdatedAt(prices, address) ?? nowMs;
         lastUpdated.set(address, updatedAt);
-        out.push(entry(chainId, address, usdPrice, updatedAt, nowMs, ['coingecko']));
+        out.push(
+          entry(chainId, address, usdPrice, updatedAt, nowMs, ["coingecko"]),
+        );
       }
       await store(chainId, prices, nowMs, lastUpdated);
     }),
@@ -134,9 +191,19 @@ export async function buildOracleSnapshot(
     [...nativeResults.entries()].map(async ([chainId, usdPrice]) => {
       const address = nativeMisses.get(chainId);
       if (!address) return;
-      const updatedAt = nativePriceLastUpdatedAt(nativeResults, chainId) ?? nowMs;
-      out.push(entry(chainId, address, usdPrice, updatedAt, nowMs, ['coingecko-native']));
-      await store(chainId, new Map([[address, usdPrice]]), nowMs, new Map([[address, updatedAt]]));
+      const updatedAt =
+        nativePriceLastUpdatedAt(nativeResults, chainId) ?? nowMs;
+      out.push(
+        entry(chainId, address, usdPrice, updatedAt, nowMs, [
+          "coingecko-native",
+        ]),
+      );
+      await store(
+        chainId,
+        new Map([[address, usdPrice]]),
+        nowMs,
+        new Map([[address, updatedAt]]),
+      );
     }),
   );
 
