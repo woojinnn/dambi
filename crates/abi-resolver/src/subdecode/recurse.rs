@@ -92,6 +92,15 @@ pub const MORPHO_BUNDLER_MULTICALL_SELECTOR: [u8; 4] = [0x37, 0x4f, 0x43, 0x5d];
 /// `data` (arg 3) is the executor's calldata.
 pub const ONEINCH_V5_SWAP_SELECTOR: [u8; 4] = [0x12, 0xaa, 0x3c, 0xaf];
 
+/// CoW Protocol GPv2Settlement
+/// `settle(IERC20[] tokens, uint256[] clearingPrices, GPv2Trade.Data[] trades,
+///         GPv2Interaction.Data[][3] interactions)`.
+/// `interactions` (arg 3) is a fixed-size group of three dynamic arrays
+/// (pre-trade, intra-trade, post-trade). Each entry is
+/// `(address target, uint256 value, bytes callData)` — every `callData`
+/// is calldata for its `target`.
+pub const COW_SETTLEMENT_SETTLE_SELECTOR: [u8; 4] = [0x13, 0xd7, 0x9a, 0x0b];
+
 /// One sub-call extracted from a decoded outer call — `(target, calldata)`.
 #[derive(Debug, Clone)]
 pub struct ChildCall {
@@ -116,6 +125,14 @@ pub enum RecurseRule {
     },
     /// `(address, bytes, …)[]` arg N — each tuple has a per-entry target.
     AddressBytesTuples {
+        array_arg: usize,
+        target_field: usize,
+        payload_field: usize,
+    },
+    /// `(address, …, bytes, …)[][N]` arg M — fixed-size `[N]` group of dynamic
+    /// arrays of address-bytes tuples. CoW Settlement uses `[][3]`
+    /// (pre/intra/post phases of `settle`).
+    NestedAddressBytesTuples {
         array_arg: usize,
         target_field: usize,
         payload_field: usize,
@@ -153,6 +170,11 @@ pub fn lookup_recurse_rule(selector: &[u8; 4]) -> Option<RecurseRule> {
             array_arg: 0,
             target_field: 0,
             payload_field: 1,
+        }),
+        COW_SETTLEMENT_SETTLE_SELECTOR => Some(RecurseRule::NestedAddressBytesTuples {
+            array_arg: 3,
+            target_field: 0,
+            payload_field: 2,
         }),
         _ => None,
     }
@@ -234,6 +256,41 @@ pub fn extract_children(
             }
             Some(out)
         }
+        RecurseRule::NestedAddressBytesTuples {
+            array_arg,
+            target_field,
+            payload_field,
+        } => {
+            let arg = decoded.args.get(array_arg)?;
+            let groups = match &arg.value {
+                DynSolValue::FixedArray(g) | DynSolValue::Array(g) => g,
+                _ => return None,
+            };
+            let mut out = Vec::new();
+            for group in groups {
+                let DynSolValue::Array(items) = group else {
+                    return None;
+                };
+                for item in items {
+                    let DynSolValue::Tuple(fields) = item else {
+                        return None;
+                    };
+                    let target = match fields.get(target_field)? {
+                        DynSolValue::Address(a) => *a,
+                        _ => return None,
+                    };
+                    let payload = match fields.get(payload_field)? {
+                        DynSolValue::Bytes(b) => b.clone(),
+                        _ => return None,
+                    };
+                    out.push(ChildCall {
+                        target,
+                        calldata: payload,
+                    });
+                }
+            }
+            Some(out)
+        }
     }
 }
 
@@ -302,5 +359,83 @@ mod tests {
         let decoded = fake_decoded_multicall(vec![]);
         let calls = extract_subcalls(&decoded).unwrap();
         assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn cow_settlement_selector_maps_to_nested_rule() {
+        match lookup_recurse_rule(&COW_SETTLEMENT_SETTLE_SELECTOR) {
+            Some(RecurseRule::NestedAddressBytesTuples {
+                array_arg: 3,
+                target_field: 0,
+                payload_field: 2,
+            }) => {}
+            other => panic!("unexpected rule: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_address_bytes_tuples_extracts_children_across_groups() {
+        // Build a synthetic decoded call shaped like
+        //   settle(_, _, _, interactions: (address,uint256,bytes)[][3])
+        // with one interaction in group 0, none in group 1, two in group 2.
+        let make_tuple = |target: Address, value: u64, data: Vec<u8>| -> DynSolValue {
+            DynSolValue::Tuple(vec![
+                DynSolValue::Address(target),
+                DynSolValue::Uint(U256::from(value), 256),
+                DynSolValue::Bytes(data),
+            ])
+        };
+        let t1 = Address::repeat_byte(0x11);
+        let t2 = Address::repeat_byte(0x22);
+        let t3 = Address::repeat_byte(0x33);
+        let group0 = DynSolValue::Array(vec![make_tuple(t1, 0, vec![0xaa])]);
+        let group1 = DynSolValue::Array(vec![]);
+        let group2 = DynSolValue::Array(vec![
+            make_tuple(t2, 7, vec![0xbb, 0xcc]),
+            make_tuple(t3, 0, vec![0xdd]),
+        ]);
+        let interactions = DynSolValue::FixedArray(vec![group0, group1, group2]);
+
+        let decoded = DecodedCall {
+            function_name: "settle".into(),
+            signature: "settle(address[],uint256[],...)".into(),
+            args: vec![
+                DecodedArg {
+                    name: "tokens".into(),
+                    sol_type: "address[]".into(),
+                    value: DynSolValue::Array(vec![]),
+                    components: vec![],
+                },
+                DecodedArg {
+                    name: "clearingPrices".into(),
+                    sol_type: "uint256[]".into(),
+                    value: DynSolValue::Array(vec![]),
+                    components: vec![],
+                },
+                DecodedArg {
+                    name: "trades".into(),
+                    sol_type: "tuple[]".into(),
+                    value: DynSolValue::Array(vec![]),
+                    components: vec![],
+                },
+                DecodedArg {
+                    name: "interactions".into(),
+                    sol_type: "tuple[][3]".into(),
+                    value: interactions,
+                    components: vec![],
+                },
+            ],
+        };
+
+        let rule = lookup_recurse_rule(&COW_SETTLEMENT_SETTLE_SELECTOR).unwrap();
+        let parent = Address::repeat_byte(0x99);
+        let children = extract_children(&decoded, rule, parent).unwrap();
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].target, t1);
+        assert_eq!(children[0].calldata, vec![0xaa]);
+        assert_eq!(children[1].target, t2);
+        assert_eq!(children[1].calldata, vec![0xbb, 0xcc]);
+        assert_eq!(children[2].target, t3);
+        assert_eq!(children[2].calldata, vec![0xdd]);
     }
 }

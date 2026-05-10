@@ -9528,6 +9528,48 @@
           "type": "function"
         }
       ]
+    },
+    {
+      "chain_id": 1,
+      "address": "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+      "abi": [
+        {
+          "inputs": [
+            { "name": "tokens", "type": "address[]" },
+            { "name": "clearingPrices", "type": "uint256[]" },
+            {
+              "name": "trades",
+              "type": "tuple[]",
+              "components": [
+                { "name": "sellTokenIndex", "type": "uint256" },
+                { "name": "buyTokenIndex", "type": "uint256" },
+                { "name": "receiver", "type": "address" },
+                { "name": "sellAmount", "type": "uint256" },
+                { "name": "buyAmount", "type": "uint256" },
+                { "name": "validTo", "type": "uint32" },
+                { "name": "appData", "type": "bytes32" },
+                { "name": "feeAmount", "type": "uint256" },
+                { "name": "flags", "type": "uint256" },
+                { "name": "executedAmount", "type": "uint256" },
+                { "name": "signature", "type": "bytes" }
+              ]
+            },
+            {
+              "name": "interactions",
+              "type": "tuple[][3]",
+              "components": [
+                { "name": "target", "type": "address" },
+                { "name": "value", "type": "uint256" },
+                { "name": "callData", "type": "bytes" }
+              ]
+            }
+          ],
+          "name": "settle",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        }
+      ]
     }
   ]
 }
