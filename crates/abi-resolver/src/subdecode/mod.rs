@@ -17,6 +17,7 @@
 //! `DecodeResponse` children so the structure surfaces in the UI. Unknown
 //! payloads fall back to opaque hex without further interpretation.
 
+pub mod enum_tagged;
 pub mod opcode_stream;
 pub mod protocols;
 pub mod recurse;

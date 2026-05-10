@@ -19,9 +19,14 @@ use abi_resolver::openchain::{OpenchainIndex, SignatureCandidate};
 use abi_resolver::resolver::{ResolveOutcome, Resolver, Source};
 use abi_resolver::sourcify::SourcifyIndex;
 use abi_resolver::sqlite_index::SqliteSourcifyIndex;
+use abi_resolver::subdecode::enum_tagged::{try_dispatch as enum_try_dispatch, DecodedEnum};
 use abi_resolver::subdecode::opcode_stream::OpcodeTable;
 use abi_resolver::subdecode::opcode_stream::{
     dispatch as dispatch_opcode_stream, DecodedStep, StepDecodeError,
+};
+use abi_resolver::subdecode::protocols::balancer_v2::{
+    BALANCER_V2_EXIT_KIND_STABLE, BALANCER_V2_EXIT_KIND_WEIGHTED, BALANCER_V2_JOIN_KIND,
+    EXIT_POOL_SELECTOR, JOIN_POOL_SELECTOR,
 };
 use abi_resolver::subdecode::protocols::pancake_ur::{
     is_pancake_universal_router, PANCAKE_UR_TABLE,
@@ -386,7 +391,12 @@ fn decode_recursive(
                 function_name: r.decoded.function_name,
                 signature: r.decoded.signature,
                 selector: selector_hex,
-                args: r.decoded.args.into_iter().map(arg_to_api).collect(),
+                args: r
+                    .decoded
+                    .args
+                    .into_iter()
+                    .map(|a| arg_to_api(a, Some(&selector_bytes)))
+                    .collect(),
                 children,
             }
         }
@@ -406,36 +416,60 @@ fn source_label(s: Source) -> &'static str {
     }
 }
 
-fn arg_to_api(a: DecodedArg) -> ApiArg {
+fn arg_to_api(a: DecodedArg, selector: Option<&[u8; 4]>) -> ApiArg {
     ApiArg {
-        value: format_value_with_packed(&a.value, &a.components, &a.name),
+        value: format_value_with_packed(&a.value, &a.components, &a.name, selector),
         name: a.name,
         sol_type: a.sol_type,
     }
 }
 
-/// Render a decoded value, with packed-format enrichment for known
-/// non-standard sub-formats. Currently:
+/// Render a decoded value, with sub-format enrichment for known non-standard
+/// payloads. Currently:
 ///
-/// - A `bytes` arg (or tuple field) named `path` is parsed as a V3 packed
-///   `[token20][fee3][token20]…` path and rendered as a friendly
-///   `0x… --[fee=N]--> 0x…` chain when it parses.
-///   [`format_packed_path`] returns `None` for bytes that don't satisfy the
-///   strict V3 path length constraint, so non-V3 bytes named `path` fall
-///   back to raw hex.
+/// - **packed**: a `bytes` arg (or tuple field) named `path` is parsed as a
+///   V3 packed `[token20][fee3][token20]…` path and rendered as a friendly
+///   `0x… --[fee=N]--> 0x…` chain when it parses. [`format_packed_path`]
+///   returns `None` for bytes that don't satisfy the strict V3 path length
+///   constraint, so non-V3 bytes named `path` fall back to raw hex.
+///
+/// - **enum-tagged**: a `bytes` arg named `userData` inside the Balancer V2
+///   `joinPool` / `exitPool` calls is decoded against the protocol's
+///   `JoinKind` / `ExitKind` table — pool-type-aware (`Weighted` / `Stable`)
+///   for the exit case via `try_dispatch`.
 ///
 /// Recurses into tuples and arrays so the enrichment fires regardless of
-/// nesting depth (e.g. V3 SwapRouter's `exactInput.params.path`).
+/// nesting depth.
 fn format_value_with_packed(
     value: &DynSolValue,
     components: &[Param],
     parent_name: &str,
+    selector_ctx: Option<&[u8; 4]>,
 ) -> String {
     // V3 packed path detection.
     if parent_name == "path" {
         if let DynSolValue::Bytes(bytes) = value {
             if let Some(friendly) = format_packed_path(bytes) {
                 return friendly;
+            }
+        }
+    }
+
+    // Balancer V2 userData enum-tagged decode.
+    if parent_name == "userData" {
+        if let (Some(sel), DynSolValue::Bytes(bytes)) = (selector_ctx, value) {
+            let tables: &[&_] = match *sel {
+                JOIN_POOL_SELECTOR => &[&BALANCER_V2_JOIN_KIND],
+                EXIT_POOL_SELECTOR => &[
+                    &BALANCER_V2_EXIT_KIND_WEIGHTED,
+                    &BALANCER_V2_EXIT_KIND_STABLE,
+                ],
+                _ => &[],
+            };
+            if !tables.is_empty() {
+                if let Some(decoded) = enum_try_dispatch(bytes, tables) {
+                    return format_decoded_enum(&decoded);
+                }
             }
         }
     }
@@ -449,7 +483,8 @@ fn format_value_with_packed(
                     let child = components.get(i);
                     let child_components = child.map(|c| c.components.as_slice()).unwrap_or(&[]);
                     let child_name = child.map(|c| c.name.as_str()).unwrap_or("");
-                    let formatted = format_value_with_packed(v, child_components, child_name);
+                    let formatted =
+                        format_value_with_packed(v, child_components, child_name, selector_ctx);
                     match child {
                         Some(c) if !c.name.is_empty() => format!("{}: {}", c.name, formatted),
                         _ => formatted,
@@ -464,12 +499,35 @@ fn format_value_with_packed(
             // own name as if it applied to each element.
             let inner: Vec<String> = items
                 .iter()
-                .map(|v| format_value_with_packed(v, components, ""))
+                .map(|v| format_value_with_packed(v, components, "", selector_ctx))
                 .collect();
             format!("[{}]", inner.join(", "))
         }
         // For everything else, the alloy-aware formatter is fine.
         _ => format_value_named(value, components),
+    }
+}
+
+/// Render a decoded enum-tagged payload as `KIND_NAME(field1=value1, …)`.
+/// Used by [`format_value_with_packed`] when it identifies a known userData
+/// blob (Balancer V2 join/exit kinds today).
+fn format_decoded_enum(decoded: &DecodedEnum) -> String {
+    // Skip the leading `kind` field — it's already part of the prefix.
+    let body: Vec<String> = decoded
+        .args
+        .iter()
+        .skip(1)
+        .map(|a| format!("{}={}", a.name, format_value_named(&a.value, &a.components)))
+        .collect();
+    if body.is_empty() {
+        format!("{} ({})", decoded.kind_name, decoded.table_name)
+    } else {
+        format!(
+            "{}({})  // {}",
+            decoded.kind_name,
+            body.join(", "),
+            decoded.table_name,
+        )
     }
 }
 
@@ -624,7 +682,10 @@ fn step_arg_to_api(opcode: u8, a: DecodedArg) -> ApiArg {
             }
         }
     }
-    arg_to_api(a)
+    // Opcode steps don't carry a parent function selector context — they
+    // ARE the dispatch context. Pass `None` so format_value_with_packed
+    // skips selector-keyed lookups (Balancer userData, etc.).
+    arg_to_api(a, None)
 }
 
 #[derive(Serialize)]
