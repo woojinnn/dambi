@@ -69,6 +69,9 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
+mod etherscan;
+use etherscan::EtherscanClient;
+
 const SOURCIFY_BUNDLE: &[u8] = include_bytes!("../../abi-resolver/data/sourcify.json");
 
 /// Address-agnostic selector → signature seed list used as the third resolver
@@ -152,6 +155,10 @@ fn seed_signatures() -> &'static [([u8; 4], &'static str)] {
 #[derive(Clone)]
 struct AppState {
     resolver: Arc<Resolver>,
+    /// Optional Etherscan v2 fallback. Populated from `ETHERSCAN_API_KEY`
+    /// at startup; `None` when unset, in which case the fourth resolver
+    /// tier is silently skipped.
+    etherscan: Option<Arc<EtherscanClient>>,
     event_tx: broadcast::Sender<String>,
 }
 
@@ -329,129 +336,167 @@ async fn decode(State(state): State<AppState>, Json(req): Json<DecodeRequest>) -
 
     let response = decode_recursive(
         state.resolver.as_ref(),
+        state.etherscan.as_deref(),
         req.chain_id,
         &address,
         &calldata,
         0,
-    );
+    )
+    .await;
     Json(response).into_response()
 }
 
 /// Resolve `calldata` against the parent target, then if the function is a
 /// recognised self-call multicall wrapper, recurse on each `bytes[]` entry up
 /// to [`MAX_SUBDECODE_DEPTH`].
-fn decode_recursive(
-    resolver: &Resolver,
+///
+/// Returns a boxed future so the function can be called recursively from
+/// itself and from [`step_to_response`] without `async fn` recursion errors.
+fn decode_recursive<'a>(
+    resolver: &'a Resolver,
+    etherscan: Option<&'a EtherscanClient>,
     chain_id: u64,
-    target: &Address,
-    calldata: &[u8],
+    target: &'a Address,
+    calldata: &'a [u8],
     depth: u32,
-) -> DecodeResponse {
-    let selector_hex = format!("0x{}", hex::encode(&calldata[..4.min(calldata.len())]));
-    if calldata.len() < 4 {
-        return DecodeResponse::NotFound {
-            selector: selector_hex,
-            message: "calldata shorter than 4-byte selector",
-            children: Vec::new(),
-        };
-    }
-
-    let outcome = resolver.resolve(chain_id, target, calldata);
-    match outcome {
-        ResolveOutcome::Resolved(r) => {
-            let mut selector_bytes = [0u8; 4];
-            selector_bytes.copy_from_slice(&calldata[..4]);
-            let children = if depth >= MAX_SUBDECODE_DEPTH {
-                Vec::new()
-            } else if let Some(rule) = lookup_recurse_rule(&selector_bytes) {
-                // Recursive — generalized recursion (self-multicall, named-target,
-                // address-bytes tuples).
-                extract_children(&r.decoded, rule, *target)
-                    .map(|children| {
-                        children
-                            .into_iter()
-                            .take(MAX_SUBDECODE_CHILDREN)
-                            .map(|c| {
-                                decode_recursive(
-                                    resolver,
-                                    chain_id,
-                                    &c.target,
-                                    &c.calldata,
-                                    depth + 1,
-                                )
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else if let Some((ur_kind, table)) =
-                pick_ur_opcode_table(chain_id, target, &selector_bytes)
-            {
-                // Opcode dispatch —  each opcode against the matching UR table.
-                // Role-gated: Uniswap UR vs Pancake UR vs (unknown UR fork
-                // → no dispatch). Avoids silent misdecode where two routers
-                // share the `execute(...)` selector but disagree on opcode
-                // semantics.
-                extract_commands_and_inputs(&r.decoded)
-                    .map(|(commands, inputs)| {
-                        let steps = dispatch_opcode_stream(&commands, &inputs, table);
-                        steps
-                            .into_iter()
-                            .take(MAX_SUBDECODE_CHILDREN)
-                            .map(|step| {
-                                step_to_response(step, depth + 1, resolver, chain_id, ur_kind)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else if is_v4_position_manager_modify_liquidities(&selector_bytes)
-                && v4_position_manager_address(chain_id).as_ref() == Some(target)
-            {
-                // V4 PositionManager.modifyLiquidities(...) — outer entrypoint
-                // whose unlockData is the same `(bytes actions, bytes[] params)`
-                // pair that V4_SWAP carries. Role-gated by the chain's V4 PM
-                // address allowlist so we only apply V4_ROUTER_TABLE to known
-                // V4 PM deployments.
-                extract_modify_liquidities_actions_and_params(&r.decoded)
-                    .map(|(actions, params)| {
-                        let steps = dispatch_opcode_stream(&actions, &params, &V4_ROUTER_TABLE);
-                        steps
-                            .into_iter()
-                            .take(MAX_SUBDECODE_CHILDREN)
-                            .map(|step| {
-                                step_to_response(
-                                    step,
-                                    depth + 1,
-                                    resolver,
-                                    chain_id,
-                                    UrKind::Uniswap,
-                                )
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            DecodeResponse::Resolved {
-                source: source_label(r.source),
-                function_name: r.decoded.function_name,
-                signature: r.decoded.signature,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = DecodeResponse> + Send + 'a>> {
+    Box::pin(async move {
+        let selector_hex = format!("0x{}", hex::encode(&calldata[..4.min(calldata.len())]));
+        if calldata.len() < 4 {
+            return DecodeResponse::NotFound {
                 selector: selector_hex,
-                args: r
-                    .decoded
-                    .args
-                    .into_iter()
-                    .map(|a| arg_to_api(a, Some(&selector_bytes)))
-                    .collect(),
-                children,
-            }
+                message: "calldata shorter than 4-byte selector",
+                children: Vec::new(),
+            };
         }
-        ResolveOutcome::NotFound => DecodeResponse::NotFound {
+
+        // Try local tiers first; on a miss, fall back to Etherscan when
+        // the client is configured. The Etherscan path returns just a
+        // `DecodedCall`, so we synthesize a `Resolved` with a synthetic
+        // source label for the response shape.
+        let resolved = match resolver.resolve(chain_id, target, calldata) {
+            ResolveOutcome::Resolved(r) => Some((source_label(r.source), r.decoded)),
+            ResolveOutcome::NotFound => {
+                if let Some(client) = etherscan {
+                    client
+                        .try_resolve(chain_id, target, calldata)
+                        .await
+                        .map(|d| ("etherscan", d))
+                } else {
+                    None
+                }
+            }
+        };
+
+        let Some((source, decoded)) = resolved else {
+            return DecodeResponse::NotFound {
+                selector: selector_hex,
+                message: "no signature matched in any tier",
+                children: Vec::new(),
+            };
+        };
+
+        let mut selector_bytes = [0u8; 4];
+        selector_bytes.copy_from_slice(&calldata[..4]);
+        let children = if depth >= MAX_SUBDECODE_DEPTH {
+            Vec::new()
+        } else if let Some(rule) = lookup_recurse_rule(&selector_bytes) {
+            // Recursive — generalized recursion (self-multicall, named-target,
+            // address-bytes tuples, fixed-array-of-tuples).
+            match extract_children(&decoded, rule, *target) {
+                Some(children) => {
+                    let mut out = Vec::with_capacity(children.len().min(MAX_SUBDECODE_CHILDREN));
+                    for c in children.into_iter().take(MAX_SUBDECODE_CHILDREN) {
+                        out.push(
+                            decode_recursive(
+                                resolver,
+                                etherscan,
+                                chain_id,
+                                &c.target,
+                                &c.calldata,
+                                depth + 1,
+                            )
+                            .await,
+                        );
+                    }
+                    out
+                }
+                None => Vec::new(),
+            }
+        } else if let Some((ur_kind, table)) =
+            pick_ur_opcode_table(chain_id, target, &selector_bytes)
+        {
+            // Opcode dispatch —  each opcode against the matching UR table.
+            // Role-gated: Uniswap UR vs Pancake UR vs (unknown UR fork
+            // → no dispatch). Avoids silent misdecode where two routers
+            // share the `execute(...)` selector but disagree on opcode
+            // semantics.
+            match extract_commands_and_inputs(&decoded) {
+                Some((commands, inputs)) => {
+                    let steps = dispatch_opcode_stream(&commands, &inputs, table);
+                    let mut out = Vec::with_capacity(steps.len().min(MAX_SUBDECODE_CHILDREN));
+                    for step in steps.into_iter().take(MAX_SUBDECODE_CHILDREN) {
+                        out.push(
+                            step_to_response(
+                                step,
+                                depth + 1,
+                                resolver,
+                                etherscan,
+                                chain_id,
+                                ur_kind,
+                            )
+                            .await,
+                        );
+                    }
+                    out
+                }
+                None => Vec::new(),
+            }
+        } else if is_v4_position_manager_modify_liquidities(&selector_bytes)
+            && v4_position_manager_address(chain_id).as_ref() == Some(target)
+        {
+            // V4 PositionManager.modifyLiquidities(...) — outer entrypoint
+            // whose unlockData is the same `(bytes actions, bytes[] params)`
+            // pair that V4_SWAP carries. Role-gated by the chain's V4 PM
+            // address allowlist so we only apply V4_ROUTER_TABLE to known
+            // V4 PM deployments.
+            match extract_modify_liquidities_actions_and_params(&decoded) {
+                Some((actions, params)) => {
+                    let steps = dispatch_opcode_stream(&actions, &params, &V4_ROUTER_TABLE);
+                    let mut out = Vec::with_capacity(steps.len().min(MAX_SUBDECODE_CHILDREN));
+                    for step in steps.into_iter().take(MAX_SUBDECODE_CHILDREN) {
+                        out.push(
+                            step_to_response(
+                                step,
+                                depth + 1,
+                                resolver,
+                                etherscan,
+                                chain_id,
+                                UrKind::Uniswap,
+                            )
+                            .await,
+                        );
+                    }
+                    out
+                }
+                None => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        DecodeResponse::Resolved {
+            source,
+            function_name: decoded.function_name,
+            signature: decoded.signature,
             selector: selector_hex,
-            message: "no signature matched in any tier",
-            children: Vec::new(),
-        },
-    }
+            args: decoded
+                .args
+                .into_iter()
+                .map(|a| arg_to_api(a, Some(&selector_bytes)))
+                .collect(),
+            children,
+        }
+    })
 }
 
 fn source_label(s: Source) -> &'static str {
@@ -596,120 +641,135 @@ fn format_decoded_enum(decoded: &DecodedEnum) -> String {
 ///   so the call is decoded against the NPM ABI.
 /// - `V4_POSITION_MANAGER_CALL` (UR opcode `0x14`) — same as above against
 ///   the V4 PositionManager.
-fn step_to_response(
+fn step_to_response<'a>(
     step: DecodedStep,
     depth: u32,
-    resolver: &Resolver,
+    resolver: &'a Resolver,
+    etherscan: Option<&'a EtherscanClient>,
     chain_id: u64,
     ur_kind: UrKind,
-) -> DecodeResponse {
-    let selector = format!("0x{:02x}", step.opcode);
-    let function_name = if step.allow_revert {
-        format!("{} (allowRevert)", step.name)
-    } else {
-        step.name.to_string()
-    };
-
-    // Compute nested children before consuming `step.args` below.
-    let nested_children = if depth >= MAX_SUBDECODE_DEPTH {
-        Vec::new()
-    } else if step.opcode == 0x10 {
-        // Both UR families dispatch on opcode 0x10 but to different action
-        // tables: Uniswap UR's V4_SWAP → V4_ROUTER_TABLE; Pancake UR's
-        // INFI_SWAP → PANCAKE_INFI_TABLE.
-        let (extracted, table) = match ur_kind {
-            UrKind::Uniswap => (extract_v4_actions_and_params(&step), &V4_ROUTER_TABLE),
-            UrKind::Pancake => (extract_infi_actions_and_params(&step), &PANCAKE_INFI_TABLE),
-        };
-        extracted
-            .map(|(actions, params)| {
-                let sub_steps = dispatch_opcode_stream(&actions, &params, table);
-                sub_steps
-                    .into_iter()
-                    .take(MAX_SUBDECODE_CHILDREN)
-                    .map(|s| step_to_response(s, depth + 1, resolver, chain_id, ur_kind))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    } else if step.opcode == 0x21 {
-        // EXECUTE_SUB_PLAN — same `(bytes commands, bytes[] inputs)` shape as
-        // the outer execute(...) entrypoint, dispatched recursively against
-        // the *same* UR table family the parent step came from.
-        let table = match ur_kind {
-            UrKind::Uniswap => &UNISWAP_UR_TABLE,
-            UrKind::Pancake => &PANCAKE_UR_TABLE,
-        };
-        extract_v4_actions_and_params(&step)
-            .map(|(commands, inputs)| {
-                let sub_steps = dispatch_opcode_stream(&commands, &inputs, table);
-                sub_steps
-                    .into_iter()
-                    .take(MAX_SUBDECODE_CHILDREN)
-                    .map(|s| step_to_response(s, depth + 1, resolver, chain_id, ur_kind))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    } else if matches!(step.opcode, 0x11 | 0x12 | 0x14) && !step.raw_input.is_empty() {
-        // V3 / V4 PositionManager call — input is full calldata that the UR
-        // contract dispatches via `address(NPM/PM).call(inputs)`. Recurse
-        // against the chain-specific PositionManager address so the resolver
-        // matches the NPM/PM ABI rather than UR's.
-        let pm_addr = if step.opcode == 0x14 {
-            v4_position_manager_address(chain_id)
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = DecodeResponse> + Send + 'a>> {
+    Box::pin(async move {
+        let selector = format!("0x{:02x}", step.opcode);
+        let function_name = if step.allow_revert {
+            format!("{} (allowRevert)", step.name)
         } else {
-            v3_position_manager_address(chain_id)
+            step.name.to_string()
         };
-        match pm_addr {
-            Some(addr) => vec![decode_recursive(
-                resolver,
-                chain_id,
-                &addr,
-                &step.raw_input,
-                depth + 1,
-            )],
-            None => Vec::new(),
-        }
-    } else {
-        Vec::new()
-    };
 
-    let (signature, args) = match (step.args, step.error) {
-        (Some(decoded_args), _) => (
-            format!("{}(...)", step.name),
-            decoded_args
-                .into_iter()
-                .map(|a| step_arg_to_api(step.opcode, a))
-                .collect(),
-        ),
-        (None, Some(StepDecodeError::UnknownOpcode)) => (
-            format!("UNKNOWN(raw 0x{} bytes)", hex::encode(&step.raw_input)),
-            vec![raw_input_arg(&step.raw_input)],
-        ),
-        (None, Some(StepDecodeError::NoSchema)) => (
-            format!("{}(... schema TBD)", step.name),
-            vec![raw_input_arg(&step.raw_input)],
-        ),
-        (None, Some(StepDecodeError::AbiDecode(msg))) => (
-            format!("{}(... ABI decode failed: {msg})", step.name),
-            vec![raw_input_arg(&step.raw_input)],
-        ),
-        (None, Some(StepDecodeError::BadSignature(msg))) => (
-            format!("{}(bad table signature: {msg})", step.name),
-            vec![raw_input_arg(&step.raw_input)],
-        ),
-        (None, None) => (
-            format!("{}(...)", step.name),
-            vec![raw_input_arg(&step.raw_input)],
-        ),
-    };
-    DecodeResponse::Resolved {
-        source: "ur_command",
-        function_name,
-        signature,
-        selector,
-        args,
-        children: nested_children,
-    }
+        // Compute nested children before consuming `step.args` below.
+        let nested_children = if depth >= MAX_SUBDECODE_DEPTH {
+            Vec::new()
+        } else if step.opcode == 0x10 {
+            // Both UR families dispatch on opcode 0x10 but to different action
+            // tables: Uniswap UR's V4_SWAP → V4_ROUTER_TABLE; Pancake UR's
+            // INFI_SWAP → PANCAKE_INFI_TABLE.
+            let (extracted, table) = match ur_kind {
+                UrKind::Uniswap => (extract_v4_actions_and_params(&step), &V4_ROUTER_TABLE),
+                UrKind::Pancake => (extract_infi_actions_and_params(&step), &PANCAKE_INFI_TABLE),
+            };
+            match extracted {
+                Some((actions, params)) => {
+                    let sub_steps = dispatch_opcode_stream(&actions, &params, table);
+                    let mut out = Vec::with_capacity(sub_steps.len().min(MAX_SUBDECODE_CHILDREN));
+                    for s in sub_steps.into_iter().take(MAX_SUBDECODE_CHILDREN) {
+                        out.push(
+                            step_to_response(s, depth + 1, resolver, etherscan, chain_id, ur_kind)
+                                .await,
+                        );
+                    }
+                    out
+                }
+                None => Vec::new(),
+            }
+        } else if step.opcode == 0x21 {
+            // EXECUTE_SUB_PLAN — same `(bytes commands, bytes[] inputs)` shape as
+            // the outer execute(...) entrypoint, dispatched recursively against
+            // the *same* UR table family the parent step came from.
+            let table = match ur_kind {
+                UrKind::Uniswap => &UNISWAP_UR_TABLE,
+                UrKind::Pancake => &PANCAKE_UR_TABLE,
+            };
+            match extract_v4_actions_and_params(&step) {
+                Some((commands, inputs)) => {
+                    let sub_steps = dispatch_opcode_stream(&commands, &inputs, table);
+                    let mut out = Vec::with_capacity(sub_steps.len().min(MAX_SUBDECODE_CHILDREN));
+                    for s in sub_steps.into_iter().take(MAX_SUBDECODE_CHILDREN) {
+                        out.push(
+                            step_to_response(s, depth + 1, resolver, etherscan, chain_id, ur_kind)
+                                .await,
+                        );
+                    }
+                    out
+                }
+                None => Vec::new(),
+            }
+        } else if matches!(step.opcode, 0x11 | 0x12 | 0x14) && !step.raw_input.is_empty() {
+            // V3 / V4 PositionManager call — input is full calldata that the UR
+            // contract dispatches via `address(NPM/PM).call(inputs)`. Recurse
+            // against the chain-specific PositionManager address so the resolver
+            // matches the NPM/PM ABI rather than UR's.
+            let pm_addr = if step.opcode == 0x14 {
+                v4_position_manager_address(chain_id)
+            } else {
+                v3_position_manager_address(chain_id)
+            };
+            match pm_addr {
+                Some(addr) => vec![
+                    decode_recursive(
+                        resolver,
+                        etherscan,
+                        chain_id,
+                        &addr,
+                        &step.raw_input,
+                        depth + 1,
+                    )
+                    .await,
+                ],
+                None => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+
+        let (signature, args) = match (step.args, step.error) {
+            (Some(decoded_args), _) => (
+                format!("{}(...)", step.name),
+                decoded_args
+                    .into_iter()
+                    .map(|a| step_arg_to_api(step.opcode, a))
+                    .collect(),
+            ),
+            (None, Some(StepDecodeError::UnknownOpcode)) => (
+                format!("UNKNOWN(raw 0x{} bytes)", hex::encode(&step.raw_input)),
+                vec![raw_input_arg(&step.raw_input)],
+            ),
+            (None, Some(StepDecodeError::NoSchema)) => (
+                format!("{}(... schema TBD)", step.name),
+                vec![raw_input_arg(&step.raw_input)],
+            ),
+            (None, Some(StepDecodeError::AbiDecode(msg))) => (
+                format!("{}(... ABI decode failed: {msg})", step.name),
+                vec![raw_input_arg(&step.raw_input)],
+            ),
+            (None, Some(StepDecodeError::BadSignature(msg))) => (
+                format!("{}(bad table signature: {msg})", step.name),
+                vec![raw_input_arg(&step.raw_input)],
+            ),
+            (None, None) => (
+                format!("{}(...)", step.name),
+                vec![raw_input_arg(&step.raw_input)],
+            ),
+        };
+        DecodeResponse::Resolved {
+            source: "ur_command",
+            function_name,
+            signature,
+            selector,
+            args,
+            children: nested_children,
+        }
+    })
 }
 
 fn raw_input_arg(input: &[u8]) -> ApiArg {
@@ -804,8 +864,17 @@ async fn main() {
         .init();
 
     let (event_tx, _) = broadcast::channel::<String>(64);
+    let etherscan = EtherscanClient::from_env().map(Arc::new);
+    if etherscan.is_some() {
+        tracing::info!("Etherscan v2 fallback enabled (ETHERSCAN_API_KEY present)");
+    } else {
+        tracing::info!(
+            "ETHERSCAN_API_KEY not set — Etherscan fallback disabled (decoder will only use local tiers)"
+        );
+    }
     let state = AppState {
         resolver: Arc::new(build_resolver()),
+        etherscan,
         event_tx,
     };
 
