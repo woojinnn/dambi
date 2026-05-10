@@ -37,7 +37,9 @@ use abi_resolver::subdecode::protocols::universal_router::{
     v3_position_manager_address, v4_position_manager_address, UNISWAP_UR_TABLE,
 };
 use abi_resolver::subdecode::protocols::v4_router::{
-    extract_actions_and_params as extract_v4_actions_and_params, V4_ROUTER_TABLE,
+    extract_actions_and_params as extract_v4_actions_and_params,
+    extract_modify_liquidities_actions_and_params, is_v4_position_manager_modify_liquidities,
+    V4_ROUTER_TABLE,
 };
 use abi_resolver::subdecode::recurse::{extract_children, lookup_recurse_rule};
 use alloy_dyn_abi::DynSolValue;
@@ -376,6 +378,24 @@ fn decode_recursive(
                 extract_commands_and_inputs(&r.decoded)
                     .map(|(commands, inputs)| {
                         let steps = dispatch_opcode_stream(&commands, &inputs, table);
+                        steps
+                            .into_iter()
+                            .take(MAX_SUBDECODE_CHILDREN)
+                            .map(|step| step_to_response(step, depth + 1, resolver, chain_id))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else if is_v4_position_manager_modify_liquidities(&selector_bytes)
+                && v4_position_manager_address(chain_id).as_ref() == Some(target)
+            {
+                // V4 PositionManager.modifyLiquidities(...) — outer entrypoint
+                // whose unlockData is the same `(bytes actions, bytes[] params)`
+                // pair that V4_SWAP carries. Role-gated by the chain's V4 PM
+                // address allowlist so we only apply V4_ROUTER_TABLE to known
+                // V4 PM deployments.
+                extract_modify_liquidities_actions_and_params(&r.decoded)
+                    .map(|(actions, params)| {
+                        let steps = dispatch_opcode_stream(&actions, &params, &V4_ROUTER_TABLE);
                         steps
                             .into_iter()
                             .take(MAX_SUBDECODE_CHILDREN)

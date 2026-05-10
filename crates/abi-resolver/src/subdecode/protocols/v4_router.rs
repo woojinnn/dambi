@@ -108,6 +108,87 @@ const SWAP_EXACT_OUT_JSON: &str = r#"[{
     ]
 }]"#;
 
+// ---------------------------------------------------------------------------
+// PositionManager liquidity actions (0x00–0x05). Source:
+// `Uniswap/v4-periphery @ main` → `src/PositionManager.sol::_handleAction`.
+// Each `params` blob is `abi.encode(...)` of the listed flat fields (NOT a
+// wrapped single-tuple-arg — `decodeModifyLiquidityParams` / `decodeMintParams`
+// / `decodeBurnParams` read each field at fixed offsets, matching the flat
+// encoding shape).
+// ---------------------------------------------------------------------------
+
+/// `INCREASE_LIQUIDITY` / `DECREASE_LIQUIDITY` — both use the same shape;
+/// for `DECREASE_LIQUIDITY` the `amount*Max` fields are interpreted as
+/// `amount*Min` slippage floors.
+const INCREASE_LIQUIDITY_JSON: &str = r#"[
+    { "name": "tokenId",     "type": "uint256" },
+    { "name": "liquidity",   "type": "uint256" },
+    { "name": "amount0Max",  "type": "uint128" },
+    { "name": "amount1Max",  "type": "uint128" },
+    { "name": "hookData",    "type": "bytes" }
+]"#;
+
+const DECREASE_LIQUIDITY_JSON: &str = r#"[
+    { "name": "tokenId",     "type": "uint256" },
+    { "name": "liquidity",   "type": "uint256" },
+    { "name": "amount0Min",  "type": "uint128" },
+    { "name": "amount1Min",  "type": "uint128" },
+    { "name": "hookData",    "type": "bytes" }
+]"#;
+
+/// `MINT_POSITION` — full pool key + tick range + slippage maxima + owner +
+/// hookData.
+const MINT_POSITION_JSON: &str = r#"[
+    { "name": "poolKey", "type": "tuple", "components": [
+        { "name": "currency0",   "type": "address" },
+        { "name": "currency1",   "type": "address" },
+        { "name": "fee",         "type": "uint24" },
+        { "name": "tickSpacing", "type": "int24" },
+        { "name": "hooks",       "type": "address" }
+    ]},
+    { "name": "tickLower",  "type": "int24" },
+    { "name": "tickUpper",  "type": "int24" },
+    { "name": "liquidity",  "type": "uint256" },
+    { "name": "amount0Max", "type": "uint128" },
+    { "name": "amount1Max", "type": "uint128" },
+    { "name": "owner",      "type": "address" },
+    { "name": "hookData",   "type": "bytes" }
+]"#;
+
+/// `BURN_POSITION`.
+const BURN_POSITION_JSON: &str = r#"[
+    { "name": "tokenId",    "type": "uint256" },
+    { "name": "amount0Min", "type": "uint128" },
+    { "name": "amount1Min", "type": "uint128" },
+    { "name": "hookData",   "type": "bytes" }
+]"#;
+
+/// `INCREASE_LIQUIDITY_FROM_DELTAS` (DEPRECATED upstream — kept for legacy
+/// calldata that still appears on-chain).
+const INCREASE_LIQUIDITY_FROM_DELTAS_JSON: &str = r#"[
+    { "name": "tokenId",    "type": "uint256" },
+    { "name": "amount0Max", "type": "uint128" },
+    { "name": "amount1Max", "type": "uint128" },
+    { "name": "hookData",   "type": "bytes" }
+]"#;
+
+/// `MINT_POSITION_FROM_DELTAS` (DEPRECATED upstream).
+const MINT_POSITION_FROM_DELTAS_JSON: &str = r#"[
+    { "name": "poolKey", "type": "tuple", "components": [
+        { "name": "currency0",   "type": "address" },
+        { "name": "currency1",   "type": "address" },
+        { "name": "fee",         "type": "uint24" },
+        { "name": "tickSpacing", "type": "int24" },
+        { "name": "hooks",       "type": "address" }
+    ]},
+    { "name": "tickLower",  "type": "int24" },
+    { "name": "tickUpper",  "type": "int24" },
+    { "name": "amount0Max", "type": "uint128" },
+    { "name": "amount1Max", "type": "uint128" },
+    { "name": "owner",      "type": "address" },
+    { "name": "hookData",   "type": "bytes" }
+]"#;
+
 /// V4 routers/PositionManager use the full byte for the opcode — there is no
 /// `allowRevert` flag like UR's `0x80` bit. We mirror UR's table struct shape
 /// by setting `mask = 0xff` and `allow_revert_bit = 0`.
@@ -122,45 +203,43 @@ pub static V4_ROUTER_TABLE: OpcodeTable = OpcodeTable {
 };
 
 const ENTRIES: &[OpcodeEntry] = &[
-    // ---- liquidity actions (PositionManager only — kept label-only) ----
+    // ---- liquidity actions (PositionManager only — schemas verified against
+    // `Uniswap/v4-periphery @ main` PositionManager._handleAction) ----
     OpcodeEntry {
         opcode: 0x00,
         name: "INCREASE_LIQUIDITY",
-        // PositionManager schema: (uint256 tokenId, uint256 liquidity,
-        // uint128 amount0Max, uint128 amount1Max, bytes hookData). Wired up
-        // when V4_POSITION_MANAGER_CALL recursion lands.
         input_signatures: &[],
-        input_json_abi: None,
+        input_json_abi: Some(INCREASE_LIQUIDITY_JSON),
     },
     OpcodeEntry {
         opcode: 0x01,
         name: "DECREASE_LIQUIDITY",
         input_signatures: &[],
-        input_json_abi: None,
+        input_json_abi: Some(DECREASE_LIQUIDITY_JSON),
     },
     OpcodeEntry {
         opcode: 0x02,
         name: "MINT_POSITION",
         input_signatures: &[],
-        input_json_abi: None,
+        input_json_abi: Some(MINT_POSITION_JSON),
     },
     OpcodeEntry {
         opcode: 0x03,
         name: "BURN_POSITION",
         input_signatures: &[],
-        input_json_abi: None,
+        input_json_abi: Some(BURN_POSITION_JSON),
     },
     OpcodeEntry {
         opcode: 0x04,
         name: "INCREASE_LIQUIDITY_FROM_DELTAS",
         input_signatures: &[],
-        input_json_abi: None,
+        input_json_abi: Some(INCREASE_LIQUIDITY_FROM_DELTAS_JSON),
     },
     OpcodeEntry {
         opcode: 0x05,
         name: "MINT_POSITION_FROM_DELTAS",
         input_signatures: &[],
-        input_json_abi: None,
+        input_json_abi: Some(MINT_POSITION_FROM_DELTAS_JSON),
     },
     // ---- swapping (V4Router) ----
     // V4Router decodes each swap action's `params` via
@@ -298,6 +377,88 @@ const ENTRIES: &[OpcodeEntry] = &[
         input_json_abi: None,
     },
 ];
+
+/// `PositionManager.modifyLiquidities(bytes,uint256)` selector — when
+/// `unlockData = (bytes actions, bytes[] params)` is the outer entrypoint
+/// (V4 PM called directly, not through UR's V4_SWAP).
+pub const MODIFY_LIQUIDITIES_SELECTOR: [u8; 4] = [0xdd, 0x46, 0x50, 0x8f];
+
+/// `PositionManager.modifyLiquiditiesWithoutUnlock(bytes,bytes[])` — same
+/// dispatch as above but the unlock state is already held by the caller.
+pub const MODIFY_LIQUIDITIES_WITHOUT_UNLOCK_SELECTOR: [u8; 4] = [0x4a, 0xfe, 0x39, 0x3c];
+
+/// True when `selector` matches one of the V4 PositionManager entrypoints
+/// whose payload is a (`bytes` actions stream, `bytes[]` per-action params)
+/// pair driven by the same [`V4_ROUTER_TABLE`].
+#[must_use]
+pub fn is_v4_position_manager_modify_liquidities(selector: &[u8; 4]) -> bool {
+    matches!(
+        *selector,
+        MODIFY_LIQUIDITIES_SELECTOR | MODIFY_LIQUIDITIES_WITHOUT_UNLOCK_SELECTOR
+    )
+}
+
+/// Pull the inner `(bytes actions, bytes[] params)` pair out of a decoded
+/// `modifyLiquidities` / `modifyLiquiditiesWithoutUnlock` outer call.
+///
+/// `modifyLiquidities` packs both into a single `bytes unlockData` arg —
+/// `unlockData = abi.encode(actions, params)` — while
+/// `modifyLiquiditiesWithoutUnlock` exposes the pair as two flat args.
+/// Both shapes are supported here.
+#[must_use]
+pub fn extract_modify_liquidities_actions_and_params(
+    decoded: &crate::decode::DecodedCall,
+) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
+    if decoded.args.is_empty() {
+        return None;
+    }
+    // modifyLiquiditiesWithoutUnlock(bytes actions, bytes[] params)
+    if decoded.args.len() >= 2 {
+        if let (DynSolValue::Bytes(actions), DynSolValue::Array(items)) =
+            (&decoded.args[0].value, &decoded.args[1].value)
+        {
+            let mut params = Vec::with_capacity(items.len());
+            let mut all_bytes = true;
+            for v in items {
+                match v {
+                    DynSolValue::Bytes(b) => params.push(b.clone()),
+                    _ => {
+                        all_bytes = false;
+                        break;
+                    }
+                }
+            }
+            if all_bytes {
+                return Some((actions.clone(), params));
+            }
+        }
+    }
+    // modifyLiquidities(bytes unlockData, uint256 deadline)
+    let DynSolValue::Bytes(unlock_data) = &decoded.args[0].value else {
+        return None;
+    };
+    // unlock_data = abi.encode(bytes actions, bytes[] params)
+    let function = alloy_json_abi::Function::parse("step(bytes,bytes[])").ok()?;
+    use alloy_dyn_abi::JsonAbiExt;
+    let values = function.abi_decode_input(unlock_data, true).ok()?;
+    if values.len() < 2 {
+        return None;
+    }
+    let DynSolValue::Bytes(actions) = &values[0] else {
+        return None;
+    };
+    let DynSolValue::Array(items) = &values[1] else {
+        return None;
+    };
+    let mut params = Vec::with_capacity(items.len());
+    for v in items {
+        let DynSolValue::Bytes(b) = v else {
+            return None;
+        };
+        params.push(b.clone());
+    }
+    Some((actions.clone(), params))
+}
 
 /// Pull the inner `(bytes actions, bytes[] params)` pair out of a Universal
 /// Router `V4_SWAP` step.
