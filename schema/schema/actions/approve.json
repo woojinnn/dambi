@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema_v101/actions/approve.json",
+  "title": "ApproveAction",
+  "description": "action=approve. ERC-20/721/1155 approve, Permit2 approval 모두 포함. 거의 모든 DEX/Lending/RWA/LST action 의 prerequisite — 정책상 가장 위험한 action 중 하나 (unlimited approval, unknown spender). 보통 category=misc 로 라벨링되지만 강제 아님 — protocol 맥락에 따라 다른 category 가능.",
+
+  "type": "object",
+  "properties": {
+    "_kind": { "const": "approve" },
+
+    "token": {
+      "$ref": "../common/_common.json#/$defs/AssetRef",
+      "description": "approval 대상 토큰. ERC-20/721/1155."
+    },
+
+    "spender": {
+      "$ref": "../common/_common.json#/$defs/Address",
+      "description": "approval 받는 주소. 정책 'whitelisted spender 만 허용' 의 핵심 분기 — 잘 알려진 router 외 차단."
+    },
+
+    "spenderLabel": {
+      "type": "string",
+      "description": "host 보강: spender 의 알려진 라벨 (예: 'Uniswap V3 SwapRouter02', 'Permit2 canonical'). 미식별 spender 는 정책상 block 신호."
+    },
+
+    "amount": {
+      "$ref": "../common/_common.json#/$defs/AmountConstraint",
+      "description": "approve 양. kind=unlimited 면 uint256.max — 정책 'no unlimited approval' 핵심 분기."
+    },
+
+    "approvalKind": {
+      "type": "string",
+      "enum": ["erc20", "erc20_increase", "erc20_decrease", "erc721", "erc1155", "permit2"],
+      "description": "approve 메소드 종류. erc20=기본 approve, erc20_increase/decrease=OZ 의 안전 변형, erc721=NFT, erc1155=multi-token, permit2=Uniswap Permit2."
+    }, 
+
+    "currentAllowance": {
+      "$ref": "../common/_common.json#/$defs/DecimalString",
+      "description": "host:onchain 보강: 현재 allowance(token, owner=root.from, spender) 값. 정책 'increase 폭 < 10%' 같은 분기."
+    },
+
+    "validity": {
+      "$ref": "../common/_common.json#/$defs/Validity",
+      "description": "approve 의 유효기간 — Permit2 한정. source='grant-expiration' (Permit2 PermitDetails.expiration, uint48). 일반 ERC-20/721/1155 approve 는 만료 개념 없음 — omit. 정책 'expiresInSeconds > 31536000 차단' (1년 초과 차단) 분기."
+    }
+  },
+
+  "required": ["_kind", "token", "spender", "amount", "approvalKind"]
+}

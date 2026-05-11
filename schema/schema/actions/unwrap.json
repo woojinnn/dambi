@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema_v101/actions/unwrap.json",
+  "title": "UnwrapAction",
+  "description": "action=unwrap. wrapped (WETH 등) → native asset (ETH 등) 변환. WETH9.withdraw() / V3 unwrapWETH9 / V4 Router UNWRAP opcode / UR UNWRAP_WETH 등. 보통 category=misc 로 라벨링되지만 강제 아님.",
+
+  "type": "object",
+  "properties": {
+    "_kind": { "const": "unwrap" },
+
+    "wrappedAsset": {
+      "$ref": "../common/_common.json#/$defs/AssetRef",
+      "description": "소각될 wrapped ERC20. kind=erc20."
+    },
+
+    "nativeAsset": {
+      "$ref": "../common/_common.json#/$defs/AssetRef",
+      "description": "수령할 native asset. kind=native."
+    },
+
+    "amount": {
+      "$ref": "../common/_common.json#/$defs/AmountConstraint",
+      "description": "unwrap 양. UR UNWRAP_WETH 는 amountMin (kind=min — 최소 보장), WETH9.withdraw 는 정확한 양 (kind=exact)."
+    },
+
+    "recipient": {
+      "$ref": "../common/_common.json#/$defs/Address",
+      "description": "native asset 를 받을 주소. root.from 과 다르면 '제3자에게 ETH 송금' — 정책 분기 핵심 (phishing 패턴)."
+    }
+  },
+
+  "required": ["_kind", "wrappedAsset", "nativeAsset", "amount"]
+}

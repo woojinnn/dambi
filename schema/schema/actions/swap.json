@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema_v101/actions/swap.json",
+  "title": "SwapAction",
+  "description": "action=swap. tokenIn → tokenOut 의 1회 교환. action 은 category-agnostic — DEX (Uniswap/Curve/Balancer/...) 외에도 Liquid Staking (Lido stETH↔wstETH), RWA (LBTC↔WBTC minting), Lending (일부 lending protocol 의 내부 swap routing) 등 다양한 category 에서 발생. category 분기는 root.actions[].category 에서.",
+
+  "type": "object",
+  "properties": {
+    "_kind": { "const": "swap" },
+
+    "mode": {
+      "type": "string",
+      "enum": ["exact_in", "exact_out", "unknown"],
+      "description": "사용자가 무엇을 고정했는가. exact_in = 입력 양 고정 (낼 양 정확), exact_out = 출력 양 고정 (받을 양 정확). 정책 'exact_out 차단' 같은 분기 가능."
+    },
+
+    "tokenIn": {
+      "$ref": "../common/_common.json#/$defs/AssetRef",
+      "description": "사용자가 *내보낼* 토큰. 정책 'whitelisted tokenIn' 분기 핵심."
+    },
+
+    "tokenOut": {
+      "$ref": "../common/_common.json#/$defs/AssetRef",
+      "description": "사용자가 *받을* 토큰. 정책 'no blacklisted tokenOut' / 'tokenOut.symbol = USDC 만 허용' 분기."
+    },
+
+    "amountIn": {
+      "$ref": "../common/_common.json#/$defs/AmountConstraint",
+      "description": "낼 양. mode=exact_in → kind=exact, mode=exact_out → kind=max (슬리피지 상한)."
+    },
+
+    "amountOut": {
+      "$ref": "../common/_common.json#/$defs/AmountConstraint",
+      "description": "받을 양. mode=exact_in → kind=min (슬리피지 하한), mode=exact_out → kind=exact."
+    },
+
+    "recipient": {
+      "$ref": "../common/_common.json#/$defs/Address",
+      "description": "swap 결과 수령자. root.from 과 다르면 '다른 EOA 송금' 패턴 — 정책 'no outbound transfer' 의 핵심 분기 (phishing 1차 신호)."
+    },
+
+    "slippageBps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000,
+      "description": "사용자 의도 슬리피지 (basis point). 1% = 100. amountOutMin/expectedOut 또는 amountInMax/quoteIn 으로 derive. 정책 'max 3% slippage = 300 bps' 분기 핵심."
+    },
+
+    "validity": {
+      "$ref": "../common/_common.json#/$defs/Validity",
+      "description": "swap 의 유효기간 — source='tx-deadline'. V2/V3 swap deadline, addLiquidity-style deadline, UR executeWithDeadline 모두. V4/V4Router 일부는 deadline 부재 — omit."
+    },
+
+    "feeBps": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "swap 시 발생하는 pool fee (bps). V2=30 fixed, V3=tier/100, V4=PoolKey.fee/100 (dynamic 풀이면 omit)."
+    }
+  },
+
+  "required": ["_kind", "mode", "tokenIn", "tokenOut", "amountIn", "amountOut"]
+}
