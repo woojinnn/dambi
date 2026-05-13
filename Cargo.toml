@@ -11,6 +11,7 @@ members = [
     "crates/adapters-bundle",
     "crates/integration-tests",
     "crates/adapters/abi-resolver",
+    "crates/adapters/call-adapter",
     "crates/adapters/sign-resolver",
     "crates/adapters/request-router",
     "crates/web-server",
@@ -42,6 +43,7 @@ policy-engine-adapter-uniswap-v3 = { path = "crates/adapters/uniswap-v3", versio
 policy-engine-adapter-universal-router = { path = "crates/adapters/universal-router", version = "0.1.0" }
 policy-engine-adapters-bundle = { path = "crates/adapters-bundle", version = "0.1.0" }
 abi-resolver = { path = "crates/adapters/abi-resolver", version = "0.1.0" }
+call-adapter = { path = "crates/adapters/call-adapter", version = "0.1.0" }
 sign-resolver = { path = "crates/adapters/sign-resolver", version = "0.1.0" }
 mappers = { path = "crates/adapters/mappers", version = "0.1.0" }
 
