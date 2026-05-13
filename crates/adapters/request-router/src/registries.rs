@@ -8,6 +8,7 @@ use abi_resolver::decoders::uniswap_v2::{
 use abi_resolver::decoders::uniswap_v3::{
     ExactInputDecoder, ExactInputSingleDecoder, UNISWAP_V3_DECODER_ID,
 };
+use abi_resolver::decoders::erc20::{Erc20ApproveDecoder, ERC20_APPROVE_DECODER_ID};
 use abi_resolver::InMemoryDecoderRegistry;
 use abi_resolver::{DecoderId, DecoderRegistry};
 use call_adapter::{
@@ -18,6 +19,7 @@ use mappers::protocols::uniswap_v2::{
     SwapExactTokensForTokensMapper, SwapTokensForExactTokensMapper,
 };
 use mappers::protocols::uniswap_v3::UniswapV3Mapper;
+use mappers::protocols::erc20::Erc20ApproveMapper;
 use mappers::{InMemoryMapperRegistry, MapperMatchKey};
 use sign_resolver::adapters::eip2612::Eip2612Adapter;
 use sign_resolver::adapters::permit2::Permit2Adapter;
@@ -39,6 +41,7 @@ impl DefaultRegistries {
                 .register(Arc::new(SwapTokensForExactTokensDecoder::new()))
                 .register(Arc::new(ExactInputSingleDecoder::new()))
                 .register(Arc::new(ExactInputDecoder::new()))
+                .register(Arc::new(Erc20ApproveDecoder::new()))
                 .build(),
         );
         let mappers = Arc::new(
@@ -60,6 +63,12 @@ impl DefaultRegistries {
                         decoder_id: DecoderId::new(UNISWAP_V3_DECODER_ID),
                     },
                     Arc::new(UniswapV3Mapper::new()),
+                )
+                .register(
+                    MapperMatchKey {
+                        decoder_id: DecoderId::new(ERC20_APPROVE_DECODER_ID),
+                    },
+                    Arc::new(Erc20ApproveMapper::new()),
                 )
                 .build(),
         );
