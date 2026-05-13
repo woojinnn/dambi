@@ -1,8 +1,8 @@
 //! Thin `#[wasm_bindgen]` JSON-string exports.
 
 use crate::dto::{
-    EngineErrorDto, Envelope, HostFactPlanDto, HostSnapshotDto, InstallPoliciesInputDto,
-    MatchedPolicyDto, OracleEntryDto, VerdictDto, WindowKeyPlanDto,
+    EngineErrorDto, Envelope, EvaluateEnvelopeInputDto, HostFactPlanDto, HostSnapshotDto,
+    InstallPoliciesInputDto, MatchedPolicyDto, OracleEntryDto, VerdictDto, WindowKeyPlanDto,
 };
 use crate::state::{
     registry, signature_registry, snapshot_oracle_from_entries, EngineState, FixedClock,
@@ -11,12 +11,15 @@ use crate::state::{
 use policy_engine::core::{LegacyAction, Request};
 use policy_engine::host::oracle::SnapshotOracle;
 use policy_engine::host::HostCapabilities;
-use policy_engine::lowering::{required_host_facts, required_window_keys};
+use policy_engine::lowering::{
+    policy_request_from_envelope, required_host_facts, required_window_keys,
+};
 use policy_engine::pipeline::PipelineError;
 use policy_engine::policy::{
     MatchedPolicy, PolicyEngineBuilder, PolicyRequestOrigin, Severity, Verdict,
 };
 use policy_engine::Pipeline;
+use policy_engine::{ActionAddress, ActionEnvelope, DecimalString};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -527,6 +530,133 @@ mod tests {
         })
     }
 
+    fn swap_schema_text() -> &'static str {
+        include_str!("../../../policy-schema/actions/swap.cedarschema")
+    }
+
+    fn install_empty_policies_with_swap_schema() {
+        let output = install_policies_json(
+            json!({
+                "schema_text": swap_schema_text(),
+                "policy_set": []
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+    }
+
+    fn asset_ref(address: &str, symbol: &str, decimals: u64) -> Value {
+        json!({
+            "kind": "erc20",
+            "chainId": 1,
+            "address": address,
+            "symbol": symbol,
+            "decimals": decimals
+        })
+    }
+
+    fn amount_constraint(kind: &str, value: &str) -> Value {
+        json!({
+            "kind": kind,
+            "value": value
+        })
+    }
+
+    fn approve_envelope_json() -> Value {
+        json!({
+            "category": "misc",
+            "action": "approve",
+            "fields": {
+                "token": asset_ref("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "USDC", 6),
+                "spender": "0x2222222222222222222222222222222222222222",
+                "amount": amount_constraint("exact", "1000"),
+                "approvalKind": "erc20"
+            }
+        })
+    }
+
+    fn swap_envelope_json() -> Value {
+        json!({
+            "category": "dex",
+            "action": "swap",
+            "fields": {
+                "mode": "exact_in",
+                "tokenIn": asset_ref("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", 18),
+                "tokenOut": asset_ref("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "USDC", 6),
+                "amountIn": amount_constraint("exact", "1000000000000000000"),
+                "amountOut": amount_constraint("min", "900000000"),
+                "recipient": "0x1111111111111111111111111111111111111111"
+            }
+        })
+    }
+
+    fn evaluate_envelope_input_json(envelope: Value) -> Value {
+        json!({
+            "envelope": envelope,
+            "from": "0x1111111111111111111111111111111111111111",
+            "to": "0x2222222222222222222222222222222222222222",
+            "value_wei": "0",
+            "chain_id": 1,
+            "block_timestamp": 1_700_000_000_u64,
+            "host_snapshot": empty_snapshot_json()
+        })
+    }
+
+    #[test]
+    fn evaluate_envelope_non_swap_returns_pass() {
+        let output = evaluate_envelope_json(
+            evaluate_envelope_input_json(approve_envelope_json()).to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["kind"], "pass", "{parsed}");
+    }
+
+    #[test]
+    fn evaluate_envelope_swap_returns_pass_under_empty_policy_set() {
+        install_empty_policies_with_swap_schema();
+
+        let output =
+            evaluate_envelope_json(evaluate_envelope_input_json(swap_envelope_json()).to_string());
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["kind"], "pass", "{parsed}");
+    }
+
+    #[test]
+    fn evaluate_envelope_swap_routes_to_swap_action() {
+        let install_output = install_policies_json(
+            json!({
+                "schema_text": swap_schema_text(),
+                "policy_set": [{
+                    "id": "bundle::block-swap",
+                    "text": r#"
+                        @severity("deny")
+                        @reason("swap blocked")
+                        forbid (principal, action == Action::"swap", resource);
+                    "#
+                }]
+            })
+            .to_string(),
+        );
+        let install: Value = serde_json::from_str(&install_output).unwrap();
+        assert_eq!(install["ok"], true, "{install}");
+
+        let output =
+            evaluate_envelope_json(evaluate_envelope_input_json(swap_envelope_json()).to_string());
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["kind"], "fail", "{parsed}");
+        assert_eq!(
+            parsed["data"]["matched"][0]["policy_id"], "bundle::block-swap",
+            "{parsed}"
+        );
+    }
+
     #[test]
     fn install_round_trip_injects_id_before_evaluation() {
         let policy = r#"
@@ -779,4 +909,72 @@ mod tests_route_request {
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0]["action"], "swap");
     }
+}
+
+#[wasm_bindgen]
+pub fn evaluate_envelope_json(input_json: String) -> String {
+    let verdict = (|| -> Result<Verdict, EngineErrorDto> {
+        let input: EvaluateEnvelopeInputDto =
+            serde_json::from_str(&input_json).map_err(|error| {
+                EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
+            })?;
+        let EvaluateEnvelopeInputDto {
+            envelope,
+            from,
+            to,
+            value_wei,
+            chain_id,
+            block_timestamp,
+            host_snapshot,
+        } = input;
+
+        let envelope: ActionEnvelope = serde_json::from_value(envelope)
+            .map_err(|error| EngineErrorDto::new("invalid_envelope_json", error.to_string()))?;
+        let from: ActionAddress = from
+            .parse()
+            .map_err(|error| EngineErrorDto::new("invalid_from", error))?;
+        let to: ActionAddress = to
+            .parse()
+            .map_err(|error| EngineErrorDto::new("invalid_to", error))?;
+        let value_wei: DecimalString = value_wei
+            .parse()
+            .map_err(|error| EngineErrorDto::new("invalid_value_wei", error))?;
+
+        let Some(request) = policy_request_from_envelope(
+            &envelope,
+            &from,
+            &to,
+            &value_wei,
+            chain_id,
+            block_timestamp,
+        ) else {
+            return Ok(Verdict::Pass);
+        };
+
+        let oracle = snapshot_oracle_from_entries(&host_snapshot.oracle);
+        let portfolio = SnapshotPortfolio::from_entries(&host_snapshot.balances);
+        let approvals = SnapshotApprovals::from_entries(&host_snapshot.allowances);
+        let stats = SnapshotStatWindows::from_entries(&host_snapshot.windows);
+        let clock = FixedClock(host_snapshot.now_ts.unwrap_or(0));
+        let _host = HostCapabilities::new(&oracle)
+            .with_clock(&clock)
+            .with_portfolio(&portfolio)
+            .with_approvals(&approvals)
+            .with_stats(&stats);
+
+        STATE.with(|state| {
+            let state = state.borrow();
+            let state = state.as_ref().ok_or_else(not_installed_error)?;
+            state
+                .policies
+                .evaluate_requests(std::iter::once((&request, PolicyRequestOrigin::Action)))
+                .map_err(|error| EngineErrorDto::new("policy", error.to_string()))
+        })
+    })();
+
+    let dto = match verdict {
+        Ok(verdict) => verdict_to_dto(verdict),
+        Err(error) => engine_error_verdict(error),
+    };
+    Envelope::ok(dto).to_json()
 }

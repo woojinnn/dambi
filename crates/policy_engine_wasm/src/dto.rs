@@ -141,6 +141,17 @@ pub struct HostSnapshotDto {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct EvaluateEnvelopeInputDto {
+    pub envelope: serde_json::Value,
+    pub from: String,
+    pub to: String,
+    pub value_wei: String,
+    pub chain_id: u64,
+    pub block_timestamp: u64,
+    pub host_snapshot: HostSnapshotDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct OracleEntryDto {
     pub token_key: String,
     pub usd_per_unit: String,
