@@ -43,7 +43,7 @@ pub struct SignRequest {
 /// - `method`   — RPC method string (e.g. `"eth_signTypedData_v4"`)
 /// - `params`   — JSON array of RPC params
 /// - `chain_id` — wallet's currently active chain id (fallback when the
-///                payload does not embed one)
+///   payload does not embed one)
 ///
 /// # Errors
 ///
@@ -57,9 +57,7 @@ pub fn parse_sign_request(
     let sign_method = SignMethod::detect(method)
         .ok_or_else(|| SignResolveError::UnsupportedMethod(method.to_string()))?;
 
-    let arr = params
-        .as_array()
-        .ok_or(SignResolveError::ParamsNotArray)?;
+    let arr = params.as_array().ok_or(SignResolveError::ParamsNotArray)?;
 
     match sign_method {
         SignMethod::EthSignTypedDataV4 => parse_typed_data_v4(arr, chain_id),
@@ -105,7 +103,7 @@ fn parse_typed_data_v4(params: &[Value], chain_id: u64) -> Result<SignRequest, S
 /// params: [hexMessage, signerAddress]
 fn parse_personal_sign(params: &[Value], chain_id: u64) -> Result<SignRequest, SignResolveError> {
     let message = params
-        .get(0)
+        .first()
         .and_then(|v| v.as_str())
         .ok_or(SignResolveError::MissingParam(0))?
         .to_string();
@@ -139,8 +137,11 @@ fn parse_eth_sign(params: &[Value], chain_id: u64) -> Result<SignRequest, SignRe
 
 /// `eth_signTransaction`
 /// params: [txObject { from, to, data, value, gas, chainId?, ... }]
-fn parse_sign_transaction(params: &[Value], chain_id: u64) -> Result<SignRequest, SignResolveError> {
-    let tx = params.get(0).ok_or(SignResolveError::MissingParam(0))?;
+fn parse_sign_transaction(
+    params: &[Value],
+    chain_id: u64,
+) -> Result<SignRequest, SignResolveError> {
+    let tx = params.first().ok_or(SignResolveError::MissingParam(0))?;
 
     let signer = tx
         .get("from")
@@ -168,7 +169,7 @@ fn parse_send_user_operation(
     params: &[Value],
     chain_id: u64,
 ) -> Result<SignRequest, SignResolveError> {
-    let user_op = params.get(0).ok_or(SignResolveError::MissingParam(0))?;
+    let user_op = params.first().ok_or(SignResolveError::MissingParam(0))?;
 
     let signer = user_op
         .get("sender")
@@ -199,7 +200,7 @@ fn parse_wallet_grant_permissions(
     params: &[Value],
     chain_id: u64,
 ) -> Result<SignRequest, SignResolveError> {
-    let request = params.get(0).ok_or(SignResolveError::MissingParam(0))?;
+    let request = params.first().ok_or(SignResolveError::MissingParam(0))?;
 
     let signer = request
         .get("signer")
@@ -287,7 +288,8 @@ mod tests {
 
     #[test]
     fn typed_data_v4_parses_json_string_payload() {
-        let typed_data_str = r#"{"domain":{"chainId":10},"primaryType":"T","types":{},"message":{}}"#;
+        let typed_data_str =
+            r#"{"domain":{"chainId":10},"primaryType":"T","types":{},"message":{}}"#;
         let params = json!(["0x1111111111111111111111111111111111111111", typed_data_str]);
         let req = parse_sign_request("eth_signTypedData_v4", &params, 1).unwrap();
         assert_eq!(req.chain_id, 10);
@@ -393,15 +395,13 @@ mod tests {
 
     #[test]
     fn unsupported_method_returns_error() {
-        let err =
-            parse_sign_request("eth_sendTransaction", &json!([]), 1).unwrap_err();
+        let err = parse_sign_request("eth_sendTransaction", &json!([]), 1).unwrap_err();
         assert!(matches!(err, SignResolveError::UnsupportedMethod(_)));
     }
 
     #[test]
     fn non_array_params_returns_error() {
-        let err =
-            parse_sign_request("personal_sign", &json!({"a": 1}), 1).unwrap_err();
+        let err = parse_sign_request("personal_sign", &json!({"a": 1}), 1).unwrap_err();
         assert_eq!(err, SignResolveError::ParamsNotArray);
     }
 }

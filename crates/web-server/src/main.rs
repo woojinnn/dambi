@@ -93,14 +93,17 @@ struct SignDecodeResponse {
 }
 
 fn sign_payload_to_json(payload: &sign_resolver::SignPayload) -> serde_json::Value {
-    use sign_resolver::SignPayload;
     use serde_json::json;
+    use sign_resolver::SignPayload;
     match payload {
         SignPayload::TypedData(v) => json!({ "kind": "typed_data", "data": v }),
         SignPayload::RawMessage(s) => json!({ "kind": "raw_message", "message": s }),
         SignPayload::RawHash(s) => json!({ "kind": "raw_hash", "hash": s }),
         SignPayload::Transaction(v) => json!({ "kind": "transaction", "tx": v }),
-        SignPayload::UserOperation { user_op, entry_point } => {
+        SignPayload::UserOperation {
+            user_op,
+            entry_point,
+        } => {
             json!({ "kind": "user_operation", "user_op": user_op, "entry_point": entry_point })
         }
         SignPayload::PermissionRequest(v) => json!({ "kind": "permission_request", "request": v }),
@@ -453,7 +456,8 @@ async fn decode(State(state): State<AppState>, Json(req): Json<DecodeRequest>) -
     // Top-level schema mapping. Only attaches when a mapper is registered
     // for `(chain_id, address, selector)`; otherwise the field is omitted.
     let to_lc = format!("0x{}", hex::encode(address.0 .0));
-    let mapping_json = run_schema_mapper(state.resolver.as_ref(), &req, &address, &calldata, &to_lc);
+    let mapping_json =
+        run_schema_mapper(state.resolver.as_ref(), &req, &address, &calldata, &to_lc);
     let response = match (response, mapping_json) {
         (
             DecodeResponse::Resolved {
@@ -623,8 +627,7 @@ fn decode_recursive<'a>(
             match extract_transactions_bytes(&decoded) {
                 Some(tx_bytes) => {
                     let sub_txs = parse_multisend_transactions(&tx_bytes);
-                    let mut out =
-                        Vec::with_capacity(sub_txs.len().min(MAX_SUBDECODE_CHILDREN));
+                    let mut out = Vec::with_capacity(sub_txs.len().min(MAX_SUBDECODE_CHILDREN));
                     for sub_tx in sub_txs.into_iter().take(MAX_SUBDECODE_CHILDREN) {
                         if sub_tx.data.len() >= 4 {
                             out.push(

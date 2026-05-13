@@ -7,8 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::actions::{
-    AddLiquidityAction, ApproveAction, RemoveLiquidityAction, SwapAction, UnwrapAction,
-    WrapAction,
+    AddLiquidityAction, ApproveAction, RemoveLiquidityAction, SwapAction, UnwrapAction, WrapAction,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +25,7 @@ pub enum Category {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "_kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ActionFields {
     Swap(SwapAction),
     Wrap(WrapAction),
@@ -57,6 +57,10 @@ pub struct ActionEnvelope {
 
 impl ActionEnvelope {
     pub fn new(category: Category, fields: ActionFields) -> Self {
-        Self { action: fields.action_name().to_string(), category, fields }
+        Self {
+            action: fields.action_name().to_string(),
+            category,
+            fields,
+        }
     }
 }

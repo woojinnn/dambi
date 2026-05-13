@@ -310,9 +310,18 @@ mod tests {
         };
 
         let params = call.arg("params").unwrap();
-        assert_eq!(params.field("path").unwrap().as_bytes().unwrap(), path_bytes.as_slice());
-        assert_eq!(params.field("recipient").unwrap().as_address().unwrap(), recipient);
-        assert_eq!(params.field("amountIn").unwrap().as_uint().unwrap(), amount_in);
+        assert_eq!(
+            params.field("path").unwrap().as_bytes().unwrap(),
+            path_bytes.as_slice()
+        );
+        assert_eq!(
+            params.field("recipient").unwrap().as_address().unwrap(),
+            recipient
+        );
+        assert_eq!(
+            params.field("amountIn").unwrap().as_uint().unwrap(),
+            amount_in
+        );
         assert_eq!(
             params.field("amountOutMinimum").unwrap().as_uint().unwrap(),
             amount_out_min

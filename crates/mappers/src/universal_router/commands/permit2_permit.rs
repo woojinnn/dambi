@@ -10,6 +10,10 @@ use crate::context::{BuildContext, RawTx};
 use crate::error::MapError;
 use crate::types::envelope::ActionEnvelope;
 
-pub fn map_command(_ctx: &BuildContext, _tx: &RawTx, _input: &[u8]) -> Result<Vec<ActionEnvelope>, MapError> {
+pub fn map_command(
+    _ctx: &BuildContext,
+    _tx: &RawTx,
+    _input: &[u8],
+) -> Result<Vec<ActionEnvelope>, MapError> {
     Ok(vec![])
 }

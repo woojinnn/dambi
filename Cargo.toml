@@ -42,6 +42,8 @@ policy-engine-adapter-uniswap-v3 = { path = "crates/adapters/uniswap-v3", versio
 policy-engine-adapter-universal-router = { path = "crates/adapters/universal-router", version = "0.1.0" }
 policy-engine-adapters-bundle = { path = "crates/adapters-bundle", version = "0.1.0" }
 abi-resolver = { path = "crates/abi-resolver", version = "0.1.0" }
+sign-resolver = { path = "crates/sign-resolver", version = "0.1.0" }
+mappers = { path = "crates/mappers", version = "0.1.0" }
 
 # WASM bridge deps
 wasm-bindgen = "0.2"

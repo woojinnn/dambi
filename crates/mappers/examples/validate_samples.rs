@@ -28,15 +28,18 @@ fn main() -> std::io::Result<()> {
     let mut root = project_root.clone();
     while !root.join(BASE).exists() {
         if !root.pop() {
-            eprintln!("could not find {BASE} starting from {}", project_root.display());
+            eprintln!(
+                "could not find {BASE} starting from {}",
+                project_root.display()
+            );
             std::process::exit(1);
         }
     }
     let base = root.join(BASE);
     eprintln!("Walking: {}", base.display());
 
-    let sourcify = SourcifyIndex::load_bundle(SOURCIFY_BUNDLE)
-        .expect("curated sourcify bundle must parse");
+    let sourcify =
+        SourcifyIndex::load_bundle(SOURCIFY_BUNDLE).expect("curated sourcify bundle must parse");
     let resolver = Resolver::new(sourcify, OpenchainIndex::empty());
 
     let mut totals: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
@@ -55,9 +58,17 @@ fn main() -> std::io::Result<()> {
             if line.trim().is_empty() {
                 continue;
             }
-            let Ok(rec) = serde_json::from_str::<Value>(line) else { continue; };
-            let Some(tx) = build_raw_tx(&rec) else { continue; };
-            let ctx = BuildContext { chain_id: 1, block_timestamp: 0, ..Default::default() };
+            let Ok(rec) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let Some(tx) = build_raw_tx(&rec) else {
+                continue;
+            };
+            let ctx = BuildContext {
+                chain_id: 1,
+                block_timestamp: 0,
+                ..Default::default()
+            };
             let entry = totals.entry(rel.clone()).or_insert((0, 0, 0));
             // Resolve via abi-resolver so migrated mappers can read decoded
             // args by name. Legacy mappers ignore `call` and still sol!-decode
@@ -68,7 +79,8 @@ fn main() -> std::io::Result<()> {
                 Ok(envelopes) if !envelopes.is_empty() => {
                     entry.0 += 1;
                     if !printed_examples.contains_key(&rel) {
-                        let root = assemble(&tx, &ctx, protocol_for(&tx.to.to_lowercase()), envelopes);
+                        let root =
+                            assemble(&tx, &ctx, protocol_for(&tx.to.to_lowercase()), envelopes);
                         let json = serde_json::to_string_pretty(&root).unwrap();
                         println!("─── {} ───", rel);
                         println!("{}", json);
@@ -76,13 +88,15 @@ fn main() -> std::io::Result<()> {
                         printed_examples.insert(rel.clone(), true);
                     }
                 }
-                Ok(_)  => entry.1 += 1, // decoded but no policy-relevant envelope
+                Ok(_) => entry.1 += 1, // decoded but no policy-relevant envelope
                 Err(_) => entry.2 += 1, // dispatch error (unsupported, decode failure)
             }
         }
     });
 
-    eprintln!("\n=== Summary (ok=produced envelopes, empty=no swap/wrap action, err=decode failure) ===");
+    eprintln!(
+        "\n=== Summary (ok=produced envelopes, empty=no swap/wrap action, err=decode failure) ==="
+    );
     let mut total_ok = 0usize;
     let mut total_empty = 0usize;
     let mut total_err = 0usize;
@@ -95,12 +109,17 @@ fn main() -> std::io::Result<()> {
         total_empty += empty;
         total_err += err;
     }
-    eprintln!("\nTotal: ok={} empty={} err={}", total_ok, total_empty, total_err);
+    eprintln!(
+        "\nTotal: ok={} empty={} err={}",
+        total_ok, total_empty, total_err
+    );
     Ok(())
 }
 
 fn walk_jsonl(dir: &Path, on_file: &mut dyn FnMut(&Path)) {
-    let Ok(rd) = fs::read_dir(dir) else { return; };
+    let Ok(rd) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in rd.flatten() {
         let p = entry.path();
         if p.is_dir() {
@@ -112,13 +131,23 @@ fn walk_jsonl(dir: &Path, on_file: &mut dyn FnMut(&Path)) {
 }
 
 fn build_raw_tx(rec: &Value) -> Option<RawTx> {
-    let to    = rec.get("to")?.as_str()?.to_string();
-    let from  = rec.get("from")?.as_str()?.to_string();
+    let to = rec.get("to")?.as_str()?.to_string();
+    let from = rec.get("from")?.as_str()?.to_string();
     let input_hex = rec.get("input")?.as_str()?;
-    let value = rec.get("value").and_then(|v| v.as_str()).unwrap_or("0").to_string();
+    let value = rec
+        .get("value")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0")
+        .to_string();
     let stripped = input_hex.strip_prefix("0x").unwrap_or(input_hex);
     let input = hex::decode(stripped).ok()?;
-    Some(RawTx { chain_id: 1, from, to, value, input })
+    Some(RawTx {
+        chain_id: 1,
+        from,
+        to,
+        value,
+        input,
+    })
 }
 
 fn resolve_call(resolver: &Resolver, tx: &RawTx) -> Option<DecodedCall> {

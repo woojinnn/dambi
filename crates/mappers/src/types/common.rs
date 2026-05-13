@@ -57,19 +57,34 @@ pub struct AmountConstraint {
 
 impl AmountConstraint {
     pub fn exact(v: impl Into<DecimalString>) -> Self {
-        Self { kind: AmountKind::Exact, value: Some(v.into()) }
+        Self {
+            kind: AmountKind::Exact,
+            value: Some(v.into()),
+        }
     }
     pub fn min(v: impl Into<DecimalString>) -> Self {
-        Self { kind: AmountKind::Min, value: Some(v.into()) }
+        Self {
+            kind: AmountKind::Min,
+            value: Some(v.into()),
+        }
     }
     pub fn max(v: impl Into<DecimalString>) -> Self {
-        Self { kind: AmountKind::Max, value: Some(v.into()) }
+        Self {
+            kind: AmountKind::Max,
+            value: Some(v.into()),
+        }
     }
     pub fn unlimited() -> Self {
-        Self { kind: AmountKind::Unlimited, value: None }
+        Self {
+            kind: AmountKind::Unlimited,
+            value: None,
+        }
     }
     pub fn unknown() -> Self {
-        Self { kind: AmountKind::Unknown, value: None }
+        Self {
+            kind: AmountKind::Unknown,
+            value: None,
+        }
     }
 }
 
