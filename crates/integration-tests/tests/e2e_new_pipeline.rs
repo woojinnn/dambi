@@ -12,23 +12,17 @@ use std::path::Path;
 use std::str::FromStr as _;
 
 const BLOCK_TIMESTAMP: u64 = 1_700_000_000;
-const CORE_SCHEMA: &str = include_str!("../../../policy-schema/core.cedarschema");
-const SWAP_SCHEMA: &str = include_str!("../../../policy-schema/actions/swap.cedarschema");
 
 type HostSnapshot<'a> = HostCapabilities<'a>;
 
 fn install_policies_and_evaluate(
     policies: &[(&str, &str)],
-    schema_text: Option<&str>,
     request: &PolicyRequest,
     host_snapshot: &HostSnapshot<'_>,
 ) -> Verdict {
     let _ = host_snapshot;
 
     let mut builder = PolicyEngineBuilder::new();
-    if let Some(schema_text) = schema_text.and_then(additive_schema_text) {
-        builder = builder.add_schema_text(schema_text);
-    }
 
     for (policy_id, policy_text) in policies {
         builder = builder.add_text(deny_policy(policy_id, policy_text));
@@ -49,27 +43,8 @@ fn install_policies_and_evaluate(
         .unwrap_or_else(|error| panic!("policy request should evaluate: {error}"))
 }
 
-fn additive_schema_text(schema_text: &str) -> Option<&str> {
-    let schema_text = schema_text.trim();
-    if schema_text.is_empty() {
-        return None;
-    }
-
-    let extension = schema_text.strip_prefix(CORE_SCHEMA).unwrap_or(schema_text);
-    let extension = extension.trim();
-    if extension.is_empty() {
-        None
-    } else {
-        Some(extension)
-    }
-}
-
 fn deny_policy(policy_id: &str, policy_text: &str) -> String {
     format!("@id(\"{policy_id}\")\n@severity(\"deny\")\n{policy_text}\n")
-}
-
-fn schema_text() -> String {
-    format!("{CORE_SCHEMA}\n{SWAP_SCHEMA}")
 }
 
 fn empty_host_snapshot<'a>(oracle: &'a MockOracle) -> HostSnapshot<'a> {
@@ -172,7 +147,7 @@ fn e2e_swap_v2_passes_under_empty_policies() {
     let oracle = MockOracle::default();
     let host_snapshot = empty_host_snapshot(&oracle);
 
-    let verdict = install_policies_and_evaluate(&[], None, &request, &host_snapshot);
+    let verdict = install_policies_and_evaluate(&[], &request, &host_snapshot);
 
     assert_eq!(verdict, Verdict::Pass);
 }
@@ -188,7 +163,6 @@ fn e2e_swap_v2_fails_under_blanket_forbid() {
             "test/forbid-swap",
             r#"forbid (principal, action == Action::"swap", resource);"#,
         )],
-        None,
         &request,
         &host_snapshot,
     );
@@ -222,7 +196,6 @@ fn e2e_swap_v3_evaluates_through_new_pipeline() {
             r#"forbid (principal, action == Action::"swap", resource)
                when { context.swapMode == "exact_in" };"#,
         )],
-        None,
         &request,
         &host_snapshot,
     );
@@ -242,7 +215,6 @@ fn e2e_v2_exact_out_does_not_match_exact_in_only_policy() {
             r#"forbid (principal, action == Action::"swap", resource)
                when { context.swapMode == "exact_in" };"#,
         )],
-        None,
         &request,
         &host_snapshot,
     );
