@@ -7,13 +7,18 @@ description = "Workspace-level integration tests for policy-engine. No public AP
 publish = false
 
 [dependencies]
+hex.workspace = true
 policy-engine.workspace = true
 policy-engine-adapter-uniswap-v2.workspace = true
 policy-engine-adapter-uniswap-v3.workspace = true
 policy-engine-adapters-bundle.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "capture_baseline"
+path = "src/bin/capture_baseline.rs"
 
 [dev-dependencies]
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
-serde_json.workspace = true
-hex.workspace = true
