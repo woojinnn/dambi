@@ -331,15 +331,22 @@ struct DecodeRequest {
     #[serde(default)]
     rpc_method: Option<String>,
     /// Optional `tx.from` for schema-mapper context. Defaults to zero address.
+    /// Currently unused — legacy schema mapper was removed in L5; L7 will
+    /// re-wire these into the new pipeline.
     #[serde(default)]
+    #[allow(dead_code)]
     from: Option<String>,
     /// Optional `tx.value` (decimal string of wei). Defaults to `"0"`.
+    /// Currently unused — see `from` above.
     #[serde(default)]
+    #[allow(dead_code)]
     value: Option<String>,
     /// Optional `block.timestamp` for `deadlineSecondsFromNow` derivation.
     /// Defaults to 0; downstream consumers should treat the field as
     /// "raw deadline minus 0" when omitted.
+    /// Currently unused — see `from` above.
     #[serde(default)]
+    #[allow(dead_code)]
     block_timestamp: Option<i64>,
 }
 
@@ -504,11 +511,11 @@ async fn decode(State(state): State<AppState>, Json(req): Json<DecodeRequest>) -
     )
     .await;
 
-    // Top-level schema mapping. Only attaches when a mapper is registered
-    // for `(chain_id, address, selector)`; otherwise the field is omitted.
-    let to_lc = format!("0x{}", hex::encode(address.0 .0));
-    let mapping_json =
-        run_schema_mapper(state.resolver.as_ref(), &req, &address, &calldata, &to_lc);
+    // Legacy schema mapping has been removed (L5 of LegacyAction cleanup);
+    // the new pipeline (request-router → mappers::protocols) is invoked
+    // elsewhere. This field stays in the response shape for now and is
+    // always `None` until L7 wires the new pipeline through.
+    let mapping_json: Option<serde_json::Value> = None;
     let response = match (response, mapping_json) {
         (
             DecodeResponse::Resolved {
@@ -712,61 +719,9 @@ fn decode_recursive<'a>(
                 .map(|a| arg_to_api(a, Some(&selector_bytes)))
                 .collect(),
             children,
-            mapping: None, // filled at top level only — see `run_schema_mapper`
+            mapping: None, // filled at top level only.
         }
     })
-}
-
-/// Run the `mappers` crate against the top-level tx and emit the resulting
-/// `RootRequest` as a `serde_json::Value`. Returns `None` when no mapper is
-/// registered for `(chain_id, to, selector)` or when decoding fails — the
-/// frontend treats both as "no schema view available" without an error.
-///
-/// Resolves the calldata via the same Resolver used by the display decoder
-/// so migrated mappers can consume the decoded `args` by name. Legacy
-/// mappers still `sol!`-decode `tx.input` and ignore the `call`.
-fn run_schema_mapper(
-    resolver: &Resolver,
-    req: &DecodeRequest,
-    address: &Address,
-    calldata: &[u8],
-    to_lc: &str,
-) -> Option<serde_json::Value> {
-    let from = req
-        .from
-        .as_deref()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_string());
-    let value = req.value.clone().unwrap_or_else(|| "0".to_string());
-    let block_timestamp = req.block_timestamp.unwrap_or(0);
-
-    let tx = mappers::context::RawTx {
-        chain_id: req.chain_id,
-        from,
-        to: to_lc.to_string(),
-        value,
-        input: calldata.to_vec(),
-    };
-    let ctx = mappers::context::BuildContext {
-        chain_id: req.chain_id,
-        block_timestamp,
-        ..Default::default()
-    };
-    let call = match resolver.resolve(req.chain_id, address, calldata) {
-        ResolveOutcome::Resolved(r) => r.decoded,
-        ResolveOutcome::NotFound => abi_resolver::decode::DecodedCall {
-            function_name: String::new(),
-            signature: String::new(),
-            args: Vec::new(),
-        },
-    };
-    let envelopes = mappers::registry::dispatch(&ctx, &tx, &call).ok()?;
-    if envelopes.is_empty() {
-        return None;
-    }
-    let protocol = mappers::registry::protocol_for(to_lc);
-    let root = mappers::assembler::assemble(&tx, &ctx, protocol, envelopes);
-    serde_json::to_value(&root).ok()
 }
 
 fn source_label(s: Source) -> &'static str {
