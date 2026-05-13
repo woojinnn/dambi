@@ -14,12 +14,18 @@
 //! [`SignResolveError::UnsupportedMethod`].
 
 pub mod error;
+pub mod in_memory;
 pub mod method;
 pub mod payload;
+pub mod sign_adapter;
 
 pub use error::SignResolveError;
+pub use in_memory::{InMemorySignAdapterRegistry, InMemorySignAdapterRegistryBuilder};
 pub use method::SignMethod;
 pub use payload::SignPayload;
+pub use sign_adapter::{
+    SignAdapter, SignAdapterError, SignAdapterId, SignAdapterRegistry, SignContext, SignMatchKey,
+};
 
 use serde_json::Value;
 
