@@ -6,14 +6,14 @@ license.workspace = true
 description = "Aggregator: builds default action adapter registries from every internal adapter crate"
 
 [dependencies]
+alloy-primitives.workspace = true
 policy-engine.workspace = true
-policy-engine-adapter-permit2.workspace = true
 policy-engine-adapter-universal-router.workspace = true
 policy-engine-adapter-uniswap-v2.workspace = true
 policy-engine-adapter-uniswap-v3.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-alloy-primitives.workspace = true
 hex.workspace = true
 
 [[example]]

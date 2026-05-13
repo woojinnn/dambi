@@ -35,7 +35,7 @@ use std::sync::Arc;
 // All first-party adapter crates are re-exported under their module name so
 // downstream code (tests, examples) doesn't need to depend on each one.
 pub mod eip2612;
-pub use policy_engine_adapter_permit2 as permit2;
+pub mod permit2;
 pub use policy_engine_adapter_uniswap_v2 as uniswap_v2;
 pub use policy_engine_adapter_uniswap_v3 as uniswap_v3;
 pub use policy_engine_adapter_universal_router as universal_router;

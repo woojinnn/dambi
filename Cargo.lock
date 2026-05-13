@@ -2170,16 +2170,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "policy-engine-adapter-permit2"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "policy-engine",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "policy-engine-adapter-uniswap-v2"
 version = "0.1.0"
 dependencies = [
@@ -2222,10 +2212,10 @@ dependencies = [
  "alloy-primitives",
  "hex",
  "policy-engine",
- "policy-engine-adapter-permit2",
  "policy-engine-adapter-uniswap-v2",
  "policy-engine-adapter-uniswap-v3",
  "policy-engine-adapter-universal-router",
+ "serde_json",
 ]
 
 [[package]]
