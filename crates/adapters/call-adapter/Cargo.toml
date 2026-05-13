@@ -1,0 +1,15 @@
+[package]
+name = "call-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+abi-resolver = { workspace = true }
+mappers = { workspace = true }
+policy-engine = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = "1"
+hex = { workspace = true }
