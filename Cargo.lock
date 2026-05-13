@@ -2230,6 +2230,7 @@ dependencies = [
  "policy-engine-adapter-uniswap-v2",
  "policy-engine-adapter-uniswap-v3",
  "policy-engine-adapters-bundle",
+ "serde",
  "serde_json",
 ]
 
