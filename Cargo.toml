@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "crates/policy-engine",
     "crates/policy_engine_wasm",
-    "crates/adapters/permit2",
     "crates/adapters/uniswap-v2",
     "crates/adapters/uniswap-v3",
     "crates/adapters/universal-router",
@@ -36,7 +35,6 @@ thiserror = "2"
 
 # Internal crates referenced by path.
 policy-engine = { path = "crates/policy-engine", version = "0.1.0" }
-policy-engine-adapter-permit2 = { path = "crates/adapters/permit2", version = "0.1.0" }
 policy-engine-adapter-uniswap-v2 = { path = "crates/adapters/uniswap-v2", version = "0.1.0" }
 policy-engine-adapter-uniswap-v3 = { path = "crates/adapters/uniswap-v3", version = "0.1.0" }
 policy-engine-adapter-universal-router = { path = "crates/adapters/universal-router", version = "0.1.0" }
