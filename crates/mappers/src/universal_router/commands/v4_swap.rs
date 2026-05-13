@@ -9,7 +9,11 @@ use crate::error::MapError;
 use crate::types::envelope::ActionEnvelope;
 use crate::uniswap_v4;
 
-pub fn map_command(ctx: &BuildContext, tx: &RawTx, input: &[u8]) -> Result<Vec<ActionEnvelope>, MapError> {
+pub fn map_command(
+    ctx: &BuildContext,
+    tx: &RawTx,
+    input: &[u8],
+) -> Result<Vec<ActionEnvelope>, MapError> {
     let (actions, params): (Bytes, Vec<Bytes>) =
         <(Bytes, Vec<Bytes>)>::abi_decode_sequence(input, true)
             .map_err(|e| MapError::AbiDecode(e.to_string()))?;
@@ -23,7 +27,9 @@ pub fn map_command(ctx: &BuildContext, tx: &RawTx, input: &[u8]) -> Result<Vec<A
             0x09 => uniswap_v4::swap_exact_out::map_action(ctx, tx, p),
             _ => Ok(vec![]), // non-swap V4 actions (SETTLE/TAKE/WRAP/UNWRAP/etc.) — skip
         };
-        if let Ok(envs) = res { out.extend(envs); }
+        if let Ok(envs) = res {
+            out.extend(envs);
+        }
     }
     Ok(out)
 }

@@ -29,7 +29,11 @@ sol! {
     }
 }
 
-pub fn map_action(ctx: &BuildContext, _tx: &RawTx, params: &[u8]) -> Result<Vec<ActionEnvelope>, MapError> {
+pub fn map_action(
+    ctx: &BuildContext,
+    _tx: &RawTx,
+    params: &[u8],
+) -> Result<Vec<ActionEnvelope>, MapError> {
     let (currency_in, path, amount_in, amount_out_minimum): (_, Vec<PathKey>, _, _) =
         if let Ok(p) = ExactInParamsV2::abi_decode(params, true) {
             let _: Vec<U256> = p.minHopPriceX36;
@@ -40,21 +44,27 @@ pub fn map_action(ctx: &BuildContext, _tx: &RawTx, params: &[u8]) -> Result<Vec<
             (p.currencyIn, p.path, p.amountIn, p.amountOutMinimum)
         };
     let token_in = currency_to_asset(ctx, currency_in);
-    let last_hop_curr = path.last().map(|k| k.intermediateCurrency)
+    let last_hop_curr = path
+        .last()
+        .map(|k| k.intermediateCurrency)
         .ok_or(MapError::EmptyPath(0))?;
     let fee_bps = if path.len() == 1 {
         pool_fee_to_bps(path[0].fee.to::<u32>())
-    } else { None };
+    } else {
+        None
+    };
     Ok(vec![envelope_swap(SwapAction {
         mode: SwapMode::ExactIn,
         token_in,
         token_out: currency_to_asset(ctx, last_hop_curr),
-        amount_in:  AmountConstraint::exact(amount_in.to_string()),
+        amount_in: AmountConstraint::exact(amount_in.to_string()),
         amount_out: AmountConstraint::min(amount_out_minimum.to_string()),
         recipient: None,
         deadline_seconds_from_now: None,
         fee_bps,
-        slippage_bps: None, value_in_usd: None,
-        min_value_out_usd: None, expected_value_out_usd: None,
+        slippage_bps: None,
+        value_in_usd: None,
+        min_value_out_usd: None,
+        expected_value_out_usd: None,
     })])
 }

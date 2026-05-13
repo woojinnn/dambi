@@ -17,9 +17,18 @@ pub struct EthSide {
     pub output_is_native: bool,
 }
 
-pub const TT: EthSide = EthSide { input_is_native: false, output_is_native: false };
-pub const ET: EthSide = EthSide { input_is_native: true,  output_is_native: false };
-pub const TE: EthSide = EthSide { input_is_native: false, output_is_native: true  };
+pub const TT: EthSide = EthSide {
+    input_is_native: false,
+    output_is_native: false,
+};
+pub const ET: EthSide = EthSide {
+    input_is_native: true,
+    output_is_native: false,
+};
+pub const TE: EthSide = EthSide {
+    input_is_native: false,
+    output_is_native: true,
+};
 
 pub fn token_in_out(
     ctx: &BuildContext,
@@ -56,5 +65,7 @@ pub fn envelope_swap(action: SwapAction) -> ActionEnvelope {
 /// Pull `tx.value` as a `U256`, used by payable V2 functions where the
 /// input amount comes from `msg.value` rather than calldata.
 pub fn tx_value_u256(tx: &RawTx) -> alloy_primitives::U256 {
-    tx.value.parse::<alloy_primitives::U256>().unwrap_or_default()
+    tx.value
+        .parse::<alloy_primitives::U256>()
+        .unwrap_or_default()
 }

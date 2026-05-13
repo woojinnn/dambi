@@ -7,7 +7,7 @@ use crate::error::MapError;
 use crate::types::actions::SwapAction;
 use crate::types::envelope::{ActionEnvelope, ActionFields, Category};
 
-pub const V3_ROUTER_MAINNET_LC: &str   = "0xe592427a0aece92de3edee1f18e0157c05861564";
+pub const V3_ROUTER_MAINNET_LC: &str = "0xe592427a0aece92de3edee1f18e0157c05861564";
 pub const V3_ROUTER02_MAINNET_LC: &str = "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45";
 
 /// V3 path = `token (20) || fee (3) || token (20) || fee (3) || ... || token (20)`.
@@ -20,7 +20,7 @@ pub fn parse_path(path: &[u8]) -> Result<(Vec<AlloyAddress>, Vec<u32>), MapError
     if path.len() < ADDR + HOP {
         return Err(MapError::EmptyPath(path.len()));
     }
-    if (path.len() - ADDR) % HOP != 0 {
+    if !(path.len() - ADDR).is_multiple_of(HOP) {
         return Err(MapError::AbiDecode(format!(
             "V3 path length {} not aligned to address(20) + N*hop(23)",
             path.len()

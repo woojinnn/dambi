@@ -15,9 +15,13 @@ use crate::types::envelope::ActionEnvelope;
 use crate::uniswap_v3::common::{envelope_swap, fee_tier_to_bps, parse_path};
 
 type ArgsLatest = (AlloyAddress, U256, U256, Bytes, bool, Vec<U256>);
-type ArgsOld    = (AlloyAddress, U256, U256, Bytes, bool);
+type ArgsOld = (AlloyAddress, U256, U256, Bytes, bool);
 
-pub fn map_command(ctx: &BuildContext, _tx: &RawTx, input: &[u8]) -> Result<Vec<ActionEnvelope>, MapError> {
+pub fn map_command(
+    ctx: &BuildContext,
+    _tx: &RawTx,
+    input: &[u8],
+) -> Result<Vec<ActionEnvelope>, MapError> {
     let (recipient, amount_in, amount_out_min, path_b) =
         if let Ok((r, ai, ao, p, _, _)) = ArgsLatest::abi_decode_sequence(input, true) {
             (r, ai, ao, p)
@@ -27,17 +31,23 @@ pub fn map_command(ctx: &BuildContext, _tx: &RawTx, input: &[u8]) -> Result<Vec<
             (r, ai, ao, p)
         };
     let (tokens, fees) = parse_path(&path_b)?;
-    let fee_bps = if fees.len() == 1 { Some(fee_tier_to_bps(fees[0])) } else { None };
+    let fee_bps = if fees.len() == 1 {
+        Some(fee_tier_to_bps(fees[0]))
+    } else {
+        None
+    };
     Ok(vec![envelope_swap(SwapAction {
         mode: SwapMode::ExactIn,
-        token_in:  ctx.tokens.erc20(ctx.chain_id, *tokens.first().unwrap()),
+        token_in: ctx.tokens.erc20(ctx.chain_id, *tokens.first().unwrap()),
         token_out: ctx.tokens.erc20(ctx.chain_id, *tokens.last().unwrap()),
-        amount_in:  AmountConstraint::exact(amount_in.to_string()),
+        amount_in: AmountConstraint::exact(amount_in.to_string()),
         amount_out: AmountConstraint::min(amount_out_min.to_string()),
         recipient: Some(addr_to_string(recipient)),
         deadline_seconds_from_now: None,
         fee_bps,
-        slippage_bps: None, value_in_usd: None,
-        min_value_out_usd: None, expected_value_out_usd: None,
+        slippage_bps: None,
+        value_in_usd: None,
+        min_value_out_usd: None,
+        expected_value_out_usd: None,
     })])
 }

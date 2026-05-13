@@ -51,12 +51,27 @@ mod tests {
 
     #[test]
     fn detects_all_known_methods() {
-        assert_eq!(SignMethod::detect("eth_signTypedData_v4"), Some(SignMethod::EthSignTypedDataV4));
-        assert_eq!(SignMethod::detect("personal_sign"), Some(SignMethod::PersonalSign));
+        assert_eq!(
+            SignMethod::detect("eth_signTypedData_v4"),
+            Some(SignMethod::EthSignTypedDataV4)
+        );
+        assert_eq!(
+            SignMethod::detect("personal_sign"),
+            Some(SignMethod::PersonalSign)
+        );
         assert_eq!(SignMethod::detect("eth_sign"), Some(SignMethod::EthSign));
-        assert_eq!(SignMethod::detect("eth_signTransaction"), Some(SignMethod::EthSignTransaction));
-        assert_eq!(SignMethod::detect("eth_sendUserOperation"), Some(SignMethod::EthSendUserOperation));
-        assert_eq!(SignMethod::detect("wallet_grantPermissions"), Some(SignMethod::WalletGrantPermissions));
+        assert_eq!(
+            SignMethod::detect("eth_signTransaction"),
+            Some(SignMethod::EthSignTransaction)
+        );
+        assert_eq!(
+            SignMethod::detect("eth_sendUserOperation"),
+            Some(SignMethod::EthSendUserOperation)
+        );
+        assert_eq!(
+            SignMethod::detect("wallet_grantPermissions"),
+            Some(SignMethod::WalletGrantPermissions)
+        );
     }
 
     #[test]

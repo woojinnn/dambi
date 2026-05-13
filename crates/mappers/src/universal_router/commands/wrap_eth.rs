@@ -11,7 +11,11 @@ use crate::types::envelope::{ActionEnvelope, ActionFields, Category};
 
 const WETH_MAINNET_LC: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 
-pub fn map_command(ctx: &BuildContext, _tx: &RawTx, input: &[u8]) -> Result<Vec<ActionEnvelope>, MapError> {
+pub fn map_command(
+    ctx: &BuildContext,
+    _tx: &RawTx,
+    input: &[u8],
+) -> Result<Vec<ActionEnvelope>, MapError> {
     let (recipient, amount): (AlloyAddress, U256) =
         <(AlloyAddress, U256)>::abi_decode_sequence(input, true)
             .map_err(|e| MapError::AbiDecode(e.to_string()))?;

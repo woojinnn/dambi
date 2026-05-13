@@ -17,8 +17,8 @@
 
 use abi_resolver::resolver::{ResolveOutcome, Resolver};
 use alloy_primitives::Address;
-use sign_resolver::{parse_sign_request, SignMethod, SignPayload, SignRequest, SignResolveError};
 use serde_json::Value;
+use sign_resolver::{parse_sign_request, SignMethod, SignPayload, SignRequest, SignResolveError};
 use std::str::FromStr;
 
 /// Output of a routing decision.
@@ -86,7 +86,10 @@ fn route_sign(method: &str, params: &Value, chain_id: u64, resolver: &Resolver) 
     // Step 5: delegate inner callData to abi-resolver for tx / userOp.
     let calldata_resolved = resolve_inner_calldata(&request, resolver);
 
-    RouterOutput::Sign(SignRouterResult { request, calldata_resolved })
+    RouterOutput::Sign(SignRouterResult {
+        request,
+        calldata_resolved,
+    })
 }
 
 /// Extract the embedded calldata from sign payloads that carry a tx or UserOp,
@@ -145,11 +148,17 @@ fn try_route_write(
         .and_then(|a| a.first())
         .ok_or(RouterError::MissingTo)?;
 
-    let to_str = tx.get("to").and_then(|v| v.as_str()).ok_or(RouterError::MissingTo)?;
-    let address = Address::from_str(to_str)
-        .map_err(|_| RouterError::InvalidAddress(to_str.to_string()))?;
+    let to_str = tx
+        .get("to")
+        .and_then(|v| v.as_str())
+        .ok_or(RouterError::MissingTo)?;
+    let address =
+        Address::from_str(to_str).map_err(|_| RouterError::InvalidAddress(to_str.to_string()))?;
 
-    let from = tx.get("from").and_then(|v| v.as_str()).map(str::to_lowercase);
+    let from = tx
+        .get("from")
+        .and_then(|v| v.as_str())
+        .map(str::to_lowercase);
     let value = tx
         .get("value")
         .and_then(|v| v.as_str())
@@ -226,9 +235,14 @@ mod tests {
             "chainId": 1
         }]);
         let out = route("eth_signTransaction", &params, 1, &empty_resolver());
-        let RouterOutput::Sign(result) = out else { panic!("expected Sign") };
+        let RouterOutput::Sign(result) = out else {
+            panic!("expected Sign")
+        };
         // empty resolver → NotFound, but the field is still populated
-        assert!(matches!(result.calldata_resolved, Some(ResolveOutcome::NotFound)));
+        assert!(matches!(
+            result.calldata_resolved,
+            Some(ResolveOutcome::NotFound)
+        ));
     }
 
     #[test]
@@ -242,7 +256,9 @@ mod tests {
             "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
         ]);
         let out = route("eth_sendUserOperation", &params, 1, &empty_resolver());
-        let RouterOutput::Sign(result) = out else { panic!("expected Sign") };
+        let RouterOutput::Sign(result) = out else {
+            panic!("expected Sign")
+        };
         assert!(result.calldata_resolved.is_some());
     }
 
@@ -253,7 +269,9 @@ mod tests {
             { "domain": {}, "primaryType": "T", "types": {}, "message": {} }
         ]);
         let out = route("eth_signTypedData_v4", &params, 1, &empty_resolver());
-        let RouterOutput::Sign(result) = out else { panic!("expected Sign") };
+        let RouterOutput::Sign(result) = out else {
+            panic!("expected Sign")
+        };
         assert!(result.calldata_resolved.is_none());
     }
 
@@ -279,8 +297,13 @@ mod tests {
             "data": "0x"
         }]);
         let out = route("eth_sendTransaction", &params, 1, &empty_resolver());
-        let RouterOutput::Write(result) = out else { panic!("expected Write") };
-        assert_eq!(result.from.unwrap(), "0xab5801a7d398351b8be11c439e05c5b3259aec9b");
+        let RouterOutput::Write(result) = out else {
+            panic!("expected Write")
+        };
+        assert_eq!(
+            result.from.unwrap(),
+            "0xab5801a7d398351b8be11c439e05c5b3259aec9b"
+        );
     }
 
     // ── unsupported / error ───────────────────────────────────────────────────

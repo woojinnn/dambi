@@ -6,8 +6,8 @@ license.workspace = true
 description = "Routes raw EVM RPC requests to sign-resolver or abi-resolver based on method type."
 
 [dependencies]
-sign-resolver = { path = "../sign-resolver" }
-abi-resolver  = { path = "../abi-resolver" }
+sign-resolver.workspace = true
+abi-resolver.workspace = true
 alloy-primitives.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
