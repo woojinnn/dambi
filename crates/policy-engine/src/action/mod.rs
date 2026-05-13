@@ -1,4 +1,4 @@
-//! New 32-variant Action types (replacing the legacy 5-variant `core::LegacyAction`).
+//! Normalized envelope-driven Action types.
 //! Mirrors `schema/schema/actions/` JSON definitions.
 
 pub mod common;

@@ -110,9 +110,8 @@ pub enum Severity {
 
 /// Origin of the Cedar `PolicyRequest` that caused a policy match.
 ///
-/// This is intentionally separate from [`crate::core::Request`]: `Request::Tx`
-/// and `Request::Sig` are host-facing inputs, while `PolicyRequestOrigin`
-/// describes which Cedar request layer produced the returned match.
+/// Describes which lowering layer produced the returned match (currently
+/// always `Action` for the envelope-driven pipeline).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PolicyRequestOrigin {
     /// Request originated from an action-level policy request.
@@ -496,7 +495,7 @@ impl Default for PolicyEngineBuilder {
 
 impl PolicyEngineBuilder {
     /// Construct a builder pre-loaded with the bundled Cedar schema
-    /// (`core + dex + other`). The bundled schema is mandatory: every
+    /// (`core + swap`). The bundled schema is mandatory: every
     /// engine produced by this builder is strict-validated.
     ///
     /// To extend the schema with adapter-contributed fragments, chain
@@ -518,7 +517,7 @@ impl PolicyEngineBuilder {
     }
 
     /// Extend the schema with an additional Cedar fragment. The bundled
-    /// schema (`core + dex + other`) is already pre-loaded by `new()`, so
+    /// schema (`core + swap`) is already pre-loaded by `new()`, so
     /// this method is for adapter- or host-contributed fragments only.
     /// Re-declaring an entity, type, or action that the bundled schema
     /// already provides is a parse error (`Wallet declared twice`); pass
@@ -573,28 +572,37 @@ mod tests {
                 "parents": []
             },
             {
-                "uid": { "type": "Protocol", "id": "dex-v3" },
+                "uid": { "type": "Protocol", "id": "swap" },
                 "attrs": {},
                 "parents": []
             }
         ])
     }
 
-    fn context_dex(usd_value: &str) -> JsonValue {
+    fn token(symbol: &str) -> JsonValue {
         json!({
-            "target": "0x0000000000000000000000000000000000000002",
-            "valueWei": "0",
-            "protocolIds": ["uniswap-v3"],
-            "inputTokens": [],
-            "outputTokens": [],
+            "chainId": 1,
+            "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "symbol": symbol,
+            "decimals": 18,
+            "isNative": false,
+        })
+    }
+
+    fn context_swap(usd_value: &str) -> JsonValue {
+        json!({
+            "swapMode": "exact_in",
+            "tokenIn": token("WETH"),
+            "tokenOut": token("USDC"),
+            "amountIn": { "kind": "exact", "value": "1000" },
+            "amountOut": { "kind": "min", "value": "900" },
+            "recipient": "0x0000000000000000000000000000000000000001",
             "totalInputUsd": {
                 "value": { "__extn": { "fn": "decimal", "arg": usd_value } },
                 "asOfTs": 1,
                 "staleSec": 5,
                 "sources": ["mock"],
             },
-            "hasZeroMinOutput": false,
-            "hasExternalRecipient": false,
         })
     }
 
@@ -604,10 +612,10 @@ mod tests {
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"dex""#,
-                r#"Protocol::"dex""#,
+                r#"Action::"swap""#,
+                r#"Protocol::"swap""#,
                 &entities(),
-                &context_dex("50.00"),
+                &context_swap("50.00"),
             )
             .unwrap();
         assert_eq!(v, Verdict::Pass);
@@ -619,7 +627,7 @@ mod tests {
             @id("user/max-swap-usd-100")
             @severity("deny")
             @reason("USD value of swap exceeds 100")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when {
               context has totalInputUsd &&
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
@@ -629,10 +637,10 @@ mod tests {
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"dex""#,
-                r#"Protocol::"dex""#,
+                r#"Action::"swap""#,
+                r#"Protocol::"swap""#,
                 &entities(),
-                &context_dex("200.00"),
+                &context_swap("200.00"),
             )
             .unwrap();
         match v {
@@ -654,7 +662,7 @@ mod tests {
         let policy = r#"
             @id("user/max-swap-usd-100")
             @severity("deny")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when {
               context has totalInputUsd &&
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
@@ -664,10 +672,10 @@ mod tests {
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"dex""#,
-                r#"Protocol::"dex""#,
+                r#"Action::"swap""#,
+                r#"Protocol::"swap""#,
                 &entities(),
-                &context_dex("50.00"),
+                &context_swap("50.00"),
             )
             .unwrap();
         assert_eq!(v, Verdict::Pass);
@@ -679,7 +687,7 @@ mod tests {
             @id("user/large-swap-warning")
             @severity("warn")
             @reason("Large swap — please review")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when {
               context has totalInputUsd &&
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
@@ -689,10 +697,10 @@ mod tests {
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"dex""#,
-                r#"Protocol::"dex""#,
+                r#"Action::"swap""#,
+                r#"Protocol::"swap""#,
                 &entities(),
-                &context_dex("200.00"),
+                &context_swap("200.00"),
             )
             .unwrap();
         match v {
@@ -713,7 +721,7 @@ mod tests {
         let policy = r#"
             @id("user/large-swap-warning")
             @severity("warn")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when {
               context has totalInputUsd &&
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
@@ -721,7 +729,7 @@ mod tests {
 
             @id("user/huge-swap-deny")
             @severity("deny")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when {
               context has totalInputUsd &&
               context.totalInputUsd.value.greaterThan(decimal("150.00"))
@@ -731,10 +739,10 @@ mod tests {
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"dex""#,
-                r#"Protocol::"dex""#,
+                r#"Action::"swap""#,
+                r#"Protocol::"swap""#,
                 &entities(),
-                &context_dex("200.00"),
+                &context_swap("200.00"),
             )
             .unwrap();
         match v {
@@ -775,7 +783,7 @@ mod tests {
         let typo_policy = r#"
             @id("smoke/typo")
             @severity("deny")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when {
               context has totalInputUsd &&
               context.totalInputUSd.value.greaterThan(decimal("0"))
@@ -791,13 +799,13 @@ mod tests {
 
     #[test]
     fn from_sources_validates_policy_against_bundled_schema() {
-        // The unbundled `from_sources` constructor must apply the bundled
-        // Cedar schema (core + dex + other) so a policy with a typo in a
-        // DexContext field is rejected at build time, not silently accepted.
+        // The unbundled `from_sources` constructor applies the bundled
+        // Cedar schema (core + swap) so a policy with a typo in a
+        // SwapContext field is rejected at build time, not silently accepted.
         let policy = r#"
             @id("bad/from-sources-context-typo")
             @severity("deny")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when { context.totalInputUSd.value.greaterThan(decimal("100.00")) };
         "#;
 
@@ -813,7 +821,7 @@ mod tests {
         let policy = r#"
             @id("bad/context-typo")
             @severity("deny")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when { context.totalInputUSd.value.greaterThan(decimal("100.00")) };
         "#;
 
@@ -832,7 +840,7 @@ mod tests {
         let policy = r#"
             @id("user/max-swap-usd-100")
             @severity("deny")
-            forbid (principal, action == Action::"dex", resource)
+            forbid (principal, action == Action::"swap", resource)
             when {
               context has totalInputUsd &&
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
@@ -843,8 +851,8 @@ mod tests {
         let err = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
-                r#"Action::"dex""#,
-                r#"Protocol::"dex""#,
+                r#"Action::"swap""#,
+                r#"Protocol::"swap""#,
                 &entities(),
                 &json!({}),
             )
@@ -861,15 +869,15 @@ mod tests {
         let policy = r#"
             @id("user/action-deny")
             @severity("deny")
-            forbid (principal, action == Action::"dex", resource);
+            forbid (principal, action == Action::"swap", resource);
         "#;
         let engine = PolicyEngine::from_sources([policy]).unwrap();
         let request = PolicyRequest::new(
             r#"Wallet::"0xUser""#,
-            r#"Action::"dex""#,
-            r#"Protocol::"dex""#,
+            r#"Action::"swap""#,
+            r#"Protocol::"swap""#,
             entities(),
-            context_dex("50.00"),
+            context_swap("50.00"),
         );
 
         let verdict = engine.evaluate_request(&request).unwrap();
