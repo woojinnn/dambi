@@ -160,14 +160,20 @@ fn unknown_selector_returns_error() {
 }
 
 #[test]
-fn erc20_approve_returns_error_for_now() {
-    // ERC-20 `approve(spender, amount)` has no Mapper registered yet — once
-    // we add an approve Mapper this assertion will need to flip to a
-    // structural check on Action::Approve. Until then, NoCallMatch is the
-    // expected outcome.
-    let result = route("erc20_approve.json");
-    assert!(
-        result.is_err(),
-        "erc20 approve fixture has no mapper yet, should error",
-    );
+fn erc20_approve_routes_to_unlimited_approve_envelope() {
+    use policy_engine::action::common::AmountKind;
+    use policy_engine::action::envelope::{Action, Category};
+    use policy_engine::action::misc::ApprovalKind;
+
+    let envelopes = route("erc20_approve.json")
+        .expect("erc20 approve fixture should route via ERC-20 mapper");
+    assert_eq!(envelopes.len(), 1);
+    assert_eq!(envelopes[0].category, Category::Misc);
+    let Action::Approve(approve) = &envelopes[0].action else {
+        panic!("expected Action::Approve, got kind={}", envelopes[0].action.kind());
+    };
+    // Fixture uses USDT and ffff…ff amount, so we expect Unlimited.
+    assert_eq!(approve.amount.kind, AmountKind::Unlimited);
+    assert!(approve.amount.value.is_none());
+    assert_eq!(approve.approval_kind, ApprovalKind::Erc20);
 }
