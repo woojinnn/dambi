@@ -11,12 +11,6 @@ serde_json = "1"
 thiserror = { workspace = true }
 anyhow = "1"
 alloy-primitives = { workspace = true }
-alloy-sol-types = { workspace = true }
-alloy-dyn-abi = { workspace = true }
 abi-resolver = { workspace = true }
 policy-engine = { workspace = true }
 hex = "0.4"
-
-[[example]]
-name = "validate_samples"
-path = "examples/validate_samples.rs"

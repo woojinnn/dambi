@@ -1,47 +1,32 @@
-//! Calldata → `schema_demo` mappers.
+//! Calldata → `ActionEnvelope` mappers.
 //!
-//! Each Solidity function or Universal Router command has one mapper file.
-//! A mapper:
-//!   1. Receives decoded params (or raw calldata + decodes inline),
-//!   2. Builds the corresponding `ActionEnvelope`(s) per the JSON schema in
-//!      `schema_demo/schema/`,
-//!   3. Leaves USD / oracle / token-registry fields as `None` for the host.
+//! New pipeline:
+//! ```text
+//!   TransactionRequest → Decoder (abi-resolver) → DecodedCall
+//!                     → Mapper (mappers::protocols::*) → ActionEnvelope
+//! ```
 //!
-//! The `assembler` then wraps the resulting `Vec<ActionEnvelope>` in a
-//! `RootRequest` with the top-level metadata.
+//! Each protocol provides one or more [`Mapper`] implementations that consume
+//! an [`abi_resolver::DecodedCall`] and emit `ActionEnvelope`s. Mappers are
+//! resolved by `MapperMatchKey` (currently just the decoder id) via a
+//! [`MapperRegistry`].
 //!
 //! Module layout:
 //! ```text
-//!   uniswap_v2/        - V2 Router02 (9 swap functions)
-//!   uniswap_v3/        - V3 SwapRouter (4 functions)
-//!   uniswap_v4/        - V4 Router actions (4 swap actions)
-//!   universal_router/  - UR execute() + command dispatcher
-//!     commands/        - per-command mappers (V2/V3 sub-dispatch, WRAP, etc.)
-//!   types/             - Rust mirrors of schema_demo JSON types
-//!   context.rs         - BuildContext, RawTx, TokenRegistry
-//!   error.rs           - MapError
-//!   assembler.rs       - RootRequest builder
-//!   registry.rs        - (chain_id, to, selector) -> mapper dispatch
+//!   mapper.rs                       - Mapper trait + MapperRegistry trait
+//!   in_memory_mapper_registry.rs    - HashMap-backed MapperRegistry
+//!   token_registry.rs               - TokenRegistry trait + EmptyTokenRegistry
+//!   protocols/                      - per-protocol mappers
+//!     erc20.rs
+//!     uniswap_v2.rs
+//!     uniswap_v3.rs
+//!     weth.rs
 //! ```
 
-#![allow(dead_code)]
-#![allow(clippy::module_inception)]
-
-pub mod assembler;
-pub mod context;
-pub mod error;
 pub mod in_memory_mapper_registry;
 pub mod mapper;
 pub mod protocols;
-pub mod registry;
 pub mod token_registry;
-pub mod types;
-
-pub mod swap_router_02;
-pub mod uniswap_v2;
-pub mod uniswap_v3;
-pub mod uniswap_v4;
-pub mod universal_router;
 
 pub use in_memory_mapper_registry::{InMemoryMapperRegistry, InMemoryMapperRegistryBuilder};
 pub use mapper::{MapContext, Mapper, MapperError, MapperId, MapperMatchKey, MapperRegistry};
