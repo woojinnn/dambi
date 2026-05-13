@@ -6,10 +6,14 @@ pub mod envelope;
 // Following modules added in subsequent tasks (1.3-1.6):
 /// Decentralized exchange action schema types.
 pub mod dex;
-// pub mod lending;
-// pub mod misc;
-// pub mod staking;
-// pub mod restaking;
+/// Lending action schema types.
+pub mod lending;
+/// Miscellaneous action schema types.
+pub mod misc;
+/// Staking action schema types.
+pub mod staking;
+/// Restaking action schema types.
+pub mod restaking;
 
 pub use common::{
     Address, AmountConstraint, AmountKind, AssetKind, AssetRef, DecimalString, Hex, UsdValuation,
