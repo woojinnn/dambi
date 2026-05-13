@@ -75,6 +75,46 @@ use tower_http::trace::TraceLayer;
 mod etherscan;
 use etherscan::EtherscanClient;
 
+// ── /api/route ────────────────────────────────────────────────────────────────
+// New unified entry point exposing the Phase 5 `request_router::route_request`
+// pipeline. Keeps `/api/decode` and `/api/sign` available unchanged for
+// backward compatibility; `/api/route` is the migration target for the
+// extension and other consumers once Phase 8 lands.
+
+#[derive(Deserialize)]
+struct RouteRequest {
+    method: String,
+    params: serde_json::Value,
+    chain_id: u64,
+    #[serde(default)]
+    block_timestamp: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct RouteResponse {
+    actions: Vec<serde_json::Value>,
+}
+
+async fn route(State(state): State<AppState>, Json(req): Json<RouteRequest>) -> Response {
+    let registries = state.route_registries.as_ref();
+    let token_registry = mappers::EmptyTokenRegistry;
+    let ctx = request_router::RouterContext {
+        registries,
+        token_registry: &token_registry,
+        block_timestamp: req.block_timestamp,
+    };
+    match request_router::route_request(&ctx, &req.method, &req.params, req.chain_id) {
+        Ok(envelopes) => {
+            let actions: Vec<serde_json::Value> = envelopes
+                .iter()
+                .filter_map(|e| serde_json::to_value(e).ok())
+                .collect();
+            Json(RouteResponse { actions }).into_response()
+        }
+        Err(e) => err(StatusCode::BAD_REQUEST, format!("route error: {e}")),
+    }
+}
+
 // ── /api/sign ─────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -219,6 +259,9 @@ struct AppState {
     /// tier is silently skipped.
     etherscan: Option<Arc<EtherscanClient>>,
     event_tx: broadcast::Sender<String>,
+    /// Phase 5 registries used by `POST /api/route`. Built once at startup
+    /// from `request_router::DefaultRegistries::standard()`.
+    route_registries: Arc<request_router::DefaultRegistries>,
 }
 
 fn build_resolver() -> Resolver {
@@ -1096,11 +1139,13 @@ async fn main() {
         resolver: Arc::new(build_resolver()),
         etherscan,
         event_tx,
+        route_registries: Arc::new(request_router::DefaultRegistries::standard()),
     };
 
     let mut app = Router::new()
         .route("/api/decode", post(decode))
         .route("/api/sign", post(decode_sign))
+        .route("/api/route", post(route))
         .route("/api/event", post(post_event))
         .route("/api/event/stream", get(event_stream))
         .route("/api/health", get(health))
