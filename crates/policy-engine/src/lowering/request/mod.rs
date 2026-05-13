@@ -1,15 +1,8 @@
 //! `PolicyRequest` builders.
 //!
-//! Each semantic action lowers to exactly one policy request.
+//! Each semantic action envelope lowers to exactly one policy request.
 
-mod action;
 mod amount;
-mod dex;
 mod envelope;
-mod other;
-pub mod signature;
 
-pub use action::{
-    request_from_action, request_from_action_with_host, requests_from_action, requests_from_actions,
-};
 pub use envelope::policy_request_from_envelope;
