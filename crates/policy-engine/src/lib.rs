@@ -46,6 +46,7 @@ pub mod pipeline;
 pub mod policy;
 pub mod prelude;
 pub mod registry;
+pub mod root;
 pub mod schema;
 
 pub use action::{
@@ -87,4 +88,5 @@ pub use registry::{
     SignatureActionAdapterRegistry, SignatureActionResolverOutcome, TransactionActionAdapterIndex,
     TransactionActionAdapterRegistry, TransactionResolverOutcome,
 };
+pub use root::{ProtocolRef, RequestKind, RootRequest};
 pub use schema::PolicySchemaComposer;
