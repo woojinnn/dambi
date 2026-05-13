@@ -2,7 +2,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use abi_resolver::decoders::erc20::{
-    Erc20ApproveDecoder, Erc20TransferDecoder, ERC20_APPROVE_DECODER_ID, ERC20_TRANSFER_DECODER_ID,
+    Erc20ApproveDecoder, Erc20TransferDecoder, Erc20TransferFromDecoder, ERC20_APPROVE_DECODER_ID,
+    ERC20_TRANSFER_DECODER_ID, ERC20_TRANSFER_FROM_DECODER_ID,
 };
 use abi_resolver::decoders::uniswap_v2::{
     SwapExactTokensForTokensDecoder, SwapTokensForExactTokensDecoder,
@@ -17,7 +18,7 @@ use call_adapter::{
     CallAdapter as _, CallAdapterId, DefaultCallAdapter, InMemoryCallAdapterRegistry,
     UniversalRouterCallAdapter,
 };
-use mappers::protocols::erc20::{Erc20ApproveMapper, Erc20TransferMapper};
+use mappers::protocols::erc20::{Erc20ApproveMapper, Erc20TransferFromMapper, Erc20TransferMapper};
 use mappers::protocols::uniswap_v2::{
     SwapExactTokensForTokensMapper, SwapTokensForExactTokensMapper,
 };
@@ -45,6 +46,7 @@ impl DefaultRegistries {
                 .register(Arc::new(ExactInputDecoder::new()))
                 .register(Arc::new(Erc20ApproveDecoder::new()))
                 .register(Arc::new(Erc20TransferDecoder::new()))
+                .register(Arc::new(Erc20TransferFromDecoder::new()))
                 .build(),
         );
         let mappers = Arc::new(
@@ -78,6 +80,12 @@ impl DefaultRegistries {
                         decoder_id: DecoderId::new(ERC20_TRANSFER_DECODER_ID),
                     },
                     Arc::new(Erc20TransferMapper::new()),
+                )
+                .register(
+                    MapperMatchKey {
+                        decoder_id: DecoderId::new(ERC20_TRANSFER_FROM_DECODER_ID),
+                    },
+                    Arc::new(Erc20TransferFromMapper::new()),
                 )
                 .build(),
         );
