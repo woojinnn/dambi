@@ -11,6 +11,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 policy-engine.workspace = true
 policy-engine-adapters-bundle.workspace = true
+request-router = { path = "../adapters/request-router" }
+mappers.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true

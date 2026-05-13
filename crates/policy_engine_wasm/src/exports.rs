@@ -685,3 +685,101 @@ mod tests {
         assert_eq!(parsed["data"]["kind"], "pass", "{parsed}");
     }
 }
+
+// ── Phase 7: route_request_json ───────────────────────────────────────────────
+// New-pipeline entry point exposing `request_router::route_request` to JS.
+// Returns the `Vec<ActionEnvelope>` JSON inside the standard `{ok, data}` envelope.
+// Parallel to `build_action_for_request_json` which emits LegacyAction;
+// `route_request_json` is the migration target.
+
+#[derive(serde::Deserialize)]
+struct RouteRequestInput {
+    method: String,
+    params: serde_json::Value,
+    chain_id: u64,
+    #[serde(default)]
+    block_timestamp: Option<u64>,
+}
+
+#[wasm_bindgen]
+pub fn route_request_json(input_json: String) -> String {
+    let parse_result: Result<RouteRequestInput, _> = serde_json::from_str(&input_json);
+    let input = match parse_result {
+        Ok(v) => v,
+        Err(e) => {
+            return Envelope::<()>::err(
+                "invalid_input_json",
+                format!("invalid input json: {e}"),
+            )
+            .to_json();
+        }
+    };
+
+    let registries = request_router::DefaultRegistries::standard();
+    let token_registry = mappers::EmptyTokenRegistry;
+    let ctx = request_router::RouterContext {
+        registries: &registries,
+        token_registry: &token_registry,
+        block_timestamp: input.block_timestamp,
+    };
+    match request_router::route_request(&ctx, &input.method, &input.params, input.chain_id) {
+        Ok(envelopes) => Envelope::ok(envelopes).to_json(),
+        Err(e) => Envelope::<()>::err("route_failed", e.to_string()).to_json(),
+    }
+}
+
+#[cfg(test)]
+mod tests_route_request {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn route_request_unsupported_method_returns_err() {
+        let out = route_request_json(
+            json!({
+                "method": "personal_sign",
+                "params": [],
+                "chain_id": 1u64,
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false);
+        assert_eq!(parsed["error"]["kind"], "route_failed");
+    }
+
+    #[test]
+    fn route_request_unknown_selector_returns_err() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../crates/integration-tests/data/golden/inputs/unknown_selector.json"
+        ))
+        .unwrap();
+        let input = json!({
+            "method": fixture["rpc"]["method"],
+            "params": fixture["rpc"]["params"],
+            "chain_id": fixture["chain_id"],
+        });
+        let out = route_request_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false);
+    }
+
+    #[test]
+    fn route_request_v2_swap_returns_envelope() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../crates/integration-tests/data/golden/inputs/swap_uniswap_v2_exact_in.json"
+        ))
+        .unwrap();
+        let input = json!({
+            "method": fixture["rpc"]["method"],
+            "params": fixture["rpc"]["params"],
+            "chain_id": fixture["chain_id"],
+        });
+        let out = route_request_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        let actions = parsed["data"].as_array().expect("data is array");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["action"], "swap");
+    }
+}
