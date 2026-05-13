@@ -30,7 +30,10 @@
 pub mod assembler;
 pub mod context;
 pub mod error;
+pub mod in_memory_mapper_registry;
+pub mod mapper;
 pub mod registry;
+pub mod token_registry;
 pub mod types;
 
 pub mod swap_router_02;
@@ -38,3 +41,7 @@ pub mod uniswap_v2;
 pub mod uniswap_v3;
 pub mod uniswap_v4;
 pub mod universal_router;
+
+pub use in_memory_mapper_registry::{InMemoryMapperRegistry, InMemoryMapperRegistryBuilder};
+pub use mapper::{MapContext, Mapper, MapperError, MapperId, MapperMatchKey, MapperRegistry};
+pub use token_registry::{EmptyTokenRegistry, TokenMetadata, TokenRegistry};
