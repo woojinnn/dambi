@@ -221,3 +221,39 @@ fn erc20_transfer_routes_to_transfer_envelope() {
         );
     };
 }
+
+#[test]
+fn erc20_transfer_from_routes_to_transfer_envelope() {
+    use policy_engine::action::common::AmountKind;
+    use policy_engine::action::envelope::{Action, Category};
+    use std::str::FromStr as _;
+
+    let envelopes = route("erc20_transfer_from.json")
+        .expect("erc20 transferFrom fixture should route via ERC-20 mapper");
+    assert_eq!(envelopes.len(), 1);
+    assert_eq!(envelopes[0].category, Category::Misc);
+    assert_eq!(envelopes[0].action.kind(), "transfer");
+    let Action::Transfer(transfer) = &envelopes[0].action else {
+        panic!(
+            "expected Action::Transfer, got kind={}",
+            envelopes[0].action.kind()
+        );
+    };
+
+    assert_eq!(
+        transfer.from,
+        policy_engine::action::Address::from_str("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .unwrap()
+    );
+    assert_eq!(
+        transfer.recipient,
+        policy_engine::action::Address::from_str("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+            .unwrap()
+    );
+    let amount = transfer.amount.as_ref().expect("transferFrom amount");
+    assert_eq!(amount.kind, AmountKind::Exact);
+    assert_eq!(
+        amount.value.as_ref().map(ToString::to_string),
+        Some("1000000".to_string())
+    );
+}
