@@ -1,11 +1,13 @@
 type DecreaseLiquidityContext = {
   nft: AssetRef,
   liquidityDelta: AmountConstraint,
-  outputs: Set<AssetRefWithAmountConstraint>,
+  outputTokens: Set<AssetRefWithAmountConstraint>,
   recipient?: String,
   validity?: Validity,
 
-  totalOutputUsd?: UsdValuation,
+  totalInputUsd?: UsdValuation,
+  totalMinOutputUsd?: UsdValuation,
+  effectiveRateVsOracleBps?: Long,
   nftOwnerIsActor?: Bool,
   recipientIsContract?: Bool,
   windowStats?: WindowStats,

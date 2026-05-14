@@ -1,15 +1,14 @@
 type AddLiquidityContext = {
-  pool?: Pool,
-  inputs: Set<AssetRefWithAmountConstraint>,
-  lpToken?: AssetRef,
-  lpAmount?: AmountConstraint,
+  pool: Pool,
+  inputTokens: Set<AssetRefWithAmountConstraint>,
+  outputLp: AssetRefWithAmountConstraint,
   recipient: String,
   validity?: Validity,
 
   totalInputUsd?: UsdValuation,
+  totalMinOutputUsd?: UsdValuation,
+  effectiveRateVsOracleBps?: Long,
   totalInputFractionOfPortfolioBps?: Long,
-  allowancesCoverInputs?: Bool,
-  hasUnlimitedAllowance?: Bool,
   recipientIsContract?: Bool,
   windowStats?: WindowStats,
 };

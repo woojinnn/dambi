@@ -1,16 +1,14 @@
 type MintLiquidityNftContext = {
-  pool?: Pool,
-  feeTierBps: Long,
+  pool: Pool,
+  feeBps: Long,
   tickRange: TickRange,
-  inputs: Set<AssetRefWithAmountConstraint>,
-  nft: AssetRef,
+  inputTokens: Set<AssetRefWithAmountConstraint>,
   recipient: String,
   validity?: Validity,
 
   totalInputUsd?: UsdValuation,
   totalInputFractionOfPortfolioBps?: Long,
-  allowancesCoverInputs?: Bool,
-  hasUnlimitedAllowance?: Bool,
+  effectiveRateVsOracleBps?: Long,
   recipientIsContract?: Bool,
   windowStats?: WindowStats,
 };

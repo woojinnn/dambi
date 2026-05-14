@@ -1,16 +1,14 @@
 type RemoveLiquidityContext = {
   exitMode: String,
-  pool?: Pool,
-  lpToken?: AssetRef,
-  lpBurnAmount?: AmountConstraint,
-  outputs: Set<AssetRefWithAmountConstraint>,
+  pool: Pool,
+  inputLp: AssetRefWithAmountConstraint,
+  outputTokens: Set<AssetRefWithAmountConstraint>,
   recipient: String,
   validity?: Validity,
 
   totalInputUsd?: UsdValuation,
-  totalOutputUsd?: UsdValuation,
-  allowancesCoverInputs?: Bool,
-  hasUnlimitedAllowance?: Bool,
+  totalMinOutputUsd?: UsdValuation,
+  effectiveRateVsOracleBps?: Long,
   recipientIsContract?: Bool,
   windowStats?: WindowStats,
 };
