@@ -33,14 +33,14 @@ pub struct BorrowAction {
 mod tests {
     use super::*;
     use crate::action::lending::test_support::{
-        address, amount, asset, assert_json_roundtrip, market, validity,
+        address, amount, assert_json_roundtrip, erc20, market, validity,
     };
     use serde_json::json;
 
     #[test]
     fn test_borrow_action_serde_roundtrip_minimal() {
         assert_json_roundtrip::<BorrowAction>(json!({
-            "asset": asset("USDC"),
+            "asset": erc20("USDC"),
             "amount": amount("exact", "1000"),
             "recipient": address(0x30),
             "onBehalf": address(0x31)
@@ -51,7 +51,7 @@ mod tests {
     fn test_borrow_action_serde_roundtrip_full() {
         assert_json_roundtrip::<BorrowAction>(json!({
             "market": market(),
-            "asset": asset("USDC"),
+            "asset": erc20("USDC"),
             "amount": amount("exact", "1000"),
             "amountMode": "shares",
             "recipient": address(0x30),

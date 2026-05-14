@@ -31,14 +31,14 @@ pub struct WithdrawAction {
 mod tests {
     use super::*;
     use crate::action::lending::test_support::{
-        address, amount, asset, assert_json_roundtrip, market,
+        address, amount, assert_json_roundtrip, erc20, market,
     };
     use serde_json::json;
 
     #[test]
     fn test_withdraw_action_serde_roundtrip_minimal() {
         assert_json_roundtrip::<WithdrawAction>(json!({
-            "asset": asset("USDC"),
+            "asset": erc20("USDC"),
             "amount": amount("exact", "1000"),
             "recipient": address(0x30)
         }));
@@ -48,7 +48,7 @@ mod tests {
     fn test_withdraw_action_serde_roundtrip_full() {
         assert_json_roundtrip::<WithdrawAction>(json!({
             "market": market(),
-            "asset": asset("USDC"),
+            "asset": erc20("USDC"),
             "amount": amount("unlimited", "0"),
             "amountMode": "shares",
             "recipient": address(0x30),

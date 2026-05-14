@@ -34,9 +34,7 @@ pub struct DelegateAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::misc::test_support::{
-        address, assert_json_roundtrip, erc20, validity,
-    };
+    use crate::action::misc::test_support::{address, assert_json_roundtrip, erc20, validity};
     use serde_json::json;
 
     #[test]

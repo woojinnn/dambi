@@ -29,57 +29,11 @@ pub struct StrategyRef {
 
 #[cfg(test)]
 pub(super) mod test_support {
-    use serde::{de::DeserializeOwned, Serialize};
     use serde_json::{json, Value};
-    use std::fmt::Debug;
 
-    #[allow(clippy::needless_pass_by_value)]
-    pub(crate) fn assert_json_roundtrip<T>(fixture: Value)
-    where
-        T: Serialize + DeserializeOwned + PartialEq + Debug,
-    {
-        let action = serde_json::from_value::<T>(fixture.clone()).unwrap();
-        let serialized = serde_json::to_value(action).unwrap();
-
-        assert_eq!(serialized, fixture);
-    }
-
-    pub(crate) fn address(value: u8) -> String {
-        format!("0x{value:040x}")
-    }
-
-    pub(crate) fn hex32(value: u8) -> String {
-        format!("0x{}", format!("{value:02x}").repeat(32))
-    }
-
-    pub(crate) fn native(symbol: &str) -> Value {
-        json!({
-            "kind": "native",
-            "symbol": symbol,
-            "decimals": 18
-        })
-    }
-
-    pub(crate) fn erc20(symbol: &str) -> Value {
-        json!({
-            "kind": "erc20",
-            "address": address(0x10),
-            "symbol": symbol,
-            "decimals": 18
-        })
-    }
-
-    pub(crate) fn erc721(symbol: &str) -> Value {
-        json!({
-            "kind": "erc721",
-            "address": address(0x11),
-            "symbol": symbol
-        })
-    }
-
-    pub(crate) fn amount(kind: &str, value: &str) -> Value {
-        json!({ "kind": kind, "value": value })
-    }
+    pub(crate) use crate::action::test_support::{
+        address, amount, assert_json_roundtrip, erc20, erc721, hex32, native,
+    };
 
     pub(crate) fn strategy() -> Value {
         json!({

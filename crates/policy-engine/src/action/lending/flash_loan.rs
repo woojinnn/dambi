@@ -33,14 +33,14 @@ pub struct FlashLoanAction {
 mod tests {
     use super::*;
     use crate::action::lending::test_support::{
-        address, amount, asset, assert_json_roundtrip, market,
+        address, amount, assert_json_roundtrip, erc20, market,
     };
     use serde_json::json;
 
     #[test]
     fn test_flash_loan_action_serde_roundtrip_minimal() {
         assert_json_roundtrip::<FlashLoanAction>(json!({
-            "assets": [asset("USDC")],
+            "assets": [erc20("USDC")],
             "amounts": [amount("exact", "1000")],
             "receiver": address(0x50),
             "flashLoanKind": "simple"
@@ -51,7 +51,7 @@ mod tests {
     fn test_flash_loan_action_serde_roundtrip_full() {
         assert_json_roundtrip::<FlashLoanAction>(json!({
             "pool": market(),
-            "assets": [asset("USDC"), asset("WETH")],
+            "assets": [erc20("USDC"), erc20("WETH")],
             "amounts": [amount("exact", "1000"), amount("exact", "2")],
             "receiver": address(0x50),
             "onBehalf": address(0x31),
