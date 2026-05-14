@@ -1,0 +1,18 @@
+type SignAuthorizationContext = {
+  market?: Pool,
+  authorizer: String,
+  authorized: String,
+  isAuthorized: Bool,
+  authorizationScope: String,
+  amount?: AmountConstraint,
+  nonce?: String,
+  validity: Validity,
+
+  authorizedIsContract?: Bool,
+};
+
+action "sign_authorization" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: SignAuthorizationContext,
+};

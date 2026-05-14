@@ -1,0 +1,17 @@
+type WithdrawContext = {
+  market?: Pool,
+  asset: AssetRef,
+  amount: AmountConstraint,
+  amountMode?: String,
+  recipient: String,
+  onBehalf?: String,
+
+  totalOutputUsd?: UsdValuation,
+  recipientIsContract?: Bool,
+};
+
+action "withdraw" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: WithdrawContext,
+};

@@ -1,0 +1,17 @@
+type FlashLoanContext = {
+  pool?: Pool,
+  assets: Set<AssetRefWithAmountConstraint>,
+  receiver: String,
+  onBehalf?: String,
+  flashLoanKind: String,
+  fee?: AmountConstraint,
+
+  totalLoanUsd?: UsdValuation,
+  receiverIsContract?: Bool,
+};
+
+action "flash_loan" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: FlashLoanContext,
+};

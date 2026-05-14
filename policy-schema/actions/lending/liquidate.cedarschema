@@ -1,0 +1,21 @@
+type LiquidateContext = {
+  market?: Pool,
+  borrower: String,
+  collateralAsset?: AssetRef,
+  debtAsset: AssetRef,
+  debtToCover?: AmountConstraint,
+  seizedCollateralAmount?: AmountConstraint,
+  liquidationKind: String,
+  liquidateMode?: String,
+  recipient?: String,
+  receiveAToken?: Bool,
+
+  totalDebtUsd?: UsdValuation,
+  totalCollateralUsd?: UsdValuation,
+};
+
+action "liquidate" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: LiquidateContext,
+};

@@ -1,0 +1,12 @@
+type RevokeContext = {
+  target?: Pool,
+  caller: String,
+  subject: String,
+  revokeKind: String,
+};
+
+action "revoke" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: RevokeContext,
+};
