@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/policy-engine",
-    "crates/policy_engine_wasm",
+    "crates/policy-engine-wasm",
     "crates/integration-tests",
     "crates/adapters/abi-resolver",
     "crates/adapters/call-adapter",
