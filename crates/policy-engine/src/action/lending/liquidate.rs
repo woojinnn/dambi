@@ -43,7 +43,7 @@ pub struct LiquidateAction {
 mod tests {
     use super::*;
     use crate::action::lending::test_support::{
-        address, amount, asset, assert_json_roundtrip, market,
+        address, amount, assert_json_roundtrip, erc20, market,
     };
     use serde_json::json;
 
@@ -51,7 +51,7 @@ mod tests {
     fn test_liquidate_action_serde_roundtrip_minimal() {
         assert_json_roundtrip::<LiquidateAction>(json!({
             "borrower": address(0x40),
-            "debtAsset": asset("USDC"),
+            "debtAsset": erc20("USDC"),
             "liquidationKind": "pool_share"
         }));
     }
@@ -61,8 +61,8 @@ mod tests {
         assert_json_roundtrip::<LiquidateAction>(json!({
             "market": market(),
             "borrower": address(0x40),
-            "collateralAsset": asset("WETH"),
-            "debtAsset": asset("USDC"),
+            "collateralAsset": erc20("WETH"),
+            "debtAsset": erc20("USDC"),
             "debtToCover": amount("exact", "1000"),
             "seizedCollateralAmount": amount("estimated", "1"),
             "liquidationKind": "socializable",

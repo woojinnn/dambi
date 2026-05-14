@@ -2,10 +2,9 @@
 //! Mirrors `schema/schema/actions/` JSON definitions.
 
 pub mod common;
-pub mod envelope;
-// Following modules added in subsequent tasks (1.3-1.6):
 /// Decentralized exchange action schema types.
 pub mod dex;
+pub mod envelope;
 /// Lending action schema types.
 pub mod lending;
 /// Miscellaneous action schema types.
@@ -14,6 +13,9 @@ pub mod misc;
 pub mod restaking;
 /// Staking action schema types.
 pub mod staking;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub use common::{
     Address, AmountConstraint, AmountKind, AssetKind, AssetRef, AssetRefWithAmountConstraint,

@@ -24,7 +24,9 @@ pub struct StakeAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::staking::test_support::{address, amount, assert_json_roundtrip, erc20, native};
+    use crate::action::staking::test_support::{
+        address, amount, assert_json_roundtrip, erc20, native,
+    };
     use serde_json::json;
 
     #[test]
