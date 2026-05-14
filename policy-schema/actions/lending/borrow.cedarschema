@@ -1,0 +1,18 @@
+type BorrowContext = {
+  market?: Pool,
+  asset: AssetRef,
+  amount: AmountConstraint,
+  amountMode: String,
+  recipient: String,
+  onBehalf: String,
+  validity?: Validity,
+
+  totalBorrowedUsd?: UsdValuation,
+  recipientIsContract?: Bool,
+};
+
+action "borrow" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: BorrowContext,
+};

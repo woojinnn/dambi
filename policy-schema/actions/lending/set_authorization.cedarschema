@@ -1,0 +1,16 @@
+type SetAuthorizationContext = {
+  market?: Pool,
+  authorizer: String,
+  authorized: String,
+  isAuthorized: Bool,
+  authorizationScope: String,
+  amount?: AmountConstraint,
+
+  authorizedIsContract?: Bool,
+};
+
+action "set_authorization" appliesTo {
+  principal: Wallet,
+  resource: Protocol,
+  context: SetAuthorizationContext,
+};
