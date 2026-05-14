@@ -6,7 +6,7 @@ type LiquidateContext = {
   debtToCover?: AmountConstraint,
   seizedCollateralAmount?: AmountConstraint,
   liquidationKind: String,
-  liquidateMode: String,
+  liquidateMode?: String,
   recipient?: String,
   receiveAToken?: Bool,
 

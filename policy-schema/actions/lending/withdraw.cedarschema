@@ -2,7 +2,7 @@ type WithdrawContext = {
   market?: Pool,
   asset: AssetRef,
   amount: AmountConstraint,
-  amountMode: String,
+  amountMode?: String,
   recipient: String,
   onBehalf?: String,
 

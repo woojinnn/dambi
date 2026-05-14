@@ -2,7 +2,7 @@ type SupplyContext = {
   market?: Pool,
   asset: AssetRef,
   amount: AmountConstraint,
-  amountMode: String,
+  amountMode?: String,
   recipient: String,
   from?: String,
   validity?: Validity,
