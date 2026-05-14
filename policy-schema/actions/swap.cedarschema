@@ -1,7 +1,7 @@
 type SwapContext = {
   swapMode: String,
-  tokenIn: Token,
-  tokenOut: Token,
+  tokenIn: AssetRef,
+  tokenOut: AssetRef,
   amountIn: AmountConstraint,
   amountOut: AmountConstraint,
   recipient: String,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { SignDecodeRequest } from '../api'
+import { samplesForMethod, type SignSample } from '../samples/signSamples'
 
 const SIGN_METHODS = [
   'eth_signTypedData_v4',
@@ -16,6 +17,7 @@ interface Props {
   params: string
   onMethodChange: (v: string) => void
   onChainIdChange: (v: string) => void
+  onLoadSample: (sample: SignSample) => void
   onSubmit: (req: SignDecodeRequest) => void
   loading: boolean
 }
@@ -50,7 +52,7 @@ const DEFAULT_USER_OP: UserOpFields = {
 }
 const DEFAULT_GRANT: GrantPermFields = { request: DEFAULT_GRANT_REQUEST_JSON }
 
-export function SignDecodeForm({ method, chainId, params, onMethodChange, onChainIdChange, onSubmit, loading }: Props) {
+export function SignDecodeForm({ method, chainId, params, onMethodChange, onChainIdChange, onLoadSample, onSubmit, loading }: Props) {
   const [typedData, setTypedData] = useState<TypedDataFields>(DEFAULT_TYPED)
   const [personalSign, setPersonalSign] = useState<PersonalSignFields>(DEFAULT_PERSONAL)
   const [ethSign, setEthSign] = useState<EthSignFields>(DEFAULT_ETH_SIGN)
@@ -202,7 +204,7 @@ export function SignDecodeForm({ method, chainId, params, onMethodChange, onChai
       case 'personal_sign':
         return (
           <>
-            {td('Message (hex or text)', personalSign.message, (v) => setPersonalSign((s) => ({ ...s, message: v })))}
+            {td('Message (hex or text)', personalSign.message, (v) => setPersonalSign((s) => ({ ...s, message: v })), true, 4)}
             {td('Signer', personalSign.signer, (v) => setPersonalSign((s) => ({ ...s, signer: v })))}
           </>
         )
@@ -218,7 +220,7 @@ export function SignDecodeForm({ method, chainId, params, onMethodChange, onChai
           <>
             {td('From', signTx.from, (v) => setSignTx((s) => ({ ...s, from: v })))}
             {td('To', signTx.to, (v) => setSignTx((s) => ({ ...s, to: v })))}
-            {td('Data', signTx.data, (v) => setSignTx((s) => ({ ...s, data: v })))}
+            {td('Data', signTx.data, (v) => setSignTx((s) => ({ ...s, data: v })), true, 6)}
             {td('Value', signTx.value, (v) => setSignTx((s) => ({ ...s, value: v })))}
           </>
         )
@@ -280,6 +282,37 @@ export function SignDecodeForm({ method, chainId, params, onMethodChange, onChai
           {loading ? 'Decoding…' : 'Decode Sign'}
         </button>
       </div>
+      <SampleRow method={method} onLoadSample={onLoadSample} disabled={loading} />
     </form>
+  )
+}
+
+function SampleRow({
+  method,
+  onLoadSample,
+  disabled,
+}: {
+  method: string
+  onLoadSample: (sample: SignSample) => void
+  disabled: boolean
+}) {
+  const samples = samplesForMethod(method)
+  if (samples.length === 0) return null
+  return (
+    <div className="samples">
+      <span>Try a sample:</span>
+      {samples.map((s, i) => (
+        <button
+          key={i}
+          type="button"
+          className="sample"
+          disabled={disabled}
+          onClick={() => onLoadSample(s)}
+          title={s.notes ?? s.label}
+        >
+          {s.label}
+        </button>
+      ))}
+    </div>
   )
 }

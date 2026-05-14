@@ -88,11 +88,46 @@ struct RouteRequest {
     chain_id: u64,
     #[serde(default)]
     block_timestamp: Option<u64>,
+    /// User's wallet address; used as the Cedar `principal` (`Wallet::"…"`) when
+    /// evaluating policies. Defaults to the zero address when missing — policy
+    /// authors should typically gate on the principal field.
+    #[serde(default)]
+    from: Option<String>,
+    /// Optional Cedar policy texts to evaluate against the routed action
+    /// envelopes. When empty the response carries `verdict: pass` (vacuously).
+    #[serde(default)]
+    policies: Vec<String>,
 }
 
 #[derive(Serialize)]
 struct RouteResponse {
     actions: Vec<serde_json::Value>,
+    /// Aggregated policy verdict across all returned envelopes. `null` when
+    /// the route succeeded but the policy engine itself failed to build
+    /// (malformed policy text, schema mismatch). Use the sibling
+    /// `policy_error` field to surface the reason.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verdict: Option<RouteVerdict>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    policy_error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+enum RouteVerdict {
+    /// No matched policies — accept.
+    Pass,
+    /// Some `@severity("warn")` policies matched; no deny.
+    Warn { matched: Vec<MatchedPolicySummary> },
+    /// At least one `@severity("deny")` policy matched.
+    Fail { matched: Vec<MatchedPolicySummary> },
+}
+
+#[derive(Serialize)]
+struct MatchedPolicySummary {
+    policy_id: String,
+    severity: String,
+    message: Option<String>,
 }
 
 async fn route(State(state): State<AppState>, Json(req): Json<RouteRequest>) -> Response {
@@ -103,23 +138,115 @@ async fn route(State(state): State<AppState>, Json(req): Json<RouteRequest>) -> 
         token_registry: &token_registry,
         block_timestamp: req.block_timestamp,
     };
-    match request_router::route_request(&ctx, &req.method, &req.params, req.chain_id) {
-        Ok(envelopes) => {
-            let mut actions = Vec::with_capacity(envelopes.len());
-            for env in &envelopes {
-                match serde_json::to_value(env) {
-                    Ok(v) => actions.push(v),
-                    Err(e) => {
-                        return err(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("envelope serialize: {e}"),
-                        );
-                    }
-                }
+    let envelopes = match request_router::route_request(&ctx, &req.method, &req.params, req.chain_id) {
+        Ok(e) => e,
+        Err(e) => return err(StatusCode::BAD_REQUEST, format!("route error: {e}")),
+    };
+
+    let mut actions = Vec::with_capacity(envelopes.len());
+    for env in &envelopes {
+        match serde_json::to_value(env) {
+            Ok(v) => actions.push(v),
+            Err(e) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("envelope serialize: {e}"),
+                );
             }
-            Json(RouteResponse { actions }).into_response()
         }
-        Err(e) => err(StatusCode::BAD_REQUEST, format!("route error: {e}")),
+    }
+
+    let (verdict, policy_error) = evaluate_envelopes(&envelopes, &req);
+
+    Json(RouteResponse {
+        actions,
+        verdict,
+        policy_error,
+    })
+    .into_response()
+}
+
+/// Build a `PolicyEngine` from the request's `policies` field, lower each
+/// envelope to a `PolicyRequest`, evaluate, and aggregate the per-envelope
+/// verdicts. Returns `(verdict, error_string)` — both `Option`. When the
+/// engine itself fails to build, returns `(None, Some(reason))` so the UI can
+/// still render the decoded actions with a warning banner.
+fn evaluate_envelopes(
+    envelopes: &[policy_engine::ActionEnvelope],
+    req: &RouteRequest,
+) -> (Option<RouteVerdict>, Option<String>) {
+    use policy_engine::action::DecimalString;
+    use policy_engine::lowering::request::policy_request_from_envelope;
+    use policy_engine::policy::Verdict;
+    use std::str::FromStr as _;
+
+    if req.policies.is_empty() {
+        return (Some(RouteVerdict::Pass), None);
+    }
+
+    let mut builder = policy_engine::PolicyEngineBuilder::new();
+    for src in &req.policies {
+        builder = builder.add_text(src);
+    }
+    let engine = match builder.build() {
+        Ok(e) => e,
+        Err(e) => return (None, Some(format!("policy engine build: {e}"))),
+    };
+
+    let from_str = req.from.as_deref().unwrap_or(
+        "0x0000000000000000000000000000000000000000",
+    );
+    let from = match policy_engine::action::Address::from_str(from_str) {
+        Ok(a) => a,
+        Err(e) => return (None, Some(format!("invalid `from` address: {e}"))),
+    };
+    let zero_value = DecimalString::from_str("0").expect("static zero is valid decimal");
+    let to_placeholder = from.clone();
+    let block_ts = req.block_timestamp.unwrap_or(0);
+
+    let mut per_env_verdicts = Vec::with_capacity(envelopes.len());
+    for env in envelopes {
+        let Some(policy_req) = policy_request_from_envelope(
+            env,
+            &from,
+            &to_placeholder,
+            &zero_value,
+            req.chain_id,
+            block_ts,
+        ) else {
+            // No lowering for this envelope variant — treat as pass for now
+            // (other action variants land as policies in subsequent phases).
+            per_env_verdicts.push(Verdict::Pass);
+            continue;
+        };
+        match engine.evaluate_request(&policy_req) {
+            Ok(v) => per_env_verdicts.push(v),
+            Err(e) => return (None, Some(format!("policy evaluate: {e}"))),
+        }
+    }
+
+    let aggregated = Verdict::aggregate(per_env_verdicts);
+    let verdict = match aggregated {
+        Verdict::Pass => RouteVerdict::Pass,
+        Verdict::Warn(matched) => RouteVerdict::Warn {
+            matched: matched.iter().map(matched_summary).collect(),
+        },
+        Verdict::Fail(matched) => RouteVerdict::Fail {
+            matched: matched.iter().map(matched_summary).collect(),
+        },
+    };
+    (Some(verdict), None)
+}
+
+fn matched_summary(m: &policy_engine::policy::MatchedPolicy) -> MatchedPolicySummary {
+    use policy_engine::policy::Severity;
+    MatchedPolicySummary {
+        policy_id: m.policy_id.to_string(),
+        severity: match m.severity {
+            Severity::Deny => "deny".to_string(),
+            Severity::Warn => "warn".to_string(),
+        },
+        message: m.reason.clone(),
     }
 }
 
@@ -1026,6 +1153,27 @@ fn frontend_dir() -> Option<PathBuf> {
     }
 }
 
+/// Resolve the policy-builder Vite build output. Checked locations, in order:
+/// 1. `$POLICY_BUILDER_DIST` if set.
+/// 2. The workspace-relative `web/policy-builder/dist` next to this crate.
+fn policy_builder_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("POLICY_BUILDER_DIST") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("web/policy-builder/dist");
+    if here.exists() {
+        Some(here)
+    } else {
+        None
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -1058,8 +1206,31 @@ async fn main() {
         .route("/api/event", post(post_event))
         .route("/api/event/stream", get(event_stream))
         .route("/api/health", get(health))
-        .with_state(state)
-        .layer(CorsLayer::permissive())
+        .with_state(state);
+
+    // Mount the policy-builder Vite build under /policy-builder/*. Built
+    // assets resolve relative to that path because the Vite config sets
+    // `base: "/policy-builder/"`. Mounted as a nested service so the
+    // existing root-level frontend fallback below is untouched.
+    if let Some(dir) = policy_builder_dir() {
+        tracing::info!("serving policy-builder build from {}", dir.display());
+        app = app.nest_service("/policy-builder", ServeDir::new(dir));
+    } else {
+        tracing::info!(
+            "web/policy-builder/dist not found — /policy-builder/ disabled (run `npm run build` in web/policy-builder)"
+        );
+    }
+
+    // `allow_private_network(true)` opts in to Chrome's Private Network Access
+    // preflight so Tampermonkey's `GM_xmlhttpRequest` from an HTTPS dApp page
+    // (Uniswap, OpenSea, …) can reach this server on 127.0.0.1. Without it the
+    // browser blocks the request before it leaves the extension and the
+    // userscript sees a synthetic "Failed to fetch" error.
+    app = app
+        .layer(
+            CorsLayer::permissive()
+                .allow_private_network(true),
+        )
         .layer(TraceLayer::new_for_http());
 
     if let Some(dir) = frontend_dir() {

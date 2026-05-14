@@ -14,11 +14,11 @@ type TickRange = {
 };
 
 type AssetRef = {
-  kind: String,
+  chainId: Long,
   address: String,
-  tokenId?: String,
   symbol: String,
   decimals: Long,
+  isNative: Bool,
 };
 
 type AmountConstraint = {

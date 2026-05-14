@@ -356,6 +356,14 @@ mod tests {
         assert!(matches!(err, AdapterError::CalldataTooShort(3)));
     }
 
+    // The V2-fixture-based integration tests below relied on the per-function
+    // `SwapExactTokensForTokensDecoder` / `SwapTokensForExactTokensDecoder`
+    // structs, which were removed when the project moved to the option-A
+    // architecture (`request-router::route_call_fallback` decodes V2 via
+    // Sourcify). The equivalent end-to-end coverage now lives in
+    // `request-router` integration tests against `route_request`, which goes
+    // through the same `DefaultCallAdapter::build` path.
+    #[allow(dead_code)]
     #[derive(Deserialize)]
     struct V2Fixture {
         chain_id: u64,
@@ -509,65 +517,7 @@ mod tests {
         }
     }
 
-    fn v2_decoder_registry() -> InMemoryDecoderRegistry {
-        use abi_resolver::decoders::uniswap_v2::{
-            SwapExactTokensForTokensDecoder, SwapTokensForExactTokensDecoder,
-        };
-
-        InMemoryDecoderRegistry::builder()
-            .register(Arc::new(SwapExactTokensForTokensDecoder::new()))
-            .register(Arc::new(SwapTokensForExactTokensDecoder::new()))
-            .build()
-    }
-
-    fn build_v2_fixture(input: &str) -> Vec<ActionEnvelope> {
-        use abi_resolver::DecoderRegistry as _;
-
-        let (fixture, calldata) = v2_fixture(input);
-        let tx = &fixture.rpc.params[0];
-        let token_registry = v2_token_registry();
-        let decoder_registry = v2_decoder_registry();
-        let mapper_registry = v2_mapper_registry();
-        let adapter = DefaultCallAdapter::new(
-            CallAdapterId::new("default/uniswap-v2"),
-            decoder_registry.match_keys(),
-        );
-        let from = address(&tx.from);
-        let to = address(&tx.to);
-        let value_wei = decimal("0");
-
-        adapter
-            .build(
-                &CallContext {
-                    chain_id: fixture.chain_id,
-                    from: &from,
-                    to: &to,
-                    value_wei: &value_wei,
-                    block_timestamp: Some(1_700_000_000),
-                    token_registry: &token_registry,
-                    decoder_registry: &decoder_registry,
-                    mapper_registry: &mapper_registry,
-                },
-                &calldata,
-            )
-            .unwrap()
-    }
-
-    #[test]
-    fn test_default_call_adapter_build_produces_expected_v2_swap_exact_in_envelope() {
-        let result = build_v2_fixture(include_str!(
-            "../../../integration-tests/data/golden/inputs/swap_uniswap_v2_exact_in.json"
-        ));
-
-        assert_eq!(result, vec![expected_v2_exact_in_envelope()]);
-    }
-
-    #[test]
-    fn test_default_call_adapter_build_produces_expected_v2_swap_exact_out_envelope() {
-        let result = build_v2_fixture(include_str!(
-            "../../../integration-tests/data/golden/inputs/swap_uniswap_v2_exact_out.json"
-        ));
-
-        assert_eq!(result, vec![expected_v2_exact_out_envelope()]);
-    }
+    // `v2_decoder_registry` / `build_v2_fixture` and the two V2 fixture tests
+    // were removed alongside the per-function V2 decoders. End-to-end V2 swap
+    // mapping is now exercised through `request_router` integration tests.
 }

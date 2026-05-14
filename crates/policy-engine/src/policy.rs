@@ -580,6 +580,9 @@ mod tests {
     }
 
     fn token(symbol: &str) -> JsonValue {
+        // Matches the `AssetRef` record declared in core.cedarschema: the
+        // runtime lowering emits `chainId`/`address`/`symbol`/`decimals`/
+        // `isNative` here, so the fixture mirrors that shape.
         json!({
             "chainId": 1,
             "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",

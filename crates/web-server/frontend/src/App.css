@@ -29,6 +29,12 @@ body {
   padding-bottom: 16px;
   margin-bottom: 24px;
 }
+.app-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
 .app-header h1 {
   margin: 0 0 6px 0;
   font-size: 28px;
@@ -38,6 +44,25 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: 14px;
+}
+.app-nav {
+  display: flex;
+  gap: 8px;
+}
+.nav-button {
+  display: inline-block;
+  padding: 8px 14px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #2a3340;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.1s ease;
+}
+.nav-button:hover {
+  filter: brightness(1.1);
 }
 
 main {
@@ -618,4 +643,75 @@ code {
 .form select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ── VerdictCard styles ──────────────────────────────────────────────── */
+.verdict-card {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fafafa;
+  font-size: 0.9rem;
+}
+.verdict-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+.verdict-pill {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.verdict-pill-pass    { background: #d4edda; color: #155724; }
+.verdict-pill-warn    { background: #fff3cd; color: #856404; }
+.verdict-pill-fail    { background: #f8d7da; color: #721c24; }
+.verdict-pill-pending { background: #e2e3e5; color: #383d41; }
+.verdict-pill-error   { background: #f5c6cb; color: #721c24; }
+.verdict-pill-unknown { background: #e2e3e5; color: #383d41; }
+.verdict-card-error {
+  margin: 0.3rem 0;
+  padding: 0.4rem;
+  background: #f8d7da;
+  border-radius: 4px;
+  color: #721c24;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+.verdict-card-matches {
+  list-style: none;
+  padding: 0;
+  margin: 0.3rem 0;
+}
+.verdict-card-matches li {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 4px;
+  background: #fff;
+  border-left: 3px solid #ccc;
+}
+.verdict-card-matches li.matched-deny { border-left-color: #dc3545; }
+.verdict-card-matches li.matched-warn { border-left-color: #ffc107; }
+.verdict-card-matches code { font-size: 0.85rem; }
+.verdict-card-matches .matched-reason { color: #555; }
+.verdict-card-actions { margin-top: 0.4rem; }
+.verdict-card-actions summary { cursor: pointer; color: #555; }
+.verdict-card-actions pre {
+  margin: 0.3rem 0 0;
+  padding: 0.5rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  max-height: 240px;
+  overflow: auto;
+}
+.verdict-card-empty {
+  color: #888;
+  font-style: italic;
+  font-size: 0.85rem;
 }

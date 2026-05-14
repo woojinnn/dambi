@@ -1,8 +1,12 @@
 use std::str::FromStr as _;
 
+use abi_resolver::bridge::convert_legacy_call;
+use abi_resolver::resolver::ResolveOutcome;
 use abi_resolver::CallMatchKey;
+use alloy_primitives::Address as AlloyAddress;
 use alloy_primitives::U256;
 use call_adapter::{CallAdapterRegistry, CallContext};
+use mappers::{MapContext, MapperMatchKey, MapperRegistry as _};
 use policy_engine::action::{Address, DecimalString};
 use serde_json::Value;
 use sign_resolver::{
@@ -85,25 +89,80 @@ fn route_call(
         to: to.clone(),
         selector,
     };
-    let adapter = ctx
+
+    // Tier 1: a registered `CallAdapter` (new pipeline). Covers protocols where
+    // we ship a per-function `sol!`-backed decoder + mapper.
+    if let Some(adapter) = ctx.registries.call_adapters.resolve(&key) {
+        let call_ctx = CallContext {
+            chain_id,
+            from: &from,
+            to: &to,
+            value_wei: &value,
+            block_timestamp: ctx.block_timestamp,
+            token_registry: ctx.token_registry,
+            decoder_registry: ctx.registries.decoders.as_ref(),
+            mapper_registry: ctx.registries.mappers.as_ref(),
+        };
+        return adapter
+            .build(&call_ctx, &calldata)
+            .map_err(|err| RouterError::Call(err.into()));
+    }
+
+    // Tier 2: legacy `Resolver` fallback (Sourcify bundle + openchain seed + optional
+    // SQLite). We decode dynamically, then convert the result into the new
+    // `DecodedCall` shape and dispatch through the new `MapperRegistry` using
+    // the canonical decoder_id derived from the selector. This lets us pick up
+    // any function whose ABI Sourcify knows about, as long as a mapper exists.
+    route_call_fallback(ctx, chain_id, &from, &to, &value, &calldata, selector)
+}
+
+/// Sourcify-backed fallback decode + mapper dispatch. Invoked from
+/// [`route_call`] when no per-function `CallAdapter` is registered for
+/// `(chain, to, selector)`.
+fn route_call_fallback(
+    ctx: &RouterContext<'_>,
+    chain_id: u64,
+    from: &Address,
+    to: &Address,
+    value: &DecimalString,
+    calldata: &[u8],
+    selector: [u8; 4],
+) -> Result<Vec<policy_engine::ActionEnvelope>, RouterError> {
+    let alloy_addr = AlloyAddress::from_str(&to.to_string())
+        .map_err(|e| RouterError::Internal(anyhow::anyhow!("address conversion: {e}")))?;
+    let outcome = ctx
         .registries
-        .call_adapters
-        .resolve(&key)
-        .ok_or(RouterError::NoMatch)?;
-    let call_ctx = CallContext {
-        chain_id,
-        from: &from,
-        to: &to,
-        value_wei: &value,
-        block_timestamp: ctx.block_timestamp,
-        token_registry: ctx.token_registry,
-        decoder_registry: ctx.registries.decoders.as_ref(),
-        mapper_registry: ctx.registries.mappers.as_ref(),
+        .resolver
+        .resolve(chain_id, &alloy_addr, calldata);
+    let legacy_call = match outcome {
+        ResolveOutcome::Resolved(r) => r.decoded,
+        ResolveOutcome::NotFound => return Err(RouterError::NoMatch),
     };
 
-    adapter
-        .build(&call_ctx, &calldata)
-        .map_err(|err| RouterError::Call(err.into()))
+    let decoded = convert_legacy_call(legacy_call, selector)
+        .map_err(|e| RouterError::Internal(anyhow::anyhow!(e)))?;
+
+    let mapper_key = MapperMatchKey {
+        decoder_id: decoded.decoder_id.clone(),
+    };
+    let mapper = ctx
+        .registries
+        .mappers
+        .resolve(&mapper_key)
+        .ok_or(RouterError::NoMatch)?;
+
+    let map_ctx = MapContext {
+        chain_id,
+        from,
+        to,
+        value_wei: value,
+        block_timestamp: ctx.block_timestamp,
+        token_registry: ctx.token_registry,
+    };
+
+    mapper
+        .map(&map_ctx, &decoded)
+        .map_err(|e| RouterError::Call(e.into()))
 }
 
 fn route_sign_typed_data(
