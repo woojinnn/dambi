@@ -31,8 +31,8 @@ mod tests;
 use std::str::FromStr as _;
 
 use alloy_primitives::{I256, U256};
-use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
-use policy_engine::action::misc::{UnwrapAction, WrapAction};
+use policy_engine::action::dex::{SwapAction, SwapMode};
+use policy_engine::action::misc::{TransferAction, UnwrapAction, WrapAction};
 use policy_engine::action::{
     Action, ActionEnvelope, AmountConstraint, AmountKind, AssetKind, AssetRef, Category,
     DecimalString,
@@ -84,6 +84,7 @@ fn apply_envelope(ledger: &mut Ledger, env: &ActionEnvelope, ctx: &CallContext<'
         Action::Swap(s) => apply_swap(ledger, s, ctx),
         Action::Wrap(w) => apply_wrap(ledger, w, ctx),
         Action::Unwrap(u) => apply_unwrap(ledger, u, ctx),
+        Action::Transfer(t) => apply_transfer(ledger, t, ctx),
         // Other variants (Approve, Permit, lending sign actions, …) don't
         // move asset balances at this layer.
         _ => {}
@@ -146,6 +147,36 @@ fn apply_wrap(ledger: &mut Ledger, w: &WrapAction, ctx: &CallContext<'_>) {
         Effect::Mint {
             to: ActorRef::External(w.recipient.clone()),
             asset: asset_from_ref(&w.wrapped_asset),
+            amount,
+        },
+        ctx,
+    );
+}
+
+/// TransferAction (synthesised from UR `SWEEP` / `TRANSFER`): the router
+/// hands `amount` of `token` to `recipient`. Modelled as
+/// Move(t.from, t.recipient). When the from address resolves to neither
+/// User nor Router (an external sender — rare here), we still apply it
+/// so the ledger stays balanced and `interpret` falls back gracefully.
+fn apply_transfer(ledger: &mut Ledger, t: &TransferAction, ctx: &CallContext<'_>) {
+    let Some(amount_constraint) = t.amount.as_ref() else {
+        return;
+    };
+    let Some(amount) = amount_spec_from(amount_constraint) else {
+        return;
+    };
+    let from = if &t.from == ctx.from {
+        ActorRef::User
+    } else if &t.from == ctx.to {
+        ActorRef::Router
+    } else {
+        ActorRef::External(t.from.clone())
+    };
+    ledger.apply(
+        Effect::Move {
+            from,
+            to: ActorRef::External(t.recipient.clone()),
+            asset: asset_from_ref(&t.token),
             amount,
         },
         ctx,

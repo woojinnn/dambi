@@ -54,8 +54,16 @@ pub enum OpcodeKind {
     UnwrapWeth,
     V4Swap,
     ExecuteSubPlan,
+    /// SWEEP — drain router balance to recipient, ≥ amountMin. Surfaced as
+    /// a TransferAction so the simulator sees the router→user settlement
+    /// (otherwise [WRAP, SWAP(→Router), SWEEP] can't collapse cleanly).
+    Sweep,
+    /// TRANSFER — send exact amount of token from router to recipient.
+    /// Same modelling as SWEEP with `Exact` instead of `AtLeast`.
+    Transfer,
     /// Recognised but intentionally not surfaced as an envelope (Permit2 family,
-    /// SWEEP/TRANSFER/PAY_PORTION, position-manager calls, balance checks).
+    /// PAY_PORTION, position-manager calls, balance checks). Distinct from
+    /// `Unknown` so unrecognised opcodes still produce an error.
     Ignored,
     /// Not in the fork's opcode table — dispatcher returns an error.
     Unknown,
@@ -96,6 +104,8 @@ fn classify_uniswap_ur(opcode: u8) -> OpcodeKind {
     match opcode {
         0x00 => OpcodeKind::V3SwapExactIn,
         0x01 => OpcodeKind::V3SwapExactOut,
+        0x04 => OpcodeKind::Sweep,         // surfaced as TransferAction for the simulator
+        0x05 => OpcodeKind::Transfer,      // ditto
         0x08 => OpcodeKind::V2SwapExactIn,
         0x09 => OpcodeKind::V2SwapExactOut,
         0x0b => OpcodeKind::WrapEth,
@@ -109,14 +119,19 @@ fn classify_uniswap_ur(opcode: u8) -> OpcodeKind {
         //   UR these commands just replay the same permit (or `transferFrom`)
         //   the user already authorised, so we emit no extra envelope here.
         //
-        //   Settlement/utility (0x04 SWEEP, 0x05 TRANSFER, 0x06 PAY_PORTION,
-        //   0x07 PAY_PORTION_FULL_PRECISION, 0x0e BALANCE_CHECK_ERC20):
-        //   plumbing around the swap result; absorbed by the merge step.
+        //   PAY_PORTION (0x06) / PAY_PORTION_FULL_PRECISION (0x07): take a
+        //   ratio of the router balance — exact amount unknowable without
+        //   simulating the swap output. Skipping keeps the ledger sound;
+        //   the simulator falls back to fan-out when the fee is large
+        //   enough to matter.
+        //
+        //   BALANCE_CHECK_ERC20 (0x0e): assertion-only, no asset move.
         //
         //   V3/V4 position manager (0x11–0x14): liquidity-position operations
         //   outside the current swap policy scope.
-        0x02 | 0x03 | 0x04 | 0x05 | 0x06 | 0x07 | 0x0a | 0x0d | 0x0e | 0x11 | 0x12
-        | 0x13 | 0x14 => OpcodeKind::Ignored,
+        0x02 | 0x03 | 0x06 | 0x07 | 0x0a | 0x0d | 0x0e | 0x11 | 0x12 | 0x13 | 0x14 => {
+            OpcodeKind::Ignored
+        }
         _ => OpcodeKind::Unknown,
     }
 }
@@ -137,13 +152,15 @@ fn classify_pancake_ur(opcode: u8) -> OpcodeKind {
     match opcode {
         0x00 => OpcodeKind::V3SwapExactIn,
         0x01 => OpcodeKind::V3SwapExactOut,
+        0x04 => OpcodeKind::Sweep,
+        0x05 => OpcodeKind::Transfer,
         0x08 => OpcodeKind::V2SwapExactIn,
         0x09 => OpcodeKind::V2SwapExactOut,
         0x0b => OpcodeKind::WrapEth,
         0x0c => OpcodeKind::UnwrapWeth,
         0x21 => OpcodeKind::ExecuteSubPlan,
-        // Permit2 family + settlement/utility (same as Uniswap)
-        0x02 | 0x03 | 0x04 | 0x05 | 0x06 | 0x0a | 0x0d | 0x0e
+        // Permit2 family + PAY_PORTION + balance check (same as Uniswap)
+        0x02 | 0x03 | 0x06 | 0x0a | 0x0d | 0x0e
         // V3 position manager + Pancake Infinity slots (0x10..=0x16)
         | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x15 | 0x16
         // Pancake stable-swap
@@ -250,6 +267,12 @@ pub(super) fn expand_commands(
                     depth + 1,
                     oc,
                 )?);
+            }
+            OpcodeKind::Sweep => {
+                envelopes.push(command_decode::sweep::decode(ctx, input)?);
+            }
+            OpcodeKind::Transfer => {
+                envelopes.push(command_decode::transfer::decode(ctx, input)?);
             }
             OpcodeKind::Ignored => {}
             OpcodeKind::Unknown => {

@@ -467,25 +467,23 @@ mod tests {
 
         let envelopes = route("eth_sendTransaction", params, 1);
 
-        // PR 10b note: the simulator (sim::simulate) only sees envelopes,
-        // and SWEEP/PAY_PORTION currently produce no envelope (Ignored
-        // since PR 1). That makes the simulator unable to see the final
-        // router→user transfer, so it falls back to fan-out: [WrapAction,
-        // SwapAction(recipient=Router)] — 2 envelopes. PR 11 adds SWEEP/
-        // TRANSFER as TransferAction envelopes so the simulator can close
-        // the loop and collapse this to a single Swap(ETH→USDC) again.
-        // For now we only assert that the call adapter ran and produced
-        // at least one DEX-category envelope (the swap).
-        assert!(
-            !envelopes.is_empty(),
-            "Pancake UR call adapter must produce at least one envelope"
-        );
-        assert!(
-            envelopes
-                .iter()
-                .any(|e| matches!(e.action, Action::Swap(_))),
-            "expected at least one Swap envelope in the result, got {:?}",
-            envelopes.iter().map(|e| e.action.kind()).collect::<Vec<_>>()
+        // After PR 11 the simulator sees SWEEP as a TransferAction
+        // (router→user), closing the asset-flow loop:
+        //   msg.value(ETH) → router; WRAP burns ETH, mints WETH on router;
+        //   SWAP burns router's WETH, mints USDC on router; SWEEP transfers
+        //   router USDC to user. Net user delta: ETH -, USDC +.
+        // → simulator collapses to a single Swap(ETH → USDC) envelope.
+        assert_eq!(envelopes.len(), 1, "Pancake UR WRAP+V3_SWAP+SWEEP should collapse to 1 swap");
+        assert_eq!(envelopes[0].category, policy_engine::Category::Dex);
+        assert_eq!(envelopes[0].action.kind(), "swap");
+        let Action::Swap(s) = &envelopes[0].action else {
+            panic!("expected Swap envelope, got {:?}", envelopes[0].action.kind())
+        };
+        assert!(s.token_in.address.is_none(), "WRAP should collapse → native ETH input");
+        assert_eq!(
+            s.token_out.address.as_ref().map(|a| a.to_string().to_lowercase()),
+            Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string()),
+            "expected USDC as token_out"
         );
     }
 
