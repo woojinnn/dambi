@@ -121,7 +121,7 @@ describe("parseAdapterManifest", () => {
     ).toThrow(/expected 0x-prefixed 32-byte hex string/);
   });
 
-  it("rejects an upper-cased address (must be lowercased canonical)", () => {
+  it("normalizes upper-cased addresses to lowercase canonical form", () => {
     expect(() =>
       parseAdapterManifest(
         validManifest({
@@ -158,6 +158,96 @@ describe("parseAdapterManifest", () => {
     expect(parsed.adapters[0].versions[0].supported_addresses[0].address).toBe(
       "0xabcdef1234567890abcdef1234567890abcdef12",
     );
+  });
+
+  it("normalizes upper-cased sha256 to lowercase in output", () => {
+    const upperSha = "0x" + "AB".repeat(32);
+    const parsed = parseAdapterManifest(
+      validManifest({
+        adapters: [
+          validEntry({ versions: [validVersion({ sha256: upperSha })] }),
+        ],
+      }),
+    );
+    expect(parsed.adapters[0].versions[0].sha256).toBe("0x" + "ab".repeat(32));
+  });
+
+  it("rejects a supported_addresses[].chain_id not present in supported_chains[]", () => {
+    expect(() =>
+      parseAdapterManifest(
+        validManifest({
+          adapters: [
+            validEntry({
+              versions: [
+                validVersion({
+                  supported_chains: [1, 10],
+                  supported_addresses: [
+                    {
+                      chain_id: 137,
+                      address: "0x000000000004444c5dc75cb358380d2e3de08a90",
+                    },
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/chain_id 137 not present in supported_chains/);
+  });
+
+  it("rejects duplicate version strings in versions[]", () => {
+    expect(() =>
+      parseAdapterManifest(
+        validManifest({
+          adapters: [
+            validEntry({
+              stable_version: "0.1.0",
+              versions: [validVersion(), validVersion()],
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/duplicate version "0.1.0" in versions/);
+  });
+
+  it("rejects an absolute url (must be registry-relative starting with '/')", () => {
+    expect(() =>
+      parseAdapterManifest(
+        validManifest({
+          adapters: [
+            validEntry({
+              versions: [
+                validVersion({ url: "https://evil.example/x.wasm" }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/registry-relative path starting with '\/'/);
+  });
+
+  it("treats missing signature_alg as null (forward-compatible)", () => {
+    const v = validVersion();
+    expect((v as { signature_alg?: unknown }).signature_alg).toBeUndefined();
+    const parsed = parseAdapterManifest(
+      validManifest({
+        adapters: [validEntry({ versions: [v] })],
+      }),
+    );
+    expect(parsed.adapters[0].versions[0].signature_alg).toBeNull();
+
+    // Also accept an explicit string value (Phase 4 will populate this).
+    const parsedWithAlg = parseAdapterManifest(
+      validManifest({
+        adapters: [
+          validEntry({
+            versions: [validVersion({ signature_alg: "ed25519" })],
+          }),
+        ],
+      }),
+    );
+    expect(parsedWithAlg.adapters[0].versions[0].signature_alg).toBe("ed25519");
   });
 
   it("rejects an empty versions[] array", () => {

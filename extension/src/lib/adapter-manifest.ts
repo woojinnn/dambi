@@ -56,6 +56,12 @@ export interface AdapterVersion {
   readonly signature: string | null;
   /** Opaque id of the signer key. Null until Phase 4. */
   readonly signer_id: string | null;
+  /**
+   * Signature algorithm tag. Null in Phase 1; Phase 4 populates with values like
+   * `"ed25519"` or `"sigstore-bundle-v0.3"`. Locking the wire-format slot now
+   * means Phase 4 isn't a `schema_version` bump.
+   */
+  readonly signature_alg: string | null;
   readonly published_at: string;
   /** Emergency kill-switch. Versions marked revoked must not be used even if cached. */
   readonly revoked: boolean;
@@ -105,6 +111,17 @@ function parseAdapterEntry(value: unknown, path: string): AdapterEntry {
   if (versions.length === 0) {
     fail(`${path}.versions`, "must contain at least one version", versions);
   }
+  const seenVersions = new Set<string>();
+  for (const v of versions) {
+    if (seenVersions.has(v.version)) {
+      fail(
+        `${path}.versions`,
+        `duplicate version "${v.version}" in versions[]`,
+        v.version,
+      );
+    }
+    seenVersions.add(v.version);
+  }
   const stable = requireString(record, "stable_version", `${path}.stable_version`);
   if (!versions.some((v) => v.version === stable)) {
     fail(
@@ -136,18 +153,43 @@ function parseAdapterVersion(value: unknown, path: string): AdapterVersion {
   if (!HEX_SHA256.test(sha256)) {
     fail(`${path}.sha256`, "expected 0x-prefixed 32-byte hex string", sha256);
   }
+  const url = requireString(record, "url", `${path}.url`);
+  if (!url.startsWith("/")) {
+    fail(
+      `${path}.url`,
+      "expected registry-relative path starting with '/' (absolute URLs not allowed)",
+      url,
+    );
+  }
+  const supported_chains = parseChainArray(
+    record,
+    "supported_chains",
+    `${path}.supported_chains`,
+  );
+  const supported_addresses = parseArray(
+    record,
+    "supported_addresses",
+    `${path}.supported_addresses`,
+    parseChainBinding,
+  );
+  const chainIdSet = new Set(supported_chains);
+  for (let i = 0; i < supported_addresses.length; i += 1) {
+    const binding = supported_addresses[i];
+    if (!chainIdSet.has(binding.chain_id)) {
+      fail(
+        `${path}.supported_addresses[${i}].chain_id`,
+        `chain_id ${binding.chain_id} not present in supported_chains[]`,
+        binding.chain_id,
+      );
+    }
+  }
   return {
     version: requireString(record, "version", `${path}.version`),
-    url: requireString(record, "url", `${path}.url`),
+    url,
     sha256,
     size_bytes: requireNonNegativeInt(record, "size_bytes", `${path}.size_bytes`),
-    supported_chains: parseChainArray(record, "supported_chains", `${path}.supported_chains`),
-    supported_addresses: parseArray(
-      record,
-      "supported_addresses",
-      `${path}.supported_addresses`,
-      parseChainBinding,
-    ),
+    supported_chains,
+    supported_addresses,
     host_capabilities: parseStringArray(
       record,
       "host_capabilities",
@@ -155,6 +197,11 @@ function parseAdapterVersion(value: unknown, path: string): AdapterVersion {
     ),
     signature: requireNullableString(record, "signature", `${path}.signature`),
     signer_id: requireNullableString(record, "signer_id", `${path}.signer_id`),
+    signature_alg: optionalNullableString(
+      record,
+      "signature_alg",
+      `${path}.signature_alg`,
+    ),
     published_at: requireString(record, "published_at", `${path}.published_at`),
     revoked: requireBool(record, "revoked", `${path}.revoked`),
   };
@@ -210,6 +257,10 @@ function requireRecord(value: unknown, path: string): JsonRecord {
   fail(path, "expected object", value);
 }
 
+// Returns whatever is stored at `key` (including `undefined`); subsequent
+// type checks in the typed helpers below catch shape problems. Don't tighten
+// this without auditing every caller — they intentionally rely on getting the
+// raw value back so they can format their own "expected X" errors.
 function requireField(record: JsonRecord, key: string, path: string): unknown {
   if (Object.prototype.hasOwnProperty.call(record, key)) return record[key];
   fail(path, "missing required field", record);
@@ -227,6 +278,22 @@ function requireNullableString(
   path: string,
 ): string | null {
   const value = requireField(record, key, path);
+  if (value === null || typeof value === "string") return value;
+  fail(path, "expected string or null", value);
+}
+
+/**
+ * Like {@link requireNullableString} but treats an absent key as `null`.
+ * Use for forward-compatible wire-format slots (e.g. `signature_alg`) where
+ * older producers may omit the field entirely.
+ */
+function optionalNullableString(
+  record: JsonRecord,
+  key: string,
+  path: string,
+): string | null {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) return null;
+  const value = record[key];
   if (value === null || typeof value === "string") return value;
   fail(path, "expected string or null", value);
 }

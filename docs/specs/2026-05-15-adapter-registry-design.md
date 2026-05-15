@@ -88,6 +88,9 @@ Canonical TypeScript types live at `extension/src/lib/adapter-manifest.ts`. JSON
           // Signature placeholder — null in Phase 1.
           "signature": null,
           "signer_id": null,
+          // Phase 4 will populate with e.g. "ed25519" or "sigstore-bundle-v0.3".
+          // Slot exists today so Phase 4 isn't a `schema_version` bump.
+          "signature_alg": null,
 
           "published_at": "2026-05-15T06:30:00Z",
           "revoked": false                       // emergency kill switch
@@ -103,7 +106,7 @@ Canonical TypeScript types live at `extension/src/lib/adapter-manifest.ts`. JSON
 - **`schema_version: 1`** — explicit so future schema changes can coexist behind a parser version gate.
 - **`stable_version`** mutable, `versions[].url` immutable → rollback is a single manifest edit.
 - **`sha256`** required from day 1 — cheap, no key management, ensures bytes integrity even before signing exists.
-- **`signature` / `signer_id`** nullable today; extension verifier stub accepts null but emits a TODO log. Phase 4 flips to required.
+- **`signature` / `signer_id` / `signature_alg`** nullable today; extension verifier stub accepts null but emits a TODO log. Phase 4 flips them to required and populates `signature_alg` with values like `"ed25519"` or `"sigstore-bundle-v0.3"`. The parser accepts an absent `signature_alg` key as `null`, so older registry builds keep parsing after Phase 4 lands and producers can roll out in any order. Reserving the slot now avoids a `schema_version` bump when Phase 4 ships.
 - **`supported_addresses`** lets the extension look up adapter by `(chain_id, to)` without first compiling the WASM.
 - **`revoked: true`** lets us hot-disable a buggy version without removing it from `versions[]` (history preserved).
 
@@ -118,7 +121,7 @@ Canonical TypeScript types live at `extension/src/lib/adapter-manifest.ts`. JSON
 | **5** | sha256 + Sigstore/cosign + transparency log | Sigstore bundle in manifest; verify against Rekor |
 
 Day-1 substrate that supports all future phases:
-- Manifest fields (`signature`, `signer_id`) exist as nullable from Phase 1
+- Manifest fields (`signature`, `signer_id`, `signature_alg`) exist as nullable from Phase 1 (parser treats absent `signature_alg` as `null` for forward compatibility)
 - Verifier module exists with explicit `TODO: signature enforcement` log
 - Extension config has `TRUSTED_SIGNER_IDS: string[]` (empty in Phase 1)
 
