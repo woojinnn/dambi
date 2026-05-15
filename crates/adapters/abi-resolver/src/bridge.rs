@@ -109,7 +109,7 @@ fn flatten_tuple_arg(arg: LegacyArg) -> Result<Vec<DecodedArg>, BridgeError> {
         }]);
     }
     let mut out = Vec::with_capacity(items.len());
-    for (value, component) in items.into_iter().zip(arg.components.into_iter()) {
+    for (value, component) in items.into_iter().zip(arg.components) {
         let name = if component.name.is_empty() {
             format!("arg{}", out.len())
         } else {
