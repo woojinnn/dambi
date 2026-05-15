@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use abi_resolver::{DecodedCall, DecodedValue, DecoderId};
 use policy_engine::action::common::{
-    Address, AmountConstraint, AmountKind, AssetKind, AssetRef, DecimalString,
+    Address, AmountConstraint, AmountKind, AssetKind, AssetRef, AssetRefWithAmountConstraint,
+    DecimalString,
 };
 use policy_engine::action::envelope::{Action, ActionEnvelope, Category};
 use policy_engine::action::misc::{
@@ -150,11 +151,12 @@ impl Mapper for Erc20TransferMapper {
         };
 
         let action = TransferAction {
-            token,
+            token: AssetRefWithAmountConstraint {
+                asset: token,
+                amount,
+            },
             from: ctx.from.clone(),
             recipient,
-            amount: Some(amount),
-            token_id: None,
         };
 
         Ok(vec![ActionEnvelope {
@@ -215,11 +217,12 @@ impl Mapper for Erc20TransferFromMapper {
         };
 
         let action = TransferAction {
-            token,
+            token: AssetRefWithAmountConstraint {
+                asset: token,
+                amount,
+            },
             from,
             recipient,
-            amount: Some(amount),
-            token_id: None,
         };
 
         Ok(vec![ActionEnvelope {
@@ -550,12 +553,12 @@ mod tests {
         let Action::Transfer(a) = &envelopes[0].action else {
             panic!("expected Transfer, got kind={}", envelopes[0].action.kind());
         };
-        assert_eq!(a.token.kind, AssetKind::Erc20);
-        assert_eq!(a.token.address.as_ref(), Some(&to));
+        assert_eq!(a.token.asset.kind, AssetKind::Erc20);
+        assert_eq!(a.token.asset.address.as_ref(), Some(&to));
         assert_eq!(a.from, from);
         assert_eq!(a.recipient, recipient);
-        assert!(a.token_id.is_none());
-        let amount = a.amount.as_ref().expect("ERC-20 transfer amount");
+        assert!(a.token.asset.token_id.is_none());
+        let amount = &a.token.amount;
         assert_eq!(amount.kind, AmountKind::Exact);
         assert_eq!(
             amount.value.as_ref().map(ToString::to_string),
@@ -592,13 +595,13 @@ mod tests {
         let Action::Transfer(a) = &envelopes[0].action else {
             panic!("expected Transfer, got kind={}", envelopes[0].action.kind());
         };
-        assert_eq!(a.token.kind, AssetKind::Erc20);
-        assert_eq!(a.token.address.as_ref(), Some(&token));
+        assert_eq!(a.token.asset.kind, AssetKind::Erc20);
+        assert_eq!(a.token.asset.address.as_ref(), Some(&token));
         assert_eq!(a.from, owner);
         assert_ne!(a.from, tx_sender);
         assert_eq!(a.recipient, recipient);
-        assert!(a.token_id.is_none());
-        let amount = a.amount.as_ref().expect("ERC-20 transferFrom amount");
+        assert!(a.token.asset.token_id.is_none());
+        let amount = &a.token.amount;
         assert_eq!(amount.kind, AmountKind::Exact);
         assert_eq!(
             amount.value.as_ref().map(ToString::to_string),

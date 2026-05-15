@@ -1,7 +1,7 @@
 //! Shared action schema primitives.
 
 use alloy_primitives::U256;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::{fmt, str::FromStr};
 
 /// EVM address normalized to lowercase `0x` plus 40 hex characters.
@@ -134,7 +134,7 @@ pub enum AssetKind {
 }
 
 /// Asset reference used by action fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetRef {
     /// Asset classification.
@@ -151,6 +151,56 @@ pub struct AssetRef {
     /// Token decimal precision, when known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decimals: Option<u8>,
+}
+
+impl<'de> Deserialize<'de> for AssetRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RawAssetRef {
+            kind: AssetKind,
+            address: Option<Address>,
+            #[serde(rename = "tokenId")]
+            token_id: Option<DecimalString>,
+            symbol: Option<String>,
+            decimals: Option<u8>,
+        }
+
+        let raw = RawAssetRef::deserialize(deserializer)?;
+        let asset = Self {
+            kind: raw.kind,
+            address: raw.address,
+            token_id: raw.token_id,
+            symbol: raw.symbol,
+            decimals: raw.decimals,
+        };
+
+        asset.validate_required_fields().map_err(de::Error::custom)?;
+        Ok(asset)
+    }
+}
+
+impl AssetRef {
+    fn validate_required_fields(&self) -> Result<(), &'static str> {
+        if matches!(
+            self.kind,
+            AssetKind::Erc20 | AssetKind::Erc721 | AssetKind::Erc1155
+        ) && self.address.is_none()
+        {
+            return Err("address is required for erc20, erc721, and erc1155 assets");
+        }
+
+        if matches!(self.kind, AssetKind::Erc721 | AssetKind::Erc1155)
+            && self.token_id.is_none()
+        {
+            return Err("tokenId is required for erc721 and erc1155 assets");
+        }
+
+        Ok(())
+    }
 }
 
 /// Asset reference paired with an amount constraint.
@@ -179,6 +229,8 @@ pub enum AmountKind {
     Estimated,
     /// Unknown amount semantics.
     Unknown,
+    /// Portion-based amount.
+    Portion,
 }
 
 /// Amount constraint paired with an optional raw value.
@@ -339,6 +391,58 @@ mod tests {
     }
 
     #[test]
+    fn test_asset_ref_deserialize_erc20_with_address_ok() {
+        let json = r#"{"kind":"erc20","address":"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"}"#;
+
+        let asset = serde_json::from_str::<AssetRef>(json).unwrap();
+
+        assert_eq!(asset.kind, AssetKind::Erc20);
+        assert!(asset.address.is_some());
+        assert_eq!(asset.token_id, None);
+    }
+
+    #[test]
+    fn test_asset_ref_deserialize_erc20_missing_address_err() {
+        let json = r#"{"kind":"erc20"}"#;
+
+        let err = serde_json::from_str::<AssetRef>(json).unwrap_err();
+
+        assert!(err.to_string().contains("address is required"));
+    }
+
+    #[test]
+    fn test_asset_ref_deserialize_erc721_with_address_and_token_id_ok() {
+        let json = r#"{"kind":"erc721","address":"0x1234567890abcdef1234567890abcdef12345678","tokenId":"42"}"#;
+
+        let asset = serde_json::from_str::<AssetRef>(json).unwrap();
+
+        assert_eq!(asset.kind, AssetKind::Erc721);
+        assert!(asset.address.is_some());
+        assert_eq!(asset.token_id.unwrap().to_string(), "42");
+    }
+
+    #[test]
+    fn test_asset_ref_deserialize_erc721_missing_token_id_err() {
+        let json =
+            r#"{"kind":"erc721","address":"0x1234567890abcdef1234567890abcdef12345678"}"#;
+
+        let err = serde_json::from_str::<AssetRef>(json).unwrap_err();
+
+        assert!(err.to_string().contains("tokenId is required"));
+    }
+
+    #[test]
+    fn test_asset_ref_deserialize_native_without_address_ok() {
+        let json = r#"{"kind":"native"}"#;
+
+        let asset = serde_json::from_str::<AssetRef>(json).unwrap();
+
+        assert_eq!(asset.kind, AssetKind::Native);
+        assert_eq!(asset.address, None);
+        assert_eq!(asset.token_id, None);
+    }
+
+    #[test]
     fn test_asset_ref_with_amount_constraint_serde_roundtrip() {
         let constrained = AssetRefWithAmountConstraint {
             asset: AssetRef {
@@ -377,6 +481,7 @@ mod tests {
             (AmountKind::Unlimited, "unlimited"),
             (AmountKind::Estimated, "estimated"),
             (AmountKind::Unknown, "unknown"),
+            (AmountKind::Portion, "portion"),
         ];
 
         for (kind, expected) in cases {

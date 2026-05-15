@@ -819,8 +819,8 @@ mod tests_policy_rpc {
                 "method": "oracle.usd_value",
                 "params": {
                     "chain_id": "$.root.chain_id",
-                    "asset": "$.action.tokenIn",
-                    "amount": "$.action.amountIn.value"
+                    "asset": "$.action.inputToken.asset",
+                    "amount": "$.action.inputToken.amount.value"
                 },
                 "outputs": [{
                     "kind": "context",

@@ -2,9 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::action::common::{
-    Address, AmountConstraint, AssetRef, AssetRefWithAmountConstraint, Validity,
-};
+use crate::action::common::{Address, AssetRefWithAmountConstraint, Validity};
 
 use super::{PoolRef, RemoveLiquidityExitMode};
 
@@ -14,16 +12,13 @@ use super::{PoolRef, RemoveLiquidityExitMode};
 pub struct RemoveLiquidityAction {
     /// Withdrawal mode.
     pub exit_mode: RemoveLiquidityExitMode,
-    /// Source pool, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pool: Option<PoolRef>,
-    /// LP token being burned, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lp_token: Option<AssetRef>,
-    /// LP burn amount constraint, when present.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lp_burn_amount: Option<AmountConstraint>,
+    /// Source pool.
+    pub pool: PoolRef,
+    /// LP token being burned with amount constraint.
+    #[serde(rename = "inputLp")]
+    pub input_lp: AssetRefWithAmountConstraint,
     /// Underlying pool assets with amount constraints.
+    #[serde(rename = "outputTokens")]
     pub outputs: Vec<AssetRefWithAmountConstraint>,
     /// Recipient of the withdrawn assets.
     pub recipient: Address,
@@ -44,9 +39,15 @@ mod tests {
     fn test_remove_liquidity_action_serde_roundtrip_minimal() {
         let action = RemoveLiquidityAction {
             exit_mode: RemoveLiquidityExitMode::Proportional,
-            pool: None,
-            lp_token: None,
-            lp_burn_amount: None,
+            pool: pool(),
+            input_lp: AssetRefWithAmountConstraint {
+                asset: erc20(
+                    "0x3333333333333333333333333333333333333333",
+                    "UNI-V2",
+                    18,
+                ),
+                amount: amount(AmountKind::Exact, "100000000000000000"),
+            },
             outputs: asset_amount_pair(AmountKind::Min, AmountKind::Min),
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: None,
@@ -59,13 +60,15 @@ mod tests {
     fn test_remove_liquidity_action_serde_roundtrip_full() {
         let action = RemoveLiquidityAction {
             exit_mode: RemoveLiquidityExitMode::SingleAsset,
-            pool: Some(pool()),
-            lp_token: Some(erc20(
-                "0x3333333333333333333333333333333333333333",
-                "UNI-V2",
-                18,
-            )),
-            lp_burn_amount: Some(amount(AmountKind::Exact, "100000000000000000")),
+            pool: pool(),
+            input_lp: AssetRefWithAmountConstraint {
+                asset: erc20(
+                    "0x3333333333333333333333333333333333333333",
+                    "UNI-V2",
+                    18,
+                ),
+                amount: amount(AmountKind::Exact, "100000000000000000"),
+            },
             outputs: asset_amount_pair(AmountKind::Min, AmountKind::Min),
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: Some(validity()),

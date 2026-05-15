@@ -30,24 +30,20 @@ pub const LABEL: &str = "label";
 
 // ── DEX action context fields ──
 /// Assets deposited or spent by a DEX action.
-pub const INPUTS: &str = "inputs";
+pub const INPUT_TOKENS: &str = "inputTokens";
 /// Assets received or withdrawn by a DEX action.
-pub const OUTPUTS: &str = "outputs";
-/// LP token minted or burned by a liquidity action.
-pub const LP_TOKEN: &str = "lpToken";
-/// LP amount constraint.
-pub const LP_AMOUNT: &str = "lpAmount";
-/// LP burn amount constraint.
-pub const LP_BURN_AMOUNT: &str = "lpBurnAmount";
+pub const OUTPUT_TOKENS: &str = "outputTokens";
+/// LP token and amount constraint minted by a liquidity action.
+pub const OUTPUT_LP: &str = "outputLp";
+/// LP token and amount constraint burned by a liquidity action.
+pub const INPUT_LP: &str = "inputLp";
 /// Fungible liquidity exit mode discriminator.
 pub const EXIT_MODE: &str = "exitMode";
 /// Concentrated-liquidity NFT burn kind discriminator.
 pub const BURN_KIND: &str = "burnKind";
 /// Internal liquidity delta for NFT decrease actions.
 pub const LIQUIDITY_DELTA: &str = "liquidityDelta";
-/// Concentrated-liquidity pool fee tier in basis points.
-pub const FEE_TIER_BPS: &str = "feeTierBps";
-/// Per-swap pool fee in basis points.
+/// Pool fee in basis points.
 pub const FEE_BPS: &str = "feeBps";
 /// Concentrated-liquidity tick range record.
 pub const TICK_RANGE: &str = "tickRange";
@@ -61,6 +57,58 @@ pub const POOL: &str = "pool";
 pub const NFT: &str = "nft";
 /// Recipient address field.
 pub const RECIPIENT: &str = "recipient";
+
+// ── donate / initialize_pool context fields ──
+/// Originating wallet for a V4 donate.
+pub const FROM: &str = "from";
+/// Hook contract address for a V4 pool.
+pub const HOOKS: &str = "hooks";
+/// Hook callback flag record decoded from `hooks` address bits.
+pub const HOOK_PERMISSIONS: &str = "hookPermissions";
+/// Whether the V4 pool is dynamic-fee.
+pub const IS_DYNAMIC_FEE: &str = "isDynamicFee";
+/// Length of the trailing V4 hook payload.
+pub const HOOK_DATA_LEN: &str = "hookDataLen";
+/// First four bytes of the V4 hook payload, when present.
+pub const HOOK_DATA_SELECTOR: &str = "hookDataSelector";
+/// Lower-address token in a pool.
+pub const TOKEN0: &str = "token0";
+/// Higher-address token in a pool.
+pub const TOKEN1: &str = "token1";
+/// V4 pool tick spacing.
+pub const TICK_SPACING: &str = "tickSpacing";
+/// Initial sqrt price (Q64.96) for a pool.
+pub const SQRT_PRICE_X96: &str = "sqrtPriceX96";
+
+// ── HookPermissions sub-record fields ──
+/// Hook implements `beforeInitialize`.
+pub const HOOK_BEFORE_INITIALIZE: &str = "beforeInitialize";
+/// Hook implements `afterInitialize`.
+pub const HOOK_AFTER_INITIALIZE: &str = "afterInitialize";
+/// Hook implements `beforeAddLiquidity`.
+pub const HOOK_BEFORE_ADD_LIQUIDITY: &str = "beforeAddLiquidity";
+/// Hook implements `afterAddLiquidity`.
+pub const HOOK_AFTER_ADD_LIQUIDITY: &str = "afterAddLiquidity";
+/// Hook implements `beforeRemoveLiquidity`.
+pub const HOOK_BEFORE_REMOVE_LIQUIDITY: &str = "beforeRemoveLiquidity";
+/// Hook implements `afterRemoveLiquidity`.
+pub const HOOK_AFTER_REMOVE_LIQUIDITY: &str = "afterRemoveLiquidity";
+/// Hook implements `beforeSwap`.
+pub const HOOK_BEFORE_SWAP: &str = "beforeSwap";
+/// Hook implements `afterSwap`.
+pub const HOOK_AFTER_SWAP: &str = "afterSwap";
+/// Hook implements `beforeDonate`.
+pub const HOOK_BEFORE_DONATE: &str = "beforeDonate";
+/// Hook implements `afterDonate`.
+pub const HOOK_AFTER_DONATE: &str = "afterDonate";
+/// Hook implements `beforeSwapReturnDelta`.
+pub const HOOK_BEFORE_SWAP_RETURN_DELTA: &str = "beforeSwapReturnDelta";
+/// Hook implements `afterSwapReturnDelta`.
+pub const HOOK_AFTER_SWAP_RETURN_DELTA: &str = "afterSwapReturnDelta";
+/// Hook implements `afterAddLiquidityReturnDelta`.
+pub const HOOK_AFTER_ADD_LIQUIDITY_RETURN_DELTA: &str = "afterAddLiquidityReturnDelta";
+/// Hook implements `afterRemoveLiquidityReturnDelta`.
+pub const HOOK_AFTER_REMOVE_LIQUIDITY_RETURN_DELTA: &str = "afterRemoveLiquidityReturnDelta";
 
 // ── Derived action context fields ──
 /// Validity-window delta from `block_timestamp` in seconds.

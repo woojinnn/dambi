@@ -84,6 +84,12 @@ pub struct Requirement {
     /// Output projection rules.
     #[serde(default)]
     pub outputs: Vec<ContextProjection>,
+    /// When true, a missing param selector silently skips this requirement
+    /// instead of failing the whole plan. Use for enrichments whose source
+    /// fields are conditionally present (e.g. `amount.value` is absent for
+    /// `unlimited` amounts; `outputTokens` is absent for empty-only burns).
+    #[serde(default)]
+    pub optional: bool,
 }
 
 /// Requirement gate.

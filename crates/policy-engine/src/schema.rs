@@ -12,8 +12,12 @@ const DEX_BURN_LIQUIDITY_NFT_SCHEMA: &str =
     include_str!("../../../policy-schema/actions/DEX/burn_liquidity_nft.cedarschema");
 const DEX_DECREASE_LIQUIDITY_SCHEMA: &str =
     include_str!("../../../policy-schema/actions/DEX/decrease_liquidity.cedarschema");
+const DEX_DONATE_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/DEX/donate.cedarschema");
 const DEX_INCREASE_LIQUIDITY_SCHEMA: &str =
     include_str!("../../../policy-schema/actions/DEX/increase_liquidity.cedarschema");
+const DEX_INITIALIZE_POOL_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/DEX/initialize_pool.cedarschema");
 const DEX_MINT_LIQUIDITY_NFT_SCHEMA: &str =
     include_str!("../../../policy-schema/actions/DEX/mint_liquidity_nft.cedarschema");
 const DEX_REMOVE_LIQUIDITY_SCHEMA: &str =
@@ -132,7 +136,9 @@ fn base_schema_text() -> String {
         DEX_ADD_LIQUIDITY_SCHEMA,
         DEX_BURN_LIQUIDITY_NFT_SCHEMA,
         DEX_DECREASE_LIQUIDITY_SCHEMA,
+        DEX_DONATE_SCHEMA,
         DEX_INCREASE_LIQUIDITY_SCHEMA,
+        DEX_INITIALIZE_POOL_SCHEMA,
         DEX_MINT_LIQUIDITY_NFT_SCHEMA,
         DEX_REMOVE_LIQUIDITY_SCHEMA,
         DEX_SWAP_SCHEMA,
@@ -307,7 +313,9 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     ("add_liquidity", "AddLiquidityContext"),
     ("burn_liquidity_nft", "BurnLiquidityNftContext"),
     ("decrease_liquidity", "DecreaseLiquidityContext"),
+    ("donate", "DonateContext"),
     ("increase_liquidity", "IncreaseLiquidityContext"),
+    ("initialize_pool", "InitializePoolContext"),
     ("mint_liquidity_nft", "MintLiquidityNftContext"),
     ("remove_liquidity", "RemoveLiquidityContext"),
     ("swap", "SwapContext"),

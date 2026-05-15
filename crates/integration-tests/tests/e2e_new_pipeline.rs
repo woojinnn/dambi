@@ -1,5 +1,6 @@
 use alloy_primitives::U256;
 use mappers::EmptyTokenRegistry;
+use policy_engine::action::common::AssetRefWithAmountConstraint;
 use policy_engine::action::dex::{SwapAction, SwapMode};
 use policy_engine::policy_rpc::{
     apply_rpc_results, plan_calls, PolicyManifest, PolicyRpcResponse, PolicyRpcResult, RootInput,
@@ -336,10 +337,14 @@ fn synthetic_swap_request_with(input: SyntheticSwapInput<'_>) -> PolicyRequest {
         category: Category::Dex,
         action: Action::Swap(SwapAction {
             swap_mode: SwapMode::ExactIn,
-            token_in,
-            token_out,
-            amount_in,
-            amount_out,
+            input_token: AssetRefWithAmountConstraint {
+                asset: token_in,
+                amount: amount_in,
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: token_out,
+                amount: amount_out,
+            },
             recipient: from.clone(),
             validity,
             fee_bps: input.fee_bps,

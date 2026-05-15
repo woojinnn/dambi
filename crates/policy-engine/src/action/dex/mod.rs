@@ -2,12 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::common::Address;
+use crate::action::common::{Address, Hex};
 
 mod add_liquidity;
 mod burn_liquidity_nft;
 mod decrease_liquidity;
+mod donate;
 mod increase_liquidity;
+mod initialize_pool;
 mod mint_liquidity_nft;
 mod remove_liquidity;
 mod swap;
@@ -15,7 +17,9 @@ mod swap;
 pub use add_liquidity::AddLiquidityAction;
 pub use burn_liquidity_nft::BurnLiquidityNftAction;
 pub use decrease_liquidity::DecreaseLiquidityAction;
+pub use donate::DonateAction;
 pub use increase_liquidity::IncreaseLiquidityAction;
+pub use initialize_pool::InitializePoolAction;
 pub use mint_liquidity_nft::MintLiquidityNftAction;
 pub use remove_liquidity::RemoveLiquidityAction;
 pub use swap::SwapAction;
@@ -60,12 +64,11 @@ pub enum BurnKind {
 #[serde(rename_all = "camelCase")]
 /// Protocol-agnostic pool reference.
 pub struct PoolRef {
-    /// Pool contract address, when available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub address: Option<Address>,
+    /// Pool contract address.
+    pub address: Address,
     /// Protocol-specific pool identifier, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    pub id: Option<Hex>,
     /// Human-readable pool label, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -80,13 +83,51 @@ pub struct TickRange {
     pub upper: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+/// V4 hook callback flags decoded from the lowest 14 bits of the hook address.
+///
+/// All fields default to `false` so JSON payloads may omit any subset of flags;
+/// the cedar shape (`policy-schema/core.cedarschema`) requires every field to
+/// be present when the record is emitted.
+pub struct HookPermissions {
+    /// Hook implements `beforeInitialize`.
+    pub before_initialize: bool,
+    /// Hook implements `afterInitialize`.
+    pub after_initialize: bool,
+    /// Hook implements `beforeAddLiquidity`.
+    pub before_add_liquidity: bool,
+    /// Hook implements `afterAddLiquidity`.
+    pub after_add_liquidity: bool,
+    /// Hook implements `beforeRemoveLiquidity`.
+    pub before_remove_liquidity: bool,
+    /// Hook implements `afterRemoveLiquidity`.
+    pub after_remove_liquidity: bool,
+    /// Hook implements `beforeSwap`.
+    pub before_swap: bool,
+    /// Hook implements `afterSwap`.
+    pub after_swap: bool,
+    /// Hook implements `beforeDonate`.
+    pub before_donate: bool,
+    /// Hook implements `afterDonate`.
+    pub after_donate: bool,
+    /// Hook implements `beforeSwapReturnDelta`.
+    pub before_swap_return_delta: bool,
+    /// Hook implements `afterSwapReturnDelta`.
+    pub after_swap_return_delta: bool,
+    /// Hook implements `afterAddLiquidityReturnDelta`.
+    pub after_add_liquidity_return_delta: bool,
+    /// Hook implements `afterRemoveLiquidityReturnDelta`.
+    pub after_remove_liquidity_return_delta: bool,
+}
+
 #[cfg(test)]
 pub(super) mod test_support {
     use std::str::FromStr as _;
 
     use crate::action::common::{
         Address, AmountConstraint, AmountKind, AssetKind, AssetRef, AssetRefWithAmountConstraint,
-        DecimalString, Validity, ValiditySource,
+        DecimalString, Hex, Validity, ValiditySource,
     };
 
     use super::PoolRef;
@@ -97,6 +138,10 @@ pub(super) mod test_support {
 
     pub(crate) fn decimal(value: &str) -> DecimalString {
         DecimalString::from_str(value).unwrap()
+    }
+
+    pub(crate) fn hex(value: &str) -> Hex {
+        Hex::from_str(value).unwrap()
     }
 
     pub(crate) fn erc20(address_value: &str, symbol: &str, decimals: u8) -> AssetRef {
@@ -142,10 +187,10 @@ pub(super) mod test_support {
 
     pub(crate) fn pool() -> PoolRef {
         PoolRef {
-            address: Some(address("0x1111111111111111111111111111111111111111")),
-            id: Some(
-                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
-            ),
+            address: address("0x1111111111111111111111111111111111111111"),
+            id: Some(hex(
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )),
             label: Some("ETH/USDC 0.05%".to_owned()),
         }
     }

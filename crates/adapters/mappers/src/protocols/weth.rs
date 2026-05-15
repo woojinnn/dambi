@@ -4,7 +4,7 @@ use std::sync::Arc;
 use abi_resolver::decoders::weth::{WETH_DEPOSIT_DECODER_ID, WETH_WITHDRAW_DECODER_ID};
 use abi_resolver::{DecodedCall, DecodedValue, DecoderId};
 use policy_engine::action::common::{
-    AmountConstraint, AmountKind, AssetKind, AssetRef, DecimalString,
+    AmountConstraint, AmountKind, AssetKind, AssetRef, AssetRefWithAmountConstraint, DecimalString,
 };
 use policy_engine::action::envelope::{Action, ActionEnvelope, Category};
 use policy_engine::action::misc::{UnwrapAction, WrapAction};
@@ -38,12 +38,18 @@ impl Mapper for WethDepositMapper {
         ctx: &MapContext<'_>,
         _decoded: &DecodedCall,
     ) -> Result<Vec<ActionEnvelope>, MapperError> {
+        let amount = AmountConstraint {
+            kind: AmountKind::Exact,
+            value: Some(ctx.value_wei.clone()),
+        };
         let action = WrapAction {
-            native_asset: native_eth(ctx.chain_id),
-            wrapped_asset: wrapped_weth(ctx),
-            amount: AmountConstraint {
-                kind: AmountKind::Exact,
-                value: Some(ctx.value_wei.clone()),
+            native_asset: AssetRefWithAmountConstraint {
+                asset: native_eth(ctx.chain_id),
+                amount: amount.clone(),
+            },
+            wrapped_asset: AssetRefWithAmountConstraint {
+                asset: wrapped_weth(ctx),
+                amount,
             },
             recipient: ctx.from.clone(),
         };
@@ -80,15 +86,21 @@ impl Mapper for WethWithdrawMapper {
         decoded: &DecodedCall,
     ) -> Result<Vec<ActionEnvelope>, MapperError> {
         let wad = find_uint(decoded, "wad")?;
+        let amount = AmountConstraint {
+            kind: AmountKind::Exact,
+            value: Some(
+                DecimalString::from_str(&wad.to_string())
+                    .expect("U256 decimal string is always valid"),
+            ),
+        };
         let action = UnwrapAction {
-            wrapped_asset: wrapped_weth(ctx),
-            native_asset: native_eth(ctx.chain_id),
-            amount: AmountConstraint {
-                kind: AmountKind::Exact,
-                value: Some(
-                    DecimalString::from_str(&wad.to_string())
-                        .expect("U256 decimal string is always valid"),
-                ),
+            wrapped_asset: AssetRefWithAmountConstraint {
+                asset: wrapped_weth(ctx),
+                amount: amount.clone(),
+            },
+            native_asset: AssetRefWithAmountConstraint {
+                asset: native_eth(ctx.chain_id),
+                amount,
             },
             recipient: ctx.from.clone(),
         };
@@ -213,18 +225,18 @@ mod tests {
         let Action::Wrap(wrap) = &envelopes[0].action else {
             panic!("expected Wrap, got kind={}", envelopes[0].action.kind());
         };
-        assert_eq!(wrap.native_asset.kind, AssetKind::Native);
-        assert_eq!(wrap.native_asset.token_id, None);
-        assert!(wrap.native_asset.address.is_none());
-        assert_eq!(wrap.native_asset.symbol.as_deref(), Some("ETH"));
-        assert_eq!(wrap.native_asset.decimals, Some(18));
-        assert_eq!(wrap.wrapped_asset.kind, AssetKind::Erc20);
-        assert_eq!(wrap.wrapped_asset.token_id, None);
-        assert_eq!(wrap.wrapped_asset.address.as_ref(), Some(&weth));
-        assert_eq!(wrap.wrapped_asset.symbol.as_deref(), Some("WETH"));
-        assert_eq!(wrap.wrapped_asset.decimals, Some(18));
-        assert_eq!(wrap.amount.kind, AmountKind::Exact);
-        assert_eq!(wrap.amount.value.as_ref(), Some(&value));
+        assert_eq!(wrap.native_asset.asset.kind, AssetKind::Native);
+        assert_eq!(wrap.native_asset.asset.token_id, None);
+        assert!(wrap.native_asset.asset.address.is_none());
+        assert_eq!(wrap.native_asset.asset.symbol.as_deref(), Some("ETH"));
+        assert_eq!(wrap.native_asset.asset.decimals, Some(18));
+        assert_eq!(wrap.wrapped_asset.asset.kind, AssetKind::Erc20);
+        assert_eq!(wrap.wrapped_asset.asset.token_id, None);
+        assert_eq!(wrap.wrapped_asset.asset.address.as_ref(), Some(&weth));
+        assert_eq!(wrap.wrapped_asset.asset.symbol.as_deref(), Some("WETH"));
+        assert_eq!(wrap.wrapped_asset.asset.decimals, Some(18));
+        assert_eq!(wrap.native_asset.amount.kind, AmountKind::Exact);
+        assert_eq!(wrap.native_asset.amount.value.as_ref(), Some(&value));
         assert_eq!(wrap.recipient, from);
         assert_ne!(wrap.recipient, weth);
     }
@@ -255,19 +267,19 @@ mod tests {
         let Action::Unwrap(unwrap) = &envelopes[0].action else {
             panic!("expected Unwrap, got kind={}", envelopes[0].action.kind());
         };
-        assert_eq!(unwrap.wrapped_asset.kind, AssetKind::Erc20);
-        assert_eq!(unwrap.wrapped_asset.token_id, None);
-        assert_eq!(unwrap.wrapped_asset.address.as_ref(), Some(&weth));
-        assert_eq!(unwrap.wrapped_asset.symbol.as_deref(), Some("WETH"));
-        assert_eq!(unwrap.wrapped_asset.decimals, Some(18));
-        assert_eq!(unwrap.native_asset.kind, AssetKind::Native);
-        assert_eq!(unwrap.native_asset.token_id, None);
-        assert!(unwrap.native_asset.address.is_none());
-        assert_eq!(unwrap.native_asset.symbol.as_deref(), Some("ETH"));
-        assert_eq!(unwrap.native_asset.decimals, Some(18));
-        assert_eq!(unwrap.amount.kind, AmountKind::Exact);
+        assert_eq!(unwrap.wrapped_asset.asset.kind, AssetKind::Erc20);
+        assert_eq!(unwrap.wrapped_asset.asset.token_id, None);
+        assert_eq!(unwrap.wrapped_asset.asset.address.as_ref(), Some(&weth));
+        assert_eq!(unwrap.wrapped_asset.asset.symbol.as_deref(), Some("WETH"));
+        assert_eq!(unwrap.wrapped_asset.asset.decimals, Some(18));
+        assert_eq!(unwrap.native_asset.asset.kind, AssetKind::Native);
+        assert_eq!(unwrap.native_asset.asset.token_id, None);
+        assert!(unwrap.native_asset.asset.address.is_none());
+        assert_eq!(unwrap.native_asset.asset.symbol.as_deref(), Some("ETH"));
+        assert_eq!(unwrap.native_asset.asset.decimals, Some(18));
+        assert_eq!(unwrap.wrapped_asset.amount.kind, AmountKind::Exact);
         assert_eq!(
-            unwrap.amount.value.as_ref().map(ToString::to_string),
+            unwrap.wrapped_asset.amount.value.as_ref().map(ToString::to_string),
             Some("500000000000000000".to_owned())
         );
         assert_eq!(unwrap.recipient, from);

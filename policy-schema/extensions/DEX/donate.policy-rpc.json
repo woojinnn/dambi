@@ -1,0 +1,70 @@
+{
+  "id": "schema::DEX/donate/enrichment",
+  "schema_version": 1,
+  "requires": [
+    {
+      "id": "donate-total-input-usd",
+      "when": { "action": "donate" },
+      "method": "oracle.usd_value",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputUsd",
+          "type": "UsdValuation",
+          "from": "$.result",
+          "required": false
+        }
+      ],
+      "optional": true
+    },
+    {
+      "id": "donate-total-input-fraction-of-portfolio-bps",
+      "when": { "action": "donate" },
+      "method": "portfolio.input_fraction_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputFractionOfPortfolioBps",
+          "type": "Long",
+          "from": "$.result.bps",
+          "required": false
+        }
+      ],
+      "optional": true
+    },
+    {
+      "id": "donate-window-stats",
+      "when": { "action": "donate" },
+      "method": "stat_window.donate_stats",
+      "params": {
+        "owner": "$.root.from",
+        "action": "donate"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "windowStats",
+          "type": "WindowStats",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "context_extensions": {
+    "donate": {
+      "totalInputUsd": "UsdValuation",
+      "totalInputFractionOfPortfolioBps": "Long",
+      "windowStats": "WindowStats"
+    }
+  }
+}

@@ -1,10 +1,12 @@
 use crate::action::dex::DecreaseLiquidityAction;
-use crate::context_keys::{LIQUIDITY_DELTA, NFT, OUTPUTS, RECIPIENT};
+use crate::context_keys::{LIQUIDITY_DELTA, NFT, OUTPUT_TOKENS, RECIPIENT};
+use crate::lowering::dex::asset_with_amounts_json;
+use crate::lowering::LoweringError;
 use crate::policy::PolicyRequest;
 use serde_json::{Map, Value};
 
 use crate::lowering::common::amount::amount_constraint_json;
-use crate::lowering::common::asset::{asset_ref_json, asset_ref_with_amount_json};
+use crate::lowering::common::asset::asset_ref_json;
 use crate::lowering::common::validity::validity_json;
 use crate::lowering::dispatch::{Lower, LoweringCtx};
 
@@ -12,22 +14,14 @@ const ACTION_ID: &str = "decrease_liquidity";
 const VALIDITY: &str = "validity";
 
 impl Lower for DecreaseLiquidityAction {
-    fn build(&self, ctx: &LoweringCtx<'_>) -> PolicyRequest {
+    fn build(&self, ctx: &LoweringCtx<'_>) -> Result<PolicyRequest, LoweringError> {
         let mut context = Map::new();
-        context.insert(NFT.into(), asset_ref_json(&self.nft));
+        context.insert(NFT.into(), asset_ref_json(&self.nft)?);
         context.insert(
             LIQUIDITY_DELTA.into(),
             amount_constraint_json(&self.liquidity_delta),
         );
-        context.insert(
-            OUTPUTS.into(),
-            Value::Array(
-                self.outputs
-                    .iter()
-                    .map(asset_ref_with_amount_json)
-                    .collect(),
-            ),
-        );
+        context.insert(OUTPUT_TOKENS.into(), asset_with_amounts_json(&self.outputs)?);
         if let Some(recipient) = &self.recipient {
             context.insert(RECIPIENT.into(), Value::from(recipient.to_string()));
         }
@@ -35,7 +29,7 @@ impl Lower for DecreaseLiquidityAction {
             context.insert(VALIDITY.into(), validity_json(validity));
         }
 
-        ctx.request(ACTION_ID, Value::Object(context))
+        Ok(ctx.request(ACTION_ID, Value::Object(context)))
     }
 }
 
@@ -66,7 +60,7 @@ mod tests {
         assert!(request.action.contains("decrease_liquidity"));
         assert!(request.context.get("nft").is_some());
         assert!(request.context.get("liquidityDelta").is_some());
-        assert!(request.context.get("outputs").is_some());
+        assert!(request.context.get("outputTokens").is_some());
         assert!(request.context.get("recipient").is_some());
         assert!(request.context.get("validity").is_some());
     }

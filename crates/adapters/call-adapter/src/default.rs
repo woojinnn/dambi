@@ -85,6 +85,7 @@ mod tests {
         EmptyTokenRegistry, InMemoryMapperRegistry, MapContext, Mapper, MapperError, MapperId,
         MapperMatchKey, TokenMetadata, TokenRegistry,
     };
+    use policy_engine::action::common::AssetRefWithAmountConstraint;
     use policy_engine::action::dex::{SwapAction, SwapMode};
     use policy_engine::action::misc::WrapAction;
     use policy_engine::action::{
@@ -183,23 +184,31 @@ mod tests {
         ActionEnvelope {
             category: Category::Misc,
             action: Action::Wrap(WrapAction {
-                native_asset: AssetRef {
-                    kind: AssetKind::Native,
-                    address: None,
-                    token_id: None,
-                    symbol: Some("ETH".to_owned()),
-                    decimals: Some(18),
+                native_asset: AssetRefWithAmountConstraint {
+                    asset: AssetRef {
+                        kind: AssetKind::Native,
+                        address: None,
+                        token_id: None,
+                        symbol: Some("ETH".to_owned()),
+                        decimals: Some(18),
+                    },
+                    amount: AmountConstraint {
+                        kind: AmountKind::Exact,
+                        value: Some(decimal("100")),
+                    },
                 },
-                wrapped_asset: AssetRef {
-                    kind: AssetKind::Erc20,
-                    address: Some(address("0x3333333333333333333333333333333333333333")),
-                    token_id: None,
-                    symbol: Some("WETH".to_owned()),
-                    decimals: Some(18),
-                },
-                amount: AmountConstraint {
-                    kind: AmountKind::Exact,
-                    value: Some(decimal("100")),
+                wrapped_asset: AssetRefWithAmountConstraint {
+                    asset: AssetRef {
+                        kind: AssetKind::Erc20,
+                        address: Some(address("0x3333333333333333333333333333333333333333")),
+                        token_id: None,
+                        symbol: Some("WETH".to_owned()),
+                        decimals: Some(18),
+                    },
+                    amount: AmountConstraint {
+                        kind: AmountKind::Exact,
+                        value: Some(decimal("100")),
+                    },
                 },
                 recipient,
             }),
@@ -462,15 +471,19 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactIn,
-                token_in: erc20_asset("0xdac17f958d2ee523a2206206994597c13d831ec7", "USDT", 6),
-                token_out: erc20_asset("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", 18),
-                amount_in: AmountConstraint {
-                    kind: AmountKind::Exact,
-                    value: Some(decimal("200000000")),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: erc20_asset("0xdac17f958d2ee523a2206206994597c13d831ec7", "USDT", 6),
+                    amount: AmountConstraint {
+                        kind: AmountKind::Exact,
+                        value: Some(decimal("200000000")),
+                    },
                 },
-                amount_out: AmountConstraint {
-                    kind: AmountKind::Min,
-                    value: Some(decimal("0")),
+                output_token: AssetRefWithAmountConstraint {
+                    asset: erc20_asset("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", 18),
+                    amount: AmountConstraint {
+                        kind: AmountKind::Min,
+                        value: Some(decimal("0")),
+                    },
                 },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {
@@ -487,15 +500,19 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactOut,
-                token_in: erc20_asset("0xdac17f958d2ee523a2206206994597c13d831ec7", "USDT", 6),
-                token_out: erc20_asset("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", 18),
-                amount_in: AmountConstraint {
-                    kind: AmountKind::Max,
-                    value: Some(decimal("4000000000")),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: erc20_asset("0xdac17f958d2ee523a2206206994597c13d831ec7", "USDT", 6),
+                    amount: AmountConstraint {
+                        kind: AmountKind::Max,
+                        value: Some(decimal("4000000000")),
+                    },
                 },
-                amount_out: AmountConstraint {
-                    kind: AmountKind::Exact,
-                    value: Some(decimal("1000000000000000000")),
+                output_token: AssetRefWithAmountConstraint {
+                    asset: erc20_asset("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", 18),
+                    amount: AmountConstraint {
+                        kind: AmountKind::Exact,
+                        value: Some(decimal("1000000000000000000")),
+                    },
                 },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {

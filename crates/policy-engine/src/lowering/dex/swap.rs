@@ -1,10 +1,10 @@
 use crate::action::dex::{SwapAction, SwapMode};
-use crate::action::AssetRefWithAmountConstraint;
 use crate::context_keys::{FEE_BPS, RECIPIENT, VALIDITY_DELTA_SEC};
+use crate::lowering::dex::asset_with_amount_json;
+use crate::lowering::LoweringError;
 use crate::policy::PolicyRequest;
 use serde_json::{Map, Value};
 
-use crate::lowering::common::asset::asset_ref_with_amount_json;
 use crate::lowering::common::cedar::cedar_long_u64;
 use crate::lowering::common::validity::{validity_delta_sec, validity_json};
 use crate::lowering::dispatch::{Lower, LoweringCtx};
@@ -17,12 +17,12 @@ const OUTPUT_TOKEN: &str = "outputToken";
 const VALIDITY: &str = "validity";
 
 impl Lower for SwapAction {
-    fn build(&self, ctx: &LoweringCtx<'_>) -> PolicyRequest {
-        ctx.request(ACTION_ID, context(self, ctx))
+    fn build(&self, ctx: &LoweringCtx<'_>) -> Result<PolicyRequest, LoweringError> {
+        Ok(ctx.request(ACTION_ID, context(self, ctx)?))
     }
 }
 
-fn context(swap: &SwapAction, ctx: &LoweringCtx<'_>) -> Value {
+fn context(swap: &SwapAction, ctx: &LoweringCtx<'_>) -> Result<Value, LoweringError> {
     let mut context = Map::new();
     context.insert(
         SWAP_MODE.into(),
@@ -30,17 +30,11 @@ fn context(swap: &SwapAction, ctx: &LoweringCtx<'_>) -> Value {
     );
     context.insert(
         INPUT_TOKEN.into(),
-        asset_ref_with_amount_json(&AssetRefWithAmountConstraint {
-            asset: swap.token_in.clone(),
-            amount: swap.amount_in.clone(),
-        }),
+        asset_with_amount_json(&swap.input_token)?,
     );
     context.insert(
         OUTPUT_TOKEN.into(),
-        asset_ref_with_amount_json(&AssetRefWithAmountConstraint {
-            asset: swap.token_out.clone(),
-            amount: swap.amount_out.clone(),
-        }),
+        asset_with_amount_json(&swap.output_token)?,
     );
     context.insert(RECIPIENT.into(), Value::from(swap.recipient.to_string()));
 
@@ -53,7 +47,7 @@ fn context(swap: &SwapAction, ctx: &LoweringCtx<'_>) -> Value {
     if let Some(fee_bps) = swap.fee_bps {
         context.insert(FEE_BPS.into(), cedar_long_u64(u64::from(fee_bps)));
     }
-    Value::Object(context)
+    Ok(Value::Object(context))
 }
 
 const fn swap_mode_str(mode: &SwapMode) -> &'static str {
@@ -69,7 +63,9 @@ const fn swap_mode_str(mode: &SwapMode) -> &'static str {
 mod tests {
     use crate::action::dex::{SwapAction, SwapMode};
     use crate::action::misc::{ApprovalKind, ApproveAction};
-    use crate::action::{Action, AmountConstraint, AmountKind, Category};
+    use crate::action::{
+        Action, AmountConstraint, AmountKind, AssetRefWithAmountConstraint, Category,
+    };
     use serde_json::{json, Value};
 
     use crate::lowering::dex::test_support::{
@@ -78,12 +74,18 @@ mod tests {
     };
 
     fn swap(recipient: crate::action::Address, amount_in: AmountConstraint) -> SwapAction {
+        let input_asset = erc20("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "WETH", 18);
+        let output_asset = erc20("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "USDC", 6);
         SwapAction {
             swap_mode: SwapMode::ExactIn,
-            token_in: erc20("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "WETH", 18),
-            token_out: erc20("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "USDC", 6),
-            amount_in,
-            amount_out: amount(AmountKind::Min, "0"),
+            input_token: AssetRefWithAmountConstraint {
+                asset: input_asset,
+                amount: amount_in,
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: output_asset,
+                amount: amount(AmountKind::Min, "0"),
+            },
             recipient,
             validity: None,
             fee_bps: Some(30),
@@ -177,7 +179,7 @@ mod tests {
             }),
         };
 
-        assert!(crate::lowering::policy_request_from_envelope(
+        assert!(crate::lowering::try_policy_request_from_envelope(
             &envelope,
             &address("0x1111111111111111111111111111111111111111"),
             &address("0x2222222222222222222222222222222222222222"),
@@ -185,6 +187,7 @@ mod tests {
             1,
             BLOCK_TIMESTAMP,
         )
+        .unwrap()
         .is_none());
     }
 

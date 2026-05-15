@@ -1,10 +1,32 @@
-use crate::action::{AssetKind, AssetRef, AssetRefWithAmountConstraint};
+use crate::action::{AmountConstraint, AssetKind, AssetRef};
 use crate::context_keys::{ADDRESS, AMOUNT, ASSET, DECIMALS, SYMBOL, TOKEN_ID};
 use serde_json::{Map, Value};
 
 use super::amount::amount_constraint_json;
 
-pub(crate) fn asset_ref_json(asset: &AssetRef) -> Value {
+/// Errors raised by lowering helpers when input data is structurally invalid.
+#[derive(Debug)]
+pub enum LoweringError {
+    /// A required field on `AssetRef` was missing during lowering.
+    MissingAssetField {
+        /// Name of the missing field (e.g. `"address"`, `"symbol"`, `"decimals"`).
+        field: &'static str,
+    },
+}
+
+impl std::fmt::Display for LoweringError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingAssetField { field } => {
+                write!(f, "missing required asset field: {field}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LoweringError {}
+
+pub(crate) fn asset_ref_json(asset: &AssetRef) -> Result<Value, LoweringError> {
     let mut out = Map::new();
     out.insert("kind".into(), Value::from(asset_kind_str(&asset.kind)));
     out.insert(
@@ -28,14 +50,17 @@ pub(crate) fn asset_ref_json(asset: &AssetRef) -> Value {
         DECIMALS.into(),
         Value::from(i64::from(asset.decimals.unwrap_or_default())),
     );
-    Value::Object(out)
+    Ok(Value::Object(out))
 }
 
-pub(crate) fn asset_ref_with_amount_json(pair: &AssetRefWithAmountConstraint) -> Value {
+pub(crate) fn asset_ref_with_amount_json(
+    asset: &AssetRef,
+    amount: &AmountConstraint,
+) -> Result<Value, LoweringError> {
     let mut out = Map::new();
-    out.insert(ASSET.into(), asset_ref_json(&pair.asset));
-    out.insert(AMOUNT.into(), amount_constraint_json(&pair.amount));
-    Value::Object(out)
+    out.insert(ASSET.into(), asset_ref_json(asset)?);
+    out.insert(AMOUNT.into(), amount_constraint_json(amount));
+    Ok(Value::Object(out))
 }
 
 pub(crate) const fn asset_kind_str(kind: &AssetKind) -> &'static str {

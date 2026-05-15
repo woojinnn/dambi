@@ -15,7 +15,7 @@ pub struct BurnLiquidityNftAction {
     /// Burn semantics.
     pub burn_kind: BurnKind,
     /// Output assets with amount constraints for auto-decrease burns.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "outputTokens", skip_serializing_if = "Option::is_none")]
     pub outputs: Option<Vec<AssetRefWithAmountConstraint>>,
     /// Recipient for auto-decrease burn outputs.
     #[serde(skip_serializing_if = "Option::is_none")]

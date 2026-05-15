@@ -11,6 +11,7 @@ pub struct IncreaseLiquidityAction {
     /// NFT collection for the position.
     pub nft: AssetRef,
     /// Position token pair with amount constraints.
+    #[serde(rename = "inputTokens")]
     pub inputs: Vec<AssetRefWithAmountConstraint>,
     /// Validity window, when available.
     #[serde(skip_serializing_if = "Option::is_none")]

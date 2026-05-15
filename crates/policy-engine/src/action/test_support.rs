@@ -54,6 +54,7 @@ pub(crate) fn erc721(symbol: &str) -> Value {
     json!({
         "kind": "erc721",
         "address": address(0x11),
+        "tokenId": "1",
         "symbol": symbol
     })
 }

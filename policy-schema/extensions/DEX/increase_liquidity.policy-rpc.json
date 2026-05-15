@@ -1,0 +1,107 @@
+{
+  "id": "schema::DEX/increase_liquidity/enrichment",
+  "schema_version": 1,
+  "requires": [
+    {
+      "id": "increase-liquidity-total-input-usd",
+      "when": { "action": "increase_liquidity" },
+      "method": "oracle.usd_value",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputUsd",
+          "type": "UsdValuation",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "increase-liquidity-total-input-fraction-of-portfolio-bps",
+      "when": { "action": "increase_liquidity" },
+      "method": "portfolio.input_fraction_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputFractionOfPortfolioBps",
+          "type": "Long",
+          "from": "$.result.bps",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "increase-liquidity-effective-rate-vs-oracle-bps",
+      "when": { "action": "increase_liquidity" },
+      "method": "oracle.effective_rate_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "nft": "$.action.nft",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "effectiveRateVsOracleBps",
+          "type": "Long",
+          "from": "$.result.bps",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "increase-liquidity-nft-owner-is-actor",
+      "when": { "action": "increase_liquidity" },
+      "method": "nft.owner_is_actor",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "nft": "$.action.nft"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "nftOwnerIsActor",
+          "type": "Bool",
+          "from": "$.result.ownerIsActor",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "increase-liquidity-window-stats",
+      "when": { "action": "increase_liquidity" },
+      "method": "stat_window.increase_liquidity_stats",
+      "params": {
+        "owner": "$.root.from",
+        "action": "increase_liquidity"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "windowStats",
+          "type": "WindowStats",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "context_extensions": {
+    "increase_liquidity": {
+      "totalInputUsd": "UsdValuation",
+      "totalInputFractionOfPortfolioBps": "Long",
+      "effectiveRateVsOracleBps": "Long",
+      "nftOwnerIsActor": "Bool",
+      "windowStats": "WindowStats"
+    }
+  }
+}

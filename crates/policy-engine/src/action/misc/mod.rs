@@ -46,6 +46,10 @@ pub enum ApprovalKind {
 pub enum PermitKind {
     /// EIP-2612 token permit.
     Eip2612,
+    /// ERC-721 token permit.
+    Erc721Permit,
+    /// ERC-721 approval-for-all permit.
+    Erc721PermitForAll,
     /// Permit2 allowance grant.
     Permit2Single,
     /// Permit2 one-shot transfer authorization.

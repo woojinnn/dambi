@@ -1,0 +1,90 @@
+{
+  "id": "schema::DEX/mint_liquidity_nft/enrichment",
+  "schema_version": 1,
+  "requires": [
+    {
+      "id": "mint-liquidity-nft-total-input-usd",
+      "when": { "action": "mint_liquidity_nft" },
+      "method": "oracle.usd_value",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputUsd",
+          "type": "UsdValuation",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "mint-liquidity-nft-total-input-fraction-of-portfolio-bps",
+      "when": { "action": "mint_liquidity_nft" },
+      "method": "portfolio.input_fraction_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputFractionOfPortfolioBps",
+          "type": "Long",
+          "from": "$.result.bps",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "mint-liquidity-nft-effective-rate-vs-oracle-bps",
+      "when": { "action": "mint_liquidity_nft" },
+      "method": "oracle.effective_rate_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "pool": "$.action.pool",
+        "feeBps": "$.action.feeBps",
+        "tickRange": "$.action.tickRange",
+        "inputTokens": "$.action.inputTokens"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "effectiveRateVsOracleBps",
+          "type": "Long",
+          "from": "$.result.bps",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "mint-liquidity-nft-window-stats",
+      "when": { "action": "mint_liquidity_nft" },
+      "method": "stat_window.mint_liquidity_nft_stats",
+      "params": {
+        "owner": "$.root.from",
+        "action": "mint_liquidity_nft"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "windowStats",
+          "type": "WindowStats",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "context_extensions": {
+    "mint_liquidity_nft": {
+      "totalInputUsd": "UsdValuation",
+      "totalInputFractionOfPortfolioBps": "Long",
+      "effectiveRateVsOracleBps": "Long",
+      "windowStats": "WindowStats"
+    }
+  }
+}

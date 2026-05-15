@@ -2,6 +2,7 @@ use std::str::FromStr as _;
 
 use abi_resolver::{DecodedCall, DecodedValue, DecoderId};
 use alloy_primitives::U256;
+use policy_engine::action::common::AssetRefWithAmountConstraint;
 use policy_engine::action::dex::{SwapAction, SwapMode};
 use policy_engine::action::{
     Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef, Category,
@@ -50,10 +51,14 @@ impl Mapper for SwapExactTokensForTokensMapper {
 
         Ok(vec![swap_envelope(SwapAction {
             swap_mode: SwapMode::ExactIn,
-            token_in,
-            token_out,
-            amount_in: amount_constraint(AmountKind::Exact, amount_in)?,
-            amount_out: amount_constraint(AmountKind::Min, amount_out_min)?,
+            input_token: AssetRefWithAmountConstraint {
+                asset: token_in,
+                amount: amount_constraint(AmountKind::Exact, amount_in)?,
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: token_out,
+                amount: amount_constraint(AmountKind::Min, amount_out_min)?,
+            },
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
@@ -94,10 +99,14 @@ impl Mapper for SwapTokensForExactTokensMapper {
 
         Ok(vec![swap_envelope(SwapAction {
             swap_mode: SwapMode::ExactOut,
-            token_in,
-            token_out,
-            amount_in: amount_constraint(AmountKind::Max, amount_in_max)?,
-            amount_out: amount_constraint(AmountKind::Exact, amount_out)?,
+            input_token: AssetRefWithAmountConstraint {
+                asset: token_in,
+                amount: amount_constraint(AmountKind::Max, amount_in_max)?,
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: token_out,
+                amount: amount_constraint(AmountKind::Exact, amount_out)?,
+            },
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
@@ -136,10 +145,14 @@ impl Mapper for SwapExactETHForTokensMapper {
 
         Ok(vec![swap_envelope(SwapAction {
             swap_mode: SwapMode::ExactIn,
-            token_in: native_eth_asset_ref(ctx),
-            token_out: path_last_asset(ctx, &path)?,
-            amount_in: decimal_amount_constraint(AmountKind::Exact, ctx.value_wei),
-            amount_out: amount_constraint(AmountKind::Min, amount_out_min)?,
+            input_token: AssetRefWithAmountConstraint {
+                asset: native_eth_asset_ref(ctx),
+                amount: decimal_amount_constraint(AmountKind::Exact, ctx.value_wei),
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: path_last_asset(ctx, &path)?,
+                amount: amount_constraint(AmountKind::Min, amount_out_min)?,
+            },
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
@@ -179,10 +192,14 @@ impl Mapper for SwapTokensForExactETHMapper {
 
         Ok(vec![swap_envelope(SwapAction {
             swap_mode: SwapMode::ExactOut,
-            token_in: path_first_asset(ctx, &path)?,
-            token_out: native_eth_asset_ref(ctx),
-            amount_in: amount_constraint(AmountKind::Max, amount_in_max)?,
-            amount_out: amount_constraint(AmountKind::Exact, amount_out)?,
+            input_token: AssetRefWithAmountConstraint {
+                asset: path_first_asset(ctx, &path)?,
+                amount: amount_constraint(AmountKind::Max, amount_in_max)?,
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: native_eth_asset_ref(ctx),
+                amount: amount_constraint(AmountKind::Exact, amount_out)?,
+            },
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
@@ -222,10 +239,14 @@ impl Mapper for SwapExactTokensForETHMapper {
 
         Ok(vec![swap_envelope(SwapAction {
             swap_mode: SwapMode::ExactIn,
-            token_in: path_first_asset(ctx, &path)?,
-            token_out: native_eth_asset_ref(ctx),
-            amount_in: amount_constraint(AmountKind::Exact, amount_in)?,
-            amount_out: amount_constraint(AmountKind::Min, amount_out_min)?,
+            input_token: AssetRefWithAmountConstraint {
+                asset: path_first_asset(ctx, &path)?,
+                amount: amount_constraint(AmountKind::Exact, amount_in)?,
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: native_eth_asset_ref(ctx),
+                amount: amount_constraint(AmountKind::Min, amount_out_min)?,
+            },
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
@@ -264,10 +285,14 @@ impl Mapper for SwapETHForExactTokensMapper {
 
         Ok(vec![swap_envelope(SwapAction {
             swap_mode: SwapMode::ExactOut,
-            token_in: native_eth_asset_ref(ctx),
-            token_out: path_last_asset(ctx, &path)?,
-            amount_in: decimal_amount_constraint(AmountKind::Max, ctx.value_wei),
-            amount_out: amount_constraint(AmountKind::Exact, amount_out)?,
+            input_token: AssetRefWithAmountConstraint {
+                asset: native_eth_asset_ref(ctx),
+                amount: decimal_amount_constraint(AmountKind::Max, ctx.value_wei),
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: path_last_asset(ctx, &path)?,
+                amount: amount_constraint(AmountKind::Exact, amount_out)?,
+            },
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
@@ -437,6 +462,7 @@ mod tests {
     };
     use abi_resolver::{DecodedArg, DecodedCall, DecodedValue, DecoderId};
     use alloy_primitives::U256;
+    use policy_engine::action::common::AssetRefWithAmountConstraint;
     use policy_engine::action::dex::{SwapAction, SwapMode};
     use policy_engine::action::{
         Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef,
@@ -822,20 +848,24 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactIn,
-                token_in: erc20(
-                    1,
-                    "0xdac17f958d2ee523a2206206994597c13d831ec7",
-                    in_symbol,
-                    in_decimals,
-                ),
-                token_out: erc20(
-                    1,
-                    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-                    out_symbol,
-                    out_decimals,
-                ),
-                amount_in: amount(AmountKind::Exact, "200000000"),
-                amount_out: amount(AmountKind::Min, "0"),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: erc20(
+                        1,
+                        "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                        in_symbol,
+                        in_decimals,
+                    ),
+                    amount: amount(AmountKind::Exact, "200000000"),
+                },
+                output_token: AssetRefWithAmountConstraint {
+                    asset: erc20(
+                        1,
+                        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                        out_symbol,
+                        out_decimals,
+                    ),
+                    amount: amount(AmountKind::Min, "0"),
+                },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {
                     expires_at: decimal("9999999999"),
@@ -856,20 +886,24 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactOut,
-                token_in: erc20(
-                    1,
-                    "0xdac17f958d2ee523a2206206994597c13d831ec7",
-                    in_symbol,
-                    in_decimals,
-                ),
-                token_out: erc20(
-                    1,
-                    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-                    out_symbol,
-                    out_decimals,
-                ),
-                amount_in: amount(AmountKind::Max, "4000000000"),
-                amount_out: amount(AmountKind::Exact, "1000000000000000000"),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: erc20(
+                        1,
+                        "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                        in_symbol,
+                        in_decimals,
+                    ),
+                    amount: amount(AmountKind::Max, "4000000000"),
+                },
+                output_token: AssetRefWithAmountConstraint {
+                    asset: erc20(
+                        1,
+                        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                        out_symbol,
+                        out_decimals,
+                    ),
+                    amount: amount(AmountKind::Exact, "1000000000000000000"),
+                },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {
                     expires_at: decimal("9999999999"),
@@ -885,10 +919,14 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactIn,
-                token_in: native_eth(1),
-                token_out: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
-                amount_in: amount(AmountKind::Exact, "1000000000000000000"),
-                amount_out: amount(AmountKind::Min, "200000000"),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: native_eth(1),
+                    amount: amount(AmountKind::Exact, "1000000000000000000"),
+                },
+                output_token: AssetRefWithAmountConstraint {
+                    asset: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
+                    amount: amount(AmountKind::Min, "200000000"),
+                },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {
                     expires_at: decimal("9999999999"),
@@ -904,10 +942,14 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactOut,
-                token_in: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
-                token_out: native_eth(1),
-                amount_in: amount(AmountKind::Max, "4000000000"),
-                amount_out: amount(AmountKind::Exact, "1000000000000000000"),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
+                    amount: amount(AmountKind::Max, "4000000000"),
+                },
+                output_token: AssetRefWithAmountConstraint {
+                    asset: native_eth(1),
+                    amount: amount(AmountKind::Exact, "1000000000000000000"),
+                },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {
                     expires_at: decimal("9999999999"),
@@ -923,10 +965,14 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactIn,
-                token_in: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
-                token_out: native_eth(1),
-                amount_in: amount(AmountKind::Exact, "200000000"),
-                amount_out: amount(AmountKind::Min, "0"),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
+                    amount: amount(AmountKind::Exact, "200000000"),
+                },
+                output_token: AssetRefWithAmountConstraint {
+                    asset: native_eth(1),
+                    amount: amount(AmountKind::Min, "0"),
+                },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {
                     expires_at: decimal("9999999999"),
@@ -942,10 +988,14 @@ mod tests {
             category: Category::Dex,
             action: Action::Swap(SwapAction {
                 swap_mode: SwapMode::ExactOut,
-                token_in: native_eth(1),
-                token_out: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
-                amount_in: amount(AmountKind::Max, "1500000000000000000"),
-                amount_out: amount(AmountKind::Exact, "200000000"),
+                input_token: AssetRefWithAmountConstraint {
+                    asset: native_eth(1),
+                    amount: amount(AmountKind::Max, "1500000000000000000"),
+                },
+                output_token: AssetRefWithAmountConstraint {
+                    asset: erc20(1, "0xdac17f958d2ee523a2206206994597c13d831ec7", None, None),
+                    amount: amount(AmountKind::Exact, "200000000"),
+                },
                 recipient: address("0x1111111111111111111111111111111111111111"),
                 validity: Some(Validity {
                     expires_at: decimal("9999999999"),
@@ -976,8 +1026,8 @@ mod tests {
         };
         assert_eq!(result[0].category, Category::Dex);
         assert_eq!(swap.swap_mode, SwapMode::ExactIn);
-        assert_eq!(swap.amount_in.kind, AmountKind::Exact);
-        assert_eq!(swap.amount_out.kind, AmountKind::Min);
+        assert_eq!(swap.input_token.amount.kind, AmountKind::Exact);
+        assert_eq!(swap.output_token.amount.kind, AmountKind::Min);
     }
 
     #[test]
@@ -999,8 +1049,8 @@ mod tests {
             panic!("expected swap action");
         };
         assert_eq!(swap.swap_mode, SwapMode::ExactOut);
-        assert_eq!(swap.amount_in.kind, AmountKind::Max);
-        assert_eq!(swap.amount_out.kind, AmountKind::Exact);
+        assert_eq!(swap.input_token.amount.kind, AmountKind::Max);
+        assert_eq!(swap.output_token.amount.kind, AmountKind::Exact);
     }
 
     #[test]
@@ -1021,11 +1071,11 @@ mod tests {
         let Action::Swap(swap) = &result[0].action else {
             panic!("expected swap action");
         };
-        assert_eq!(swap.token_in.kind, AssetKind::Native);
-        assert_eq!(swap.token_in.address, None);
-        assert_eq!(swap.token_out.kind, AssetKind::Erc20);
-        assert_eq!(swap.amount_in.kind, AmountKind::Exact);
-        assert_eq!(swap.amount_out.kind, AmountKind::Min);
+        assert_eq!(swap.input_token.asset.kind, AssetKind::Native);
+        assert_eq!(swap.input_token.asset.address, None);
+        assert_eq!(swap.output_token.asset.kind, AssetKind::Erc20);
+        assert_eq!(swap.input_token.amount.kind, AmountKind::Exact);
+        assert_eq!(swap.output_token.amount.kind, AmountKind::Min);
     }
 
     #[test]
@@ -1046,11 +1096,11 @@ mod tests {
         let Action::Swap(swap) = &result[0].action else {
             panic!("expected swap action");
         };
-        assert_eq!(swap.token_in.kind, AssetKind::Erc20);
-        assert_eq!(swap.token_out.kind, AssetKind::Native);
-        assert_eq!(swap.token_out.address, None);
-        assert_eq!(swap.amount_in.kind, AmountKind::Max);
-        assert_eq!(swap.amount_out.kind, AmountKind::Exact);
+        assert_eq!(swap.input_token.asset.kind, AssetKind::Erc20);
+        assert_eq!(swap.output_token.asset.kind, AssetKind::Native);
+        assert_eq!(swap.output_token.asset.address, None);
+        assert_eq!(swap.input_token.amount.kind, AmountKind::Max);
+        assert_eq!(swap.output_token.amount.kind, AmountKind::Exact);
     }
 
     #[test]
@@ -1071,11 +1121,11 @@ mod tests {
         let Action::Swap(swap) = &result[0].action else {
             panic!("expected swap action");
         };
-        assert_eq!(swap.token_in.kind, AssetKind::Erc20);
-        assert_eq!(swap.token_out.kind, AssetKind::Native);
-        assert_eq!(swap.token_out.address, None);
-        assert_eq!(swap.amount_in.kind, AmountKind::Exact);
-        assert_eq!(swap.amount_out.kind, AmountKind::Min);
+        assert_eq!(swap.input_token.asset.kind, AssetKind::Erc20);
+        assert_eq!(swap.output_token.asset.kind, AssetKind::Native);
+        assert_eq!(swap.output_token.asset.address, None);
+        assert_eq!(swap.input_token.amount.kind, AmountKind::Exact);
+        assert_eq!(swap.output_token.amount.kind, AmountKind::Min);
     }
 
     #[test]
@@ -1096,11 +1146,11 @@ mod tests {
         let Action::Swap(swap) = &result[0].action else {
             panic!("expected swap action");
         };
-        assert_eq!(swap.token_in.kind, AssetKind::Native);
-        assert_eq!(swap.token_in.address, None);
-        assert_eq!(swap.token_out.kind, AssetKind::Erc20);
-        assert_eq!(swap.amount_in.kind, AmountKind::Max);
-        assert_eq!(swap.amount_out.kind, AmountKind::Exact);
+        assert_eq!(swap.input_token.asset.kind, AssetKind::Native);
+        assert_eq!(swap.input_token.asset.address, None);
+        assert_eq!(swap.output_token.asset.kind, AssetKind::Erc20);
+        assert_eq!(swap.input_token.amount.kind, AmountKind::Max);
+        assert_eq!(swap.output_token.amount.kind, AmountKind::Exact);
     }
 
     #[test]
@@ -1121,9 +1171,9 @@ mod tests {
         let Action::Swap(swap) = &result[0].action else {
             panic!("expected swap action");
         };
-        assert_eq!(swap.token_in.symbol.as_deref(), Some("USDT"));
-        assert_eq!(swap.token_in.decimals, Some(6));
-        assert_eq!(swap.token_out.symbol.as_deref(), Some("WETH"));
-        assert_eq!(swap.token_out.decimals, Some(18));
+        assert_eq!(swap.input_token.asset.symbol.as_deref(), Some("USDT"));
+        assert_eq!(swap.input_token.asset.decimals, Some(6));
+        assert_eq!(swap.output_token.asset.symbol.as_deref(), Some("WETH"));
+        assert_eq!(swap.output_token.asset.decimals, Some(18));
     }
 }

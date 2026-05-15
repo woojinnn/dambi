@@ -1,9 +1,11 @@
 use crate::action::dex::IncreaseLiquidityAction;
-use crate::context_keys::{INPUTS, NFT};
+use crate::context_keys::{INPUT_TOKENS, NFT};
+use crate::lowering::dex::asset_with_amounts_json;
+use crate::lowering::LoweringError;
 use crate::policy::PolicyRequest;
 use serde_json::{Map, Value};
 
-use crate::lowering::common::asset::{asset_ref_json, asset_ref_with_amount_json};
+use crate::lowering::common::asset::asset_ref_json;
 use crate::lowering::common::validity::validity_json;
 use crate::lowering::dispatch::{Lower, LoweringCtx};
 
@@ -11,18 +13,15 @@ const ACTION_ID: &str = "increase_liquidity";
 const VALIDITY: &str = "validity";
 
 impl Lower for IncreaseLiquidityAction {
-    fn build(&self, ctx: &LoweringCtx<'_>) -> PolicyRequest {
+    fn build(&self, ctx: &LoweringCtx<'_>) -> Result<PolicyRequest, LoweringError> {
         let mut context = Map::new();
-        context.insert(NFT.into(), asset_ref_json(&self.nft));
-        context.insert(
-            INPUTS.into(),
-            Value::Array(self.inputs.iter().map(asset_ref_with_amount_json).collect()),
-        );
+        context.insert(NFT.into(), asset_ref_json(&self.nft)?);
+        context.insert(INPUT_TOKENS.into(), asset_with_amounts_json(&self.inputs)?);
         if let Some(validity) = &self.validity {
             context.insert(VALIDITY.into(), validity_json(validity));
         }
 
-        ctx.request(ACTION_ID, Value::Object(context))
+        Ok(ctx.request(ACTION_ID, Value::Object(context)))
     }
 }
 
@@ -49,7 +48,7 @@ mod tests {
 
         assert!(request.action.contains("increase_liquidity"));
         assert!(request.context.get("nft").is_some());
-        assert!(request.context.get("inputs").is_some());
+        assert!(request.context.get("inputTokens").is_some());
         assert!(request.context.get("validity").is_some());
     }
 }

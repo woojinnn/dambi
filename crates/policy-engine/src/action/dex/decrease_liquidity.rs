@@ -15,6 +15,7 @@ pub struct DecreaseLiquidityAction {
     /// Internal liquidity amount to remove.
     pub liquidity_delta: AmountConstraint,
     /// Output assets with amount constraints.
+    #[serde(rename = "outputTokens")]
     pub outputs: Vec<AssetRefWithAmountConstraint>,
     /// Recipient of withdrawn assets, when the protocol sends them immediately.
     #[serde(skip_serializing_if = "Option::is_none")]

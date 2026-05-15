@@ -267,9 +267,10 @@ fn permit_envelope(
         token: erc20(approval.chain_id, approval.token),
         owner,
         spender: Some(spender),
-        spender_label: None,
         recipient: None,
-        amount: permit_amount(&approval.amount, default_amount_kind),
+        amount: Some(permit_amount(&approval.amount, default_amount_kind)),
+        operator: None,
+        approved: None,
         requested_amount: None,
         validity: signature_deadline(deadline),
         signature_validity: None,
@@ -483,9 +484,10 @@ mod tests {
                     .unwrap()
             )
         );
-        assert_eq!(action.amount.kind, AmountKind::Max);
+        let amount = action.amount.as_ref().expect("permit2 carries amount");
+        assert_eq!(amount.kind, AmountKind::Max);
         assert_eq!(
-            action.amount.value.as_ref().map(ToString::to_string),
+            amount.value.as_ref().map(ToString::to_string),
             Some("10000000000000000".to_owned())
         );
         assert_eq!(action.validity.expires_at.to_string(), "1600");
@@ -505,7 +507,7 @@ mod tests {
                 panic!("expected Action::Permit");
             };
             assert_eq!(action.permit_kind, PermitKind::Permit2Single);
-            assert_eq!(action.amount.kind, AmountKind::Max);
+            assert_eq!(action.amount.as_ref().unwrap().kind, AmountKind::Max);
             assert_eq!(action.validity.expires_at.to_string(), "1600");
         }
         let Action::Permit(first) = &envelopes[0].action else {

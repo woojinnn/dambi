@@ -2,9 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::action::common::{
-    Address, AmountConstraint, AssetRef, AssetRefWithAmountConstraint, Validity,
-};
+use crate::action::common::{Address, AssetRefWithAmountConstraint, Validity};
 
 use super::PoolRef;
 
@@ -12,17 +10,14 @@ use super::PoolRef;
 #[serde(rename_all = "camelCase")]
 /// Add liquidity to a fungible LP pool.
 pub struct AddLiquidityAction {
-    /// Target pool, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pool: Option<PoolRef>,
+    /// Target pool.
+    pub pool: PoolRef,
     /// Assets deposited into the pool with amount constraints.
+    #[serde(rename = "inputTokens")]
     pub inputs: Vec<AssetRefWithAmountConstraint>,
-    /// LP token minted by the pool, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lp_token: Option<AssetRef>,
-    /// LP amount constraint, when represented by the protocol.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lp_amount: Option<AmountConstraint>,
+    /// LP token minted by the pool with amount constraint.
+    #[serde(rename = "outputLp")]
+    pub output_lp: AssetRefWithAmountConstraint,
     /// Recipient of the LP token.
     pub recipient: Address,
     /// Validity window, when available.
@@ -41,10 +36,16 @@ mod tests {
     #[test]
     fn test_add_liquidity_action_serde_roundtrip_minimal() {
         let action = AddLiquidityAction {
-            pool: None,
+            pool: pool(),
             inputs: asset_amount_pair(AmountKind::Exact, AmountKind::Exact),
-            lp_token: None,
-            lp_amount: None,
+            output_lp: AssetRefWithAmountConstraint {
+                asset: erc20(
+                    "0x3333333333333333333333333333333333333333",
+                    "UNI-V2",
+                    18,
+                ),
+                amount: amount(AmountKind::Min, "100000000000000000"),
+            },
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: None,
         };
@@ -55,14 +56,16 @@ mod tests {
     #[test]
     fn test_add_liquidity_action_serde_roundtrip_full() {
         let action = AddLiquidityAction {
-            pool: Some(pool()),
+            pool: pool(),
             inputs: asset_amount_pair(AmountKind::Min, AmountKind::Min),
-            lp_token: Some(erc20(
-                "0x3333333333333333333333333333333333333333",
-                "UNI-V2",
-                18,
-            )),
-            lp_amount: Some(amount(AmountKind::Min, "100000000000000000")),
+            output_lp: AssetRefWithAmountConstraint {
+                asset: erc20(
+                    "0x3333333333333333333333333333333333333333",
+                    "UNI-V2",
+                    18,
+                ),
+                amount: amount(AmountKind::Min, "100000000000000000"),
+            },
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: Some(validity()),
         };

@@ -5,6 +5,7 @@ use crate::policy::PolicyRequest;
 use serde_json::Value;
 
 use super::common::cedar::entities;
+use super::LoweringError;
 
 #[allow(dead_code)]
 pub(crate) struct LoweringCtx<'a> {
@@ -40,7 +41,7 @@ impl LoweringCtx<'_> {
 /// payload, which keeps every per-action implementation honest about its
 /// signature.
 pub(crate) trait Lower {
-    fn build(&self, ctx: &LoweringCtx<'_>) -> PolicyRequest;
+    fn build(&self, ctx: &LoweringCtx<'_>) -> Result<PolicyRequest, LoweringError>;
 }
 
 /// Build a Cedar policy request from a normalized action envelope.
@@ -53,6 +54,21 @@ pub fn policy_request_from_envelope(
     chain_id: u64,
     block_timestamp: u64,
 ) -> Option<PolicyRequest> {
+    try_policy_request_from_envelope(envelope, from, to, value_wei, chain_id, block_timestamp)
+        .ok()
+        .flatten()
+}
+
+/// Build a Cedar policy request from a normalized action envelope, preserving
+/// lowering failures for supported action categories.
+pub fn try_policy_request_from_envelope(
+    envelope: &ActionEnvelope,
+    from: &Address,
+    to: &Address,
+    value_wei: &DecimalString,
+    chain_id: u64,
+    block_timestamp: u64,
+) -> Result<Option<PolicyRequest>, LoweringError> {
     let ctx = LoweringCtx {
         from,
         to,
@@ -62,13 +78,18 @@ pub fn policy_request_from_envelope(
     };
 
     match &envelope.action {
-        Action::Swap(action) => Some(action.build(&ctx)),
-        Action::AddLiquidity(action) => Some(action.build(&ctx)),
-        Action::RemoveLiquidity(action) => Some(action.build(&ctx)),
-        Action::MintLiquidityNft(action) => Some(action.build(&ctx)),
-        Action::BurnLiquidityNft(action) => Some(action.build(&ctx)),
-        Action::IncreaseLiquidity(action) => Some(action.build(&ctx)),
-        Action::DecreaseLiquidity(action) => Some(action.build(&ctx)),
-        _ => None,
+        Action::Swap(action) => action.build(&ctx).map(Some),
+        Action::AddLiquidity(action) => action.build(&ctx).map(Some),
+        Action::RemoveLiquidity(action) => action.build(&ctx).map(Some),
+        Action::MintLiquidityNft(action) => action.build(&ctx).map(Some),
+        Action::BurnLiquidityNft(action) => action.build(&ctx).map(Some),
+        Action::IncreaseLiquidity(action) => action.build(&ctx).map(Some),
+        Action::DecreaseLiquidity(action) => action.build(&ctx).map(Some),
+        Action::Donate(action) => action.build(&ctx).map(Some),
+        Action::InitializePool(action) => action.build(&ctx).map(Some),
+        // TODO: lending / misc / restaking / staking lowering not yet implemented —
+        // current phase only supports DEX actions. See policy-schema/actions/<category>/
+        // for the cedar schemas already defined for these actions.
+        _ => Ok(None),
     }
 }

@@ -19,6 +19,7 @@ pub(crate) const fn amount_kind_str(kind: &AmountKind) -> &'static str {
         AmountKind::Min => "min",
         AmountKind::Max => "max",
         AmountKind::Unlimited => "unlimited",
+        AmountKind::Portion => "portion",
         AmountKind::Estimated => "estimated",
         AmountKind::Unknown => "unknown",
     }

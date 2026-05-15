@@ -3,13 +3,38 @@
 //! Each submodule provides an `impl Lower for <Action>` so the dispatcher in
 //! [`crate::lowering::dispatch`] can call `action.build(&ctx)` uniformly.
 
+use crate::action::AssetRefWithAmountConstraint;
+use crate::lowering::common::asset::asset_ref_with_amount_json;
+use crate::lowering::LoweringError;
+use serde_json::Value;
+
 pub(crate) mod add_liquidity;
 pub(crate) mod burn_liquidity_nft;
 pub(crate) mod decrease_liquidity;
+pub(crate) mod donate;
 pub(crate) mod increase_liquidity;
+pub(crate) mod initialize_pool;
 pub(crate) mod mint_liquidity_nft;
 pub(crate) mod remove_liquidity;
 pub(crate) mod swap;
+
+pub(crate) mod hooks;
+
+pub(crate) fn asset_with_amount_json(
+    asset_with_amount: &AssetRefWithAmountConstraint,
+) -> Result<Value, LoweringError> {
+    asset_ref_with_amount_json(&asset_with_amount.asset, &asset_with_amount.amount)
+}
+
+pub(crate) fn asset_with_amounts_json(
+    assets_with_amounts: &[AssetRefWithAmountConstraint],
+) -> Result<Value, LoweringError> {
+    assets_with_amounts
+        .iter()
+        .map(asset_with_amount_json)
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::Array)
+}
 
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -18,7 +43,7 @@ pub(crate) mod test_support {
     use crate::action::dex::{PoolRef, TickRange};
     use crate::action::{
         Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef,
-        AssetRefWithAmountConstraint, Category, DecimalString, Validity, ValiditySource,
+        AssetRefWithAmountConstraint, Category, DecimalString, Hex, Validity, ValiditySource,
     };
     use crate::policy::PolicyRequest;
 
@@ -30,6 +55,10 @@ pub(crate) mod test_support {
 
     pub(crate) fn decimal(value: &str) -> DecimalString {
         DecimalString::from_str(value).unwrap()
+    }
+
+    pub(crate) fn hex(value: &str) -> Hex {
+        Hex::from_str(value).unwrap()
     }
 
     pub(crate) fn erc20(address_value: &str, symbol: &str, decimals: u8) -> AssetRef {
@@ -48,7 +77,7 @@ pub(crate) mod test_support {
             address: Some(address("0x4444444444444444444444444444444444444444")),
             token_id: Some(decimal(token_id)),
             symbol: Some("UNI-V3-POS".to_owned()),
-            decimals: None,
+            decimals: Some(0),
         }
     }
 
@@ -72,10 +101,10 @@ pub(crate) mod test_support {
 
     pub(crate) fn pool() -> PoolRef {
         PoolRef {
-            address: Some(address("0x1111111111111111111111111111111111111111")),
-            id: Some(
-                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
-            ),
+            address: address("0x1111111111111111111111111111111111111111"),
+            id: Some(hex(
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )),
             label: Some("ETH/USDC 0.05%".to_owned()),
         }
     }
@@ -119,7 +148,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn policy_request(envelope: &ActionEnvelope, from: &Address) -> PolicyRequest {
-        crate::lowering::policy_request_from_envelope(
+        crate::lowering::try_policy_request_from_envelope(
             envelope,
             from,
             &address("0x2222222222222222222222222222222222222222"),
@@ -127,6 +156,7 @@ pub(crate) mod test_support {
             1,
             BLOCK_TIMESTAMP,
         )
+        .expect("DEX envelope lowering does not fail")
         .expect("DEX envelope lowers to policy request")
     }
 }

@@ -1,9 +1,11 @@
 use crate::action::dex::{BurnKind, BurnLiquidityNftAction};
-use crate::context_keys::{BURN_KIND, NFT, OUTPUTS, RECIPIENT};
+use crate::context_keys::{BURN_KIND, NFT, OUTPUT_TOKENS, RECIPIENT};
+use crate::lowering::dex::asset_with_amounts_json;
+use crate::lowering::LoweringError;
 use crate::policy::PolicyRequest;
 use serde_json::{Map, Value};
 
-use crate::lowering::common::asset::{asset_ref_json, asset_ref_with_amount_json};
+use crate::lowering::common::asset::asset_ref_json;
 use crate::lowering::common::validity::validity_json;
 use crate::lowering::dispatch::{Lower, LoweringCtx};
 
@@ -11,18 +13,15 @@ const ACTION_ID: &str = "burn_liquidity_nft";
 const VALIDITY: &str = "validity";
 
 impl Lower for BurnLiquidityNftAction {
-    fn build(&self, ctx: &LoweringCtx<'_>) -> PolicyRequest {
+    fn build(&self, ctx: &LoweringCtx<'_>) -> Result<PolicyRequest, LoweringError> {
         let mut context = Map::new();
-        context.insert(NFT.into(), asset_ref_json(&self.nft));
+        context.insert(NFT.into(), asset_ref_json(&self.nft)?);
         context.insert(
             BURN_KIND.into(),
             Value::from(burn_kind_str(&self.burn_kind)),
         );
         if let Some(outputs) = &self.outputs {
-            context.insert(
-                OUTPUTS.into(),
-                Value::Array(outputs.iter().map(asset_ref_with_amount_json).collect()),
-            );
+            context.insert(OUTPUT_TOKENS.into(), asset_with_amounts_json(outputs)?);
         }
         if let Some(recipient) = &self.recipient {
             context.insert(RECIPIENT.into(), Value::from(recipient.to_string()));
@@ -31,7 +30,7 @@ impl Lower for BurnLiquidityNftAction {
             context.insert(VALIDITY.into(), validity_json(validity));
         }
 
-        ctx.request(ACTION_ID, Value::Object(context))
+        Ok(ctx.request(ACTION_ID, Value::Object(context)))
     }
 }
 
@@ -68,7 +67,7 @@ mod tests {
         assert!(request.action.contains("burn_liquidity_nft"));
         assert!(request.context.get("nft").is_some());
         assert!(request.context.get("burnKind").is_some());
-        assert!(request.context.get("outputs").is_some());
+        assert!(request.context.get("outputTokens").is_some());
         assert!(request.context.get("recipient").is_some());
         assert!(request.context.get("validity").is_some());
     }

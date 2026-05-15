@@ -1,15 +1,14 @@
 {
-  "id": "schema::DEX/swap/enrichment",
+  "id": "schema::DEX/add_liquidity/enrichment",
   "schema_version": 1,
   "requires": [
     {
-      "id": "swap-total-input-usd",
-      "when": { "action": "swap" },
+      "id": "add-liquidity-total-input-usd",
+      "when": { "action": "add_liquidity" },
       "method": "oracle.usd_value",
       "params": {
         "chain_id": "$.root.chain_id",
-        "asset": "$.action.inputToken.asset",
-        "amount": "$.action.inputToken.amount.value"
+        "inputTokens": "$.action.inputTokens"
       },
       "outputs": [
         {
@@ -19,17 +18,16 @@
           "from": "$.result",
           "required": false
         }
-      ],
-      "optional": true
+      ]
     },
     {
-      "id": "swap-total-min-output-usd",
-      "when": { "action": "swap" },
+      "id": "add-liquidity-total-min-output-usd",
+      "when": { "action": "add_liquidity" },
       "method": "oracle.usd_value",
       "params": {
         "chain_id": "$.root.chain_id",
-        "asset": "$.action.outputToken.asset",
-        "amount": "$.action.outputToken.amount.value"
+        "asset": "$.action.outputLp.asset",
+        "amount": "$.action.outputLp.amount.value"
       },
       "outputs": [
         {
@@ -43,15 +41,13 @@
       "optional": true
     },
     {
-      "id": "swap-effective-rate-vs-oracle-bps",
-      "when": { "action": "swap" },
+      "id": "add-liquidity-effective-rate-vs-oracle-bps",
+      "when": { "action": "add_liquidity" },
       "method": "oracle.effective_rate_bps",
       "params": {
         "chain_id": "$.root.chain_id",
-        "token_in": "$.action.inputToken.asset",
-        "amount_in": "$.action.inputToken.amount.value",
-        "token_out": "$.action.outputToken.asset",
-        "amount_out": "$.action.outputToken.amount.value"
+        "inputTokens": "$.action.inputTokens",
+        "outputLp": "$.action.outputLp"
       },
       "outputs": [
         {
@@ -61,18 +57,16 @@
           "from": "$.result.bps",
           "required": false
         }
-      ],
-      "optional": true
+      ]
     },
     {
-      "id": "swap-input-fraction-of-portfolio-bps",
-      "when": { "action": "swap" },
+      "id": "add-liquidity-total-input-fraction-of-portfolio-bps",
+      "when": { "action": "add_liquidity" },
       "method": "portfolio.input_fraction_bps",
       "params": {
         "chain_id": "$.root.chain_id",
         "owner": "$.root.from",
-        "asset": "$.action.inputToken.asset",
-        "amount": "$.action.inputToken.amount.value"
+        "inputTokens": "$.action.inputTokens"
       },
       "outputs": [
         {
@@ -82,16 +76,15 @@
           "from": "$.result.bps",
           "required": false
         }
-      ],
-      "optional": true
+      ]
     },
     {
-      "id": "swap-window-stats",
-      "when": { "action": "swap" },
-      "method": "stat_window.swap_stats",
+      "id": "add-liquidity-window-stats",
+      "when": { "action": "add_liquidity" },
+      "method": "stat_window.add_liquidity_stats",
       "params": {
         "owner": "$.root.from",
-        "action": "swap"
+        "action": "add_liquidity"
       },
       "outputs": [
         {
@@ -105,7 +98,7 @@
     }
   ],
   "context_extensions": {
-    "swap": {
+    "add_liquidity": {
       "totalInputUsd": "UsdValuation",
       "totalMinOutputUsd": "UsdValuation",
       "effectiveRateVsOracleBps": "Long",

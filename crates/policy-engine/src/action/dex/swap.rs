@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::action::common::{Address, AmountConstraint, AssetRef, Validity};
+use crate::action::common::{Address, AssetRefWithAmountConstraint, Validity};
 
 use super::SwapMode;
 
@@ -13,14 +13,12 @@ pub struct SwapAction {
     /// Swap amount mode.
     #[serde(rename = "swapMode")]
     pub swap_mode: SwapMode,
-    /// Asset sent by the user.
-    pub token_in: AssetRef,
-    /// Asset received by the user.
-    pub token_out: AssetRef,
-    /// Input amount constraint.
-    pub amount_in: AmountConstraint,
-    /// Output amount constraint.
-    pub amount_out: AmountConstraint,
+    /// Asset and amount sent by the user.
+    #[serde(rename = "inputToken")]
+    pub input_token: AssetRefWithAmountConstraint,
+    /// Asset and amount received by the user.
+    #[serde(rename = "outputToken")]
+    pub output_token: AssetRefWithAmountConstraint,
     /// Recipient of the output asset.
     pub recipient: Address,
     /// Validity window, when present in calldata or wrapper context.
@@ -42,12 +40,17 @@ mod tests {
 
     #[test]
     fn test_swap_action_serde_roundtrip_minimal() {
+        let [input_asset, output_asset] = token_pair();
         let action = SwapAction {
             swap_mode: SwapMode::ExactIn,
-            token_in: token_pair()[0].clone(),
-            token_out: token_pair()[1].clone(),
-            amount_in: amount(AmountKind::Exact, "1000000000000000000"),
-            amount_out: amount(AmountKind::Min, "1900000"),
+            input_token: AssetRefWithAmountConstraint {
+                asset: input_asset,
+                amount: amount(AmountKind::Exact, "1000000000000000000"),
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: output_asset,
+                amount: amount(AmountKind::Min, "1900000"),
+            },
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: None,
             fee_bps: None,
@@ -61,12 +64,17 @@ mod tests {
 
     #[test]
     fn test_swap_action_serde_roundtrip_full() {
+        let [input_asset, output_asset] = token_pair();
         let action = SwapAction {
             swap_mode: SwapMode::ExactOut,
-            token_in: token_pair()[0].clone(),
-            token_out: token_pair()[1].clone(),
-            amount_in: amount(AmountKind::Max, "1100000000000000000"),
-            amount_out: amount(AmountKind::Exact, "2000000"),
+            input_token: AssetRefWithAmountConstraint {
+                asset: input_asset,
+                amount: amount(AmountKind::Max, "1100000000000000000"),
+            },
+            output_token: AssetRefWithAmountConstraint {
+                asset: output_asset,
+                amount: amount(AmountKind::Exact, "2000000"),
+            },
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: Some(validity()),
             fee_bps: Some(5),
@@ -92,25 +100,29 @@ mod tests {
             .unwrap_or_else(|| {
                 json!({
                     "swapMode": "exact_in",
-                    "tokenIn": {
-                        "kind": "erc20",
-                        "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-                        "symbol": "WETH",
-                        "decimals": 18
+                    "inputToken": {
+                        "asset": {
+                            "kind": "erc20",
+                            "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                            "symbol": "WETH",
+                            "decimals": 18
+                        },
+                        "amount": {
+                            "kind": "exact",
+                            "value": "1000000000000000000"
+                        }
                     },
-                    "tokenOut": {
-                        "kind": "erc20",
-                        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                        "symbol": "USDC",
-                        "decimals": 6
-                    },
-                    "amountIn": {
-                        "kind": "exact",
-                        "value": "1000000000000000000"
-                    },
-                    "amountOut": {
-                        "kind": "min",
-                        "value": "1900000"
+                    "outputToken": {
+                        "asset": {
+                            "kind": "erc20",
+                            "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                            "symbol": "USDC",
+                            "decimals": 6
+                        },
+                        "amount": {
+                            "kind": "min",
+                            "value": "1900000"
+                        }
                     },
                     "recipient": "0x2222222222222222222222222222222222222222"
                 })

@@ -4,11 +4,9 @@ use serde_json::{Map, Value};
 
 pub(crate) fn pool_json(pool: &PoolRef) -> Value {
     let mut out = Map::new();
-    if let Some(address) = &pool.address {
-        out.insert(ADDRESS.into(), Value::from(address.to_string()));
-    }
+    out.insert(ADDRESS.into(), Value::from(pool.address.to_string()));
     if let Some(id) = &pool.id {
-        out.insert(ID.into(), Value::from(id.as_str()));
+        out.insert(ID.into(), Value::from(id.to_string()));
     }
     if let Some(label) = &pool.label {
         out.insert(LABEL.into(), Value::from(label.as_str()));

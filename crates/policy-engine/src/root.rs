@@ -160,10 +160,14 @@ mod tests {
     fn swap_fields() -> Value {
         json!({
             "swapMode": "exact_in",
-            "tokenIn": erc20("WETH"),
-            "tokenOut": erc20("USDC"),
-            "amountIn": amount("exact", "1000"),
-            "amountOut": amount("min", "900"),
+            "inputToken": {
+                "asset": erc20("WETH"),
+                "amount": amount("exact", "1000")
+            },
+            "outputToken": {
+                "asset": erc20("USDC"),
+                "amount": amount("min", "900")
+            },
             "recipient": address(0x30)
         })
     }

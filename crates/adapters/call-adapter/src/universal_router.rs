@@ -3,6 +3,7 @@ use std::str::FromStr as _;
 use abi_resolver::decoders::universal_router::UniversalRouterDecoder;
 use abi_resolver::{DecodeContext, DecodedCall, DecodedValue, Decoder as _};
 use policy_engine::action::dex::{SwapAction, SwapMode};
+use policy_engine::action::common::AssetRefWithAmountConstraint;
 use policy_engine::action::{
     Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef, Category,
     DecimalString, Validity, ValiditySource,
@@ -103,10 +104,14 @@ fn decode_v3_swap_exact_in(
 
     Ok(swap_envelope(SwapAction {
         swap_mode: SwapMode::ExactIn,
-        token_in: asset_ref(ctx, &parsed_path.token_in),
-        token_out: asset_ref(ctx, &parsed_path.token_out),
-        amount_in: amount_constraint(AmountKind::Exact, amount_in),
-        amount_out: amount_constraint(AmountKind::Min, amount_out_min),
+        input_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, &parsed_path.token_in),
+            amount: amount_constraint(AmountKind::Exact, amount_in),
+        },
+        output_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, &parsed_path.token_out),
+            amount: amount_constraint(AmountKind::Min, amount_out_min),
+        },
         recipient,
         validity,
         fee_bps: parsed_path.fee_bps,
@@ -133,10 +138,14 @@ fn decode_v3_swap_exact_out(
     // (token_in = what the user spends, token_out = what they receive).
     Ok(swap_envelope(SwapAction {
         swap_mode: SwapMode::ExactOut,
-        token_in: asset_ref(ctx, &parsed_path.token_out),
-        token_out: asset_ref(ctx, &parsed_path.token_in),
-        amount_in: amount_constraint(AmountKind::Max, amount_in_max),
-        amount_out: amount_constraint(AmountKind::Exact, amount_out),
+        input_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, &parsed_path.token_out),
+            amount: amount_constraint(AmountKind::Max, amount_in_max),
+        },
+        output_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, &parsed_path.token_in),
+            amount: amount_constraint(AmountKind::Exact, amount_out),
+        },
         recipient,
         validity,
         fee_bps: parsed_path.fee_bps,
@@ -157,10 +166,14 @@ fn decode_v2_swap_exact_in(
 
     Ok(swap_envelope(SwapAction {
         swap_mode: SwapMode::ExactIn,
-        token_in: asset_ref(ctx, token_in),
-        token_out: asset_ref(ctx, token_out),
-        amount_in: amount_constraint(AmountKind::Exact, amount_in),
-        amount_out: amount_constraint(AmountKind::Min, amount_out_min),
+        input_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, token_in),
+            amount: amount_constraint(AmountKind::Exact, amount_in),
+        },
+        output_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, token_out),
+            amount: amount_constraint(AmountKind::Min, amount_out_min),
+        },
         recipient,
         validity,
         fee_bps: Some(30),
@@ -181,10 +194,14 @@ fn decode_v2_swap_exact_out(
 
     Ok(swap_envelope(SwapAction {
         swap_mode: SwapMode::ExactOut,
-        token_in: asset_ref(ctx, token_in),
-        token_out: asset_ref(ctx, token_out),
-        amount_in: amount_constraint(AmountKind::Max, amount_in_max),
-        amount_out: amount_constraint(AmountKind::Exact, amount_out),
+        input_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, token_in),
+            amount: amount_constraint(AmountKind::Max, amount_in_max),
+        },
+        output_token: AssetRefWithAmountConstraint {
+            asset: asset_ref(ctx, token_out),
+            amount: amount_constraint(AmountKind::Exact, amount_out),
+        },
         recipient,
         validity,
         fee_bps: Some(30),

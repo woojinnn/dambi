@@ -82,9 +82,10 @@ impl SignAdapter for Eip2612Adapter {
             token: erc20(ctx.chain_id, verifying_contract),
             owner,
             spender: Some(spender),
-            spender_label: None,
             recipient: None,
-            amount,
+            amount: Some(amount),
+            operator: None,
+            approved: None,
             requested_amount: None,
             validity: signature_deadline(deadline),
             signature_validity: None,
@@ -326,9 +327,10 @@ mod tests {
             )
         );
         assert_eq!(action.token.token_id, None);
-        assert_eq!(action.amount.kind, AmountKind::Exact);
+        let amount = action.amount.as_ref().expect("eip2612 permit must carry amount");
+        assert_eq!(amount.kind, AmountKind::Exact);
         assert_eq!(
-            action.amount.value.as_ref().map(ToString::to_string),
+            amount.value.as_ref().map(ToString::to_string),
             Some("50000000".to_owned())
         );
         assert_eq!(action.validity.expires_at.to_string(), "1600");
@@ -349,8 +351,9 @@ mod tests {
         let Action::Permit(action) = &envelopes[0].action else {
             panic!("expected Action::Permit");
         };
-        assert_eq!(action.amount.kind, AmountKind::Unlimited);
-        assert_eq!(action.amount.value, None);
+        let amount = action.amount.as_ref().expect("eip2612 permit must carry amount");
+        assert_eq!(amount.kind, AmountKind::Unlimited);
+        assert_eq!(amount.value, None);
     }
 
     #[test]

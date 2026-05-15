@@ -1,15 +1,14 @@
 {
-  "id": "schema::DEX/swap/enrichment",
+  "id": "schema::DEX/burn_liquidity_nft/enrichment",
   "schema_version": 1,
   "requires": [
     {
-      "id": "swap-total-input-usd",
-      "when": { "action": "swap" },
+      "id": "burn-liquidity-nft-total-input-usd",
+      "when": { "action": "burn_liquidity_nft" },
       "method": "oracle.usd_value",
       "params": {
         "chain_id": "$.root.chain_id",
-        "asset": "$.action.inputToken.asset",
-        "amount": "$.action.inputToken.amount.value"
+        "nft": "$.action.nft"
       },
       "outputs": [
         {
@@ -19,17 +18,15 @@
           "from": "$.result",
           "required": false
         }
-      ],
-      "optional": true
+      ]
     },
     {
-      "id": "swap-total-min-output-usd",
-      "when": { "action": "swap" },
+      "id": "burn-liquidity-nft-total-min-output-usd",
+      "when": { "action": "burn_liquidity_nft" },
       "method": "oracle.usd_value",
       "params": {
         "chain_id": "$.root.chain_id",
-        "asset": "$.action.outputToken.asset",
-        "amount": "$.action.outputToken.amount.value"
+        "outputTokens": "$.action.outputTokens"
       },
       "outputs": [
         {
@@ -43,15 +40,13 @@
       "optional": true
     },
     {
-      "id": "swap-effective-rate-vs-oracle-bps",
-      "when": { "action": "swap" },
+      "id": "burn-liquidity-nft-effective-rate-vs-oracle-bps",
+      "when": { "action": "burn_liquidity_nft" },
       "method": "oracle.effective_rate_bps",
       "params": {
         "chain_id": "$.root.chain_id",
-        "token_in": "$.action.inputToken.asset",
-        "amount_in": "$.action.inputToken.amount.value",
-        "token_out": "$.action.outputToken.asset",
-        "amount_out": "$.action.outputToken.amount.value"
+        "nft": "$.action.nft",
+        "outputTokens": "$.action.outputTokens"
       },
       "outputs": [
         {
@@ -65,33 +60,30 @@
       "optional": true
     },
     {
-      "id": "swap-input-fraction-of-portfolio-bps",
-      "when": { "action": "swap" },
-      "method": "portfolio.input_fraction_bps",
+      "id": "burn-liquidity-nft-nft-owner-is-actor",
+      "when": { "action": "burn_liquidity_nft" },
+      "method": "nft.owner_is_actor",
       "params": {
         "chain_id": "$.root.chain_id",
-        "owner": "$.root.from",
-        "asset": "$.action.inputToken.asset",
-        "amount": "$.action.inputToken.amount.value"
+        "nft": "$.action.nft"
       },
       "outputs": [
         {
           "kind": "context",
-          "field": "totalInputFractionOfPortfolioBps",
-          "type": "Long",
-          "from": "$.result.bps",
+          "field": "nftOwnerIsActor",
+          "type": "Bool",
+          "from": "$.result.ownerIsActor",
           "required": false
         }
-      ],
-      "optional": true
+      ]
     },
     {
-      "id": "swap-window-stats",
-      "when": { "action": "swap" },
-      "method": "stat_window.swap_stats",
+      "id": "burn-liquidity-nft-window-stats",
+      "when": { "action": "burn_liquidity_nft" },
+      "method": "stat_window.burn_liquidity_nft_stats",
       "params": {
         "owner": "$.root.from",
-        "action": "swap"
+        "action": "burn_liquidity_nft"
       },
       "outputs": [
         {
@@ -105,11 +97,11 @@
     }
   ],
   "context_extensions": {
-    "swap": {
+    "burn_liquidity_nft": {
       "totalInputUsd": "UsdValuation",
       "totalMinOutputUsd": "UsdValuation",
       "effectiveRateVsOracleBps": "Long",
-      "totalInputFractionOfPortfolioBps": "Long",
+      "nftOwnerIsActor": "Bool",
       "windowStats": "WindowStats"
     }
   }

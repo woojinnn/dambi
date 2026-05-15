@@ -29,8 +29,8 @@ mod tests {
                 "method": "oracle.usd_value",
                 "params": {
                     "chain_id": "$.root.chain_id",
-                    "asset": "$.action.tokenIn",
-                    "amount": "$.action.amountIn.value"
+                    "asset": "$.action.inputToken.asset",
+                    "amount": "$.action.inputToken.amount.value"
                 },
                 "outputs": [{
                     "kind": "context",
@@ -52,20 +52,24 @@ mod tests {
             "action": "swap",
             "fields": {
                 "swapMode": "exact_in",
-                "tokenIn": {
-                    "kind": "erc20",
-                    "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-                    "symbol": "WETH",
-                    "decimals": 18
+                "inputToken": {
+                    "asset": {
+                        "kind": "erc20",
+                        "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                        "symbol": "WETH",
+                        "decimals": 18
+                    },
+                    "amount": { "kind": "exact", "value": "1000000000000000000" }
                 },
-                "tokenOut": {
-                    "kind": "erc20",
-                    "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                    "symbol": "USDC",
-                    "decimals": 6
+                "outputToken": {
+                    "asset": {
+                        "kind": "erc20",
+                        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                        "symbol": "USDC",
+                        "decimals": 6
+                    },
+                    "amount": { "kind": "min", "value": "900000000" }
                 },
-                "amountIn": { "kind": "exact", "value": "1000000000000000000" },
-                "amountOut": { "kind": "min", "value": "900000000" },
                 "recipient": "0x1111111111111111111111111111111111111111"
             }
         }))

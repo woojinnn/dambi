@@ -43,6 +43,10 @@ pub enum Action {
     IncreaseLiquidity(crate::action::dex::IncreaseLiquidityAction),
     /// Decrease liquidity in an NFT position.
     DecreaseLiquidity(crate::action::dex::DecreaseLiquidityAction),
+    /// Push assets into a V4 pool's in-range LPs without minting.
+    Donate(crate::action::dex::DonateAction),
+    /// Create a new pool or set its initial price.
+    InitializePool(crate::action::dex::InitializePoolAction),
     /// Supply assets to a lending market.
     Supply(crate::action::lending::SupplyAction),
     /// Withdraw assets from a lending market.
@@ -107,6 +111,8 @@ impl Action {
             Self::BurnLiquidityNft(_) => "burn_liquidity_nft",
             Self::IncreaseLiquidity(_) => "increase_liquidity",
             Self::DecreaseLiquidity(_) => "decrease_liquidity",
+            Self::Donate(_) => "donate",
+            Self::InitializePool(_) => "initialize_pool",
             Self::Supply(_) => "supply",
             Self::Withdraw(_) => "withdraw",
             Self::Borrow(_) => "borrow",
@@ -145,7 +151,9 @@ impl Action {
             | Self::MintLiquidityNft(_)
             | Self::BurnLiquidityNft(_)
             | Self::IncreaseLiquidity(_)
-            | Self::DecreaseLiquidity(_) => Category::Dex,
+            | Self::DecreaseLiquidity(_)
+            | Self::Donate(_)
+            | Self::InitializePool(_) => Category::Dex,
             Self::Supply(_)
             | Self::Withdraw(_)
             | Self::Borrow(_)
@@ -286,6 +294,12 @@ mod tests {
             (
                 action("decrease_liquidity", decrease_liquidity_fields()),
                 "decrease_liquidity",
+                Category::Dex,
+            ),
+            (action("donate", donate_fields()), "donate", Category::Dex),
+            (
+                action("initialize_pool", initialize_pool_fields()),
+                "initialize_pool",
                 Category::Dex,
             ),
             (
@@ -436,6 +450,7 @@ mod tests {
         json!({
             "kind": "erc721",
             "address": address(0x11),
+            "tokenId": "1",
             "symbol": symbol
         })
     }
@@ -464,20 +479,44 @@ mod tests {
         ])
     }
 
+    fn asset_amount(asset: Value, kind: &str, value: &str) -> Value {
+        json!({
+            "asset": asset,
+            "amount": amount(kind, value)
+        })
+    }
+
+    fn pool() -> Value {
+        json!({
+            "address": address(0x20),
+            "id": hex32(0x21),
+            "label": "ETH/USDC 0.05%"
+        })
+    }
+
+    fn erc721_instance(symbol: &str, token_id: &str) -> Value {
+        json!({
+            "kind": "erc721",
+            "address": address(0x11),
+            "tokenId": token_id,
+            "symbol": symbol
+        })
+    }
+
     fn swap_fields() -> Value {
         json!({
             "swapMode": "exact_in",
-            "tokenIn": erc20("WETH"),
-            "tokenOut": erc20("USDC"),
-            "amountIn": amount("exact", "1000"),
-            "amountOut": amount("min", "900"),
+            "inputToken": asset_amount(erc20("WETH"), "exact", "1000"),
+            "outputToken": asset_amount(erc20("USDC"), "min", "900"),
             "recipient": address(0x30)
         })
     }
 
     fn add_liquidity_fields() -> Value {
         json!({
-            "inputs": asset_amount_pair("exact", "exact"),
+            "pool": pool(),
+            "inputTokens": asset_amount_pair("exact", "exact"),
+            "outputLp": asset_amount(erc20("UNI-V2"), "min", "100"),
             "recipient": address(0x30)
         })
     }
@@ -485,46 +524,61 @@ mod tests {
     fn remove_liquidity_fields() -> Value {
         json!({
             "exitMode": "proportional",
-            "outputs": asset_amount_pair("min", "min"),
+            "pool": pool(),
+            "inputLp": asset_amount(erc20("UNI-V2"), "exact", "100"),
+            "outputTokens": asset_amount_pair("min", "min"),
             "recipient": address(0x30)
         })
     }
 
     fn mint_liquidity_nft_fields() -> Value {
         json!({
-            "feeTierBps": 5,
+            "pool": pool(),
+            "feeBps": 5,
             "tickRange": {
                 "lower": -60,
                 "upper": 60
             },
-            "inputs": asset_amount_pair("min", "min"),
-            "nft": erc721("UNI-V3-POS"),
+            "inputTokens": asset_amount_pair("min", "min"),
             "recipient": address(0x30)
         })
     }
 
     fn burn_liquidity_nft_fields() -> Value {
         json!({
-            "nft": erc721("UNI-V3-POS"),
-            "tokenId": "42",
+            "nft": erc721_instance("UNI-V3-POS", "42"),
             "burnKind": "empty_only"
         })
     }
 
     fn increase_liquidity_fields() -> Value {
         json!({
-            "nft": erc721("UNI-V3-POS"),
-            "tokenId": "42",
-            "inputs": asset_amount_pair("min", "min")
+            "nft": erc721_instance("UNI-V3-POS", "42"),
+            "inputTokens": asset_amount_pair("min", "min")
         })
     }
 
     fn decrease_liquidity_fields() -> Value {
         json!({
-            "nft": erc721("UNI-V3-POS"),
-            "tokenId": "42",
+            "nft": erc721_instance("UNI-V3-POS", "42"),
             "liquidityDelta": amount("exact", "1000"),
-            "outputs": asset_amount_pair("min", "min")
+            "outputTokens": asset_amount_pair("min", "min")
+        })
+    }
+
+    fn donate_fields() -> Value {
+        json!({
+            "pool": pool(),
+            "inputTokens": asset_amount_pair("exact", "exact")
+        })
+    }
+
+    fn initialize_pool_fields() -> Value {
+        json!({
+            "pool": pool(),
+            "token0": erc20("WETH"),
+            "token1": erc20("USDC"),
+            "feeBps": 500
         })
     }
 
@@ -604,18 +658,28 @@ mod tests {
 
     fn wrap_fields() -> Value {
         json!({
-            "nativeAsset": native("ETH"),
-            "wrappedAsset": erc20("WETH"),
-            "amount": amount("exact", "1000"),
+            "nativeAsset": {
+                "asset": native("ETH"),
+                "amount": amount("exact", "1000")
+            },
+            "wrappedAsset": {
+                "asset": erc20("WETH"),
+                "amount": amount("exact", "1000")
+            },
             "recipient": address(0x30)
         })
     }
 
     fn unwrap_fields() -> Value {
         json!({
-            "wrappedAsset": erc20("WETH"),
-            "nativeAsset": native("ETH"),
-            "amount": amount("exact", "1000"),
+            "wrappedAsset": {
+                "asset": erc20("WETH"),
+                "amount": amount("exact", "1000")
+            },
+            "nativeAsset": {
+                "asset": native("ETH"),
+                "amount": amount("exact", "1000")
+            },
             "recipient": address(0x30)
         })
     }
@@ -639,7 +703,10 @@ mod tests {
 
     fn transfer_fields() -> Value {
         json!({
-            "token": erc20("USDC"),
+            "token": {
+                "asset": erc20("USDC"),
+                "amount": amount("exact", "1000")
+            },
             "from": address(0x50),
             "recipient": address(0x51)
         })
@@ -650,6 +717,7 @@ mod tests {
             "permitKind": "eip2612",
             "token": erc20("USDC"),
             "owner": address(0x52),
+            "spender": address(0x53),
             "amount": amount("exact", "1000"),
             "validity": validity()
         })

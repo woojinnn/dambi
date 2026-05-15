@@ -79,8 +79,8 @@ fn swap_uniswap_v2_exact_in_routes() {
     use policy_engine::action::common::AmountKind;
     use policy_engine::action::dex::SwapMode;
     assert_eq!(swap.swap_mode, SwapMode::ExactIn);
-    assert_eq!(swap.amount_in.kind, AmountKind::Exact);
-    assert_eq!(swap.amount_out.kind, AmountKind::Min);
+    assert_eq!(swap.input_token.amount.kind, AmountKind::Exact);
+    assert_eq!(swap.output_token.amount.kind, AmountKind::Min);
 }
 
 #[test]
@@ -91,8 +91,8 @@ fn swap_uniswap_v2_exact_out_routes() {
     use policy_engine::action::common::AmountKind;
     use policy_engine::action::dex::SwapMode;
     assert_eq!(swap.swap_mode, SwapMode::ExactOut);
-    assert_eq!(swap.amount_in.kind, AmountKind::Max);
-    assert_eq!(swap.amount_out.kind, AmountKind::Exact);
+    assert_eq!(swap.input_token.amount.kind, AmountKind::Max);
+    assert_eq!(swap.output_token.amount.kind, AmountKind::Exact);
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn swap_uniswap_v3_exact_input_multi_routes() {
     );
     // token_in and token_out must differ on a real multi-hop fixture.
     assert_ne!(
-        swap.token_in.address, swap.token_out.address,
+        swap.input_token.asset.address, swap.output_token.asset.address,
         "multi-hop swap collapsed to a single token",
     );
 }
@@ -131,8 +131,8 @@ fn swap_uniswap_v3_exact_output_single_routes() {
     use policy_engine::action::common::AmountKind;
     use policy_engine::action::dex::SwapMode;
     assert_eq!(swap.swap_mode, SwapMode::ExactOut);
-    assert_eq!(swap.amount_in.kind, AmountKind::Max);
-    assert_eq!(swap.amount_out.kind, AmountKind::Exact);
+    assert_eq!(swap.input_token.amount.kind, AmountKind::Max);
+    assert_eq!(swap.output_token.amount.kind, AmountKind::Exact);
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn erc20_transfer_from_routes_to_transfer_envelope() {
         policy_engine::action::Address::from_str("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
             .unwrap()
     );
-    let amount = transfer.amount.as_ref().expect("transferFrom amount");
+    let amount = &transfer.token.amount;
     assert_eq!(amount.kind, AmountKind::Exact);
     assert_eq!(
         amount.value.as_ref().map(ToString::to_string),

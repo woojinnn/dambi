@@ -1,0 +1,29 @@
+{
+  "id": "schema::DEX/initialize_pool/enrichment",
+  "schema_version": 1,
+  "requires": [
+    {
+      "id": "initialize-pool-window-stats",
+      "when": { "action": "initialize_pool" },
+      "method": "stat_window.initialize_pool_stats",
+      "params": {
+        "owner": "$.root.from",
+        "action": "initialize_pool"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "windowStats",
+          "type": "WindowStats",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "context_extensions": {
+    "initialize_pool": {
+      "windowStats": "WindowStats"
+    }
+  }
+}

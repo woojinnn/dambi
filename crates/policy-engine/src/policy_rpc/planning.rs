@@ -48,8 +48,9 @@ pub fn plan_calls(
                     continue;
                 }
                 let mut params = Map::new();
+                let mut skip = false;
                 for (key, template) in &requirement.params {
-                    let value = match template {
+                    let resolved = match template {
                         Value::String(selector) if selector.starts_with("$.") => resolve_selector(
                             selector,
                             &root_json,
@@ -57,10 +58,24 @@ pub fn plan_calls(
                             &context_json,
                             &Value::Object(Map::new()),
                             params_root,
-                        )?,
-                        literal => literal.clone(),
+                        ),
+                        literal => Ok(literal.clone()),
                     };
-                    params.insert(key.clone(), value);
+                    match resolved {
+                        Ok(value) => {
+                            params.insert(key.clone(), value);
+                        }
+                        Err(error) => {
+                            if requirement.optional {
+                                skip = true;
+                                break;
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
+                if skip {
+                    continue;
                 }
                 calls.push(PolicyRpcCall {
                     id: policy_rpc_call_id(&manifest.id, envelope_index, &requirement.id),
