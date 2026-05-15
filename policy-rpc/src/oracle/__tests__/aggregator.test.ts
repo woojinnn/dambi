@@ -62,6 +62,15 @@ describe("formatScaledUsd", () => {
   it("rounds to zero precision deterministically", () => {
     expect(formatScaledUsd(ORACLE_USD_SCALE * 12n + ORACLE_USD_SCALE / 2n, 0)).toBe("12");
   });
+
+  it("upscales when outputDecimals exceeds the internal 1e8 scale", () => {
+    // ORACLE_USD_SCALE = 1e8, so $1.00000000 -> ask for 12 decimals -> pad 4 zeros.
+    const oneDollar = ORACLE_USD_SCALE;
+    expect(formatScaledUsd(oneDollar, 12)).toBe("1.000000000000");
+    // Mix in a fractional value: 1.23456789 at 8 dp -> 1.234567890000 at 12 dp.
+    const withFraction = ORACLE_USD_SCALE + 23_456_789n;
+    expect(formatScaledUsd(withFraction, 12)).toBe("1.234567890000");
+  });
 });
 
 describe("OracleAggregator", () => {
@@ -81,6 +90,19 @@ describe("OracleAggregator", () => {
     expect(valuation.sources).toHaveLength(3);
     expect(valuation.confidence).toBe("high");
     expect(valuation.staleSec).toBe(1);
+    expect(valuation.sourceBreakdown.every((s) => s.included)).toBe(true);
+  });
+
+  it("returns high confidence when N=2 sources agree within tolerance", async () => {
+    const sources = [
+      new FakeSource("a", async () => fixedSample("a", 100, observedAt)),
+      new FakeSource("b", async () => fixedSample("b", 101, observedAt)), // ~1% deviation
+    ];
+    const aggregator = new OracleAggregator({ sources, nowMs, outputDecimals: 4 });
+
+    const valuation = await aggregator.aggregate(1, { address: wethAddress });
+    expect(valuation.sources).toEqual(["a", "b"]);
+    expect(valuation.confidence).toBe("high");
     expect(valuation.sourceBreakdown.every((s) => s.included)).toBe(true);
   });
 
