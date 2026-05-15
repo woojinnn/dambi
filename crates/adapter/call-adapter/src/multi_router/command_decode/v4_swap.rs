@@ -126,24 +126,35 @@ struct TakePortionInfo {
     bips: u32,
 }
 
-/// Extract the `recipient` field from a TAKE step's args. TAKE's input
-/// signature is `(address currency, address recipient, uint256 amount)`,
-/// so args[1] is the recipient.
-fn take_recipient_from(step: &DecodedStep) -> Option<Address> {
+/// V4Router opcode entries declare a single tuple as their `input_signatures`,
+/// so `step.args` always has length 1 and the actual fields live inside the
+/// first arg's `DynSolValue::Tuple`. This helper unwraps that consistently.
+fn step_tuple_fields(step: &DecodedStep) -> Option<&[DynSolValue]> {
     let args = step.args.as_ref()?;
-    let recipient_arg = args.get(1)?;
-    address_from(&recipient_arg.value)
+    let first = args.first()?;
+    match &first.value {
+        DynSolValue::Tuple(fields) => Some(fields.as_slice()),
+        _ => None,
+    }
+}
+
+/// Extract the `recipient` field from a TAKE step. Signature is
+/// `(address currency, address recipient, uint256 amount)`, so the inner
+/// tuple's fields[1] is the recipient.
+fn take_recipient_from(step: &DecodedStep) -> Option<Address> {
+    let fields = step_tuple_fields(step)?;
+    address_from(fields.get(1)?)
 }
 
 /// Extract `(recipient, bips)` from a TAKE_PORTION step. Signature is
-/// `(address currency, address recipient, uint256 bips)` so args[1] is
-/// recipient, args[2] is bips. Caller drops the result silently when
+/// `(address currency, address recipient, uint256 bips)` so fields[1] is
+/// recipient, fields[2] is bips. Caller drops the result silently when
 /// either field can't be read — TAKE_PORTION is a best-effort enrichment,
 /// not a correctness gate.
 fn take_portion_from(step: &DecodedStep) -> Option<TakePortionInfo> {
-    let args = step.args.as_ref()?;
-    let recipient = address_from(&args.get(1)?.value)?;
-    let DynSolValue::Uint(bips_u, _) = &args.get(2)?.value else {
+    let fields = step_tuple_fields(step)?;
+    let recipient = address_from(fields.get(1)?)?;
+    let DynSolValue::Uint(bips_u, _) = fields.get(2)? else {
         return None;
     };
     let bips = u32::try_from(*bips_u).ok()?;
