@@ -1,16 +1,10 @@
 //! Thin `#[wasm_bindgen]` JSON-string exports.
 
 use crate::dto::{
-    AllowanceEntryDto, BalanceEntryDto, EngineErrorDto, Envelope, EvaluateEnvelopeInputDto,
-    EvaluatePolicyRpcInputDto, HostSnapshotDto, InstallPoliciesInputDto, MatchedPolicyDto,
-    OracleEntryDto, PlanPolicyRpcInputDto, PolicyRpcPlanDto, PreviewSchemaInputDto, RawRequestDto,
-    VerdictDto,
+    EngineErrorDto, Envelope, EvaluatePolicyRpcInputDto, InstallPoliciesInputDto, MatchedPolicyDto,
+    PlanPolicyRpcInputDto, PolicyRpcPlanDto, PreviewSchemaInputDto, RawRequestDto, VerdictDto,
 };
 use alloy_primitives::U256;
-use policy_engine::core::{Address as CoreAddress, Token, UsdValuation as CoreUsdValuation};
-use policy_engine::enrichment::enrich_envelope;
-use policy_engine::host::oracle::SnapshotOracle;
-use policy_engine::host::{HostCapabilities, MockApprovals, MockPortfolio};
 use policy_engine::lowering::policy_request_from_envelope;
 use policy_engine::policy::{
     MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyRequestOrigin, Severity, Verdict,
@@ -361,143 +355,6 @@ fn is_ident_char(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Value};
-
-    fn empty_snapshot_json() -> Value {
-        json!({
-            "oracle": [],
-            "balances": [],
-            "allowances": [],
-            "now_ts": 1_700_000_000_u64,
-            "windows": []
-        })
-    }
-
-    // The bundled Cedar schema (composed by `PolicyEngineBuilder::new()`) already
-    // contains the `swap` action declaration, so adding `swap.cedarschema` again
-    // would fail with a duplicate-declaration error. Tests that want a swap-aware
-    // engine therefore install with empty `schema_text`.
-    fn install_empty_policies_with_swap_schema() {
-        let output = install_policies_json(
-            json!({
-                "schema_text": "",
-                "policy_set": []
-            })
-            .to_string(),
-        );
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(parsed["ok"], true, "{parsed}");
-    }
-
-    fn asset_ref(address: &str, symbol: &str, decimals: u64) -> Value {
-        json!({
-            "kind": "erc20",
-            "address": address,
-            "symbol": symbol,
-            "decimals": decimals
-        })
-    }
-
-    fn amount_constraint(kind: &str, value: &str) -> Value {
-        json!({
-            "kind": kind,
-            "value": value
-        })
-    }
-
-    fn approve_envelope_json() -> Value {
-        json!({
-            "category": "misc",
-            "action": "approve",
-            "fields": {
-                "token": asset_ref("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "USDC", 6),
-                "spender": "0x2222222222222222222222222222222222222222",
-                "amount": amount_constraint("exact", "1000"),
-                "approvalKind": "erc20"
-            }
-        })
-    }
-
-    fn swap_envelope_json() -> Value {
-        json!({
-            "category": "dex",
-            "action": "swap",
-            "fields": {
-                "swapMode": "exact_in",
-                "tokenIn": asset_ref("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", 18),
-                "tokenOut": asset_ref("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "USDC", 6),
-                "amountIn": amount_constraint("exact", "1000000000000000000"),
-                "amountOut": amount_constraint("min", "900000000"),
-                "recipient": "0x1111111111111111111111111111111111111111"
-            }
-        })
-    }
-
-    fn evaluate_envelope_input_json(envelope: Value) -> Value {
-        json!({
-            "envelope": envelope,
-            "from": "0x1111111111111111111111111111111111111111",
-            "to": "0x2222222222222222222222222222222222222222",
-            "value_wei": "0",
-            "chain_id": 1,
-            "block_timestamp": 1_700_000_000_u64,
-            "host_snapshot": empty_snapshot_json()
-        })
-    }
-
-    #[test]
-    fn evaluate_envelope_non_swap_returns_pass() {
-        let output = evaluate_envelope_json(
-            evaluate_envelope_input_json(approve_envelope_json()).to_string(),
-        );
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(parsed["ok"], true, "{parsed}");
-        assert_eq!(parsed["data"]["kind"], "pass", "{parsed}");
-    }
-
-    #[test]
-    fn evaluate_envelope_swap_returns_pass_under_empty_policy_set() {
-        install_empty_policies_with_swap_schema();
-
-        let output =
-            evaluate_envelope_json(evaluate_envelope_input_json(swap_envelope_json()).to_string());
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(parsed["ok"], true, "{parsed}");
-        assert_eq!(parsed["data"]["kind"], "pass", "{parsed}");
-    }
-
-    #[test]
-    fn evaluate_envelope_swap_routes_to_swap_action() {
-        let install_output = install_policies_json(
-            json!({
-                "schema_text": "",
-                "policy_set": [{
-                    "id": "bundle::block-swap",
-                    "text": r#"
-                        @severity("deny")
-                        @reason("swap blocked")
-                        forbid (principal, action == Action::"swap", resource);
-                    "#
-                }]
-            })
-            .to_string(),
-        );
-        let install: Value = serde_json::from_str(&install_output).unwrap();
-        assert_eq!(install["ok"], true, "{install}");
-
-        let output =
-            evaluate_envelope_json(evaluate_envelope_input_json(swap_envelope_json()).to_string());
-        let parsed: Value = serde_json::from_str(&output).unwrap();
-
-        assert_eq!(parsed["ok"], true, "{parsed}");
-        assert_eq!(parsed["data"]["kind"], "fail", "{parsed}");
-        assert_eq!(
-            parsed["data"]["matched"][0]["policy_id"], "bundle::block-swap",
-            "{parsed}"
-        );
-    }
 
     #[test]
     fn policy_entry_id_is_escaped_when_injected() {
@@ -967,14 +824,14 @@ mod tests_policy_rpc {
                 },
                 "outputs": [{
                     "kind": "context",
-                    "field": "rpcTotalInputUsd",
+                    "field": "totalInputUsd",
                     "type": "UsdValuation",
                     "from": "$.result",
                     "required": true
                 }]
             }],
             "context_extensions": {
-                "swap": { "rpcTotalInputUsd": "UsdValuation" }
+                "swap": { "totalInputUsd": "UsdValuation" }
             }
         })
     }
@@ -1016,8 +873,8 @@ mod tests_policy_rpc {
                         @reason("too much USD")
                         forbid(principal, action == Action::"swap", resource)
                         when {
-                            context has rpcTotalInputUsd &&
-                            context.rpcTotalInputUsd.value.greaterThan(decimal("100.00"))
+                            context has totalInputUsd &&
+                            context.totalInputUsd.value.greaterThan(decimal("100.00"))
                         };
                     "#
                 }]
@@ -1177,6 +1034,26 @@ mod tests_policy_rpc {
     fn default_swap_policy_rpc_files_plan_and_evaluate() {
         let max_manifest = default_max_input_manifest_json();
         let min_manifest = default_min_output_manifest_json();
+        assert_eq!(
+            max_manifest["context_extensions"]["swap"]["totalInputUsd"], "UsdValuation",
+            "{max_manifest}"
+        );
+        assert!(
+            max_manifest["context_extensions"]["swap"]
+                .get("rpcTotalInputUsd")
+                .is_none(),
+            "{max_manifest}"
+        );
+        assert_eq!(
+            min_manifest["context_extensions"]["swap"]["totalMinOutputUsd"], "UsdValuation",
+            "{min_manifest}"
+        );
+        assert!(
+            min_manifest["context_extensions"]["swap"]
+                .get("rpcTotalMinOutputUsd")
+                .is_none(),
+            "{min_manifest}"
+        );
         let manifests = vec![max_manifest, min_manifest];
 
         let install_output = install_policies_json(
@@ -1289,7 +1166,7 @@ mod tests_policy_rpc {
         assert!(parsed["data"]["schema_text"]
             .as_str()
             .unwrap()
-            .contains("rpcTotalInputUsd?: UsdValuation"));
+            .contains("totalInputUsd?: UsdValuation"));
         assert!(parsed["data"]["schema_hash"]
             .as_str()
             .unwrap()
@@ -1353,184 +1230,4 @@ mod tests_policy_rpc {
             .contains("type PolicyRpcDebug"));
         assert_ne!(parsed["data"]["schema_hash"], base["data"]["schema_hash"]);
     }
-}
-
-#[wasm_bindgen]
-pub fn evaluate_envelope_json(input_json: String) -> String {
-    let verdict = (|| -> Result<Verdict, EngineErrorDto> {
-        let input: EvaluateEnvelopeInputDto =
-            serde_json::from_str(&input_json).map_err(|error| {
-                EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
-            })?;
-        let EvaluateEnvelopeInputDto {
-            envelope,
-            from,
-            to,
-            value_wei,
-            chain_id,
-            block_timestamp,
-            host_snapshot,
-        } = input;
-
-        let envelope: ActionEnvelope = serde_json::from_value(envelope)
-            .map_err(|error| EngineErrorDto::new("invalid_envelope_json", error.to_string()))?;
-        let from: ActionAddress = from
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_from", error))?;
-        let to: ActionAddress = to
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_to", error))?;
-        let value_wei: DecimalString = value_wei
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_value_wei", error))?;
-
-        // Build host capabilities from the snapshot DTO, then enrich the
-        // envelope's swap action (if any) before lowering. Non-swap envelopes
-        // pass through unchanged. Missing host data simply leaves enrichment
-        // fields as `None`.
-        let host_parts = host_capabilities_parts_from_dto(&host_snapshot);
-        let host = host_parts.as_capabilities();
-        let envelope = enrich_envelope(envelope, &from, &to, &host);
-
-        let Some(request) = policy_request_from_envelope(
-            &envelope,
-            &from,
-            &to,
-            &value_wei,
-            chain_id,
-            block_timestamp,
-        ) else {
-            return Ok(Verdict::Pass);
-        };
-
-        STATE.with(|state| {
-            let state = state.borrow();
-            let state = state.as_ref().ok_or_else(not_installed_error)?;
-            state
-                .policies
-                .evaluate_requests(std::iter::once((&request, PolicyRequestOrigin::Action)))
-                .map_err(|error| EngineErrorDto::new("policy", error.to_string()))
-        })
-    })();
-
-    let dto = match verdict {
-        Ok(verdict) => verdict_to_dto(verdict),
-        Err(error) => engine_error_verdict(error),
-    };
-    Envelope::ok(dto).to_json()
-}
-
-/// Owned storage for the host capability traits constructed from a snapshot
-/// DTO. Held in this struct so the borrowed [`HostCapabilities`] can reference
-/// the trait objects for the duration of a single `evaluate_envelope_json`
-/// call.
-struct HostCapabilityParts {
-    oracle: SnapshotOracle,
-    portfolio: Option<MockPortfolio>,
-    approvals: Option<MockApprovals>,
-}
-
-impl HostCapabilityParts {
-    fn as_capabilities(&self) -> HostCapabilities<'_> {
-        let mut host = HostCapabilities::new(&self.oracle);
-        if let Some(portfolio) = &self.portfolio {
-            host = host.with_portfolio(portfolio);
-        }
-        if let Some(approvals) = &self.approvals {
-            host = host.with_approvals(approvals);
-        }
-        host
-    }
-}
-
-fn host_capabilities_parts_from_dto(snapshot: &HostSnapshotDto) -> HostCapabilityParts {
-    let oracle = snapshot_oracle_from_entries(&snapshot.oracle);
-    let portfolio = snapshot_portfolio_from_entries(&snapshot.balances);
-    let approvals = snapshot_approvals_from_entries(&snapshot.allowances);
-    HostCapabilityParts {
-        oracle,
-        portfolio,
-        approvals,
-    }
-}
-
-fn snapshot_oracle_from_entries(entries: &[OracleEntryDto]) -> SnapshotOracle {
-    let mut oracle = SnapshotOracle::new();
-    for entry in entries {
-        let Some(token) = token_from_token_key(&entry.token_key) else {
-            continue;
-        };
-        oracle.insert(
-            &token,
-            CoreUsdValuation {
-                value: entry.usd_per_unit.clone(),
-                as_of_ts: entry.as_of_ts,
-                sources: entry.sources.clone(),
-                stale_sec: entry.stale_sec,
-            },
-        );
-    }
-    oracle
-}
-
-fn snapshot_portfolio_from_entries(entries: &[BalanceEntryDto]) -> Option<MockPortfolio> {
-    if entries.is_empty() {
-        return None;
-    }
-    let mut portfolio = MockPortfolio::new();
-    for entry in entries {
-        let Some(owner) = CoreAddress::new(&entry.owner).ok() else {
-            continue;
-        };
-        let Some(token) = token_from_token_key(&entry.token_key) else {
-            continue;
-        };
-        let Some(balance) = U256::from_str_radix(&entry.balance, 10).ok() else {
-            continue;
-        };
-        portfolio = portfolio.with_balance(&owner, &token, balance);
-    }
-    Some(portfolio)
-}
-
-fn snapshot_approvals_from_entries(entries: &[AllowanceEntryDto]) -> Option<MockApprovals> {
-    if entries.is_empty() {
-        return None;
-    }
-    let mut approvals = MockApprovals::new();
-    for entry in entries {
-        let Some(owner) = CoreAddress::new(&entry.owner).ok() else {
-            continue;
-        };
-        let Some(spender) = CoreAddress::new(&entry.spender).ok() else {
-            continue;
-        };
-        let Some(token) = token_from_token_key(&entry.token_key) else {
-            continue;
-        };
-        let Some(allowance) = U256::from_str_radix(&entry.allowance, 10).ok() else {
-            continue;
-        };
-        approvals = approvals.with_allowance(&owner, &token, &spender, allowance);
-    }
-    Some(approvals)
-}
-
-/// Parse a `Token::key()` of the form `"chain_id:address"` back into a
-/// minimal `Token`. The `symbol` and `decimals` fields are not encoded in the
-/// key — host trait lookups only consult `Token::key()` (chain_id + address),
-/// so we stub the remaining fields. Enrichment paths that need real decimals
-/// (e.g. USD scaling) read them from the envelope's `AssetRef.decimals`
-/// instead, not from this reconstructed `Token`.
-fn token_from_token_key(key: &str) -> Option<Token> {
-    let (chain, address) = key.split_once(':')?;
-    let chain_id = chain.parse::<u64>().ok()?;
-    let address = CoreAddress::new(address).ok()?;
-    Some(Token {
-        chain_id,
-        address,
-        symbol: String::new(),
-        decimals: 0,
-        is_native: false,
-    })
 }

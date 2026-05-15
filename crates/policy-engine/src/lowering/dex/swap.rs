@@ -1,13 +1,9 @@
 use crate::action::dex::{SwapAction, SwapMode};
 use crate::action::AssetRefWithAmountConstraint;
-use crate::context_keys::{
-    FEE_BPS, RECIPIENT, TOTAL_INPUT_FRACTION_OF_PORTFOLIO_BPS, TOTAL_INPUT_USD,
-    TOTAL_MIN_OUTPUT_USD, VALIDITY_DELTA_SEC,
-};
+use crate::context_keys::{FEE_BPS, RECIPIENT, VALIDITY_DELTA_SEC};
 use crate::policy::PolicyRequest;
 use serde_json::{Map, Value};
 
-use crate::lowering::common::amount::action_usd_valuation_json;
 use crate::lowering::common::asset::asset_ref_with_amount_json;
 use crate::lowering::common::cedar::cedar_long_u64;
 use crate::lowering::common::validity::{validity_delta_sec, validity_json};
@@ -57,25 +53,6 @@ fn context(swap: &SwapAction, ctx: &LoweringCtx<'_>) -> Value {
     if let Some(fee_bps) = swap.fee_bps {
         context.insert(FEE_BPS.into(), cedar_long_u64(u64::from(fee_bps)));
     }
-    if let Some(usd) = &swap.enrichment.value_in_usd {
-        context.insert(
-            TOTAL_INPUT_USD.into(),
-            action_usd_valuation_json(usd, ctx.block_timestamp),
-        );
-    }
-    if let Some(usd) = &swap.enrichment.min_value_out_usd {
-        context.insert(
-            TOTAL_MIN_OUTPUT_USD.into(),
-            action_usd_valuation_json(usd, ctx.block_timestamp),
-        );
-    }
-    if let Some(fraction_bps) = swap.enrichment.input_fraction_of_portfolio_bps {
-        context.insert(
-            TOTAL_INPUT_FRACTION_OF_PORTFOLIO_BPS.into(),
-            cedar_long_u64(u64::from(fraction_bps)),
-        );
-    }
-
     Value::Object(context)
 }
 
@@ -90,14 +67,14 @@ const fn swap_mode_str(mode: &SwapMode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use crate::action::dex::{SwapAction, SwapEnrichment, SwapMode};
+    use crate::action::dex::{SwapAction, SwapMode};
     use crate::action::misc::{ApprovalKind, ApproveAction};
     use crate::action::{Action, AmountConstraint, AmountKind, Category};
     use serde_json::{json, Value};
 
     use crate::lowering::dex::test_support::{
-        address, amount, amount_without_value, decimal, envelope, erc20, policy_request, usd,
-        validity, BLOCK_TIMESTAMP,
+        address, amount, amount_without_value, decimal, envelope, erc20, policy_request, validity,
+        BLOCK_TIMESTAMP,
     };
 
     fn swap(recipient: crate::action::Address, amount_in: AmountConstraint) -> SwapAction {
@@ -110,12 +87,6 @@ mod tests {
             recipient,
             validity: None,
             fee_bps: Some(30),
-            enrichment: SwapEnrichment {
-                value_in_usd: Some(usd("2000.00")),
-                min_value_out_usd: Some(usd("0")),
-                expected_value_out_usd: Some(usd("2001.00")),
-                input_fraction_of_portfolio_bps: Some(125),
-            },
         }
     }
 
@@ -183,15 +154,8 @@ mod tests {
                 .and_then(Value::as_str),
             Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
         );
-        assert!(request.context.get("totalInputUsd").is_some());
-        assert!(request.context.get("totalMinOutputUsd").is_some());
-        assert_eq!(
-            request
-                .context
-                .get("totalInputFractionOfPortfolioBps")
-                .and_then(Value::as_i64),
-            Some(125)
-        );
+        assert!(request.context.get("totalInputUsd").is_none());
+        assert!(request.context.get("totalMinOutputUsd").is_none());
         assert_eq!(
             request.context.get("feeBps").and_then(Value::as_i64),
             Some(30)

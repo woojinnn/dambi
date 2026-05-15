@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::common::{Address, UsdValuation};
+use super::common::Address;
 
 mod add_liquidity;
 mod burn_liquidity_nft;
@@ -80,42 +80,13 @@ pub struct TickRange {
     pub upper: i32,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Optional host-derived valuation facts for a swap.
-pub struct SwapEnrichment {
-    /// USD value of the input amount.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value_in_usd: Option<UsdValuation>,
-    /// Minimum USD value of the output amount.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub min_value_out_usd: Option<UsdValuation>,
-    /// Expected USD value of the output amount.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected_value_out_usd: Option<UsdValuation>,
-    /// Input amount as basis points of the portfolio value.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_fraction_of_portfolio_bps: Option<u32>,
-}
-
-impl SwapEnrichment {
-    /// Returns true when no enrichment fields are populated.
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.value_in_usd.is_none()
-            && self.min_value_out_usd.is_none()
-            && self.expected_value_out_usd.is_none()
-            && self.input_fraction_of_portfolio_bps.is_none()
-    }
-}
-
 #[cfg(test)]
 pub(super) mod test_support {
     use std::str::FromStr as _;
 
     use crate::action::common::{
         Address, AmountConstraint, AmountKind, AssetKind, AssetRef, AssetRefWithAmountConstraint,
-        DecimalString, UsdValuation, Validity, ValiditySource,
+        DecimalString, Validity, ValiditySource,
     };
 
     use super::PoolRef;
@@ -201,15 +172,6 @@ pub(super) mod test_support {
                 amount: amount(second, "2000000"),
             },
         ]
-    }
-
-    pub(crate) fn usd(value: &str) -> UsdValuation {
-        UsdValuation {
-            value: value.to_owned(),
-            as_of_ts: Some(1_700_000_000),
-            sources: Some(vec!["oracle".to_owned()]),
-            stale_sec: Some(30),
-        }
     }
 
     pub(crate) fn assert_roundtrip<T>(value: &T)

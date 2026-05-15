@@ -114,36 +114,33 @@ The composed schema is:
 
 ```text
 policy-schema/core.cedarschema
-policy-schema/actions/dex.cedarschema
-policy-schema/actions/other.cedarschema
-policy-schema/actions/permit2.cedarschema
-policy-schema/actions/eip2612.cedarschema
-policy-schema/actions/eip712_other.cedarschema
+policy-schema/actions/**/<action>.cedarschema
+manifest-provided context_extensions, when a Policy RPC manifest is installed
 ```
 
-DEX requests evaluate:
+Swap requests evaluate:
 
 ```cedar
-action == Action::"dex"
+action == Action::"swap"
 resource is Protocol
-context is DexContext
+context is SwapContext
 ```
 
-`DexContext` contains aggregate primitives:
+`SwapContext` contains calldata-derived primitives:
 
-- `target`, `valueWei`
-- `protocolIds`
-- `inputTokens`, `outputTokens`
-- `totalInputUsd`, `totalMinOutputUsd`
-- `maxFeeBps`
-- `hasZeroMinOutput`
-- `hasExternalRecipient`
-- `totalInputFractionOfPortfolioBps`
-- `allowancesCoverInputs`
-- `windowStats`
+- `swapMode`
+- `inputToken`, `outputToken`
+- `recipient`
+- `validity`, `validityDeltaSec`
+- `feeBps`
 
-The shipped policies under `policies/dex/` validate against the composed schema
-in `crates/integration-tests/tests/schema_validation.rs`.
+Remote facts such as `totalInputUsd` and `totalMinOutputUsd` are not part of
+the base schema. They are added by `.policy-rpc.json` manifests through
+`context_extensions` and materialized from Policy RPC JSON responses before
+Cedar evaluation.
+
+The shipped policies under `policies/swap/` validate against the composed base
+schema plus their paired Policy RPC manifests.
 
 Signature requests evaluate:
 
@@ -186,26 +183,22 @@ Adding an internal adapter:
 4. Register it in `crates/adapters-bundle`.
 5. Add unit and integration coverage.
 
-## Host Capabilities
+## Policy RPC
 
-`HostCapabilities` is the boundary between wallet host data and the policy
-engine. The demo uses mock providers, but production implementations can slot
-behind the same traits.
+Policy RPC is the boundary between wallet/browser orchestration and remote
+policy facts. A policy bundle may include a `.policy-rpc.json` manifest that
+declares:
 
-- `Oracle`: token -> USD unit price. Used to stamp `totalInputUsd` and
-  `totalMinOutputUsd`, and signature `totalApprovedUsd`.
-- `Clock`: current Unix timestamp. Used to stamp signature deadline deltas.
-  `HostCapabilities::new(&oracle)` defaults this to `SystemClock`; tests can
-  use `with_clock(&MockClock::with_fixed(...))`.
-- `Portfolio`: `(owner, token) -> balance`. Used to stamp
-  `totalInputFractionOfPortfolioBps`.
-- `Approvals`: `(owner, token, spender) -> allowance`. Used to stamp
-  `allowancesCoverInputs`.
-- `StatWindows`: per-owner rolling counters with reserve/settle/release.
-  Used to stamp projected `windowStats`.
+- when the requirement applies, e.g. `{ "action": "swap" }`
+- which backend method to call, e.g. `oracle.usd_value`
+- params selected from root/action/base context JSON
+- which response field is projected into Cedar context
+- the schema fragment contributed by the projected context fields
 
-Missing providers or missing records are fail-open for this demo: the field is
-omitted, and policies are expected to guard with `context has <field>`.
+The browser extension asks WASM to plan Policy RPC calls, sends those calls to
+the configured Policy RPC server, then asks WASM to materialize the JSON
+response and evaluate Cedar. The Rust/WASM policy engine no longer performs
+direct host oracle, balance, allowance, or stat-window enrichment.
 
 ## Evaluation Flow
 
@@ -214,27 +207,23 @@ Pipeline::evaluate(&Request)
 |-- Request::Tx(TransactionRequest)
 |   |-- TransactionActionAdapterRegistry::resolve_with_adapter
 |   |-- TransactionActionAdapter::build_action or Action::Other
-|   |-- DEX host enrichment, if Action::Dex
-|   |-- lowering::request_from_action
-|   `-- Cedar action ids: dex, other
+|   |-- Policy RPC planning from installed manifests
+|   |-- extension/backend executes planned Policy RPC calls
+|   |-- Policy RPC response materialization
+|   |-- lowering::policy_request_from_envelope
+|   `-- Cedar action ids: swap, ...
 |
 `-- Request::Sig(SignatureRequest)
     |-- SignatureActionAdapterRegistry::resolve
     |-- SignatureActionAdapter::build_action, if Permit2/EIP-2612 matched
-    |-- Action::Eip712Other fallback, if unmatched
-    |-- signature host enrichment with Oracle + Clock
-    |-- lowering::request_from_action_with_host
-    `-- Cedar action ids: signature.permit2, signature.eip2612,
-        signature.eip712_other
+    |-- Policy RPC planning/materialization, if manifests require it
+    |-- lowering::policy_request_from_envelope
+    `-- Cedar action ids: permit, ...
 
 Both branches:
   -> PolicyEngine::evaluate_requests(... PolicyRequestOrigin::Action ...)
   -> Verdict
 ```
-
-`Pipeline::evaluate_with_reservation` reserves projected DEX stat-window deltas
-before evaluation, so cap policies see the post-this-transaction window state.
-If Cedar returns `Verdict::Fail`, the speculative reservation is released.
 
 ## Verdict Shape
 
@@ -315,7 +304,7 @@ The workspace currently has 229 passing tests plus 1 ignored doctest:
 
 | Area | Tests | Coverage |
 |---|---:|---|
-| `policy-engine` unit tests | 58 | core types, host mocks, decimal helpers, DEX enrichment, schema validation, policy evaluation, registry |
+| `policy-engine` unit tests | 58 | core types, action lowering, Policy RPC planning/materialization, schema validation, policy evaluation, registry |
 | Uniswap V2 adapter | 24 | selector pins, ABI round trips, DEX action construction |
 | Uniswap V3 adapter | 41 | per-function encode/decode, path decoding, multicall aggregation, ABI cross-checks |
 | Universal Router adapter | 5 | execute decoding and aggregate DEX action construction |

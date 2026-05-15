@@ -5,9 +5,7 @@
 //! - **`action`**: normalized [`ActionEnvelope`] schema types (the new pipeline input).
 //! - **`core`**: shared domain types (`Address`, `Token`, `AmountSpec`,
 //!   `UsdValuation`, `TransactionRequest`, `SignatureRequest`) consumed by
-//!   host capabilities.
-//! - **`host`**: host-provided capabilities (`Oracle`, `Portfolio`, `Approvals`,
-//!   `StatWindows`) used by lowering and evaluation.
+//!   adapters and Policy RPC integrations.
 //! - **`policy`**: `PolicyEngine` (Cedar wrapper) and the `PolicyRequest`
 //!   shape that lowering produces and the engine consumes.
 //! - **`lowering`**: [`policy_request_from_envelope`] — the bridge from
@@ -42,8 +40,6 @@ pub mod action;
 pub mod cedar_json;
 pub mod context_keys;
 pub mod core;
-pub mod enrichment;
-pub mod host;
 pub mod lowering;
 pub mod policy;
 pub mod policy_rpc;
@@ -53,16 +49,9 @@ pub mod schema;
 
 pub use action::{
     Action, ActionEnvelope, Address as ActionAddress, AmountConstraint, AmountKind, AssetKind,
-    AssetRef, AssetRefWithAmountConstraint, Category, DecimalString, Hex,
-    UsdValuation as ActionUsdValuation, Validity, ValiditySource,
+    AssetRef, AssetRefWithAmountConstraint, Category, DecimalString, Hex, Validity, ValiditySource,
 };
 pub use core::{Address, AmountSpec, SignatureRequest, Token, TransactionRequest, UsdValuation};
-pub use enrichment::enrich_envelope;
-pub use host::{
-    Approvals, ApprovalsError, Clock, HostCapabilities, MockApprovals, MockClock, MockOracle,
-    MockPortfolio, MockStatWindows, Oracle, OracleError, Portfolio, PortfolioError, ReservationId,
-    StatDelta, StatKey, StatValue, StatWindows, SystemClock,
-};
 pub use lowering::policy_request_from_envelope;
 pub use policy::{
     MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyError, PolicyRequest,

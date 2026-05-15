@@ -18,8 +18,7 @@ pub(crate) mod test_support {
     use crate::action::dex::{PoolRef, TickRange};
     use crate::action::{
         Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef,
-        AssetRefWithAmountConstraint, Category, DecimalString, UsdValuation, Validity,
-        ValiditySource,
+        AssetRefWithAmountConstraint, Category, DecimalString, Validity, ValiditySource,
     };
     use crate::policy::PolicyRequest;
 
@@ -62,15 +61,6 @@ pub(crate) mod test_support {
 
     pub(crate) fn amount_without_value(kind: AmountKind) -> AmountConstraint {
         AmountConstraint { kind, value: None }
-    }
-
-    pub(crate) fn usd(value: &str) -> UsdValuation {
-        UsdValuation {
-            value: value.to_owned(),
-            as_of_ts: Some(BLOCK_TIMESTAMP),
-            sources: Some(vec!["oracle".to_owned()]),
-            stale_sec: Some(30),
-        }
     }
 
     pub(crate) fn validity(expires_at: u64) -> Validity {

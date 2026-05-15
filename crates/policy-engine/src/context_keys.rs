@@ -62,13 +62,7 @@ pub const NFT: &str = "nft";
 /// Recipient address field.
 pub const RECIPIENT: &str = "recipient";
 
-// ── Host-derived enrichment fields ──
-/// Total USD value of input requirements.
-pub const TOTAL_INPUT_USD: &str = "totalInputUsd";
-/// Total USD value of minimum output requirements.
-pub const TOTAL_MIN_OUTPUT_USD: &str = "totalMinOutputUsd";
-/// Input value as basis points of the actor's portfolio.
-pub const TOTAL_INPUT_FRACTION_OF_PORTFOLIO_BPS: &str = "totalInputFractionOfPortfolioBps";
+// ── Derived action context fields ──
 /// Validity-window delta from `block_timestamp` in seconds.
 pub const VALIDITY_DELTA_SEC: &str = "validityDeltaSec";
 
@@ -91,9 +85,3 @@ pub const EXTN_FN: &str = "fn";
 pub const EXTN_ARG: &str = "arg";
 /// Cedar Decimal extension function name.
 pub const EXTN_DECIMAL: &str = "decimal";
-
-// ── Stat-window keys consumed by host stat plumbing ──
-/// Rolling 24-hour swap volume in USD.
-pub const SWAP_VOLUME_USD_24H: &str = "swapVolumeUsd24h";
-/// Rolling 24-hour swap count.
-pub const SWAP_COUNT_24H: &str = "swapCount24h";

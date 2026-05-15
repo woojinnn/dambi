@@ -80,38 +80,6 @@ pub struct MatchedPolicyDto {
     pub origin: String,
 }
 
-// `HostSnapshotDto` and its entry types are kept for the JSON wire shape only.
-// The new pipeline does not yet consume the snapshot (oracle/balances/allowances/
-// windows are tier-1/tier-2 facts that the rebuilt host capabilities layer will
-// rewire later). For now we still accept the same input shape from TS callers so
-// the boundary contract is stable — hence `#[allow(dead_code)]` on the fields.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct HostSnapshotDto {
-    #[serde(default)]
-    pub oracle: Vec<OracleEntryDto>,
-    #[serde(default)]
-    pub balances: Vec<BalanceEntryDto>,
-    #[serde(default)]
-    pub allowances: Vec<AllowanceEntryDto>,
-    #[serde(default)]
-    pub now_ts: Option<u64>,
-    #[serde(default)]
-    pub windows: Vec<WindowEntryDto>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct EvaluateEnvelopeInputDto {
-    pub envelope: serde_json::Value,
-    pub from: String,
-    pub to: String,
-    pub value_wei: String,
-    pub chain_id: u64,
-    pub block_timestamp: u64,
-    #[allow(dead_code)]
-    pub host_snapshot: HostSnapshotDto,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawRequestDto {
     pub method: String,
@@ -152,43 +120,6 @@ pub struct EvaluatePolicyRpcInputDto {
 pub struct PreviewSchemaInputDto {
     #[serde(default)]
     pub manifests: Vec<PolicyManifest>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct OracleEntryDto {
-    pub token_key: String,
-    pub usd_per_unit: String,
-    pub as_of_ts: u64,
-    #[serde(default)]
-    pub stale_sec: u64,
-    #[serde(default)]
-    pub sources: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct BalanceEntryDto {
-    pub owner: String,
-    pub token_key: String,
-    pub balance: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct AllowanceEntryDto {
-    pub owner: String,
-    pub token_key: String,
-    pub spender: String,
-    pub allowance: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct WindowEntryDto {
-    pub actor: String,
-    pub name: String,
-    pub value: String,
 }
 
 #[cfg(test)]

@@ -1,29 +1,22 @@
 use alloy_primitives::U256;
 use mappers::EmptyTokenRegistry;
-use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
-use policy_engine::core::{Address as CoreAddress, Token, UsdValuation as CoreUsdValuation};
+use policy_engine::action::dex::{SwapAction, SwapMode};
+use policy_engine::policy_rpc::{
+    apply_rpc_results, plan_calls, PolicyManifest, PolicyRpcResponse, PolicyRpcResult, RootInput,
+};
 use policy_engine::{
-    enrich_envelope, policy_request_from_envelope, Action, ActionAddress, ActionEnvelope,
-    ActionUsdValuation, AmountConstraint, AmountKind, AssetKind, AssetRef, Category, DecimalString,
-    HostCapabilities, MockOracle, PolicyEngineBuilder, PolicyRequest, Severity, Validity,
-    ValiditySource, Verdict,
+    policy_request_from_envelope, Action, ActionAddress, ActionEnvelope, AmountConstraint,
+    AmountKind, AssetKind, AssetRef, Category, DecimalString, PolicyEngineBuilder, PolicyRequest,
+    PolicySchemaComposer, Severity, Validity, ValiditySource, Verdict,
 };
 use request_router::{route_request, DefaultRegistries, RouterContext};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::str::FromStr as _;
 
 const BLOCK_TIMESTAMP: u64 = 1_700_000_000;
 
-type HostSnapshot<'a> = HostCapabilities<'a>;
-
-fn install_policies_and_evaluate(
-    policies: &[(&str, &str)],
-    request: &PolicyRequest,
-    host_snapshot: &HostSnapshot<'_>,
-) -> Verdict {
-    let _ = host_snapshot;
-
+fn install_policies_and_evaluate(policies: &[(&str, &str)], request: &PolicyRequest) -> Verdict {
     let mut builder = PolicyEngineBuilder::new();
 
     for (policy_id, policy_text) in policies {
@@ -47,10 +40,6 @@ fn install_policies_and_evaluate(
 
 fn deny_policy(policy_id: &str, policy_text: &str) -> String {
     format!("@id(\"{policy_id}\")\n@severity(\"deny\")\n{policy_text}\n")
-}
-
-fn empty_host_snapshot<'a>(oracle: &'a MockOracle) -> HostSnapshot<'a> {
-    HostCapabilities::new(oracle)
 }
 
 fn load_fixture(filename: &str) -> Value {
@@ -146,10 +135,8 @@ fn swap_request_from_fixture(filename: &str) -> PolicyRequest {
 #[test]
 fn e2e_swap_v2_passes_under_empty_policies() {
     let request = swap_request_from_fixture("swap_uniswap_v2_exact_in.json");
-    let oracle = MockOracle::default();
-    let host_snapshot = empty_host_snapshot(&oracle);
 
-    let verdict = install_policies_and_evaluate(&[], &request, &host_snapshot);
+    let verdict = install_policies_and_evaluate(&[], &request);
 
     assert_eq!(verdict, Verdict::Pass);
 }
@@ -170,8 +157,6 @@ fn e2e_swap_v2_deadline_lowers_validity_delta_sec() {
 #[test]
 fn e2e_swap_v2_fails_under_blanket_forbid() {
     let request = swap_request_from_fixture("swap_uniswap_v2_exact_in.json");
-    let oracle = MockOracle::default();
-    let host_snapshot = empty_host_snapshot(&oracle);
 
     let verdict = install_policies_and_evaluate(
         &[(
@@ -179,7 +164,6 @@ fn e2e_swap_v2_fails_under_blanket_forbid() {
             r#"forbid (principal, action == Action::"swap", resource);"#,
         )],
         &request,
-        &host_snapshot,
     );
 
     match verdict {
@@ -202,8 +186,6 @@ fn e2e_approve_action_is_unsupported_for_now() {
 #[test]
 fn e2e_swap_v3_evaluates_through_new_pipeline() {
     let request = swap_request_from_fixture("swap_uniswap_v3_exact_input_single.json");
-    let oracle = MockOracle::default();
-    let host_snapshot = empty_host_snapshot(&oracle);
 
     let verdict = install_policies_and_evaluate(
         &[(
@@ -212,7 +194,6 @@ fn e2e_swap_v3_evaluates_through_new_pipeline() {
                when { context.swapMode == "exact_in" };"#,
         )],
         &request,
-        &host_snapshot,
     );
 
     assert!(matches!(verdict, Verdict::Fail(_)));
@@ -221,8 +202,6 @@ fn e2e_swap_v3_evaluates_through_new_pipeline() {
 #[test]
 fn e2e_v2_exact_out_does_not_match_exact_in_only_policy() {
     let request = swap_request_from_fixture("swap_uniswap_v2_exact_out.json");
-    let oracle = MockOracle::default();
-    let host_snapshot = empty_host_snapshot(&oracle);
 
     let verdict = install_policies_and_evaluate(
         &[(
@@ -231,7 +210,6 @@ fn e2e_v2_exact_out_does_not_match_exact_in_only_policy() {
                when { context.swapMode == "exact_in" };"#,
         )],
         &request,
-        &host_snapshot,
     );
 
     assert_eq!(verdict, Verdict::Pass);
@@ -242,14 +220,30 @@ const NO_ZERO_MIN_OUTPUT_POLICY: &str =
     include_str!("../../../policies/swap/no-zero-min-output.cedar");
 const MAX_INPUT_USD_100_POLICY: &str =
     include_str!("../../../policies/swap/max-input-usd-100.cedar");
+const MAX_INPUT_USD_100_MANIFEST: &str =
+    include_str!("../../../policies/swap/max-input-usd-100.policy-rpc.json");
 const MIN_OUTPUT_USD_FLOOR_POLICY: &str =
     include_str!("../../../policies/swap/min-output-usd-floor.cedar");
+const MIN_OUTPUT_USD_FLOOR_MANIFEST: &str =
+    include_str!("../../../policies/swap/min-output-usd-floor.policy-rpc.json");
 const KNOWN_TOKEN_ONLY_POLICY: &str = include_str!("../../../policies/swap/known-token-only.cedar");
 const MAX_FEE_BPS_30_POLICY: &str = include_str!("../../../policies/swap/max-fee-bps-30.cedar");
 const EXPIRED_DEADLINE_POLICY: &str = include_str!("../../../policies/swap/expired-deadline.cedar");
 
 fn evaluate_with_policies(policies: &[&str], request: &PolicyRequest) -> Verdict {
-    let mut builder = PolicyEngineBuilder::new();
+    evaluate_with_policies_and_manifests(policies, &[], request)
+}
+
+fn evaluate_with_policies_and_manifests(
+    policies: &[&str],
+    manifests: &[PolicyManifest],
+    request: &PolicyRequest,
+) -> Verdict {
+    let schema = PolicySchemaComposer::new()
+        .with_manifests(manifests)
+        .expect("policy RPC manifests should extend schema")
+        .compose();
+    let mut builder = PolicyEngineBuilder::with_schema_text(schema);
     for policy_text in policies {
         builder = builder.add_text(*policy_text);
     }
@@ -290,15 +284,6 @@ impl<'a> Default for SyntheticSwapInput<'a> {
             total_min_output_usd: None,
             validity_delta_sec: None,
         }
-    }
-}
-
-fn usd_valuation(value: &str) -> ActionUsdValuation {
-    ActionUsdValuation {
-        value: value.to_owned(),
-        as_of_ts: Some(BLOCK_TIMESTAMP),
-        sources: Some(vec!["synthetic".to_owned()]),
-        stale_sec: Some(0),
     }
 }
 
@@ -347,12 +332,6 @@ fn synthetic_swap_request_with(input: SyntheticSwapInput<'_>) -> PolicyRequest {
             .expect("valid synthetic expiry"),
         source: ValiditySource::TxDeadline,
     });
-    let enrichment = SwapEnrichment {
-        value_in_usd: input.total_input_usd.map(usd_valuation),
-        min_value_out_usd: input.total_min_output_usd.map(usd_valuation),
-        expected_value_out_usd: None,
-        input_fraction_of_portfolio_bps: None,
-    };
     let envelope = ActionEnvelope {
         category: Category::Dex,
         action: Action::Swap(SwapAction {
@@ -364,11 +343,10 @@ fn synthetic_swap_request_with(input: SyntheticSwapInput<'_>) -> PolicyRequest {
             recipient: from.clone(),
             validity,
             fee_bps: input.fee_bps,
-            enrichment,
         }),
     };
 
-    policy_request_from_envelope(
+    let mut requests = vec![policy_request_from_envelope(
         &envelope,
         &from,
         &to,
@@ -376,7 +354,93 @@ fn synthetic_swap_request_with(input: SyntheticSwapInput<'_>) -> PolicyRequest {
         1,
         BLOCK_TIMESTAMP,
     )
-    .expect("synthetic swap envelope should lower to a policy request")
+    .expect("synthetic swap envelope should lower to a policy request")];
+
+    materialize_synthetic_rpc_context(
+        &mut requests,
+        &envelope,
+        &from,
+        &to,
+        input.total_input_usd,
+        input.total_min_output_usd,
+    );
+
+    requests.remove(0)
+}
+
+fn materialize_synthetic_rpc_context(
+    requests: &mut [PolicyRequest],
+    envelope: &ActionEnvelope,
+    from: &ActionAddress,
+    to: &ActionAddress,
+    total_input_usd: Option<&str>,
+    total_min_output_usd: Option<&str>,
+) {
+    let mut manifests = Vec::new();
+    if total_input_usd.is_some() {
+        manifests.push(policy_manifest(MAX_INPUT_USD_100_MANIFEST));
+    }
+    if total_min_output_usd.is_some() {
+        manifests.push(policy_manifest(MIN_OUTPUT_USD_FLOOR_MANIFEST));
+    }
+    if manifests.is_empty() {
+        return;
+    }
+
+    let root = RootInput {
+        chain_id: 1,
+        from: from.to_string(),
+        to: to.to_string(),
+        value_wei: "0".to_owned(),
+        block_timestamp: Some(BLOCK_TIMESTAMP),
+    };
+    let calls = plan_calls(
+        &root,
+        std::slice::from_ref(envelope),
+        &manifests,
+        &json!({}),
+    )
+    .expect("synthetic manifests should plan");
+    let results = calls
+        .into_iter()
+        .map(|call| {
+            let value = if call.id.contains("swap-min-output-usd") {
+                total_min_output_usd.expect("min output result value")
+            } else {
+                total_input_usd.expect("input result value")
+            };
+            PolicyRpcResult {
+                id: call.id,
+                ok: true,
+                result: Some(policy_rpc_usd_result(value)),
+                error: None,
+            }
+        })
+        .collect();
+
+    apply_rpc_results(
+        requests,
+        std::slice::from_ref(envelope),
+        &manifests,
+        &PolicyRpcResponse {
+            request_id: "synthetic-eval".to_owned(),
+            results,
+        },
+    )
+    .expect("synthetic RPC response should materialize");
+}
+
+fn policy_manifest(text: &str) -> PolicyManifest {
+    serde_json::from_str(text).expect("default policy RPC manifest parses")
+}
+
+fn policy_rpc_usd_result(value: &str) -> Value {
+    json!({
+        "value": value,
+        "asOfTs": BLOCK_TIMESTAMP,
+        "sources": ["synthetic"],
+        "staleSec": 0
+    })
 }
 
 fn assert_policy_passes(policy_text: &str, request: &PolicyRequest) {
@@ -385,8 +449,49 @@ fn assert_policy_passes(policy_text: &str, request: &PolicyRequest) {
     assert_eq!(verdict, Verdict::Pass);
 }
 
+fn assert_policy_passes_with_manifest(
+    policy_text: &str,
+    manifest_text: &str,
+    request: &PolicyRequest,
+) {
+    let manifest = policy_manifest(manifest_text);
+    let verdict = evaluate_with_policies_and_manifests(
+        &[policy_text],
+        std::slice::from_ref(&manifest),
+        request,
+    );
+
+    assert_eq!(verdict, Verdict::Pass);
+}
+
 fn assert_policy_denies(policy_text: &str, request: &PolicyRequest, policy_id: &str) {
     let verdict = evaluate_with_policies(&[policy_text], request);
+
+    match verdict {
+        Verdict::Fail(matched) => {
+            assert!(
+                matched.iter().any(
+                    |policy| policy.policy_id == policy_id && policy.severity == Severity::Deny
+                ),
+                "expected deny policy {policy_id} to fire, got {matched:?}"
+            );
+        }
+        other => panic!("expected Verdict::Fail, got {other:?}"),
+    }
+}
+
+fn assert_policy_denies_with_manifest(
+    policy_text: &str,
+    manifest_text: &str,
+    request: &PolicyRequest,
+    policy_id: &str,
+) {
+    let manifest = policy_manifest(manifest_text);
+    let verdict = evaluate_with_policies_and_manifests(
+        &[policy_text],
+        std::slice::from_ref(&manifest),
+        request,
+    );
 
     match verdict {
         Verdict::Fail(matched) => {
@@ -408,7 +513,11 @@ fn test_max_input_usd_100_pass() {
         ..SyntheticSwapInput::default()
     });
 
-    assert_policy_passes(MAX_INPUT_USD_100_POLICY, &request);
+    assert_policy_passes_with_manifest(
+        MAX_INPUT_USD_100_POLICY,
+        MAX_INPUT_USD_100_MANIFEST,
+        &request,
+    );
 }
 
 #[test]
@@ -418,7 +527,12 @@ fn test_max_input_usd_100_fail() {
         ..SyntheticSwapInput::default()
     });
 
-    assert_policy_denies(MAX_INPUT_USD_100_POLICY, &request, "user/max-input-usd-100");
+    assert_policy_denies_with_manifest(
+        MAX_INPUT_USD_100_POLICY,
+        MAX_INPUT_USD_100_MANIFEST,
+        &request,
+        "user/max-input-usd-100",
+    );
 }
 
 #[test]
@@ -428,7 +542,11 @@ fn test_min_output_usd_floor_pass() {
         ..SyntheticSwapInput::default()
     });
 
-    assert_policy_passes(MIN_OUTPUT_USD_FLOOR_POLICY, &request);
+    assert_policy_passes_with_manifest(
+        MIN_OUTPUT_USD_FLOOR_POLICY,
+        MIN_OUTPUT_USD_FLOOR_MANIFEST,
+        &request,
+    );
 }
 
 #[test]
@@ -438,8 +556,9 @@ fn test_min_output_usd_floor_fail() {
         ..SyntheticSwapInput::default()
     });
 
-    assert_policy_denies(
+    assert_policy_denies_with_manifest(
         MIN_OUTPUT_USD_FLOOR_POLICY,
+        MIN_OUTPUT_USD_FLOOR_MANIFEST,
         &request,
         "user/min-output-usd-floor",
     );
@@ -541,15 +660,11 @@ fn swap_passes_under_max_fee_policy() {
     assert_eq!(verdict, Verdict::Pass);
 }
 
-/// End-to-end: route a v2 swap fixture, attach a `MockOracle` priced for both
-/// tokens, call `enrich_envelope` to fill `SwapEnrichment`, then lower
-/// through `policy_request_from_envelope` and assert that the resulting
-/// Cedar context carries `totalInputUsd` (i.e., the enrichment value reaches
-/// the policy request).
+/// End-to-end: route a v2 swap fixture, plan the default Policy RPC manifest,
+/// materialize its JSON result, and assert that the resulting Cedar context
+/// carries `totalInputUsd`.
 #[test]
-fn enrich_fills_usd_valuation_on_v2_swap() {
-    // Reproduce what `policy_request_from_fixture` does, but stop at the
-    // routed envelope so we can run the enrichment stage before lowering.
+fn policy_rpc_materializes_usd_valuation_on_v2_swap() {
     let fixture = load_fixture("swap_uniswap_v2_exact_in.json");
     let rpc = fixture.get("rpc").unwrap();
     let method = rpc.get("method").and_then(Value::as_str).unwrap();
@@ -570,66 +685,52 @@ fn enrich_fills_usd_valuation_on_v2_swap() {
     let tx = params.as_array().unwrap().first().unwrap();
     let from = address_field(tx, "from", "swap_uniswap_v2_exact_in.json");
     let to = address_field(tx, "to", "swap_uniswap_v2_exact_in.json");
-
-    // Build an oracle that prices both USDT and WETH so both value_in_usd
-    // and (min/expected)_value_out_usd are populated.
-    let usdt = Token {
-        chain_id: 0,
-        address: CoreAddress::new("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap(),
-        symbol: String::new(),
-        decimals: 6,
-        is_native: false,
-    };
-    let weth = Token {
-        chain_id: 0,
-        address: CoreAddress::new("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap(),
-        symbol: String::new(),
-        decimals: 18,
-        is_native: false,
-    };
-    let oracle = MockOracle::new()
-        .with_price(
-            &usdt,
-            CoreUsdValuation {
-                value: "1.0000".to_owned(),
-                as_of_ts: BLOCK_TIMESTAMP,
-                sources: vec!["mock-oracle".to_owned()],
-                stale_sec: 30,
-            },
-        )
-        .with_price(
-            &weth,
-            CoreUsdValuation {
-                value: "2000.0000".to_owned(),
-                as_of_ts: BLOCK_TIMESTAMP,
-                sources: vec!["mock-oracle".to_owned()],
-                stale_sec: 30,
-            },
-        );
-    let host = HostCapabilities::new(&oracle);
-
-    let enriched = enrich_envelope(envelope, &from, &to, &host);
-    let Action::Swap(swap) = &enriched.action else {
-        panic!("expected swap action");
-    };
-    assert!(
-        swap.enrichment.value_in_usd.is_some(),
-        "enrichment.value_in_usd should be set when oracle has a price for token_in"
-    );
-
-    let request = policy_request_from_envelope(
-        &enriched,
+    let mut requests = vec![policy_request_from_envelope(
+        &envelope,
         &from,
         &to,
         &DecimalString::from_str("0").unwrap(),
         chain_id,
         BLOCK_TIMESTAMP,
     )
-    .expect("envelope should lower to a swap policy request");
+    .expect("envelope should lower to a swap policy request")];
+    let manifest = policy_manifest(MAX_INPUT_USD_100_MANIFEST);
+    let root = RootInput {
+        chain_id,
+        from: from.to_string(),
+        to: to.to_string(),
+        value_wei: "0".to_owned(),
+        block_timestamp: Some(BLOCK_TIMESTAMP),
+    };
+    let call = plan_calls(
+        &root,
+        std::slice::from_ref(&envelope),
+        std::slice::from_ref(&manifest),
+        &json!({}),
+    )
+    .expect("default manifest should plan")
+    .pop()
+    .expect("manifest should produce one call");
+
+    apply_rpc_results(
+        &mut requests,
+        std::slice::from_ref(&envelope),
+        std::slice::from_ref(&manifest),
+        &PolicyRpcResponse {
+            request_id: "fixture-eval".to_owned(),
+            results: vec![PolicyRpcResult {
+                id: call.id,
+                ok: true,
+                result: Some(policy_rpc_usd_result("125.0000")),
+                error: None,
+            }],
+        },
+    )
+    .expect("default manifest response should materialize");
 
     assert!(
-        request.context.get("totalInputUsd").is_some(),
-        "policy request context should include totalInputUsd after enrichment, got: {}",
-        request.context
+        requests[0].context.get("totalInputUsd").is_some(),
+        "policy request context should include totalInputUsd after Policy RPC, got: {}",
+        requests[0].context
     );
 }

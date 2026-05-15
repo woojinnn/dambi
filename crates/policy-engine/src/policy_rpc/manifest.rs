@@ -123,6 +123,8 @@ pub enum ProjectionType {
     Decimal,
     /// Cedar `UsdValuation`.
     UsdValuation,
+    /// Cedar `WindowStats`.
+    WindowStats,
     /// Cedar `Set<String>`.
     #[serde(rename = "Set<String>")]
     SetString,
@@ -138,6 +140,7 @@ impl ProjectionType {
             Self::Bool => "Bool",
             Self::Decimal => "decimal",
             Self::UsdValuation => "UsdValuation",
+            Self::WindowStats => "WindowStats",
             Self::SetString => "Set<String>",
         }
     }

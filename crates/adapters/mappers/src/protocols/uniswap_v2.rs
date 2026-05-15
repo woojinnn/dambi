@@ -2,7 +2,7 @@ use std::str::FromStr as _;
 
 use abi_resolver::{DecodedCall, DecodedValue, DecoderId};
 use alloy_primitives::U256;
-use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
+use policy_engine::action::dex::{SwapAction, SwapMode};
 use policy_engine::action::{
     Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef, Category,
     DecimalString, Validity, ValiditySource,
@@ -57,7 +57,6 @@ impl Mapper for SwapExactTokensForTokensMapper {
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
-            enrichment: SwapEnrichment::default(),
         })])
     }
 }
@@ -102,7 +101,6 @@ impl Mapper for SwapTokensForExactTokensMapper {
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
-            enrichment: SwapEnrichment::default(),
         })])
     }
 }
@@ -145,7 +143,6 @@ impl Mapper for SwapExactETHForTokensMapper {
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
-            enrichment: SwapEnrichment::default(),
         })])
     }
 }
@@ -189,7 +186,6 @@ impl Mapper for SwapTokensForExactETHMapper {
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
-            enrichment: SwapEnrichment::default(),
         })])
     }
 }
@@ -233,7 +229,6 @@ impl Mapper for SwapExactTokensForETHMapper {
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
-            enrichment: SwapEnrichment::default(),
         })])
     }
 }
@@ -276,7 +271,6 @@ impl Mapper for SwapETHForExactTokensMapper {
             recipient,
             validity: Some(validity(deadline)?),
             fee_bps: Some(30),
-            enrichment: SwapEnrichment::default(),
         })])
     }
 }
@@ -443,7 +437,7 @@ mod tests {
     };
     use abi_resolver::{DecodedArg, DecodedCall, DecodedValue, DecoderId};
     use alloy_primitives::U256;
-    use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
+    use policy_engine::action::dex::{SwapAction, SwapMode};
     use policy_engine::action::{
         Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef,
         Category, DecimalString, Validity, ValiditySource,
@@ -848,7 +842,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -883,7 +876,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -903,7 +895,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -923,7 +914,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -943,7 +933,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -963,7 +952,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }

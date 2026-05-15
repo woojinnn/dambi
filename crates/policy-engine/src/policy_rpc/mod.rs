@@ -34,14 +34,14 @@ mod tests {
                 },
                 "outputs": [{
                     "kind": "context",
-                    "field": "rpcTotalInputUsd",
+                    "field": "totalInputUsd",
                     "type": "UsdValuation",
                     "from": "$.result",
                     "required": required
                 }]
             }],
             "context_extensions": {
-                "swap": { "rpcTotalInputUsd": "UsdValuation" }
+                "swap": { "totalInputUsd": "UsdValuation" }
             }
         })
     }
@@ -249,7 +249,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            requests[0].context["rpcTotalInputUsd"],
+            requests[0].context["totalInputUsd"],
             json!({
                 "value": { "__extn": { "fn": "decimal", "arg": "3500.1200" } },
                 "asOfTs": 1_700_000_000,
@@ -320,7 +320,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(requests[0].context.get("rpcTotalInputUsd").is_none());
+        assert!(requests[0].context.get("totalInputUsd").is_none());
     }
 
     #[test]
@@ -502,16 +502,18 @@ mod tests {
             .unwrap()
             .preview();
 
+        assert!(preview.schema_text.contains("totalInputUsd?: UsdValuation"));
         assert!(preview
-            .schema_text
-            .contains("rpcTotalInputUsd?: UsdValuation"));
+            .added_fields
+            .iter()
+            .all(|field| field.field != "totalInputUsd"));
 
         let conflict = serde_json::from_value::<super::PolicyManifest>(json!({
             "id": "user/conflict",
             "schema_version": 1,
             "requires": [],
             "context_extensions": {
-                "swap": { "rpcTotalInputUsd": "Long" }
+                "swap": { "totalInputUsd": "Long" }
             }
         }))
         .unwrap();
@@ -522,9 +524,9 @@ mod tests {
     }
 
     #[test]
-    fn generated_schema_rejects_base_field_collision() {
-        let manifest = serde_json::from_value::<super::PolicyManifest>(json!({
-            "id": "user/base-collision",
+    fn generated_schema_accepts_base_field_same_type_and_rejects_conflict() {
+        let same_type = serde_json::from_value::<super::PolicyManifest>(json!({
+            "id": "user/base-same-type",
             "schema_version": 1,
             "requires": [],
             "context_extensions": {
@@ -533,9 +535,145 @@ mod tests {
         }))
         .unwrap();
 
+        let preview = crate::schema::PolicySchemaComposer::new()
+            .with_manifests(&[same_type])
+            .unwrap()
+            .preview();
+        assert!(preview
+            .added_fields
+            .iter()
+            .all(|field| field.field != "recipient"));
+
+        let conflict = serde_json::from_value::<super::PolicyManifest>(json!({
+            "id": "user/base-collision",
+            "schema_version": 1,
+            "requires": [],
+            "context_extensions": {
+                "swap": { "recipient": "Long" }
+            }
+        }))
+        .unwrap();
+
         assert!(crate::schema::PolicySchemaComposer::new()
-            .with_manifests(&[manifest])
+            .with_manifests(&[conflict])
             .is_err());
+    }
+
+    #[test]
+    fn materialization_inserts_window_stats_context() {
+        let manifest = serde_json::from_value::<super::PolicyManifest>(json!({
+            "id": "user/window-stats",
+            "schema_version": 1,
+            "requires": [{
+                "id": "swap-window-stats",
+                "when": { "action": "swap" },
+                "method": "stat_window.swap_stats",
+                "params": {},
+                "outputs": [{
+                    "kind": "context",
+                    "field": "windowStats",
+                    "type": "WindowStats",
+                    "from": "$.result",
+                    "required": true
+                }]
+            }],
+            "context_extensions": {
+                "swap": { "windowStats": "WindowStats" }
+            }
+        }))
+        .expect("manifest parses");
+        let envelope = swap_envelope();
+        let mut requests = vec![crate::policy_request_from_envelope(
+            &envelope,
+            &"0x1111111111111111111111111111111111111111"
+                .parse()
+                .unwrap(),
+            &"0x2222222222222222222222222222222222222222"
+                .parse()
+                .unwrap(),
+            &"0".parse().unwrap(),
+            1,
+            1_700_000_000,
+        )
+        .expect("swap lowers")];
+
+        super::apply_rpc_results(
+            &mut requests,
+            &[envelope],
+            &[manifest],
+            &super::PolicyRpcResponse {
+                request_id: "eval-1".to_owned(),
+                results: vec![super::PolicyRpcResult {
+                    id: "user/window-stats::0::swap-window-stats".to_owned(),
+                    ok: true,
+                    result: Some(json!({
+                        "swapVolumeUsd24h": "42.0000",
+                        "swapCount24h": 3
+                    })),
+                    error: None,
+                }],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            requests[0].context["windowStats"],
+            json!({
+                "swapVolumeUsd24h": { "__extn": { "fn": "decimal", "arg": "42.0000" } },
+                "swapCount24h": 3
+            })
+        );
+    }
+
+    #[test]
+    fn schema_swap_extension_manifest_declares_legacy_enrichment_fields() {
+        let manifest = serde_json::from_str::<super::PolicyManifest>(include_str!(
+            "../../../../policy-schema/extensions/DEX/swap.policy-rpc.json"
+        ))
+        .expect("schema extension manifest parses");
+        let root = super::RootInput {
+            chain_id: 1,
+            from: "0x1111111111111111111111111111111111111111".to_owned(),
+            to: "0x2222222222222222222222222222222222222222".to_owned(),
+            value_wei: "0".to_owned(),
+            block_timestamp: Some(1_700_000_000),
+        };
+        let preview = crate::schema::PolicySchemaComposer::new()
+            .with_manifests(std::slice::from_ref(&manifest))
+            .unwrap()
+            .preview();
+
+        assert!(preview.added_fields.is_empty(), "{preview:?}");
+        assert_eq!(
+            manifest.context_extensions["swap"]["totalInputUsd"],
+            "UsdValuation"
+        );
+        assert_eq!(
+            manifest.context_extensions["swap"]["totalMinOutputUsd"],
+            "UsdValuation"
+        );
+        assert_eq!(
+            manifest.context_extensions["swap"]["effectiveRateVsOracleBps"],
+            "Long"
+        );
+        assert_eq!(
+            manifest.context_extensions["swap"]["totalInputFractionOfPortfolioBps"],
+            "Long"
+        );
+        assert_eq!(
+            manifest.context_extensions["swap"]["windowStats"],
+            "WindowStats"
+        );
+
+        let calls = super::plan_calls(&root, &[swap_envelope()], &[manifest], &json!({})).unwrap();
+        let methods = calls
+            .iter()
+            .map(|call| call.method.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(methods.contains("oracle.usd_value"));
+        assert!(methods.contains("oracle.effective_rate_bps"));
+        assert!(methods.contains("portfolio.input_fraction_bps"));
+        assert!(methods.contains("stat_window.swap_stats"));
     }
 
     #[test]

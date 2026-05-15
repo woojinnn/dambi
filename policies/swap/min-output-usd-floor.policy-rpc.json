@@ -14,7 +14,7 @@
       "outputs": [
         {
           "kind": "context",
-          "field": "rpcTotalMinOutputUsd",
+          "field": "totalMinOutputUsd",
           "type": "UsdValuation",
           "from": "$.result",
           "required": true
@@ -24,7 +24,7 @@
   ],
   "context_extensions": {
     "swap": {
-      "rpcTotalMinOutputUsd": "UsdValuation"
+      "totalMinOutputUsd": "UsdValuation"
     }
   }
 }

@@ -14,7 +14,6 @@ export type { VerdictDto } from "./wasm-bridge.types";
 
 interface WasmExports {
   install_policies_json(input: string): string;
-  evaluate_envelope_json(input_json: string): string;
   evaluate_policy_rpc_json(input_json: string): string;
   plan_policy_rpc_json(input_json: string): string;
   route_request_json(input_json: string): string;
@@ -85,43 +84,6 @@ export async function installPolicies(input: {
 }): Promise<void> {
   const exports = await load();
   unwrap<unknown>(exports.install_policies_json(JSON.stringify(input)));
-}
-
-export async function evaluateEnvelope({
-  envelope,
-  from,
-  to,
-  value_wei,
-  chain_id,
-  block_timestamp,
-  host_snapshot,
-}: {
-  envelope: {
-    category: string;
-    action: string;
-    fields: Record<string, unknown>;
-  };
-  from: string;
-  to: string;
-  value_wei: string;
-  chain_id: number;
-  block_timestamp: number;
-  host_snapshot: Record<string, unknown>;
-}): Promise<VerdictDto> {
-  const exports = await load();
-  const input = {
-    envelope,
-    from,
-    to,
-    value_wei,
-    chain_id,
-    block_timestamp,
-    host_snapshot,
-  };
-  const raw = unwrap<unknown>(
-    exports.evaluate_envelope_json(JSON.stringify(input)),
-  );
-  return parseVerdict(raw);
 }
 
 /**
