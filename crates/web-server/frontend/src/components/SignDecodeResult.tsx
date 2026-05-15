@@ -1,4 +1,5 @@
 import type { SignDecodeResponse } from '../api'
+import { MappingSection } from './MappingSection'
 
 interface Props {
   result: SignDecodeResponse | null
@@ -47,6 +48,13 @@ export function SignDecodeResult({ result, error }: Props) {
         </tbody>
       </table>
       <PayloadDetail payload={result.payload} />
+      {result.mapping && <MappingSection root={result.mapping} />}
+      {!result.mapping && result.mapping_error && (
+        <div className="mapping-error">
+          <h4>Schema mapping failed</h4>
+          <pre>{result.mapping_error}</pre>
+        </div>
+      )}
       <details className="raw">
         <summary>Raw JSON</summary>
         <pre>{JSON.stringify(result, null, 2)}</pre>
