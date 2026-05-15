@@ -84,13 +84,13 @@ pub fn policy_request_from_envelope(
         Action::Supply(action) => Ok(action.build(&ctx)),
         Action::Withdraw(action) => Ok(action.build(&ctx)),
         Action::Borrow(action) => Ok(action.build(&ctx)),
-        Action::Repay(_)
-        | Action::Liquidate(_)
-        | Action::FlashLoan(_)
-        | Action::SetAuthorization(_)
-        | Action::SignAuthorization(_)
-        | Action::Revoke(_)
-        | Action::Wrap(_)
+        Action::Repay(action) => Ok(action.build(&ctx)),
+        Action::Liquidate(action) => Ok(action.build(&ctx)),
+        Action::FlashLoan(action) => Ok(action.build(&ctx)),
+        Action::SetAuthorization(action) => Ok(action.build(&ctx)),
+        Action::SignAuthorization(action) => Ok(action.build(&ctx)),
+        Action::Revoke(action) => Ok(action.build(&ctx)),
+        Action::Wrap(_)
         | Action::Unwrap(_)
         | Action::Approve(_)
         | Action::SetApprovalForAll(_)
@@ -114,9 +114,193 @@ pub fn policy_request_from_envelope(
 #[cfg(test)]
 mod tests {
     use super::{policy_request_from_envelope, LoweringError};
+    use crate::action::lending::{
+        AuthorizationScope, BorrowAction, FlashLoanAction, FlashLoanKind, LiquidateAction,
+        LiquidationKind, RepayAction, RepayKind, RevokeAction, RevokeKind, SetAuthorizationAction,
+        SignAuthorizationAction, SignAuthorizationScope, SupplyAction, WithdrawAction,
+    };
     use crate::action::misc::ClaimRewardsAction;
-    use crate::action::{Action, ActionEnvelope, Address, Category, DecimalString};
+    use crate::action::{
+        Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef,
+        Category, DecimalString, Validity, ValiditySource,
+    };
     use std::str::FromStr as _;
+
+    fn address(value: &str) -> Address {
+        Address::from_str(value).unwrap()
+    }
+
+    fn decimal(value: &str) -> DecimalString {
+        DecimalString::from_str(value).unwrap()
+    }
+
+    fn erc20() -> AssetRef {
+        AssetRef {
+            kind: AssetKind::Erc20,
+            address: Some(address("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")),
+            token_id: None,
+            symbol: Some("USDC".to_owned()),
+            decimals: Some(6),
+        }
+    }
+
+    fn exact(value: &str) -> AmountConstraint {
+        AmountConstraint {
+            kind: AmountKind::Exact,
+            value: Some(decimal(value)),
+        }
+    }
+
+    fn validity() -> Validity {
+        Validity {
+            expires_at: decimal("1700000600"),
+            source: ValiditySource::SignatureDeadline,
+        }
+    }
+
+    fn lower(envelope: &ActionEnvelope) -> Result<crate::policy::PolicyRequest, LoweringError> {
+        policy_request_from_envelope(
+            envelope,
+            &address("0x1111111111111111111111111111111111111111"),
+            &address("0x2222222222222222222222222222222222222222"),
+            &decimal("0"),
+            1,
+            1_700_000_000,
+        )
+    }
+
+    fn envelope(action: Action) -> ActionEnvelope {
+        ActionEnvelope {
+            category: Category::Lending,
+            action,
+        }
+    }
+
+    #[test]
+    fn dispatch_routes_each_lending_variant_to_its_action_id() {
+        let me = address("0x1111111111111111111111111111111111111111");
+        let other = address("0x3333333333333333333333333333333333333333");
+        let cases: Vec<(Action, &'static str)> = vec![
+            (
+                Action::Supply(SupplyAction {
+                    market: None,
+                    asset: erc20(),
+                    amount: exact("1000"),
+                    amount_mode: None,
+                    recipient: me.clone(),
+                    from: None,
+                    validity: None,
+                }),
+                "supply",
+            ),
+            (
+                Action::Withdraw(WithdrawAction {
+                    market: None,
+                    asset: erc20(),
+                    amount: exact("1000"),
+                    amount_mode: None,
+                    recipient: me.clone(),
+                    on_behalf: None,
+                }),
+                "withdraw",
+            ),
+            (
+                Action::Borrow(BorrowAction {
+                    market: None,
+                    asset: erc20(),
+                    amount: exact("1000"),
+                    amount_mode: None,
+                    recipient: me.clone(),
+                    on_behalf: me.clone(),
+                    validity: None,
+                }),
+                "borrow",
+            ),
+            (
+                Action::Repay(RepayAction {
+                    market: None,
+                    asset: erc20(),
+                    amount: exact("1000"),
+                    amount_mode: None,
+                    on_behalf: me.clone(),
+                    repay_kind: RepayKind::DebtAsset,
+                    validity: None,
+                }),
+                "repay",
+            ),
+            (
+                Action::Liquidate(LiquidateAction {
+                    market: None,
+                    borrower: other.clone(),
+                    collateral_asset: None,
+                    debt_asset: erc20(),
+                    debt_to_cover: None,
+                    seized_collateral_amount: None,
+                    liquidation_kind: LiquidationKind::PoolShare,
+                    liquidate_mode: None,
+                    recipient: None,
+                    receive_a_token: None,
+                }),
+                "liquidate",
+            ),
+            (
+                Action::FlashLoan(FlashLoanAction {
+                    pool: None,
+                    assets: vec![erc20()],
+                    amounts: vec![exact("1000")],
+                    receiver: me.clone(),
+                    on_behalf: None,
+                    flash_loan_kind: FlashLoanKind::Simple,
+                    fee: None,
+                }),
+                "flash_loan",
+            ),
+            (
+                Action::SetAuthorization(SetAuthorizationAction {
+                    market: None,
+                    authorizer: me.clone(),
+                    authorized: other.clone(),
+                    is_authorized: true,
+                    authorization_scope: AuthorizationScope::All,
+                    amount: None,
+                }),
+                "set_authorization",
+            ),
+            (
+                Action::SignAuthorization(SignAuthorizationAction {
+                    market: None,
+                    authorizer: me.clone(),
+                    authorized: other.clone(),
+                    is_authorized: true,
+                    authorization_scope: SignAuthorizationScope::All,
+                    amount: None,
+                    nonce: None,
+                    validity: validity(),
+                }),
+                "sign_authorization",
+            ),
+            (
+                Action::Revoke(RevokeAction {
+                    target: None,
+                    caller: me.clone(),
+                    subject: other.clone(),
+                    revoke_kind: RevokeKind::Erc20Allowance,
+                }),
+                "revoke",
+            ),
+        ];
+
+        for (action, expected_action_id) in cases {
+            let envelope = envelope(action);
+            let request = lower(&envelope)
+                .unwrap_or_else(|error| panic!("{expected_action_id} should lower: {error}"));
+            assert_eq!(
+                request.action,
+                format!(r#"Action::"{expected_action_id}""#),
+                "wrong action uid for {expected_action_id}",
+            );
+        }
+    }
 
     #[test]
     fn unsupported_action_returns_unsupported_action_error() {

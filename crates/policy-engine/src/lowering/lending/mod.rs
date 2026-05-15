@@ -5,6 +5,12 @@
 
 pub(crate) mod borrow;
 pub(crate) mod common;
+pub(crate) mod flash_loan;
+pub(crate) mod liquidate;
+pub(crate) mod repay;
+pub(crate) mod revoke;
+pub(crate) mod set_authorization;
+pub(crate) mod sign_authorization;
 pub(crate) mod supply;
 pub(crate) mod withdraw;
 
