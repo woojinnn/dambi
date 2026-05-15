@@ -276,6 +276,8 @@ mod tests {
                 expected_value_out_usd: None,
                 allowance_covers_input: Some(true),
                 input_fraction_of_portfolio_bps: Some(125),
+                dapp_fee_bps: None,
+                dapp_fee_recipient: None,
             },
         }
     }

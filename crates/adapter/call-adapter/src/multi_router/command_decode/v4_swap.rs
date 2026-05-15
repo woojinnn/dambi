@@ -35,7 +35,7 @@ const V4_ACTION_SWAP_EXACT_OUT: u8 = 0x09;
 // Settlement actions — used for two-pass recipient patching, not emitted
 // as their own envelopes.
 const V4_ACTION_TAKE: u8 = 0x0e;
-// const V4_ACTION_TAKE_PORTION: u8 = 0x10;  // captured for PR 12
+const V4_ACTION_TAKE_PORTION: u8 = 0x10;
 
 sol! {
     #[allow(clippy::too_many_arguments)]
@@ -56,9 +56,10 @@ pub(in crate::multi_router) fn decode(
     let params: Vec<Vec<u8>> = parsed.params.iter().map(|b| b.to_vec()).collect();
     let steps = dispatch_opcodes(&actions, &params, &V4_ROUTER_TABLE);
 
-    // Pass 1 — collect swaps + take recipient sidecar.
+    // Pass 1 — collect swaps + take_recipient + take_portion sidecar.
     let mut envelopes = Vec::new();
     let mut take_recipient: Option<Address> = None;
+    let mut take_portion: Option<TakePortionInfo> = None;
 
     for step in &steps {
         match step.opcode {
@@ -82,39 +83,76 @@ pub(in crate::multi_router) fn decode(
                     take_recipient = Some(r);
                 }
             }
-            // SETTLE / TAKE_PORTION / TAKE_PAIR / etc. are intentionally
-            // unobserved here — they're either user→pool settlement (already
-            // implicit in swap.amount_in) or fee/closure ops the simulator
-            // would need richer state to reason about.
+            V4_ACTION_TAKE_PORTION => {
+                // TAKE_PORTION(currency, recipient, bips) — dApp/aggregator
+                // fee skim. Captured for SwapEnrichment so the wallet UI
+                // can surface "X bps goes to Y".
+                if let Some(info) = take_portion_from(step) {
+                    take_portion = Some(info);
+                }
+            }
+            // SETTLE / SETTLE_ALL / TAKE_PAIR / etc. — user→pool settlement
+            // (already implicit in swap.amount_in) or pair-management ops.
             _ => continue,
         }
     }
 
-    // Pass 2 — patch swap recipient if a TAKE destination was seen and
-    // the swap action's own recipient still defaults to ctx.from (V4
-    // doesn't carry recipient in swap params, so the inner decoders fall
-    // back to that default).
-    if let Some(real_recipient) = take_recipient {
-        for env in &mut envelopes {
-            if let Action::Swap(s) = &mut env.action {
-                if &s.recipient == ctx.from {
-                    s.recipient = real_recipient.clone();
-                }
+    // Pass 2 — patch swap recipient + dApp fee enrichment.
+    for env in &mut envelopes {
+        let Action::Swap(s) = &mut env.action else {
+            continue;
+        };
+        // Fix the recipient default. V4 swap params don't carry a recipient,
+        // so inner decoders default to ctx.from; patch with TAKE's real
+        // destination when present.
+        if let Some(real_recipient) = take_recipient.as_ref() {
+            if &s.recipient == ctx.from {
+                s.recipient = real_recipient.clone();
             }
+        }
+        // Stamp dApp fee enrichment when TAKE_PORTION was seen.
+        if let Some(info) = take_portion.as_ref() {
+            s.enrichment.dapp_fee_bps = Some(info.bips);
+            s.enrichment.dapp_fee_recipient = Some(info.recipient.clone());
         }
     }
 
     Ok(envelopes)
 }
 
+#[derive(Debug, Clone)]
+struct TakePortionInfo {
+    recipient: Address,
+    bips: u32,
+}
+
 /// Extract the `recipient` field from a TAKE step's args. TAKE's input
 /// signature is `(address currency, address recipient, uint256 amount)`,
 /// so args[1] is the recipient.
 fn take_recipient_from(step: &DecodedStep) -> Option<Address> {
-    use std::str::FromStr as _;
     let args = step.args.as_ref()?;
     let recipient_arg = args.get(1)?;
-    let DynSolValue::Address(addr) = &recipient_arg.value else {
+    address_from(&recipient_arg.value)
+}
+
+/// Extract `(recipient, bips)` from a TAKE_PORTION step. Signature is
+/// `(address currency, address recipient, uint256 bips)` so args[1] is
+/// recipient, args[2] is bips. Caller drops the result silently when
+/// either field can't be read — TAKE_PORTION is a best-effort enrichment,
+/// not a correctness gate.
+fn take_portion_from(step: &DecodedStep) -> Option<TakePortionInfo> {
+    let args = step.args.as_ref()?;
+    let recipient = address_from(&args.get(1)?.value)?;
+    let DynSolValue::Uint(bips_u, _) = &args.get(2)?.value else {
+        return None;
+    };
+    let bips = u32::try_from(*bips_u).ok()?;
+    Some(TakePortionInfo { recipient, bips })
+}
+
+fn address_from(value: &DynSolValue) -> Option<Address> {
+    use std::str::FromStr as _;
+    let DynSolValue::Address(addr) = value else {
         return None;
     };
     Address::from_str(&format!("0x{}", hex::encode(addr.0))).ok()

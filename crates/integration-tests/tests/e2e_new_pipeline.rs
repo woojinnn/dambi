@@ -357,6 +357,8 @@ fn synthetic_swap_request_with(input: SyntheticSwapInput<'_>) -> PolicyRequest {
         expected_value_out_usd: None,
         allowance_covers_input: input.allowance_covers_input,
         input_fraction_of_portfolio_bps: None,
+        dapp_fee_bps: None,
+        dapp_fee_recipient: None,
     };
     let envelope = ActionEnvelope {
         category: Category::Dex,

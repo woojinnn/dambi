@@ -83,6 +83,16 @@ pub struct SwapEnrichment {
     /// Input amount as basis points of the portfolio value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_fraction_of_portfolio_bps: Option<u32>,
+    /// dApp / aggregator fee taken out of the swap output, in basis points
+    /// (10000 = 100%). Populated for V4 `TAKE_PORTION` and similar
+    /// router-level fee opcodes; absent when no fee was charged or when
+    /// the router family doesn't expose one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dapp_fee_bps: Option<u32>,
+    /// Address receiving the `dapp_fee_bps` cut. Recorded so wallet UIs
+    /// can surface "X% goes to Y" instead of just an opaque skim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dapp_fee_recipient: Option<Address>,
 }
 
 impl SwapEnrichment {
@@ -94,6 +104,8 @@ impl SwapEnrichment {
             && self.expected_value_out_usd.is_none()
             && self.allowance_covers_input.is_none()
             && self.input_fraction_of_portfolio_bps.is_none()
+            && self.dapp_fee_bps.is_none()
+            && self.dapp_fee_recipient.is_none()
     }
 }
 
@@ -396,6 +408,8 @@ mod tests {
                 expected_value_out_usd: Some(usd("2001.00")),
                 allowance_covers_input: Some(true),
                 input_fraction_of_portfolio_bps: Some(125),
+                dapp_fee_bps: None,
+                dapp_fee_recipient: None,
             },
         };
 
