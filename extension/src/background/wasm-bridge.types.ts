@@ -2,7 +2,16 @@ type JsonRecord = Record<string, unknown>;
 
 const VERDICT_KINDS = ["pass", "fail", "warn"] as const;
 const POLICY_SEVERITIES = ["deny", "warn"] as const;
-const POLICY_REQUEST_ORIGINS = ["tx", "engine_error"] as const;
+// Wire-format strings emitted by `origin_to_string()` in
+// `crates/policy-engine-wasm/src/exports.rs`. `evaluate_policy_rpc_json`
+// dispatches every request with `PolicyRequestOrigin::Action`, so
+// production verdicts always carry `origin: "action"`. `"tx"` is reserved
+// in the enum and serializer but is not produced by any current call site;
+// `"engine_error"` is set by our own catch-path verdicts in
+// `orchestrator.engineErrorVerdict`. Removing any entry will route real
+// matched-policy verdicts through `engineErrorVerdict` and silently drop
+// the matched-policy list — keep this in sync with Rust's serializer.
+const POLICY_REQUEST_ORIGINS = ["action", "tx", "engine_error"] as const;
 
 export type Severity = (typeof POLICY_SEVERITIES)[number];
 export type Origin = (typeof POLICY_REQUEST_ORIGINS)[number];

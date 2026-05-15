@@ -60,6 +60,26 @@ describe("wasm bridge parsers", () => {
     ).toThrow(WasmDecodeError);
   });
 
+  it("accepts the production origin string emitted by evaluate_policy_rpc_json", () => {
+    // `crates/policy-engine-wasm/src/exports.rs` hard-codes every request
+    // to `PolicyRequestOrigin::Action`, so every real verdict from the
+    // current WASM path carries `origin: "action"`. Trimming this from
+    // POLICY_REQUEST_ORIGINS routes matched-policy verdicts through
+    // `engineErrorVerdict` and is a silent regression.
+    const productionShape = {
+      kind: "fail",
+      matched: [
+        {
+          policy_id: "user/max-input-usd-3",
+          reason: "Total input value is $3 or more",
+          severity: "deny",
+          origin: "action",
+        },
+      ],
+    };
+    expect(parseVerdict(productionShape)).toEqual(productionShape);
+  });
+
   it("installPolicies unwraps the WASM ok envelope", async () => {
     wasmMocks.installPoliciesJson.mockReturnValue(
       JSON.stringify({ ok: true, data: null }),
