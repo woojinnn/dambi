@@ -1,0 +1,16 @@
+{
+  "name": "adapter-registry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Static-file registry for WASM adapter artifacts (Phase 1 substrate)",
+  "scripts": {
+    "build:manifest": "node scripts/build-manifest.js",
+    "test": "../extension/node_modules/.bin/vitest run",
+    "test:watch": "../extension/node_modules/.bin/vitest",
+    "typecheck": "../extension/node_modules/.bin/tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
