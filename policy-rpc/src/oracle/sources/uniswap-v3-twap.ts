@@ -166,6 +166,11 @@ export class UniswapV3TwapSource implements OracleSource {
       );
     }
 
+    // The anchor read goes through the same `observeTwapTick` path as the
+    // primary read, which maps OLD/cardinality reverts to `stale` (not
+    // `unavailable`). That mapping is intentional: a stale anchor is a
+    // transient observation-cardinality issue the aggregator can handle via
+    // its all_sources_stale path, identical to a stale primary pool.
     const anchorTick = await this.observeTwapTick(client, anchor.pool);
     const wethUsd = priceFromTick(anchorTick, anchor);
 

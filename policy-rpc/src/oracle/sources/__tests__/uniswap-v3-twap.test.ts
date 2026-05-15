@@ -190,4 +190,49 @@ describe("UniswapV3TwapSource", () => {
       sourceId: "uniswap-v3-twap",
     });
   });
+
+  it("propagates stale (not unavailable) when the WETH anchor pool reverts with OLD", async () => {
+    // Non-stable quoted token forces the source to chain through the WETH
+    // anchor. If the anchor pool itself has insufficient observations the
+    // failure must surface as 'stale' so the aggregator routes through the
+    // same code path as a stale primary read.
+    const tknAddress = "0x1111111111111111111111111111111111111111";
+    const tknEntry: UniswapPoolEntry = {
+      pool: "0x2222222222222222222222222222222222222222",
+      tokenIsToken0: true,
+      tokenDecimals: 18,
+      quoteDecimals: 18,
+      quoteKind: "weth",
+    };
+    const anchorEntry: UniswapPoolEntry = {
+      pool: anchorPool,
+      tokenIsToken0: false,
+      tokenDecimals: 18,
+      quoteDecimals: 6,
+      quoteKind: "stable",
+    };
+
+    // Direct pool resolves normally, anchor reverts with "OLD".
+    const tknTick = tickForRawRatio(0.01);
+    const client = {
+      readContract: vi.fn(async (params: { address: string; args: [readonly number[]] }) => {
+        if (params.address.toLowerCase() === tknEntry.pool.toLowerCase()) {
+          const seconds = BigInt(params.args[0][0]);
+          return [[0n, BigInt(tknTick) * seconds], [0n, 0n]] as const;
+        }
+        throw new Error("execution reverted: OLD");
+      }),
+    } as unknown as PublicClient;
+
+    const source = new UniswapV3TwapSource({
+      registry: { 1: { [tknAddress]: tknEntry } },
+      wethAnchorPools: { 1: anchorEntry },
+      publicClient: client,
+    });
+
+    await expect(source.fetch(1, { address: tknAddress })).rejects.toMatchObject({
+      code: "stale",
+      sourceId: "uniswap-v3-twap",
+    });
+  });
 });
