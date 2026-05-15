@@ -7,3 +7,4 @@ mod common;
 mod dex;
 mod dispatch;
 mod error;
+mod lending;

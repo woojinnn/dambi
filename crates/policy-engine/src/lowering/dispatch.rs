@@ -81,8 +81,8 @@ pub fn policy_request_from_envelope(
         Action::BurnLiquidityNft(action) => Ok(action.build(&ctx)),
         Action::IncreaseLiquidity(action) => Ok(action.build(&ctx)),
         Action::DecreaseLiquidity(action) => Ok(action.build(&ctx)),
-        Action::Supply(_)
-        | Action::Withdraw(_)
+        Action::Supply(action) => Ok(action.build(&ctx)),
+        Action::Withdraw(_)
         | Action::Borrow(_)
         | Action::Repay(_)
         | Action::Liquidate(_)

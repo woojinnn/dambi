@@ -62,6 +62,60 @@ pub const NFT: &str = "nft";
 /// Recipient address field.
 pub const RECIPIENT: &str = "recipient";
 
+// ── Lending action context fields ──
+/// Lending market reference.
+pub const MARKET: &str = "market";
+/// Authorization or revoke target contract reference.
+pub const TARGET: &str = "target";
+/// Authorization scope discriminator.
+pub const AUTHORIZATION_SCOPE: &str = "authorizationScope";
+/// Authorizer account address.
+pub const AUTHORIZER: &str = "authorizer";
+/// Authorized account address.
+pub const AUTHORIZED: &str = "authorized";
+/// Whether an authorization grants authority.
+pub const IS_AUTHORIZED: &str = "isAuthorized";
+/// Whether the action originator is the operator on behalf of `onBehalf`.
+pub const ON_BEHALF: &str = "onBehalf";
+/// Account that funds or supplies the action.
+pub const FROM: &str = "from";
+/// Liquidation borrower address.
+pub const BORROWER: &str = "borrower";
+/// Collateral asset record for liquidation.
+pub const COLLATERAL_ASSET: &str = "collateralAsset";
+/// Debt asset record for liquidation.
+pub const DEBT_ASSET: &str = "debtAsset";
+/// Debt amount to cover during liquidation.
+pub const DEBT_TO_COVER: &str = "debtToCover";
+/// Collateral amount to seize during liquidation.
+pub const SEIZED_COLLATERAL_AMOUNT: &str = "seizedCollateralAmount";
+/// Liquidation mechanism discriminator.
+pub const LIQUIDATION_KIND: &str = "liquidationKind";
+/// Liquidation input dimension discriminator.
+pub const LIQUIDATE_MODE: &str = "liquidateMode";
+/// Whether Aave collateral is received as an aToken.
+pub const RECEIVE_A_TOKEN: &str = "receiveAToken";
+/// Flash loan callback receiver contract.
+pub const RECEIVER: &str = "receiver";
+/// Flash loan variant discriminator.
+pub const FLASH_LOAN_KIND: &str = "flashLoanKind";
+/// Flash loan fee amount.
+pub const FEE: &str = "fee";
+/// Repayment funding source discriminator.
+pub const REPAY_KIND: &str = "repayKind";
+/// Authorization signature nonce.
+pub const NONCE: &str = "nonce";
+/// Amount denomination discriminator (assets / shares).
+pub const AMOUNT_MODE: &str = "amountMode";
+/// Revoke caller address.
+pub const CALLER: &str = "caller";
+/// Revoke subject address.
+pub const SUBJECT: &str = "subject";
+/// Revoke variant discriminator.
+pub const REVOKE_KIND: &str = "revokeKind";
+/// Set of assets borrowed in a flash loan.
+pub const ASSETS: &str = "assets";
+
 // ── Derived action context fields ──
 /// Validity-window delta from `block_timestamp` in seconds.
 pub const VALIDITY_DELTA_SEC: &str = "validityDeltaSec";
