@@ -1,0 +1,28 @@
+{
+  "id": "default::lending/max-borrow-usd-1000",
+  "schema_version": 1,
+  "requires": [
+    {
+      "id": "lending-total-borrow-usd",
+      "when": { "action": "borrow" },
+      "method": "oracle.usd_value",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "asset": "$.action.asset",
+        "amount": "$.action.amount.value"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalBorrowedUsd",
+          "type": "UsdValuation",
+          "from": "$.result",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "context_extensions": {
+    "borrow": { "totalBorrowedUsd": "UsdValuation" }
+  }
+}
