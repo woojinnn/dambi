@@ -99,7 +99,7 @@ describe("OracleAggregator", () => {
     expect(valuation.confidence).toBe("low");
     expect(valuation.sourceBreakdown).toEqual([
       { sourceId: "ok", value: "200.0000", asOfTs: observedAt / 1000, included: true },
-      { sourceId: "err", value: "0.0000", asOfTs: 0, included: false, reason: "unavailable" },
+      { sourceId: "err", value: null, asOfTs: 0, included: false, reason: "unavailable" },
     ]);
   });
 
@@ -259,6 +259,37 @@ describe("OracleAggregator", () => {
 
     await expect(aggregator.aggregate(1, { address: wethAddress })).rejects.toMatchObject({
       code: "oracle_disagreement",
+    });
+  });
+
+  it("marks failed sources with value: null (not '0.0000') in the breakdown", async () => {
+    const sources = [
+      new FakeSource("ok", async () => fixedSample("ok", 42, observedAt)),
+      new FakeSource("stale", async () => {
+        throw new OracleSourceError("stale", "stale", "old");
+      }),
+      new FakeSource("crash", async () => {
+        throw new Error("totally unrelated");
+      }),
+    ];
+    const aggregator = new OracleAggregator({ sources, nowMs, outputDecimals: 4 });
+
+    const valuation = await aggregator.aggregate(1, { address: wethAddress });
+    const staleEntry = valuation.sourceBreakdown.find((s) => s.sourceId === "stale");
+    const crashEntry = valuation.sourceBreakdown.find((s) => s.sourceId === "crash");
+    expect(staleEntry).toEqual({
+      sourceId: "stale",
+      value: null,
+      asOfTs: 0,
+      included: false,
+      reason: "stale",
+    });
+    expect(crashEntry).toEqual({
+      sourceId: "crash",
+      value: null,
+      asOfTs: 0,
+      included: false,
+      reason: "totally unrelated",
     });
   });
 

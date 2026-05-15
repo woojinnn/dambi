@@ -56,10 +56,14 @@ export interface OracleUsdValueParams {
  * and whether the aggregator kept or dropped it. Additive next to the legacy
  * `sources: string[]` field so callers reading the existing shape continue to
  * work.
+ *
+ * `value` is `null` for sources that failed (e.g. `unavailable`, `stale`,
+ * `unsupported_token`) so consumers can distinguish a real $0 quote from a
+ * source that produced no quote at all. `asOfTs` is `0` for failed sources.
  */
 export interface UsdValuationSource extends JsonObject {
   sourceId: string;
-  value: string;
+  value: string | null;
   asOfTs: number;
   included: boolean;
   reason?: string;

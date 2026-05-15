@@ -279,9 +279,12 @@ function sampleToBreakdown(
 }
 
 function failureToBreakdown(failure: CollectedFailure): UsdValuationSource {
+  // Use `null` (not "0.0000") so consumers can tell a failed source apart
+  // from a source that genuinely quoted $0. Failed sources also expose
+  // `asOfTs: 0` since no quote timestamp exists.
   return {
     sourceId: failure.sourceId,
-    value: "0.0000",
+    value: null,
     asOfTs: 0,
     included: false,
     reason: failure.code === "unknown" ? failure.reason : failure.code,
