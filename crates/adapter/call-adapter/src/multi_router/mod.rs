@@ -25,6 +25,7 @@ mod command_decode;
 mod commands;
 mod common;
 mod execute;
+mod merge;
 mod v4_actions;
 
 use abi_resolver::subdecode::protocols::universal_router::{
@@ -73,7 +74,8 @@ impl CallAdapter for MultiRouterCallAdapter {
         calldata: &[u8],
     ) -> Result<Vec<ActionEnvelope>, AdapterError> {
         let (commands, inputs, validity) = execute::decode_outer_call(calldata)?;
-        commands::expand_commands(ctx, &commands, &inputs, validity, 0)
+        let envelopes = commands::expand_commands(ctx, &commands, &inputs, validity, 0)?;
+        Ok(merge::merge(envelopes))
     }
 }
 
