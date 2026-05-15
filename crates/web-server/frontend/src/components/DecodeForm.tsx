@@ -39,9 +39,11 @@ interface Props {
   chainId: string
   address: string
   calldata: string
+  from: string
   onChainIdChange: (v: string) => void
   onAddressChange: (v: string) => void
   onCalldataChange: (v: string) => void
+  onFromChange: (v: string) => void
   onSubmit: (req: DecodeRequest) => void
   loading: boolean
 }
@@ -50,9 +52,11 @@ export function DecodeForm({
   chainId,
   address,
   calldata,
+  from,
   onChainIdChange,
   onAddressChange,
   onCalldataChange,
+  onFromChange,
   onSubmit,
   loading,
 }: Props) {
@@ -60,6 +64,7 @@ export function DecodeForm({
     onChainIdChange(String(s.request.chain_id))
     onAddressChange(s.request.address)
     onCalldataChange(s.request.calldata)
+    onFromChange(s.request.from ?? '')
   }
 
   function submit(e: React.FormEvent) {
@@ -69,7 +74,15 @@ export function DecodeForm({
       alert('chain_id must be a positive number')
       return
     }
-    onSubmit({ chain_id: id, address: address.trim(), calldata: calldata.trim() })
+    const trimmedFrom = from.trim()
+    onSubmit({
+      chain_id: id,
+      address: address.trim(),
+      calldata: calldata.trim(),
+      // Only include `from` when non-empty so backend keeps its
+      // zero-address default for callers who don't care.
+      ...(trimmedFrom ? { from: trimmedFrom } : {}),
+    })
   }
 
   return (
@@ -94,6 +107,19 @@ export function DecodeForm({
             placeholder="0x…"
             value={address}
             onChange={(e) => onAddressChange(e.target.value)}
+            disabled={loading}
+            spellCheck={false}
+          />
+        </label>
+      </div>
+      <div className="row">
+        <label>
+          <span>From address (optional — wallet user)</span>
+          <input
+            type="text"
+            placeholder="0x…  (leave blank to use zero address)"
+            value={from}
+            onChange={(e) => onFromChange(e.target.value)}
             disabled={loading}
             spellCheck={false}
           />

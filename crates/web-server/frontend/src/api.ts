@@ -76,6 +76,15 @@ export interface DecodeRequest {
    * skip the fallback to keep the 5 req/s free-tier budget intact.
    */
   rpc_method?: string
+  /**
+   * Wallet address originating the call (`tx.from`). Optional. When
+   * supplied, the backend simulator inside `route_request` recognises
+   * this address as the wallet user and can collapse multi-step routing
+   * (split swaps, SWEEP-to-user, V4 TAKE-to-user) into a single envelope.
+   * When omitted, the simulator can't identify the user inside an
+   * external recipient field and falls back to a fan-out envelope list.
+   */
+  from?: string
 }
 
 export interface ApiError {

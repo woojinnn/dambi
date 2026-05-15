@@ -457,6 +457,14 @@ struct DecodeRequest {
     /// skipped (strict default).
     #[serde(default)]
     rpc_method: Option<String>,
+    /// Wallet address that originates the call (`tx.from`). Optional but
+    /// recommended: the `mapping` payload is built by routing the calldata
+    /// through `request_router::route_request`, which uses `from` to
+    /// resolve "the user" inside the simulator. When omitted the simulator
+    /// can't recognise the user's external address as their own and falls
+    /// back to a fan-out envelope list instead of merging into one.
+    #[serde(default)]
+    from: Option<String>,
 }
 
 /// Whether `rpc_method` represents a wallet write or sign operation —
@@ -626,7 +634,13 @@ async fn decode(State(state): State<AppState>, Json(req): Json<DecodeRequest>) -
     // `mapping = None` and the frontend simply omits the section — never
     // breaks the decode response itself.
     if let DecodeResponse::Resolved { mapping, .. } = &mut response {
-        *mapping = build_mapping(&state.route_registries, req.chain_id, &address, &calldata);
+        *mapping = build_mapping(
+            &state.route_registries,
+            req.chain_id,
+            &address,
+            &calldata,
+            req.from.as_deref(),
+        );
     }
     Json(response).into_response()
 }
@@ -635,11 +649,18 @@ async fn decode(State(state): State<AppState>, Json(req): Json<DecodeRequest>) -
 /// `MappingSection`. Returns `None` when no call adapter / mapper matches
 /// (e.g. unknown selector) — the absence is silent because the resolved
 /// decode itself is still useful.
+///
+/// `from_hex` is the wallet address originating the call. When supplied
+/// the simulator can recognise the user's external address inside the
+/// envelope chain and collapse multi-step routing (split swaps, SWEEP
+/// to user, etc.) into a single envelope. When omitted, ctx.from
+/// defaults to the zero address and the simulator falls back to fan-out.
 fn build_mapping(
     registries: &Arc<request_router::DefaultRegistries>,
     chain_id: u64,
     target: &Address,
     calldata: &[u8],
+    from_hex: Option<&str>,
 ) -> Option<serde_json::Value> {
     use serde_json::json;
 
@@ -652,7 +673,16 @@ fn build_mapping(
 
     let to_hex = format!("0x{}", hex::encode(target));
     let data_hex = format!("0x{}", hex::encode(calldata));
-    let params = json!([{ "to": to_hex, "data": data_hex }]);
+
+    // Fall back to the zero address when caller didn't provide `from`.
+    // route_call accepts a missing `from` field and applies the same
+    // default internally; we mirror it here so the mapping `from` field
+    // matches the simulator's actor.
+    let from_hex = from_hex
+        .map(str::to_owned)
+        .unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_owned());
+
+    let params = json!([{ "from": from_hex, "to": to_hex, "data": data_hex }]);
 
     let envelopes = match request_router::route_request(&ctx, "eth_sendTransaction", &params, chain_id) {
         Ok(e) if !e.is_empty() => e,
@@ -670,7 +700,7 @@ fn build_mapping(
         "schemaVersion": "1.0.1",
         "requestKind": "transaction",
         "chainId": chain_id,
-        "from": "0x0000000000000000000000000000000000000000",
+        "from": from_hex,
         "to": to_hex,
         "value": "0",
         "selector": selector_hex,

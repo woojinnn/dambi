@@ -193,6 +193,7 @@ function App() {
   const [chainId, setChainId] = useState<string>('1')
   const [address, setAddress] = useState<string>('')
   const [calldata, setCalldata] = useState<string>('')
+  const [from, setFrom] = useState<string>('')
   const [result, setResult] = useState<DecodeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -285,6 +286,10 @@ function App() {
     setChainId(f.chainId)
     setAddress(f.address)
     setCalldata(f.calldata)
+    // RPC events carry a `from` address (the wallet user) alongside `to`.
+    // Populate it so the simulator can recognise the user inside multi-step
+    // routing instead of falling back to the zero-address default.
+    setFrom(entry.payload.from ?? '')
     setPendingRpcMethod(entry.payload.method)
     requestAnimationFrame(() => {
       document.querySelector('.write-decoder')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -377,9 +382,11 @@ function App() {
               chainId={chainId}
               address={address}
               calldata={calldata}
+              from={from}
               onChainIdChange={trackedSetChainId}
               onAddressChange={trackedSetAddress}
               onCalldataChange={trackedSetCalldata}
+              onFromChange={setFrom}
               onSubmit={handleSubmit}
               loading={loading}
             />
