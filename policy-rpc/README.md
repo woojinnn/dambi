@@ -12,6 +12,21 @@ Reference TypeScript server for policy-specific remote facts.
 `oracle.usd_value` resolves a CoinGecko token USD price and computes a
 `UsdValuation` result with bigint-safe scaled decimal math.
 
+The reference server also exposes v1 mock methods for host-capability-shaped
+facts while the backing services are still being designed:
+
+- `clock.now`
+- `approval.allowance`
+- `approval.cover_inputs`
+- `portfolio.balance`
+- `portfolio.input_fraction_bps`
+- `oracle.effective_rate_bps`
+- `stat_window.snapshot`
+- `stat_window.swap_stats`
+
+`policy-schema/extensions/DEX/swap.policy-rpc.json` shows how the legacy swap
+enrichment fields can be requested and projected through policy-rpc manifests.
+
 ## Development
 
 ```bash

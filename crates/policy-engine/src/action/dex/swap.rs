@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::common::{Address, AmountConstraint, AssetRef, Validity};
 
-use super::{SwapEnrichment, SwapMode};
+use super::SwapMode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,9 +29,6 @@ pub struct SwapAction {
     /// Pool fee in basis points, when known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fee_bps: Option<u32>,
-    /// Host-derived enrichment facts.
-    #[serde(default, skip_serializing_if = "SwapEnrichment::is_empty")]
-    pub enrichment: SwapEnrichment,
 }
 
 #[cfg(test)]
@@ -39,7 +36,7 @@ mod tests {
     use super::*;
     use crate::action::common::AmountKind;
     use crate::action::dex::test_support::{
-        address, amount, assert_roundtrip, token_pair, usd, validity,
+        address, amount, assert_roundtrip, token_pair, validity,
     };
     use serde_json::{json, Value};
 
@@ -54,7 +51,6 @@ mod tests {
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: None,
             fee_bps: None,
-            enrichment: SwapEnrichment::default(),
         };
 
         assert_roundtrip(&action);
@@ -74,37 +70,12 @@ mod tests {
             recipient: address("0x2222222222222222222222222222222222222222"),
             validity: Some(validity()),
             fee_bps: Some(5),
-            enrichment: SwapEnrichment {
-                value_in_usd: Some(usd("2000.00")),
-                min_value_out_usd: Some(usd("1990.00")),
-                expected_value_out_usd: Some(usd("2001.00")),
-                input_fraction_of_portfolio_bps: Some(125),
-            },
         };
 
         assert_roundtrip(&action);
         let value = serde_json::to_value(&action).unwrap();
         assert_eq!(value.get("swapMode"), Some(&json!("exact_out")));
         assert!(value.get("mode").is_none());
-    }
-
-    #[test]
-    fn test_swap_enrichment_omitted_when_empty() {
-        let action = SwapAction {
-            swap_mode: SwapMode::ExactIn,
-            token_in: token_pair()[0].clone(),
-            token_out: token_pair()[1].clone(),
-            amount_in: amount(AmountKind::Exact, "1000000000000000000"),
-            amount_out: amount(AmountKind::Min, "1900000"),
-            recipient: address("0x2222222222222222222222222222222222222222"),
-            validity: None,
-            fee_bps: None,
-            enrichment: SwapEnrichment::default(),
-        };
-
-        let value = serde_json::to_value(action).unwrap();
-
-        assert!(value.get("enrichment").is_none());
     }
 
     #[test]
@@ -148,6 +119,5 @@ mod tests {
         let action = serde_json::from_value::<SwapAction>(fixture).unwrap();
 
         assert_eq!(action.swap_mode, SwapMode::ExactIn);
-        assert!(action.enrichment.is_empty());
     }
 }

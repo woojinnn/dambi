@@ -292,6 +292,8 @@ fn ingest_policy(
 mod tests {
     use super::super::{PolicyEngineBuilder, PolicyError, PolicyRequest};
     use super::*;
+    use crate::policy_rpc::PolicyManifest;
+    use crate::schema::PolicySchemaComposer;
     use serde_json::json;
 
     fn entities() -> JsonValue {
@@ -341,9 +343,40 @@ mod tests {
         })
     }
 
+    fn total_input_usd_manifest() -> PolicyManifest {
+        serde_json::from_value(json!({
+            "id": "test/total-input-usd",
+            "schema_version": 1,
+            "requires": [],
+            "context_extensions": {
+                "swap": {
+                    "totalInputUsd": "UsdValuation"
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn engine_with_total_input_usd_schema<I, S>(sources: I) -> PolicyEngine
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let manifest = total_input_usd_manifest();
+        let schema = PolicySchemaComposer::new()
+            .with_manifests(std::slice::from_ref(&manifest))
+            .unwrap()
+            .compose();
+        let mut builder = PolicyEngineBuilder::with_schema_text(schema);
+        for source in sources {
+            builder = builder.add_text(source);
+        }
+        builder.build().unwrap()
+    }
+
     #[test]
     fn empty_policy_set_allows_everything() {
-        let engine = PolicyEngine::from_sources(Vec::<&str>::new()).unwrap();
+        let engine = engine_with_total_input_usd_schema(Vec::<&str>::new());
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
@@ -368,7 +401,7 @@ mod tests {
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
             };
         "#;
-        let engine = PolicyEngine::from_sources([policy]).unwrap();
+        let engine = engine_with_total_input_usd_schema([policy]);
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
@@ -403,7 +436,7 @@ mod tests {
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
             };
         "#;
-        let engine = PolicyEngine::from_sources([policy]).unwrap();
+        let engine = engine_with_total_input_usd_schema([policy]);
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
@@ -428,7 +461,7 @@ mod tests {
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
             };
         "#;
-        let engine = PolicyEngine::from_sources([policy]).unwrap();
+        let engine = engine_with_total_input_usd_schema([policy]);
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
@@ -467,7 +500,7 @@ mod tests {
               context.totalInputUsd.value.greaterThan(decimal("150.00"))
             };
         "#;
-        let engine = PolicyEngine::from_sources([policy]).unwrap();
+        let engine = engine_with_total_input_usd_schema([policy]);
         let v = engine
             .evaluate(
                 r#"Wallet::"0xUser""#,
@@ -517,8 +550,7 @@ mod tests {
             @severity("deny")
             forbid (principal, action == Action::"swap", resource)
             when {
-              context has totalInputUsd &&
-              context.totalInputUSd.value.greaterThan(decimal("0"))
+              context.recipienT == "0x0000000000000000000000000000000000000001"
             };
         "#;
 
@@ -573,7 +605,7 @@ mod tests {
               context.totalInputUsd.value.greaterThan(decimal("100.00"))
             };
         "#;
-        let engine = PolicyEngine::builder().add_text(policy).build().unwrap();
+        let engine = engine_with_total_input_usd_schema([policy]);
 
         let err = engine
             .evaluate(
@@ -598,7 +630,7 @@ mod tests {
             @severity("deny")
             forbid (principal, action == Action::"swap", resource);
         "#;
-        let engine = PolicyEngine::from_sources([policy]).unwrap();
+        let engine = engine_with_total_input_usd_schema([policy]);
         let request = PolicyRequest::new(
             r#"Wallet::"0xUser""#,
             r#"Action::"swap""#,

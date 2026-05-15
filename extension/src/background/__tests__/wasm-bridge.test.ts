@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseVerdict, WasmDecodeError } from "../wasm-bridge.types";
 import {
   EngineError,
-  evaluateEnvelope,
   installPolicies,
   evaluatePolicyRpc,
   planPolicyRpc,
@@ -12,7 +11,6 @@ import {
 const wasmMocks = vi.hoisted(() => ({
   init: vi.fn(async () => undefined),
   installPoliciesJson: vi.fn(),
-  evaluateEnvelopeJson: vi.fn(),
   evaluatePolicyRpcJson: vi.fn(),
   planPolicyRpcJson: vi.fn(),
   routeRequestJson: vi.fn(),
@@ -29,7 +27,6 @@ vi.mock("webextension-polyfill", () => ({
 vi.mock("../../wasm/policy_engine_wasm", () => ({
   default: wasmMocks.init,
   install_policies_json: wasmMocks.installPoliciesJson,
-  evaluate_envelope_json: wasmMocks.evaluateEnvelopeJson,
   evaluate_policy_rpc_json: wasmMocks.evaluatePolicyRpcJson,
   plan_policy_rpc_json: wasmMocks.planPolicyRpcJson,
   route_request_json: wasmMocks.routeRequestJson,
@@ -197,64 +194,5 @@ describe("wasm bridge parsers", () => {
     expect(wasmMocks.evaluatePolicyRpcJson).toHaveBeenCalledWith(
       JSON.stringify(input),
     );
-  });
-
-  it("evaluateEnvelope passes through the WASM verdict envelope", async () => {
-    const verdict = {
-      kind: "warn",
-      matched: [
-        {
-          policy_id: "policy::warn",
-          reason: "watch",
-          severity: "warn",
-          origin: "action",
-        },
-      ],
-    };
-    wasmMocks.evaluateEnvelopeJson.mockReturnValue(
-      JSON.stringify({ ok: true, data: verdict }),
-    );
-
-    const input = {
-      envelope: {
-        category: "dex",
-        action: "swap",
-        fields: { mode: "exact_in" },
-      },
-      from: "0x1111111111111111111111111111111111111111",
-      to: "0x2222222222222222222222222222222222222222",
-      value_wei: "0",
-      chain_id: 1,
-      block_timestamp: 1_700_000_000,
-      host_snapshot: {},
-    };
-
-    const result = await evaluateEnvelope(input);
-
-    expect(result).toEqual(verdict);
-    expect(wasmMocks.evaluateEnvelopeJson).toHaveBeenCalledWith(
-      JSON.stringify(input),
-    );
-  });
-
-  it("evaluateEnvelope surfaces engine errors as EngineError", async () => {
-    wasmMocks.evaluateEnvelopeJson.mockReturnValue(
-      JSON.stringify({
-        ok: false,
-        error: { kind: "engine_failure", message: "x" },
-      }),
-    );
-
-    await expect(
-      evaluateEnvelope({
-        envelope: { category: "dex", action: "swap", fields: {} },
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-        chain_id: 1,
-        block_timestamp: 1_700_000_000,
-        host_snapshot: {},
-      }),
-    ).rejects.toBeInstanceOf(EngineError);
   });
 });

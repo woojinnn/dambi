@@ -1,0 +1,112 @@
+{
+  "id": "schema::DEX/swap/enrichment",
+  "schema_version": 1,
+  "requires": [
+    {
+      "id": "swap-total-input-usd",
+      "when": { "action": "swap" },
+      "method": "oracle.usd_value",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "asset": "$.action.tokenIn",
+        "amount": "$.action.amountIn.value"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputUsd",
+          "type": "UsdValuation",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "swap-total-min-output-usd",
+      "when": { "action": "swap" },
+      "method": "oracle.usd_value",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "asset": "$.action.tokenOut",
+        "amount": "$.action.amountOut.value"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalMinOutputUsd",
+          "type": "UsdValuation",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "swap-effective-rate-vs-oracle-bps",
+      "when": { "action": "swap" },
+      "method": "oracle.effective_rate_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "token_in": "$.action.tokenIn",
+        "amount_in": "$.action.amountIn.value",
+        "token_out": "$.action.tokenOut",
+        "amount_out": "$.action.amountOut.value"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "effectiveRateVsOracleBps",
+          "type": "Long",
+          "from": "$.result.bps",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "swap-input-fraction-of-portfolio-bps",
+      "when": { "action": "swap" },
+      "method": "portfolio.input_fraction_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "asset": "$.action.tokenIn",
+        "amount": "$.action.amountIn.value"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "totalInputFractionOfPortfolioBps",
+          "type": "Long",
+          "from": "$.result.bps",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "swap-window-stats",
+      "when": { "action": "swap" },
+      "method": "stat_window.swap_stats",
+      "params": {
+        "owner": "$.root.from",
+        "action": "swap"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "windowStats",
+          "type": "WindowStats",
+          "from": "$.result",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "context_extensions": {
+    "swap": {
+      "totalInputUsd": "UsdValuation",
+      "totalMinOutputUsd": "UsdValuation",
+      "effectiveRateVsOracleBps": "Long",
+      "totalInputFractionOfPortfolioBps": "Long",
+      "windowStats": "WindowStats"
+    }
+  }
+}

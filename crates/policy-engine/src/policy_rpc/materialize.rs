@@ -233,6 +233,7 @@ fn canonical_manifest_type(type_name: &str) -> Result<&'static str, PolicyRpcErr
         "Bool" => Ok("Bool"),
         "decimal" | "Decimal" => Ok("decimal"),
         "UsdValuation" => Ok("UsdValuation"),
+        "WindowStats" => Ok("WindowStats"),
         "Set<String>" => Ok("Set<String>"),
         other => Err(PolicyRpcError::InvalidManifest(format!(
             "unsupported context field type `{other}`"
@@ -265,6 +266,7 @@ fn materialize_value(value: &Value, type_name: &ProjectionType) -> Result<Value,
             .map(crate::cedar_json::decimal_json)
             .ok_or_else(|| PolicyRpcError::RpcResult("expected Decimal string".to_owned())),
         ProjectionType::UsdValuation => usd_valuation_from_json(value),
+        ProjectionType::WindowStats => window_stats_from_json(value),
         ProjectionType::SetString => {
             let array = value.as_array().ok_or_else(|| {
                 PolicyRpcError::RpcResult("expected Set<String> array".to_owned())
@@ -318,4 +320,46 @@ fn usd_valuation_from_json(value: &Value) -> Result<Value, PolicyRpcError> {
         stale_sec,
         sources,
     }))
+}
+
+fn window_stats_from_json(value: &Value) -> Result<Value, PolicyRpcError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| PolicyRpcError::RpcResult("expected WindowStats object".to_owned()))?;
+    let mut out = Map::new();
+
+    if let Some(volume) = object.get("swapVolumeUsd24h") {
+        let volume = volume.as_str().ok_or_else(|| {
+            PolicyRpcError::RpcResult(
+                "expected WindowStats.swapVolumeUsd24h decimal string".to_owned(),
+            )
+        })?;
+        out.insert(
+            "swapVolumeUsd24h".to_owned(),
+            crate::cedar_json::decimal_json(volume),
+        );
+    }
+
+    if let Some(count) = object.get("swapCount24h") {
+        let count = long_from_json(count).ok_or_else(|| {
+            PolicyRpcError::RpcResult("expected WindowStats.swapCount24h Long".to_owned())
+        })?;
+        out.insert("swapCount24h".to_owned(), Value::from(count));
+    }
+
+    for field in object.keys() {
+        if field != "swapVolumeUsd24h" && field != "swapCount24h" {
+            return Err(PolicyRpcError::RpcResult(format!(
+                "unexpected WindowStats field `{field}`"
+            )));
+        }
+    }
+
+    Ok(Value::Object(out))
+}
+
+fn long_from_json(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
 }

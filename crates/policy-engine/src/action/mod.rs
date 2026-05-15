@@ -19,6 +19,6 @@ pub(crate) mod test_support;
 
 pub use common::{
     Address, AmountConstraint, AmountKind, AssetKind, AssetRef, AssetRefWithAmountConstraint,
-    DecimalString, Hex, UsdValuation, Validity, ValiditySource,
+    DecimalString, Hex, Validity, ValiditySource,
 };
 pub use envelope::{Action, ActionEnvelope, Category};

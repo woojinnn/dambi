@@ -213,23 +213,6 @@ pub struct Validity {
     pub source: ValiditySource,
 }
 
-/// USD value and provenance metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UsdValuation {
-    /// USD value as a decimal string.
-    pub value: String,
-    /// Source timestamp for the valuation, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub as_of_ts: Option<u64>,
-    /// Data sources that contributed to the valuation, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sources: Option<Vec<String>>,
-    /// Age of the valuation in seconds, when known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stale_sec: Option<u64>,
-}
-
 fn validate_hex_prefixed(
     s: &str,
     expected_digits: Option<usize>,

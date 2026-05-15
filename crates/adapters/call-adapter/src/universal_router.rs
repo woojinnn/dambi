@@ -2,7 +2,7 @@ use std::str::FromStr as _;
 
 use abi_resolver::decoders::universal_router::UniversalRouterDecoder;
 use abi_resolver::{DecodeContext, DecodedCall, DecodedValue, Decoder as _};
-use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
+use policy_engine::action::dex::{SwapAction, SwapMode};
 use policy_engine::action::{
     Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef, Category,
     DecimalString, Validity, ValiditySource,
@@ -110,7 +110,6 @@ fn decode_v3_swap_exact_in(
         recipient,
         validity,
         fee_bps: parsed_path.fee_bps,
-        enrichment: SwapEnrichment::default(),
     }))
 }
 
@@ -141,7 +140,6 @@ fn decode_v3_swap_exact_out(
         recipient,
         validity,
         fee_bps: parsed_path.fee_bps,
-        enrichment: SwapEnrichment::default(),
     }))
 }
 
@@ -166,7 +164,6 @@ fn decode_v2_swap_exact_in(
         recipient,
         validity,
         fee_bps: Some(30),
-        enrichment: SwapEnrichment::default(),
     }))
 }
 
@@ -191,7 +188,6 @@ fn decode_v2_swap_exact_out(
         recipient,
         validity,
         fee_bps: Some(30),
-        enrichment: SwapEnrichment::default(),
     }))
 }
 

@@ -85,7 +85,7 @@ mod tests {
         EmptyTokenRegistry, InMemoryMapperRegistry, MapContext, Mapper, MapperError, MapperId,
         MapperMatchKey, TokenMetadata, TokenRegistry,
     };
-    use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
+    use policy_engine::action::dex::{SwapAction, SwapMode};
     use policy_engine::action::misc::WrapAction;
     use policy_engine::action::{
         Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef,
@@ -478,7 +478,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -504,7 +503,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }

@@ -60,11 +60,88 @@ describe("policy-rpc HTTP server", () => {
     await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
-  it("lists oracle.usd_value in the registered methods", async () => {
+  it("lists registered methods", async () => {
     const response = await fetch(`${baseUrl}/v1/methods`);
 
     await expect(response.json()).resolves.toEqual({
-      methods: ["oracle.usd_value"],
+      methods: [
+        "approval.allowance",
+        "approval.cover_inputs",
+        "clock.now",
+        "oracle.effective_rate_bps",
+        "oracle.usd_value",
+        "portfolio.balance",
+        "portfolio.input_fraction_bps",
+        "stat_window.snapshot",
+        "stat_window.swap_stats",
+      ],
+    });
+  });
+
+  it("executes host-capability mock methods in one batch", async () => {
+    const rpcResponse = await fetch(`${baseUrl}/v1/rpc`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        request_id: "eval-host-mocks",
+        calls: [
+          { id: "now", method: "clock.now", params: {} },
+          {
+            id: "allowance",
+            method: "approval.allowance",
+            params: { allowance: "100", requested_amount: "50" },
+          },
+          { id: "cover", method: "approval.cover_inputs", params: {} },
+          { id: "balance", method: "portfolio.balance", params: { balance: "7" } },
+          {
+            id: "fraction",
+            method: "portfolio.input_fraction_bps",
+            params: { bps: 125 },
+          },
+          {
+            id: "rate",
+            method: "oracle.effective_rate_bps",
+            params: { bps: 9900 },
+          },
+          {
+            id: "stats",
+            method: "stat_window.swap_stats",
+            params: { swap_volume_usd_24h: "42.0000", swap_count_24h: 3 },
+          },
+        ],
+      }),
+    });
+
+    await expect(rpcResponse.json()).resolves.toEqual({
+      request_id: "eval-host-mocks",
+      results: [
+        { id: "now", ok: true, result: { nowTs: 1778750005 } },
+        {
+          id: "allowance",
+          ok: true,
+          result: {
+            allowance: "100",
+            coversRequestedAmount: true,
+            hasUnlimitedAllowance: false,
+          },
+        },
+        {
+          id: "cover",
+          ok: true,
+          result: {
+            allowancesCoverInputs: true,
+            hasUnlimitedAllowance: false,
+          },
+        },
+        { id: "balance", ok: true, result: { balance: "7" } },
+        { id: "fraction", ok: true, result: { bps: 125 } },
+        { id: "rate", ok: true, result: { bps: 9900 } },
+        {
+          id: "stats",
+          ok: true,
+          result: { swapVolumeUsd24h: "42.0000", swapCount24h: 3 },
+        },
+      ],
     });
   });
 

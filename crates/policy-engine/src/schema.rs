@@ -168,10 +168,13 @@ fn added_fields(
                 validate_field_name(field)?;
                 let canonical_type = canonical_type(type_name)?;
                 let key = (action.clone(), field.clone());
-                if base_declared.contains_key(&key) {
-                    return Err(PolicyRpcError::Schema(format!(
-                        "context extension {action}.{field} collides with a base schema field"
-                    )));
+                if let Some(base_type) = base_declared.get(&key) {
+                    if base_type != canonical_type {
+                        return Err(PolicyRpcError::Schema(format!(
+                            "context extension {action}.{field} has type {canonical_type}, but base schema declares {base_type}"
+                        )));
+                    }
+                    continue;
                 }
                 if let Some(existing) = declared.get(&key) {
                     if existing != canonical_type {
@@ -292,6 +295,7 @@ fn canonical_type(type_name: &str) -> Result<&'static str, PolicyRpcError> {
         "Bool" => Ok("Bool"),
         "decimal" | "Decimal" => Ok("decimal"),
         "UsdValuation" => Ok("UsdValuation"),
+        "WindowStats" => Ok("WindowStats"),
         "Set<String>" => Ok("Set<String>"),
         other => Err(PolicyRpcError::Schema(format!(
             "unsupported context field type `{other}`"

@@ -2,7 +2,7 @@ use std::str::FromStr as _;
 
 use abi_resolver::{DecodedCall, DecodedValue, DecoderId};
 use alloy_primitives::U256;
-use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
+use policy_engine::action::dex::{SwapAction, SwapMode};
 use policy_engine::action::{
     Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef, Category,
     DecimalString, Validity, ValiditySource,
@@ -204,7 +204,6 @@ fn map_exact_input_single(
         recipient,
         validity: Some(validity(deadline)?),
         fee_bps: Some(fee_bps(fee)?),
-        enrichment: SwapEnrichment::default(),
     }))
 }
 
@@ -228,7 +227,6 @@ fn map_exact_input(
         recipient,
         validity: Some(validity(deadline)?),
         fee_bps: Some(parsed.first_fee / 100),
-        enrichment: SwapEnrichment::default(),
     }))
 }
 
@@ -253,7 +251,6 @@ fn map_exact_output_single(
         recipient,
         validity: Some(validity(deadline)?),
         fee_bps: Some(fee_bps(fee)?),
-        enrichment: SwapEnrichment::default(),
     }))
 }
 
@@ -277,7 +274,6 @@ fn map_exact_output(
         recipient,
         validity: Some(validity(deadline)?),
         fee_bps: Some(parsed.first_fee / 100),
-        enrichment: SwapEnrichment::default(),
     }))
 }
 
@@ -431,7 +427,7 @@ mod tests {
         DecodeContext, DecodedArg, DecodedCall, DecodedValue, Decoder as _, DecoderId,
     };
     use alloy_primitives::U256;
-    use policy_engine::action::dex::{SwapAction, SwapEnrichment, SwapMode};
+    use policy_engine::action::dex::{SwapAction, SwapMode};
     use policy_engine::action::{
         Action, ActionEnvelope, Address, AmountConstraint, AmountKind, AssetKind, AssetRef,
         Category, DecimalString, Validity, ValiditySource,
@@ -786,7 +782,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(30),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -821,7 +816,6 @@ mod tests {
                     source: ValiditySource::TxDeadline,
                 }),
                 fee_bps: Some(5),
-                enrichment: SwapEnrichment::default(),
             }),
         }
     }
@@ -923,7 +917,6 @@ mod tests {
             })
         );
         assert_eq!(swap.fee_bps, Some(30));
-        assert_eq!(swap.enrichment, SwapEnrichment::default());
     }
 
     #[test]
