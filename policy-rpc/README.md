@@ -9,8 +9,18 @@ Reference TypeScript server for policy-specific remote facts.
 - `POST /v1/rpc`
 - `GET /debug/recent`
 
-`oracle.usd_value` resolves a CoinGecko token USD price and computes a
-`UsdValuation` result with bigint-safe scaled decimal math.
+`oracle.usd_value` resolves a token USD price via a multi-source
+`OracleAggregator` (Chainlink price feeds, Uniswap V3 30-min TWAP, and
+CoinGecko) and computes a `UsdValuation` result with bigint-safe scaled
+decimal math. The aggregator computes a median across surviving sources,
+drops outliers more than 3% from the median, and flags single-source
+results with `confidence: "low"`. Per-source detail is surfaced in the
+additive `sourceBreakdown` field; the legacy `sources: string[]` listing
+of included identifiers is preserved.
+
+On-chain reads use viem's HTTP transport. Configure per-chain RPC URLs
+with `RPC_URL_<chainId>` env vars (e.g. `RPC_URL_1=https://...`); the
+defaults are `publicnode.com` public endpoints.
 
 The reference server also exposes v1 mock methods for host-capability-shaped
 facts while the backing services are still being designed:
@@ -33,8 +43,8 @@ enrichment fields can be requested and projected through policy-rpc manifests.
 ../extension/node_modules/.bin/vitest run
 ```
 
-The implementation uses Node built-ins and the global `fetch`; it has no runtime
-dependencies.
+The implementation uses Node built-ins, the global `fetch`, and `viem`
+for on-chain calls.
 
 ## Docker
 
