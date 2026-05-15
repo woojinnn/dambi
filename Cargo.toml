@@ -10,6 +10,8 @@ members = [
     "crates/adapters/request-router",
     "crates/web-server",
     "crates/adapters/mappers",
+    "crates/policy-builder",
+    "crates/policy-builder-wasm",
 ]
 
 [workspace.package]
@@ -37,6 +39,7 @@ call-adapter = { path = "crates/adapters/call-adapter", version = "0.1.0" }
 sign-resolver = { path = "crates/adapters/sign-resolver", version = "0.1.0" }
 mappers = { path = "crates/adapters/mappers", version = "0.1.0" }
 request-router = { path = "crates/adapters/request-router", version = "0.1.0" }
+policy-builder = { path = "crates/policy-builder", version = "0.1.0" }
 
 # WASM bridge deps
 wasm-bindgen = "0.2"

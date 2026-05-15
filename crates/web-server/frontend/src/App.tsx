@@ -5,6 +5,7 @@ import { DecodeForm } from './components/DecodeForm'
 import { DecodeResult } from './components/DecodeResult'
 import { SignDecodeForm } from './components/SignDecodeForm'
 import { SignDecodeResult } from './components/SignDecodeResult'
+import { VerdictCard, type RouteResult } from './components/VerdictCard'
 import './App.css'
 
 interface RpcEvent {
@@ -15,6 +16,7 @@ interface RpcEvent {
   to?: string
   calldata?: string[]
   addresses?: string[]
+  from?: string
   rawParams?: unknown
   parsedTypedData?: unknown
   [extra: string]: unknown
@@ -23,6 +25,59 @@ interface RpcEvent {
 interface EventEntry {
   receivedAt: number
   payload: RpcEvent
+  /// Result of /api/route + policy evaluation. Populated asynchronously after
+  /// the SSE event lands. `undefined` while in-flight, `null` if the route
+  /// call failed at the HTTP layer.
+  routed?: RouteResult | null
+  routedInflight?: boolean
+}
+
+/// Local-storage key the policy-builder UI uses to persist saved rules.
+/// We read it here so the captured RPC events can be evaluated against the
+/// user's policy library without round-tripping through the policy-builder.
+const POLICY_STORAGE_KEY = 'scopeball:policy-builder:rules:v1'
+
+interface SavedPolicy {
+  id: string
+  enabled: boolean
+  cedarText?: string
+}
+
+function loadEnabledPolicies(): string[] {
+  try {
+    const raw = localStorage.getItem(POLICY_STORAGE_KEY)
+    if (!raw) return []
+    const list = JSON.parse(raw) as SavedPolicy[]
+    return list
+      .filter((p) => p.enabled && typeof p.cedarText === 'string' && p.cedarText.length > 0)
+      .map((p) => p.cedarText as string)
+  } catch {
+    return []
+  }
+}
+
+async function evaluateWriteEvent(payload: RpcEvent): Promise<RouteResult | null> {
+  try {
+    const body = {
+      method: payload.method ?? 'eth_sendTransaction',
+      params: payload.rawParams ?? [],
+      chain_id: parseInt((payload.primaryChainId ?? '0x1').slice(2), 16) || 1,
+      from: payload.from,
+      policies: loadEnabledPolicies(),
+    }
+    const res = await fetch('/api/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      return { actions: [], policy_error: `HTTP ${res.status}: ${text || 'route failed'}` }
+    }
+    return (await res.json()) as RouteResult
+  } catch (e) {
+    return { actions: [], policy_error: String(e) }
+  }
 }
 
 // Two separate ring buffers so a flood of read/wallet noise can never
@@ -138,6 +193,7 @@ function App() {
   const [chainId, setChainId] = useState<string>('1')
   const [address, setAddress] = useState<string>('')
   const [calldata, setCalldata] = useState<string>('')
+  const [from, setFrom] = useState<string>('')
   const [result, setResult] = useState<DecodeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -168,17 +224,42 @@ function App() {
     es.onmessage = (ev) => {
       try {
         const payload = JSON.parse(ev.data) as RpcEvent
-        const entry: EventEntry = { receivedAt: Date.now(), payload }
         const cat = categorize(payload.method)
+        const isRouteable = cat === 'write'
+        const entry: EventEntry = {
+          receivedAt: Date.now(),
+          payload,
+          routedInflight: isRouteable,
+        }
         if (cat === 'write' || cat === 'sign') {
+          let inserted = true
           setTransactions((prev) => {
             // dApps and userscripts often emit the same write twice in quick
             // succession (estimate-then-send, double-hook, retry, etc).
             // Drop the new entry if the most recent one carries the same
             // method + to + calldata within a short window.
-            if (isRecentDuplicate(prev[0], entry, 3000)) return prev
+            if (isRecentDuplicate(prev[0], entry, 3000)) {
+              inserted = false
+              return prev
+            }
             return [entry, ...prev].slice(0, TX_LIMIT)
           })
+
+          // Decision 3b: auto-fire /api/route on every captured write event
+          // so the verdict card can render without the user clicking [Use].
+          // Sign events stay manual — sign evaluation goes through /api/sign
+          // (handled separately by the SignDecodeForm).
+          if (inserted && isRouteable) {
+            void evaluateWriteEvent(payload).then((routed) => {
+              setTransactions((prev) =>
+                prev.map((e) =>
+                  e.receivedAt === entry.receivedAt
+                    ? { ...e, routed: routed ?? undefined, routedInflight: false }
+                    : e,
+                ),
+              )
+            })
+          }
         } else {
           setOthers((prev) => {
             if (isRecentDuplicate(prev[0], entry, 1500)) return prev
@@ -205,6 +286,10 @@ function App() {
     setChainId(f.chainId)
     setAddress(f.address)
     setCalldata(f.calldata)
+    // RPC events carry a `from` address (the wallet user) alongside `to`.
+    // Populate it so the simulator can recognise the user inside multi-step
+    // routing instead of falling back to the zero-address default.
+    setFrom(entry.payload.from ?? '')
     setPendingRpcMethod(entry.payload.method)
     requestAnimationFrame(() => {
       document.querySelector('.write-decoder')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -269,8 +354,15 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>ABI Resolver</h1>
-        <p>Decode arbitrary EVM calldata against a Sourcify-backed signature DB.</p>
+        <div className="app-header-top">
+          <div>
+            <h1>ABI Resolver</h1>
+            <p>Decode arbitrary EVM calldata against a Sourcify-backed signature DB.</p>
+          </div>
+          <nav className="app-nav">
+            <a href="/policy-builder/" className="nav-button">Policy Builder →</a>
+          </nav>
+        </div>
       </header>
       <main>
         <RpcEventsPanel
@@ -290,9 +382,11 @@ function App() {
               chainId={chainId}
               address={address}
               calldata={calldata}
+              from={from}
               onChainIdChange={trackedSetChainId}
               onAddressChange={trackedSetAddress}
               onCalldataChange={trackedSetCalldata}
+              onFromChange={setFrom}
               onSubmit={handleSubmit}
               loading={loading}
             />
@@ -306,6 +400,11 @@ function App() {
               params={signParams}
               onMethodChange={(v) => { setSignMethod(v); }}
               onChainIdChange={(v) => { setSignChainId(v); }}
+              onLoadSample={(sample) => {
+                setSignMethod(sample.method)
+                setSignChainId(String(sample.chain_id))
+                setSignParams(JSON.stringify(sample.params, null, 2))
+              }}
               onSubmit={handleSignSubmit}
               loading={signLoading}
             />
@@ -373,6 +472,12 @@ function EventCard({ entry, open, onLoadWrite, onLoadSign }: EventCardProps) {
           </button>
         ) : null}
       </summary>
+      {(entry.routed !== undefined || entry.routedInflight) && (
+        <VerdictCard
+          routed={entry.routed ?? undefined}
+          inflight={!!entry.routedInflight}
+        />
+      )}
       <pre className="json">{JSON.stringify(entry.payload, null, 2)}</pre>
     </details>
   )

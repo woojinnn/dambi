@@ -76,6 +76,15 @@ export interface DecodeRequest {
    * skip the fallback to keep the 5 req/s free-tier budget intact.
    */
   rpc_method?: string
+  /**
+   * Wallet address originating the call (`tx.from`). Optional. When
+   * supplied, the backend simulator inside `route_request` recognises
+   * this address as the wallet user and can collapse multi-step routing
+   * (split swaps, SWEEP-to-user, V4 TAKE-to-user) into a single envelope.
+   * When omitted, the simulator can't identify the user inside an
+   * external recipient field and falls back to a fan-out envelope list.
+   */
+  from?: string
 }
 
 export interface ApiError {
@@ -104,6 +113,20 @@ export interface SignDecodeResponse {
   signer: string
   chain_id: number
   payload: { kind: SignPayloadKind } & Record<string, unknown>
+  /**
+   * Schema-mapper output, when a sign adapter recognises the typed-data
+   * schema (Permit2, EIP-2612, lending auth, …). Optional because the
+   * backend may not always run mapping; if absent and `mapping_error` is
+   * also absent the UI silently skips the mapping section.
+   */
+  mapping?: MappingRoot
+  /**
+   * Set when the backend tried to map the sign payload but failed (e.g.
+   * "primary type Permit looked like EIP-2612 but message.value is
+   * missing"). UI renders this in place of `mapping` so the user sees
+   * *why* nothing was decoded rather than just an empty section.
+   */
+  mapping_error?: string
 }
 
 export async function decodeSign(req: SignDecodeRequest): Promise<SignDecodeResponse> {

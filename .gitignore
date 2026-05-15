@@ -18,3 +18,12 @@ parquet_venv/
 sourcify_dump/
 
 .serena/
+
+# Frontend build artifacts and dependencies
+**/node_modules/
+**/dist/
+.vite/
+
+# Web-server runtime artifacts (managed by scripts/serve.sh).
+target/web-server.log
+target/web-server.pid
