@@ -1,6 +1,8 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { OracleAggregator } from "../oracle/aggregator";
+import { CoinGeckoSource } from "../oracle/sources/coingecko";
 import { createPolicyRpcServer } from "../server";
 
 const wethAddress = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
@@ -10,22 +12,30 @@ describe("policy-rpc HTTP server", () => {
   let baseUrl = "";
 
   beforeEach(async () => {
-    server = createPolicyRpcServer({
-      fetch: async (input) => {
-        return new Response(
-          JSON.stringify({
-            [wethAddress]: {
-              usd: 3500.12,
-              last_updated_at: 1778750000,
-            },
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
+    const nowMs = () => 1778750005000;
+    const fetchStub: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          [wethAddress]: {
+            usd: 3500.12,
+            last_updated_at: 1778750000,
           },
-        );
-      },
-      nowMs: () => 1778750005000,
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+
+    const coinGeckoOnly = new OracleAggregator({
+      sources: [new CoinGeckoSource({ fetch: fetchStub, nowMs })],
+      nowMs,
+      outputDecimals: 4,
+    });
+
+    server = createPolicyRpcServer({
+      aggregator: coinGeckoOnly,
+      nowMs,
     });
 
     await new Promise<void>((resolve) => {
@@ -166,21 +176,28 @@ describe("policy-rpc HTTP server", () => {
       }),
     });
 
-    await expect(rpcResponse.json()).resolves.toEqual({
-      request_id: "eval-123",
-      results: [
-        {
-          id: "swap-total-input-usd",
-          ok: true,
-          result: {
-            value: "3500.1200",
-            asOfTs: 1778750000,
-            staleSec: 5,
-            sources: ["coingecko"],
-          },
-        },
-      ],
+    const body = await rpcResponse.json();
+    expect(body.request_id).toBe("eval-123");
+    expect(body.results).toHaveLength(1);
+    expect(body.results[0]).toMatchObject({
+      id: "swap-total-input-usd",
+      ok: true,
+      result: {
+        value: "3500.1200",
+        asOfTs: 1778750000,
+        staleSec: 5,
+        sources: ["coingecko"],
+        confidence: "low",
+      },
     });
+    expect(body.results[0].result.sourceBreakdown).toEqual([
+      {
+        sourceId: "coingecko",
+        value: "3500.1200",
+        asOfTs: 1778750000,
+        included: true,
+      },
+    ]);
 
     const debugResponse = await fetch(`${baseUrl}/debug/recent`);
     const debug = await debugResponse.json();
@@ -238,30 +255,30 @@ describe("policy-rpc HTTP server", () => {
       }),
     });
 
-    await expect(rpcResponse.json()).resolves.toEqual({
-      request_id: "eval-assets",
-      results: [
-        {
-          id: "erc20-input",
-          ok: true,
-          result: {
-            value: "3500.1200",
-            asOfTs: 1778750000,
-            staleSec: 5,
-            sources: ["coingecko"],
-          },
-        },
-        {
-          id: "native-input",
-          ok: true,
-          result: {
-            value: "7000.2400",
-            asOfTs: 1778750000,
-            staleSec: 5,
-            sources: ["coingecko"],
-          },
-        },
-      ],
+    const body = await rpcResponse.json();
+    expect(body.request_id).toBe("eval-assets");
+    expect(body.results).toHaveLength(2);
+    expect(body.results[0]).toMatchObject({
+      id: "erc20-input",
+      ok: true,
+      result: {
+        value: "3500.1200",
+        asOfTs: 1778750000,
+        staleSec: 5,
+        sources: ["coingecko"],
+        confidence: "low",
+      },
+    });
+    expect(body.results[1]).toMatchObject({
+      id: "native-input",
+      ok: true,
+      result: {
+        value: "7000.2400",
+        asOfTs: 1778750000,
+        staleSec: 5,
+        sources: ["coingecko"],
+        confidence: "low",
+      },
     });
   });
 
