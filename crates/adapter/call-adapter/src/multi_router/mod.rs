@@ -73,7 +73,7 @@ impl CallAdapter for MultiRouterCallAdapter {
         calldata: &[u8],
     ) -> Result<Vec<ActionEnvelope>, AdapterError> {
         let (commands, inputs, validity) = execute::decode_outer_call(calldata)?;
-        commands::expand_commands(ctx, &commands, &inputs, validity)
+        commands::expand_commands(ctx, &commands, &inputs, validity, 0)
     }
 }
 
