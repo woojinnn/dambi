@@ -13,11 +13,17 @@
 //! - Unknown opcodes → error (no silent skips). Use the explicit "recognised
 //!   non-swap" arm to opt out cleanly.
 
+use alloy_sol_types::{sol, SolType};
 use policy_engine::action::{ActionEnvelope, Validity};
 
 use crate::{AdapterError, CallContext};
 
 use super::command_decode;
+
+// ABI shape of an `EXECUTE_SUB_PLAN` (0x21) input: a nested
+// `(commands, inputs[])` tuple. The dispatcher decodes this and recurses
+// back into `expand_commands` with `depth + 1`.
+type SubPlanInput = sol! { (bytes, bytes[]) };
 
 const V3_SWAP_EXACT_IN: u8 = 0x00;
 const V3_SWAP_EXACT_OUT: u8 = 0x01;
@@ -39,6 +45,7 @@ const V3_POSITION_MANAGER_PERMIT: u8 = 0x11;
 const V3_POSITION_MANAGER_CALL: u8 = 0x12;
 const V4_INITIALIZE_POOL: u8 = 0x13;
 const V4_POSITION_MANAGER_CALL: u8 = 0x14;
+const EXECUTE_SUB_PLAN: u8 = 0x21;
 const COMMAND_TYPE_MASK: u8 = 0x7f;
 
 /// Maximum number of commands per stream (protects against memory exhaustion).
@@ -123,6 +130,24 @@ pub(super) fn expand_commands(
                     ctx,
                     input,
                     validity.clone(),
+                )?);
+            }
+            EXECUTE_SUB_PLAN => {
+                let (sub_commands, sub_inputs) =
+                    SubPlanInput::abi_decode_sequence(input, true).map_err(|e| {
+                        AdapterError::Invalid(format!(
+                            "EXECUTE_SUB_PLAN outer decode failed: {e}"
+                        ))
+                    })?;
+                let sub_commands = sub_commands.to_vec();
+                let sub_inputs: Vec<Vec<u8>> =
+                    sub_inputs.into_iter().map(|b| b.to_vec()).collect();
+                envelopes.extend(expand_commands(
+                    ctx,
+                    &sub_commands,
+                    &sub_inputs,
+                    validity.clone(),
+                    depth + 1,
                 )?);
             }
             // ── Recognised non-swap commands — intentionally ignored ─────
