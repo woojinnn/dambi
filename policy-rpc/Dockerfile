@@ -14,6 +14,7 @@ RUN yarn install --immutable
 WORKDIR /app/policy-rpc
 COPY policy-rpc/package.json policy-rpc/tsconfig.json ./
 COPY policy-rpc/src ./src
+RUN npm install --omit=dev --no-audit --no-fund
 RUN ../extension/node_modules/.bin/tsc -p tsconfig.json
 
 FROM node:20-alpine
@@ -25,6 +26,7 @@ ENV PORT=8787
 WORKDIR /app
 
 COPY --chown=node:node policy-rpc/package.json ./
+COPY --from=build --chown=node:node /app/policy-rpc/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/policy-rpc/dist ./dist
 
 USER node

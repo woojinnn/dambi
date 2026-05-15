@@ -11,6 +11,9 @@
     "typecheck": "../extension/node_modules/.bin/tsc -p tsconfig.json --noEmit",
     "start": "node --enable-source-maps dist/index.js"
   },
+  "dependencies": {
+    "viem": "2.13.7"
+  },
   "engines": {
     "node": ">=20"
   }
