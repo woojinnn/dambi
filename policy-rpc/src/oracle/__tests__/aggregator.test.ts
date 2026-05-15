@@ -139,6 +139,22 @@ describe("OracleAggregator", () => {
     });
   });
 
+  it("throws all_sources_unsupported when every source reports unsupported_token", async () => {
+    const sources = [
+      new FakeSource("a", async () => {
+        throw new OracleSourceError("unsupported_token", "a", "nope");
+      }),
+      new FakeSource("b", async () => {
+        throw new OracleSourceError("unsupported_token", "b", "nope");
+      }),
+    ];
+    const aggregator = new OracleAggregator({ sources, nowMs });
+
+    await expect(aggregator.aggregate(1, { address: wethAddress })).rejects.toMatchObject({
+      code: "all_sources_unsupported",
+    });
+  });
+
   it("throws all_sources_stale when every survivor is stale", async () => {
     const sources = [
       new FakeSource("a", async () => {

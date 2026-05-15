@@ -160,7 +160,7 @@ describe("oracle.usd_value", () => {
     });
   });
 
-  it("propagates aggregator upstream_error when CoinGecko has no USD price", async () => {
+  it("returns a not_found method error when CoinGecko has no USD price", async () => {
     const method = buildMethod({
       fetch: async () =>
         new Response(JSON.stringify({}), {
@@ -178,7 +178,7 @@ describe("oracle.usd_value", () => {
         decimals: 18,
       }),
     ).rejects.toMatchObject({
-      code: "upstream_error",
+      code: "not_found",
     });
   });
 });

@@ -11,6 +11,7 @@ import {
 export type AggregatorErrorCode =
   | "all_sources_failed"
   | "all_sources_stale"
+  | "all_sources_unsupported"
   | "oracle_disagreement"
   | "no_sources_configured";
 
@@ -106,14 +107,26 @@ export class OracleAggregator {
 
     if (samples.length === 0) {
       const breakdown = failures.map(failureToBreakdown);
-      const stale = failures.length > 0 && failures.every((f) => f.code === "stale");
-      throw new AggregatorError(
-        stale ? "all_sources_stale" : "all_sources_failed",
-        stale
-          ? "All oracle sources returned stale data"
-          : `No oracle source produced a usable quote: ${failures.map((f) => `${f.sourceId}=${f.code}`).join(", ")}`,
-        breakdown,
-      );
+      const allStale = failures.length > 0 && failures.every((f) => f.code === "stale");
+      const allUnsupported =
+        failures.length > 0 && failures.every((f) => f.code === "unsupported_token");
+
+      let code: AggregatorErrorCode;
+      let message: string;
+      if (allStale) {
+        code = "all_sources_stale";
+        message = "All oracle sources returned stale data";
+      } else if (allUnsupported) {
+        code = "all_sources_unsupported";
+        message = "No oracle source recognises this token";
+      } else {
+        code = "all_sources_failed";
+        message = `No oracle source produced a usable quote: ${failures
+          .map((f) => `${f.sourceId}=${f.code}`)
+          .join(", ")}`;
+      }
+
+      throw new AggregatorError(code, message, breakdown);
     }
 
     if (samples.length === 1) {

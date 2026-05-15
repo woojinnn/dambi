@@ -24,7 +24,11 @@ export interface OracleUsdValueMethodOptions extends CoinGeckoClientOptions {
   aggregator?: OracleAggregator;
   /** Override the source list when constructing the default aggregator. */
   sources?: OracleSource[];
-  /** Aggregator tuning when sources are supplied (otherwise built fresh). */
+  /**
+   * Aggregator tuning when sources are supplied (otherwise built fresh).
+   * If both `aggregatorOptions.nowMs` and the top-level `nowMs` are set the
+   * top-level value wins so callers stay consistent across the method.
+   */
   aggregatorOptions?: Omit<OracleAggregatorOptions, "sources">;
 }
 
@@ -105,6 +109,8 @@ function mapAggregatorError(error: unknown): RpcMethodError {
     switch (error.code) {
       case "all_sources_stale":
         return new RpcMethodError("stale_data", error.message);
+      case "all_sources_unsupported":
+        return new RpcMethodError("not_found", error.message);
       case "oracle_disagreement":
         return new RpcMethodError("oracle_disagreement", error.message);
       case "no_sources_configured":
