@@ -22,14 +22,16 @@ Why vendor instead of cross-package import?
 3. The duplication is intentionally a forcing function: when track-B publishes
    the canonical module, this directory becomes a "delete me" pointer.
 
-Reconciliation plan — when the canonical module lands:
+Reconciliation plan — after PR #22 (`feat/adapter-registry-design`) merges to main:
 
-```
-rm -rf adapter-registry/tests/_vendored
-# update manifest-shape.test.ts:
-#   import { parseAdapterManifest, AdapterManifestError } from "../../extension/src/lib/adapter-manifest"
-# update vitest.config.ts if needed to widen `include` / module resolution
-```
+1. (a) Update `adapter-registry/scripts/build-manifest.js` to emit the canonical
+   schema (per-version `url`, `0x`-prefixed `sha256`, `size_bytes`, `signature`,
+   `signer_id`, `published_at`, adapter-level `canary_version`, lowercased
+   addresses, error-on-missing-`display_name`). **Done in this PR.**
+2. (b) Delete `adapter-registry/tests/_vendored/`.
+3. (c) Update the import in `adapter-registry/tests/manifest-shape.test.ts` to
+   `../../extension/src/lib/adapter-manifest.js` (and adjust
+   `vitest.config.ts` / `tsconfig.json` if module resolution needs widening).
 
 The two parsers must stay in lockstep. CI will eventually catch drift by
 diffing the runtime output of `build-manifest.js` against
