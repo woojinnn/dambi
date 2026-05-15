@@ -19,6 +19,24 @@ const DEX_MINT_LIQUIDITY_NFT_SCHEMA: &str =
 const DEX_REMOVE_LIQUIDITY_SCHEMA: &str =
     include_str!("../../../policy-schema/actions/DEX/remove_liquidity.cedarschema");
 const DEX_SWAP_SCHEMA: &str = include_str!("../../../policy-schema/actions/DEX/swap.cedarschema");
+const LENDING_BORROW_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/borrow.cedarschema");
+const LENDING_FLASH_LOAN_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/flash_loan.cedarschema");
+const LENDING_LIQUIDATE_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/liquidate.cedarschema");
+const LENDING_REPAY_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/repay.cedarschema");
+const LENDING_REVOKE_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/revoke.cedarschema");
+const LENDING_SET_AUTHORIZATION_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/set_authorization.cedarschema");
+const LENDING_SIGN_AUTHORIZATION_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/sign_authorization.cedarschema");
+const LENDING_SUPPLY_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/supply.cedarschema");
+const LENDING_WITHDRAW_SCHEMA: &str =
+    include_str!("../../../policy-schema/actions/lending/withdraw.cedarschema");
 
 /// Composes the shipped core and action Cedar schemas.
 #[derive(Debug, Default, Clone)]
@@ -127,6 +145,10 @@ pub fn schema_hash(schema_text: &str) -> String {
 const BASE_SCHEMA_TEXT: &str = "";
 
 fn base_schema_text() -> String {
+    // Staking/restaking schemas are intentionally omitted pending the C2/C3
+    // lowering work (PR #25) and its symmetric follow-up; lending lands here
+    // because the schemas are already on disk under
+    // `policy-schema/actions/lending/`.
     [
         CORE_SCHEMA,
         DEX_ADD_LIQUIDITY_SCHEMA,
@@ -136,6 +158,15 @@ fn base_schema_text() -> String {
         DEX_MINT_LIQUIDITY_NFT_SCHEMA,
         DEX_REMOVE_LIQUIDITY_SCHEMA,
         DEX_SWAP_SCHEMA,
+        LENDING_BORROW_SCHEMA,
+        LENDING_FLASH_LOAN_SCHEMA,
+        LENDING_LIQUIDATE_SCHEMA,
+        LENDING_REPAY_SCHEMA,
+        LENDING_REVOKE_SCHEMA,
+        LENDING_SET_AUTHORIZATION_SCHEMA,
+        LENDING_SIGN_AUTHORIZATION_SCHEMA,
+        LENDING_SUPPLY_SCHEMA,
+        LENDING_WITHDRAW_SCHEMA,
     ]
     .join("\n")
 }
@@ -312,3 +343,29 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     ("remove_liquidity", "RemoveLiquidityContext"),
     ("swap", "SwapContext"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::base_schema_text;
+
+    #[test]
+    fn base_schema_text_bundles_lending_actions() {
+        let schema = base_schema_text();
+        for action in [
+            "borrow",
+            "flash_loan",
+            "liquidate",
+            "repay",
+            "revoke",
+            "set_authorization",
+            "sign_authorization",
+            "supply",
+            "withdraw",
+        ] {
+            assert!(
+                schema.contains(&format!("action \"{action}\"")),
+                "base schema missing lending action `{action}`"
+            );
+        }
+    }
+}
