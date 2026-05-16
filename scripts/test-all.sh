@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full test suite — Rust workspace + extension when present.
+# Run the full test suite — Rust workspace + browser-extension when present.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -13,17 +13,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 echo "==> cargo fmt --all -- --check"
 cargo fmt --all -- --check
 
-if [ -d extension ] && [ -f extension/package.json ]; then
-  echo "==> yarn typecheck (extension)"
-  (cd extension && yarn typecheck)
+if [ -d browser-extension ] && [ -f browser-extension/package.json ]; then
+  echo "==> yarn typecheck (browser-extension)"
+  (cd browser-extension && yarn typecheck)
 
-  if grep -q '"test"' extension/package.json; then
-    echo "==> yarn test (extension)"
-    (cd extension && yarn test --run 2>/dev/null || yarn test)
+  if grep -q '"test"' browser-extension/package.json; then
+    echo "==> yarn test (browser-extension)"
+    (cd browser-extension && yarn test --run 2>/dev/null || yarn test)
   fi
 
-  echo "==> yarn build:chrome (extension)"
-  (cd extension && yarn build:chrome >/dev/null)
+  echo "==> yarn build:chrome (browser-extension)"
+  (cd browser-extension && yarn build:chrome >/dev/null)
 fi
 
 echo "==> all checks passed"

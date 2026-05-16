@@ -206,7 +206,7 @@ Pipeline::evaluate(&Request)
 |   |-- TransactionActionAdapterRegistry::resolve_with_adapter
 |   |-- TransactionActionAdapter::build_action or Action::Other
 |   |-- Policy RPC planning from installed manifests
-|   |-- extension/backend executes planned Policy RPC calls
+|   |-- browser-extension/backend executes planned Policy RPC calls
 |   |-- Policy RPC response materialization
 |   |-- lowering::policy_request_from_envelope
 |   `-- Cedar action ids: swap, ...

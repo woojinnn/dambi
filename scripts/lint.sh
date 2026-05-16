@@ -10,8 +10,8 @@ cargo fmt --all
 echo "==> cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged"
 cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged
 
-if [ -f extension/package.json ]; then
-  (cd extension && yarn lint || true)
+if [ -f browser-extension/package.json ]; then
+  (cd browser-extension && yarn lint || true)
 fi
 
 echo "==> done"

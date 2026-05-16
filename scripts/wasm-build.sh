@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the policy-engine WASM artifact + copy into extension/ for static webpack import.
+# Build the policy-engine WASM artifact + copy into browser-extension/ for static webpack import.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -16,12 +16,12 @@ wasm-pack build crates/policy-engine-wasm \
   --out-dir pkg \
   --out-name policy_engine_wasm
 
-if [ -d extension ]; then
-  mkdir -p extension/src/wasm extension/public/wasm
-  cp crates/policy-engine-wasm/pkg/policy_engine_wasm.js extension/src/wasm/
-  cp crates/policy-engine-wasm/pkg/policy_engine_wasm.d.ts extension/src/wasm/ 2>/dev/null || true
-  cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm extension/src/wasm/
-  cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm extension/public/wasm/
-  cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm.d.ts extension/src/wasm/ 2>/dev/null || true
-  echo "==> wasm artifact copied to extension/{src,public}/wasm/"
+if [ -d browser-extension ]; then
+  mkdir -p browser-extension/src/wasm browser-extension/public/wasm
+  cp crates/policy-engine-wasm/pkg/policy_engine_wasm.js browser-extension/src/wasm/
+  cp crates/policy-engine-wasm/pkg/policy_engine_wasm.d.ts browser-extension/src/wasm/ 2>/dev/null || true
+  cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm browser-extension/src/wasm/
+  cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm browser-browser-extension/public/wasm/
+  cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm.d.ts browser-extension/src/wasm/ 2>/dev/null || true
+  echo "==> wasm artifact copied to browser-extension/{src,public}/wasm/"
 fi
