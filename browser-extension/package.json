@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Policy-engine-backed wallet transaction safety extension",
+  "workspaces": [
+    "dashboard"
+  ],
   "scripts": {
     "dev:chrome": "yarn prepare:defaults && yarn prepare:wasm && cross-env TARGET_BROWSER=chrome webpack --config webpack/webpack.dev.js --watch",
     "dev:firefox": "yarn prepare:defaults && yarn prepare:wasm && cross-env TARGET_BROWSER=firefox webpack --config webpack/webpack.dev.js --watch",
