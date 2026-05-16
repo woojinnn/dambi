@@ -1,4 +1,5 @@
 use crate::manifest::Manifest;
+use crate::validate_wasm::validate_wasm_module;
 use crate::AppState;
 use axum::extract::{Multipart, State};
 use axum::http::StatusCode;
@@ -56,6 +57,10 @@ pub async fn handle(
 
     if !wasm.starts_with(b"\0asm") {
         return Err(bad_request("wasm header missing"));
+    }
+
+    if let Err(reason) = validate_wasm_module(&wasm, &manifest) {
+        return Err(bad_request(&format!("wasm/manifest mismatch: {reason}")));
     }
 
     state

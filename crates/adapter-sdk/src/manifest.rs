@@ -61,6 +61,10 @@ pub enum ManifestError {
     SdkVersion { expected: u32, got: u32 },
     #[error("capabilities list is empty")]
     NoCapabilities,
+    #[error("invalid name `{name}`: must match [A-Za-z0-9_.-]+ and not begin with `.`")]
+    InvalidName { name: String },
+    #[error("invalid version `{version}`: must match [A-Za-z0-9_.-]+ and not begin with `.`")]
+    InvalidVersion { version: String },
 }
 
 impl Manifest {
@@ -78,8 +82,38 @@ impl Manifest {
         {
             return Err(ManifestError::NoMatchers);
         }
+        if !is_safe_path_component(&self.name) {
+            return Err(ManifestError::InvalidName {
+                name: self.name.clone(),
+            });
+        }
+        if !is_safe_path_component(&self.version) {
+            return Err(ManifestError::InvalidVersion {
+                version: self.version.clone(),
+            });
+        }
         Ok(())
     }
+}
+
+/// Whether `s` is safe to use as a single filesystem path component.
+///
+/// Allowed: non-empty, ASCII alphanumeric plus `_`, `-`, `.`. Must not begin
+/// with `.` (so `..`, `.`, and dotfiles like `.foo` are rejected). Rejects
+/// `/`, `\`, NUL, and any other character outside the allowlist.
+///
+/// Semver values like `0.1.0` or `1.2.3-beta.1` pass; path-traversal
+/// payloads like `../etc` or `..\bad` do not.
+pub fn is_safe_path_component(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    if s.starts_with('.') {
+        return false;
+    }
+    s.bytes().all(|b| {
+        b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.'
+    })
 }
 
 #[cfg(test)]
@@ -131,5 +165,41 @@ mod tests {
         let s = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&s).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn validate_rejects_path_traversal_in_name() {
+        let mut m = sample();
+        m.name = "../etc".into();
+        assert!(matches!(m.validate(), Err(ManifestError::InvalidName { .. })));
+    }
+
+    #[test]
+    fn validate_rejects_path_traversal_in_version() {
+        let mut m = sample();
+        m.version = "../bad".into();
+        assert!(matches!(m.validate(), Err(ManifestError::InvalidVersion { .. })));
+    }
+
+    #[test]
+    fn is_safe_path_component_accepts_typical_values() {
+        assert!(is_safe_path_component("erc20-transfer"));
+        assert!(is_safe_path_component("0.1.0"));
+        assert!(is_safe_path_component("1.2.3-beta.1"));
+        assert!(is_safe_path_component("a"));
+        assert!(is_safe_path_component("X_Y_Z"));
+    }
+
+    #[test]
+    fn is_safe_path_component_rejects_traversal_and_metachars() {
+        assert!(!is_safe_path_component(""));
+        assert!(!is_safe_path_component("."));
+        assert!(!is_safe_path_component(".."));
+        assert!(!is_safe_path_component(".hidden"));
+        assert!(!is_safe_path_component("a/b"));
+        assert!(!is_safe_path_component("a\\b"));
+        assert!(!is_safe_path_component("a\0b"));
+        assert!(!is_safe_path_component(" foo"));
+        assert!(!is_safe_path_component("foo bar"));
     }
 }

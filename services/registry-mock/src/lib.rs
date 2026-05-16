@@ -4,6 +4,7 @@ mod route_chains;
 mod route_packages;
 mod route_publish;
 mod storage;
+mod validate_wasm;
 
 use axum::routing::{get, post};
 use axum::Router;
