@@ -1,4 +1,5 @@
 mod manifest;
+mod route_packages;
 mod route_publish;
 mod storage;
 
@@ -22,6 +23,8 @@ pub async fn build_app(state_dir: PathBuf) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/publish", post(route_publish::handle))
+        .route("/packages/:name/:version/adapter.wasm", get(route_packages::wasm))
+        .route("/packages/:name/:version/manifest.json", get(route_packages::manifest))
         .with_state(Arc::new(state))
 }
 
