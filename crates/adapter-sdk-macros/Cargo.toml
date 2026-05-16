@@ -14,3 +14,7 @@ proc-macro2 = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 serde_json.workspace = true
+
+[dev-dependencies]
+adapter-sdk = { path = "../adapter-sdk" }
+trybuild = "1"
