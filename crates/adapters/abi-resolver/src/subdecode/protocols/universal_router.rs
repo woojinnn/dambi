@@ -353,6 +353,13 @@ pub fn is_uniswap_universal_router(chain_id: u64, target: &Address) -> bool {
         .any(|(chain, addr)| *chain == chain_id && addr == target)
 }
 
+/// Iterator over all `(chain_id, address)` Uniswap Universal Router
+/// deployments. Used by `call-adapter::MultiRouterCallAdapter::match_keys`
+/// to enumerate the (chain, to, selector) keys the adapter handles.
+pub fn uniswap_universal_router_deployments() -> impl Iterator<Item = (u64, Address)> {
+    UNISWAP_UR_ADDRESSES.iter().copied()
+}
+
 /// Per-chain Uniswap V3 NonfungiblePositionManager addresses. The same
 /// contract is `CREATE2`-deployed at the same address on most EVM chains
 /// (mainnet/arbitrum/optimism/polygon/base/etc.) but the address registry

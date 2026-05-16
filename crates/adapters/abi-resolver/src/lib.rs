@@ -18,10 +18,11 @@
 //!   - `resolver`: tier the lookups (Sourcify first, openchain fallback).
 //!   - `subdecode`: parsers for non-standard payloads packed in `bytes` args.
 
+pub mod bridge;
 pub mod decode;
 pub mod decoder;
-pub mod decoders;
 pub mod extract;
+pub mod ids;
 pub mod in_memory_registry;
 pub mod openchain;
 pub mod resolver;

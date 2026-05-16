@@ -269,9 +269,9 @@ fn permit_envelope(
         spender: Some(spender),
         recipient: None,
         amount: Some(permit_amount(&approval.amount, default_amount_kind)),
+        requested_amount: None,
         operator: None,
         approved: None,
-        requested_amount: None,
         validity: signature_deadline(deadline),
         signature_validity: None,
     });
@@ -297,7 +297,8 @@ fn permit_amount(value: &DecimalString, default_kind: AmountKind) -> AmountConst
     }
 }
 
-fn erc20(_chain_id: u64, address: Address) -> AssetRef {
+fn erc20(chain_id: u64, address: Address) -> AssetRef {
+    let _ = chain_id;
     AssetRef {
         kind: AssetKind::Erc20,
         address: Some(address),
@@ -484,7 +485,7 @@ mod tests {
                     .unwrap()
             )
         );
-        let amount = action.amount.as_ref().expect("permit2 carries amount");
+        let amount = action.amount.as_ref().expect("Permit2 permit amount");
         assert_eq!(amount.kind, AmountKind::Max);
         assert_eq!(
             amount.value.as_ref().map(ToString::to_string),
@@ -507,7 +508,8 @@ mod tests {
                 panic!("expected Action::Permit");
             };
             assert_eq!(action.permit_kind, PermitKind::Permit2Single);
-            assert_eq!(action.amount.as_ref().unwrap().kind, AmountKind::Max);
+            let amount = action.amount.as_ref().expect("Permit2 permit amount");
+            assert_eq!(amount.kind, AmountKind::Max);
             assert_eq!(action.validity.expires_at.to_string(), "1600");
         }
         let Action::Permit(first) = &envelopes[0].action else {

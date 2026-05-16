@@ -16,3 +16,12 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
 alloy-primitives = { workspace = true }
+tracing = "0.1"
+
+[features]
+# `sqlite` enables the Sourcify SQLite dump tier in the fallback decoding path
+# (`route_request`'s second-tier sourcify fallback). Pulled in via
+# `abi-resolver/sqlite`. Off by default so wasm consumers (extension build) can
+# disable it together with the abi-resolver sqlite feature.
+default = []
+sqlite = ["abi-resolver/sqlite"]

@@ -84,9 +84,9 @@ impl SignAdapter for Eip2612Adapter {
             spender: Some(spender),
             recipient: None,
             amount: Some(amount),
+            requested_amount: None,
             operator: None,
             approved: None,
-            requested_amount: None,
             validity: signature_deadline(deadline),
             signature_validity: None,
         });
@@ -170,7 +170,8 @@ fn permit_amount(value: &DecimalString, unlimited_value: &str) -> AmountConstrai
     }
 }
 
-fn erc20(_chain_id: u64, address: Address) -> AssetRef {
+fn erc20(chain_id: u64, address: Address) -> AssetRef {
+    let _ = chain_id;
     AssetRef {
         kind: AssetKind::Erc20,
         address: Some(address),
@@ -326,8 +327,7 @@ mod tests {
                     .unwrap()
             )
         );
-        assert_eq!(action.token.token_id, None);
-        let amount = action.amount.as_ref().expect("eip2612 permit must carry amount");
+        let amount = action.amount.as_ref().expect("EIP-2612 permit amount");
         assert_eq!(amount.kind, AmountKind::Exact);
         assert_eq!(
             amount.value.as_ref().map(ToString::to_string),
@@ -351,7 +351,7 @@ mod tests {
         let Action::Permit(action) = &envelopes[0].action else {
             panic!("expected Action::Permit");
         };
-        let amount = action.amount.as_ref().expect("eip2612 permit must carry amount");
+        let amount = action.amount.as_ref().expect("EIP-2612 permit amount");
         assert_eq!(amount.kind, AmountKind::Unlimited);
         assert_eq!(amount.value, None);
     }

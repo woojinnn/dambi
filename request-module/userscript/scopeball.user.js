@@ -131,11 +131,8 @@
             origin: location.origin,
             currentChainId: cachedChainId || undefined,
           });
-          // Sequence number lets the sandbox dedup when both window and
-          // unsafeWindow listeners catch the same postMessage.
-          window.__scopeballSeq = (window.__scopeballSeq || 0) + 1;
           window.postMessage(
-            { source: 'scopeball', seq: window.__scopeballSeq, payload: extracted },
+            { source: 'scopeball', payload: extracted },
             location.origin,
           );
           if (args && (args.method === 'wallet_switchEthereumChain'
@@ -318,24 +315,10 @@
   // -------- Sandbox-side relay: postMessage → backend --------
   // Listen on both the sandbox window AND (if available) the page-world
   // unsafeWindow. Some Tampermonkey configs send postMessage to a different
-  // window object than the sandbox listens on. We dedup by seq number so
-  // that double-delivery doesn't double-POST.
-  const seenSeq = new Set();
+  // window object than the sandbox listens on.
   function onScopeballMessage(e) {
     const d = e && e.data;
     if (!d || d.source !== 'scopeball' || !d.payload) return;
-
-    if (typeof d.seq === 'number') {
-      if (seenSeq.has(d.seq)) return;
-      seenSeq.add(d.seq);
-      // Bound the set so it doesn't grow forever on long-lived tabs.
-      if (seenSeq.size > 1024) {
-        const arr = Array.from(seenSeq);
-        seenSeq.clear();
-        arr.slice(-512).forEach(function (n) { seenSeq.add(n); });
-      }
-    }
-
     console.log('[scopeball] sandbox got message', d.payload.method);
 
     GM_xmlhttpRequest({

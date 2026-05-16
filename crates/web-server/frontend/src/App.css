@@ -1,14 +1,20 @@
 :root {
-  --bg: #0f1419;
-  --panel: #1a2029;
-  --panel-2: #232b36;
-  --text: #d8dee9;
-  --muted: #7a8694;
-  --accent: #6cb6ff;
-  --accent-strong: #4a9eea;
-  --error: #ff7a7a;
-  --warn: #ffc36c;
-  --ok: #66dd99;
+  /* Light theme — clean slate/indigo palette (mirrors decoder_db). */
+  --bg: #f5f7fa;
+  --panel: #ffffff;
+  --panel-2: #eef2f6;
+  --text: #1e293b;
+  --muted: #64748b;
+  --border: #cbd5e1;
+  --border-strong: #94a3b8;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #dbeafe;
+  --error: #dc2626;
+  --warn: #d97706;
+  --ok: #059669;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 1px rgba(15, 23, 42, 0.03);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.04);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
 }
 
@@ -25,9 +31,15 @@ body {
 }
 
 .app-header {
-  border-bottom: 1px solid #2a3340;
+  border-bottom: 1px solid var(--border);
   padding-bottom: 16px;
   margin-bottom: 24px;
+}
+.app-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 .app-header h1 {
   margin: 0 0 6px 0;
@@ -39,6 +51,25 @@ body {
   color: var(--muted);
   font-size: 14px;
 }
+.app-nav {
+  display: flex;
+  gap: 8px;
+}
+.nav-button {
+  display: inline-block;
+  padding: 8px 14px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.1s ease;
+}
+.nav-button:hover {
+  filter: brightness(1.1);
+}
 
 main {
   display: grid;
@@ -49,7 +80,7 @@ main {
   background: var(--panel);
   padding: 20px;
   border-radius: 12px;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   display: grid;
   gap: 14px;
 }
@@ -65,7 +96,7 @@ main {
 .form input,
 .form textarea {
   background: var(--panel-2);
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   color: var(--text);
   padding: 10px 12px;
   border-radius: 8px;
@@ -89,7 +120,7 @@ main {
 
 .form button[type='submit'] {
   background: var(--accent-strong);
-  color: #0c1218;
+  color: #ffffff;
   padding: 10px 20px;
   border: none;
   border-radius: 8px;
@@ -101,8 +132,8 @@ main {
   background: var(--accent);
 }
 .form button[type='submit']:disabled {
-  background: #3a4654;
-  color: #7a8694;
+  background: var(--border);
+  color: var(--muted);
   cursor: not-allowed;
 }
 
@@ -119,7 +150,7 @@ main {
 }
 .sample {
   background: var(--panel-2);
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   color: var(--text);
   padding: 4px 10px;
   border-radius: 6px;
@@ -138,7 +169,7 @@ main {
   background: var(--panel);
   padding: 20px;
   border-radius: 12px;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
 }
 
 .result.placeholder {
@@ -148,7 +179,8 @@ main {
 }
 
 .result.error {
-  border-color: rgba(255, 122, 122, 0.4);
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.04);
 }
 .result.error h2 {
   color: var(--error);
@@ -156,7 +188,8 @@ main {
 }
 
 .result.not-found {
-  border-color: rgba(255, 195, 108, 0.4);
+  border-color: rgba(217, 119, 6, 0.35);
+  background: rgba(217, 119, 6, 0.04);
 }
 .result.not-found h2 {
   color: var(--warn);
@@ -203,7 +236,7 @@ table.args th,
 table.args td {
   padding: 8px 12px;
   text-align: left;
-  border-bottom: 1px solid #2a3340;
+  border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
 table.args th {
@@ -221,8 +254,8 @@ table.args td.value code {
   margin-top: 20px;
   padding: 16px 20px;
   border-radius: 12px;
-  border: 1px solid #2d4255;
-  background: rgba(45, 66, 85, 0.18);
+  border: 1px solid var(--accent-soft);
+  background: rgba(37, 99, 235, 0.04);
 }
 .mapping > header {
   display: flex;
@@ -233,7 +266,7 @@ table.args td.value code {
 .mapping h3 {
   margin: 0;
   font-size: 14px;
-  color: var(--accent, #4ea0ff);
+  color: var(--accent);
 }
 .mapping .schema-version {
   font-size: 11px;
@@ -249,7 +282,8 @@ table.args td.value code {
   gap: 12px;
 }
 .mapping .action {
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 14px;
 }
@@ -285,6 +319,75 @@ table.args td.value code {
 .mapping table.fields td.value code {
   word-break: break-all;
 }
+/* Definition list — each row is a labelled field. The label is full-width
+   above the value (NOT a two-column table) so long JSON values can use the
+   full container width without squeezing the label. Used by MappingSection
+   for action fields. */
+.mapping dl.fields {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.mapping dl.fields .field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.mapping dl.fields dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.mapping dl.fields dd {
+  margin: 0;
+  min-width: 0;
+}
+.mapping dl.fields code.value {
+  font-size: 12px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.mapping pre.field-json {
+  background: var(--panel-2);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* Sign decoder mapping failure — same visual weight as a result, distinct
+   color so the user notices that mapping was attempted but failed. */
+.mapping-error {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.06);
+}
+.mapping-error h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--error);
+}
+.mapping-error pre {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #7f1d1d;
+}
 
 .raw {
   margin-top: 16px;
@@ -301,14 +404,14 @@ table.args td.value code {
   overflow-x: auto;
   font-size: 12px;
   margin-top: 8px;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
 }
 
 .rpc-events {
   background: var(--panel);
   padding: 16px 20px;
   border-radius: 12px;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
 }
 .rpc-events.empty {
   color: var(--muted);
@@ -332,7 +435,7 @@ table.args td.value code {
 .rpc-events-header .clear-btn {
   margin-left: auto;
   background: transparent;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   color: var(--muted);
   padding: 4px 10px;
   border-radius: 6px;
@@ -413,7 +516,7 @@ table.args td.value code {
 .badge-read {
   background: var(--panel-2);
   color: var(--muted);
-  border-color: #2a3340;
+  border-color: var(--border);
 }
 .rpc-event.cat-write > summary {
   border-left: 3px solid var(--error);
@@ -428,7 +531,7 @@ table.args td.value code {
   border-left: 3px solid var(--accent);
 }
 .rpc-event.cat-read > summary {
-  border-left: 3px solid #2a3340;
+  border-left: 3px solid var(--border);
 }
 .rpc-event > summary .muted {
   color: var(--muted);
@@ -442,7 +545,7 @@ table.args td.value code {
   overflow-x: auto;
   font-size: 12px;
   margin: 8px 0 0 0;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -465,7 +568,7 @@ table.args td.value code {
 .use-btn {
   margin-left: auto;
   background: var(--accent-strong);
-  color: #0c1218;
+  color: #ffffff;
   border: none;
   padding: 4px 12px;
   border-radius: 6px;
@@ -486,7 +589,7 @@ table.args td.value code {
 
 .rpc-event-history {
   margin-top: 12px;
-  border-top: 1px dashed #2a3340;
+  border-top: 1px dashed var(--border);
   padding-top: 10px;
 }
 .rpc-event-history > summary {
@@ -509,7 +612,7 @@ table.args td.value code {
 footer {
   margin-top: 40px;
   padding-top: 16px;
-  border-top: 1px solid #2a3340;
+  border-top: 1px solid var(--border);
   text-align: center;
   font-size: 12px;
   color: var(--muted);
@@ -556,7 +659,7 @@ code {
 /* ── Sign form gas fields collapsible ───────────────────────────────────── */
 
 .sign-form-gas {
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0 12px;
 }
@@ -590,7 +693,7 @@ code {
   overflow-x: auto;
   font-size: 12px;
   margin: 6px 0 0 0;
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .sign-payload code.value {
@@ -602,7 +705,7 @@ code {
 
 .form select {
   background: var(--panel-2);
-  border: 1px solid #2a3340;
+  border: 1px solid var(--border);
   color: var(--text);
   padding: 10px 12px;
   border-radius: 8px;
@@ -618,4 +721,75 @@ code {
 .form select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ── VerdictCard styles ──────────────────────────────────────────────── */
+.verdict-card {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fafafa;
+  font-size: 0.9rem;
+}
+.verdict-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+.verdict-pill {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.verdict-pill-pass    { background: #d4edda; color: #155724; }
+.verdict-pill-warn    { background: #fff3cd; color: #856404; }
+.verdict-pill-fail    { background: #f8d7da; color: #721c24; }
+.verdict-pill-pending { background: #e2e3e5; color: #383d41; }
+.verdict-pill-error   { background: #f5c6cb; color: #721c24; }
+.verdict-pill-unknown { background: #e2e3e5; color: #383d41; }
+.verdict-card-error {
+  margin: 0.3rem 0;
+  padding: 0.4rem;
+  background: #f8d7da;
+  border-radius: 4px;
+  color: #721c24;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+.verdict-card-matches {
+  list-style: none;
+  padding: 0;
+  margin: 0.3rem 0;
+}
+.verdict-card-matches li {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 4px;
+  background: #fff;
+  border-left: 3px solid #ccc;
+}
+.verdict-card-matches li.matched-deny { border-left-color: #dc3545; }
+.verdict-card-matches li.matched-warn { border-left-color: #ffc107; }
+.verdict-card-matches code { font-size: 0.85rem; }
+.verdict-card-matches .matched-reason { color: #555; }
+.verdict-card-actions { margin-top: 0.4rem; }
+.verdict-card-actions summary { cursor: pointer; color: #555; }
+.verdict-card-actions pre {
+  margin: 0.3rem 0 0;
+  padding: 0.5rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  max-height: 240px;
+  overflow: auto;
+}
+.verdict-card-empty {
+  color: #888;
+  font-style: italic;
+  font-size: 0.85rem;
 }
