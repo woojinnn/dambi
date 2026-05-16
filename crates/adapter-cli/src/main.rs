@@ -1,6 +1,7 @@
 //! adapter-cli — build, validate, and publish adapter packages.
 
 mod cmd_build;
+mod cmd_publish;
 mod cmd_validate;
 mod manifest;
 
@@ -27,6 +28,12 @@ enum Cmd {
         /// Path to the built .wasm file.
         wasm: PathBuf,
     },
+    Publish {
+        /// Path to the built .wasm file.
+        wasm: PathBuf,
+        #[arg(long, default_value = "http://localhost:8080")]
+        registry: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -34,5 +41,6 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Cmd::Build { manifest_path, profile } => cmd_build::run(&manifest_path, &profile),
         Cmd::Validate { wasm } => cmd_validate::run(&wasm),
+        Cmd::Publish { wasm, registry } => cmd_publish::run(&wasm, &registry),
     }
 }
