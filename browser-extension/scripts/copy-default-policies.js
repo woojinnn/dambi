@@ -28,10 +28,10 @@ function listCedarFiles(dir) {
 
 function listSchemaFiles() {
   const files = [];
-  const core = path.join(REPO_ROOT, "policy-schema", "core.cedarschema");
+  const core = path.join(REPO_ROOT, "schema", "policy-schema", "core.cedarschema");
   if (fs.existsSync(core)) files.push(core);
 
-  const actionsDir = path.join(REPO_ROOT, "policy-schema", "actions");
+  const actionsDir = path.join(REPO_ROOT, "schema", "policy-schema", "actions");
   if (fs.existsSync(actionsDir)) {
     files.push(...listFilesWithExtension(actionsDir, ".cedarschema"));
   }
@@ -48,7 +48,7 @@ function main() {
     .join("\n\n");
   fs.writeFileSync(path.join(DEST, "schema.cedarschema"), schema);
 
-  const policiesDir = path.join(REPO_ROOT, "policies");
+  const policiesDir = path.join(REPO_ROOT, "policy-examples");
   if (fs.existsSync(policiesDir)) {
     const files = listCedarFiles(policiesDir);
     const policySet = files.map((f) => {
@@ -76,7 +76,7 @@ function main() {
     );
   } else {
     fs.writeFileSync(path.join(DEST, "policy-set.json"), "[]");
-    console.log(`Wrote empty policy-set.json (no policies/ dir found)`);
+    console.log(`Wrote empty policy-set.json (no policy-examples/ dir found)`);
   }
 }
 
