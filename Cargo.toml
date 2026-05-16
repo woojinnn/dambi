@@ -15,6 +15,7 @@ members = [
     "crates/adapter-sdk",
     "crates/adapter-sdk-macros",
     "crates/adapter-samples/erc20-transfer",
+    "services/registry-mock",
 ]
 
 [workspace.package]
