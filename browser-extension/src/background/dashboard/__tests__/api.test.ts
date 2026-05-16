@@ -205,4 +205,52 @@ describe("dashboard/api", () => {
       error: { kind: "install_failed", message: "boom" },
     });
   });
+
+  it("rolls back storage when WASM rejects the policy (no prior entry)", async () => {
+    // First put fails — storage must NOT keep the bad policy.
+    mocks.applyEnabledIds.mockResolvedValueOnce({
+      ok: false,
+      error: { kind: "schema_failed", message: "attribute foo not found" },
+    });
+    const res = await handleDashboardRequest({
+      type: "dashboard:put-raw",
+      id: "dashboard::demo/bad",
+      text: RAW_TEXT,
+    });
+    expect(res.ok).toBe(false);
+    expect(await listManaged()).toEqual([]);
+    // Rollback also runs applyEnabledIds a second time with the prior set.
+    expect(mocks.applyEnabledIds).toHaveBeenCalledTimes(2);
+    const [secondIds] = mocks.applyEnabledIds.mock.calls[1];
+    expect(secondIds).not.toContain("dashboard::demo/bad");
+  });
+
+  it("restores the prior entry when an existing managed policy fails to re-install", async () => {
+    // Plant a working policy first.
+    await handleDashboardRequest({
+      type: "dashboard:put-raw",
+      id: "dashboard::demo/x",
+      text: RAW_TEXT,
+    });
+    const before = await listManaged();
+    expect(before).toHaveLength(1);
+    const priorText = before[0].text;
+    mocks.applyEnabledIds.mockClear();
+
+    // Now attempt an update whose new text fails WASM validation.
+    mocks.applyEnabledIds.mockResolvedValueOnce({
+      ok: false,
+      error: { kind: "schema_failed", message: "broken update" },
+    });
+    const res = await handleDashboardRequest({
+      type: "dashboard:put-raw",
+      id: "dashboard::demo/x",
+      text: '@id("dashboard::demo/x") @severity("warn") @reason("v2") forbid (principal, action, resource);',
+    });
+    expect(res.ok).toBe(false);
+    const after = await listManaged();
+    expect(after).toHaveLength(1);
+    expect(after[0].text).toBe(priorText);
+    expect(mocks.applyEnabledIds).toHaveBeenCalledTimes(2);
+  });
 });

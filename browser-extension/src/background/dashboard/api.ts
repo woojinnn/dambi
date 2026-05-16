@@ -82,6 +82,58 @@ async function autoApplyEnabled(
   return applyEnabledIds(nextIds, reinstallAllPolicies);
 }
 
+/**
+ * Persist + apply + rollback wrapper. Used by put-raw and put-template so a
+ * policy whose Cedar (or schema) fails WASM validation doesn't leave the store
+ * in a broken state.
+ *
+ * Sequence (success path):
+ *   1. Snapshot prior storage + enabled-set state.
+ *   2. upsertManaged(policy)
+ *   3. applyEnabledIds(currentEnabled ∪ {id}, reinstall) — WASM validates here.
+ *   4. Read catalog and return { policy, catalog }.
+ *
+ * Sequence (failure path — WASM rejected):
+ *   3a. Restore the prior managed-policy entry (or remove if it was a fresh
+ *       insert).
+ *   3b. applyEnabledIds(priorEnabled, reinstall) so ENABLED/APPLIED keys and
+ *       the running engine snap back to the last good state. The prior set
+ *       was working before this call, so this reinstall must succeed unless
+ *       the storage was already broken — in that pathological case we still
+ *       surface the original error.
+ */
+async function persistThenApply(
+  policy: ManagedPolicy,
+): Promise<DashboardResponse<{ policy: ManagedPolicy; catalog: unknown }>> {
+  const priorList = await listManaged();
+  const priorEntry = priorList.find((p) => p.id === policy.id);
+  const priorEnabled = await getEnabledIds();
+
+  await upsertManaged(policy);
+  const apply = await autoApplyEnabled((cur) => {
+    cur.add(policy.id);
+    return cur;
+  });
+
+  if (!apply.ok) {
+    // Roll storage back to its pre-call shape.
+    if (priorEntry) {
+      await upsertManaged(priorEntry);
+    } else {
+      await deleteManaged(policy.id);
+    }
+    // Snap the engine back to the prior enabled set. Best-effort; if this
+    // also fails, surface the *original* error rather than the rollback's.
+    await applyEnabledIds(priorEnabled, reinstallAllPolicies).catch(
+      () => undefined,
+    );
+    return { ok: false, error: apply.error };
+  }
+
+  const catalog = await getCatalog();
+  return { ok: true, data: { policy, catalog } };
+}
+
 export async function handleDashboardRequest(
   req: DashboardRequest,
 ): Promise<DashboardResponse> {
@@ -123,11 +175,7 @@ export async function handleDashboardRequest(
           updatedAtMs: Date.now(),
           schemaVersion: 1,
         };
-        await upsertManaged(policy);
-        const apply = await autoApplyEnabled((cur) => cur.add(req.id));
-        if (!apply.ok) return { ok: false, error: apply.error };
-        const catalog = await getCatalog();
-        return { ok: true, data: { policy, catalog } };
+        return await persistThenApply(policy);
       }
 
       case "dashboard:put-template": {
@@ -165,11 +213,7 @@ export async function handleDashboardRequest(
           updatedAtMs: Date.now(),
           schemaVersion: 1,
         };
-        await upsertManaged(policy);
-        const apply = await autoApplyEnabled((cur) => cur.add(req.id));
-        if (!apply.ok) return { ok: false, error: apply.error };
-        const catalog = await getCatalog();
-        return { ok: true, data: { policy, catalog } };
+        return await persistThenApply(policy);
       }
 
       case "dashboard:delete": {
