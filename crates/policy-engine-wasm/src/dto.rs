@@ -117,6 +117,15 @@ pub struct EvaluatePolicyRpcInputDto {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct EvaluateEnvelopesInputDto {
+    pub envelopes: Vec<ActionEnvelope>,
+    pub root: RootInput,
+    pub rpc_response: PolicyRpcResponse,
+    #[serde(default)]
+    pub manifests: Vec<PolicyManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct PreviewSchemaInputDto {
     #[serde(default)]
     pub manifests: Vec<PolicyManifest>,

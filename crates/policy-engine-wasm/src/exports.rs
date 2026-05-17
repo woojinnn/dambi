@@ -1,8 +1,9 @@
 //! Thin `#[wasm_bindgen]` JSON-string exports.
 
 use crate::dto::{
-    EngineErrorDto, Envelope, EvaluatePolicyRpcInputDto, InstallPoliciesInputDto, MatchedPolicyDto,
-    PlanPolicyRpcInputDto, PolicyRpcPlanDto, PreviewSchemaInputDto, RawRequestDto, VerdictDto,
+    EngineErrorDto, Envelope, EvaluateEnvelopesInputDto, EvaluatePolicyRpcInputDto,
+    InstallPoliciesInputDto, MatchedPolicyDto, PlanPolicyRpcInputDto, PolicyRpcPlanDto,
+    PreviewSchemaInputDto, RawRequestDto, VerdictDto,
 };
 use alloy_primitives::U256;
 use policy_engine::lowering::policy_request_from_envelope;
@@ -10,7 +11,8 @@ use policy_engine::policy::{
     MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyRequestOrigin, Severity, Verdict,
 };
 use policy_engine::policy_rpc::{
-    apply_rpc_results_with_indices, manifest_set_hash, plan_calls, RootInput,
+    apply_rpc_results_with_indices, manifest_set_hash, plan_calls, PolicyManifest,
+    PolicyRpcResponse, RootInput,
 };
 use policy_engine::schema::AddedContextField;
 use policy_engine::schema::{schema_hash, PolicySchemaComposer};
@@ -510,50 +512,46 @@ pub fn evaluate_policy_rpc_json(input_json: String) -> String {
             Ok(())
         })?;
 
-        let from: ActionAddress = input
-            .plan
-            .root
-            .from
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_from", error))?;
-        let to: ActionAddress = input
-            .plan
-            .root
-            .to
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_to", error))?;
-        let value_wei: DecimalString = input
-            .plan
-            .root
-            .value_wei
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_value_wei", error))?;
-        let block_timestamp = input.plan.root.block_timestamp.unwrap_or_default();
-
-        let mut policy_envelopes = Vec::new();
-        let mut requests = Vec::new();
-        for (envelope_index, envelope) in input.plan.envelopes.iter().enumerate() {
-            if let Some(request) = policy_request_from_envelope(
-                envelope,
-                &from,
-                &to,
-                &value_wei,
-                input.plan.root.chain_id,
-                block_timestamp,
-            ) {
-                policy_envelopes.push((envelope_index, envelope));
-                requests.push(request);
-            }
-        }
-
-        apply_rpc_results_with_indices(
-            &mut requests,
-            &policy_envelopes,
-            &input.manifests,
+        evaluate_envelopes_inner(
+            &input.plan.envelopes,
+            &input.plan.root,
             &input.rpc_response,
+            &input.manifests,
+            Some(&input.plan.schema_hash),
         )
-        .map_err(|error| EngineErrorDto::new("projection_failed", error.to_string()))?;
+    })();
 
+    let dto = match verdict {
+        Ok(verdict) => verdict_to_dto(verdict),
+        Err(error) => engine_error_verdict(error),
+    };
+    Envelope::ok(dto).to_json()
+}
+
+/// Evaluate pre-routed `ActionEnvelope[]` against the installed policy set.
+/// Skips routing — caller (Plan 2's JS loader) is responsible for converting
+/// raw RPC → envelopes via adapter WASMs.
+///
+/// Input JSON shape:
+/// ```json
+/// {
+///   "envelopes": [...],
+///   "root": { "chain_id": ..., "from": ..., "to": ..., "value_wei": ..., "block_timestamp": ... },
+///   "rpc_response": { "request_id": ..., "results": [...] },
+///   "manifests": [...]
+/// }
+/// ```
+///
+/// Output: same verdict DTO as `evaluate_policy_rpc_json`.
+#[wasm_bindgen]
+pub fn evaluate_envelopes_json(input_json: String) -> String {
+    let verdict = (|| -> Result<Verdict, EngineErrorDto> {
+        let input: EvaluateEnvelopesInputDto =
+            serde_json::from_str(&input_json).map_err(|error| {
+                EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
+            })?;
+
+        let manifest_hash = manifest_set_hash(&input.manifests);
         STATE.with(|state| {
             let state = state.borrow();
             let state = state.as_ref().ok_or_else(not_installed_error)?;
@@ -563,21 +561,16 @@ pub fn evaluate_policy_rpc_json(input_json: String) -> String {
                     "installed policies were built with a different manifest set",
                 ));
             }
-            if state.schema_hash != input.plan.schema_hash {
-                return Err(EngineErrorDto::new(
-                    "installed_schema_hash_mismatch",
-                    "installed policies were built with a different schema",
-                ));
-            }
-            state
-                .policies
-                .evaluate_requests(
-                    requests
-                        .iter()
-                        .map(|request| (request, PolicyRequestOrigin::Action)),
-                )
-                .map_err(|error| EngineErrorDto::new("policy", error.to_string()))
-        })
+            Ok(())
+        })?;
+
+        evaluate_envelopes_inner(
+            &input.envelopes,
+            &input.root,
+            &input.rpc_response,
+            &input.manifests,
+            None,
+        )
     })();
 
     let dto = match verdict {
@@ -585,6 +578,81 @@ pub fn evaluate_policy_rpc_json(input_json: String) -> String {
         Err(error) => engine_error_verdict(error),
     };
     Envelope::ok(dto).to_json()
+}
+
+/// Shared "post-routing" path: lower envelopes → apply RPC projections →
+/// evaluate against the installed policy set. Public exports add their own
+/// outer hash/plan checks before calling this.
+///
+/// When `expected_schema_hash` is `Some`, the installed schema must match it.
+fn evaluate_envelopes_inner(
+    envelopes: &[ActionEnvelope],
+    root: &RootInput,
+    rpc_response: &PolicyRpcResponse,
+    manifests: &[PolicyManifest],
+    expected_schema_hash: Option<&str>,
+) -> Result<Verdict, EngineErrorDto> {
+    let manifest_hash = manifest_set_hash(manifests);
+
+    let from: ActionAddress = root
+        .from
+        .parse()
+        .map_err(|error| EngineErrorDto::new("invalid_from", error))?;
+    let to: ActionAddress = root
+        .to
+        .parse()
+        .map_err(|error| EngineErrorDto::new("invalid_to", error))?;
+    let value_wei: DecimalString = root
+        .value_wei
+        .parse()
+        .map_err(|error| EngineErrorDto::new("invalid_value_wei", error))?;
+    let block_timestamp = root.block_timestamp.unwrap_or_default();
+
+    let mut policy_envelopes = Vec::new();
+    let mut requests = Vec::new();
+    for (envelope_index, envelope) in envelopes.iter().enumerate() {
+        if let Some(request) = policy_request_from_envelope(
+            envelope,
+            &from,
+            &to,
+            &value_wei,
+            root.chain_id,
+            block_timestamp,
+        ) {
+            policy_envelopes.push((envelope_index, envelope));
+            requests.push(request);
+        }
+    }
+
+    apply_rpc_results_with_indices(&mut requests, &policy_envelopes, manifests, rpc_response)
+        .map_err(|error| EngineErrorDto::new("projection_failed", error.to_string()))?;
+
+    STATE.with(|state| {
+        let state = state.borrow();
+        let state = state.as_ref().ok_or_else(not_installed_error)?;
+        if state.manifest_set_hash != manifest_hash {
+            return Err(EngineErrorDto::new(
+                "installed_manifest_hash_mismatch",
+                "installed policies were built with a different manifest set",
+            ));
+        }
+        if let Some(expected) = expected_schema_hash {
+            if state.schema_hash != expected {
+                return Err(EngineErrorDto::new(
+                    "installed_schema_hash_mismatch",
+                    "installed policies were built with a different schema",
+                ));
+            }
+        }
+        state
+            .policies
+            .evaluate_requests(
+                requests
+                    .iter()
+                    .map(|request| (request, PolicyRequestOrigin::Action)),
+            )
+            .map_err(|error| EngineErrorDto::new("policy", error.to_string()))
+    })
 }
 
 fn route_envelopes(input: &RawRequestDto) -> Result<Vec<ActionEnvelope>, EngineErrorDto> {
@@ -887,6 +955,45 @@ mod tests_policy_rpc {
                 "plan": plan,
                 "rpc_response": {
                     "request_id": "eval-1",
+                    "results": [{
+                        "id": "user/max-input-usd-100::0::swap-total-input-usd",
+                        "ok": true,
+                        "result": {
+                            "value": "3500.1200",
+                            "asOfTs": 1_700_000_000_u64,
+                            "staleSec": 5,
+                            "sources": ["coingecko"]
+                        }
+                    }]
+                },
+                "manifests": [manifest_json()]
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["kind"], "fail", "{parsed}");
+        assert_eq!(
+            parsed["data"]["matched"][0]["policy_id"], "bundle::max-input-usd-100",
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn evaluate_envelopes_json_matches_policy_rpc_evaluation() {
+        install_usd_policy();
+        // Reuse plan_policy_rpc_json to obtain pre-routed envelopes + root —
+        // mirrors what Plan 2's JS loader produces via adapter WASMs.
+        let plan_output = plan_policy_rpc_json(plan_input().to_string());
+        let plan: Value = serde_json::from_str::<Value>(&plan_output).unwrap()["data"].clone();
+
+        let output = evaluate_envelopes_json(
+            json!({
+                "envelopes": plan["envelopes"],
+                "root": plan["root"],
+                "rpc_response": {
+                    "request_id": "envelopes-eval-1",
                     "results": [{
                         "id": "user/max-input-usd-100::0::swap-total-input-usd",
                         "ok": true,
