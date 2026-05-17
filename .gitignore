@@ -27,3 +27,6 @@ sourcify_dump/
 # Web-server runtime artifacts (managed by scripts/serve.sh).
 target/web-server.log
 target/web-server.pid
+
+# Claude Code per-developer settings (worktree isolation overrides, etc.)
+.claude/
