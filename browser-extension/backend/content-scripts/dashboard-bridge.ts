@@ -76,6 +76,10 @@ const WATCHED_KEYS = new Set([
   "marketplace:bundles",
   "policy-selection:enabled-ids",
   "policy-selection:applied-ids",
+  // Audit log appends on every verdict — dashboard's AuditPage uses this
+  // to refresh on the fly. Storage layer trims to AUDIT_MAX (100), so the
+  // change events fire at most once per decision and the payload stays small.
+  "requests:audit",
 ]);
 
 Browser.storage.onChanged.addListener((changes, areaName) => {
