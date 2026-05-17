@@ -347,8 +347,8 @@ async function openVerdictWindow(
     await Browser.windows.create({
       url,
       type: "popup",
-      width: 520,
-      height: 480,
+      width: 480,
+      height: 640,
       focused: true,
     });
   } catch {
@@ -384,8 +384,8 @@ async function openVerdictWindowAndAwait(
     win = await Browser.windows.create({
       url,
       type: "popup",
-      width: 520,
-      height: 480,
+      width: 480,
+      height: 640,
       focused: true,
     });
   } catch {

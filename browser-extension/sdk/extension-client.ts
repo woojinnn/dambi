@@ -62,6 +62,41 @@ export interface ManagedPolicy {
   schemaVersion: 1;
 }
 
+// Mirrors `AuditEntry` in backend/service-worker/storage.ts. Kept here so
+// the dashboard doesn't have to import a path outside its workspace.
+export type VerdictKind = "pass" | "warn" | "fail";
+
+export interface AuditMatchedPolicy {
+  id: string;
+  severity: string;
+}
+
+export interface AuditPolicyRpc {
+  request_id: string;
+  manifest_set_hash: string;
+  schema_hash: string;
+  call_ids: string[];
+  methods: string[];
+}
+
+export interface AuditEntry {
+  requestId: string;
+  hostname: string;
+  type: "transaction" | "typed-signature" | "untyped-signature";
+  bypassed: boolean;
+  verdict: VerdictKind;
+  matchedPolicies: AuditMatchedPolicy[];
+  policyRpc?: AuditPolicyRpc;
+  decidedAtMs: number;
+}
+
+export interface AuditQuery {
+  /** Cap on number of entries returned. Server-side max is 200. */
+  limit?: number;
+  /** Only entries with `decidedAtMs >= since`. Unix ms. */
+  since?: number;
+}
+
 export type Response<T> =
   | { ok: true; data: T }
   | { ok: false; error: { kind: string; message: string } };
@@ -86,6 +121,8 @@ export interface ExtensionClient {
   }): Promise<{ policy: ManagedPolicy; catalog: Catalog }>;
   delete(id: string): Promise<{ catalog: Catalog }>;
   setEnabledIds(ids: string[]): Promise<{ catalog: Catalog }>;
+  /** Recent verdict history (Pass/Warn/Fail). Ordered most-recent-first. */
+  getAuditLog(opts?: AuditQuery): Promise<AuditEntry[]>;
   /** Subscribe to extension-side change broadcasts. Returns an unsubscribe fn. */
   onChange(cb: (keys: string[]) => void): () => void;
 }
@@ -211,6 +248,11 @@ export function createExtensionClient(
       request<{ catalog: Catalog }>({
         type: "dashboard:set-enabled-ids",
         ids,
+      }),
+    getAuditLog: (opts) =>
+      request<AuditEntry[]>({
+        type: "dashboard:get-audit-log",
+        ...(opts !== undefined ? { opts } : {}),
       }),
     onChange: (cb) => {
       changeListeners.add(cb);
