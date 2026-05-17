@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 alloy-primitives.workspace = true
 policy-engine.workspace = true
 request-router.workspace = true
+sign-resolver.workspace = true
 mappers.workspace = true
 serde.workspace = true
 serde_json.workspace = true

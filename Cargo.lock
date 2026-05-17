@@ -2250,6 +2250,7 @@ dependencies = [
  "request-router",
  "serde",
  "serde_json",
+ "sign-resolver",
  "thiserror",
  "wasm-bindgen",
  "wasm-bindgen-test",

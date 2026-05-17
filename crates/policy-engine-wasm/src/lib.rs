@@ -6,6 +6,7 @@
 
 mod dto;
 mod exports;
+mod helpers;
 
 use wasm_bindgen::prelude::*;
 
@@ -19,3 +20,4 @@ pub use exports::{
     evaluate_policy_rpc_json, install_policies_json, plan_policy_rpc_json,
     preview_installed_schema_json, preview_schema_json, route_request_json,
 };
+pub use helpers::parse_sign_request_json;

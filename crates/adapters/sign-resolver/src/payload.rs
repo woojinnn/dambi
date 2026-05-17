@@ -1,7 +1,8 @@
+use serde::Serialize;
 use serde_json::Value;
 
 /// Decoded payload for each sign method variant.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum SignPayload {
     /// `eth_signTypedData_v4` — full EIP-712 typed data object.
     /// Contains `domain`, `types`, `primaryType`, `message`.
