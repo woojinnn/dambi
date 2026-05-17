@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/universal-router/execute@1.0.0",
   "manifest_path": "manifests/uniswap/universal-router/execute@1.0.0.json",
-  "bundle_sha256": "0xaaa76a3ba443ddf3211303e31c8f7be028206193c5da3bab8f5659948cd4a7b3",
+  "bundle_sha256": "0xe00473a30f3e94c3a63e55ef5a330f775696b05f874b8db7f39b7050e8fb7b76",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/universal-router/execute@1.0.0",
@@ -16,8 +16,15 @@
         137
       ],
       "to": [
+        "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
         "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
-        "0x4c82d1FBfe28C977cbB58D8C7Ff8FCf9F70A2cca"
+        "0x6fF5693b99212Da76ad316178A184AB56D299b43",
+        "0xCb1355ff08Ab38bBCE60111F1bb2B784bE25D7e8",
+        "0x851116d9223fAbed8E56C0E6b8Ad0c31d98B3507",
+        "0x5E325eDA8064b456f4781070C0738d849c824258",
+        "0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3",
+        "0xec7BE89e9d109e7e3Fec59c222CF297125FEFda2",
+        "0x1095692A6237d83C6a72F3F5eFEdb9A670C49223"
       ],
       "selector": "0x3593564c"
     },

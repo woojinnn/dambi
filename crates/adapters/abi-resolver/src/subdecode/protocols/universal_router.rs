@@ -325,23 +325,76 @@ pub fn is_universal_router_execute(selector: &[u8; 4]) -> bool {
 }
 
 /// Allowlist of Uniswap Universal Router deployments — `(chain_id, address)`.
-/// New deploys can be added here as they're verified.
+/// Source: https://github.com/Uniswap/universal-router/tree/main/deploy-addresses
+/// Includes both `UniversalRouterV1_2_V2Support` (V2 swap pool routing) and
+/// `UniversalRouterV2` (V4-supporting). `UniversalRouterV1_2_NoV2Support` is
+/// intentionally omitted since it cannot route V2 swap opcodes.
 const UNISWAP_UR_ADDRESSES: &[(u64, Address)] = &[
-    // Ethereum mainnet — original Universal Router (in our curated bundle).
+    // Ethereum mainnet
+    (
+        1,
+        Address::new(
+            *b"\x3f\xc9\x1a\x3a\xfd\x70\x39\x5c\xd4\x96\xc6\x47\xd5\xa6\xcc\x9d\x4b\x2b\x7f\xad",
+        ),
+    ), // UniversalRouterV1_2_V2Support
     (
         1,
         Address::new(
             *b"\x66\xa9\x89\x3c\xc0\x7d\x91\xd9\x56\x44\xae\xdd\x05\xd0\x3f\x95\xe1\xdb\xa8\xaf",
         ),
-    ),
-    // Ethereum mainnet — V4-supporting Universal Router (not on Sourcify
-    // yet; Etherscan-verified).
+    ), // UniversalRouterV2 (V4-supporting)
+    // Base
     (
-        1,
+        8453,
         Address::new(
-            *b"\x4c\x82\xd1\xfb\xfe\x28\xc9\x77\xcb\xb5\x8d\x8c\x7f\xf8\xfc\xf9\xf7\x0a\x2c\xca",
+            *b"\x3f\xc9\x1a\x3a\xfd\x70\x39\x5c\xd4\x96\xc6\x47\xd5\xa6\xcc\x9d\x4b\x2b\x7f\xad",
         ),
-    ),
+    ), // UniversalRouterV1_2_V2Support (shared CREATE2 addr with mainnet)
+    (
+        8453,
+        Address::new(
+            *b"\x6f\xf5\x69\x3b\x99\x21\x2d\xa7\x6a\xd3\x16\x17\x8a\x18\x4a\xb5\x6d\x29\x9b\x43",
+        ),
+    ), // UniversalRouterV2
+    // Optimism
+    (
+        10,
+        Address::new(
+            *b"\xcb\x13\x55\xff\x08\xab\x38\xbb\xce\x60\x11\x1f\x1b\xb2\xb7\x84\xbe\x25\xd7\xe8",
+        ),
+    ), // UniversalRouterV1_2_V2Support
+    (
+        10,
+        Address::new(
+            *b"\x85\x11\x16\xd9\x22\x3f\xab\xed\x8e\x56\xc0\xe6\xb8\xad\x0c\x31\xd9\x8b\x35\x07",
+        ),
+    ), // UniversalRouterV2
+    // Arbitrum One
+    (
+        42161,
+        Address::new(
+            *b"\x5e\x32\x5e\xda\x80\x64\xb4\x56\xf4\x78\x10\x70\xc0\x73\x8d\x84\x9c\x82\x42\x58",
+        ),
+    ), // UniversalRouterV1_2_V2Support
+    (
+        42161,
+        Address::new(
+            *b"\xa5\x1a\xfa\xfe\x02\x63\xb4\x0e\xda\xef\x0d\xf8\x78\x1e\xa9\xaa\x03\xe3\x81\xa3",
+        ),
+    ), // UniversalRouterV2
+    // Polygon
+    (
+        137,
+        Address::new(
+            *b"\xec\x7b\xe8\x9e\x9d\x10\x9e\x7e\x3f\xec\x59\xc2\x22\xcf\x29\x71\x25\xfe\xfd\xa2",
+        ),
+    ), // UniversalRouterV1_2_V2Support
+    (
+        137,
+        Address::new(
+            *b"\x10\x95\x69\x2a\x62\x37\xd8\x3c\x6a\x72\xf3\xf5\xef\xed\xb9\xa6\x70\xc4\x92\x23",
+        ),
+    ), // UniversalRouterV2
 ];
 
 /// Returns true when `(chain_id, target)` matches a known Uniswap Universal
