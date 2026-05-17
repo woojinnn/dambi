@@ -22,6 +22,10 @@ interface WasmExports {
   // `crates/policy-engine-wasm/src/declarative_exports.rs`.
   declarative_install_json(bundle_json: string): string;
   declarative_lookup_json(input_json: string): string;
+  // Phase 6 — orchestrator route entry. Resolves
+  // (chain_id, to, selector) through the engine-internal bridge populated
+  // at install time, then runs the matching declarative mapper.
+  declarative_route_request_json(input_json: string): string;
 }
 
 /**
@@ -68,6 +72,50 @@ export interface DeclarativeLookupInput {
  */
 export interface DeclarativeLookupResult {
   envelopes: Record<string, unknown>[];
+}
+
+/**
+ * Phase 6 — orchestrator route entry wire shape.
+ *
+ * `(chain_id, to, selector)` form the callkey for the engine-side bridge
+ * lookup. `ctx` + `decoded` mirror the `declarative_lookup_json` shape so a
+ * caller that already has a decoded call (e.g. from the static Tier B abi
+ * resolver) can route it through the declarative pipeline without first
+ * having to know the bundle's decoder_id.
+ */
+export interface DeclarativeRouteRequestInput {
+  chain_id: number;
+  /** "0x" + 40 hex. Case-insensitive on the engine side. */
+  to: string;
+  /** "0x" + 8 hex. Case-insensitive on the engine side. */
+  selector: string;
+  ctx: {
+    chain_id: number;
+    from: string;
+    to: string;
+    value_wei?: string;
+    block_timestamp?: number;
+  };
+  decoded: {
+    decoder_id: string;
+    function_signature: string;
+    args: Array<{
+      name: string;
+      abi_type: string;
+      value: unknown;
+    }>;
+  };
+}
+
+/**
+ * Result of a successful `declarative_route_request_json` call. `decoder_id`
+ * is the bundle id the bridge resolved (`declarative.<path>`); the
+ * orchestrator surfaces it in audit telemetry so we can tell which
+ * marketplace adapter handled a given tx.
+ */
+export interface DeclarativeRouteRequestResult {
+  envelopes: Record<string, unknown>[];
+  decoder_id: string;
 }
 
 /**
@@ -233,6 +281,32 @@ export async function declarativeMap(
   const exports = await load();
   return unwrap<DeclarativeLookupResult>(
     exports.declarative_lookup_json(JSON.stringify(input)),
+  );
+}
+
+/**
+ * Phase 6 — orchestrator route entry.
+ *
+ * Resolves `(chain_id, to, selector)` through the engine-side bridge table
+ * populated at install time by `declarative_install_json`, then runs the
+ * matching mapper against the caller-supplied `decoded` call.
+ *
+ * Error semantics (mirrored straight from the WASM contract):
+ *   - `EngineError("no_declarative_mapper", …)` — no bundle is mounted for
+ *     this callkey. The orchestrator MUST treat this as a non-fatal miss
+ *     and fall through to the static Tier B pipeline.
+ *   - `EngineError("map_failed", …)` — bundle matched but the declarative
+ *     interpreter rejected the decoded call (malformed args, type
+ *     mismatch). This IS a fault.
+ *   - `EngineError("invalid_input_json", …)` — the caller built a bad
+ *     wire payload. Treat as a fault.
+ */
+export async function declarativeRouteRequest(
+  input: DeclarativeRouteRequestInput,
+): Promise<DeclarativeRouteRequestResult> {
+  const exports = await load();
+  return unwrap<DeclarativeRouteRequestResult>(
+    exports.declarative_route_request_json(JSON.stringify(input)),
   );
 }
 

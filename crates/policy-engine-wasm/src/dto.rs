@@ -200,6 +200,38 @@ pub enum DecodedValueDto {
     Tuple(Vec<DecodedValueDto>),
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 6 — orchestrator route entry
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Input for `declarative_route_request_json`.
+///
+/// `(chain_id, to, selector)` form the callkey for the bridge lookup. `ctx`
+/// and `decoded` are the per-tx execution context and the decoded call data
+/// the caller (orchestrator) decoded ahead of time (typically via the
+/// Tier B static abi-resolver). `decoded.decoder_id` is ignored — the route
+/// entry overwrites it with the canonical declarative id resolved from the
+/// bridge.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeclarativeRouteRequestInputDto {
+    pub chain_id: u64,
+    /// "0x" + 40 hex. Case-insensitive — the bridge normalises to lowercase.
+    pub to: String,
+    /// "0x" + 8 hex. Case-insensitive — same as `to`.
+    pub selector: String,
+    pub ctx: DeclarativeCtxDto,
+    pub decoded: DecodedCallDto,
+}
+
+/// Result returned by `declarative_route_request_json` on success.
+/// `decoder_id` lets the caller correlate the envelopes with the bundle the
+/// bridge resolved (useful for audit / telemetry).
+#[derive(Debug, Clone, Serialize)]
+pub struct DeclarativeRouteRequestResultDto {
+    pub envelopes: Vec<policy_engine::ActionEnvelope>,
+    pub decoder_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

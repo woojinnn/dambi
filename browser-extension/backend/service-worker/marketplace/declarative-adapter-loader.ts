@@ -38,6 +38,14 @@ import {
 export interface MountResult {
   decoderId: string;
   bundleId: string;
+  /**
+   * Phase 6 — parsed bundle kept alongside the mount result so the
+   * orchestrator can decode raw calldata against `bundle.abi_fragment` (via
+   * viem) before forwarding to the WASM route entry. The bundle is the
+   * SAME object the schema parser validated; downstream code MUST treat it
+   * as read-only.
+   */
+  bundle: AdapterFunctionBundle;
 }
 
 /**
@@ -131,6 +139,7 @@ export async function mountDeclarativeBundle(
   const result: MountResult = {
     decoderId: installed.decoder_id,
     bundleId: installed.bundle_id,
+    bundle: parsedBundle,
   };
   // Phase 2B — expand the bundle's match table into the callkey lookup so
   // the JIT fetcher can detect Layer 1 hits without a network round-trip.

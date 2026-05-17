@@ -16,7 +16,9 @@ pub fn _start() {
     console_error_panic_hook::set_once();
 }
 
-pub use declarative_exports::{declarative_install_json, declarative_lookup_json};
+pub use declarative_exports::{
+    declarative_install_json, declarative_lookup_json, declarative_route_request_json,
+};
 pub use exports::{
     evaluate_policy_rpc_json, install_policies_json, plan_policy_rpc_json,
     preview_installed_schema_json, preview_schema_json, route_request_json,

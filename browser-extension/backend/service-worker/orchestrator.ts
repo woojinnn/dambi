@@ -1,6 +1,10 @@
 import Browser from "webextension-polyfill";
 import { ensureSeedBundlesInstalled } from "./marketplace/declarative-adapter-loader";
 import {
+  tryDeclarativeRoute,
+  type DeclarativeRouteOutcome,
+} from "./marketplace/declarative-route";
+import {
   ensureDefaultPoliciesInstalled,
   getActivePolicyRpcManifests,
 } from "./policies-loader";
@@ -34,9 +38,32 @@ interface DecisionOptions {
   onAwaitingUser?: () => void;
 }
 
+/**
+ * Phase 6 — audit telemetry capturing the declarative pipeline's contribution
+ * to a single decision. Surfaced in the audit log so we can tell which
+ * marketplace bundle handled (or failed to handle) a given tx.
+ *
+ * Note: in this Phase 6 PoC the Cedar verdict still comes from the static
+ * Tier B `evaluateWithPolicyRpc` pipeline — the declarative and static
+ * envelopes are equivalent for V2 swap (proven by
+ * `declarative_equivalent_to_static_v2_mapper` in the mapper crate), so
+ * running both costs an extra round-trip but cannot disagree on the final
+ * verdict. A later phase that wires plan/evaluate to consume pre-routed
+ * envelopes will let us drop the static path on hit.
+ */
+export interface DeclarativeAuditMeta {
+  outcome: DeclarativeRouteOutcome["kind"]; // "hit" | "miss" | "fault"
+  source?: "layer1" | "jit";
+  decoder_id?: string;
+  bundle_id?: string;
+  envelope_count?: number;
+  reason?: string;
+}
+
 interface LifecycleResult {
   verdict: VerdictDto;
   policyRpc?: PolicyRpcAuditMeta;
+  declarative?: DeclarativeAuditMeta;
 }
 
 /**
@@ -126,7 +153,13 @@ async function decideInner(
       );
     }
 
-    await appendAudit(message, pending.type, verdict, lifecycle.policyRpc);
+    await appendAudit(
+      message,
+      pending.type,
+      verdict,
+      lifecycle.policyRpc,
+      lifecycle.declarative,
+    );
     return { ok, verdict };
   } catch (err) {
     const errInfo =
@@ -172,6 +205,7 @@ async function appendAudit(
   type: PendingRequest["type"],
   verdict: VerdictDto,
   policyRpc?: PolicyRpcAuditMeta,
+  declarative?: DeclarativeAuditMeta,
 ): Promise<void> {
   logDecision(message, verdict);
   await auditAppend({
@@ -186,6 +220,7 @@ async function appendAudit(
         severity: m.severity,
       })) ?? [],
     ...(policyRpc ? { policyRpc } : {}),
+    ...(declarative ? { declarative } : {}),
     decidedAtMs: Date.now(),
   });
 }
@@ -237,10 +272,100 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     return { verdict: unsupportedUntypedSignatureVerdict() };
   }
 
+  // Phase 6 — declarative path (best-effort, observability only at this
+  // stage). For transactions we hand off `(chainId, to, calldata)` to the
+  // marketplace router. A hit means a Tier A bundle is mounted and its
+  // mapper successfully produced ActionEnvelopes; the existing
+  // `evaluateWithPolicyRpc` continues to drive the Cedar verdict because
+  // the static and declarative envelopes are equivalent for V2 swap.
+  //
+  // We deliberately fence the declarative attempt in a try/catch so any
+  // glitch (registry server down, malformed bundle, race) cannot block a
+  // verdict — the static fallback is the ground truth for this PoC.
+  let declarativeMeta: DeclarativeAuditMeta | undefined;
+  if (isTransaction(message)) {
+    try {
+      const outcome = await tryDeclarativeRoute({
+        chainId: message.data.chainId,
+        from: message.data.transaction.from ?? "0x" + "0".repeat(40),
+        to: message.data.transaction.to ?? "0x" + "0".repeat(40),
+        valueWei: txValueToWeiDecimal(message.data.transaction.value),
+        calldataHex: message.data.transaction.data,
+      });
+      declarativeMeta = auditFromDeclarativeOutcome(outcome);
+      console.info("[Scopeball] declarative-route", {
+        requestId: message.requestId,
+        chainId: message.data.chainId,
+        outcome: outcome.kind,
+        ...(outcome.kind === "hit"
+          ? {
+              decoderId: outcome.value.decoderId,
+              bundleId: outcome.value.bundleId,
+              source: outcome.value.source,
+              envelopeCount: outcome.value.envelopes.length,
+            }
+          : outcome.kind === "miss"
+            ? { reason: outcome.reason }
+            : { reason: outcome.reason }),
+      });
+    } catch (err) {
+      // tryDeclarativeRoute already classifies known errors. Anything
+      // reaching here is truly unexpected — log and continue with the
+      // static path.
+      console.warn("[Scopeball] declarative-route threw", {
+        requestId: message.requestId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      declarativeMeta = { outcome: "fault", reason: "unexpected" };
+    }
+  }
+
   const result = await evaluateWithPolicyRpc(message, {
     manifests: getActivePolicyRpcManifests(),
   });
-  return { verdict: result.verdict, policyRpc: result.audit };
+  return {
+    verdict: result.verdict,
+    policyRpc: result.audit,
+    ...(declarativeMeta ? { declarative: declarativeMeta } : {}),
+  };
+}
+
+function auditFromDeclarativeOutcome(
+  outcome: DeclarativeRouteOutcome,
+): DeclarativeAuditMeta {
+  if (outcome.kind === "hit") {
+    return {
+      outcome: "hit",
+      source: outcome.value.source,
+      decoder_id: outcome.value.decoderId,
+      bundle_id: outcome.value.bundleId,
+      envelope_count: outcome.value.envelopes.length,
+    };
+  }
+  if (outcome.kind === "miss") {
+    return { outcome: "miss", reason: outcome.reason };
+  }
+  return { outcome: "fault", reason: outcome.reason };
+}
+
+/**
+ * Convert a `0x…` hex wei value (the wallet RPC convention) to a base-10
+ * decimal string the engine expects in `ctx.value_wei`. Empty / undefined
+ * defaults to "0".
+ */
+function txValueToWeiDecimal(value: string | undefined): string {
+  if (!value) return "0";
+  if (value.startsWith("0x") || value.startsWith("0X")) {
+    const hex = value.slice(2);
+    if (hex.length === 0) return "0";
+    try {
+      return BigInt("0x" + hex).toString(10);
+    } catch {
+      return "0";
+    }
+  }
+  // Already decimal (uncommon for wallet RPC but tolerated).
+  return value;
 }
 
 function inferActor(message: Message): string | undefined {

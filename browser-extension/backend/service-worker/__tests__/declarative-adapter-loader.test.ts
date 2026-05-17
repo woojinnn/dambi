@@ -57,10 +57,15 @@ describe("mountDeclarativeBundle", () => {
 
     const result = await mountDeclarativeBundle(loadFixtureText());
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       decoderId: "declarative.uniswap/v2/swapExactTokensForTokens",
       bundleId: "uniswap/v2/swapExactTokensForTokens@1.0.0",
     });
+    // Phase 6 — the mount result now also exposes the parsed bundle so
+    // downstream consumers (orchestrator declarative path) can decode
+    // calldata against `bundle.abi_fragment`.
+    expect(result.bundle.id).toBe("uniswap/v2/swapExactTokensForTokens@1.0.0");
+    expect(result.bundle.match.selector).toBe("0x38ed1739");
     // Pass-through invariant: the loader must hand the engine the exact
     // bytes it received, not a re-stringified parsed copy.
     expect(mocks.installDeclarativeBundle).toHaveBeenCalledWith(

@@ -77,10 +77,14 @@ describe("installBundle", () => {
     const bundle = loadFixtureBundle();
     const result = await installBundle(bundle, EXPECTED_SHA256);
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       decoderId: "declarative.uniswap/v2/swapExactTokensForTokens",
       bundleId: "uniswap/v2/swapExactTokensForTokens@1.0.0",
     });
+    // Phase 6 — the mount result now also exposes the parsed bundle so
+    // the orchestrator can decode calldata against the bundle's ABI.
+    expect(result.bundle).toBeDefined();
+    expect(result.bundle.id).toBe("uniswap/v2/swapExactTokensForTokens@1.0.0");
     expect(mocks.installDeclarativeBundle).toHaveBeenCalledTimes(1);
   });
 

@@ -52,6 +52,12 @@ const mocks = vi.hoisted(() => {
     pendingDelete: vi.fn(async () => undefined),
     auditAppend: vi.fn(async () => undefined),
     evaluateWithPolicyRpc: vi.fn(),
+    tryDeclarativeRoute: vi.fn<
+      (...args: unknown[]) => Promise<unknown>
+    >(async () => ({
+      kind: "miss",
+      reason: "no_selector",
+    })),
     browser: {
       storage: {
         session: {
@@ -119,6 +125,12 @@ vi.mock("../wasm-bridge", () => ({
 vi.mock("../policy-rpc", () => ({
   evaluateWithPolicyRpc: mocks.evaluateWithPolicyRpc,
 }));
+// Phase 6 — orchestrator calls `tryDeclarativeRoute` on every transaction.
+// We stub it to a fast "no_selector" miss so tests that don't care about
+// the declarative path don't have to mock the WASM bridge + JIT fetcher.
+vi.mock("../marketplace/declarative-route", () => ({
+  tryDeclarativeRoute: mocks.tryDeclarativeRoute,
+}));
 
 import { decideMessage } from "../orchestrator";
 
@@ -174,6 +186,10 @@ describe("orchestrator", () => {
         methods: [],
       },
     });
+    mocks.tryDeclarativeRoute.mockResolvedValue({
+      kind: "miss",
+      reason: "no_selector",
+    });
   });
 
   it("evaluates transactions through policy-rpc coordinator", async () => {
@@ -195,6 +211,62 @@ describe("orchestrator", () => {
         }),
       }),
     );
+  });
+
+  it("records declarative-route hit metadata in the audit trail", async () => {
+    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
+      kind: "hit",
+      value: {
+        envelopes: [
+          { category: "dex", action: "swap", fields: { swapMode: "exact_in" } },
+        ],
+        decoderId: "declarative.uniswap/v2/swapExactTokensForTokens",
+        bundleId: "uniswap/v2/swapExactTokensForTokens@1.0.0",
+        source: "layer1",
+      },
+    });
+
+    const result = await decideMessage(txMessage("stubbed-tx-1"));
+    expect(result.ok).toBe(true);
+    expect(mocks.tryDeclarativeRoute).toHaveBeenCalledOnce();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        declarative: expect.objectContaining({
+          outcome: "hit",
+          source: "layer1",
+          decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
+          bundle_id: "uniswap/v2/swapExactTokensForTokens@1.0.0",
+          envelope_count: 1,
+        }),
+      }),
+    );
+  });
+
+  it("records declarative-route miss in the audit trail", async () => {
+    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
+      kind: "miss",
+      reason: "no_publisher",
+    });
+
+    const result = await decideMessage(txMessage("stubbed-tx-2"));
+    expect(result.ok).toBe(true);
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        declarative: { outcome: "miss", reason: "no_publisher" },
+      }),
+    );
+  });
+
+  it("does not call declarative-route for untyped signatures", async () => {
+    const result = decideMessage(untypedMessage("sig-skip"), {
+      onAwaitingUser: vi.fn(),
+    });
+    await vi.waitFor(() =>
+      expect(mocks.browser.windows.create).toHaveBeenCalledTimes(1),
+    );
+    approve("sig-skip", true);
+    await result;
+    expect(mocks.tryDeclarativeRoute).not.toHaveBeenCalled();
   });
 
   it("lets the user explicitly approve unsupported untyped signatures", async () => {
