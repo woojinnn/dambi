@@ -122,6 +122,84 @@ pub struct PreviewSchemaInputDto {
     pub manifests: Vec<PolicyManifest>,
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Declarative mapper boundary (Phase 1A)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Result returned by `declarative_install_json` on success.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeclarativeInstallResultDto {
+    /// Decoder id derived from the bundle (`declarative.<bundle.id-without-version>`).
+    pub decoder_id: String,
+    /// Echoes back the bundle's full id (including `@version`) for client
+    /// indexing.
+    pub bundle_id: String,
+}
+
+/// Input for `declarative_lookup_json`.
+///
+/// Phase 1A keeps this self-contained — it carries the decoder selection key
+/// and a JSON-friendly `DecodedCall`. Bridge integration (selector → decoder)
+/// is left for Phase 1B / Phase 2.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeclarativeLookupInputDto {
+    /// Bundle's declarative decoder id (e.g.
+    /// `"declarative.uniswap/v2/swapExactTokensForTokens"`).
+    pub decoder_id: String,
+    pub ctx: DeclarativeCtxDto,
+    pub decoded: DecodedCallDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeclarativeCtxDto {
+    pub chain_id: u64,
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub value_wei: Option<String>,
+    #[serde(default)]
+    pub block_timestamp: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DecodedCallDto {
+    pub decoder_id: String,
+    pub function_signature: String,
+    #[serde(default)]
+    pub args: Vec<DecodedArgDto>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DecodedArgDto {
+    pub name: String,
+    pub abi_type: String,
+    pub value: DecodedValueDto,
+}
+
+/// Tagged DTO for the calldata-decoder's value tree.
+///
+/// `kind` discriminates the variant. `value` payloads:
+///   * `address`  — `"0x" + 40 hex` string.
+///   * `uint`     — base-10 decimal string (lossless for `uint256`).
+///   * `int`      — signed decimal string.
+///   * `bool`     — boolean.
+///   * `bytes`    — `"0x" + hex` string.
+///   * `string`   — string.
+///   * `array`    — array of `DecodedValueDto`.
+///   * `tuple`    — array of `DecodedValueDto`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum DecodedValueDto {
+    Address(String),
+    Uint(String),
+    Int(String),
+    Bool(bool),
+    Bytes(String),
+    String(String),
+    Array(Vec<DecodedValueDto>),
+    Tuple(Vec<DecodedValueDto>),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
