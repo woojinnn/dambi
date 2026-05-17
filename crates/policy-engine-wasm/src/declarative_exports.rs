@@ -148,6 +148,12 @@ pub fn declarative_lookup_json(input_json: String) -> String {
         let decoded = decoded_call_from_dto(input.decoded)?;
 
         let registry = EmptyTokenRegistry;
+        // PoC scope: WASM-side `multicall_recurse` e2e is deferred (spec §0).
+        // Rust-side unit tests cover the strategy via `ChildResolver` mocks.
+        // We leave `resolver: None` here — a bundle that requires recursion
+        // will surface `multicall_recurse requires ctx.resolver` and the host
+        // can decide whether to add WASM-side recursion later. The remaining
+        // single_emit bundles (V2/V3/SR02) are unaffected.
         let ctx = MapContext {
             chain_id: input.ctx.chain_id,
             from: &from,
@@ -155,6 +161,9 @@ pub fn declarative_lookup_json(input_json: String) -> String {
             value_wei: &value,
             block_timestamp,
             token_registry: &registry,
+            parent_calldata: None,
+            depth: 0,
+            resolver: None,
         };
 
         let envelopes = mapper

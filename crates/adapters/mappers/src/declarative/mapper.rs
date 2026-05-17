@@ -3,16 +3,18 @@
 //!
 //! Spec §5.4 (DeclarativeMapper struct), §5.5 (Bridge: DecodedCall.decoder_id).
 //!
-//! Phase 1A wires only the `single_emit` strategy. Other strategies
-//! (`opcode_stream_dispatch`, `enum_tagged_dispatch`, `multicall_recurse`)
-//! parse via Phase 0 [`super::types`] but return
-//! [`MapperError::Internal("not implemented in Phase 1A")`] when invoked.
+//! Phase 1A wired the `single_emit` strategy. Phase 4 adds `multicall_recurse`
+//! (delegated to [`super::multicall::execute`]). The remaining strategies
+//! (`opcode_stream_dispatch`, `enum_tagged_dispatch`) parse via Phase 0
+//! [`super::types`] but return [`MapperError::Internal`] when invoked — Phase 5
+//! / 향후 will fill them in.
 
 use abi_resolver::{DecodedCall, DecoderId};
 use policy_engine::ActionEnvelope;
 
 use crate::mapper::{MapContext, Mapper, MapperError, MapperId};
 
+use super::multicall;
 use super::single_emit;
 use super::types::{AdapterFunctionBundle, EmitRule};
 
@@ -89,9 +91,7 @@ impl Mapper for DeclarativeMapper {
             EmitRule::EnumTaggedDispatch { .. } => Err(MapperError::Internal(
                 anyhow::anyhow!("enum_tagged_dispatch not implemented in Phase 1A"),
             )),
-            EmitRule::MulticallRecurse { .. } => Err(MapperError::Internal(
-                anyhow::anyhow!("multicall_recurse not implemented in Phase 1A"),
-            )),
+            EmitRule::MulticallRecurse { .. } => multicall::execute(ctx, decoded, &self.bundle.emit),
         }
     }
 }
@@ -182,6 +182,9 @@ mod tests {
             value_wei: value,
             block_timestamp: Some(1_700_000_000),
             token_registry: registry,
+            parent_calldata: None,
+            depth: 0,
+            resolver: None,
         }
     }
 

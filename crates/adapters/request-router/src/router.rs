@@ -158,6 +158,9 @@ fn route_call_fallback(
         value_wei: value,
         block_timestamp: ctx.block_timestamp,
         token_registry: ctx.token_registry,
+        parent_calldata: None,
+        depth: 0,
+        resolver: None,
     };
 
     mapper

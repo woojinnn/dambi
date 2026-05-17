@@ -66,6 +66,9 @@ impl CallAdapter for DefaultCallAdapter {
             value_wei: ctx.value_wei,
             block_timestamp: ctx.block_timestamp,
             token_registry: ctx.token_registry,
+            parent_calldata: None,
+            depth: 0,
+            resolver: None,
         };
 
         Ok(mapper.map(&map_ctx, &decoded)?)
