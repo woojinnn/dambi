@@ -141,7 +141,15 @@ fn render_type_text(action: &str, fields: &[CustomFieldSource]) -> String {
     if fields.is_empty() {
         return format!("type {pascal}CustomContext = {{}};\n");
     }
-    let body = fields
+    // Sort fields by name before rendering so the cedar text is
+    // deterministic regardless of requirement traversal order. The
+    // canonical in-memory sort in `EnrichedSchema::compute` happens
+    // AFTER the composer has already substituted this rendered text
+    // into the enriched cedarschema, so without the sort here the
+    // SHA-256 of `schema_text` would depend on manifest output order.
+    let mut sorted: Vec<&CustomFieldSource> = fields.iter().collect();
+    sorted.sort_by(|x, y| x.field.cmp(&y.field));
+    let body = sorted
         .iter()
         .map(|f| format!("  {field}?: {ty}", field = f.field, ty = f.cedar_type))
         .collect::<Vec<_>>()
@@ -668,5 +676,77 @@ mod tests {
         ext.insert("swap".into(), fields);
         m.context_extensions = ext;
         assert!(manifest_to_cedarschema("swap", &m).is_ok());
+    }
+
+    /// Carry-over (Fix Q): two manifests that produce the same set of
+    /// output fields but in opposite traversal orders must yield the
+    /// same `type_text` (and therefore the same enriched schema hash).
+    /// Without sorting in `render_type_text`, the rendered cedar text
+    /// reflects requirement-iteration order — so the SHA-256 of the
+    /// composed enriched schema becomes non-deterministic.
+    #[test]
+    fn render_type_text_is_stable_under_output_order_permutation() {
+        let req_with_outputs = |outputs: Vec<ContextProjection>| Requirement {
+            id: "req-multi".into(),
+            when: RequirementWhen {
+                action: "swap".into(),
+            },
+            method: "oracle.usd_value".into(),
+            params: BTreeMap::default(),
+            outputs,
+            optional: true,
+        };
+        let proj = |field: &str, ty: ProjectionType| ContextProjection {
+            kind: "context".into(),
+            field: field.into(),
+            type_name: ty,
+            from: "$.result".into(),
+            required: false,
+        };
+
+        let m_ab = PolicyManifest {
+            id: "test::swap".into(),
+            schema_version: 1,
+            requires: vec![req_with_outputs(vec![
+                proj("aaaUsd", ProjectionType::UsdValuation),
+                proj("zzzUsd", ProjectionType::UsdValuation),
+            ])],
+            context_extensions: BTreeMap::default(),
+        };
+        let m_ba = PolicyManifest {
+            id: "test::swap".into(),
+            schema_version: 1,
+            requires: vec![req_with_outputs(vec![
+                proj("zzzUsd", ProjectionType::UsdValuation),
+                proj("aaaUsd", ProjectionType::UsdValuation),
+            ])],
+            context_extensions: BTreeMap::default(),
+        };
+
+        let frag_ab = manifest_to_cedarschema("swap", &m_ab).expect("ok");
+        let frag_ba = manifest_to_cedarschema("swap", &m_ba).expect("ok");
+        assert_eq!(
+            frag_ab.type_text, frag_ba.type_text,
+            "type_text must not depend on output traversal order"
+        );
+
+        // Hash determinism: rendered text feeds into the enriched schema
+        // text BEFORE `EnrichedSchema::compute` runs its in-memory sort,
+        // so the composer's per-action sort can't repair this. Pin it
+        // here by composing both manifests against the same base stub
+        // and comparing schema_hash.
+        use super::super::composer::compose_enriched_with_base;
+        let base = String::from("type SwapCustomContext = {};\n");
+        let manifests_ab = BTreeMap::from([("swap".to_owned(), m_ab)]);
+        let manifests_ba = BTreeMap::from([("swap".to_owned(), m_ba)]);
+        let enriched_ab = compose_enriched_with_base(&base, &manifests_ab).expect("ok");
+        let enriched_ba = compose_enriched_with_base(&base, &manifests_ba).expect("ok");
+        assert_eq!(
+            enriched_ab.schema_hash, enriched_ba.schema_hash,
+            "enriched schema hash must not depend on output traversal order: \
+             ab={ab} ba={ba}",
+            ab = enriched_ab.schema_text,
+            ba = enriched_ba.schema_text,
+        );
     }
 }
