@@ -19,6 +19,21 @@
   font-size: 1.1rem;
 }
 
+.schema-viewer-draft-pill {
+  display: inline-block;
+  margin-left: 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #fff3bf;
+  color: #6b4f00;
+  border: 1px solid #ffd43b;
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  vertical-align: middle;
+}
+
 .schema-hash-badge {
   font-size: 0.8rem;
   background: var(--surface-muted, #f4f4f4);
