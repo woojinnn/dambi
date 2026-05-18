@@ -24,7 +24,7 @@ export type ConnectionStatus =
   | { kind: "connected"; version: number }
   | { kind: "error"; message: string };
 
-interface ExtensionContextValue {
+export interface ExtensionContextValue {
   client: ExtensionClient;
   catalog: Catalog | null;
   managed: ManagedPolicy[] | null;
@@ -32,7 +32,12 @@ interface ExtensionContextValue {
   refresh: () => Promise<void>;
 }
 
-const ExtensionContext = createContext<ExtensionContextValue | null>(null);
+// Exported so tests can mount a stand-in provider (see
+// `testing/test-sdk-provider.tsx`) without going through the real
+// connection-establishing `ExtensionProvider`.
+export const ExtensionContext = createContext<ExtensionContextValue | null>(
+  null,
+);
 
 // One client per app instance. `createExtensionClient()` registers a
 // window.message listener — calling it once and reusing the instance is
