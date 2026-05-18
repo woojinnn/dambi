@@ -217,4 +217,77 @@ describe("handleManifestRequest", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect((r.data as { ids: string[] }).ids).toEqual(["a", "b"]);
   });
+
+  it("migration:rewrite leaves the id on the pending queue when it produced a real rewrite", async () => {
+    // Codex review carry-over: don't pop pending until the dashboard
+    // confirms with `migration:ack` after the follow-up put-raw lands.
+    // Otherwise a failed put-raw (network drop, WASM reject, tab close)
+    // leaves storage with v0 text and no banner to surface it.
+    await mocks.browser.storage.local.set({
+      "migration:pending": ["dashboard::a"],
+    });
+    const r = await handleManifestRequest({
+      type: "migration:rewrite",
+      id: "dashboard::a",
+      text: `forbid (principal, action == Action::"swap", resource)
+        when { context.totalInputUsd.value > 100 };`,
+      knownFields: ["totalInputUsd"],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((r.data as { applied: boolean }).applied).toBe(true);
+    }
+    // Pending unchanged — the dashboard still has to ack.
+    expect(mocks.localStore.get("migration:pending")).toEqual(["dashboard::a"]);
+  });
+
+  it("migration:rewrite auto-pops when there is nothing to rewrite", async () => {
+    // When the text is already on the v1 layout, the rewrite returns
+    // the input verbatim and there's no follow-up put-raw to wait for
+    // — pop the id immediately so the banner stops showing it.
+    await mocks.browser.storage.local.set({
+      "migration:pending": ["dashboard::clean"],
+    });
+    const r = await handleManifestRequest({
+      type: "migration:rewrite",
+      id: "dashboard::clean",
+      text: `forbid (principal, action == Action::"swap", resource);`,
+      knownFields: ["totalInputUsd"],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((r.data as { applied: boolean }).applied).toBe(false);
+    }
+    // `setPending([])` removes the key entirely to keep storage tidy.
+    expect(mocks.localStore.has("migration:pending")).toBe(false);
+  });
+
+  it("migration:ack pops the id off the pending queue", async () => {
+    await mocks.browser.storage.local.set({
+      "migration:pending": ["dashboard::a", "dashboard::b"],
+    });
+    const r = await handleManifestRequest({
+      type: "migration:ack",
+      id: "dashboard::a",
+    });
+    expect(r.ok).toBe(true);
+    expect(mocks.localStore.get("migration:pending")).toEqual(["dashboard::b"]);
+    if (r.ok) {
+      expect((r.data as { remaining: string[] }).remaining).toEqual([
+        "dashboard::b",
+      ]);
+    }
+  });
+
+  it("migration:ack is a no-op when the id isn't on the queue", async () => {
+    await mocks.browser.storage.local.set({
+      "migration:pending": ["dashboard::a"],
+    });
+    const r = await handleManifestRequest({
+      type: "migration:ack",
+      id: "dashboard::missing",
+    });
+    expect(r.ok).toBe(true);
+    expect(mocks.localStore.get("migration:pending")).toEqual(["dashboard::a"]);
+  });
 });
