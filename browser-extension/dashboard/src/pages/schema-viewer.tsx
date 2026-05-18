@@ -240,6 +240,52 @@ export function SchemaViewer(): JSX.Element {
     );
   }, [preview, schema, action]);
 
+  // Fix P (D14): when in preview mode, compute the diff between the
+  // previewed `customTypes[action]` and the installed
+  // `customContexts[action]` — categorise each field as `added`,
+  // `removed`, `changed`, or `same` so the row renderer can paint a
+  // badge. Removed rows appear in addition to `customFields` so the
+  // user sees what would disappear.
+  const installedCustomFields = useMemo(
+    () =>
+      asCustomFields(schema?.customContexts?.[action] as unknown[] | undefined),
+    [schema, action],
+  );
+  type DiffKind = "added" | "removed" | "changed" | "same";
+  const diffRows = useMemo(() => {
+    if (!preview) return null;
+    const installedByField = new Map<string, CustomFieldSource>();
+    for (const f of installedCustomFields) installedByField.set(f.field, f);
+    const previewByField = new Map<string, CustomFieldSource>();
+    for (const f of customFields) previewByField.set(f.field, f);
+
+    const rows: Array<{ field: CustomFieldSource; kind: DiffKind }> = [];
+    for (const f of customFields) {
+      const installed = installedByField.get(f.field);
+      if (!installed) rows.push({ field: f, kind: "added" });
+      else if (installed.cedar_type !== f.cedar_type)
+        rows.push({ field: f, kind: "changed" });
+      else rows.push({ field: f, kind: "same" });
+    }
+    for (const f of installedCustomFields) {
+      if (!previewByField.has(f.field)) rows.push({ field: f, kind: "removed" });
+    }
+    return rows;
+  }, [preview, customFields, installedCustomFields]);
+
+  const diffBadge = (kind: DiffKind): string => {
+    switch (kind) {
+      case "added":
+        return "+";
+      case "removed":
+        return "−";
+      case "changed":
+        return "~";
+      default:
+        return "";
+    }
+  };
+
   return (
     <div className="schema-viewer">
       <header className="schema-viewer-head">
@@ -361,7 +407,56 @@ export function SchemaViewer(): JSX.Element {
 
               <section className="schema-section schema-section-custom">
                 <h3>Custom fields</h3>
-                {customFields.length === 0 ? (
+                {diffRows ? (
+                  diffRows.length === 0 ? (
+                    <p className="schema-empty">
+                      No manifest-derived fields for this action.
+                    </p>
+                  ) : (
+                    <ul className="schema-field-list">
+                      {diffRows.map(({ field: f, kind }) => {
+                        const tooltip =
+                          "source_method=" + f.source_method +
+                          ", source_requirement_id=" + f.source_requirement_id +
+                          ", requirement_optional=" + String(f.requirement_optional);
+                        const badge = diffBadge(kind);
+                        return (
+                          <li
+                            key={f.field}
+                            className={
+                              "schema-field schema-field-custom" +
+                              (kind === "same" ? "" : ` schema-field-${kind}`)
+                            }
+                            data-testid="custom-field-row"
+                            data-diff={kind}
+                            title={tooltip}
+                          >
+                            {badge ? (
+                              <span
+                                className={`schema-diff-badge schema-diff-badge-${kind}`}
+                                aria-label={kind}
+                                data-testid={`diff-badge-${kind}`}
+                              >
+                                {badge}
+                              </span>
+                            ) : null}
+                            <span className="schema-field-name custom">
+                              {f.field}
+                            </span>
+                            <span className="schema-field-sep">:</span>
+                            <span className="schema-field-type custom">
+                              {f.cedar_type}
+                            </span>
+                            <span className="schema-field-meta">
+                              via <code>{f.source_method}</code>
+                              {f.requirement_optional ? " (optional)" : ""}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )
+                ) : customFields.length === 0 ? (
                   <p className="schema-empty">
                     No manifest-derived fields for this action.
                   </p>
