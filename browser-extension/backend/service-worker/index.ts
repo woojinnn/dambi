@@ -4,6 +4,8 @@ import {
   handleDashboardRequest,
   isDashboardRequest,
 } from "./dashboard/api";
+import { devSeed, fetchBundledDefaultManifests } from "./manifests/dev-seed";
+import * as manifestStore from "./manifests/store";
 import { decideMessage } from "./orchestrator";
 import {
   ensureDefaultPoliciesInstalled,
@@ -11,6 +13,7 @@ import {
 } from "./policies-loader";
 import { applyEnabledIds, getCatalog } from "./policy-selection";
 import { RequestType, type Message, type MessageResponse } from "@lib/types";
+import { installPolicies as wasmInstallPolicies } from "./wasm-bridge";
 
 const WALLET_ACTION_TYPES = new Set<string>([
   RequestType.TRANSACTION,
@@ -27,6 +30,50 @@ console.log("Scopeball SW alive at", new Date().toISOString());
 void ensureDefaultPoliciesInstalled().catch((err) => {
   console.warn("[Scopeball] cold-start prewarm failed:", err);
 });
+
+// Phase 6 / Task 6.3: hydrate the manifest-driven schema on SW boot.
+//
+// Two paths share the same atomic-install plumbing:
+// 1. Prod cold-start restore — if storage already has manifests (the user
+//    installed them via the dashboard in a previous lifetime), push them
+//    back into WASM so the engine starts up with the right schema.
+// 2. Dev seeding — when `NODE_ENV !== "production"`, `devSeed()` fills in
+//    any missing default actions from `public/default-manifests/`. Prod
+//    builds short-circuit inside `devSeed`.
+//
+// Both are best-effort; failures are logged so the engine still serves
+// the legacy `policies-loader` install path.
+void hydrateManifests().catch((err) => {
+  console.warn("[Scopeball] manifest hydration failed:", err);
+});
+
+async function hydrateManifests(): Promise<void> {
+  const existing = await manifestStore.getAllManifests();
+  if (Object.keys(existing).length > 0) {
+    // Cold-start restore: re-push the stored manifest map into WASM so
+    // policies authored on previous startups validate against the
+    // enriched schema.
+    const installed = await wasmInstallPolicies({
+      schema_text: "",
+      policy_set: [],
+      manifests: existing,
+    });
+    if (installed) {
+      await manifestStore.setHash(installed.enrichedSchemaHash);
+    }
+  }
+  await devSeed({
+    fetchDefaults: fetchBundledDefaultManifests,
+    wasmInstall: async (manifests) => {
+      const r = await wasmInstallPolicies({
+        schema_text: "",
+        policy_set: [],
+        manifests,
+      });
+      return r;
+    },
+  });
+}
 
 Browser.runtime.onConnect.addListener((port) => {
   if (port.name !== Identifier.CONTENT_SCRIPT) return;
