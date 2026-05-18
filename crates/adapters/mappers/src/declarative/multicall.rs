@@ -38,6 +38,16 @@ use super::types::EmitRule;
 /// (`RecurseRuleId := "self_array_bytes_last_arg" | ...`).
 pub const RULE_ID_SELF_ARRAY_BYTES_LAST_ARG: &str = "self_array_bytes_last_arg";
 
+/// Hard cap on the number of inner sub-calls a `multicall_recurse` outer call
+/// may carry. Round 1 audit (P1) — an attacker-shaped `bytes[]` payload could
+/// otherwise force the host resolver to fan out N child dispatches per outer
+/// call, multiplying CPU/allocation cost. In practice legitimate Uniswap V3
+/// NFPM and SwapRouter02 multicalls ship 2-8 inner steps; 64 leaves room for
+/// `Multicall3` aggregation while still bounding work. Exceeding this cap
+/// surfaces as a clear `MapperError::Internal` so the caller knows the gate
+/// tripped (vs. e.g. a generic ABI-decode error).
+pub const MAX_MULTICALL_CHILDREN: usize = 64;
+
 /// Execute a `multicall_recurse` rule against the given decoded outer call.
 ///
 /// Returns the flattened envelopes emitted by the inner steps, or an error if
@@ -61,9 +71,8 @@ pub fn execute(
     };
 
     if recurse_rule_id != RULE_ID_SELF_ARRAY_BYTES_LAST_ARG {
-        return Err(MapperError::Internal(anyhow::anyhow!(
-            "multicall_recurse rule id {recurse_rule_id:?} not implemented in Phase 4 PoC \
-             (only {RULE_ID_SELF_ARRAY_BYTES_LAST_ARG:?} supported)"
+        return Err(MapperError::Unsupported(format!(
+            "multicall_recurse/{recurse_rule_id}"
         )));
     }
 
@@ -75,6 +84,14 @@ pub fn execute(
     })?;
 
     let children = extract_self_array_bytes(decoded)?;
+
+    if children.len() > MAX_MULTICALL_CHILDREN {
+        return Err(MapperError::Internal(anyhow::anyhow!(
+            "multicall_recurse rejected: child count {} exceeds MAX_MULTICALL_CHILDREN ({})",
+            children.len(),
+            MAX_MULTICALL_CHILDREN
+        )));
+    }
 
     let mut envelopes = Vec::new();
     for (index, child_calldata) in children.iter().enumerate() {
@@ -388,7 +405,14 @@ mod tests {
         };
 
         let err = execute(&ctx, &decoded, &bad_rule).unwrap_err();
-        assert!(err.to_string().contains("not implemented in Phase 4"));
+        // Round 4 audit — the rule mismatch now surfaces as
+        // `MapperError::Unsupported("multicall_recurse/<rule_id>")` so the
+        // orchestrator can classify it as a known limitation rather than a
+        // runtime fault.
+        assert!(
+            matches!(&err, MapperError::Unsupported(s) if s == "multicall_recurse/safe_multisend_packed"),
+            "expected Unsupported(\"multicall_recurse/safe_multisend_packed\"), got {err:?}"
+        );
     }
 
     #[test]

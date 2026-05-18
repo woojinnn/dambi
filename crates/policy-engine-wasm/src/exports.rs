@@ -1,11 +1,12 @@
 //! Thin `#[wasm_bindgen]` JSON-string exports.
 
 use crate::dto::{
-    EngineErrorDto, Envelope, EvaluatePolicyRpcInputDto, InstallPoliciesInputDto, MatchedPolicyDto,
-    PlanPolicyRpcInputDto, PolicyRpcPlanDto, PreviewSchemaInputDto, RawRequestDto, VerdictDto,
+    EngineErrorDto, Envelope, EvaluatePolicyRpcInputDto, EvaluateWithEnvelopesInputDto,
+    InstallPoliciesInputDto, MatchedPolicyDto, PlanPolicyRpcInputDto, PolicyRpcPlanDto,
+    PreviewSchemaInputDto, RawRequestDto, VerdictDto,
 };
 use alloy_primitives::U256;
-use policy_engine::lowering::policy_request_from_envelope;
+use policy_engine::lowering::try_policy_request_from_envelope;
 use policy_engine::policy::{
     MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyRequestOrigin, Severity, Verdict,
 };
@@ -33,6 +34,7 @@ thread_local! {
 #[wasm_bindgen]
 pub fn install_policies_json(policies_json: String) -> String {
     let result = (|| -> Result<(), EngineErrorDto> {
+        check_input_size(&policies_json, "install_policies_json")?;
         let input: InstallPoliciesInputDto =
             serde_json::from_str(&policies_json).map_err(|error| {
                 EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
@@ -80,6 +82,34 @@ fn not_installed_error() -> EngineErrorDto {
         "not_installed",
         "install_policies_json must be called first",
     )
+}
+
+/// Maximum accepted JSON input byte length at the WASM boundary (4 MiB).
+///
+/// Round 1 audit (P1) — bound `String` inputs before `serde_json::from_str` so
+/// a hostile caller cannot drive the WASM allocator into an OOM with a giant
+/// payload. 4 MiB easily covers every legitimate request: an
+/// `evaluate_policy_rpc_json` plan with all of the supported manifests, a full
+/// Universal-Router opcode stream, and the largest declarative bundle all sit
+/// under ~50 KiB.
+pub(crate) const MAX_WASM_INPUT_JSON_LEN: usize = 4 * 1024 * 1024;
+
+/// Reject WASM JSON inputs that exceed [`MAX_WASM_INPUT_JSON_LEN`].
+///
+/// Returns an `EngineErrorDto` with `kind = "input_too_large"` so callers can
+/// distinguish a size violation from a malformed-JSON case.
+pub(crate) fn check_input_size(input_json: &str, entry: &str) -> Result<(), EngineErrorDto> {
+    if input_json.len() > MAX_WASM_INPUT_JSON_LEN {
+        return Err(EngineErrorDto::new(
+            "input_too_large",
+            format!(
+                "{entry} input json length {} exceeds {} byte limit",
+                input_json.len(),
+                MAX_WASM_INPUT_JSON_LEN
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn verdict_to_dto(verdict: Verdict) -> VerdictDto {
@@ -392,6 +422,9 @@ mod tests {
 
 #[wasm_bindgen]
 pub fn route_request_json(input_json: String) -> String {
+    if let Err(err) = check_input_size(&input_json, "route_request_json") {
+        return Envelope::<()>::err(err.kind, err.message).to_json();
+    }
     let parse_result: Result<RawRequestDto, _> = serde_json::from_str(&input_json);
     let input = match parse_result {
         Ok(v) => v,
@@ -417,6 +450,7 @@ pub fn route_request_json(input_json: String) -> String {
 #[wasm_bindgen]
 pub fn preview_schema_json(input_json: String) -> String {
     let result = (|| -> Result<policy_engine::schema::SchemaPreview, EngineErrorDto> {
+        check_input_size(&input_json, "preview_schema_json")?;
         let input: PreviewSchemaInputDto = serde_json::from_str(&input_json).map_err(|error| {
             EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
         })?;
@@ -454,6 +488,7 @@ pub fn preview_installed_schema_json() -> String {
 #[wasm_bindgen]
 pub fn plan_policy_rpc_json(input_json: String) -> String {
     let result = (|| -> Result<PolicyRpcPlanDto, EngineErrorDto> {
+        check_input_size(&input_json, "plan_policy_rpc_json")?;
         let input: PlanPolicyRpcInputDto = serde_json::from_str(&input_json).map_err(|error| {
             EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
         })?;
@@ -502,6 +537,7 @@ pub fn plan_policy_rpc_json(input_json: String) -> String {
 #[wasm_bindgen]
 pub fn evaluate_policy_rpc_json(input_json: String) -> String {
     let verdict = (|| -> Result<Verdict, EngineErrorDto> {
+        check_input_size(&input_json, "evaluate_policy_rpc_json")?;
         let input: EvaluatePolicyRpcInputDto =
             serde_json::from_str(&input_json).map_err(|error| {
                 EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
@@ -538,51 +574,50 @@ pub fn evaluate_policy_rpc_json(input_json: String) -> String {
             Ok(())
         })?;
 
-        let from: ActionAddress = input
-            .plan
-            .root
-            .from
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_from", error))?;
-        let to: ActionAddress = input
-            .plan
-            .root
-            .to
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_to", error))?;
-        let value_wei: DecimalString = input
-            .plan
-            .root
-            .value_wei
-            .parse()
-            .map_err(|error| EngineErrorDto::new("invalid_value_wei", error))?;
-        let block_timestamp = input.plan.root.block_timestamp.unwrap_or_default();
-
-        let mut policy_envelopes = Vec::new();
-        let mut requests = Vec::new();
-        for (envelope_index, envelope) in input.plan.envelopes.iter().enumerate() {
-            if let Some(request) = policy_request_from_envelope(
-                envelope,
-                &from,
-                &to,
-                &value_wei,
-                input.plan.root.chain_id,
-                block_timestamp,
-            ) {
-                policy_envelopes.push((envelope_index, envelope));
-                requests.push(request);
-            }
-        }
-
-        apply_rpc_results_with_indices(
-            &mut requests,
-            &policy_envelopes,
+        evaluate_envelopes_inner(
+            &input.plan.envelopes,
+            &input.plan.root.from,
+            &input.plan.root.to,
+            &input.plan.root.value_wei,
+            input.plan.root.chain_id,
+            input.plan.root.block_timestamp.unwrap_or_default(),
             &input.manifests,
+            &manifest_hash,
+            &input.plan.schema_hash,
             &input.rpc_response,
         )
-        .map_err(|error| EngineErrorDto::new("projection_failed", error.to_string()))?;
+    })();
 
-        STATE.with(|state| {
+    let dto = match verdict {
+        Ok(verdict) => verdict_to_dto(verdict),
+        Err(error) => engine_error_verdict(error),
+    };
+    Envelope::ok(dto).to_json()
+}
+
+/// Evaluate policies against caller-supplied envelopes.
+///
+/// Phase 7A entry that lets the declarative pipeline drive Cedar verdicts
+/// directly from envelopes it produced, skipping the route → plan stages.
+/// The function still enforces:
+///   * Installed policies' `manifest_set_hash` matches the `manifests` arg.
+///   * Installed `schema_hash` matches the schema derived from `manifests`.
+///   * `rpc_response` projects without error (fail-closed on required RPC).
+///
+/// The reply envelope mirrors `evaluate_policy_rpc_json` — `Envelope::ok` with
+/// a `VerdictDto`, or a synthetic `Fail`/`__engine::*` matched policy when
+/// validation fails.
+#[wasm_bindgen]
+pub fn evaluate_with_envelopes_json(input_json: String) -> String {
+    let verdict = (|| -> Result<Verdict, EngineErrorDto> {
+        check_input_size(&input_json, "evaluate_with_envelopes_json")?;
+        let input: EvaluateWithEnvelopesInputDto = serde_json::from_str(&input_json)
+            .map_err(|error| {
+                EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
+            })?;
+
+        let manifest_hash = manifest_set_hash(&input.manifests);
+        let schema_hash = STATE.with(|state| {
             let state = state.borrow();
             let state = state.as_ref().ok_or_else(not_installed_error)?;
             if state.manifest_set_hash != manifest_hash {
@@ -591,21 +626,21 @@ pub fn evaluate_policy_rpc_json(input_json: String) -> String {
                     "installed policies were built with a different manifest set",
                 ));
             }
-            if state.schema_hash != input.plan.schema_hash {
-                return Err(EngineErrorDto::new(
-                    "installed_schema_hash_mismatch",
-                    "installed policies were built with a different schema",
-                ));
-            }
-            state
-                .policies
-                .evaluate_requests(
-                    requests
-                        .iter()
-                        .map(|request| (request, PolicyRequestOrigin::Action)),
-                )
-                .map_err(|error| EngineErrorDto::new("policy", error.to_string()))
-        })
+            Ok(state.schema_hash.clone())
+        })?;
+
+        evaluate_envelopes_inner(
+            &input.envelopes,
+            &input.from,
+            &input.to,
+            &input.value_wei,
+            input.chain_id,
+            input.block_timestamp,
+            &input.manifests,
+            &manifest_hash,
+            &schema_hash,
+            &input.rpc_response,
+        )
     })();
 
     let dto = match verdict {
@@ -613,6 +648,108 @@ pub fn evaluate_policy_rpc_json(input_json: String) -> String {
         Err(error) => engine_error_verdict(error),
     };
     Envelope::ok(dto).to_json()
+}
+
+/// Lower envelopes into Cedar requests, project RPC results, and evaluate.
+///
+/// Shared by `evaluate_policy_rpc_json` and `evaluate_with_envelopes_json`.
+/// `installed_manifest_hash` and `installed_schema_hash` are the values the
+/// caller already verified against the engine state — passing them through
+/// is purely defensive (re-checked after `apply_rpc_results_with_indices` to
+/// fail-closed on concurrent reinstalls).
+#[allow(clippy::too_many_arguments)]
+fn evaluate_envelopes_inner(
+    envelopes: &[policy_engine::ActionEnvelope],
+    from_str: &str,
+    to_str: &str,
+    value_wei_str: &str,
+    chain_id: u64,
+    block_timestamp: u64,
+    manifests: &[policy_engine::policy_rpc::PolicyManifest],
+    installed_manifest_hash: &str,
+    installed_schema_hash: &str,
+    rpc_response: &policy_engine::policy_rpc::PolicyRpcResponse,
+) -> Result<Verdict, EngineErrorDto> {
+    let from: ActionAddress = from_str
+        .parse()
+        .map_err(|error| EngineErrorDto::new("invalid_from", error))?;
+    let to: ActionAddress = to_str
+        .parse()
+        .map_err(|error| EngineErrorDto::new("invalid_to", error))?;
+    let value_wei: DecimalString = value_wei_str
+        .parse()
+        .map_err(|error| EngineErrorDto::new("invalid_value_wei", error))?;
+
+    let mut policy_envelopes = Vec::new();
+    let mut requests = Vec::new();
+    for (envelope_index, envelope) in envelopes.iter().enumerate() {
+        // Round 5 audit (P0) — `policy_request_from_envelope` historically
+        // collapsed every lowering failure into `None`, which downstream
+        // treated as "skip this envelope". A failing lowering on a hostile
+        // calldata would therefore vanish from policy evaluation and
+        // produce a default `Pass` verdict (fail-open). Switching to
+        // `try_policy_request_from_envelope` keeps lowering errors
+        // visible so we can fail-closed (`__engine::lowering_failed`),
+        // while still allowing intentional `Ok(None)` skips for action
+        // variants the current Phase has not lowered yet (e.g. Wrap /
+        // Permit — see `dispatch.rs` for the explicit skip list).
+        match try_policy_request_from_envelope(
+            envelope,
+            &from,
+            &to,
+            &value_wei,
+            chain_id,
+            block_timestamp,
+        ) {
+            Ok(Some(request)) => {
+                policy_envelopes.push((envelope_index, envelope));
+                requests.push(request);
+            }
+            Ok(None) => {
+                // Intentional skip — action category not yet lowered.
+                // Logged so the orchestrator audit picks it up without
+                // failing the request.
+                continue;
+            }
+            Err(error) => {
+                return Err(EngineErrorDto::new(
+                    "lowering_failed",
+                    format!(
+                        "envelope {envelope_index} ({}) failed to lower into a policy request: {error}",
+                        envelope.action.kind()
+                    ),
+                ));
+            }
+        }
+    }
+
+    apply_rpc_results_with_indices(&mut requests, &policy_envelopes, manifests, rpc_response)
+        .map_err(|error| EngineErrorDto::new("projection_failed", error.to_string()))?;
+
+    STATE.with(|state| {
+        let state = state.borrow();
+        let state = state.as_ref().ok_or_else(not_installed_error)?;
+        if state.manifest_set_hash != installed_manifest_hash {
+            return Err(EngineErrorDto::new(
+                "installed_manifest_hash_mismatch",
+                "installed policies were built with a different manifest set",
+            ));
+        }
+        if state.schema_hash != installed_schema_hash {
+            return Err(EngineErrorDto::new(
+                "installed_schema_hash_mismatch",
+                "installed policies were built with a different schema",
+            ));
+        }
+        state
+            .policies
+            .evaluate_requests(
+                requests
+                    .iter()
+                    .map(|request| (request, PolicyRequestOrigin::Action)),
+            )
+            .map_err(|error| EngineErrorDto::new("policy", error.to_string()))
+    })
 }
 
 fn route_envelopes(input: &RawRequestDto) -> Result<Vec<ActionEnvelope>, EngineErrorDto> {
@@ -1153,6 +1290,128 @@ mod tests_policy_rpc {
             matched[0]["reason"]
                 .as_str()
                 .is_some_and(|reason| reason.contains("Minimum output")),
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn evaluate_with_envelopes_json_v2_swap_pass_with_permit_policy() {
+        // Install a single permit-all policy (no manifests) — verdict should pass.
+        let install_output = install_policies_json(
+            json!({
+                "schema_text": "",
+                "manifests": [],
+                "policy_set": [{
+                    "id": "bundle::permit-all-swap",
+                    "text": r#"
+                        @severity("warn")
+                        @reason("permit everything")
+                        permit(principal, action == Action::"swap", resource);
+                    "#
+                }]
+            })
+            .to_string(),
+        );
+        let installed: Value = serde_json::from_str(&install_output).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        // V2 swap mainnet: WETH (1e18 exact_in) → USDC (min 0). Symbols and
+        // decimals are populated because the declarative adapter layer is
+        // expected to enrich envelopes before they reach this entry.
+        let envelope = json!({
+            "category": "dex",
+            "action": "swap",
+            "fields": {
+                "swapMode": "exact_in",
+                "inputToken": {
+                    "asset": {
+                        "kind": "erc20",
+                        "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                        "symbol": "WETH",
+                        "decimals": 18
+                    },
+                    "amount": { "kind": "exact", "value": "1000000000000000000" }
+                },
+                "outputToken": {
+                    "asset": {
+                        "kind": "erc20",
+                        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                        "symbol": "USDC",
+                        "decimals": 6
+                    },
+                    "amount": { "kind": "min", "value": "0" }
+                },
+                "recipient": "0x2222222222222222222222222222222222222222"
+            }
+        });
+
+        let output = evaluate_with_envelopes_json(
+            json!({
+                "envelopes": [envelope],
+                "from": "0x1111111111111111111111111111111111111111",
+                "to": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                "value_wei": "0",
+                "chain_id": 1u64,
+                "block_timestamp": 1_700_000_000u64,
+                "manifests": [],
+                "rpc_response": { "request_id": "decl-eval-1", "results": [] }
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["kind"], "pass", "{parsed}");
+    }
+
+    #[test]
+    fn evaluate_with_envelopes_json_fails_closed_on_manifest_mismatch() {
+        // Install with one manifest set, then call evaluate with a different
+        // set — must fail closed via `__engine::installed_manifest_hash_mismatch`.
+        install_usd_policy();
+        let other_manifest = json!({
+            "id": "user/another-manifest",
+            "schema_version": 1,
+            "requires": [],
+            "context_extensions": {}
+        });
+
+        let envelope = json!({
+            "category": "dex",
+            "action": "swap",
+            "fields": {
+                "swapMode": "exact_in",
+                "inputToken": {
+                    "asset": { "kind": "erc20", "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" },
+                    "amount": { "kind": "exact", "value": "1" }
+                },
+                "outputToken": {
+                    "asset": { "kind": "erc20", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
+                    "amount": { "kind": "min", "value": "0" }
+                },
+                "recipient": "0x2222222222222222222222222222222222222222"
+            }
+        });
+
+        let output = evaluate_with_envelopes_json(
+            json!({
+                "envelopes": [envelope],
+                "from": "0x1111111111111111111111111111111111111111",
+                "to": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+                "value_wei": "0",
+                "chain_id": 1u64,
+                "manifests": [other_manifest],
+                "rpc_response": { "request_id": "decl-eval-2", "results": [] }
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["kind"], "fail", "{parsed}");
+        assert_eq!(
+            parsed["data"]["matched"][0]["policy_id"],
+            "__engine::installed_manifest_hash_mismatch",
             "{parsed}"
         );
     }

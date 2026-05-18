@@ -100,6 +100,14 @@ function sha256Hex(s: string): string {
   return createHash("sha256").update(s, "utf8").digest("hex");
 }
 
+// Round 3 audit (P1) — tighten registry-side validation so the index
+// builder rejects malformed bundles before they get a callkey entry.
+// The runtime `parseBundle` enforces the same shape, but catching this
+// at build time keeps a hand-edited bundle from quietly slipping a
+// "0x" + N-where-N != 8 selector or a non-EVM address into the index.
+const SELECTOR_RE = /^0x[0-9a-fA-F]{8}$/;
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
 function loadBundle(path: string): AdapterBundle {
   const raw = readFileSync(path, "utf8");
   const json = JSON.parse(raw) as AdapterBundle;
@@ -112,8 +120,24 @@ function loadBundle(path: string): AdapterBundle {
   if (!json.match || !Array.isArray(json.match.chain_ids) || !Array.isArray(json.match.to)) {
     throw new Error(`bundle.match shape invalid: ${path}`);
   }
-  if (typeof json.match.selector !== "string" || !json.match.selector.startsWith("0x")) {
-    throw new Error(`bundle.match.selector invalid: ${path}`);
+  for (const [i, cid] of json.match.chain_ids.entries()) {
+    if (typeof cid !== "number" || !Number.isInteger(cid) || cid < 1) {
+      throw new Error(
+        `bundle.match.chain_ids[${i}] must be positive integer: ${path}`,
+      );
+    }
+  }
+  for (const [i, to] of json.match.to.entries()) {
+    if (typeof to !== "string" || !ADDRESS_RE.test(to)) {
+      throw new Error(
+        `bundle.match.to[${i}] expected EVM address "0x" + 40 hex, got "${to}": ${path}`,
+      );
+    }
+  }
+  if (typeof json.match.selector !== "string" || !SELECTOR_RE.test(json.match.selector)) {
+    throw new Error(
+      `bundle.match.selector expected "0x" + 8 hex, got "${json.match.selector}": ${path}`,
+    );
   }
   return json;
 }

@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "swap-router-02/exactInputSingle@1.0.0",
   "manifest_path": "manifests/swap-router-02/exactInputSingle@1.0.0.json",
-  "bundle_sha256": "0x35337caf5cc44cc3357b89b70481d43bf6937ed6c1eb301484eca9660d71b430",
+  "bundle_sha256": "0x0d089c5c1fe1b652e0ebe1d5f5113f68b4f872f6f3ee1e62615a9dc68988aca0",
   "bundle": {
     "type": "adapter_function",
     "id": "swap-router-02/exactInputSingle@1.0.0",
@@ -99,9 +99,10 @@
     },
     "requires": {
       "imperative": [],
-      "host_capabilities": [
-        "host:token_metadata"
+      "adapter_capabilities": [
+        "token_metadata"
       ],
+      "host_capabilities": [],
       "extension": ">=0.1.0"
     }
   }

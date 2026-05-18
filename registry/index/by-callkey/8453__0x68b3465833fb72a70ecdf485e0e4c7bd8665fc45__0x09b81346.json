@@ -1,0 +1,113 @@
+{
+  "matched": true,
+  "bundle_id": "swap-router-02/exactOutput@1.0.0",
+  "manifest_path": "manifests/swap-router-02/exactOutput@1.0.0.json",
+  "bundle_sha256": "0x34b99d7a4bb7bf7b319a55e6a8eb60a9c0f5df0a4d09a62f2953d9053f98ba68",
+  "bundle": {
+    "type": "adapter_function",
+    "id": "swap-router-02/exactOutput@1.0.0",
+    "publisher": "uniswap.eth",
+    "match": {
+      "chain_ids": [
+        1,
+        8453,
+        10,
+        42161,
+        137
+      ],
+      "to": [
+        "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
+      ],
+      "selector": "0x09b81346"
+    },
+    "abi_fragment": {
+      "function_name": "exactOutput",
+      "abi": {
+        "name": "exactOutput",
+        "type": "function",
+        "inputs": [
+          {
+            "name": "params",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "path",
+                "type": "bytes"
+              },
+              {
+                "name": "recipient",
+                "type": "address"
+              },
+              {
+                "name": "amountOut",
+                "type": "uint256"
+              },
+              {
+                "name": "amountInMaximum",
+                "type": "uint256"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "category": "dex",
+      "action": "swap",
+      "fields": {
+        "inputToken.asset.kind": {
+          "literal": "erc20"
+        },
+        "inputToken.asset.address": {
+          "fn": "unfold_v3_path",
+          "args": [
+            {
+              "from": "$.args.path"
+            },
+            {
+              "literal": "last_token"
+            }
+          ]
+        },
+        "inputToken.amount.kind": {
+          "literal": "max"
+        },
+        "inputToken.amount.value": {
+          "from": "$.args.amountInMaximum"
+        },
+        "outputToken.asset.kind": {
+          "literal": "erc20"
+        },
+        "outputToken.asset.address": {
+          "fn": "unfold_v3_path",
+          "args": [
+            {
+              "from": "$.args.path"
+            },
+            {
+              "literal": "first_token"
+            }
+          ]
+        },
+        "outputToken.amount.kind": {
+          "literal": "exact"
+        },
+        "outputToken.amount.value": {
+          "from": "$.args.amountOut"
+        },
+        "recipient": {
+          "from": "$.args.recipient"
+        }
+      }
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

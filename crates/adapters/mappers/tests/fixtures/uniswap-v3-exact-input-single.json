@@ -50,7 +50,8 @@
   },
   "requires": {
     "imperative": [],
-    "host_capabilities": ["host:token_metadata"],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
     "extension": ">=0.1.0"
   }
 }

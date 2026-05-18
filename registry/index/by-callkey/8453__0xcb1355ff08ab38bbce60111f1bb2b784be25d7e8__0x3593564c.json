@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/universal-router/execute@1.0.0",
   "manifest_path": "manifests/uniswap/universal-router/execute@1.0.0.json",
-  "bundle_sha256": "0xe00473a30f3e94c3a63e55ef5a330f775696b05f874b8db7f39b7050e8fb7b76",
+  "bundle_sha256": "0x2a324eb53fa32323669383babbf408ddff5414293c0109888301983b527f73e9",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/universal-router/execute@1.0.0",
@@ -156,6 +156,31 @@
             }
           }
         },
+        "0x02": {
+          "name": "PERMIT2_TRANSFER_FROM",
+          "category": "misc",
+          "action": "transfer",
+          "fields": {
+            "token.asset.kind": {
+              "literal": "erc20"
+            },
+            "token.asset.address": {
+              "from": "$.args.token"
+            },
+            "token.amount.kind": {
+              "literal": "exact"
+            },
+            "token.amount.value": {
+              "from": "$.args.amount"
+            },
+            "from": {
+              "from": "$.args.recipient"
+            },
+            "recipient": {
+              "from": "$.args.recipient"
+            }
+          }
+        },
         "0x04": {
           "name": "SWEEP",
           "category": "misc",
@@ -172,6 +197,81 @@
             },
             "token.amount.value": {
               "from": "$.args.amountMin"
+            },
+            "from": {
+              "from": "$.args.recipient"
+            },
+            "recipient": {
+              "from": "$.args.recipient"
+            }
+          }
+        },
+        "0x05": {
+          "name": "TRANSFER",
+          "category": "misc",
+          "action": "transfer",
+          "fields": {
+            "token.asset.kind": {
+              "literal": "erc20"
+            },
+            "token.asset.address": {
+              "from": "$.args.token"
+            },
+            "token.amount.kind": {
+              "literal": "exact"
+            },
+            "token.amount.value": {
+              "from": "$.args.value"
+            },
+            "from": {
+              "from": "$.args.recipient"
+            },
+            "recipient": {
+              "from": "$.args.recipient"
+            }
+          }
+        },
+        "0x06": {
+          "name": "PAY_PORTION",
+          "category": "misc",
+          "action": "transfer",
+          "fields": {
+            "token.asset.kind": {
+              "literal": "erc20"
+            },
+            "token.asset.address": {
+              "from": "$.args.token"
+            },
+            "token.amount.kind": {
+              "literal": "portion"
+            },
+            "token.amount.value": {
+              "from": "$.args.bips"
+            },
+            "from": {
+              "from": "$.args.recipient"
+            },
+            "recipient": {
+              "from": "$.args.recipient"
+            }
+          }
+        },
+        "0x07": {
+          "name": "PAY_PORTION_FULL_PRECISION",
+          "category": "misc",
+          "action": "transfer",
+          "fields": {
+            "token.asset.kind": {
+              "literal": "erc20"
+            },
+            "token.asset.address": {
+              "from": "$.args.token"
+            },
+            "token.amount.kind": {
+              "literal": "portion"
+            },
+            "token.amount.value": {
+              "from": "$.args.portion"
             },
             "from": {
               "from": "$.args.recipient"
@@ -383,9 +483,10 @@
       "imperative": [
         "universal-router-dispatcher@^1.0"
       ],
-      "host_capabilities": [
-        "host:token_metadata"
+      "adapter_capabilities": [
+        "token_metadata"
       ],
+      "host_capabilities": [],
       "extension": ">=0.1.0"
     }
   }

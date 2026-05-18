@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/exactInputSingle@1.0.0",
   "manifest_path": "manifests/uniswap/v3/exactInputSingle@1.0.0.json",
-  "bundle_sha256": "0x665a3ca62dd179a86a0261d184c10304f97fb8bdef5c448b16f2d4220f403a63",
+  "bundle_sha256": "0xa879caede41c9a68246eec11349a5576a219958bdb92775227855be297571e7d",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/exactInputSingle@1.0.0",
@@ -109,9 +109,10 @@
     },
     "requires": {
       "imperative": [],
-      "host_capabilities": [
-        "host:token_metadata"
+      "adapter_capabilities": [
+        "token_metadata"
       ],
+      "host_capabilities": [],
       "extension": ">=0.1.0"
     }
   }

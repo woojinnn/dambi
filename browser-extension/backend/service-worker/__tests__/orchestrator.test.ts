@@ -52,6 +52,9 @@ const mocks = vi.hoisted(() => {
     pendingDelete: vi.fn(async () => undefined),
     auditAppend: vi.fn(async () => undefined),
     evaluateWithPolicyRpc: vi.fn(),
+    evaluateWithEnvelopes: vi.fn<
+      (...args: unknown[]) => Promise<unknown>
+    >(async () => ({ kind: "pass" })),
     tryDeclarativeRoute: vi.fn<
       (...args: unknown[]) => Promise<unknown>
     >(async () => ({
@@ -121,6 +124,7 @@ vi.mock("../storage", () => ({
 }));
 vi.mock("../wasm-bridge", () => ({
   EngineError: mocks.MockEngineError,
+  evaluateWithEnvelopes: mocks.evaluateWithEnvelopes,
 }));
 vi.mock("../policy-rpc", () => ({
   evaluateWithPolicyRpc: mocks.evaluateWithPolicyRpc,
@@ -190,6 +194,7 @@ describe("orchestrator", () => {
       kind: "miss",
       reason: "no_selector",
     });
+    mocks.evaluateWithEnvelopes.mockResolvedValue({ kind: "pass" });
   });
 
   it("evaluates transactions through policy-rpc coordinator", async () => {
@@ -253,6 +258,149 @@ describe("orchestrator", () => {
     expect(mocks.auditAppend).toHaveBeenCalledWith(
       expect.objectContaining({
         declarative: { outcome: "miss", reason: "no_publisher" },
+      }),
+    );
+  });
+
+  // ── Phase 7F — declarative verdict path ──────────────────────────────
+  // When the declarative router returns a hit with ≥1 envelope, the
+  // orchestrator now routes the verdict through `evaluate_with_envelopes_json`
+  // (mocked here as `evaluateWithEnvelopes`). For miss/fault/empty outcomes
+  // it falls back to the static `evaluateWithPolicyRpc` path. The audit
+  // log's `verdictSource` field captures which path won.
+
+  const hitOutcome = {
+    kind: "hit" as const,
+    value: {
+      envelopes: [
+        {
+          category: "dex",
+          action: "swap",
+          fields: { swapMode: "exact_in" },
+        },
+      ],
+      decoderId: "declarative.uniswap/v2/swapExactTokensForTokens",
+      bundleId: "uniswap/v2/swapExactTokensForTokens@1.0.0",
+      source: "layer1" as const,
+    },
+  };
+
+  it("phase7F: declarative hit drives Cedar verdict (verdictSource=declarative)", async () => {
+    mocks.tryDeclarativeRoute.mockResolvedValueOnce(hitOutcome);
+    mocks.evaluateWithEnvelopes.mockResolvedValueOnce({ kind: "pass" });
+
+    const result = await decideMessage(txMessage("decl-hit-1"));
+
+    expect(result.ok).toBe(true);
+    expect(result.verdict.kind).toBe("pass");
+    // The declarative path runs evaluateWithEnvelopes…
+    expect(mocks.evaluateWithEnvelopes).toHaveBeenCalledOnce();
+    const [evalArgs] = mocks.evaluateWithEnvelopes.mock.calls[0] as [
+      Record<string, unknown>,
+    ];
+    expect(evalArgs.envelopes).toEqual(hitOutcome.value.envelopes);
+    expect(evalArgs.chain_id).toBe(1);
+    expect(evalArgs.manifests).toEqual([{ id: "manifest-a" }]);
+    // …and the static path stays out of the way.
+    expect(mocks.evaluateWithPolicyRpc).not.toHaveBeenCalled();
+    // Audit log records the declarative source.
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "declarative",
+        declarative: expect.objectContaining({
+          outcome: "hit",
+          decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
+          envelope_count: 1,
+        }),
+      }),
+    );
+  });
+
+  it("phase7F: declarative miss falls back to static path (verdictSource=static)", async () => {
+    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
+      kind: "miss",
+      reason: "no_publisher",
+    });
+
+    const result = await decideMessage(txMessage("decl-miss-1"));
+
+    expect(result.ok).toBe(true);
+    expect(mocks.evaluateWithEnvelopes).not.toHaveBeenCalled();
+    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "static",
+        declarative: { outcome: "miss", reason: "no_publisher" },
+      }),
+    );
+  });
+
+  it("phase7F: declarative fault falls back to static path (verdictSource=static)", async () => {
+    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
+      kind: "fault",
+      reason: "map_failed",
+      cause: new Error("mapper rejected decoded call"),
+    });
+
+    const result = await decideMessage(txMessage("decl-fault-1"));
+
+    expect(result.ok).toBe(true);
+    expect(mocks.evaluateWithEnvelopes).not.toHaveBeenCalled();
+    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "static",
+        declarative: { outcome: "fault", reason: "map_failed" },
+      }),
+    );
+  });
+
+  it("phase7F: declarative hit with 0 envelopes falls back to static path", async () => {
+    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
+      kind: "hit",
+      value: {
+        envelopes: [],
+        decoderId: "declarative.something/empty",
+        bundleId: "something/empty@1.0.0",
+        source: "layer1",
+      },
+    });
+
+    const result = await decideMessage(txMessage("decl-empty-1"));
+
+    expect(result.ok).toBe(true);
+    expect(mocks.evaluateWithEnvelopes).not.toHaveBeenCalled();
+    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "static",
+        declarative: expect.objectContaining({
+          outcome: "hit",
+          envelope_count: 0,
+        }),
+      }),
+    );
+  });
+
+  it("phase7F: evaluateWithEnvelopes throw falls through to static path", async () => {
+    mocks.tryDeclarativeRoute.mockResolvedValueOnce(hitOutcome);
+    mocks.evaluateWithEnvelopes.mockRejectedValueOnce(
+      new mocks.MockEngineError(
+        "installed_manifest_hash_mismatch",
+        "stale manifests",
+      ),
+    );
+
+    const result = await decideMessage(txMessage("decl-eval-throw-1"));
+
+    expect(result.ok).toBe(true);
+    expect(mocks.evaluateWithEnvelopes).toHaveBeenCalledOnce();
+    // Fall-through means the static path still runs and produces the
+    // final verdict.
+    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "static",
       }),
     );
   });

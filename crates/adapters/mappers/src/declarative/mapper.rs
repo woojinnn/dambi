@@ -90,8 +90,8 @@ impl Mapper for DeclarativeMapper {
             EmitRule::OpcodeStreamDispatch { .. } => {
                 opcode_stream::execute(ctx, decoded, &self.bundle.emit)
             }
-            EmitRule::EnumTaggedDispatch { .. } => Err(MapperError::Internal(
-                anyhow::anyhow!("enum_tagged_dispatch not implemented in Phase 1A"),
+            EmitRule::EnumTaggedDispatch { .. } => Err(MapperError::Unsupported(
+                "enum_tagged_dispatch".into(),
             )),
             EmitRule::MulticallRecurse { .. } => multicall::execute(ctx, decoded, &self.bundle.emit),
         }
@@ -332,6 +332,10 @@ mod tests {
         include_str!("../../tests/fixtures/uniswap-v3-exact-input.json");
     const V3_EXACT_INPUT_SINGLE_BUNDLE: &str =
         include_str!("../../tests/fixtures/uniswap-v3-exact-input-single.json");
+    const V3_EXACT_OUTPUT_BUNDLE: &str =
+        include_str!("../../tests/fixtures/uniswap-v3-exact-output.json");
+    const V3_EXACT_OUTPUT_SINGLE_BUNDLE: &str =
+        include_str!("../../tests/fixtures/uniswap-v3-exact-output-single.json");
     const SR02_EXACT_INPUT_BUNDLE: &str =
         include_str!("../../tests/fixtures/sr02-exact-input.json");
     const SR02_EXACT_INPUT_SINGLE_BUNDLE: &str =
@@ -729,6 +733,181 @@ mod tests {
         assert!(s.validity.is_none());
         // fee = 3000 → 30.
         assert_swap_equivalent(s, d, false, Some(30));
+        assert_eq!(d.input_token.asset.address, Some(v3_first_token()));
+        assert_eq!(d.output_token.asset.address, Some(v3_last_token()));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Phase 9A.2 — V3 SR01 exactOutput / exactOutputSingle bundles
+    //
+    // V3 `exactOutput` uses a **reversed** packed path: the output token comes
+    // first (offset 0..20), the input token comes last. The declarative bundle
+    // therefore maps `unfold_v3_path(path, "last_token")` to `inputToken` and
+    // `unfold_v3_path(path, "first_token")` to `outputToken`. `derive_swap_mode`
+    // auto-detects `(Max, Exact)` → `SwapMode::ExactOut`.
+    //
+    // SwapRouter01 (`0xE592...1564`) returns `validity` populated from the
+    // `deadline` argument, matching the static `map_exact_output*` helpers.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// V3 `exactOutput` — `params` tuple flattened to 5 args.
+    fn v3_exact_output_decoded(decoder_id: DecoderId) -> DecodedCall {
+        DecodedCall {
+            decoder_id,
+            function_signature: "exactOutput((bytes,address,uint256,uint256,uint256))".into(),
+            args: vec![
+                DecodedArg {
+                    name: "path".into(),
+                    abi_type: "bytes".into(),
+                    value: DecodedValue::Bytes(v3_two_hop_path()),
+                },
+                DecodedArg {
+                    name: "recipient".into(),
+                    abi_type: "address".into(),
+                    value: DecodedValue::Address(recipient()),
+                },
+                DecodedArg {
+                    name: "deadline".into(),
+                    abi_type: "uint256".into(),
+                    value: DecodedValue::Uint(U256::from(9_999_999_999_u64)),
+                },
+                DecodedArg {
+                    name: "amountOut".into(),
+                    abi_type: "uint256".into(),
+                    value: DecodedValue::Uint(U256::from(1_000_000_u64)),
+                },
+                DecodedArg {
+                    name: "amountInMaximum".into(),
+                    abi_type: "uint256".into(),
+                    value: DecodedValue::Uint(U256::from(2_000_000_u64)),
+                },
+            ],
+            nested: vec![],
+        }
+    }
+
+    /// V3 `exactOutputSingle` — `params` tuple flattened to 8 args.
+    fn v3_exact_output_single_decoded(decoder_id: DecoderId) -> DecodedCall {
+        DecodedCall {
+            decoder_id,
+            function_signature:
+                "exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))"
+                    .into(),
+            args: vec![
+                DecodedArg {
+                    name: "tokenIn".into(),
+                    abi_type: "address".into(),
+                    value: DecodedValue::Address(v3_first_token()),
+                },
+                DecodedArg {
+                    name: "tokenOut".into(),
+                    abi_type: "address".into(),
+                    value: DecodedValue::Address(v3_last_token()),
+                },
+                DecodedArg {
+                    name: "fee".into(),
+                    abi_type: "uint24".into(),
+                    value: DecodedValue::Uint(U256::from(3000_u64)),
+                },
+                DecodedArg {
+                    name: "recipient".into(),
+                    abi_type: "address".into(),
+                    value: DecodedValue::Address(recipient()),
+                },
+                DecodedArg {
+                    name: "deadline".into(),
+                    abi_type: "uint256".into(),
+                    value: DecodedValue::Uint(U256::from(9_999_999_999_u64)),
+                },
+                DecodedArg {
+                    name: "amountOut".into(),
+                    abi_type: "uint256".into(),
+                    value: DecodedValue::Uint(U256::from(100_000_u64)),
+                },
+                DecodedArg {
+                    name: "amountInMaximum".into(),
+                    abi_type: "uint256".into(),
+                    value: DecodedValue::Uint(U256::from(200_000_000_u64)),
+                },
+                DecodedArg {
+                    name: "sqrtPriceLimitX96".into(),
+                    abi_type: "uint160".into(),
+                    value: DecodedValue::Uint(U256::ZERO),
+                },
+            ],
+            nested: vec![],
+        }
+    }
+
+    #[test]
+    fn declarative_equivalent_to_static_v3_exact_output() {
+        use crate::protocols::uniswap_v3::UniswapV3ExactOutputMapper;
+
+        let static_decoded = v3_exact_output_decoded(DecoderId::new(
+            abi_resolver::ids::EXACT_OUTPUT_DECODER_ID,
+        ));
+        let registry = EmptyTokenRegistry;
+        let from = dummy_addr(0xAA);
+        let to = dummy_addr(0xBB);
+        let value = DecimalString::from_str("0").unwrap();
+        let ctx = build_ctx(&registry, &from, &to, &value);
+        let static_env = UniswapV3ExactOutputMapper::new()
+            .map(&ctx, &static_decoded)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let declarative_env = run_declarative(V3_EXACT_OUTPUT_BUNDLE, v3_exact_output_decoded);
+
+        let Action::Swap(s) = &static_env.action else {
+            panic!("static is not swap");
+        };
+        let Action::Swap(d) = &declarative_env.action else {
+            panic!("declarative is not swap");
+        };
+        // ExactOut swap_mode is derived from (Max, Exact) amount-kind pairing.
+        assert_eq!(s.swap_mode, policy_engine::action::dex::SwapMode::ExactOut);
+        // Path's first hop fee = 500 → first_fee/100 = 5.
+        assert_swap_equivalent(s, d, true, Some(5));
+
+        // Reversed path: `last_token` = input, `first_token` = output.
+        assert_eq!(d.input_token.asset.address, Some(v3_last_token()));
+        assert_eq!(d.output_token.asset.address, Some(v3_first_token()));
+    }
+
+    #[test]
+    fn declarative_equivalent_to_static_v3_exact_output_single() {
+        use crate::protocols::uniswap_v3::UniswapV3ExactOutputSingleMapper;
+
+        let static_decoded = v3_exact_output_single_decoded(DecoderId::new(
+            abi_resolver::ids::EXACT_OUTPUT_SINGLE_DECODER_ID,
+        ));
+        let registry = EmptyTokenRegistry;
+        let from = dummy_addr(0xAA);
+        let to = dummy_addr(0xBB);
+        let value = DecimalString::from_str("0").unwrap();
+        let ctx = build_ctx(&registry, &from, &to, &value);
+        let static_env = UniswapV3ExactOutputSingleMapper::new()
+            .map(&ctx, &static_decoded)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+
+        let declarative_env =
+            run_declarative(V3_EXACT_OUTPUT_SINGLE_BUNDLE, v3_exact_output_single_decoded);
+
+        let Action::Swap(s) = &static_env.action else {
+            panic!("static is not swap");
+        };
+        let Action::Swap(d) = &declarative_env.action else {
+            panic!("declarative is not swap");
+        };
+        assert_eq!(s.swap_mode, policy_engine::action::dex::SwapMode::ExactOut);
+        // fee = 3000 → fee/100 = 30.
+        assert_swap_equivalent(s, d, true, Some(30));
+        // Single hop — tokenIn / tokenOut explicit (path semantics not used).
         assert_eq!(d.input_token.asset.address, Some(v3_first_token()));
         assert_eq!(d.output_token.asset.address, Some(v3_last_token()));
     }

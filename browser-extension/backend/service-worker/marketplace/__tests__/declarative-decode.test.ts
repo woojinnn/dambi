@@ -138,6 +138,90 @@ describe("decodeBundleCalldata — V2 swap fixture", () => {
   });
 });
 
+describe("decodeBundleCalldata — V3 tuple-param fixture (manual e2e regression)", () => {
+  // Phase 7H manual e2e found the bundled V3 exactInput hitting decode_failed
+  // because viem returns the named-tuple `params` as a JS object (every
+  // component carries a name) while the decoder previously only accepted
+  // positional arrays. `tupleValueToArray` now normalises both shapes; this
+  // test pins the regression by reading the live registry bundle and decoding
+  // the exact calldata the PoC test page emits (single-hop WETH→USDC,
+  // amountIn = 1e18, deadline = 9_999_999_999).
+  const V3_BUNDLE_PATH = path.resolve(
+    __dirname,
+    "../../../../../registry/manifests/uniswap/v3/exactInput@1.0.0.json",
+  );
+
+  // Locked V3 packed path: WETH (20 byte) + fee=3000 (3 byte = 0x000bb8) +
+  // USDC (20 byte). Mirrors the encoding in `/tmp/scopeball-poc-test/index.html`.
+  const V3_PACKED_PATH =
+    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" +
+    "000bb8" +
+    "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+  // ABI-encoded `exactInput((bytes, address, uint256, uint256, uint256))`
+  // with recipient = 0x1111..., deadline = 9_999_999_999, amountIn = 10^18,
+  // amountOutMinimum = 0, path = V3_PACKED_PATH. Selector 0xc04b8d59 follows
+  // by the head pointer (0x20) and the inline tuple. Generated via ethers v6
+  // `encodeFunctionData` and pasted verbatim so this test stays fixture-pure.
+  // V3 packed path is 43 bytes (20 + 3 + 20). ABI bytes-encoding pads to the
+  // next 32-byte boundary → 64 bytes total → 21 bytes (42 hex chars) of
+  // trailing zero padding.
+  const V3_CALLDATA =
+    "0xc04b8d59" +
+    "0000000000000000000000000000000000000000000000000000000000000020" + // offset to tuple
+    "00000000000000000000000000000000000000000000000000000000000000a0" + // offset to bytes
+    "0000000000000000000000001111111111111111111111111111111111111111" + // recipient
+    "00000000000000000000000000000000000000000000000000000002540be3ff" + // deadline
+    "0000000000000000000000000000000000000000000000000de0b6b3a7640000" + // amountIn (1e18)
+    "0000000000000000000000000000000000000000000000000000000000000000" + // amountOutMinimum
+    "000000000000000000000000000000000000000000000000000000000000002b" + // bytes len = 0x2b (43)
+    V3_PACKED_PATH.slice(2) +
+    "000000000000000000000000000000000000000000"; // 21-byte trailing pad
+
+  function loadV3Bundle() {
+    return parseBundle(JSON.parse(readFileSync(V3_BUNDLE_PATH, "utf8")));
+  }
+
+  it("flattens the named-tuple `params` into 5 top-level args", () => {
+    const bundle = loadV3Bundle();
+    const decoded = decodeBundleCalldata(bundle, V3_CALLDATA);
+
+    expect(decoded.decoder_id).toBe("declarative.uniswap/v3/exactInput");
+    expect(decoded.function_signature).toBe(
+      "exactInput((bytes,address,uint256,uint256,uint256))",
+    );
+    expect(decoded.args).toHaveLength(5);
+    expect(decoded.args.map((a) => a.name)).toEqual([
+      "path",
+      "recipient",
+      "deadline",
+      "amountIn",
+      "amountOutMinimum",
+    ]);
+    expect(decoded.args[0]).toMatchObject({
+      name: "path",
+      abi_type: "bytes",
+      value: { kind: "bytes", value: V3_PACKED_PATH },
+    });
+    expect(decoded.args[1]).toMatchObject({
+      name: "recipient",
+      abi_type: "address",
+      value: { kind: "address", value: "0x1111111111111111111111111111111111111111" },
+    });
+    expect(decoded.args[2]).toMatchObject({
+      name: "deadline",
+      value: { kind: "uint", value: "9999999999" },
+    });
+    expect(decoded.args[3]).toMatchObject({
+      name: "amountIn",
+      value: { kind: "uint", value: "1000000000000000000" },
+    });
+    expect(decoded.args[4]).toMatchObject({
+      name: "amountOutMinimum",
+      value: { kind: "uint", value: "0" },
+    });
+  });
+});
+
 describe("buildRouteInput", () => {
   it("composes the wire envelope with sensible defaults", () => {
     const bundle = loadBundle();

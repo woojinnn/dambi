@@ -39,6 +39,19 @@ export interface AbiFragment {
 
 export interface Requires {
   imperative: string[];
+  /**
+   * Adapter-layer capabilities — resolved at static lookup time
+   * (e.g. "token_metadata" for the registry-side static token endpoint).
+   *
+   * Introduced in Phase 7B alongside narrowing `host_capabilities` to
+   * dynamic-only.
+   */
+  adapter_capabilities: string[];
+  /**
+   * Host-layer capabilities — dynamic RPC / oracle enrichment only
+   * (e.g. "host:oracle"). Static lookups moved to `adapter_capabilities`
+   * in Phase 7B.
+   */
   host_capabilities: string[];
   /** semver requirement, e.g. ">=0.1.0". */
   extension: string;
@@ -185,6 +198,11 @@ export interface AdapterFunctionBundle {
 
 const SELECTOR_RE = /^0x[0-9a-fA-F]{8}$/;
 const HEX_U8_RE = /^0x[0-9a-fA-F]{1,2}$/;
+// Round 3 audit (P1) — bundles claiming arbitrary `to` strings (non-EVM
+// addresses) would corrupt the bridge table. EVM addresses are exactly
+// `"0x" + 40 hex` (EIP-55 checksum or lowercased) — we accept both cases
+// and let the bridge normalise downstream.
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const MAX_TRANSFORM_ARGS = 4; // per BNF "max_4"
 
 export class BundleParseError extends Error {
@@ -234,6 +252,43 @@ function reqIntegerArray(v: unknown, path: string): number[] {
     }
     return item;
   });
+}
+
+/**
+ * Round 3 audit (P1) — chain ids must be positive integers. EVM chain ids
+ * start at 1 (mainnet); 0 is a sentinel that has no on-chain meaning and
+ * would otherwise become a valid bridge key. Reuses `reqIntegerArray` for
+ * the shape check, then tightens the lower bound.
+ */
+function reqChainIdArray(v: unknown, path: string): number[] {
+  const arr = reqIntegerArray(v, path);
+  arr.forEach((item, i) => {
+    if (item < 1) {
+      throw new BundleParseError(
+        `${path}[${i}]: expected positive chain id (>= 1), got ${item}`,
+      );
+    }
+  });
+  return arr;
+}
+
+/**
+ * Round 3 audit (P1) — a bundle's `to` list must contain real EVM
+ * addresses. Without this gate a malicious or buggy publisher could push
+ * a `to: ["foo"]` payload, which would silently land in the bridge table
+ * and never match any legitimate tx. Accepts both lowercase and EIP-55
+ * checksum input; the bridge normalises further downstream.
+ */
+function reqAddressArray(v: unknown, path: string): string[] {
+  const arr = reqStringArray(v, path);
+  arr.forEach((item, i) => {
+    if (!ADDRESS_RE.test(item)) {
+      throw new BundleParseError(
+        `${path}[${i}]: expected EVM address "0x" + 40 hex, got "${item}"`,
+      );
+    }
+  });
+  return arr;
 }
 
 function parseValueExpr(v: unknown, path: string): ValueExpr {
@@ -431,12 +486,25 @@ function parseEmitRule(v: unknown, path: string): EmitRule {
 
 function parseRequires(v: unknown, path: string): Requires {
   const obj = reqObj(v, path);
+  // Phase 7B: `adapter_capabilities` is new. Default to [] when omitted so
+  // older bundles still parse during the migration window.
+  const adapterCaps =
+    "adapter_capabilities" in obj
+      ? reqStringArray(
+          obj.adapter_capabilities,
+          `${path}.adapter_capabilities`,
+        )
+      : [];
+  // `host_capabilities` is also tolerated as missing — narrowed to dynamic
+  // enrichment only (e.g. "host:oracle"); empty for purely static bundles.
+  const hostCaps =
+    "host_capabilities" in obj
+      ? reqStringArray(obj.host_capabilities, `${path}.host_capabilities`)
+      : [];
   return {
     imperative: reqStringArray(obj.imperative, `${path}.imperative`),
-    host_capabilities: reqStringArray(
-      obj.host_capabilities,
-      `${path}.host_capabilities`,
-    ),
+    adapter_capabilities: adapterCaps,
+    host_capabilities: hostCaps,
     extension: reqString(obj.extension, `${path}.extension`),
   };
 }
@@ -450,8 +518,8 @@ function parseMatch(v: unknown, path: string): BundleMatch {
     );
   }
   return {
-    chain_ids: reqIntegerArray(obj.chain_ids, `${path}.chain_ids`),
-    to: reqStringArray(obj.to, `${path}.to`),
+    chain_ids: reqChainIdArray(obj.chain_ids, `${path}.chain_ids`),
+    to: reqAddressArray(obj.to, `${path}.to`),
     selector,
   };
 }

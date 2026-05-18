@@ -62,10 +62,13 @@ describe("parseBundle — V2 swap fixture", () => {
     });
   });
 
-  it("requires.host_capabilities surfaces token_metadata", () => {
+  it("requires.adapter_capabilities surfaces token_metadata (Phase 7B)", () => {
     const bundle = parseBundle(loadV2SwapFixture());
     expect(bundle.requires.imperative).toEqual([]);
-    expect(bundle.requires.host_capabilities).toEqual(["host:token_metadata"]);
+    // Phase 7B: token_metadata is now adapter-layer (static lookup);
+    // host_capabilities is narrowed to dynamic-only.
+    expect(bundle.requires.adapter_capabilities).toEqual(["token_metadata"]);
+    expect(bundle.requires.host_capabilities).toEqual([]);
     expect(bundle.requires.extension).toBe(">=0.1.0");
   });
 });

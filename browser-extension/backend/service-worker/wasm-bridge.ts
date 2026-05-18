@@ -6,6 +6,7 @@ import {
   type EvaluatePolicyRpcInputDto,
   type PlanPolicyRpcInputDto,
   type PolicyRpcPlanDto,
+  type PolicyRpcResponseDto,
   type VerdictDto,
 } from "./wasm-bridge.types";
 
@@ -26,6 +27,10 @@ interface WasmExports {
   // (chain_id, to, selector) through the engine-internal bridge populated
   // at install time, then runs the matching declarative mapper.
   declarative_route_request_json(input_json: string): string;
+  // Phase 7A — evaluate Cedar policies against caller-supplied envelopes.
+  // Skips the route → plan stages so the declarative pipeline can drive
+  // verdicts directly from its post-processed envelopes.
+  evaluate_with_envelopes_json(input_json: string): string;
 }
 
 /**
@@ -322,6 +327,77 @@ export async function evaluatePolicyRpc(
   console.debug("[Scopeball] wasm.evaluate", {
     requestId: input.plan.request_id,
     planCallCount: input.plan.calls.length,
+    rpcResultCount: input.rpc_response.results.length,
+    manifestCount: input.manifests.length,
+    durationMs: Date.now() - startedAtMs,
+    verdict: verdict.kind,
+    matched:
+      verdict.matched?.map((m) => ({
+        id: m.policy_id,
+        severity: m.severity,
+      })) ?? [],
+  });
+  return verdict;
+}
+
+/**
+ * Wire shape for `evaluateWithEnvelopes`. Mirrors
+ * `crates/policy-engine-wasm/src/dto.rs::EvaluateWithEnvelopesInputDto`.
+ *
+ * `envelopes` are the post-processed (Phase 7E enriched) ActionEnvelopes the
+ * declarative pipeline already produced — the WASM lowers them into Cedar
+ * requests directly, skipping `route_request_json` / `plan_policy_rpc_json`.
+ *
+ * `rpc_response` carries `policy-rpc` results when manifests declare any
+ * `requires`; pass `{ request_id, results: [] }` for pipelines that do not
+ * need RPC enrichment (e.g. permit-only policies). The WASM still runs the
+ * projection step against this response, so manifests that DO require RPC
+ * data must supply matching results or the verdict will fail closed via
+ * `__engine::projection_failed`.
+ */
+export interface EvaluateWithEnvelopesInput {
+  envelopes: readonly Record<string, unknown>[];
+  from: string;
+  to: string;
+  value_wei: string;
+  chain_id: number;
+  block_timestamp: number;
+  manifests: readonly unknown[];
+  rpc_response: PolicyRpcResponseDto;
+}
+
+/**
+ * Phase 7A entry — evaluate Cedar policies against caller-supplied envelopes.
+ *
+ * The declarative pipeline produces envelopes via `declarativeRouteRequest`
+ * (then post-processes them through `enrichEnvelopeAssets` to fill in
+ * AssetRef `symbol`/`decimals`). Handing those enriched envelopes here lets
+ * the declarative path drive Cedar verdicts — i.e. the static
+ * `evaluatePolicyRpc` path is no longer the sole verdict driver.
+ *
+ * The WASM enforces:
+ *   * Installed policies' `manifest_set_hash` matches `manifests` arg.
+ *   * Installed `schema_hash` matches the schema derived from `manifests`.
+ *   * RPC projection succeeds (or the response is empty when no calls).
+ *
+ * Failures surface as a synthetic `Fail` verdict whose `matched[0]` is
+ * `__engine::<kind>` — matching the same pattern `evaluatePolicyRpc` uses
+ * for engine-side faults.
+ */
+export async function evaluateWithEnvelopes(
+  input: EvaluateWithEnvelopesInput,
+): Promise<VerdictDto> {
+  const exports = await load();
+  const startedAtMs = Date.now();
+  const raw = unwrap<unknown>(
+    exports.evaluate_with_envelopes_json(JSON.stringify(input)),
+  );
+  const verdict = parseVerdict(raw);
+  console.debug("[Scopeball] wasm.evaluate-with-envelopes", {
+    chainId: input.chain_id,
+    from: input.from,
+    to: input.to,
+    envelopeCount: input.envelopes.length,
     rpcResultCount: input.rpc_response.results.length,
     manifestCount: input.manifests.length,
     durationMs: Date.now() - startedAtMs,

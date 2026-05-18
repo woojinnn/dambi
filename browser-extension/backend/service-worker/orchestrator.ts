@@ -14,7 +14,7 @@ import {
   pendingPut,
   type PendingRequest,
 } from "./storage";
-import { EngineError } from "./wasm-bridge";
+import { EngineError, evaluateWithEnvelopes } from "./wasm-bridge";
 import { evaluateWithPolicyRpc, type PolicyRpcAuditMeta } from "./policy-rpc";
 import type { VerdictDto } from "./wasm-bridge.types";
 import {
@@ -43,13 +43,11 @@ interface DecisionOptions {
  * to a single decision. Surfaced in the audit log so we can tell which
  * marketplace bundle handled (or failed to handle) a given tx.
  *
- * Note: in this Phase 6 PoC the Cedar verdict still comes from the static
- * Tier B `evaluateWithPolicyRpc` pipeline — the declarative and static
- * envelopes are equivalent for V2 swap (proven by
- * `declarative_equivalent_to_static_v2_mapper` in the mapper crate), so
- * running both costs an extra round-trip but cannot disagree on the final
- * verdict. A later phase that wires plan/evaluate to consume pre-routed
- * envelopes will let us drop the static path on hit.
+ * Phase 7F update: when `outcome === "hit"` AND `envelope_count > 0`, the
+ * declarative path now drives the Cedar verdict via
+ * `evaluate_with_envelopes_json` (Phase 7A). The static `evaluateWithPolicyRpc`
+ * remains the fallback for miss/fault outcomes and the legacy ground truth
+ * for cases the declarative path does not yet cover.
  */
 export interface DeclarativeAuditMeta {
   outcome: DeclarativeRouteOutcome["kind"]; // "hit" | "miss" | "fault"
@@ -60,8 +58,20 @@ export interface DeclarativeAuditMeta {
   reason?: string;
 }
 
+/**
+ * Phase 7F — which Cedar pipeline produced the final verdict.
+ *
+ * `"declarative"` ⇒ envelopes from the declarative router were fed to
+ *   `evaluate_with_envelopes_json` (Phase 7A WASM entry).
+ * `"static"` ⇒ verdict came from the legacy `evaluateWithPolicyRpc` path,
+ *   either because the declarative path missed/faulted, the message is a
+ *   typed signature, or the declarative path produced zero envelopes.
+ */
+export type VerdictSource = "declarative" | "static";
+
 interface LifecycleResult {
   verdict: VerdictDto;
+  verdictSource: VerdictSource;
   policyRpc?: PolicyRpcAuditMeta;
   declarative?: DeclarativeAuditMeta;
 }
@@ -127,7 +137,7 @@ async function decideInner(
     const { result: lifecycle } = await withTimeout(
       runLifecycle(message),
       HARD_TIMEOUT_MS,
-      { verdict: buildTimeoutVerdict() },
+      { verdict: buildTimeoutVerdict(), verdictSource: "static" as const },
     );
     const { verdict } = lifecycle;
 
@@ -157,6 +167,7 @@ async function decideInner(
       message,
       pending.type,
       verdict,
+      lifecycle.verdictSource,
       lifecycle.policyRpc,
       lifecycle.declarative,
     );
@@ -204,6 +215,7 @@ async function appendAudit(
   message: Message,
   type: PendingRequest["type"],
   verdict: VerdictDto,
+  verdictSource?: VerdictSource,
   policyRpc?: PolicyRpcAuditMeta,
   declarative?: DeclarativeAuditMeta,
 ): Promise<void> {
@@ -221,6 +233,7 @@ async function appendAudit(
       })) ?? [],
     ...(policyRpc ? { policyRpc } : {}),
     ...(declarative ? { declarative } : {}),
+    ...(verdictSource ? { verdictSource } : {}),
     decidedAtMs: Date.now(),
   });
 }
@@ -269,20 +282,28 @@ function logDecision(message: Message, verdict: VerdictDto): void {
 
 async function runLifecycle(message: Message): Promise<LifecycleResult> {
   if (isUntypedSignature(message)) {
-    return { verdict: unsupportedUntypedSignatureVerdict() };
+    return {
+      verdict: unsupportedUntypedSignatureVerdict(),
+      verdictSource: "static",
+    };
   }
 
-  // Phase 6 — declarative path (best-effort, observability only at this
-  // stage). For transactions we hand off `(chainId, to, calldata)` to the
-  // marketplace router. A hit means a Tier A bundle is mounted and its
-  // mapper successfully produced ActionEnvelopes; the existing
-  // `evaluateWithPolicyRpc` continues to drive the Cedar verdict because
-  // the static and declarative envelopes are equivalent for V2 swap.
+  // Phase 6 → Phase 7F — declarative path is now a verdict driver, not
+  // observability-only. For transactions we hand off
+  // `(chainId, to, calldata)` to the marketplace router. A hit with one or
+  // more enriched envelopes lets us run `evaluate_with_envelopes_json`
+  // directly, skipping `plan_policy_rpc_json` and the RPC enrichment hop.
   //
-  // We deliberately fence the declarative attempt in a try/catch so any
-  // glitch (registry server down, malformed bundle, race) cannot block a
-  // verdict — the static fallback is the ground truth for this PoC.
+  // The static `evaluateWithPolicyRpc` remains the fallback for miss/fault
+  // outcomes, hit-with-zero-envelopes edges, and any unexpected throw
+  // inside `tryDeclarativeRoute`. We deliberately fence both call sites in
+  // try/catch so a glitch (registry server down, malformed bundle, race)
+  // cannot block a verdict.
   let declarativeMeta: DeclarativeAuditMeta | undefined;
+  let declarativeHit: {
+    envelopes: Record<string, unknown>[];
+    decoderId: string;
+  } | undefined;
   if (isTransaction(message)) {
     try {
       const outcome = await tryDeclarativeRoute({
@@ -308,6 +329,12 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
             ? { reason: outcome.reason }
             : { reason: outcome.reason }),
       });
+      if (outcome.kind === "hit" && outcome.value.envelopes.length > 0) {
+        declarativeHit = {
+          envelopes: outcome.value.envelopes,
+          decoderId: outcome.value.decoderId,
+        };
+      }
     } catch (err) {
       // tryDeclarativeRoute already classifies known errors. Anything
       // reaching here is truly unexpected — log and continue with the
@@ -320,11 +347,77 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     }
   }
 
+  // Declarative verdict path — only taken when the declarative router
+  // returned a hit with ≥1 enriched envelope AND the message is a
+  // transaction. Failures here fall through to the static path so a flaky
+  // WASM call does NOT take out a tx whose static path would have passed.
+  if (declarativeHit && isTransaction(message)) {
+    try {
+      const verdict = await evaluateWithEnvelopes({
+        envelopes: declarativeHit.envelopes,
+        from: message.data.transaction.from ?? "0x" + "0".repeat(40),
+        to: message.data.transaction.to ?? "0x" + "0".repeat(40),
+        value_wei: txValueToWeiDecimal(message.data.transaction.value),
+        chain_id: message.data.chainId,
+        block_timestamp: Math.floor(Date.now() / 1000),
+        manifests: getActivePolicyRpcManifests(),
+        // Phase 7F MVP: declarative verdict path runs without RPC
+        // enrichment. Manifests that declare `requires` are NOT yet
+        // wired through this path — when they exist the WASM will fail
+        // closed via `__engine::projection_failed`, which is the
+        // desired conservative behaviour until 7G/7H wire policy-rpc
+        // results into the declarative branch.
+        rpc_response: {
+          request_id: message.requestId,
+          results: [],
+        },
+      });
+      console.info("[Scopeball] declarative-verdict", {
+        requestId: message.requestId,
+        verdictSource: "declarative",
+        verdict: verdict.kind,
+        envelopeCount: declarativeHit.envelopes.length,
+        decoderId: declarativeHit.decoderId,
+        matched:
+          verdict.matched?.map((m) => ({
+            id: m.policy_id,
+            severity: m.severity,
+          })) ?? [],
+      });
+      return {
+        verdict,
+        verdictSource: "declarative",
+        ...(declarativeMeta ? { declarative: declarativeMeta } : {}),
+      };
+    } catch (err) {
+      // evaluateWithEnvelopes threw — most likely an EngineError on the
+      // installed_manifest_hash_mismatch path. Log and fall through to
+      // the static path so we don't lose a verdict.
+      console.warn("[Scopeball] declarative-verdict threw", {
+        requestId: message.requestId,
+        decoderId: declarativeHit.decoderId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      // Fall through to static path below.
+    }
+  }
+
   const result = await evaluateWithPolicyRpc(message, {
     manifests: getActivePolicyRpcManifests(),
   });
+  console.info("[Scopeball] declarative-verdict", {
+    requestId: message.requestId,
+    verdictSource: "static",
+    verdict: result.verdict.kind,
+    matched:
+      result.verdict.matched?.map((m) => ({
+        id: m.policy_id,
+        severity: m.severity,
+      })) ?? [],
+  });
   return {
     verdict: result.verdict,
+    verdictSource: "static",
     policyRpc: result.audit,
     ...(declarativeMeta ? { declarative: declarativeMeta } : {}),
   };

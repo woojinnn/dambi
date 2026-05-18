@@ -116,6 +116,31 @@ pub struct EvaluatePolicyRpcInputDto {
     pub manifests: Vec<PolicyManifest>,
 }
 
+/// Input for `evaluate_with_envelopes_json`.
+///
+/// Bypasses the route → plan stages by accepting envelopes that the caller
+/// (e.g. the declarative pipeline in the orchestrator) has already produced.
+/// `manifests` must match the manifests installed via `install_policies_json`
+/// — the WASM enforces the same `manifest_set_hash` and `schema_hash`
+/// equality as `evaluate_policy_rpc_json`.
+///
+/// `rpc_response` carries `policy-rpc` results when manifests declare any
+/// `requires`; pass `{ "request_id": "...", "results": [] }` for pipelines
+/// that do not need RPC enrichment (e.g. permit-only policies).
+#[derive(Debug, Clone, Deserialize)]
+pub struct EvaluateWithEnvelopesInputDto {
+    pub envelopes: Vec<ActionEnvelope>,
+    pub from: String,
+    pub to: String,
+    pub value_wei: String,
+    pub chain_id: u64,
+    #[serde(default)]
+    pub block_timestamp: u64,
+    #[serde(default)]
+    pub manifests: Vec<PolicyManifest>,
+    pub rpc_response: PolicyRpcResponse,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PreviewSchemaInputDto {
     #[serde(default)]

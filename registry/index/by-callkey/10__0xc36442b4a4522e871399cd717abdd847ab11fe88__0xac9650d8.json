@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/nfpm-multicall@1.0.0",
   "manifest_path": "manifests/uniswap/v3/nfpm-multicall@1.0.0.json",
-  "bundle_sha256": "0x53186d495e7f0afaacaae12a580430757d7141f4118f1337e2c391ee1b89b89e",
+  "bundle_sha256": "0xf2e9d54db9bf62a5b30de90bfaef6803fcbc6e5ce22f62aeac67a223b91297c3",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/nfpm-multicall@1.0.0",
@@ -42,6 +42,7 @@
       "imperative": [
         "multicall-recurse@^1.0"
       ],
+      "adapter_capabilities": [],
       "host_capabilities": [],
       "extension": ">=0.1.0"
     }

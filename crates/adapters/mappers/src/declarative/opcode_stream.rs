@@ -90,9 +90,8 @@ pub fn execute(
     };
 
     if dispatcher_id != DISPATCHER_ID_UNIVERSAL_ROUTER {
-        return Err(MapperError::Internal(anyhow::anyhow!(
-            "opcode_stream_dispatch dispatcher_id {dispatcher_id:?} not implemented in Phase 5 PoC \
-             (only {DISPATCHER_ID_UNIVERSAL_ROUTER:?} supported)"
+        return Err(MapperError::Unsupported(format!(
+            "opcode_stream_dispatch/{dispatcher_id}"
         )));
     }
 
@@ -413,18 +412,20 @@ mod tests {
         raw[4..].to_vec()
     }
 
-    /// Encode PAY_PORTION input — used to exercise the unknown_opcode path
-    /// (the Phase 5 bundle does NOT include 0x06 in per_opcode_emit).
-    fn encode_pay_portion_input(
+    /// Encode BALANCE_CHECK_ERC20 input — used to exercise the unknown_opcode
+    /// path. The Phase 9A2 bundle does NOT include 0x0e in `per_opcode_emit`
+    /// (BALANCE_CHECK_ERC20 is view-only and has no `(category, action)` analog
+    /// in the action schema).
+    fn encode_balance_check_erc20_input(
+        owner: alloy_primitives::Address,
         token: alloy_primitives::Address,
-        recipient: alloy_primitives::Address,
-        bips: u128,
+        min_balance: u128,
     ) -> Vec<u8> {
         let func = Function::parse("step(address,address,uint256)").unwrap();
         let values = vec![
+            DynSolValue::Address(owner),
             DynSolValue::Address(token),
-            DynSolValue::Address(recipient),
-            DynSolValue::Uint(U256::from(bips), 256),
+            DynSolValue::Uint(U256::from(min_balance), 256),
         ];
         let raw = func.abi_encode_input(&values).unwrap();
         raw[4..].to_vec()
@@ -600,9 +601,11 @@ mod tests {
     fn unknown_opcode_with_warn_policy_skips_step() {
         let bundle: AdapterFunctionBundle = serde_json::from_str(UR_BUNDLE_JSON).unwrap();
 
-        // PAY_PORTION (0x06) is NOT in the bundle's per_opcode_emit; the
-        // bundle declares unknown_opcode_policy=warn so the step is skipped.
-        let pay_portion = encode_pay_portion_input(token_out(), recipient_addr(), 50);
+        // BALANCE_CHECK_ERC20 (0x0e) is NOT in the bundle's per_opcode_emit
+        // (view-only opcode with no policy-engine action analog); the bundle
+        // declares unknown_opcode_policy=warn so the step is skipped.
+        let balance_check =
+            encode_balance_check_erc20_input(recipient_addr(), token_out(), 1);
         let swap = encode_v3_swap_exact_in_input(
             recipient_addr(),
             1_000_000,
@@ -613,8 +616,8 @@ mod tests {
 
         let decoded = ur_execute_decoded(
             DecoderId::new("declarative.uniswap/universal-router/execute"),
-            vec![0x06, 0x00],
-            vec![pay_portion, swap],
+            vec![0x0e, 0x00],
+            vec![balance_check, swap],
         );
 
         let registry = EmptyTokenRegistry;

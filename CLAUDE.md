@@ -78,12 +78,32 @@
 
 ### 한계 (Phase 7 향후)
 
-1. **Declarative path observability-only** — Cedar verdict 는 여전히 static path 산출. envelopes equivalence (Phase 1A V2 swap test) 로 자연 일치. verdict-drive 위해 `plan_policy_rpc_with_envelopes_json` 같은 새 WASM entry 필요
+1. ~~**Declarative path observability-only**~~ — **해소**: Phase 7F `evaluate_with_envelopes_json` 가 verdict driver. Static path 는 declarative miss/fault 시 fallback
 2. **multicall_recurse WASM resolver wire-up 없음** — V3 NFPM tx 시 `ctx.resolver=None` → "map_failed" fault → static path fall-through
-3. **EnumTaggedDispatch placeholder** — Balancer V2 등 향후
+3. **EnumTaggedDispatch placeholder** — `MapperError::Unsupported("enum_tagged_dispatch")` 로 명확 분류 (2026-05-18 audit fix)
 4. **Layer 2 LRU prefetch 미구현**
 5. **HMAC IndexedDB key (§7.5) raw**
-6. **host:token_metadata enrichment 없음** — AssetRef.symbol/decimals None
+6. ~~**host:token_metadata enrichment 없음**~~ — **해소**: Phase 7D TokenRegistryClient + Phase 7E enrichEnvelopeAssets (사용자 결정 — adapter layer 책임)
+
+### Security audit 결과 (2026-05-18)
+
+사용자 요청 2시간 self-feedback audit + refactor 진행. 1 P0 + 14 P1 fix 적용:
+
+| Round | 영역 | 적용 |
+|---|---|---|
+| 1 | Rust WASM input size limit (`MAX_WASM_INPUT_JSON_LEN=4MB`) | `exports.rs`, `declarative_exports.rs` 의 7 entry 모두 check |
+| 1 | multicall `bytes[]` children cap (`MAX_MULTICALL_CHILDREN=64`) | `multicall.rs` |
+| 1 | `eval.rs` JSON path `-idx` `checked_neg` 사용 (i64::MIN overflow 차단) | `eval.rs` |
+| 2 | jit-fetcher `inflight` Map size cap (256) | `jit-fetcher.ts` |
+| 2 | token-client memCache LRU (2048) + negative (1024) + inflight (256) cap | `token-client.ts` |
+| 3 | Bundle parser strict address/chain_id/selector regex | `bundle-schema.ts`, `build-index.ts` |
+| 4 | `MapperError::Unsupported` variant 분리 (not-implemented vs runtime fault) | `mapper.rs` + 6 site |
+| **5 P0** | Lowering error fail-closed (`try_policy_request_from_envelope` + `__engine::lowering_failed`) | `exports.rs:649-690` |
+| 6 | Manifest hash serialize fail-back sentinel (collision 방지) | `policy_rpc/planning.rs:13` |
+| 7 | Registry `callKeyUrl` 의 EVM format gate + `bundle_sha256` regex | `registry/client.ts` |
+| 15 | Webpack production REGISTRY_BASE_URL HTTPS 강제 | `webpack.prod.js`, `.env` |
+
+회귀: cargo 480 / vitest 196 / tsc 0 / WASM 5.89 MiB / dist/chrome OK.
 
 ### PoC 결정 사항 (사용자 합의)
 

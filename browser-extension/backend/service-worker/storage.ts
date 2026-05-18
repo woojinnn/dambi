@@ -40,6 +40,13 @@ export interface AuditEntry {
     envelope_count?: number;
     reason?: string;
   };
+  /**
+   * Phase 7F — which Cedar pipeline produced the verdict.
+   * `"declarative"` ⇒ `evaluate_with_envelopes_json` (Phase 7A).
+   * `"static"` ⇒ legacy `evaluateWithPolicyRpc` path.
+   * Absent on engine-error short-circuits (where we have no signal).
+   */
+  verdictSource?: "declarative" | "static";
   decidedAtMs: number;
 }
 

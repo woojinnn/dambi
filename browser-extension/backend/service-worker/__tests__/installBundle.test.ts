@@ -5,7 +5,7 @@
  * — if `canonicalSha256` ever diverges from `build-index.ts` (the
  * registry-side hash producer), this test catches it.
  *
- * Expected hash: 0x9d54198599e1ced436bfbb458bf36aae4b3a01ba5a8bd885ab20f07c5a3f02f0
+ * Expected hash: 0xbb7d55d04f0dd7eda5f122a096d96a3f3c54e564b43c8fba3a359f303375bf93
  * (matches the value committed at
  * `/Users/jhy/Desktop/ScopeBall/scopeball/registry/index/by-callkey/1__….json`)
  */
@@ -39,7 +39,7 @@ const FIXTURE_PATH = path.resolve(
 );
 
 const EXPECTED_SHA256 =
-  "0x9d54198599e1ced436bfbb458bf36aae4b3a01ba5a8bd885ab20f07c5a3f02f0";
+  "0xbb7d55d04f0dd7eda5f122a096d96a3f3c54e564b43c8fba3a359f303375bf93";
 
 function loadFixtureBundle(): unknown {
   return JSON.parse(readFileSync(FIXTURE_PATH, "utf8"));

@@ -128,6 +128,13 @@ export function decodeBundleCalldata(
   // flatten_tuple_arg`): if the function takes a single struct param (one
   // tuple with components), we expose each component as a top-level arg
   // because the declarative mapper layouts were written against that shape.
+  //
+  // viem returns named tuples (all components have a `name`) as JS objects
+  // keyed by component name; positional / unnamed tuples come back as
+  // arrays. V3 SwapRouter / SR02 `exactInput` ship every component named
+  // (path / recipient / deadline / amountIn / amountOutMinimum), so the
+  // object branch is the common case for declarative bundles. The array
+  // branch keeps the historic V2 / fixture path working.
   let argDtos: DecodedArgDto[];
   const firstInputComponents = readComponents(inputs[0]);
   if (
@@ -138,22 +145,15 @@ export function decodeBundleCalldata(
   ) {
     const param = inputs[0];
     const tupleValue = args[0];
-    if (!Array.isArray(tupleValue)) {
-      throw new DeclarativeDecodeError(
-        "decode_failed",
-        `expected tuple value for ${param.name ?? "<unnamed>"}, got ${typeof tupleValue}`,
-      );
-    }
-    if (tupleValue.length !== firstInputComponents.length) {
-      throw new DeclarativeDecodeError(
-        "decode_failed",
-        `tuple length mismatch: abi=${firstInputComponents.length} decoded=${tupleValue.length}`,
-      );
-    }
+    const tupleArray = tupleValueToArray(
+      tupleValue,
+      firstInputComponents,
+      param.name ?? "<unnamed>",
+    );
     argDtos = firstInputComponents.map((component, idx) => ({
       name: component.name && component.name.length > 0 ? component.name : `arg${idx}`,
       abi_type: component.type,
-      value: encodeValue(component, tupleValue[idx]),
+      value: encodeValue(component, tupleArray[idx]),
     }));
   } else {
     argDtos = inputs.map((param, idx) => ({
@@ -313,16 +313,20 @@ function encodeValue(param: AbiParameter, value: unknown): DecodedValueDto {
   }
 
   if (type === "tuple") {
-    if (!Array.isArray(value)) {
-      throw new DeclarativeDecodeError(
-        "unsupported_value",
-        `expected tuple value, got ${typeof value}`,
-      );
-    }
     const components = readComponents(param) ?? [];
+    // Same array-or-object normalisation as the outer flattening path.
+    // Nested tuple components reach here when an `exactInput`-style ABI
+    // contains a tuple inside another tuple (V4 PoolKey-bearing actions);
+    // the V3 fixture also hits this when its `params` is forwarded into
+    // `encodeValue` for the unflattened code path.
+    const tupleArray = tupleValueToArray(
+      value,
+      components,
+      param.name ?? "<unnamed>",
+    );
     return {
       kind: "tuple",
-      value: components.map((c, idx) => encodeValue(c, value[idx])),
+      value: components.map((c, idx) => encodeValue(c, tupleArray[idx])),
     };
   }
 
@@ -377,6 +381,58 @@ function encodeValue(param: AbiParameter, value: unknown): DecodedValueDto {
   throw new DeclarativeDecodeError(
     "unsupported_value",
     `unsupported ABI type ${type}`,
+  );
+}
+
+/**
+ * Normalise a viem-decoded tuple value into a positional array indexed by
+ * `components`. viem returns named tuples (every component carries a
+ * `name`) as `{ <name>: value, ... }` objects and positional tuples as
+ * arrays — both shapes have to flow into `encodeValue`, which expects an
+ * array. We map field-by-field using the component name, so a publisher
+ * that defines a tuple with all-named components gets the same wire shape
+ * as one with positional components.
+ *
+ * Throws `DeclarativeDecodeError("decode_failed")` when the input isn't a
+ * tuple-shaped value, the array length disagrees with the components, or
+ * a required component name is missing on the decoded object.
+ */
+function tupleValueToArray(
+  value: unknown,
+  components: AbiParameter[],
+  paramName: string,
+): unknown[] {
+  if (Array.isArray(value)) {
+    if (value.length !== components.length) {
+      throw new DeclarativeDecodeError(
+        "decode_failed",
+        `tuple length mismatch for ${paramName}: abi=${components.length} decoded=${value.length}`,
+      );
+    }
+    return value;
+  }
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return components.map((component, idx) => {
+      const name = component.name;
+      if (!name || name.length === 0) {
+        throw new DeclarativeDecodeError(
+          "decode_failed",
+          `tuple ${paramName} component[${idx}] is unnamed but viem returned an object — bundle ABI must declare component names for object-form decoding`,
+        );
+      }
+      if (!Object.prototype.hasOwnProperty.call(obj, name)) {
+        throw new DeclarativeDecodeError(
+          "decode_failed",
+          `tuple ${paramName} is missing component "${name}" (component[${idx}])`,
+        );
+      }
+      return obj[name];
+    });
+  }
+  throw new DeclarativeDecodeError(
+    "decode_failed",
+    `expected tuple value for ${paramName}, got ${value === null ? "null" : typeof value}`,
   );
 }
 

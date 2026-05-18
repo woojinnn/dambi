@@ -86,13 +86,31 @@ pub struct AbiFragment {
 }
 
 /// Dependency declaration.
+///
+/// Capabilities are split into two tiers (Phase 7B):
+///  - `adapter_capabilities` — adapter-layer responsibilities resolved at
+///    static lookup time (e.g. `"token_metadata"` — symbol / decimals look-up
+///    via the registry-side static token endpoint).
+///  - `host_capabilities` — host-layer dynamic enrichment requiring live
+///    RPC / oracle calls at evaluation time (e.g. `"host:oracle"`).
+///
+/// `#[serde(default)]` on both fields keeps backward compatibility with
+/// older bundles that may omit either key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requires {
     /// Tier B imperative dependencies (e.g. `"universal-router-dispatcher@^1.0"`).
     /// Each entry MUST be statically embedded in the extension.
     pub imperative: Vec<String>,
 
-    /// host:? capability dependencies (e.g. `"host:token_metadata"`).
+    /// Adapter-layer capabilities — resolved at static lookup time
+    /// (e.g. `"token_metadata"`).
+    #[serde(default)]
+    pub adapter_capabilities: Vec<String>,
+
+    /// Host-layer capabilities — dynamic RPC enrichment only
+    /// (e.g. `"host:oracle"`). Phase 7B narrows this field's meaning to
+    /// dynamic-only; static lookups moved to `adapter_capabilities`.
+    #[serde(default)]
     pub host_capabilities: Vec<String>,
 
     /// Minimum extension version (semver requirement, e.g. `">=0.1.0"`).
@@ -370,10 +388,12 @@ mod tests {
 
         // requires
         assert_eq!(bundle.requires.imperative, Vec::<String>::new());
+        // Phase 7B: token_metadata is now an adapter capability.
         assert_eq!(
-            bundle.requires.host_capabilities,
-            vec!["host:token_metadata"]
+            bundle.requires.adapter_capabilities,
+            vec!["token_metadata"]
         );
+        assert_eq!(bundle.requires.host_capabilities, Vec::<String>::new());
         assert_eq!(bundle.requires.extension, ">=0.1.0");
 
         // Round-trip: re-serialize and parse again must equal the first parse.

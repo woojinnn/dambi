@@ -78,9 +78,7 @@ pub fn execute(
         ("misc", "unwrap") => Ok(build_unwrap_envelope(&tree)?),
         ("misc", "transfer") => Ok(build_transfer_envelope(&tree)?),
         ("misc", "permit") => Ok(build_permit_envelope(&tree)?),
-        (c, a) => Err(MapperError::Internal(anyhow::anyhow!(
-            "single_emit category/action {c:?}/{a:?} not implemented in PoC"
-        ))),
+        (c, a) => Err(MapperError::Unsupported(format!("single_emit/{c}/{a}"))),
     }
 }
 

@@ -47,6 +47,7 @@ use crate::dto::{
     DeclarativeLookupInputDto, DeclarativeRouteRequestInputDto, DeclarativeRouteRequestResultDto,
     EngineErrorDto, Envelope,
 };
+use crate::exports::check_input_size;
 
 /// Process-local state for the declarative pipeline. Two halves:
 ///
@@ -123,6 +124,7 @@ fn register_bridge_entries(bundle: &AdapterFunctionBundle, decoder_id: &str, sta
 #[wasm_bindgen]
 pub fn declarative_install_json(bundle_json: String) -> String {
     let result = (|| -> Result<DeclarativeInstallResultDto, EngineErrorDto> {
+        check_input_size(&bundle_json, "declarative_install_json")?;
         let bundle: AdapterFunctionBundle = serde_json::from_str(&bundle_json).map_err(|error| {
             EngineErrorDto::new(
                 "invalid_bundle_json",
@@ -188,6 +190,7 @@ pub fn declarative_install_json(bundle_json: String) -> String {
 #[wasm_bindgen]
 pub fn declarative_lookup_json(input_json: String) -> String {
     let result = (|| -> Result<DeclarativeLookupResultDto, EngineErrorDto> {
+        check_input_size(&input_json, "declarative_lookup_json")?;
         let input: DeclarativeLookupInputDto =
             serde_json::from_str(&input_json).map_err(|error| {
                 EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
@@ -297,6 +300,7 @@ pub struct DeclarativeLookupResultDto {
 #[wasm_bindgen]
 pub fn declarative_route_request_json(input_json: String) -> String {
     let result = (|| -> Result<DeclarativeRouteRequestResultDto, EngineErrorDto> {
+        check_input_size(&input_json, "declarative_route_request_json")?;
         let input: DeclarativeRouteRequestInputDto = serde_json::from_str(&input_json)
             .map_err(|error| {
                 EngineErrorDto::new(

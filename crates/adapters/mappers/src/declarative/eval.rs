@@ -82,9 +82,9 @@ pub fn evaluate(
         ValueExpr::Literal { literal } => Ok(literal.clone()),
 
         ValueExpr::FromArg { from, via, kind } => {
-            if via.is_some() {
-                return Err(MapperError::Internal(anyhow::anyhow!(
-                    "FromArg.via (host capability) is not implemented in Phase 1A: {via:?}"
+            if let Some(capability) = via {
+                return Err(MapperError::Unsupported(format!(
+                    "FromArg.via:{capability}"
                 )));
             }
             // `kind` is metadata for amount typing — interpreter ignores it
@@ -142,9 +142,7 @@ fn evaluate_transform(
                 .map_err(|error| MapperError::Internal(anyhow::anyhow!(error)))?;
             Ok(serde_json::Value::String(address.to_string()))
         }
-        other => Err(MapperError::Internal(anyhow::anyhow!(
-            "builtin {other:?} is not implemented in Phase 1A"
-        ))),
+        other => Err(MapperError::Unsupported(format!("builtin_fn/{other:?}"))),
     }
 }
 
@@ -219,11 +217,16 @@ fn evaluate_json_path<'a>(
                 "JsonPath {path:?}: indexed access on non-array at remainder {remainder:?}"
             ))
         })?;
+        // Round 1 audit (P1) — `-idx` for `idx == i64::MIN` is undefined in
+        // two's complement (the positive counterpart is unrepresentable).
+        // `checked_neg` returns `None` in that case so we fall through to a
+        // bounds error instead of relying on wrapping semantics that vary by
+        // build profile.
         let resolved_opt: Option<usize> = if idx >= 0 {
             usize::try_from(idx).ok().filter(|i| *i < arr.len())
         } else {
-            usize::try_from(-idx)
-                .ok()
+            idx.checked_neg()
+                .and_then(|neg| usize::try_from(neg).ok())
                 .filter(|abs| *abs <= arr.len())
                 .map(|abs| arr.len() - abs)
         };

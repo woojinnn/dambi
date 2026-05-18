@@ -124,6 +124,14 @@ pub enum MapperError {
     MissingArgument(String),
     #[error("unexpected argument type for {name}: {message}")]
     ArgumentMismatch { name: String, message: String },
+    /// Round 4 audit — surfaced when the interpreter encounters a strategy
+    /// or feature that the current Phase intentionally does not implement.
+    /// Distinct from [`Self::Internal`] so the orchestrator can classify
+    /// it as a known limitation (audit reason: "unsupported") rather than
+    /// a runtime fault. Carries a human-readable label such as
+    /// `"enum_tagged_dispatch"` or `"single_emit/dex/add_liquidity"`.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
     #[error("internal: {0}")]
     Internal(#[from] anyhow::Error),
 }

@@ -25,6 +25,10 @@
 
 import type { CallMatchKey } from "../registry/client";
 import {
+  defaultTokenRegistryClient,
+  type TokenRegistryClient,
+} from "../registry/token-client";
+import {
   EngineError,
   declarativeRouteRequest,
   type DeclarativeRouteRequestResult,
@@ -43,7 +47,11 @@ const DEFAULT_REGISTRY_BASE_URL =
     : "http://localhost:8000";
 
 export interface DeclarativeRouteHit {
-  /** ActionEnvelopes the declarative mapper produced. */
+  /**
+   * ActionEnvelopes the declarative mapper produced, post-processed by
+   * `enrichEnvelopeAssets` so every AssetRef carries `symbol`/`decimals`
+   * when the registry can resolve it.
+   */
   envelopes: Record<string, unknown>[];
   /** Bridge-resolved declarative decoder id (`declarative.<path>`). */
   decoderId: string;
@@ -76,6 +84,129 @@ export interface DeclarativeRouteOptions {
   registryBaseUrl?: string;
   /** Override the block timestamp the engine sees. Defaults to `now()`. */
   blockTimestamp?: number;
+  /**
+   * Token metadata source for Phase 7E envelope post-processing. Injected
+   * for tests; the orchestrator typically lets us fall back to the
+   * process-wide singleton via `defaultTokenRegistryClient()`.
+   */
+  tokenClient?: TokenRegistryClient;
+}
+
+/**
+ * Phase 7E — token metadata enrichment.
+ *
+ * The Rust declarative mapper emits envelopes with `AssetRef` skeletons
+ * that carry `{kind, address}` only (per §8.1 with the user's
+ * adapter-layer reassignment — `symbol`/`decimals` are NOT host:* fields).
+ * The TS post-processing step walks every envelope, finds every
+ * AssetRef-shaped object, and pulls `{symbol, decimals}` from the
+ * registry-backed `TokenRegistryClient`.
+ *
+ * AssetRef detection is structural rather than positional: any object
+ * with a string `kind` and a string `address` qualifies. This keeps the
+ * traversal stable when new action types arrive (no per-action switch to
+ * update) and side-steps the `serde(flatten)` shape `{category, action,
+ * fields}` quirk where field names live inside the dynamic `fields`
+ * payload.
+ *
+ * Native assets (kind="native", no address) are skipped — they have no
+ * address to look up. Unknown tokens (registry returns null) are also
+ * skipped so the original skeleton survives intact — a policy that
+ * doesn't reference symbol/decimals still evaluates correctly.
+ *
+ * Concurrency: every lookup is fanned through `Promise.all`. Same-token
+ * dedupe is delegated to the underlying `TokenRegistryClient`'s inflight
+ * dedupe (one in-flight Promise per `${chainId}__${address}` slot), so a
+ * swap with the same input and output token would only hit the network
+ * once.
+ */
+export async function enrichEnvelopeAssets(
+  envelopes: Record<string, unknown>[],
+  chainId: number,
+  tokenClient: TokenRegistryClient,
+): Promise<Record<string, unknown>[]> {
+  if (envelopes.length === 0) return envelopes;
+  return Promise.all(
+    envelopes.map((env) => enrichValue(env, chainId, tokenClient)) as Promise<
+      Record<string, unknown>
+    >[],
+  );
+}
+
+/**
+ * Recursive walker — clones the input value with AssetRef-shaped objects
+ * replaced by enriched copies. Pure values and arrays are traversed
+ * structurally so the call graph terminates on JSON-shaped data.
+ */
+async function enrichValue(
+  value: unknown,
+  chainId: number,
+  tokenClient: TokenRegistryClient,
+): Promise<unknown> {
+  if (Array.isArray(value)) {
+    return Promise.all(
+      value.map((item) => enrichValue(item, chainId, tokenClient)),
+    );
+  }
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if (looksLikeAssetRef(obj)) {
+      return enrichAssetRef(obj, chainId, tokenClient);
+    }
+    const out: Record<string, unknown> = {};
+    const keys = Object.keys(obj);
+    const enriched = await Promise.all(
+      keys.map((k) => enrichValue(obj[k], chainId, tokenClient)),
+    );
+    keys.forEach((k, i) => {
+      out[k] = enriched[i];
+    });
+    return out;
+  }
+  return value;
+}
+
+/**
+ * AssetRef shape probe — accepts both the always-camelCase JSON wire
+ * form (`{kind, address, tokenId?, symbol?, decimals?}`) and the
+ * subset that the mapper actually emits (`{kind, address}`). We require
+ * a string `kind` AND a string `address` so we don't accidentally
+ * enrich `{kind: "native"}` (no address) or unrelated shapes such as
+ * `{kind: "exact", value: "1000"}` (AmountConstraint).
+ */
+function looksLikeAssetRef(obj: Record<string, unknown>): boolean {
+  return typeof obj.kind === "string" && typeof obj.address === "string";
+}
+
+/**
+ * Fill in `symbol` and `decimals` on a single AssetRef. Existing values
+ * are preserved — a publisher that emits enriched payloads up-front
+ * doesn't get clobbered by a registry miss. Lookup failures fall
+ * through silently so the verdict path stays alive when the registry
+ * has gaps.
+ */
+async function enrichAssetRef(
+  assetRef: Record<string, unknown>,
+  chainId: number,
+  tokenClient: TokenRegistryClient,
+): Promise<Record<string, unknown>> {
+  const address = assetRef.address;
+  if (typeof address !== "string" || address.length === 0) return assetRef;
+
+  let meta;
+  try {
+    meta = await tokenClient.lookup(chainId, address);
+  } catch {
+    // Token registry hiccups must NOT take out the route. Skip
+    // enrichment and let the static path observe the bare skeleton.
+    return assetRef;
+  }
+  if (!meta) return assetRef;
+
+  const enriched: Record<string, unknown> = { ...assetRef };
+  if (enriched.symbol === undefined) enriched.symbol = meta.symbol;
+  if (enriched.decimals === undefined) enriched.decimals = meta.decimals;
+  return enriched;
 }
 
 /**
@@ -156,10 +287,25 @@ export async function tryDeclarativeRoute(args: {
     return { kind: "fault", reason: "unexpected", cause: err };
   }
 
+  // Phase 7E — token metadata enrichment runs after the mapper produces
+  // the skeleton envelopes. Failures here are absorbed (`enrichAssetRef`
+  // catches them per-token) so a flaky registry never escalates into a
+  // route fault.
+  let enrichedEnvelopes = result.envelopes;
+  if (result.envelopes.length > 0) {
+    const tokenClient =
+      args.options?.tokenClient ?? defaultTokenRegistryClient();
+    enrichedEnvelopes = await enrichEnvelopeAssets(
+      result.envelopes,
+      args.chainId,
+      tokenClient,
+    );
+  }
+
   return {
     kind: "hit",
     value: {
-      envelopes: result.envelopes,
+      envelopes: enrichedEnvelopes,
       decoderId: result.decoder_id,
       bundleId: adapter.bundleId,
       source: resolution.source,

@@ -49,7 +49,7 @@ const FIXTURE_PATH = path.resolve(
 );
 
 const EXPECTED_SHA256 =
-  "0x9d54198599e1ced436bfbb458bf36aae4b3a01ba5a8bd885ab20f07c5a3f02f0";
+  "0xbb7d55d04f0dd7eda5f122a096d96a3f3c54e564b43c8fba3a359f303375bf93";
 
 // match.chain_ids[0] × match.to[0] of the fixture, lowercased on selector
 // to mirror the registry callkey convention.

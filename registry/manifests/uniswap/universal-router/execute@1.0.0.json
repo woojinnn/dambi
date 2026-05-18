@@ -76,6 +76,19 @@
           "recipient":                 { "from": "$.args.recipient" }
         }
       },
+      "0x02": {
+        "name": "PERMIT2_TRANSFER_FROM",
+        "category": "misc",
+        "action": "transfer",
+        "fields": {
+          "token.asset.kind":        { "literal": "erc20" },
+          "token.asset.address":     { "from": "$.args.token" },
+          "token.amount.kind":       { "literal": "exact" },
+          "token.amount.value":      { "from": "$.args.amount" },
+          "from":                    { "from": "$.args.recipient" },
+          "recipient":               { "from": "$.args.recipient" }
+        }
+      },
       "0x04": {
         "name": "SWEEP",
         "category": "misc",
@@ -85,6 +98,45 @@
           "token.asset.address":     { "from": "$.args.token" },
           "token.amount.kind":       { "literal": "min" },
           "token.amount.value":      { "from": "$.args.amountMin" },
+          "from":                    { "from": "$.args.recipient" },
+          "recipient":               { "from": "$.args.recipient" }
+        }
+      },
+      "0x05": {
+        "name": "TRANSFER",
+        "category": "misc",
+        "action": "transfer",
+        "fields": {
+          "token.asset.kind":        { "literal": "erc20" },
+          "token.asset.address":     { "from": "$.args.token" },
+          "token.amount.kind":       { "literal": "exact" },
+          "token.amount.value":      { "from": "$.args.value" },
+          "from":                    { "from": "$.args.recipient" },
+          "recipient":               { "from": "$.args.recipient" }
+        }
+      },
+      "0x06": {
+        "name": "PAY_PORTION",
+        "category": "misc",
+        "action": "transfer",
+        "fields": {
+          "token.asset.kind":        { "literal": "erc20" },
+          "token.asset.address":     { "from": "$.args.token" },
+          "token.amount.kind":       { "literal": "portion" },
+          "token.amount.value":      { "from": "$.args.bips" },
+          "from":                    { "from": "$.args.recipient" },
+          "recipient":               { "from": "$.args.recipient" }
+        }
+      },
+      "0x07": {
+        "name": "PAY_PORTION_FULL_PRECISION",
+        "category": "misc",
+        "action": "transfer",
+        "fields": {
+          "token.asset.kind":        { "literal": "erc20" },
+          "token.asset.address":     { "from": "$.args.token" },
+          "token.amount.kind":       { "literal": "portion" },
+          "token.amount.value":      { "from": "$.args.portion" },
           "from":                    { "from": "$.args.recipient" },
           "recipient":               { "from": "$.args.recipient" }
         }
@@ -179,7 +231,8 @@
   },
   "requires": {
     "imperative": ["universal-router-dispatcher@^1.0"],
-    "host_capabilities": ["host:token_metadata"],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
     "extension": ">=0.1.0"
   }
 }

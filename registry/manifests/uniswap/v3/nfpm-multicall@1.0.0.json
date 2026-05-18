@@ -24,6 +24,7 @@
   },
   "requires": {
     "imperative": ["multicall-recurse@^1.0"],
+    "adapter_capabilities": [],
     "host_capabilities": [],
     "extension": ">=0.1.0"
   }

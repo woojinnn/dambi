@@ -51,7 +51,15 @@ export interface ResolveAdapterOptions {
 /**
  * In-flight dedupe (§7.3:811-813). Same SW process — a `Map` is enough.
  * Cross-worker dedupe via BroadcastChannel is a future enhancement.
+ *
+ * Round 2 audit (P1) — bound the size so a hostile dapp that issues N
+ * unique `(chain_id, to, selector)` triplets cannot accumulate unbounded
+ * Promises (each holding a fetch / WASM call in flight). The cap is 256:
+ * legitimate Uniswap traffic rarely sees more than a couple of concurrent
+ * mounts, so this gives plenty of headroom while still bounding worst-case
+ * memory.
  */
+const MAX_INFLIGHT_ADAPTER_FETCHES = 256;
 const inflight = new Map<string, Promise<AdapterOrVerdict>>();
 
 /**
@@ -78,6 +86,15 @@ export async function resolveAdapter(
   const k = serializeKey(key);
   const existing = inflight.get(k);
   if (existing) return existing;
+
+  // Round 2 audit (P1) — reject new fetches when the inflight Map is full.
+  // The cap is well above the legitimate concurrency ceiling, so a trip
+  // here means the SW is under abuse: a hostile dapp pumping unique
+  // callkeys. Returning `timeout` reuses the existing negative-cache
+  // verdict path and lets the caller short-circuit to the static path.
+  if (inflight.size >= MAX_INFLIGHT_ADAPTER_FETCHES) {
+    return { kind: "verdict", verdict: "no_adapter", reason: "timeout" };
+  }
 
   const p = doJitFetch(key, options).finally(() => {
     // Always clean up so a settled Promise can't keep blocking the slot.
