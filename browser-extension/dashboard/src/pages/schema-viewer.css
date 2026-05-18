@@ -221,3 +221,42 @@
   margin: 0;
   padding: 0.4rem 0.6rem;
 }
+
+/* ── Draft-vs-installed diff overlay (Fix P, D14) ─────────────────── */
+.schema-diff-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.78rem;
+  margin-right: 0.15rem;
+  border: 1px solid transparent;
+}
+.schema-diff-badge-added {
+  background: #d8f1d8;
+  color: #1e5b2e;
+  border-color: #6bbf6b;
+}
+.schema-diff-badge-removed {
+  background: #fbe1e1;
+  color: #7a2727;
+  border-color: #d27a7a;
+}
+.schema-diff-badge-changed {
+  background: #fff1c2;
+  color: #6b4f00;
+  border-color: #d8b35a;
+}
+.schema-field-added {
+  outline: 1px solid #6bbf6b;
+}
+.schema-field-removed {
+  outline: 1px solid #d27a7a;
+  opacity: 0.7;
+}
+.schema-field-changed {
+  outline: 1px solid #d8b35a;
+}
