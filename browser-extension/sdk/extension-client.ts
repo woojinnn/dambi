@@ -214,12 +214,22 @@ export interface ExtensionClient {
   getAliasTable(): Promise<{ entries: AliasTableEntry[] }>;
   /** Ids of managed policies awaiting v0 → v1 migration. */
   listMigrationPending(): Promise<{ ids: string[] }>;
-  /** Rewrite a managed policy from `context.<x>` to `context.custom.<x>`. */
+  /**
+   * Rewrite a managed policy from `context.<x>` to `context.custom.<x>`.
+   *
+   * This does NOT pop the id off the pending-migration queue. After the
+   * caller persists the rewritten text via `putRaw` and the engine
+   * accepts the install, send `migrationAck(id)` to finish the
+   * migration. Splitting the two avoids leaving the migration queue
+   * empty while storage still holds v0 text (e.g. tab closed mid-flight).
+   */
   rewritePolicyToCustom(args: {
     id: string;
     text: string;
     knownFields: readonly string[];
   }): Promise<MigrationRewriteResult>;
+  /** Pop a migrated policy id off the pending queue. */
+  migrationAck(id: string): Promise<{ id: string; remaining: string[] }>;
 }
 
 export interface ClientOptions {
@@ -390,6 +400,11 @@ export function createExtensionClient(
         id,
         text,
         knownFields,
+      }),
+    migrationAck: (id) =>
+      request<{ id: string; remaining: string[] }>({
+        type: "migration:ack",
+        id,
       }),
   };
 }

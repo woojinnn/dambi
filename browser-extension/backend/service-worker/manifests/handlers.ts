@@ -38,11 +38,15 @@ export type ManifestRequest =
       type: "migration:rewrite";
       id: string;
       knownFields: readonly string[];
-      // The current `text` of the managed policy. The SW doesn't go
-      // round-trip through `dashboard:put-raw`: it rewrites and
-      // re-installs in one shot to keep the migration atomic.
+      // The current `text` of the managed policy. The SW doesn't
+      // touch storage here — the dashboard takes the rewritten text,
+      // pushes it through `dashboard:put-raw`, and on success sends
+      // `migration:ack` to pop the id off the pending set. Splitting
+      // the two avoids a window where pending is empty but storage
+      // still has v0 text.
       text: string;
-    };
+    }
+  | { type: "migration:ack"; id: string };
 
 export type ManifestResponse<T = unknown> =
   | { ok: true; data: T }
@@ -179,20 +183,29 @@ export async function handleManifestRequest(
           return fail("invalid_request", "id and text required");
         }
         const rewritten = rewritePolicyText(req.text, req.knownFields ?? []);
+        // `rewritten === req.text` means there was nothing to rewrite.
+        // Auto-ack in that case since there's no follow-up put-raw to
+        // wait for — the policy is already on the v1 layout.
         if (rewritten === req.text) {
-          // Nothing to rewrite — drop from pending and report no-op.
           const pending = await listPending();
           await setPending(pending.filter((p) => p !== req.id));
           return { ok: true, data: { id: req.id, rewritten, applied: false } };
         }
-        // Pop the id off the pending set on success. The caller still
-        // needs to push the rewritten text through `dashboard:put-raw`
-        // so the managed-policy storage updates and the engine
-        // re-validates against the new schema; this handler only owns
-        // the migration metadata.
+        // `applied: true` only signals the rewrite produced a different
+        // string. The id stays on the pending set until the dashboard
+        // confirms with `migration:ack` after `dashboard:put-raw`
+        // succeeds. Splitting the two avoids a window where pending is
+        // empty but the managed-policy entry still has v0 text.
+        return { ok: true, data: { id: req.id, rewritten, applied: true } };
+      }
+
+      case "migration:ack": {
+        if (typeof req.id !== "string") {
+          return fail("invalid_request", "id required");
+        }
         const pending = await listPending();
         await setPending(pending.filter((p) => p !== req.id));
-        return { ok: true, data: { id: req.id, rewritten, applied: true } };
+        return { ok: true, data: { id: req.id, remaining: await listPending() } };
       }
 
       default: {
