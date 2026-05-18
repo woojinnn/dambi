@@ -25,9 +25,33 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { EnrichedSchemaOutput } from "@scopeball/sdk";
+import type { EnrichedSchemaOutput, PreviewManifestOutput } from "@scopeball/sdk";
 import { useExtension } from "../sdk-context";
+import { PREVIEW_HANDOFF_KEY } from "./manifest-editor";
 import "./schema-viewer.css";
+
+interface PreviewHandoff {
+  action: string;
+  output: PreviewManifestOutput;
+  savedAtMs: number;
+}
+
+// Consume + clear the manifest-editor → schema-viewer hand-off slot.
+// Returns the parsed payload when present and matching the requested
+// action, else null. The slot is cleared whether or not the action
+// matched so a stale draft for a different action doesn't survive.
+function consumePreviewHandoff(action: string): PreviewHandoff | null {
+  try {
+    const raw = sessionStorage.getItem(PREVIEW_HANDOFF_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(PREVIEW_HANDOFF_KEY);
+    const parsed = JSON.parse(raw) as Partial<PreviewHandoff>;
+    if (!parsed || parsed.action !== action || !parsed.output) return null;
+    return parsed as PreviewHandoff;
+  } catch {
+    return null;
+  }
+}
 
 // Mirror of `crates/policy-engine/src/schema/action_name.rs::REGISTERED_ACTIONS`.
 // Keep ordering identical to the Rust source so the rail matches the
@@ -151,6 +175,17 @@ export function SchemaViewer(): JSX.Element {
   const [schema, setSchema] = useState<EnrichedSchemaOutput | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  // Phase 7 carry-over J: when the user reached this page through the
+  // ManifestEditor's "Preview" button we read the stashed
+  // `PreviewManifestOutput` out of sessionStorage and overlay it on
+  // top of the currently-installed schema. The slot is consumed (and
+  // cleared) once per navigation so a back-and-forth doesn't repeat.
+  const [preview, setPreview] = useState<PreviewHandoff | null>(null);
+
+  useEffect(() => {
+    if (!fromPreview) return;
+    setPreview(consumePreviewHandoff(action));
+  }, [fromPreview, action]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,26 +209,66 @@ export function SchemaViewer(): JSX.Element {
   }, [client, fromPreview]);
 
   const actionPascal = useMemo(() => snakeToPascal(action), [action]);
+  // When a Preview hand-off is present we prefer its `enrichedSchemaText`
+  // so the base-fields parser sees the schema the draft manifest WOULD
+  // produce. Falls back to the installed `schema?.schema_text` otherwise.
+  const effectiveSchemaText = useMemo(() => {
+    if (preview?.output.enrichedSchemaText) {
+      return preview.output.enrichedSchemaText;
+    }
+    return schema?.schema_text ?? "";
+  }, [preview, schema]);
   const baseFields = useMemo(
     () =>
-      schema?.schema_text ? parseBaseFields(schema.schema_text, actionPascal) : [],
-    [schema, actionPascal],
+      effectiveSchemaText
+        ? parseBaseFields(effectiveSchemaText, actionPascal)
+        : [],
+    [effectiveSchemaText, actionPascal],
   );
-  const customFields = useMemo(
-    () => asCustomFields(schema?.customContexts?.[action] as unknown[] | undefined),
-    [schema, action],
-  );
+  // Preview customTypes is keyed by snake_case action name. When the
+  // hand-off matches the selected action, render its fields; otherwise
+  // fall through to the installed schema's `customContexts`.
+  const customFields = useMemo(() => {
+    if (preview) {
+      const match = preview.output.customTypes.find(
+        (entry) => entry.name === action,
+      );
+      if (match) return asCustomFields(match.fields as unknown[]);
+    }
+    return asCustomFields(
+      schema?.customContexts?.[action] as unknown[] | undefined,
+    );
+  }, [preview, schema, action]);
 
   return (
     <div className="schema-viewer">
       <header className="schema-viewer-head">
-        <h1>Enriched cedarschema</h1>
+        <h1>
+          Enriched cedarschema
+          {preview ? (
+            <span
+              className="schema-viewer-draft-pill"
+              data-testid="schema-viewer-draft-pill"
+            >
+              Draft preview
+            </span>
+          ) : null}
+        </h1>
         <div
           className="schema-hash-badge"
           data-testid="schema-hash-badge"
-          title="enrichedSchemaHash — SHA-256 of the installed enriched schema"
+          title={
+            preview
+              ? "schemaHash — SHA-256 of the previewed (unsaved) enriched schema"
+              : "enrichedSchemaHash — SHA-256 of the installed enriched schema"
+          }
         >
-          Hash: <code>{schema?.schemaHash ?? "—"}</code>
+          Hash:{" "}
+          <code>
+            {preview
+              ? preview.output.schemaHash
+              : schema?.schemaHash ?? "—"}
+          </code>
         </div>
       </header>
 
@@ -232,16 +307,26 @@ export function SchemaViewer(): JSX.Element {
 
           {err ? <div className="schema-err">Failed to load: {err}</div> : null}
 
-          {fromPreview ? (
+          {fromPreview && preview ? (
+            <div
+              className="schema-from-preview"
+              data-testid="schema-from-preview-banner"
+            >
+              <strong>Draft preview from your unsaved manifest.</strong>{" "}
+              The schema below reflects the previewed manifest for{" "}
+              <code>{preview.action}</code>; it is NOT yet installed in
+              the engine.
+            </div>
+          ) : fromPreview ? (
             <div className="schema-from-preview">
-              Showing the currently-installed schema. Diff overlay vs.
-              draft manifests is a Phase-7 follow-up.
+              Showing the currently-installed schema. No unsaved draft
+              was found.
             </div>
           ) : null}
 
           {showRaw ? (
             <pre className="schema-raw" data-testid="schema-raw-pre">
-              {schema?.schema_text ?? ""}
+              {preview?.output.enrichedSchemaText ?? schema?.schema_text ?? ""}
             </pre>
           ) : (
             <>

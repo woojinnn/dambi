@@ -45,6 +45,13 @@ interface ManifestDraft {
   requires: RequiresRow[];
 }
 
+/**
+ * sessionStorage key for the manifest-editor → schema-viewer Preview
+ * hand-off. The viewer consumes (and clears) this slot on mount when
+ * the URL carries `?fromPreview=true`.
+ */
+export const PREVIEW_HANDOFF_KEY = "manifest-editor:preview-handoff";
+
 function emptyDraft(): ManifestDraft {
   return { id: "", requires: [] };
 }
@@ -167,11 +174,24 @@ export function ManifestEditor(): JSX.Element {
     setErr(null);
     setInfo(null);
     try {
-      await client.previewManifest(action, draftToManifest(draft));
-      // Future Task 7.3 owns `/schema`. For now we trust the route — the
-      // user will see the diff once that page lands. Until then they get
-      // a 404 placeholder, which is acceptable per the task brief.
-      navigate(`/schema?action=${encodeURIComponent(action)}`);
+      const output = await client.previewManifest(action, draftToManifest(draft));
+      // Phase 7 codex carry-over J: stash the preview output in
+      // `sessionStorage` so SchemaViewer can render it as a "draft
+      // preview" overlay instead of just re-fetching the
+      // currently-installed schema. The key is namespaced by action
+      // (one preview per action at a time); SchemaViewer consumes and
+      // clears the slot on mount.
+      try {
+        sessionStorage.setItem(
+          PREVIEW_HANDOFF_KEY,
+          JSON.stringify({ action, output, savedAtMs: Date.now() }),
+        );
+      } catch {
+        // sessionStorage is unavailable (e.g. happy-dom test env edge
+        // cases). Fall through to the legacy hand-off — SchemaViewer
+        // will just render the installed schema.
+      }
+      navigate(`/schema?action=${encodeURIComponent(action)}&fromPreview=true`);
     } catch (e) {
       setErr(extractErr(e));
     } finally {
