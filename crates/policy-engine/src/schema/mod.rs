@@ -4,9 +4,11 @@ pub mod action_name;
 pub mod aliases;
 pub mod enriched;
 pub mod fragment;
+pub mod manifest_fragment;
 
 pub use enriched::EnrichedSchema;
 pub use fragment::{CedarTypeFragment, CustomFieldSource};
+pub use manifest_fragment::manifest_to_cedarschema;
 
 use crate::policy_rpc::{validate_manifests, PolicyManifest, PolicyRpcError};
 use serde::Serialize;
