@@ -2,9 +2,10 @@
 
 use crate::dto::{
     AliasEntryDto, AliasTableOutput, CustomFieldChangeDto, CustomSchemaDiffDto, CustomTypeDto,
-    EngineErrorDto, Envelope, EvaluatePolicyRpcInputDto, InstallPoliciesInputDto, MatchedPolicyDto,
-    PlanPolicyRpcInputDto, PolicyRpcPlanDto, PreviewCustomSchemaInputDto,
-    PreviewCustomSchemaOutputDto, PreviewSchemaInputDto, RawRequestDto, VerdictDto,
+    EngineErrorDto, Envelope, EvaluatePolicyRpcInputDto, InstallPoliciesInputDto,
+    InstallPoliciesOutputDto, MatchedPolicyDto, PlanPolicyRpcInputDto, PolicyRpcPlanDto,
+    PreviewCustomSchemaInputDto, PreviewCustomSchemaOutputDto, PreviewInstalledSchemaOutputDto,
+    PreviewSchemaInputDto, RawRequestDto, VerdictDto,
 };
 use alloy_primitives::U256;
 use policy_engine::lowering::policy_request_from_envelope;
@@ -39,20 +40,39 @@ thread_local! {
 
 #[wasm_bindgen]
 pub fn install_policies_json(policies_json: String) -> String {
-    let result = (|| -> Result<(), EngineErrorDto> {
+    // Phase 5.3: `manifests` may arrive as either the legacy `Vec` or the new
+    // per-action map. The map shape composes via `compose_enriched` and
+    // returns `InstallPoliciesOutputDto` in the success envelope. The list
+    // shape preserves the historical legacy install (null data).
+    let result = (|| -> Result<Option<InstallPoliciesOutputDto>, EngineErrorDto> {
         let input: InstallPoliciesInputDto =
             serde_json::from_str(&policies_json).map_err(|error| {
                 EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
             })?;
 
+        let manifest_vec = input.manifests.as_vec();
         let schema_preview = PolicySchemaComposer::new()
-            .with_manifests(&input.manifests)
+            .with_manifests(&manifest_vec)
             .map_err(|error| EngineErrorDto::new("schema_failed", error.to_string()))?
             .preview();
+
+        // Compose the enriched schema when the caller used the new map shape;
+        // otherwise stay on the legacy composer's text.
+        let enriched = match input.manifests.as_map() {
+            Some(map) => Some(
+                compose_enriched(map)
+                    .map_err(|error| EngineErrorDto::new("schema_failed", error.to_string()))?,
+            ),
+            None => None,
+        };
+        let base_schema_text = enriched.as_ref().map_or_else(
+            || schema_preview.schema_text.clone(),
+            |e| e.schema_text.clone(),
+        );
         let schema_text = if input.schema_text.trim().is_empty() {
-            schema_preview.schema_text.clone()
+            base_schema_text
         } else {
-            format!("{}\n{}", schema_preview.schema_text, input.schema_text)
+            format!("{}\n{}", base_schema_text, input.schema_text)
         };
         let installed_schema_hash = schema_hash(&schema_text);
         let mut builder = PolicyEngineBuilder::with_schema_text(schema_text.clone());
@@ -64,21 +84,27 @@ pub fn install_policies_json(policies_json: String) -> String {
             .build()
             .map_err(|error| EngineErrorDto::new("install_failed", error.to_string()))?;
 
+        let output = enriched.as_ref().map(|e| InstallPoliciesOutputDto {
+            enriched_schema_hash: e.schema_hash.clone(),
+            added_custom_fields: e.custom_types_by_action.clone(),
+        });
+
         STATE.with(|state| {
             *state.borrow_mut() = Some(EngineState {
                 policies,
-                manifest_set_hash: manifest_set_hash(&input.manifests),
+                manifest_set_hash: manifest_set_hash(&manifest_vec),
                 schema_hash: installed_schema_hash,
                 schema_text,
                 added_fields: schema_preview.added_fields,
-                enriched: None,
+                enriched,
             });
         });
-        Ok(())
+        Ok(output)
     })();
 
     match result {
-        Ok(()) => Envelope::ok(()).to_json(),
+        Ok(Some(output)) => Envelope::ok(output).to_json(),
+        Ok(None) => Envelope::<()>::ok(()).to_json(),
         Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
     }
 }
@@ -550,16 +576,24 @@ pub fn preview_schema_json(input_json: String) -> String {
 
 #[wasm_bindgen]
 pub fn preview_installed_schema_json() -> String {
-    let result: Result<policy_engine::schema::SchemaPreview, EngineErrorDto> =
-        STATE.with(|state| {
-            let state = state.borrow();
-            let state = state.as_ref().ok_or_else(not_installed_error)?;
-            Ok(policy_engine::schema::SchemaPreview {
-                schema_text: state.schema_text.clone(),
-                schema_hash: state.schema_hash.clone(),
-                added_fields: state.added_fields.clone(),
-            })
-        });
+    // Phase 5.3: extend the legacy `SchemaPreview` shape with camelCase
+    // `customContexts` and `schemaHash` keyed off the installed enriched
+    // schema (when present).
+    let result: Result<PreviewInstalledSchemaOutputDto, EngineErrorDto> = STATE.with(|state| {
+        let state = state.borrow();
+        let state = state.as_ref().ok_or_else(not_installed_error)?;
+        let (custom_contexts, schema_hash_camel) = match state.enriched.as_ref() {
+            Some(e) => (e.custom_types_by_action.clone(), e.schema_hash.clone()),
+            None => (std::collections::BTreeMap::new(), state.schema_hash.clone()),
+        };
+        Ok(PreviewInstalledSchemaOutputDto {
+            schema_text: state.schema_text.clone(),
+            schema_hash: state.schema_hash.clone(),
+            added_fields: state.added_fields.clone(),
+            custom_contexts,
+            schema_hash_camel,
+        })
+    });
 
     match result {
         Ok(preview) => Envelope::ok(preview).to_json(),
@@ -989,7 +1023,7 @@ mod tests_policy_rpc {
         let output = install_policies_json(
             json!({
                 "schema_text": "",
-                "manifests": [manifest_json()],
+                "manifests": { "swap": manifest_json() },
                 "policy_set": [{
                     "id": "bundle::max-input-usd-100",
                     "text": r#"
@@ -1086,7 +1120,6 @@ mod tests_policy_rpc {
     }
 
     #[test]
-    #[ignore = "TODO(phase-5.3): un-ignore once `install_policies_json` accepts the `manifests` map and composes via `compose_enriched` so the inline policy body's `context.custom.totalInputUsd` resolves against `SwapCustomContext`."]
     fn evaluate_policy_rpc_json_projects_result_and_evaluates_policy() {
         install_usd_policy();
         let plan_output = plan_policy_rpc_json(plan_input().to_string());
@@ -1159,10 +1192,7 @@ mod tests_policy_rpc {
             "rpc-unavailable: user/max-input-usd-100::0::swap-total-input-usd",
             "{parsed}"
         );
-        assert_eq!(
-            parsed["data"]["matched"][0]["origin"], "action",
-            "{parsed}"
-        );
+        assert_eq!(parsed["data"]["matched"][0]["origin"], "action", "{parsed}");
     }
 
     #[test]
@@ -1336,6 +1366,96 @@ mod tests_policy_rpc {
             }),
             "{parsed}"
         );
+    }
+
+    /// Task 5.3 happy path: caller passes the manifests map shape, the
+    /// install path composes via `compose_enriched`, and the success
+    /// envelope carries `enrichedSchemaHash` + per-action
+    /// `addedCustomFields`. `preview_installed_schema_json` then echoes the
+    /// same data through `customContexts` + `schemaHash` (camelCase).
+    #[test]
+    fn install_with_manifests_updates_installed_schema() {
+        let manifest = manifest_json();
+        // Inline policy reads `context.custom.totalInputUsd` — this only
+        // installs cleanly when the install path uses `compose_enriched`.
+        let policy = r#"
+            @severity("deny")
+            @reason("too much USD")
+            forbid(principal, action == Action::"swap", resource)
+            when {
+                context has custom &&
+                context.custom has totalInputUsd &&
+                context.custom.totalInputUsd.value.greaterThan(decimal("100.00"))
+            };
+        "#;
+        let install_out = install_policies_json(
+            json!({
+                "schema_text": "",
+                "manifests": { "swap": manifest },
+                "policy_set": [{
+                    "id": "bundle::max-input-usd-100",
+                    "text": policy
+                }]
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&install_out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+
+        let hash = parsed["data"]["enrichedSchemaHash"]
+            .as_str()
+            .expect("enrichedSchemaHash present");
+        assert!(hash.starts_with("sha256:"), "{hash}");
+
+        let added = &parsed["data"]["addedCustomFields"]["swap"];
+        let added = added.as_array().expect("addedCustomFields.swap array");
+        assert_eq!(added.len(), 1, "{added:?}");
+        assert_eq!(added[0]["field"], "totalInputUsd", "{added:?}");
+
+        // `preview_installed_schema_json` surfaces the same data via the
+        // camelCase additions (`customContexts`, `schemaHash`).
+        let preview_out = preview_installed_schema_json();
+        let preview: Value = serde_json::from_str(&preview_out).unwrap();
+        assert_eq!(preview["ok"], true, "{preview}");
+        let swap_fields = preview["data"]["customContexts"]["swap"]
+            .as_array()
+            .expect("customContexts.swap array");
+        assert_eq!(swap_fields.len(), 1);
+        assert_eq!(swap_fields[0]["field"], "totalInputUsd");
+        assert_eq!(preview["data"]["schemaHash"], hash, "{preview}");
+    }
+
+    /// Task 5.3 validation: installing a policy whose body uses a custom
+    /// field at the wrong type must fail strict validation against the
+    /// enriched cedarschema. `totalInputUsd` is a `UsdValuation` record;
+    /// calling `.greaterThan(decimal("100.00"))` directly on it (instead of
+    /// on its `.value` decimal) is a type error.
+    #[test]
+    fn install_with_manifests_rejects_policy_against_wrong_custom_field_type() {
+        let manifest = manifest_json();
+        let policy = r#"
+            @severity("deny")
+            forbid(principal, action == Action::"swap", resource)
+            when {
+                context has custom &&
+                context.custom has totalInputUsd &&
+                context.custom.totalInputUsd.greaterThan(decimal("100.00"))
+            };
+        "#;
+        let install_out = install_policies_json(
+            json!({
+                "schema_text": "",
+                "manifests": { "swap": manifest },
+                "policy_set": [{
+                    "id": "bundle::wrong-type",
+                    "text": policy
+                }]
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&install_out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "install_failed", "{parsed}");
     }
 
     #[test]

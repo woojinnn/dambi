@@ -169,9 +169,7 @@ fn apply_requirement_result(
             return d9_branch(requirement, call_id, reason);
         }
         Some(result) => match result.result.as_ref() {
-            None => {
-                return d9_branch(requirement, call_id, "rpc result has no payload".to_owned())
-            }
+            None => return d9_branch(requirement, call_id, "rpc result has no payload".to_owned()),
             Some(payload) => payload,
         },
     };
