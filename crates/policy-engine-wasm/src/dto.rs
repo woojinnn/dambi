@@ -55,8 +55,48 @@ pub struct InstallPoliciesInputDto {
     #[serde(default)]
     pub schema_text: String,
     pub policy_set: Vec<PolicyEntryDto>,
+    /// Phase 5: accept either the legacy `Vec<PolicyManifest>` shape or the
+    /// new `{ [action]: PolicyManifest }` map. The map shape triggers the
+    /// `compose_enriched` install path; the vec shape keeps the legacy
+    /// behaviour for callers that have not migrated yet.
     #[serde(default)]
-    pub manifests: Vec<PolicyManifest>,
+    pub manifests: ManifestsInputDto,
+}
+
+/// Wire shape for `install_policies_json` `manifests`.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ManifestsInputDto {
+    /// New shape: per-action map.
+    Map(std::collections::BTreeMap<String, PolicyManifest>),
+    /// Legacy shape: flat list.
+    List(Vec<PolicyManifest>),
+}
+
+impl Default for ManifestsInputDto {
+    fn default() -> Self {
+        Self::List(Vec::new())
+    }
+}
+
+impl ManifestsInputDto {
+    /// Flatten to a `Vec<PolicyManifest>` for the legacy validators that take a slice.
+    #[must_use]
+    pub fn as_vec(&self) -> Vec<PolicyManifest> {
+        match self {
+            Self::Map(map) => map.values().cloned().collect(),
+            Self::List(list) => list.clone(),
+        }
+    }
+
+    /// Return the map shape when the caller used it; otherwise `None`.
+    #[must_use]
+    pub fn as_map(&self) -> Option<&std::collections::BTreeMap<String, PolicyManifest>> {
+        match self {
+            Self::Map(m) => Some(m),
+            Self::List(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,6 +224,41 @@ pub struct CustomFieldChangeDto {
     pub installed_cedar_type: String,
     /// Cedar type the previewed manifest would produce.
     pub preview_cedar_type: String,
+}
+
+/// `install_policies_json` success payload (Phase 5 extension).
+///
+/// Returned only when the caller provided the new `manifests` map shape. The
+/// legacy list-shaped install path keeps emitting `null` `data`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallPoliciesOutputDto {
+    /// SHA-256 of the enriched cedarschema text.
+    pub enriched_schema_hash: String,
+    /// Per-action manifest-contributed fields keyed by `snake_case` action name.
+    pub added_custom_fields: std::collections::BTreeMap<String, Vec<CustomFieldSource>>,
+}
+
+/// `preview_installed_schema_json` success payload (Phase 5 extension).
+///
+/// Keeps the legacy snake-case fields (`schema_text`, `schema_hash`,
+/// `added_fields`) and additionally surfaces `customContexts` and
+/// `schemaHash` (camelCase) when the installed schema was produced via the
+/// manifests-map install path.
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewInstalledSchemaOutputDto {
+    /// Final Cedar schema text.
+    pub schema_text: String,
+    /// SHA-256 of `schema_text` (snake-case alias of `schemaHash`).
+    pub schema_hash: String,
+    /// Legacy added-context-field summary.
+    pub added_fields: Vec<policy_engine::schema::AddedContextField>,
+    /// Per-action custom-context fields contributed by manifests (camelCase).
+    #[serde(rename = "customContexts")]
+    pub custom_contexts: std::collections::BTreeMap<String, Vec<CustomFieldSource>>,
+    /// SHA-256 of the enriched schema text (camelCase alias of `schema_hash`).
+    #[serde(rename = "schemaHash")]
+    pub schema_hash_camel: String,
 }
 
 /// `preview_custom_schema_json` success payload.
