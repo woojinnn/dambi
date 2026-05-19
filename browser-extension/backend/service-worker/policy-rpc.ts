@@ -1,5 +1,7 @@
+import { tryHandleLocally } from "./local-method-handlers";
 import { evaluatePolicyRpc, planPolicyRpc } from "./wasm-bridge";
 import type {
+  PolicyRpcCallDto,
   PolicyRpcPlanDto,
   PolicyRpcResponseDto,
   VerdictDto,
@@ -33,10 +35,10 @@ export async function evaluateWithPolicyRpc(
     raw_request: rawRequestFromMessage(message),
     manifests,
   });
-  const rpcResponse =
-    plan.calls.length === 0
-      ? { request_id: plan.request_id, results: [] }
-      : await postPolicyRpc(options.policyRpcUrl ?? defaultPolicyRpcUrl(), plan);
+  const rpcResponse = await dispatchCalls(
+    plan,
+    options.policyRpcUrl ?? defaultPolicyRpcUrl(),
+  );
   const verdict = await evaluatePolicyRpc({
     plan,
     rpc_response: rpcResponse,
@@ -79,6 +81,53 @@ function rawRequestFromMessage(message: Message): {
     };
   }
   throw new Error("unsupported message type for policy-rpc");
+}
+
+/**
+ * Split the plan's calls into ones we can answer in-process (pure-math
+ * derivations from the action envelope, e.g. `token.normalize_to_nano`)
+ * and ones that need the remote enrichment server (oracles, chain RPC,
+ * portfolio lookup). Local handlers run before the HTTP round-trip so a
+ * fully-local plan never touches the network — keeping policies usable
+ * even when the policy-rpc daemon isn't reachable.
+ *
+ * Order is preserved by call id: the WASM materializer correlates results
+ * to plan entries via `id`, so concatenating the two batches is safe
+ * regardless of which calls were diverted.
+ */
+async function dispatchCalls(
+  plan: PolicyRpcPlanDto,
+  policyRpcUrl: string,
+): Promise<PolicyRpcResponseDto> {
+  if (plan.calls.length === 0) {
+    return { request_id: plan.request_id, results: [] };
+  }
+
+  const localResults: unknown[] = [];
+  const remoteCalls: PolicyRpcCallDto[] = [];
+  for (const call of plan.calls) {
+    const local = tryHandleLocally(call);
+    if (local) {
+      localResults.push(local);
+    } else {
+      remoteCalls.push(call);
+    }
+  }
+
+  if (remoteCalls.length === 0) {
+    console.debug("[Scopeball] policy-rpc (all local)", {
+      requestId: plan.request_id,
+      localCount: localResults.length,
+    });
+    return { request_id: plan.request_id, results: localResults };
+  }
+
+  const remotePlan: PolicyRpcPlanDto = { ...plan, calls: remoteCalls };
+  const remoteResponse = await postPolicyRpc(policyRpcUrl, remotePlan);
+  return {
+    request_id: plan.request_id,
+    results: [...localResults, ...remoteResponse.results],
+  };
 }
 
 async function postPolicyRpc(

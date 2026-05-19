@@ -56,6 +56,23 @@ pub enum ValidationError {
         /// Operator id.
         op: String,
     },
+    /// Operand wasn't in the field's `allowed_values` enum set. Surfaces UI
+    /// dropdown bypass attempts (CodeView edits, programmatic input) before
+    /// they reach the Cedar generator and produce a syntactically valid but
+    /// semantically dead policy that silently never matches.
+    #[error(
+        "predicate {index}: value {value:?} not in allowed set for field {field} (allowed: {allowed:?})"
+    )]
+    DisallowedValue {
+        /// Position in `rule.predicates`.
+        index: usize,
+        /// Field path the operand was applied to.
+        field: String,
+        /// The offending value.
+        value: String,
+        /// The full closed set this value should have been drawn from.
+        allowed: Vec<String>,
+    },
 }
 
 /// Verify `rule` is internally consistent with `schema`.
@@ -116,6 +133,37 @@ pub fn validate(rule: &PolicyRule, schema: &ActionSchema) -> Result<(), Validati
                     index,
                     op: predicate.op.clone(),
                 });
+            }
+        }
+
+        // Enum constraint: when the field carries an `allowed_values` set,
+        // every operand literal must come from it. Applies to Single and
+        // Multi; None arity has no operand to check.
+        if let Some(allowed) = field_spec.allowed_values.as_ref() {
+            match &predicate.value {
+                PredicateValue::Single(v) => {
+                    if !allowed.iter().any(|a| a == v) {
+                        return Err(ValidationError::DisallowedValue {
+                            index,
+                            field: predicate.field.clone(),
+                            value: v.clone(),
+                            allowed: allowed.clone(),
+                        });
+                    }
+                }
+                PredicateValue::Multi(vs) => {
+                    for v in vs {
+                        if !allowed.iter().any(|a| a == v) {
+                            return Err(ValidationError::DisallowedValue {
+                                index,
+                                field: predicate.field.clone(),
+                                value: v.clone(),
+                                allowed: allowed.clone(),
+                            });
+                        }
+                    }
+                }
+                PredicateValue::None => {}
             }
         }
     }
@@ -239,5 +287,64 @@ mod tests {
             validate(&rule, &schema),
             Err(ValidationError::EmptyOperandList { .. })
         ));
+    }
+
+    #[test]
+    fn enum_value_in_set_passes() {
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "swapMode".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single("exact_in".into()),
+        }]);
+        assert!(validate(&rule, &schema).is_ok());
+    }
+
+    #[test]
+    fn enum_value_outside_set_rejected() {
+        // The exact common-case footgun the enum check exists to prevent:
+        // hyphen typo in a swap mode literal — Cedar would happily compile
+        // `context.swapMode == "exact-in"`, then the policy would silently
+        // never match at runtime against the snake_case decoder output.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "swapMode".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single("exact-in".into()),
+        }]);
+        assert!(matches!(
+            validate(&rule, &schema),
+            Err(ValidationError::DisallowedValue { .. })
+        ));
+    }
+
+    #[test]
+    fn enum_multi_value_partial_violation_rejected() {
+        // `in` operator: every element of the multi-list must be in the set.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "validity.source".into(),
+            op: "in".into(),
+            value: PredicateValue::Multi(vec![
+                "tx-deadline".into(),
+                "tx_deadline".into(), // underscore typo — should reject
+            ]),
+        }]);
+        assert!(matches!(
+            validate(&rule, &schema),
+            Err(ValidationError::DisallowedValue { .. })
+        ));
+    }
+
+    #[test]
+    fn free_form_value_unchanged_by_enum_check() {
+        // Non-enum fields stay free-form: any well-typed value passes.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "recipient".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single("0xdeadbeef".into()),
+        }]);
+        assert!(validate(&rule, &schema).is_ok());
     }
 }

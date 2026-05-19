@@ -12,9 +12,9 @@
 //!    guards inserted first (so type-narrowing happens before the comparisons
 //!    that depend on it).
 
-use crate::escape::escape_string;
+use crate::escape::{escape_string, scale_decimal_to_long};
 use crate::operators::{self, EmitError};
-use crate::types::{ActionSchema, PolicyRule};
+use crate::types::{ActionSchema, FieldSpec, PolicyRule, PredicateValue};
 use crate::validate::{validate, ValidationError};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -75,8 +75,16 @@ pub fn compile(rule: &PolicyRule, schema: &ActionSchema) -> Result<String, Compi
         } else {
             format!("context.{}", predicate.field)
         };
+
+        // Token-native amount fields declare `scale = Some(n)`: the manifest
+        // pre-multiplies the on-chain `amount.value` by `10^(9 - decimals)`
+        // so the Long context value is already in the rescaled unit. We
+        // mirror the rescale on the policy literal side here so a user
+        // writing `> 0.00003` ends up comparing against `> 30000` in Cedar.
+        let scaled_value = scale_value(field_spec, &predicate.value)
+            .map_err(|source| CompileError::Emit { index, source })?;
         let fragment = op
-            .emit(&left, &predicate.value)
+            .emit(&left, &scaled_value)
             .map_err(|source| CompileError::Emit { index, source })?;
         fragments.push(fragment);
     }
@@ -98,6 +106,41 @@ pub fn compile_with_registry(
         .get(&rule.action)
         .ok_or_else(|| ValidationError::UnknownAction(rule.action.clone()))?;
     compile(rule, schema)
+}
+
+/// Apply the field's `scale` to each operand inside a [`PredicateValue`].
+///
+/// Returns the input untouched for fields without a scale — the common case,
+/// preserving the existing emit path for every non-token-native field. For
+/// scaled fields, each decimal-shaped operand becomes its `value × 10^scale`
+/// integer string, ready for the `Long` operator's `escape_long`.
+///
+/// Both `Single` and `Multi` are handled so the same field can drive `>` /
+/// `<` (one-arity) or `in [..]` (many-arity) comparisons consistently.
+fn scale_value(
+    field_spec: &FieldSpec,
+    value: &PredicateValue,
+) -> Result<PredicateValue, EmitError> {
+    let Some(scale) = field_spec.scale else {
+        return Ok(value.clone());
+    };
+    let convert = |raw: &str| -> Result<String, EmitError> {
+        scale_decimal_to_long(raw, scale).map_err(|source| EmitError::BadOperand {
+            op: "scaled_long",
+            source,
+        })
+    };
+    match value {
+        PredicateValue::Single(s) => Ok(PredicateValue::Single(convert(s)?)),
+        PredicateValue::Multi(vs) => {
+            let mut out = Vec::with_capacity(vs.len());
+            for v in vs {
+                out.push(convert(v)?);
+            }
+            Ok(PredicateValue::Multi(out))
+        }
+        PredicateValue::None => Ok(PredicateValue::None),
+    }
 }
 
 fn collect_has_guards(field_spec: &crate::types::FieldSpec, out: &mut BTreeSet<String>) {
@@ -362,6 +405,55 @@ mod tests {
         rule.severity = Severity::Warn;
         let out = compile(&rule, &swap::schema()).unwrap();
         assert!(out.contains(r#"@severity("warn")"#));
+    }
+
+    #[test]
+    fn nano_amount_field_scales_decimal_input_to_long() {
+        // The whole point of the scale field: user writes "0.00003" (the
+        // value they see on a DEX UI), Cedar gets the matching i64 literal
+        // after a 10^9 rescale that the manifest mirrors on the context
+        // side. Inequality emit path must work end-to-end.
+        let rule = rule_with(vec![Predicate {
+            field: "inputAmountNano".into(),
+            op: "gt".into(),
+            value: PredicateValue::Single("0.00003".into()),
+        }]);
+        let out = compile(&rule, &swap::schema()).unwrap();
+        assert!(
+            out.contains("context.custom.inputAmountNano > 30000"),
+            "expected scaled literal, got:\n{out}"
+        );
+        // The `has` guard cluster still fires for the optional custom field.
+        assert!(out.contains("context has custom"));
+        assert!(out.contains("context has custom"));
+    }
+
+    #[test]
+    fn nano_amount_integer_input_also_scales() {
+        // "1" (= 1 token) must become 10^9, not 1.
+        let rule = rule_with(vec![Predicate {
+            field: "outputAmountNano".into(),
+            op: "gte".into(),
+            value: PredicateValue::Single("1".into()),
+        }]);
+        let out = compile(&rule, &swap::schema()).unwrap();
+        assert!(
+            out.contains("context.custom.outputAmountNano >= 1000000000"),
+            "got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn nano_amount_rejects_too_precise_input() {
+        // 10 fractional digits at scale=9 is a silent precision loss; we
+        // reject so the user notices instead of seeing a rounded threshold.
+        let rule = rule_with(vec![Predicate {
+            field: "inputAmountNano".into(),
+            op: "lt".into(),
+            value: PredicateValue::Single("0.0000000001".into()),
+        }]);
+        let err = compile(&rule, &swap::schema()).unwrap_err();
+        assert!(matches!(err, CompileError::Emit { .. }), "got: {err:?}");
     }
 
     #[test]

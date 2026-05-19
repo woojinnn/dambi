@@ -15,9 +15,10 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+use policy_builder::escape::unscale_long_to_decimal;
 use policy_builder::operators::{operators_for, OperatorArity};
 use policy_builder::schemas;
-use policy_builder::types::{ActionSchema, CedarType, FieldSpec, PolicyRule};
+use policy_builder::types::{ActionSchema, CedarType, FieldSpec, PolicyRule, PredicateValue};
 use policy_builder::{compile, parse_cedar, validate, CompileError, ParseError, ValidationError};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -175,13 +176,60 @@ pub fn compile_policy_json(rule_json: String) -> String {
 #[must_use]
 pub fn parse_cedar_json(cedar_text: String) -> String {
     match parse_cedar(&cedar_text) {
-        Ok(rule) => Envelope::success(rule).to_json(),
+        Ok(mut rule) => {
+            // Round-trip the inverse of the compile-time scale: when a
+            // predicate names a scaled field (e.g. `inputAmountNano`,
+            // scale = 9), the Cedar literal is `30000` but the user-facing
+            // form is `0.00003`. Without this step a Cedar→Builder
+            // round-trip would surface the raw rescaled integer and
+            // confuse anyone reading the form.
+            //
+            // Look up the schema in the bundled registry rather than
+            // re-deriving from the parsed action: parse_cedar already
+            // populated `rule.action`, and an unknown action means there
+            // is no schema to consult — we leave the rule untouched in
+            // that case and let downstream validation report the issue.
+            if let Some(schema) = schemas::registry().get(&rule.action) {
+                unscale_predicate_values(&mut rule, schema);
+            }
+            Envelope::success(rule).to_json()
+        }
         Err(error) => Envelope::<()>::failure(EnvelopeError {
             kind: parse_error_kind(&error).to_string(),
             message: error.to_string(),
             predicate_index: None,
         })
         .to_json(),
+    }
+}
+
+/// For each predicate referencing a `Some(scale)` field, divide the Long
+/// literal back into a decimal-shaped operand string. Silent no-op for
+/// fields without a scale or operands the helper can't parse — the
+/// downstream validator catches malformed values with field-aware errors.
+fn unscale_predicate_values(rule: &mut PolicyRule, schema: &ActionSchema) {
+    for predicate in &mut rule.predicates {
+        let Some(field_spec) = schema.fields.get(&predicate.field) else {
+            continue;
+        };
+        let Some(scale) = field_spec.scale else {
+            continue;
+        };
+        match &mut predicate.value {
+            PredicateValue::Single(v) => {
+                if let Ok(decimal) = unscale_long_to_decimal(v, scale) {
+                    *v = decimal;
+                }
+            }
+            PredicateValue::Multi(vs) => {
+                for v in vs {
+                    if let Ok(decimal) = unscale_long_to_decimal(v, scale) {
+                        *v = decimal;
+                    }
+                }
+            }
+            PredicateValue::None => {}
+        }
     }
 }
 
@@ -263,6 +311,19 @@ struct FieldDto {
     /// distinctly without re-deriving the split from the cedarschema.
     #[serde(rename = "isCustom")]
     is_custom: bool,
+    /// Closed-set enum constraint for this field's operand value(s). When
+    /// present, the UI should render a `<select>` (arity=one) or multi-select
+    /// (arity=many) of these literals instead of a free-form input. Omitted
+    /// when the field accepts any well-typed value.
+    #[serde(rename = "allowedValues", skip_serializing_if = "Option::is_none")]
+    allowed_values: Option<Vec<String>>,
+    /// Implicit `10^scale` exponent for Long fields whose runtime value the
+    /// manifest pre-rescaled (e.g. token-native amount fields at scale 9).
+    /// When present, the UI should accept decimal input from the user and
+    /// the WASM compiler will emit `value × 10^scale` as the Long literal.
+    /// Hint for placeholders, validation feedback, and back-display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scale: Option<u8>,
     operators: Vec<OperatorDto>,
 }
 
@@ -300,6 +361,8 @@ fn field_to_dto(spec: &FieldSpec) -> FieldDto {
         parent_optional: spec.parent_optional,
         label: spec.label.clone(),
         is_custom: spec.is_custom,
+        allowed_values: spec.allowed_values.clone(),
+        scale: spec.scale,
         operators,
     }
 }
@@ -331,6 +394,7 @@ fn validation_error_to_envelope(error: &ValidationError) -> EnvelopeError {
         ValidationError::UnknownOperator { index, .. } => ("unknown_operator", Some(*index)),
         ValidationError::ArityMismatch { index, .. } => ("arity_mismatch", Some(*index)),
         ValidationError::EmptyOperandList { index, .. } => ("empty_operand_list", Some(*index)),
+        ValidationError::DisallowedValue { index, .. } => ("disallowed_value", Some(*index)),
     };
     EnvelopeError {
         kind: kind.to_string(),
