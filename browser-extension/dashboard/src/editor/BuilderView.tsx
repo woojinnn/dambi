@@ -15,7 +15,13 @@ import "./BuilderView.css";
 interface BuilderViewProps {
   rule: PolicyRule;
   onRuleChange: (rule: PolicyRule) => void;
-  onCedarChange: (cedarText: string) => void;
+  /**
+   * Fired when the user successfully compiles the current rule. `cedarText`
+   * is the emitted Cedar string; `compiledRule` is the exact `PolicyRule`
+   * snapshot the compile ran against so the caller can detect later edits
+   * (`rule !== compiledRule`) and disable save until a re-compile.
+   */
+  onCedarChange: (cedarText: string, compiledRule: PolicyRule) => void;
 }
 
 export function BuilderView({
@@ -59,6 +65,29 @@ export function BuilderView({
     onRuleChange({ ...rule, [key]: value });
   };
 
+  // The id stores `dashboard::<action>/<suffix>` internally so the catalog
+  // can keep the same `<source>::<action>/<name>` namespacing as bundled
+  // defaults. The user only types the `<suffix>` half; these helpers split
+  // and recompose around that boundary.
+  const idSuffix = stripIdPrefix(rule.id, rule.action);
+  const composeId = (action: string, suffix: string): string =>
+    `dashboard::${action}/${suffix}`;
+
+  const handleIdSuffixChange = (suffix: string) => {
+    onRuleChange({ ...rule, id: composeId(rule.action, suffix) });
+  };
+
+  // Action change keeps the user-visible suffix but swaps the namespace so
+  // id ↔ action stay in lockstep — no save-time mismatch can be triggered
+  // from the builder.
+  const handleActionChange = (nextAction: string) => {
+    onRuleChange({
+      ...rule,
+      action: nextAction,
+      id: composeId(nextAction, idSuffix),
+    });
+  };
+
   const handlePredicateChange = (idx: number, next: Predicate) => {
     const arr = [...rule.predicates];
     arr[idx] = next;
@@ -91,8 +120,14 @@ export function BuilderView({
 
   const handleCompile = async () => {
     setCompileError(null);
-    const { cedarText, error } = await compileRule(rule);
-    if (cedarText) onCedarChange(cedarText);
+    // Capture the snapshot the compile ran against so the caller can pair
+    // the resulting Cedar text with the exact rule shape that produced it.
+    // Without the snapshot, a parallel edit during the (small but non-zero)
+    // compile latency window could silently associate fresh text with a
+    // mutated rule.
+    const snapshot = rule;
+    const { cedarText, error } = await compileRule(snapshot);
+    if (cedarText) onCedarChange(cedarText, snapshot);
     else setCompileError(error?.message ?? "compile failed");
   };
 
@@ -107,16 +142,16 @@ export function BuilderView({
         <Field label="ID">
           <input
             type="text"
-            value={rule.id}
-            placeholder="dashboard::my/rule"
-            onChange={(e) => handleField("id", e.target.value)}
+            value={idSuffix}
+            placeholder="newrule(0)"
+            onChange={(e) => handleIdSuffixChange(e.target.value)}
           />
         </Field>
         <Field label="Action">
           {actions.length > 0 ? (
             <select
               value={rule.action}
-              onChange={(e) => handleField("action", e.target.value)}
+              onChange={(e) => handleActionChange(e.target.value)}
             >
               {actions.map((a) => (
                 <option key={a} value={a}>
@@ -128,7 +163,7 @@ export function BuilderView({
             <input
               type="text"
               value={rule.action}
-              onChange={(e) => handleField("action", e.target.value)}
+              onChange={(e) => handleActionChange(e.target.value)}
             />
           )}
         </Field>
@@ -224,4 +259,16 @@ function Field({
       {children}
     </label>
   );
+}
+
+// Peel off whichever prefix this id actually carries so the user input
+// stays the bare suffix. Prefers the current-action prefix; falls back to
+// `dashboard::` alone for hydrated ids whose stored action segment doesn't
+// match the dropdown (e.g. legacy `dashboard::my/foo` policies).
+function stripIdPrefix(id: string, action: string): string {
+  const actionPrefix = `dashboard::${action}/`;
+  if (id.startsWith(actionPrefix)) return id.slice(actionPrefix.length);
+  const dashboardPrefix = "dashboard::";
+  if (id.startsWith(dashboardPrefix)) return id.slice(dashboardPrefix.length);
+  return id;
 }
