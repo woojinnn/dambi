@@ -742,7 +742,8 @@ mod tests {
         let enriched_ab = compose_enriched_with_base(&base, &manifests_ab).expect("ok");
         let enriched_ba = compose_enriched_with_base(&base, &manifests_ba).expect("ok");
         assert_eq!(
-            enriched_ab.schema_hash, enriched_ba.schema_hash,
+            enriched_ab.schema_hash,
+            enriched_ba.schema_hash,
             "enriched schema hash must not depend on output traversal order: \
              ab={ab} ba={ba}",
             ab = enriched_ab.schema_text,

@@ -290,8 +290,9 @@ when {
     match verdict {
         Verdict::Fail(matched) => {
             assert!(
-                matched.iter().any(|m| m.policy_id == "test::swap/max-100"
-                    && m.severity == Severity::Deny),
+                matched
+                    .iter()
+                    .any(|m| m.policy_id == "test::swap/max-100" && m.severity == Severity::Deny),
                 "expected deny policy test::swap/max-100 to fire, got {matched:?}"
             );
         }
@@ -320,4 +321,3 @@ when {
     let edge_fail = ManifestEngine::new(manifest, policy).evaluate_swap_at("100.0001");
     assert!(matches!(edge_fail, Verdict::Fail(_)));
 }
-
