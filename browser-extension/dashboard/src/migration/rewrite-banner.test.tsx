@@ -48,7 +48,7 @@ function renderBanner(overrides: Partial<ExtensionClient>) {
     ),
     putRaw: vi.fn(async () => ({
       policy: managed("dashboard::p1", "rewritten-text"),
-      catalog: { policies: [], enabled: [] },
+      catalog: { policies: [], enabled: [], applied: [] },
     })),
     migrationAck: vi.fn(async (id: string) => ({ id, remaining: [] as string[] })),
     ...overrides,
@@ -117,7 +117,7 @@ describe("RewriteBanner", () => {
         expect(args.text).toContain("context.custom.totalInputUsd");
         return {
           policy: managed(args.id, args.text),
-          catalog: { policies: [], enabled: [] },
+          catalog: { policies: [], enabled: [], applied: [] },
         };
       },
     );
