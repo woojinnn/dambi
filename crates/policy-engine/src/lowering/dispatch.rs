@@ -95,6 +95,13 @@ pub fn try_policy_request_from_envelope(
         Action::Transfer(action) => action.build(&ctx).map(Some),
         Action::Wrap(action) => action.build(&ctx).map(Some),
         Action::Unwrap(action) => action.build(&ctx).map(Some),
+        // misc — Aerodrome ve(3,3) variants (gauge vote / LP stake / locks).
+        Action::GaugeVote(action) => action.build(&ctx).map(Some),
+        Action::LpStake(action) => action.build(&ctx).map(Some),
+        Action::LpUnstake(action) => action.build(&ctx).map(Some),
+        Action::LockCreate(action) => action.build(&ctx).map(Some),
+        Action::LockIncrease(action) => action.build(&ctx).map(Some),
+        Action::LockManage(action) => action.build(&ctx).map(Some),
         _ => Ok(None),
     }
 }
