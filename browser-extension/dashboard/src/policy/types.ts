@@ -94,6 +94,15 @@ export interface FieldDto {
    * fractional input for fields the JSON wire shape declares as Long.
    */
   scale?: number;
+  /**
+   * Regex the operand string must match, mirrored from the upstream
+   * action-schema JSON's `"pattern"` keyword (e.g. EVM address shape
+   * `^0x[0-9a-fA-F]{40}$`). The WASM validator rejects out-of-shape
+   * input as `kind: "pattern_mismatch"`. UIs can use this for live form
+   * feedback — e.g. a red border on the value input when the user's
+   * typed value doesn't match, so they notice before clicking compile.
+   */
+  pattern?: string;
   operators: OperatorDto[];
 }
 

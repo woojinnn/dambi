@@ -95,6 +95,19 @@ pub struct FieldSpec {
     /// magnitude — sufficient for any practical token amount.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale: Option<u8>,
+    /// Regex the operand string must match, mirrored from the upstream
+    /// action-schema JSON's `"pattern"` (e.g. the EVM address shape
+    /// `^0x[0-9a-fA-F]{40}$` from `_common.json#/$defs/Address`). When
+    /// `Some`, [`crate::validate::validate`] compiles and applies the regex
+    /// to every operand of every arity; failures surface as
+    /// `PatternMismatch` so a typo'd address (`"0x52"`, `"WETH"`, etc.)
+    /// gets caught at compile time instead of producing a syntactically
+    /// valid Cedar policy that silently never matches at runtime.
+    ///
+    /// Cedar emit is unaffected — only well-shaped values reach the
+    /// generator. Free-form fields leave this as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
 }
 
 /// Schema for one action keyword.

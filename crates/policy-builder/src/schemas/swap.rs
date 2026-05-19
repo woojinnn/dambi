@@ -13,11 +13,12 @@
 //! lives under `context.custom`, and `false` when it is calldata-derived and
 //! lives directly under `context`. The generator and parser key off this flag.
 //!
-//! `allowed_values` is **not declared inline here** — it is sourced at build
-//! time from the upstream action-schema JSON via [`super::generated`]. The
-//! `enum_for` helper below does the lookup so a JSON edit (e.g. adding a new
-//! swap mode) flows into this schema on the next `cargo build` with no
-//! hand-editing. Fields without a JSON enum get `None` automatically.
+//! `allowed_values` and `pattern` are **not declared inline here** — they are
+//! sourced at build time from the upstream action-schema JSON via
+//! [`super::generated`]. `enum_for` / `pattern_for` do the lookup so a JSON
+//! edit (e.g. extending `swapMode` or tweaking the Address regex) flows
+//! into this schema on the next `cargo build` with no hand-editing. Fields
+//! without a JSON constraint get `None` automatically.
 //!
 //! `scale` is set on the token-native amount fields (`inputAmountNano`,
 //! `outputAmountNano`) so the policy builder accepts user input in the
@@ -27,7 +28,7 @@
 //! `10^(9 - decimals)` before the engine sees it, so the same policy applies
 //! identically to any token regardless of its decimals.
 
-use super::generated::action_field_enum;
+use super::generated::{action_field_enum, action_field_pattern};
 use crate::types::{ActionSchema, CedarType, FieldSpec};
 use std::collections::BTreeMap;
 
@@ -45,6 +46,13 @@ const AMOUNT_NANO_SCALE: u8 = 9;
 /// the `FieldSpec::allowed_values` semantics.
 fn enum_for(path: &str) -> Option<Vec<String>> {
     action_field_enum(ACTION, path).map(|s| s.iter().map(|v| (*v).to_string()).collect())
+}
+
+/// Look up the build-time-generated regex for a path under this action.
+/// Returns `None` for fields whose JSON Schema declares no `pattern`,
+/// matching the `FieldSpec::pattern` semantics.
+fn pattern_for(path: &str) -> Option<String> {
+    action_field_pattern(ACTION, path).map(str::to_string)
 }
 
 /// Build the `swap` schema. Called once by [`crate::schemas::registry`].
@@ -68,6 +76,7 @@ pub fn schema() -> ActionSchema {
             is_custom: false,
             allowed_values: enum_for("swapMode"),
             scale: None,
+            pattern: pattern_for("swapMode"),
         },
     );
     insert(
@@ -82,6 +91,7 @@ pub fn schema() -> ActionSchema {
             is_custom: false,
             allowed_values: None,
             scale: None,
+            pattern: pattern_for("recipient"),
         },
     );
 
@@ -106,6 +116,7 @@ pub fn schema() -> ActionSchema {
             is_custom: false,
             allowed_values: None,
             scale: None,
+            pattern: None,
         },
     );
 
@@ -122,6 +133,7 @@ pub fn schema() -> ActionSchema {
             is_custom: false,
             allowed_values: None,
             scale: None,
+            pattern: pattern_for("validity.expiresAt"),
         },
     );
     insert(
@@ -136,6 +148,7 @@ pub fn schema() -> ActionSchema {
             is_custom: false,
             allowed_values: enum_for("validity.source"),
             scale: None,
+            pattern: pattern_for("validity.source"),
         },
     );
 
@@ -161,6 +174,7 @@ pub fn schema() -> ActionSchema {
                 is_custom: true,
                 allowed_values: None,
                 scale: Some(AMOUNT_NANO_SCALE),
+                pattern: None,
             },
         );
     }
@@ -186,6 +200,7 @@ pub fn schema() -> ActionSchema {
                 is_custom: true,
                 allowed_values: None,
                 scale: None,
+                pattern: None,
             },
         );
     }
@@ -203,6 +218,7 @@ pub fn schema() -> ActionSchema {
             is_custom: true,
             allowed_values: None,
             scale: None,
+            pattern: None,
         },
     );
 
@@ -226,6 +242,7 @@ pub fn schema() -> ActionSchema {
                 is_custom: true,
                 allowed_values: None,
                 scale: None,
+                pattern: None,
             },
         );
         insert(
@@ -240,6 +257,7 @@ pub fn schema() -> ActionSchema {
                 is_custom: true,
                 allowed_values: None,
                 scale: None,
+                pattern: None,
             },
         );
         insert(
@@ -254,6 +272,7 @@ pub fn schema() -> ActionSchema {
                 is_custom: true,
                 allowed_values: None,
                 scale: None,
+                pattern: None,
             },
         );
         insert(
@@ -268,6 +287,7 @@ pub fn schema() -> ActionSchema {
                 is_custom: true,
                 allowed_values: None,
                 scale: None,
+                pattern: None,
             },
         );
     }
@@ -285,6 +305,7 @@ pub fn schema() -> ActionSchema {
             is_custom: true,
             allowed_values: None,
             scale: None,
+            pattern: None,
         },
     );
     insert(
@@ -299,6 +320,7 @@ pub fn schema() -> ActionSchema {
             is_custom: true,
             allowed_values: None,
             scale: None,
+            pattern: None,
         },
     );
 
@@ -325,6 +347,7 @@ fn insert_asset_with_amount(
     ] {
         let path = format!("{asset_parent}.{leaf}");
         let allowed_values = enum_for(&path);
+        let pattern = pattern_for(&path);
         insert(
             map,
             FieldSpec {
@@ -337,6 +360,7 @@ fn insert_asset_with_amount(
                 is_custom: false,
                 allowed_values,
                 scale: None,
+                pattern,
             },
         );
     }
@@ -344,6 +368,7 @@ fn insert_asset_with_amount(
     let amount_parent = format!("{parent}.amount");
     let amount_kind_path = format!("{amount_parent}.kind");
     let amount_kind_enum = enum_for(&amount_kind_path);
+    let amount_kind_pattern = pattern_for(&amount_kind_path);
     insert(
         map,
         FieldSpec {
@@ -356,12 +381,15 @@ fn insert_asset_with_amount(
             is_custom: false,
             allowed_values: amount_kind_enum,
             scale: None,
+            pattern: amount_kind_pattern,
         },
     );
+    let amount_value_path = format!("{amount_parent}.value");
+    let amount_value_pattern = pattern_for(&amount_value_path);
     insert(
         map,
         FieldSpec {
-            path: format!("{amount_parent}.value"),
+            path: amount_value_path,
             cedar_type: CedarType::String,
             optional: true,
             parent_path: Some(amount_parent),
@@ -370,6 +398,7 @@ fn insert_asset_with_amount(
             is_custom: false,
             allowed_values: None,
             scale: None,
+            pattern: amount_value_pattern,
         },
     );
 }
@@ -557,7 +586,6 @@ mod tests {
     #[test]
     fn non_scaled_fields_have_none_scale() {
         let s = schema();
-        // Spot-check a representative cross-section.
         for path in [
             "swapMode",
             "feeBps",
@@ -567,6 +595,57 @@ mod tests {
         ] {
             let f = s.fields.get(path).unwrap();
             assert!(f.scale.is_none(), "{path} should not have a scale");
+        }
+    }
+
+    #[test]
+    fn address_fields_carry_evm_pattern() {
+        // Recipient and both asset addresses share the standard EVM hex shape.
+        let s = schema();
+        for path in [
+            "recipient",
+            "inputToken.asset.address",
+            "outputToken.asset.address",
+        ] {
+            let f = s.fields.get(path).unwrap();
+            let pat = f
+                .pattern
+                .as_deref()
+                .unwrap_or_else(|| panic!("{path} should have a pattern"));
+            assert_eq!(pat, "^0x[0-9a-fA-F]{40}$");
+        }
+    }
+
+    #[test]
+    fn decimal_string_fields_carry_digits_pattern() {
+        let s = schema();
+        for path in [
+            "validity.expiresAt",
+            "inputToken.asset.tokenId",
+            "outputToken.asset.tokenId",
+            "inputToken.amount.value",
+            "outputToken.amount.value",
+        ] {
+            let f = s.fields.get(path).unwrap();
+            assert_eq!(f.pattern.as_deref(), Some("^[0-9]+$"));
+        }
+    }
+
+    #[test]
+    fn fields_without_pattern_constraint_are_none() {
+        let s = schema();
+        for path in [
+            "swapMode",       // enum, but no regex
+            "feeBps",         // numeric, not a String pattern
+            "inputAmountNano",
+            "totalInputUsd.value",
+            "recipientIsContract",
+        ] {
+            let f = s.fields.get(path).unwrap();
+            assert!(
+                f.pattern.is_none(),
+                "{path} should not carry a regex pattern"
+            );
         }
     }
 }

@@ -17,7 +17,7 @@ pub mod swap;
 /// JSON remains the single source of truth; a hand-written list and the
 /// JSON cannot drift.
 pub mod generated {
-    include!(concat!(env!("OUT_DIR"), "/generated_action_enums.rs"));
+    include!(concat!(env!("OUT_DIR"), "/generated_action_constraints.rs"));
 }
 
 use crate::types::ActionSchema;

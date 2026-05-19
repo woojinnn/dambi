@@ -6,6 +6,7 @@
 
 use crate::operators;
 use crate::types::{ActionSchema, PolicyRule, PredicateValue};
+use regex::Regex;
 use thiserror::Error;
 
 /// Validation failure modes. Each variant identifies which predicate index
@@ -72,6 +73,39 @@ pub enum ValidationError {
         value: String,
         /// The full closed set this value should have been drawn from.
         allowed: Vec<String>,
+    },
+    /// Operand didn't match the field's `pattern` regex (e.g. typo'd EVM
+    /// address like `"0x52"` against `^0x[0-9a-fA-F]{40}$`). Without this
+    /// check, the policy would compile to syntactically valid Cedar but
+    /// the bad literal would never match the decoder's well-formed
+    /// `context.recipient`, producing a silent no-op.
+    #[error(
+        "predicate {index}: value {value:?} doesn't match pattern {pattern:?} for field {field}"
+    )]
+    PatternMismatch {
+        /// Position in `rule.predicates`.
+        index: usize,
+        /// Field path the operand was applied to.
+        field: String,
+        /// The offending value.
+        value: String,
+        /// The regex the value should have matched.
+        pattern: String,
+    },
+    /// A field's declared `pattern` regex didn't compile. This is a schema
+    /// authoring bug, not user input — surface it so the UI/tests can
+    /// pinpoint the bad schema entry instead of silently skipping the
+    /// pattern check.
+    #[error("predicate {index}: field {field} declares an invalid regex {pattern:?}: {message}")]
+    InvalidPattern {
+        /// Position in `rule.predicates`.
+        index: usize,
+        /// Field path the bad regex was attached to.
+        field: String,
+        /// The regex source string.
+        pattern: String,
+        /// Underlying regex compile error message.
+        message: String,
     },
 }
 
@@ -159,6 +193,50 @@ pub fn validate(rule: &PolicyRule, schema: &ActionSchema) -> Result<(), Validati
                                 field: predicate.field.clone(),
                                 value: v.clone(),
                                 allowed: allowed.clone(),
+                            });
+                        }
+                    }
+                }
+                PredicateValue::None => {}
+            }
+        }
+
+        // Pattern constraint: regex from the upstream JSON Schema's
+        // `"pattern"` (e.g. EVM address shape). Compile lazily so fields
+        // without a pattern pay nothing. A regex that fails to compile is
+        // a schema bug — surface it instead of silently skipping the
+        // check.
+        if let Some(pat) = field_spec.pattern.as_ref() {
+            let re = match Regex::new(pat) {
+                Ok(r) => r,
+                Err(err) => {
+                    return Err(ValidationError::InvalidPattern {
+                        index,
+                        field: predicate.field.clone(),
+                        pattern: pat.clone(),
+                        message: err.to_string(),
+                    });
+                }
+            };
+            match &predicate.value {
+                PredicateValue::Single(v) => {
+                    if !re.is_match(v) {
+                        return Err(ValidationError::PatternMismatch {
+                            index,
+                            field: predicate.field.clone(),
+                            value: v.clone(),
+                            pattern: pat.clone(),
+                        });
+                    }
+                }
+                PredicateValue::Multi(vs) => {
+                    for v in vs {
+                        if !re.is_match(v) {
+                            return Err(ValidationError::PatternMismatch {
+                                index,
+                                field: predicate.field.clone(),
+                                value: v.clone(),
+                                pattern: pat.clone(),
                             });
                         }
                     }
@@ -337,13 +415,118 @@ mod tests {
     }
 
     #[test]
-    fn free_form_value_unchanged_by_enum_check() {
-        // Non-enum fields stay free-form: any well-typed value passes.
+    fn pattern_rejects_short_address() {
+        // The exact footgun the pattern check exists for: a 6-character
+        // hex blob looks like an address but isn't. Without the regex
+        // guard, this would compile to a syntactically valid Cedar policy
+        // that never matches the well-formed `context.recipient` produced
+        // by the decoder.
         let schema = swap::schema();
         let rule = base_rule(vec![Predicate {
             field: "recipient".into(),
             op: "eq".into(),
-            value: PredicateValue::Single("0xdeadbeef".into()),
+            value: PredicateValue::Single("0x52".into()),
+        }]);
+        assert!(matches!(
+            validate(&rule, &schema),
+            Err(ValidationError::PatternMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn pattern_accepts_valid_address() {
+        // A real 40-char EVM address (USDC mainnet, lowercased) must pass.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "recipient".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into(),
+            ),
+        }]);
+        assert!(validate(&rule, &schema).is_ok());
+    }
+
+    #[test]
+    fn pattern_accepts_mixed_case_address() {
+        // EIP-55 checksummed addresses use mixed case — regex permits
+        // [0-9a-fA-F]{40}, so checksummed forms pass.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "inputToken.asset.address".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single(
+                "0xA0b86991c6218b36c1D19D4a2e9Eb0cE3606eB48".into(),
+            ),
+        }]);
+        assert!(validate(&rule, &schema).is_ok());
+    }
+
+    #[test]
+    fn pattern_rejects_partial_match() {
+        // `is_match` allows the pattern to be anywhere in the string by
+        // default, but our patterns are anchored with ^ and $. This test
+        // guards that anchoring stays intact — a 40-hex prefix with junk
+        // appended must be rejected.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "recipient".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48extra".into(),
+            ),
+        }]);
+        assert!(matches!(
+            validate(&rule, &schema),
+            Err(ValidationError::PatternMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn pattern_check_applies_per_element_in_multi() {
+        // `in [..]` on an address field: every element must match the
+        // pattern, not just one.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "recipient".into(),
+            op: "in".into(),
+            value: PredicateValue::Multi(vec![
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into(),
+                "0xnope".into(), // ← second element invalid
+            ]),
+        }]);
+        assert!(matches!(
+            validate(&rule, &schema),
+            Err(ValidationError::PatternMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn pattern_rejects_non_digit_decimal_string() {
+        // DecimalString fields (validity.expiresAt etc.) reject anything
+        // other than digits.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "validity.expiresAt".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single("2026-05-19T00:00:00Z".into()),
+        }]);
+        assert!(matches!(
+            validate(&rule, &schema),
+            Err(ValidationError::PatternMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn free_form_value_unchanged_by_enum_check() {
+        // Non-enum, non-pattern fields stay free-form. `feeBps` has no
+        // pattern (it's a Long), so any string that parses as i64 passes
+        // through the validator — operator-level escape catches non-int.
+        let schema = swap::schema();
+        let rule = base_rule(vec![Predicate {
+            field: "feeBps".into(),
+            op: "eq".into(),
+            value: PredicateValue::Single("30".into()),
         }]);
         assert!(validate(&rule, &schema).is_ok());
     }

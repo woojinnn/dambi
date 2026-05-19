@@ -324,6 +324,13 @@ struct FieldDto {
     /// Hint for placeholders, validation feedback, and back-display.
     #[serde(skip_serializing_if = "Option::is_none")]
     scale: Option<u8>,
+    /// Regex the operand string must match (e.g. `^0x[0-9a-fA-F]{40}$` for
+    /// EVM address fields, sourced from the upstream action-schema JSON's
+    /// `"pattern"` keyword). The WASM validator enforces it and surfaces
+    /// `kind: "pattern_mismatch"` on violation; UIs can additionally use
+    /// it for live form feedback (red border on out-of-shape input).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pattern: Option<String>,
     operators: Vec<OperatorDto>,
 }
 
@@ -363,6 +370,7 @@ fn field_to_dto(spec: &FieldSpec) -> FieldDto {
         is_custom: spec.is_custom,
         allowed_values: spec.allowed_values.clone(),
         scale: spec.scale,
+        pattern: spec.pattern.clone(),
         operators,
     }
 }
@@ -395,6 +403,8 @@ fn validation_error_to_envelope(error: &ValidationError) -> EnvelopeError {
         ValidationError::ArityMismatch { index, .. } => ("arity_mismatch", Some(*index)),
         ValidationError::EmptyOperandList { index, .. } => ("empty_operand_list", Some(*index)),
         ValidationError::DisallowedValue { index, .. } => ("disallowed_value", Some(*index)),
+        ValidationError::PatternMismatch { index, .. } => ("pattern_mismatch", Some(*index)),
+        ValidationError::InvalidPattern { index, .. } => ("invalid_pattern", Some(*index)),
     };
     EnvelopeError {
         kind: kind.to_string(),

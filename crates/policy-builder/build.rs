@@ -1,26 +1,33 @@
-//! Build-time enum extractor.
+//! Build-time JSON Schema constraint extractor.
 //!
 //! Walks `schema/action-schema/schema/actions/**/*.json` plus
 //! `schema/action-schema/schema/common/_common.json`, resolves `$ref` to the
-//! common `$defs`, and emits a Rust file that maps `(action, field_path)` →
-//! the closed-set string enum declared in the JSON Schema. The generated file
-//! is `include!`'d from `schemas/generated.rs` so `swap.rs` (and any future
-//! action schema) can call one function instead of repeating literals that
-//! the upstream JSON already declared.
+//! common `$defs`, and emits a Rust file that maps `(action, field_path)`
+//! to the constraints declared in the JSON Schema:
 //!
-//! This file solves exactly one drift problem: when the action-schema authors
-//! add a new enum value (e.g. extending `swapMode` with `"limit_order"`), the
-//! policy-builder picks it up at the next `cargo build` with no hand-editing.
-//! It does **not** auto-generate the rest of the `FieldSpec` structure
-//! (cedar_type, is_custom, parent_optional, …) — that still lives in the
-//! hand-written `schemas/*.rs` files because the mapping between JSON Schema
-//! types and Cedar types is policy-specific.
+//! - **enum** (closed-set string values): exposed via
+//!   `action_field_enum(action, path) -> Option<&'static [&'static str]>`.
+//!   Used by `FieldSpec::allowed_values` and the WASM `FieldDto.allowedValues`
+//!   so the UI renders a dropdown and the validator rejects out-of-set
+//!   literals.
+//!
+//! - **pattern** (string regex): exposed via
+//!   `action_field_pattern(action, path) -> Option<&'static str>`. Mirrors
+//!   the `"pattern"` keyword used on primitives like `Address`
+//!   (`^0x[0-9a-fA-F]{40}$`) and `DecimalString` (`^[0-9]+$`). Used by
+//!   `FieldSpec::pattern` so the validator catches typo'd inputs at
+//!   compile time instead of letting a syntactically valid Cedar policy
+//!   silently never match.
+//!
+//! The generated file is `include!`'d from `schemas::generated` so any
+//! action schema module can call these lookups instead of repeating
+//! literals that the upstream JSON already declared.
 //!
 //! Cargo invariants:
-//! - `cargo:rerun-if-changed` is emitted for every JSON file inspected, so a
-//!   schema edit triggers a rebuild even though nothing under `src/` changed.
-//! - Output lives in `$OUT_DIR/generated_action_enums.rs`. The crate source
-//!   never contains a checked-in copy.
+//! - `cargo:rerun-if-changed` is emitted for every JSON file inspected,
+//!   so a schema edit triggers a rebuild without touching `src/`.
+//! - Output lives in `$OUT_DIR/generated_action_constraints.rs`; the
+//!   crate source never contains a checked-in copy.
 
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -37,7 +44,6 @@ fn main() {
         .join("action-schema")
         .join("schema");
 
-    // Emit the directory itself so deletes/additions trigger a rebuild.
     println!("cargo:rerun-if-changed={}", schema_root.display());
 
     let common_path = schema_root.join("common").join("_common.json");
@@ -45,23 +51,38 @@ fn main() {
     println!("cargo:rerun-if-changed={}", common_path.display());
 
     let actions_dir = schema_root.join("actions");
-    let mut entries: BTreeMap<String, Vec<EnumEntry>> = BTreeMap::new();
-    collect_actions(&actions_dir, &mut entries, &common_defs);
+    let mut collected: BTreeMap<String, Vec<FieldConstraints>> = BTreeMap::new();
+    collect_actions(&actions_dir, &mut collected, &common_defs);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let out_path = out_dir.join("generated_action_enums.rs");
-    fs::write(&out_path, render_rust(&entries))
+    let out_path = out_dir.join("generated_action_constraints.rs");
+    fs::write(&out_path, render_rust(&collected))
         .unwrap_or_else(|e| panic!("write {}: {}", out_path.display(), e));
 }
 
+/// One JSON-Schema-declared constraint set for a single dotted leaf path.
+/// Both fields may be present, both absent, or any combination — the
+/// renderer emits each only when it's set.
 #[derive(Debug)]
-struct EnumEntry {
+struct FieldConstraints {
     path: String,
-    values: Vec<String>,
+    enum_values: Option<Vec<String>>,
+    pattern: Option<String>,
 }
 
-/// Load `_common.json` and return its `$defs` map. We only need the defs —
-/// the rest of the file is metadata.
+impl FieldConstraints {
+    fn empty(path: String) -> Self {
+        Self {
+            path,
+            enum_values: None,
+            pattern: None,
+        }
+    }
+    fn is_empty(&self) -> bool {
+        self.enum_values.is_none() && self.pattern.is_none()
+    }
+}
+
 fn load_common_defs(path: &Path) -> BTreeMap<String, Value> {
     let raw = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
@@ -74,11 +95,9 @@ fn load_common_defs(path: &Path) -> BTreeMap<String, Value> {
     defs.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-/// Recursively descend `actions_dir`, parsing every `*.json` and collecting
-/// enum entries per action.
 fn collect_actions(
     actions_dir: &Path,
-    out: &mut BTreeMap<String, Vec<EnumEntry>>,
+    out: &mut BTreeMap<String, Vec<FieldConstraints>>,
     common_defs: &BTreeMap<String, Value>,
 ) {
     for entry in fs::read_dir(actions_dir)
@@ -106,12 +125,13 @@ fn collect_actions(
         let root: Value = serde_json::from_str(&raw)
             .unwrap_or_else(|e| panic!("parse {}: {}", path.display(), e));
 
-        let mut entries = Vec::new();
+        let mut entries: Vec<FieldConstraints> = Vec::new();
         if let Some(props) = root.get("properties").and_then(Value::as_object) {
             for (key, child) in props {
                 walk(child, key, common_defs, &mut entries);
             }
         }
+        entries.retain(|e| !e.is_empty());
         if !entries.is_empty() {
             entries.sort_by(|a, b| a.path.cmp(&b.path));
             out.insert(action_name, entries);
@@ -120,22 +140,28 @@ fn collect_actions(
 }
 
 /// Recursively walk a schema node, flattening composite types to dotted
-/// leaf paths and recording any `enum` constraints encountered.
+/// leaf paths and recording any `enum` and/or `pattern` constraint
+/// encountered. `$ref` is resolved against the common `$defs`; primitive
+/// scalar defs (`Address`, `DecimalString`, `Hex`) thus get their pattern
+/// surfaced on every leaf that references them, no manual mirroring.
 ///
-/// `$ref` is resolved against the common `$defs`. We deliberately ignore
-/// JSON-Schema features the policy builder doesn't model (allOf/oneOf/if-then,
-/// array `items`) — they don't carry enum constraints on scalar leaves in our
-/// schemas, and treating them as opaque keeps the walker tractable.
+/// JSON-Schema features the policy builder doesn't model (allOf/oneOf,
+/// if-then, array `items`) are intentionally ignored: enum/pattern on
+/// scalar leaves is all our generator can act on, so deeper structure
+/// would be dead constraints.
 fn walk(
     node: &Value,
     path: &str,
     common_defs: &BTreeMap<String, Value>,
-    out: &mut Vec<EnumEntry>,
+    out: &mut Vec<FieldConstraints>,
 ) {
-    // Resolve $ref before doing anything else — it could short-circuit
-    // straight into a composite type or a primitive.
     let resolved = resolve_ref(node, common_defs);
     let effective = resolved.as_ref().unwrap_or(node);
+
+    // Collect leaf-level constraints first (enum/pattern can coexist with
+    // properties only via allOf, which we don't traverse — so a node that
+    // has properties is treated purely as a record).
+    let mut leaf = FieldConstraints::empty(path.to_string());
 
     if let Some(values) = effective.get("enum").and_then(Value::as_array) {
         let strings: Vec<String> = values
@@ -144,13 +170,17 @@ fn walk(
             .map(str::to_owned)
             .collect();
         if !strings.is_empty() {
-            out.push(EnumEntry {
-                path: path.to_string(),
-                values: strings,
-            });
+            leaf.enum_values = Some(strings);
         }
     }
+    if let Some(pat) = effective.get("pattern").and_then(Value::as_str) {
+        leaf.pattern = Some(pat.to_string());
+    }
+    if !leaf.is_empty() {
+        out.push(leaf);
+    }
 
+    // Descend into nested records.
     if let Some(props) = effective.get("properties").and_then(Value::as_object) {
         for (key, child) in props {
             let next_path = format!("{path}.{key}");
@@ -159,45 +189,71 @@ fn walk(
     }
 }
 
-/// If `node` is `{"$ref": "..."}`, return the referenced schema. Only
-/// cross-file refs to `_common.json#/$defs/<Name>` are supported — that's
-/// the shape every action-schema file uses today.
 fn resolve_ref(node: &Value, common_defs: &BTreeMap<String, Value>) -> Option<Value> {
     let r = node.get("$ref").and_then(Value::as_str)?;
-    // Both forms encountered:
-    //   "../../common/_common.json#/$defs/Foo"  (cross-file)
-    //   "#/$defs/Foo"                            (intra-file — rare here)
     let after_hash = r.split_once('#').map(|(_, t)| t).unwrap_or("");
     let name = after_hash.strip_prefix("/$defs/")?;
     common_defs.get(name).cloned()
 }
 
-/// Render the collected map as a Rust source file. The output is a single
-/// `match` so lookups are zero-allocation, branch-predictor friendly, and
-/// readable when someone opens `OUT_DIR/generated_action_enums.rs` while
-/// debugging a drift complaint.
-fn render_rust(entries: &BTreeMap<String, Vec<EnumEntry>>) -> String {
+fn render_rust(entries: &BTreeMap<String, Vec<FieldConstraints>>) -> String {
     let mut out = String::new();
     out.push_str("// @generated by build.rs from schema/action-schema/**/*.json — do not edit.\n");
     out.push_str("//\n");
-    out.push_str("// Lookup the closed-set enum (if any) declared for one (action, field_path)\n");
-    out.push_str("// pair in the upstream action-schema JSON. Returns the values in the order\n");
-    out.push_str("// they appear in the JSON so downstream UIs render a stable dropdown.\n");
+    out.push_str("// Two lookups derived from the upstream JSON Schema, both keyed by the\n");
+    out.push_str("// (action, dotted_leaf_path) pair. Each returns `None` when the path\n");
+    out.push_str("// is unknown or carries no constraint of that kind.\n\n");
+
+    // --- enum lookup --------------------------------------------------
+    out.push_str(
+        "/// Closed-set string enum declared on this field via the JSON\n\
+         /// Schema `\"enum\"` keyword. Order matches the JSON declaration so\n\
+         /// UIs render a stable dropdown.\n",
+    );
     out.push_str("pub fn action_field_enum(action: &str, path: &str) -> Option<&'static [&'static str]> {\n");
     out.push_str("    match (action, path) {\n");
     for (action, items) in entries {
         for item in items {
-            out.push_str(&format!(
-                "        ({:?}, {:?}) => Some(&[",
-                action, item.path
-            ));
-            for (i, v) in item.values.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
+            if let Some(values) = item.enum_values.as_ref() {
+                out.push_str(&format!(
+                    "        ({:?}, {:?}) => Some(&[",
+                    action, item.path
+                ));
+                for (i, v) in values.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&format!("{:?}", v));
                 }
-                out.push_str(&format!("{:?}", v));
+                out.push_str("]),\n");
             }
-            out.push_str("]),\n");
+        }
+    }
+    out.push_str("        _ => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+
+    // --- pattern lookup -----------------------------------------------
+    out.push_str(
+        "/// Regex the operand string must match on this field, mirrored from\n\
+         /// the JSON Schema `\"pattern\"` keyword. Resolved through any `$ref`\n\
+         /// so primitive defs like `Address` propagate their pattern to every\n\
+         /// leaf that references them.\n",
+    );
+    out.push_str("pub fn action_field_pattern(action: &str, path: &str) -> Option<&'static str> {\n");
+    out.push_str("    match (action, path) {\n");
+    for (action, items) in entries {
+        for item in items {
+            if let Some(pat) = item.pattern.as_ref() {
+                // `{:?}` for the pattern emits a normal Rust string literal
+                // with escapes — `\d` in the JSON becomes `"\\d"` here.
+                // That round-trips through regex::Regex correctly; using a
+                // raw-string prefix would double-escape backslashes.
+                out.push_str(&format!(
+                    "        ({:?}, {:?}) => Some({:?}),\n",
+                    action, item.path, pat
+                ));
+            }
         }
     }
     out.push_str("        _ => None,\n");
