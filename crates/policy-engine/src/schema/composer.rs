@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 /// Every action's base cedarschema is expected to declare the empty
 /// `type <Action>CustomContext = {};` stub that this composer overwrites with
 /// the manifest fragment. Missing stubs are rejected with
-/// [`PolicyRpcError::Schema`] (see [`compose_enriched_with_base`]).
+/// [`PolicyRpcError::Schema`] (see `compose_enriched_with_base`).
 ///
 /// # Errors
 ///
