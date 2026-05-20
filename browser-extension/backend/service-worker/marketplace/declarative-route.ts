@@ -5,16 +5,16 @@
  *
  *   1. Compose `CallMatchKey` from `(chain_id, to, calldata.selector)`.
  *   2. Resolve via `resolveAdapter` — Layer 1 mount → negative cache →
- *      JIT fetch. A hit gives us the parsed bundle in addition to the
- *      decoder id.
- *   3. Decode calldata against `bundle.abi_fragment.abi` (viem).
- *   4. Hand `(chain_id, to, selector, decoded, ctx)` to the WASM route
- *      entry `declarative_route_request_json`. The engine looks up the
- *      bridge-installed mapper and runs it.
- *   5. Return `{ envelopes, decoderId, bundleId }`. The caller (orchestrator
+ *      JIT fetch. Ensures the bundle is mounted in WASM and supplies
+ *      `bundleId`/`source` for audit telemetry.
+ *   3. Hand `(chain_id, to, selector, calldata, ctx)` to the WASM route
+ *      entry `declarative_route_request_json`. The engine decodes the
+ *      raw calldata using the bridge-resolved bundle's `abi_fragment.abi`
+ *      and runs the declarative mapper.
+ *   4. Return `{ envelopes, decoderId, bundleId }`. The caller (orchestrator
  *      in `service-worker/orchestrator.ts`) plugs these into the audit trail
  *      and continues to the existing Cedar pipeline. When this helper
- *      returns `null` (Layer 1/JIT miss, decode failure, …) the caller
+ *      returns `null` (Layer 1/JIT miss, WASM decode failure, …) the caller
  *      falls through to the static Tier B pipeline.
  *
  * Out of scope for this PoC: multicall_recurse host resolver wiring (V2
@@ -33,12 +33,7 @@ import {
   declarativeRouteRequest,
   type DeclarativeRouteRequestResult,
 } from "../wasm-bridge";
-import {
-  buildRouteInput,
-  decodeBundleCalldata,
-  DeclarativeDecodeError,
-  extractSelector,
-} from "./declarative-decode";
+import { buildRouteInput, extractSelector } from "./declarative-decode";
 import { resolveAdapter, type AdapterOrVerdict } from "./jit-fetcher";
 
 const DEFAULT_REGISTRY_BASE_URL =
@@ -246,15 +241,6 @@ export async function tryDeclarativeRoute(args: {
   }
 
   const adapter = resolution.adapter;
-  let decoded;
-  try {
-    decoded = decodeBundleCalldata(adapter.bundle, args.calldataHex!);
-  } catch (err) {
-    if (err instanceof DeclarativeDecodeError) {
-      return { kind: "fault", reason: "decode_failed", cause: err };
-    }
-    return { kind: "fault", reason: "unexpected", cause: err };
-  }
 
   const blockTimestamp =
     args.options?.blockTimestamp ?? Math.floor(Date.now() / 1000);
@@ -265,7 +251,7 @@ export async function tryDeclarativeRoute(args: {
     from: args.from,
     ...(args.valueWei !== undefined ? { valueWei: args.valueWei } : {}),
     blockTimestamp,
-    decoded,
+    calldata: args.calldataHex!,
   });
 
   let result: DeclarativeRouteRequestResult;
@@ -281,6 +267,10 @@ export async function tryDeclarativeRoute(args: {
       }
       if (err.kind === "map_failed") {
         return { kind: "fault", reason: "map_failed", cause: err };
+      }
+      if (err.kind === "decode_failed" || err.kind === "invalid_calldata") {
+        // WASM could not decode the calldata against the bundle ABI.
+        return { kind: "fault", reason: "decode_failed", cause: err };
       }
       return { kind: "fault", reason: "engine_error", cause: err };
     }

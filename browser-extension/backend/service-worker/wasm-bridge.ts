@@ -87,10 +87,9 @@ export interface DeclarativeLookupResult {
  * Phase 6 — orchestrator route entry wire shape.
  *
  * `(chain_id, to, selector)` form the callkey for the engine-side bridge
- * lookup. `ctx` + `decoded` mirror the `declarative_lookup_json` shape so a
- * caller that already has a decoded call (e.g. from the static Tier B abi
- * resolver) can route it through the declarative pipeline without first
- * having to know the bundle's decoder_id.
+ * lookup. `calldata` is the raw `"0x"`-prefixed transaction calldata; the
+ * WASM route entry decodes it internally using the bridge-resolved bundle's
+ * `abi_fragment.abi` (replaces the prior TS-side viem decode step).
  */
 export interface DeclarativeRouteRequestInput {
   chain_id: number;
@@ -105,15 +104,8 @@ export interface DeclarativeRouteRequestInput {
     value_wei?: string;
     block_timestamp?: number;
   };
-  decoded: {
-    decoder_id: string;
-    function_signature: string;
-    args: Array<{
-      name: string;
-      abi_type: string;
-      value: unknown;
-    }>;
-  };
+  /** "0x"-prefixed raw calldata. Decoded inside WASM via the bundle ABI. */
+  calldata: string;
 }
 
 /**

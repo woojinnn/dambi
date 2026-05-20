@@ -217,11 +217,7 @@ describe("wasm bridge parsers", () => {
         from: "0x1111111111111111111111111111111111111111",
         to: "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
       },
-      decoded: {
-        decoder_id: "static.x",
-        function_signature: "x()",
-        args: [],
-      },
+      calldata: "0x38ed1739000000000000000000000000000000000000000000000000",
     });
     expect(result.decoder_id).toBe(
       "declarative.uniswap/v2/swapExactTokensForTokens",
@@ -247,11 +243,7 @@ describe("wasm bridge parsers", () => {
           from: "0x1111111111111111111111111111111111111111",
           to: "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
         },
-        decoded: {
-          decoder_id: "static.x",
-          function_signature: "x()",
-          args: [],
-        },
+        calldata: "0x38ed1739000000000000000000000000000000000000000000000000",
       });
       expect.fail("expected throw");
     } catch (err) {
