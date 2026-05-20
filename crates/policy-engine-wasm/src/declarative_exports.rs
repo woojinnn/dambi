@@ -20,11 +20,13 @@
 //!     WASM-side so a single Rust state owns both halves.
 //!
 //!   * `declarative_route_request_json(input_json: String) -> String` —
-//!     orchestrator entry. Caller passes `(chain_id, to, selector, decoded,
+//!     orchestrator entry. Caller passes `(chain_id, to, selector, calldata,
 //!     ctx)`; we look up the matching declarative decoder via the bridge,
-//!     fall through to `MapperError`-style miss when nothing matches, and
-//!     otherwise run `mapper.map(ctx, decoded)`. Returns the same
-//!     `{ ok, envelopes | error }` envelope as `declarative_lookup_json`.
+//!     decode the raw calldata against the bundle's `abi_fragment.abi`
+//!     (same pattern as `WasmChildResolver::resolve_child`), fall through to
+//!     a miss when nothing matches, and otherwise run `mapper.map(ctx, decoded)`.
+//!     Returns the same `{ ok, envelopes | error }` envelope as
+//!     `declarative_lookup_json`.
 //!
 //! Wire shape (input/output) is documented inline next to each export. This
 //! module forms the contract that the Phase 1B + Phase 6 TS bridges consume.
@@ -373,7 +375,7 @@ pub struct DeclarativeLookupResultDto {
 ///     "value_wei": "0",
 ///     "block_timestamp": 1700000000
 ///   },
-///   "decoded": { ... }   // same shape as declarative_lookup_json
+///   "calldata": "0x38ed1739..."   // raw "0x"-prefixed calldata; WASM decodes internally
 /// }
 /// ```
 ///
@@ -446,12 +448,15 @@ pub fn declarative_route_request_json(input_json: String) -> String {
         })?;
         let block_timestamp = input.ctx.block_timestamp;
 
-        let mut decoded = decoded_call_from_dto(input.decoded)?;
-        // Override the decoder_id the caller supplied with the canonical one
-        // the bridge resolved. `DeclarativeMapper::accepts` is strict on
-        // decoder_id equality — orchestrators that don't (yet) know the
-        // declarative id can pass whatever they have (or even the static
-        // selector-derived id) and the route entry normalises it.
+        let calldata_hex = input.calldata.strip_prefix("0x").unwrap_or(&input.calldata);
+        let calldata_bytes = hex::decode(calldata_hex).map_err(|error| {
+            EngineErrorDto::new("invalid_calldata", format!("calldata is not valid hex: {error}"))
+        })?;
+        let abi_json = &mapper.bundle().abi_fragment.abi;
+        let mut decoded = abi_resolver::bridge::decode_with_json_abi(abi_json, &calldata_bytes)
+            .map_err(|error| {
+                EngineErrorDto::new("decode_failed", format!("calldata decode failed: {error}"))
+            })?;
         decoded.decoder_id = DecoderId::new(decoder_id.clone());
 
         let registry = EmptyTokenRegistry;
@@ -707,7 +712,45 @@ mod tests {
     // Phase 6 — declarative_route_request_json + bridge layer
     // ──────────────────────────────────────────────────────────────────────
 
+    /// Encode ABI calldata: 4-byte selector + ABI-encoded params.
+    ///
+    /// Dynamic types (address[], bytes[], …) are encoded correctly by
+    /// `alloy_dyn_abi` — never hand-type dynamic ABI hex.
+    fn encode_calldata(selector: &str, args: &[alloy_dyn_abi::DynSolValue]) -> String {
+        let sel = hex::decode(selector.trim_start_matches("0x")).unwrap();
+        let body =
+            alloy_dyn_abi::DynSolValue::Tuple(args.to_vec()).abi_encode_params();
+        format!("0x{}{}", hex::encode(sel), hex::encode(body))
+    }
+
     fn v2_route_input() -> Value {
+        use alloy_dyn_abi::DynSolValue;
+        use alloy_primitives::{Address as AlloyAddress, U256 as AlloyU256};
+        let calldata = encode_calldata(
+            "0x38ed1739",
+            &[
+                DynSolValue::Uint(AlloyU256::from(1_000_000_000_000_000_000u128), 256),
+                DynSolValue::Uint(AlloyU256::from(1_900_000u64), 256),
+                DynSolValue::Array(vec![
+                    DynSolValue::Address(
+                        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                            .parse::<AlloyAddress>()
+                            .unwrap(),
+                    ),
+                    DynSolValue::Address(
+                        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                            .parse::<AlloyAddress>()
+                            .unwrap(),
+                    ),
+                ]),
+                DynSolValue::Address(
+                    "0x4444444444444444444444444444444444444444"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+                DynSolValue::Uint(AlloyU256::from(1_700_000_900u64), 256),
+            ],
+        );
         json!({
             "chain_id": 1,
             "to":       "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
@@ -719,29 +762,7 @@ mod tests {
                 "value_wei": "0",
                 "block_timestamp": 1_700_000_000_u64
             },
-            "decoded": {
-                "decoder_id": "static.uniswap-v2/swapExactTokensForTokens",
-                "function_signature":
-                    "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
-                "args": [
-                    { "name": "amountIn",     "abi_type": "uint256",
-                      "value": { "kind": "uint", "value": "1000000000000000000" } },
-                    { "name": "amountOutMin", "abi_type": "uint256",
-                      "value": { "kind": "uint", "value": "1900000" } },
-                    { "name": "path",         "abi_type": "address[]",
-                      "value": { "kind": "array", "value": [
-                          { "kind": "address",
-                            "value": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
-                          { "kind": "address",
-                            "value": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" }
-                      ] } },
-                    { "name": "to",           "abi_type": "address",
-                      "value": { "kind": "address",
-                                 "value": "0x4444444444444444444444444444444444444444" } },
-                    { "name": "deadline",     "abi_type": "uint256",
-                      "value": { "kind": "uint", "value": "1700000900" } }
-                ]
-            }
+            "calldata": calldata
         })
     }
 
@@ -829,6 +850,51 @@ mod tests {
         let out = declarative_route_request_json(v2_route_input().to_string());
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["ok"], true, "{parsed}");
+    }
+
+    /// Primary verification that `declarative_route_request_json` decodes
+    /// calldata internally (WASM-side decode path). Installs the
+    /// `NFPM_BURN_BUNDLE_JSON` bundle and passes raw `burn(uint256)` calldata
+    /// built by `burn_calldata` — no pre-decoded DTO, no dynamic types.
+    /// Asserts the `burn_liquidity_nft` envelope and tokenId.
+    #[test]
+    fn route_request_burn_calldata_decoded_in_wasm() {
+        let burn_out = declarative_install_json(NFPM_BURN_BUNDLE_JSON.to_owned());
+        let burn_parsed: Value = serde_json::from_str(&burn_out).unwrap();
+        assert_eq!(burn_parsed["ok"], true, "{burn_parsed}");
+
+        let token_id: u64 = 42_000;
+        let calldata_bytes = burn_calldata(token_id);
+        let calldata_hex = format!("0x{}", hex::encode(&calldata_bytes));
+
+        let input = json!({
+            "chain_id": 1,
+            "to":       "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+            "selector": "0x42966c68",
+            "ctx": {
+                "chain_id": 1,
+                "from": "0x000000000000000000000000000000000000aaaa",
+                "to":   "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+                "value_wei": "0",
+                "block_timestamp": 1_700_000_000_u64
+            },
+            "calldata": calldata_hex
+        });
+
+        let out = declarative_route_request_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["decoder_id"],
+            "declarative.uniswap/v3/burn"
+        );
+        let envelopes = parsed["data"]["envelopes"].as_array().expect("array");
+        assert_eq!(envelopes.len(), 1);
+        let env = &envelopes[0];
+        assert_eq!(env["category"], "dex");
+        assert_eq!(env["action"], "burn_liquidity_nft");
+        assert_eq!(env["fields"]["nft"]["tokenId"], token_id.to_string());
+        assert_eq!(env["fields"]["nft"]["kind"], "erc721");
     }
 
     #[test]
@@ -929,11 +995,15 @@ mod tests {
     }
 
     /// Build a `multicall(bytes[])` route input with a single inner `burn`
-    /// calldata. The outer call's `decoded` is constructed manually because
-    /// the DTO layer expects `kind: "bytes"` for `bytes[]` elements.
+    /// calldata. Outer calldata is ABI-encoded via `alloy_dyn_abi` — no
+    /// hand-typed hex for dynamic types.
     fn nfpm_multicall_route_input(token_id: u64) -> Value {
+        use alloy_dyn_abi::DynSolValue;
         let inner = burn_calldata(token_id);
-        let inner_hex = format!("0x{}", hex::encode(&inner));
+        let calldata = encode_calldata(
+            "0xac9650d8",
+            &[DynSolValue::Array(vec![DynSolValue::Bytes(inner)])],
+        );
         json!({
             "chain_id": 1,
             "to":       "0xc36442b4a4522e871399cd717abdd847ab11fe88",
@@ -945,16 +1015,7 @@ mod tests {
                 "value_wei": "0",
                 "block_timestamp": 1_700_000_000_u64
             },
-            "decoded": {
-                "decoder_id": "fallback/0xac9650d8",
-                "function_signature": "multicall(bytes[])",
-                "args": [
-                    { "name": "data", "abi_type": "bytes[]",
-                      "value": { "kind": "array", "value": [
-                          { "kind": "bytes", "value": inner_hex }
-                      ] } }
-                ]
-            }
+            "calldata": calldata
         })
     }
 
@@ -1022,7 +1083,11 @@ mod tests {
         // child key; we want the *bridge lookup* inside the resolver to fail.
         let mut inner = vec![0xde, 0xad, 0xbe, 0xef];
         inner.extend_from_slice(&[0u8; 32]);
-        let inner_hex = format!("0x{}", hex::encode(&inner));
+        use alloy_dyn_abi::DynSolValue;
+        let calldata = encode_calldata(
+            "0xac9650d8",
+            &[DynSolValue::Array(vec![DynSolValue::Bytes(inner)])],
+        );
         let input = json!({
             "chain_id": 1,
             "to":       "0xc36442b4a4522e871399cd717abdd847ab11fe88",
@@ -1034,16 +1099,7 @@ mod tests {
                 "value_wei": "0",
                 "block_timestamp": 1_700_000_000_u64
             },
-            "decoded": {
-                "decoder_id": "fallback/0xac9650d8",
-                "function_signature": "multicall(bytes[])",
-                "args": [
-                    { "name": "data", "abi_type": "bytes[]",
-                      "value": { "kind": "array", "value": [
-                          { "kind": "bytes", "value": inner_hex }
-                      ] } }
-                ]
-            }
+            "calldata": calldata
         });
         let out = declarative_route_request_json(input.to_string());
         let parsed: Value = serde_json::from_str(&out).unwrap();

@@ -36,3 +36,4 @@ getrandom.workspace = true
 
 [dev-dependencies]
 wasm-bindgen-test.workspace = true
+alloy-dyn-abi.workspace = true

@@ -2229,6 +2229,7 @@ name = "policy-engine-wasm"
 version = "0.1.0"
 dependencies = [
  "abi-resolver",
+ "alloy-dyn-abi",
  "alloy-primitives",
  "anyhow",
  "console_error_panic_hook",

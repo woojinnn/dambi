@@ -294,11 +294,9 @@ pub enum DecodedValueDto {
 /// Input for `declarative_route_request_json`.
 ///
 /// `(chain_id, to, selector)` form the callkey for the bridge lookup. `ctx`
-/// and `decoded` are the per-tx execution context and the decoded call data
-/// the caller (orchestrator) decoded ahead of time (typically via the
-/// Tier B static abi-resolver). `decoded.decoder_id` is ignored — the route
-/// entry overwrites it with the canonical declarative id resolved from the
-/// bridge.
+/// and `calldata` are the per-tx execution context and the raw calldata the
+/// WASM decodes internally against the bridge-resolved bundle's
+/// `abi_fragment.abi` (same pattern as `WasmChildResolver::resolve_child`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeclarativeRouteRequestInputDto {
     pub chain_id: u64,
@@ -307,7 +305,9 @@ pub struct DeclarativeRouteRequestInputDto {
     /// "0x" + 8 hex. Case-insensitive — same as `to`.
     pub selector: String,
     pub ctx: DeclarativeCtxDto,
-    pub decoded: DecodedCallDto,
+    /// Raw "0x"-prefixed calldata. WASM decodes it against the
+    /// bridge-resolved bundle's abi_fragment.
+    pub calldata: String,
 }
 
 /// Result returned by `declarative_route_request_json` on success.
