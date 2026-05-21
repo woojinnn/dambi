@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aerodrome/slipstream-npm/increaseLiquidity@1.0.0",
   "manifest_path": "manifests/aerodrome/slipstream-npm/increaseLiquidity@1.0.0.json",
-  "bundle_sha256": "0xc2e5e92ed80aa68cbdd4117589cebcb2296ed6c03f8aa87d93765a831ab4384b",
+  "bundle_sha256": "0x0e6ffd0130b3d66b9beeaed1a93cdad4fce640ab9d3ce29a7f206f4643c1ccfa",
   "bundle": {
     "type": "adapter_function",
     "id": "aerodrome/slipstream-npm/increaseLiquidity@1.0.0",
@@ -70,7 +70,7 @@
           "from": "$.args.params[0]"
         },
         "inputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputTokens[0].amount.kind": {
           "literal": "max"
@@ -79,7 +79,7 @@
           "from": "$.args.params[1]"
         },
         "inputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputTokens[1].amount.kind": {
           "literal": "max"

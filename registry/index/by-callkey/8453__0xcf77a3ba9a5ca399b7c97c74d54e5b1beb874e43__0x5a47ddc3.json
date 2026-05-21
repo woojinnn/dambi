@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aerodrome/v2/addLiquidity@1.0.0",
   "manifest_path": "manifests/aerodrome/v2/addLiquidity@1.0.0.json",
-  "bundle_sha256": "0x460435e2debefba03399e90c5d560882cadfb320855f18102799f71c01ceb5cd",
+  "bundle_sha256": "0x6740d64620543c79936bafe06e42d7b0cf2b18d26234a360ecc1ec24d3d5cf20",
   "bundle": {
     "type": "adapter_function",
     "id": "aerodrome/v2/addLiquidity@1.0.0",
@@ -94,7 +94,7 @@
           "from": "$.args.amountBDesired"
         },
         "outputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputLp.amount.kind": {
           "literal": "min"

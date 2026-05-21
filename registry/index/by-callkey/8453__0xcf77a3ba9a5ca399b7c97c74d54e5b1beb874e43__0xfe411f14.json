@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aerodrome/v2/removeLiquidityETHSupportingFeeOnTransferTokens@1.0.0",
   "manifest_path": "manifests/aerodrome/v2/removeLiquidityETHSupportingFeeOnTransferTokens@1.0.0.json",
-  "bundle_sha256": "0xdf6d6041f9218558a1d42791b7895e851bca4e11531631f0be63c0a5ff0ae2c3",
+  "bundle_sha256": "0xc4f71beba61535e44b891eec481c2ac475b7257d6b41c58d175933d00bafa515",
   "bundle": {
     "type": "adapter_function",
     "id": "aerodrome/v2/removeLiquidityETHSupportingFeeOnTransferTokens@1.0.0",
@@ -65,7 +65,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

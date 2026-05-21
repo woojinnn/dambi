@@ -83,6 +83,12 @@ impl Mapper for DeclarativeMapper {
         ctx: &MapContext<'_>,
         decoded: &DecodedCall,
     ) -> Result<Vec<ActionEnvelope>, MapperError> {
+        // The asset-integrity guard lives in `single_emit`'s `read_asset` /
+        // `read_asset_inline` (the single chokepoint for declarative AssetRef
+        // construction — `opcode_stream` and `enum_tagged` both delegate to
+        // `single_emit::execute*`, and `multicall` recurses into child
+        // mappers). Validating at construction keeps the guard free of any
+        // `ActionEnvelope` serde monomorphization in this crate.
         match &self.bundle.emit {
             EmitRule::SingleEmit { .. } => {
                 let envelope = single_emit::execute(ctx, decoded, &self.bundle.emit)?;
@@ -262,6 +268,51 @@ mod tests {
 
         // Phase 1A bundle does not emit fee_bps.
         assert!(action.fee_bps.is_none());
+    }
+
+    /// Defense-in-depth: `DeclarativeMapper::map` must reject an envelope
+    /// carrying a structurally-incomplete asset (an `erc20` with no address)
+    /// rather than emit it. The evaluate stage deserializes envelopes and
+    /// `AssetRef`'s `Deserialize` rejects an addressless `erc20`; without this
+    /// guard such a bundle fail-closes the engine with an opaque
+    /// `__engine::invalid_input_json`. The guard converts that into a
+    /// declarative fault so the orchestrator degrades to the static path.
+    #[test]
+    fn declarative_map_rejects_addressless_erc20_asset() {
+        // Take the valid V2 swap bundle and strip the `inputToken.asset.address`
+        // binding — the mapper then builds an `erc20` asset with no address.
+        let mut bundle_value: serde_json::Value = serde_json::from_str(V2_BUNDLE_JSON).unwrap();
+        let fields = bundle_value
+            .pointer_mut("/emit/fields")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("V2 bundle has emit.fields");
+        assert!(
+            fields.remove("inputToken.asset.address").is_some(),
+            "fixture must bind inputToken.asset.address for this test to be meaningful"
+        );
+        let bundle: AdapterFunctionBundle = serde_json::from_value(bundle_value).unwrap();
+        let mapper = DeclarativeMapper::new(bundle);
+        let decoded = decoded_for_declarative(mapper.declarative_decoder_id());
+
+        let registry = EmptyTokenRegistry;
+        let from = dummy_addr(0xAA);
+        let to = dummy_addr(0xBB);
+        let value = DecimalString::from_str("0").unwrap();
+        let ctx = build_ctx(&registry, &from, &to, &value);
+
+        let err = mapper
+            .map(&ctx, &decoded)
+            .expect_err("addressless erc20 asset must be rejected by the map guard");
+
+        assert!(
+            matches!(err, MapperError::Internal(_)),
+            "guard should classify a schema-contract violation as Internal, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("requires an address"),
+            "guard error should explain the missing-address fault, got: {msg}"
+        );
     }
 
     /// The declarative mapper should agree with the static V2 mapper on every

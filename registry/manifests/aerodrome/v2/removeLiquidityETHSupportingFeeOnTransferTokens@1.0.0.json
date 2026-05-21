@@ -30,7 +30,7 @@
     "fields": {
       "exitMode":                           { "literal": "proportional" },
       "pool.address":                       { "literal": "0x0000000000000000000000000000000000000000" },
-      "inputLp.asset.kind":                 { "literal": "erc20" },
+      "inputLp.asset.kind":                 { "literal": "unknown" },
       "inputLp.amount.kind":                { "literal": "exact" },
       "inputLp.amount.value":               { "from": "$.args.liquidity" },
       "outputTokens[0].asset.kind":         { "literal": "erc20" },

@@ -165,6 +165,103 @@ function wipeDir(p: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Asset-address lint — post-Aerodrome audit.
+//
+// `AssetRef`'s deserialize validation (policy-engine) requires an `address`
+// for every `erc20`/`erc721`/`erc1155` asset (and a `tokenId` for NFTs). A
+// bundle whose emit rule produces such an asset without those fields cannot
+// be deserialized at the evaluate stage — the engine fail-closes with an
+// opaque `__engine::invalid_input_json` (a false `fail`). Reject such bundles
+// here, at index-build time, before they ever reach a client.
+//
+// `KNOWN_DEFERRED_ASSET_ADDRESS` lists manifests with a pre-existing gap
+// scheduled for a follow-up fix. They warn instead of throwing so the
+// Aerodrome remediation can ship without blocking on Uniswap/Curve. This is a
+// ratchet: a NEW violation (manifest not on the list) still fails the build,
+// and each entry is deleted as its bundle is fixed.
+// ---------------------------------------------------------------------------
+
+const ERC_KINDS: ReadonlySet<string> = new Set(["erc20", "erc721", "erc1155"]);
+const NFT_KINDS: ReadonlySet<string> = new Set(["erc721", "erc1155"]);
+
+const KNOWN_DEFERRED_ASSET_ADDRESS: ReadonlySet<string> = new Set([
+  "manifests/curve/stableswap/frxeth/addLiquidity-2@1.0.0.json",
+  "manifests/curve/stableswap/frxeth/removeLiquidity-2@1.0.0.json",
+  "manifests/curve/stableswap/frxeth/removeLiquidityImbalance-2@1.0.0.json",
+  "manifests/curve/stableswap/frxeth/removeLiquidityOneCoin@1.0.0.json",
+  "manifests/uniswap/swap-router-02/unwrapWETH9@1.0.0.json",
+  "manifests/uniswap/swap-router-02/wrapETH@1.0.0.json",
+  "manifests/uniswap/v2/addLiquidity@1.0.0.json",
+  "manifests/uniswap/v2/addLiquidityETH@1.0.0.json",
+  "manifests/uniswap/v2/removeLiquidity@1.0.0.json",
+  "manifests/uniswap/v2/removeLiquidityETH@1.0.0.json",
+  "manifests/uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens@1.0.0.json",
+  "manifests/uniswap/v2/removeLiquidityETHWithPermit@1.0.0.json",
+  "manifests/uniswap/v2/removeLiquidityETHWithPermitSupportingFeeOnTransferTokens@1.0.0.json",
+  "manifests/uniswap/v2/removeLiquidityWithPermit@1.0.0.json",
+  "manifests/uniswap/v3/decreaseLiquidity@1.0.0.json",
+  "manifests/uniswap/v3/increaseLiquidity@1.0.0.json",
+  "manifests/uniswap/v3/unwrapWETH9@1.0.0.json",
+]);
+
+/** Collect every object that is the value of a key literally named `fields`. */
+function collectFieldsMaps(node: unknown, out: Record<string, unknown>[]): void {
+  if (Array.isArray(node)) {
+    for (const child of node) collectFieldsMaps(child, out);
+    return;
+  }
+  if (node === null || typeof node !== "object") return;
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === "fields" && value !== null && typeof value === "object" && !Array.isArray(value)) {
+      out.push(value as Record<string, unknown>);
+    }
+    collectFieldsMaps(value, out);
+  }
+}
+
+/**
+ * Reject a bundle whose emit rule binds an `erc20`/`erc721`/`erc1155` asset
+ * `kind` without the required `address` (or `tokenId` for NFTs). Deferred
+ * manifests warn; everything else throws and fails the build.
+ */
+function validateAssetRefs(manifestPath: string, bundle: AdapterBundle): void {
+  const fieldsMaps: Record<string, unknown>[] = [];
+  collectFieldsMaps(bundle, fieldsMaps);
+
+  const violations: string[] = [];
+  for (const fm of fieldsMaps) {
+    for (const key of Object.keys(fm)) {
+      if (!key.endsWith(".asset.kind")) continue;
+      const prefix = key.slice(0, -".kind".length); // "<path>.asset"
+      const kindNode = fm[key];
+      const literal =
+        kindNode !== null && typeof kindNode === "object" && !Array.isArray(kindNode)
+          ? (kindNode as Record<string, unknown>).literal
+          : undefined;
+      if (typeof literal !== "string" || !ERC_KINDS.has(literal)) continue;
+      if (!(`${prefix}.address` in fm)) {
+        violations.push(`${prefix}: kind="${literal}" but no "${prefix}.address" binding`);
+      }
+      if (NFT_KINDS.has(literal) && !(`${prefix}.tokenId` in fm)) {
+        violations.push(`${prefix}: kind="${literal}" but no "${prefix}.tokenId" binding`);
+      }
+    }
+  }
+  if (violations.length === 0) return;
+
+  const detail = violations.map((v) => `                - ${v}`).join("\n");
+  if (KNOWN_DEFERRED_ASSET_ADDRESS.has(manifestPath)) {
+    console.error(`[build-index] WARN ${manifestPath}: deferred asset-address gap\n${detail}`);
+    return;
+  }
+  throw new Error(
+    `bundle ${manifestPath} emits an erc-kind AssetRef without a required ` +
+      `address/tokenId — the evaluate stage cannot deserialize it ` +
+      `(add to KNOWN_DEFERRED_ASSET_ADDRESS only with a tracked follow-up):\n${detail}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -186,6 +283,7 @@ function main(): void {
   for (const file of files) {
     const bundle = loadBundle(file);
     const manifestPath = relative(REGISTRY_ROOT, file).split(/[\\/]/).join("/");
+    validateAssetRefs(manifestPath, bundle);
     const bundleSha256 = computeBundleSha256(bundle);
     const callkeyCount = bundle.match.chain_ids.length * bundle.match.to.length;
 

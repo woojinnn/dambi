@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aerodrome/v2/removeLiquidity@1.0.0",
   "manifest_path": "manifests/aerodrome/v2/removeLiquidity@1.0.0.json",
-  "bundle_sha256": "0x7ea75e51e9adad26cc96a5417125bae69b15ba8cee5219b54aff653518500cd7",
+  "bundle_sha256": "0xbff000e7d25113bef3ac04b9e9d8041d04151d4c91c56bd1a26d6fb226802c59",
   "bundle": {
     "type": "adapter_function",
     "id": "aerodrome/v2/removeLiquidity@1.0.0",
@@ -69,7 +69,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

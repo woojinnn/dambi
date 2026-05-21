@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aerodrome/slipstream-npm/decreaseLiquidity@1.0.0",
   "manifest_path": "manifests/aerodrome/slipstream-npm/decreaseLiquidity@1.0.0.json",
-  "bundle_sha256": "0xd4db39bbe6373536fdb5872b27be24acaff7253bbb9185654688af99eeccd2d7",
+  "bundle_sha256": "0xd46789b47252c8c6ac9cd5d5682c7e19839345074e871f0c60e6fcc92a392121",
   "bundle": {
     "type": "adapter_function",
     "id": "aerodrome/slipstream-npm/decreaseLiquidity@1.0.0",
@@ -72,7 +72,7 @@
           "from": "$.args.params[1]"
         },
         "outputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[0].amount.kind": {
           "literal": "min"
@@ -81,7 +81,7 @@
           "from": "$.args.params[2]"
         },
         "outputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[1].amount.kind": {
           "literal": "min"

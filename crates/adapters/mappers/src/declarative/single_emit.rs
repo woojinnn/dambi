@@ -1657,6 +1657,25 @@ fn read_asset_inline(tree: &serde_json::Value, field: &str) -> Result<AssetRef, 
             )));
         }
     };
+    // Asset-integrity guard — a declarative bundle must not emit an
+    // `erc20`/`erc721`/`erc1155` token AssetRef without an address: the
+    // evaluate stage's `AssetRef` deserialize rejects it and fail-closes the
+    // engine with an opaque `__engine::invalid_input_json`. Faulting here lets
+    // the orchestrator degrade to the static path instead of a false `fail`.
+    // `read_asset_inline` is also the building block for `read_nft_asset`
+    // (which layers on `tokenId` afterwards), so this checks only the address
+    // requirement — an NFT's address is already resolved at this point.
+    if address.is_none()
+        && matches!(
+            kind,
+            AssetKind::Erc20 | AssetKind::Erc721 | AssetKind::Erc1155
+        )
+    {
+        return Err(MapperError::Internal(anyhow::anyhow!(
+            "{field}: asset kind {kind:?} requires an address — declarative \
+             bundle emits a token the evaluate stage cannot deserialize"
+        )));
+    }
     Ok(AssetRef {
         kind,
         address,
@@ -1686,6 +1705,21 @@ fn read_asset(token: &serde_json::Value, parent: &str) -> Result<AssetRef, Mappe
             )));
         }
     };
+    // Asset-integrity guard — see `read_asset_inline`. An `erc20`/`erc721`/
+    // `erc1155` token AssetRef with no address cannot be deserialized at the
+    // evaluate stage; fault here so the orchestrator degrades to the static
+    // path rather than fail-closing with `__engine::invalid_input_json`.
+    if address.is_none()
+        && matches!(
+            kind,
+            AssetKind::Erc20 | AssetKind::Erc721 | AssetKind::Erc1155
+        )
+    {
+        return Err(MapperError::Internal(anyhow::anyhow!(
+            "{parent}.asset: kind {kind:?} requires an address — declarative \
+             bundle emits a token the evaluate stage cannot deserialize"
+        )));
+    }
     Ok(AssetRef {
         kind,
         address,
