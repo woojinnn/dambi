@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect-celo@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect-celo@1.0.0.json",
-  "bundle_sha256": "0x7c42614ae18d547523704d827e90cd977a644171844f9d396c482a65a474bd9a",
+  "bundle_sha256": "0x11ba5219a90ee1f4ffd6cc4d01cdd7f6c374f92887347d282aef4f90520b26bf",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect-celo@1.0.0",
@@ -49,7 +49,7 @@
     },
     "emit": {
       "strategy": "single_emit",
-      "category": "dex",
+      "category": "misc",
       "action": "claim_rewards",
       "fields": {
         "source.address": {
@@ -62,16 +62,16 @@
           "from": "$.tx.to"
         },
         "nft.tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "from": {
           "from": "$.tx.from"
         },
         "recipient": {
-          "from": "$.args.params.recipient"
+          "from": "$.args.recipient"
         }
       }
     },

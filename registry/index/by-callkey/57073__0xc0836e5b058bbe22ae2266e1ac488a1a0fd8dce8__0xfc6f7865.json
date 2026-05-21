@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect-ink@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect-ink@1.0.0.json",
-  "bundle_sha256": "0xf292a04bdb926f6051f92f9625aa6e315d26f7931e61386ec584561d7bf893e6",
+  "bundle_sha256": "0xe1c60802bf9540205a787aa4fa4e096120e2bb1f33022fc0957d1b9163862210",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect-ink@1.0.0",
@@ -49,7 +49,7 @@
     },
     "emit": {
       "strategy": "single_emit",
-      "category": "dex",
+      "category": "misc",
       "action": "claim_rewards",
       "fields": {
         "source.address": {
@@ -62,16 +62,16 @@
           "from": "$.tx.to"
         },
         "nft.tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "from": {
           "from": "$.tx.from"
         },
         "recipient": {
-          "from": "$.args.params.recipient"
+          "from": "$.args.recipient"
         }
       }
     },

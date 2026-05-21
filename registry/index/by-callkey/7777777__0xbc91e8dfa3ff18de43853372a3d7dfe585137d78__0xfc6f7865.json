@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect-zora@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect-zora@1.0.0.json",
-  "bundle_sha256": "0x662a6aac8b811376a6609277845accc7be520b17364e0faabf339dc192bcd88a",
+  "bundle_sha256": "0x7ad82cbcdc3c08c856d3d4caedbf2cfbc1ed3f6c7329c74010da60288b12657c",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect-zora@1.0.0",
@@ -49,7 +49,7 @@
     },
     "emit": {
       "strategy": "single_emit",
-      "category": "dex",
+      "category": "misc",
       "action": "claim_rewards",
       "fields": {
         "source.address": {
@@ -62,16 +62,16 @@
           "from": "$.tx.to"
         },
         "nft.tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "from": {
           "from": "$.tx.from"
         },
         "recipient": {
-          "from": "$.args.params.recipient"
+          "from": "$.args.recipient"
         }
       }
     },

@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect-blast@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect-blast@1.0.0.json",
-  "bundle_sha256": "0xdda5aa9d5da221d37375fa80af34713093831428d9d8846cc9a3840b2a9b25a5",
+  "bundle_sha256": "0x88b17aef661ca8878a4c0214c2212e72311ac7c5061224bbfee7d0a2d88497ca",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect-blast@1.0.0",
@@ -49,7 +49,7 @@
     },
     "emit": {
       "strategy": "single_emit",
-      "category": "dex",
+      "category": "misc",
       "action": "claim_rewards",
       "fields": {
         "source.address": {
@@ -62,16 +62,16 @@
           "from": "$.tx.to"
         },
         "nft.tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "from": {
           "from": "$.tx.from"
         },
         "recipient": {
-          "from": "$.args.params.recipient"
+          "from": "$.args.recipient"
         }
       }
     },

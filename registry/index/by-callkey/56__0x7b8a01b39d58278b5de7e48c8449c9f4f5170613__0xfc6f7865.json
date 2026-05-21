@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect-bnb@1.0.0.json",
-  "bundle_sha256": "0x6e9ec6dedf9a719ceb3cd74a7015edb922149c4e3b9c61b5655b94ec09debce3",
+  "bundle_sha256": "0x8e9ef2921201914ca7d2d2159ab1e639dc61bc4e4543d7a87a1e23e9c556f903",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect-bnb@1.0.0",
@@ -49,7 +49,7 @@
     },
     "emit": {
       "strategy": "single_emit",
-      "category": "dex",
+      "category": "misc",
       "action": "claim_rewards",
       "fields": {
         "source.address": {
@@ -62,16 +62,16 @@
           "from": "$.tx.to"
         },
         "nft.tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "from": {
           "from": "$.tx.from"
         },
         "recipient": {
-          "from": "$.args.params.recipient"
+          "from": "$.args.recipient"
         }
       }
     },

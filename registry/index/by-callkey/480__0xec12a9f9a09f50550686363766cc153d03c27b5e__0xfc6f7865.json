@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect-worldchain@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect-worldchain@1.0.0.json",
-  "bundle_sha256": "0x184218e7386b67fd1152573151e6a00bcb94a14ba2ff801b4afa710027e251c7",
+  "bundle_sha256": "0x1f3bc7b1702cb2912d9f19904c1846599722b00028fda3d2fb88a7d52c44bbc7",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect-worldchain@1.0.0",
@@ -49,7 +49,7 @@
     },
     "emit": {
       "strategy": "single_emit",
-      "category": "dex",
+      "category": "misc",
       "action": "claim_rewards",
       "fields": {
         "source.address": {
@@ -62,16 +62,16 @@
           "from": "$.tx.to"
         },
         "nft.tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "from": {
           "from": "$.tx.from"
         },
         "recipient": {
-          "from": "$.args.params.recipient"
+          "from": "$.args.recipient"
         }
       }
     },

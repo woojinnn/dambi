@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect-avalanche@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect-avalanche@1.0.0.json",
-  "bundle_sha256": "0x436bfe82737a47f0fc8000460f3737ea40088729ac5f40aa3b85b1e8d129e8de",
+  "bundle_sha256": "0x2b114de65b2b1f54397a769fedb355c2c6898528440c892d62fde20a302ecd65",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect-avalanche@1.0.0",
@@ -49,7 +49,7 @@
     },
     "emit": {
       "strategy": "single_emit",
-      "category": "dex",
+      "category": "misc",
       "action": "claim_rewards",
       "fields": {
         "source.address": {
@@ -62,16 +62,16 @@
           "from": "$.tx.to"
         },
         "nft.tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "tokenId": {
-          "from": "$.args.params.tokenId"
+          "from": "$.args.tokenId"
         },
         "from": {
           "from": "$.tx.from"
         },
         "recipient": {
-          "from": "$.args.params.recipient"
+          "from": "$.args.recipient"
         }
       }
     },
