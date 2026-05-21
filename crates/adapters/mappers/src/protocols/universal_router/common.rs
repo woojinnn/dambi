@@ -71,7 +71,7 @@ pub(super) fn wrapped_weth(ctx: &MapContext<'_>) -> AssetRef {
 /// `AssetRef` for a token referenced by address inside a UR opcode (SWEEP,
 /// TRANSFER, swap path entries). UR's `0x00…00` is the native-asset
 /// sentinel; anything else is an ERC-20.
-pub(super) fn token_asset_ref(ctx: &MapContext<'_>, addr: &Address) -> AssetRef {
+pub(crate) fn token_asset_ref(ctx: &MapContext<'_>, addr: &Address) -> AssetRef {
     if is_zero_address(addr) {
         native_eth()
     } else {

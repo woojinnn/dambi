@@ -51,14 +51,19 @@ use abi_resolver::subdecode::protocols::v4_router::{
     extract_actions_and_params, extract_modify_liquidities_actions_and_params, V4_ROUTER_MASK,
     V4_ROUTER_TABLE,
 };
-use abi_resolver::{CallMatchKey, DecodedCall, DecoderId};
+use abi_resolver::{CallMatchKey, DecodedCall, DecodedValue, DecoderId};
 use alloy_dyn_abi::DynSolValue;
-use policy_engine::action::Address;
+use alloy_primitives::U256;
+use policy_engine::action::common::{
+    AmountConstraint, AmountKind, AssetRef, AssetRefWithAmountConstraint, DecimalString,
+};
+use policy_engine::action::{Action, Address};
 use policy_engine::ActionEnvelope;
 use std::collections::BTreeMap;
 
 use crate::mapper::{MapContext, MapperError};
 use crate::protocols::universal_router::build_v4_swap_envelopes;
+use crate::protocols::universal_router::common as ur_common;
 
 use super::single_emit;
 use super::types::{EmitRule, PerOpcodeEmit, UnknownOpcodePolicy, ValueExpr};
@@ -300,7 +305,19 @@ fn dispatch_v4_pm_steps(
     unknown_opcode_policy: UnknownOpcodePolicy,
 ) -> Result<Vec<ActionEnvelope>, MapperError> {
     let mut envelopes = Vec::new();
+    // F5 — TAKE-family steps (TAKE / TAKE_ALL / TAKE_PORTION / TAKE_PAIR /
+    // SWEEP) carry the *output* side of the action stream. Collect them here
+    // and attach to the decrease_liquidity envelope(s) after the walk, rather
+    // than emitting them as standalone envelopes.
+    let mut take_outputs: Vec<V4TakeOutput> = Vec::new();
     for step in steps {
+        // F5 — intercept TAKE-family opcodes before the per_opcode_emit
+        // lookup. A malformed TAKE step is dropped (lenient) so the primary
+        // liquidity intent envelope still emits.
+        if is_v4_take_opcode(step.opcode) {
+            take_outputs.extend(decode_v4_take_outputs(ctx, step));
+            continue;
+        }
         let key = format!("0x{:02x}", step.opcode);
         let Some(rule) = per_opcode_emit.get(&key) else {
             match unknown_opcode_policy {
@@ -367,7 +384,186 @@ fn dispatch_v4_pm_steps(
         envelopes.push(envelope);
     }
 
+    // F5 — attach the collected TAKE outputs to every decrease_liquidity
+    // envelope this stream produced (`outputTokens` + `recipient`).
+    attach_take_outputs_to_decrease(&mut envelopes, take_outputs);
+
     Ok(envelopes)
+}
+
+/// V4 PositionManager "settle the open delta outward" opcodes — the action
+/// values that carry a withdrawn currency and a destination: `TAKE` (0x0e),
+/// `TAKE_ALL` (0x0f), `TAKE_PORTION` (0x10), `TAKE_PAIR` (0x11), `SWEEP`
+/// (0x14). Signatures live in `abi_resolver::subdecode::protocols::v4_router`.
+fn is_v4_take_opcode(opcode: u8) -> bool {
+    matches!(opcode, 0x0e | 0x0f | 0x10 | 0x11 | 0x14)
+}
+
+/// One "currency leaves the V4 PositionManager" effect extracted from a
+/// TAKE-family action — the output side of a V4 PM action stream
+/// (`VERIFICATION_UNISWAP_REALTX` finding F5).
+struct V4TakeOutput {
+    asset: AssetRef,
+    amount: AmountConstraint,
+    recipient: Address,
+}
+
+/// Build a synthetic per-step `DecodedCall` from a V4 PM `DecodedStep` — the
+/// TAKE-family counterpart of the per-opcode-emit synthesis in
+/// `dispatch_v4_pm_steps`. `None` when Tier B could not ABI-decode the step or
+/// an arg bridge fails: lenient, a malformed TAKE is dropped (never fatal) so
+/// the primary liquidity envelope still emits.
+fn v4_step_decoded_call(step: &DecodedStep) -> Option<DecodedCall> {
+    let inner_args = step
+        .args
+        .clone()?
+        .into_iter()
+        .map(convert_arg)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    Some(DecodedCall {
+        decoder_id: DecoderId::new(format!("opcode_stream::{}", step.name)),
+        function_signature: format!("{}({})", step.name, inner_args_signature(&inner_args)),
+        args: inner_args,
+        nested: Vec::new(),
+    })
+}
+
+/// Decode a TAKE-family V4 PM step into its [`V4TakeOutput`](s). Positional
+/// arg layout per `V4_ROUTER_TABLE`:
+///   * `0x0e TAKE`         — `(currency, recipient, amount)`
+///   * `0x0f TAKE_ALL`     — `(currency, minAmount)`; recipient is the unlock
+///                            caller, mapped to `ctx.from`
+///   * `0x10 TAKE_PORTION` — `(currency, recipient, bips)`
+///   * `0x11 TAKE_PAIR`    — `(currency0, currency1, recipient)` — two outputs
+///   * `0x14 SWEEP`        — `(currency, to)`
+///
+/// `currency` runs through `token_asset_ref` (the `0x0` native sentinel
+/// becomes `native`, consistent with F2); `recipient` runs through
+/// `map_recipient` (UR/V4 `0x..01`/`0x..02` sentinels, consistent with F3).
+fn decode_v4_take_outputs(ctx: &MapContext<'_>, step: &DecodedStep) -> Vec<V4TakeOutput> {
+    let Some(decoded) = v4_step_decoded_call(step) else {
+        return Vec::new();
+    };
+    let addr = |i: usize| -> Option<Address> {
+        match decoded.args.get(i).map(|a| &a.value) {
+            Some(DecodedValue::Address(a)) => Some(a.clone()),
+            _ => None,
+        }
+    };
+    let uint = |i: usize| -> Option<U256> {
+        match decoded.args.get(i).map(|a| &a.value) {
+            Some(DecodedValue::Uint(u)) => Some(*u),
+            _ => None,
+        }
+    };
+    let constrained = |kind: AmountKind, value: U256| AmountConstraint {
+        kind,
+        value: Some(
+            DecimalString::from_str(&value.to_string())
+                .expect("U256 decimal string is always a valid DecimalString"),
+        ),
+    };
+    // TAKE_PAIR / SWEEP drain the whole open delta — the amount is not in
+    // calldata, so the constraint carries no value.
+    let unbounded = AmountConstraint {
+        kind: AmountKind::Unknown,
+        value: None,
+    };
+
+    match step.opcode {
+        0x0e => match (addr(0), addr(1), uint(2)) {
+            (Some(currency), Some(recipient), Some(amount)) => vec![V4TakeOutput {
+                asset: ur_common::token_asset_ref(ctx, &currency),
+                amount: constrained(AmountKind::Exact, amount),
+                recipient: ur_common::map_recipient(ctx, recipient),
+            }],
+            _ => Vec::new(),
+        },
+        0x0f => match (addr(0), uint(1)) {
+            (Some(currency), Some(min_amount)) => vec![V4TakeOutput {
+                asset: ur_common::token_asset_ref(ctx, &currency),
+                amount: constrained(AmountKind::Min, min_amount),
+                recipient: ctx.from.clone(),
+            }],
+            _ => Vec::new(),
+        },
+        0x10 => match (addr(0), addr(1), uint(2)) {
+            (Some(currency), Some(recipient), Some(bips)) => vec![V4TakeOutput {
+                asset: ur_common::token_asset_ref(ctx, &currency),
+                amount: constrained(AmountKind::Portion, bips),
+                recipient: ur_common::map_recipient(ctx, recipient),
+            }],
+            _ => Vec::new(),
+        },
+        0x11 => match (addr(0), addr(1), addr(2)) {
+            (Some(currency0), Some(currency1), Some(recipient)) => {
+                let recipient = ur_common::map_recipient(ctx, recipient);
+                vec![
+                    V4TakeOutput {
+                        asset: ur_common::token_asset_ref(ctx, &currency0),
+                        amount: unbounded.clone(),
+                        recipient: recipient.clone(),
+                    },
+                    V4TakeOutput {
+                        asset: ur_common::token_asset_ref(ctx, &currency1),
+                        amount: unbounded,
+                        recipient,
+                    },
+                ]
+            }
+            _ => Vec::new(),
+        },
+        0x14 => match (addr(0), addr(1)) {
+            (Some(currency), Some(to)) => vec![V4TakeOutput {
+                asset: ur_common::token_asset_ref(ctx, &currency),
+                amount: unbounded,
+                recipient: ur_common::map_recipient(ctx, to),
+            }],
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// Attach collected V4 TAKE outputs to every `decrease_liquidity` envelope in
+/// the stream — `VERIFICATION_UNISWAP_REALTX` finding F5 (the bundle hardcodes
+/// `outputTokens: []`).
+///
+/// V4 PM flash-accounting nets every action's delta across the whole unlock,
+/// so a TAKE cannot be statically attributed to one specific DECREASE — the
+/// stream-level output set is attached to each decrease_liquidity envelope
+/// (the recipient set is exact; per-position amounts are not statically
+/// knowable). A stream with TAKE steps but no decrease envelope (e.g.
+/// burn-only) drops the collected outputs — `BurnLiquidityNftAction` has no
+/// `outputs` field, a separate follow-up out of F5 scope.
+fn attach_take_outputs_to_decrease(envelopes: &mut [ActionEnvelope], outputs: Vec<V4TakeOutput>) {
+    if outputs.is_empty() {
+        return;
+    }
+    // The common case — a single trailing TAKE_PAIR — has one recipient;
+    // surface it on `DecreaseLiquidityAction.recipient`. A mixed set (multiple
+    // distinct recipients) leaves it `None`.
+    let recipient = {
+        let first = &outputs[0].recipient;
+        outputs
+            .iter()
+            .all(|o| &o.recipient == first)
+            .then(|| first.clone())
+    };
+    let output_assets: Vec<AssetRefWithAmountConstraint> = outputs
+        .into_iter()
+        .map(|o| AssetRefWithAmountConstraint {
+            asset: o.asset,
+            amount: o.amount,
+        })
+        .collect();
+    for envelope in envelopes.iter_mut() {
+        if let Action::DecreaseLiquidity(decrease) = &mut envelope.action {
+            decrease.outputs = output_assets.clone();
+            decrease.recipient = recipient.clone();
+        }
+    }
 }
 
 /// Walk a [`DecodedStep`] slice (top-level or sub-plan) and emit envelopes.
