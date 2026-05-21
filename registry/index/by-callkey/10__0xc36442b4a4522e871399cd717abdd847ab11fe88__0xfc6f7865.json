@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/collect@1.0.0",
   "manifest_path": "manifests/uniswap/v3/collect@1.0.0.json",
-  "bundle_sha256": "0x9a75fe24669be3cc89e45ed3144165072f56ccbeca76c84ec63f16eb2dd5418e",
+  "bundle_sha256": "0xf6cb38b9ab5b9825385c6b10bde74997d3a7614f4e420953d9d0d8202c08698d",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/collect@1.0.0",
@@ -10,10 +10,9 @@
     "match": {
       "chain_ids": [
         1,
-        8453,
         10,
-        42161,
-        137
+        137,
+        42161
       ],
       "to": [
         "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"

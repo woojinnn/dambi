@@ -460,9 +460,11 @@ const UNISWAP_UR_ADDRESSES: &[(u64, Address)] = &[
     (
         480,
         Address::new(
-            *b"\x7a\x25\x0d\x56\x30\xb4\xcf\x53\x97\x39\xdf\x2c\x5d\xac\xb4\xc6\x59\xf2\x48\x8d",
+            *b"\x03\xc4\xf6\xb5\x57\x33\xcd\xf3\xca\xa0\x7c\x01\xe5\xb8\x3d\xde\xe3\x38\x1f\x60",
         ),
-    ), // UniversalRouterV1_2_V2Support
+    ), // UniversalRouter — corrected: prior value 0x7a250d56…488D was the
+       // Ethereum mainnet UniswapV2Router02 address, not a World Chain UR.
+       // Source: Uniswap/contracts deployments/480.md.
     (
         480,
         Address::new(
@@ -833,10 +835,10 @@ mod tests {
                 130,
                 *b"\xef\x74\x0b\xf2\x3a\xca\xe2\x6f\x64\x92\xb1\x0d\xe6\x45\xd6\xb9\x8d\xc8\xea\xf3",
             ),
-            // World Chain — UniversalRouterV1_2_V2Support
+            // World Chain — UniversalRouter (corrected; deployments/480.md)
             (
                 480,
-                *b"\x7a\x25\x0d\x56\x30\xb4\xcf\x53\x97\x39\xdf\x2c\x5d\xac\xb4\xc6\x59\xf2\x48\x8d",
+                *b"\x03\xc4\xf6\xb5\x57\x33\xcd\xf3\xca\xa0\x7c\x01\xe5\xb8\x3d\xde\xe3\x38\x1f\x60",
             ),
             // World Chain — UniversalRouterV2
             (
