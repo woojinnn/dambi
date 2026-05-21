@@ -1801,13 +1801,13 @@ fn read_asset_inline(tree: &serde_json::Value, field: &str) -> Result<AssetRef, 
             )));
         }
     };
-    Ok(AssetRef {
+    Ok(normalize_native_sentinel(AssetRef {
         kind,
         address,
         token_id: None,
         symbol: None,
         decimals: None,
-    })
+    }))
 }
 
 fn read_asset(token: &serde_json::Value, parent: &str) -> Result<AssetRef, MapperError> {
@@ -1830,13 +1830,13 @@ fn read_asset(token: &serde_json::Value, parent: &str) -> Result<AssetRef, Mappe
             )));
         }
     };
-    Ok(AssetRef {
+    Ok(normalize_native_sentinel(AssetRef {
         kind,
         address,
         token_id: None,
         symbol: None,
         decimals: None,
-    })
+    }))
 }
 
 fn parse_asset_kind(kind: &str) -> Option<AssetKind> {
@@ -1847,6 +1847,35 @@ fn parse_asset_kind(kind: &str) -> Option<AssetKind> {
         "native" => Some(AssetKind::Native),
         "unknown" => Some(AssetKind::Unknown),
         _ => None,
+    }
+}
+
+/// Rewrite an ERC-20 `AssetRef` at the zero address to `native`.
+///
+/// An ERC-20 token at `address(0)` is never a real token — Uniswap's
+/// Universal Router (`Constants.ETH`) and V4 (`CurrencyLibrary`) both use
+/// `address(0)` as the native-asset sentinel. A declarative bundle that
+/// hardcodes `asset.kind = "erc20"` therefore mislabels native ETH whenever
+/// the token address resolves to `0x0` (`VERIFICATION_UNISWAP_REALTX` finding
+/// F2 — UR `TRANSFER`, V4 `initialize` / `MINT_POSITION`). The static UR path
+/// already applies this `0x0 -> native` rule via
+/// `protocols::universal_router::common::token_asset_ref`; the declarative
+/// builder is the only emit path that lacked it, so the fix lives in the two
+/// shared asset readers (`read_asset` / `read_asset_inline`).
+fn normalize_native_sentinel(asset: AssetRef) -> AssetRef {
+    const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
+    let is_zero_address = matches!(
+        asset.address.as_ref(),
+        Some(addr) if addr.to_string().eq_ignore_ascii_case(ZERO_ADDRESS)
+    );
+    if asset.kind == AssetKind::Erc20 && is_zero_address {
+        AssetRef {
+            kind: AssetKind::Native,
+            address: None,
+            ..asset
+        }
+    } else {
+        asset
     }
 }
 
