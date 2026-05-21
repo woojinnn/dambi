@@ -313,7 +313,7 @@ describe("ManifestEditor", () => {
       expect(screen.getByRole("option", { name: /oracle\.usd_value/i })).toBeTruthy();
     });
 
-    it("selecting a method auto-populates locked params + primary output", async () => {
+    it("selecting a method scaffolds locked param keys (empty values) + primary output", async () => {
       const { client } = renderEditor("swap", {
         getMethodCatalog: vi.fn(async () => fakeCatalog()),
       });
@@ -325,11 +325,12 @@ describe("ManifestEditor", () => {
         target: { value: "oracle.usd_value" },
       });
 
-      // All four params from the catalog are now present, with default
-      // selectors prefilled. We assert two for brevity — the rest follow
-      // the same code path.
+      // All four param keys from the catalog show up as locked labels,
+      // but their selector values are LEFT EMPTY — the user must pick
+      // each value themselves so the editor never silently commits a
+      // guess. (Was previously pre-filled from `defaultSelector`.)
       expect(screen.getByText("chain_id")).toBeTruthy();
-      expect(screen.getByDisplayValue("$.root.chain_id")).toBeTruthy();
+      expect(screen.queryByDisplayValue("$.root.chain_id")).toBeNull();
       expect(screen.getByText(/source/i)).toBeTruthy();
       // The primary output is auto-created with the method's return type.
       // The locked type chip says "UsdValuation (record)".

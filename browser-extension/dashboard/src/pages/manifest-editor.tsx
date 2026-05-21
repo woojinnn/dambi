@@ -789,9 +789,9 @@ function RequiresEditor(props: RequiresEditorProps): JSX.Element {
 
 /**
  * Build the params list from a catalog entry. Each param key gets a
- * row with the `defaultSelector` (or the enum `default`) preloaded —
- * lets the user pick a method and immediately have a usable manifest
- * row without clicking through every param.
+ * row scaffolded with the declared key but an EMPTY value — the user
+ * picks the selector (or literal) for every param themselves, so the
+ * editor never silently commits a guess the user didn't make.
  *
  * Required params come first to match the catalog's declared order;
  * optional ones (currently only `source` on `oracle.usd_value`) come
@@ -799,16 +799,7 @@ function RequiresEditor(props: RequiresEditorProps): JSX.Element {
  */
 function paramsFromCatalog(entry: MethodCatalogEntry): ParamRow[] {
   const keys = Object.keys(entry.params);
-  return keys.map<ParamRow>((key) => ({
-    key,
-    selector: paramInitialValue(entry.params[key]),
-  }));
-}
-
-function paramInitialValue(spec: MethodParamSpec): string {
-  if (spec.defaultSelector !== undefined) return spec.defaultSelector;
-  if (spec.default !== undefined) return String(spec.default);
-  return "";
+  return keys.map<ParamRow>((key) => ({ key, selector: "" }));
 }
 
 /**

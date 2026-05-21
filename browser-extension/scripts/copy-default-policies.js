@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Copy the engine's default policy set + composed schema into
 // extension/public/default-policies/ so the SW can fetch them at install
-// time. Plan 6 will replace this static set with marketplace bundles.
+// time. Source: policy-rpc/default-policies/<action>/<name>.cedar (+ optional
+// paired .policy-rpc.json). Plan 6 will replace this static set with
+// marketplace bundles.
 
 const fs = require("fs");
 const path = require("path");
@@ -48,7 +50,7 @@ function main() {
     .join("\n\n");
   fs.writeFileSync(path.join(DEST, "schema.cedarschema"), schema);
 
-  const policiesDir = path.join(REPO_ROOT, "policy-rpc", "examples", "policies");
+  const policiesDir = path.join(REPO_ROOT, "policy-rpc", "default-policies");
   if (fs.existsSync(policiesDir)) {
     const files = listCedarFiles(policiesDir);
     const policySet = files.map((f) => {
@@ -77,7 +79,7 @@ function main() {
   } else {
     fs.writeFileSync(path.join(DEST, "policy-set.json"), "[]");
     console.log(
-      `Wrote empty policy-set.json (no policy-rpc/examples/policies/ dir found)`,
+      `Wrote empty policy-set.json (no policy-rpc/default-policies/ dir found)`,
     );
   }
 }
