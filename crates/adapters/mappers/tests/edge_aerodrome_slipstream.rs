@@ -472,3 +472,75 @@ fn slipstream_dsl_integration_exact_input_emits_swap_with_correct_endpoints() {
     );
     assert_eq!(action.recipient, recipient());
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// 12. Slipstream NPM `decreaseLiquidity` — the pool's token0 / token1 are
+//     resolved off the position `tokenId`, NOT present in calldata, so the
+//     bundle emits `outputTokens[*].asset.kind: "unknown"`. The serialized
+//     envelope must survive the evaluate stage's serde round-trip; an
+//     `erc20` asset with no address would fail-close it with
+//     `__engine::invalid_input_json`. Regression for that false-`fail`.
+// ───────────────────────────────────────────────────────────────────────────
+
+const SLIPSTREAM_NPM_DECREASE_LIQUIDITY_BUNDLE: &str = include_str!(
+    "../../../../registry/manifests/aerodrome/slipstream-npm/decreaseLiquidity@1.0.0.json"
+);
+
+/// Build a `DecodedCall` for Slipstream NPM `decreaseLiquidity`. The single
+/// `params` arg is a tuple `(tokenId, liquidity, amount0Min, amount1Min,
+/// deadline)`; the bundle resolves `$.args.params[<idx>]`, so the tuple is
+/// left un-flattened (mirrors `slipstream_exact_input_decoded`).
+fn slipstream_npm_decrease_liquidity_decoded(
+    decoder_id: DecoderId,
+    token_id: U256,
+    liquidity: U256,
+    amount0_min: U256,
+    amount1_min: U256,
+) -> DecodedCall {
+    DecodedCall {
+        decoder_id,
+        function_signature: "decreaseLiquidity((uint256,uint128,uint256,uint256,uint256))".into(),
+        args: vec![DecodedArg {
+            name: "params".into(),
+            abi_type: "tuple".into(),
+            value: DecodedValue::Tuple(vec![
+                DecodedValue::Uint(token_id),
+                DecodedValue::Uint(liquidity),
+                DecodedValue::Uint(amount0_min),
+                DecodedValue::Uint(amount1_min),
+                DecodedValue::Uint(U256::from(1_700_000_900_u64)),
+            ]),
+        }],
+        nested: vec![],
+    }
+}
+
+#[test]
+fn slipstream_npm_decrease_liquidity_envelope_survives_serde_roundtrip() {
+    let bundle: AdapterFunctionBundle =
+        serde_json::from_str(SLIPSTREAM_NPM_DECREASE_LIQUIDITY_BUNDLE)
+            .expect("Slipstream NPM decreaseLiquidity bundle parses");
+    let mapper = DeclarativeMapper::new(bundle);
+    let ctx = Ctx::new();
+
+    let decoded = slipstream_npm_decrease_liquidity_decoded(
+        mapper.declarative_decoder_id(),
+        U256::from(12_345_u64),
+        U256::from(1_000_000_000_000_000_u64),
+        U256::from(1_u64),
+        U256::from(1_u64),
+    );
+
+    let envelopes = mapper
+        .map(&ctx.map_ctx(), &decoded)
+        .expect("Slipstream NPM decreaseLiquidity maps");
+    assert_eq!(envelopes.len(), 1);
+
+    let json = serde_json::to_string(&envelopes[0]).expect("envelope serialises");
+    serde_json::from_str::<ActionEnvelope>(&json).unwrap_or_else(|err| {
+        panic!(
+            "decreaseLiquidity envelope must deserialize back (evaluate-stage \
+             contract); got error: {err}\njson: {json}"
+        )
+    });
+}

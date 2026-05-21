@@ -36,6 +36,7 @@ use policy_engine::action::{
     Action, ActionEnvelope, Address, AmountKind, AssetKind, DecimalString,
 };
 use policy_engine::action::dex::RemoveLiquidityExitMode;
+use policy_engine::{policy_request_from_envelope, PolicyEngineBuilder, Verdict};
 
 // ───────────────────────────────────────────────────────────────────────────
 // Aerodrome V2 Router bundle fixtures (registry/manifests/aerodrome/v2/*).
@@ -738,6 +739,19 @@ fn aerodrome_remove_liquidity_eth_fot_emits_native_output_leg() {
         !json_str.contains("adapter:aerodrome"),
         "envelope must not carry `adapter:aerodrome.*` dialect, got: {json_str}"
     );
+
+    // Evaluate-stage contract: the serialized envelope must deserialize back.
+    // `inputLp` is a V2 LP token whose address is a CREATE2 result absent
+    // from calldata — the bundle emits `kind: "unknown"` so `AssetRef`'s
+    // address requirement does not fail-close the evaluate stage with
+    // `__engine::invalid_input_json`.
+    let envelope_json = serde_json::to_string(envelope).expect("envelope serialises");
+    serde_json::from_str::<ActionEnvelope>(&envelope_json).unwrap_or_else(|err| {
+        panic!(
+            "removeLiquidity envelope must deserialize back (evaluate-stage contract); \
+             got error: {err}\njson: {envelope_json}"
+        )
+    });
 }
 
 /// **T9: `swapExactETHForTokens` sources native input from `$.tx.value_wei`**.
@@ -833,4 +847,79 @@ fn aerodrome_swap_zero_amount_in_emits_zero_envelope() {
             .map(ToString::to_string),
         Some("0".to_owned())
     );
+}
+
+/// **T11: `addLiquidity` envelope survives the evaluate-stage pipeline**.
+///
+/// Regression for the `__engine::invalid_input_json` false-`fail`. The
+/// declarative route serializes envelopes; the evaluate entrypoint then
+/// deserializes them and lowers each to a Cedar request. `AssetRef`'s
+/// custom `Deserialize` runs on the way back in and rejects an `erc20`
+/// asset with no address — so an `outputLp` whose address the bundle
+/// cannot emit (the V2 LP token is a CREATE2 result, absent from calldata)
+/// broke the round-trip and the engine fail-closed to a verdict of `fail`.
+///
+/// This walks the full contract: route → serialize → **deserialize** →
+/// lower → evaluate. With the bundle emitting `outputLp.asset.kind:
+/// "unknown"` the asset carries no address requirement and the pipeline
+/// completes to a real `Verdict`.
+#[test]
+fn aerodrome_add_liquidity_envelope_survives_evaluate_pipeline() {
+    let mapper = load_mapper(AERO_ADD_LIQUIDITY);
+    let ctx = Ctx::new();
+
+    let decoded = aerodrome_add_liquidity_decoded(
+        mapper.declarative_decoder_id(),
+        usdc(),
+        usdbc(),
+        false,
+        U256::from(1_000_000_u64),
+        U256::from(1_000_000_u64),
+        recipient(),
+    );
+
+    let envelopes = mapper
+        .map(&ctx.map_ctx(), &decoded)
+        .expect("addLiquidity maps");
+    assert_eq!(envelopes.len(), 1);
+
+    // Stage 1 — the declarative route serializes the envelope, the evaluate
+    // entrypoint deserializes it back. `AssetRef`'s custom `Deserialize`
+    // runs here: an `erc20` asset with no address is rejected, surfacing as
+    // `__engine::invalid_input_json`.
+    let json = serde_json::to_string(&envelopes[0]).expect("envelope serialises");
+    let roundtripped = serde_json::from_str::<ActionEnvelope>(&json).unwrap_or_else(|err| {
+        panic!(
+            "addLiquidity envelope must deserialize back (evaluate-stage contract); \
+             got error: {err}\njson: {json}"
+        )
+    });
+
+    // Stage 2 — lower to a Cedar policy request.
+    let request = policy_request_from_envelope(
+        &roundtripped,
+        &ctx.from,
+        &ctx.to,
+        &ctx.value,
+        8453,
+        1_700_000_000,
+    )
+    .expect("add_liquidity envelope must lower to a policy request");
+
+    // Stage 3 — evaluate against an empty policy set. The `unknown`-kind
+    // outputLp asset must survive the Cedar schema; with no policies the
+    // verdict is Pass.
+    let engine = PolicyEngineBuilder::new()
+        .build()
+        .expect("policy engine builds");
+    let verdict = engine
+        .evaluate(
+            &request.principal,
+            &request.action,
+            &request.resource,
+            &request.entities,
+            &request.context,
+        )
+        .expect("add_liquidity request must evaluate");
+    assert_eq!(verdict, Verdict::Pass);
 }
