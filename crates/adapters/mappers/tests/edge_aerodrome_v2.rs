@@ -86,6 +86,13 @@ fn recipient() -> Address {
     Address::from_str("0x4444444444444444444444444444444444444444").unwrap()
 }
 
+/// The tx signer used by `Ctx` — the `principal` (signing wallet) of every
+/// lowered policy request. P1 (`add-liquidity-recipient-self`, T12/T13)
+/// compares `context.recipient` against this through `principal.address`.
+fn signer() -> Address {
+    Address::from_str("0x00000000000000000000000000000000000000aa").unwrap()
+}
+
 /// Default Aerodrome `PoolFactory` on Base — used as the canonical `factory`
 /// inside each route tuple. Source: Aerodrome docs (`Aerodrome Pool Factory`).
 fn aerodrome_default_factory() -> Address {
@@ -116,7 +123,7 @@ impl Ctx {
     fn with_value(value_wei: &str) -> Self {
         Self {
             registry: EmptyTokenRegistry,
-            from: Address::from_str("0x00000000000000000000000000000000000000aa").unwrap(),
+            from: signer(),
             to: Address::from_str("0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43").unwrap(),
             value: DecimalString::from_str(value_wei).unwrap(),
         }
@@ -922,4 +929,178 @@ fn aerodrome_add_liquidity_envelope_survives_evaluate_pipeline() {
         )
         .expect("add_liquidity request must evaluate");
     assert_eq!(verdict, Verdict::Pass);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// T12–T15 — user policy evaluation over the `add_liquidity` envelope.
+//
+// T11 proved the envelope survives the evaluate pipeline to a real Verdict
+// under an *empty* policy set. T12–T15 pin that the Verdict actually tracks
+// user Cedar policies. The three policies are the ones documented for the
+// dashboard dynamic-add walkthrough; each gates a field a static-only
+// analysis can read on an `add_liquidity`:
+//
+//   * P1 `recipient` — a drainer defence (LP minted to a foreign address).
+//   * P2 `outputLp.asset.kind` — the `unknown` placeholder this engagement
+//     introduced for the un-derivable V2 LP token.
+//   * P3 `pool.address` — the `0x0` placeholder for the pool address, which
+//     Aerodrome V2 `addLiquidity` calldata never carries (the pool is
+//     `PoolFactory.getPool(tokenA, tokenB, stable)`).
+//
+// Production code is unchanged — test-only coverage.
+// ───────────────────────────────────────────────────────────────────────────
+
+/// **P1** — LP-recipient self-guard. An `addLiquidity` whose LP token is
+/// minted to an address other than the signer is a classic drainer shape.
+/// `principal.address` is the tx signer; a self-recipient tx passes.
+const POLICY_RECIPIENT_SELF_GUARD: &str = r#"@id("user/add-liquidity-recipient-self")
+@severity("deny")
+@reason("LP token recipient differs from the signing wallet")
+forbid (
+  principal,
+  action == Action::"add_liquidity",
+  resource
+) when {
+  context.recipient != principal.address
+};
+"#;
+
+/// **P2** — unknown LP-token warning. The V2 LP token address is a CREATE2
+/// result absent from calldata, so the bundle emits `outputLp.asset.kind:
+/// "unknown"`. A cautious user routes that to a warn.
+const POLICY_UNKNOWN_LP_WARN: &str = r#"@id("user/add-liquidity-unknown-lp")
+@severity("warn")
+@reason("The LP token to be received could not be statically identified")
+forbid (
+  principal,
+  action == Action::"add_liquidity",
+  resource
+) when {
+  context.outputLp.asset.kind == "unknown"
+};
+"#;
+
+/// **P3** — unidentified-pool block. Aerodrome V2 `addLiquidity` carries no
+/// pool address in calldata, so the bundle emits the zero address as a
+/// placeholder. A conservative user denies liquidity provision to a pool the
+/// analyzer cannot pin down.
+const POLICY_UNIDENTIFIED_POOL_DENY: &str = r#"@id("user/add-liquidity-unidentified-pool")
+@severity("deny")
+@reason("The target pool could not be statically identified (pool.address unresolved)")
+forbid (
+  principal,
+  action == Action::"add_liquidity",
+  resource
+) when {
+  context.pool.address == "0x0000000000000000000000000000000000000000"
+};
+"#;
+
+/// Route an Aerodrome V2 `addLiquidity` call through the declarative mapper,
+/// lower it to a Cedar request (mirroring T11's evaluate-stage serialize →
+/// deserialize → lower contract), install `policy`, and evaluate.
+/// `recipient_addr` becomes the `add_liquidity` context's `recipient`; the
+/// signer (`principal`) is always `signer()`.
+fn evaluate_add_liquidity(recipient_addr: Address, policy: &str) -> Verdict {
+    let mapper = load_mapper(AERO_ADD_LIQUIDITY);
+    let ctx = Ctx::new();
+
+    let decoded = aerodrome_add_liquidity_decoded(
+        mapper.declarative_decoder_id(),
+        usdc(),
+        usdbc(),
+        false,
+        U256::from(1_000_000_u64),
+        U256::from(1_000_000_u64),
+        recipient_addr,
+    );
+
+    let envelopes = mapper
+        .map(&ctx.map_ctx(), &decoded)
+        .expect("addLiquidity maps");
+    assert_eq!(envelopes.len(), 1);
+
+    let json = serde_json::to_string(&envelopes[0]).expect("envelope serialises");
+    let roundtripped = serde_json::from_str::<ActionEnvelope>(&json)
+        .expect("addLiquidity envelope must deserialize back");
+
+    let request = policy_request_from_envelope(
+        &roundtripped,
+        &ctx.from,
+        &ctx.to,
+        &ctx.value,
+        8453,
+        1_700_000_000,
+    )
+    .expect("add_liquidity envelope must lower to a policy request");
+
+    let engine = PolicyEngineBuilder::new()
+        .add_text(policy)
+        .build()
+        .expect("policy engine builds");
+    engine
+        .evaluate(
+            &request.principal,
+            &request.action,
+            &request.resource,
+            &request.entities,
+            &request.context,
+        )
+        .expect("add_liquidity request must evaluate")
+}
+
+/// **T12 (P1 / pass)** — recipient equals the signer, so the self-guard's
+/// `when` clause is false and the deny does not fire.
+#[test]
+fn aerodrome_add_liquidity_recipient_self_guard_passes_for_self_recipient() {
+    let verdict = evaluate_add_liquidity(signer(), POLICY_RECIPIENT_SELF_GUARD);
+    assert_eq!(verdict, Verdict::Pass);
+}
+
+/// **T13 (P1 / fail)** — recipient is a foreign address, so the self-guard
+/// fires and the verdict is a deny-severity fail.
+#[test]
+fn aerodrome_add_liquidity_recipient_self_guard_fails_for_foreign_recipient() {
+    let verdict = evaluate_add_liquidity(recipient(), POLICY_RECIPIENT_SELF_GUARD);
+    match verdict {
+        Verdict::Fail(matched) => assert!(
+            matched
+                .iter()
+                .any(|policy| policy.policy_id.contains("add-liquidity-recipient-self")),
+            "expected the recipient self-guard to match, got {matched:?}"
+        ),
+        other => panic!("expected Verdict::Fail, got {other:?}"),
+    }
+}
+
+/// **T14 (P2 / warn)** — the V2 LP token is emitted as `kind: "unknown"`, so
+/// the unknown-LP policy matches at warn severity.
+#[test]
+fn aerodrome_add_liquidity_unknown_lp_policy_warns() {
+    let verdict = evaluate_add_liquidity(signer(), POLICY_UNKNOWN_LP_WARN);
+    match verdict {
+        Verdict::Warn(matched) => assert!(
+            matched
+                .iter()
+                .any(|policy| policy.policy_id.contains("add-liquidity-unknown-lp")),
+            "expected the unknown-LP policy to match, got {matched:?}"
+        ),
+        other => panic!("expected Verdict::Warn, got {other:?}"),
+    }
+}
+
+/// **T15 (P3 / fail)** — the V2 `addLiquidity` bundle emits the zero address
+/// for `pool.address`, so the unidentified-pool policy fires as a deny.
+#[test]
+fn aerodrome_add_liquidity_unidentified_pool_policy_denies() {
+    let verdict = evaluate_add_liquidity(signer(), POLICY_UNIDENTIFIED_POOL_DENY);
+    match verdict {
+        Verdict::Fail(matched) => assert!(
+            matched
+                .iter()
+                .any(|policy| policy.policy_id.contains("add-liquidity-unidentified-pool")),
+            "expected the unidentified-pool policy to match, got {matched:?}"
+        ),
+        other => panic!("expected Verdict::Fail, got {other:?}"),
+    }
 }
