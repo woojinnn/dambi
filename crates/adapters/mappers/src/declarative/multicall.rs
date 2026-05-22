@@ -172,7 +172,10 @@ pub fn execute(
 /// This mirrors `abi_resolver::subdecode::recurse::extract_subcalls`, but
 /// operates against `decoder::DecodedCall` (the mapper-side decoded view) so
 /// the interpreter does not need to re-decode raw bytes.
-fn extract_self_array_bytes(decoded: &DecodedCall) -> Result<Vec<Vec<u8>>, MapperError> {
+///
+/// `pub` so the WASM `declarative_plan_children_json` export can extract child
+/// calldata for the TS child-prefetch pass without re-running `execute`.
+pub fn extract_self_array_bytes(decoded: &DecodedCall) -> Result<Vec<Vec<u8>>, MapperError> {
     let last = decoded.args.last().ok_or_else(|| {
         MapperError::Internal(anyhow::anyhow!(
             "multicall_recurse expected at least 1 argument, got 0"

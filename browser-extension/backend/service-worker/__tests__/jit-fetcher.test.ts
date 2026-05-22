@@ -50,6 +50,7 @@ vi.mock("../marketplace/adapter-cache", () => ({
 
 import {
   __resetJitFetcherForTest,
+  prefetchChildAdapters,
   resolveAdapter,
 } from "../marketplace/jit-fetcher";
 import {
@@ -408,5 +409,87 @@ describe("resolveAdapter", () => {
     if (result.kind === "adapter") {
       expect(result.source).toBe("jit");
     }
+  });
+});
+
+describe("prefetchChildAdapters", () => {
+  let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __resetJitFetcherForTest();
+    __resetNegativeCacheForTest();
+    __resetSeedBundlesForTest();
+    fetchMock = vi.fn<typeof fetch>();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("empty child list is a no-op (no registry fetch)", async () => {
+    await expect(prefetchChildAdapters([])).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("de-dupes identical callkeys to one fetch", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(indexResponse()), { status: 200 }),
+    );
+    mocks.installDeclarativeBundle.mockResolvedValue({
+      decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
+      bundle_id: "uniswap/v2/swapExactTokensForTokens@1.0.0",
+    });
+
+    await prefetchChildAdapters([FIXTURE_KEY, { ...FIXTURE_KEY }], {
+      registry: { fetchImpl: fetchMock },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fans out to every distinct child callkey", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(indexResponse()), { status: 200 }),
+    );
+    mocks.installDeclarativeBundle.mockResolvedValue({
+      decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
+      bundle_id: "uniswap/v2/swapExactTokensForTokens@1.0.0",
+    });
+
+    await prefetchChildAdapters([FIXTURE_KEY, UNRELATED_KEY], {
+      registry: { fetchImpl: fetchMock },
+    });
+
+    // Two distinct child callkeys → two registry fetches. (Both resolve to
+    // the same fixture bundle here, and `mountDeclarativeBundle` de-dups the
+    // WASM install by bundle id, so the fetch count is the fan-out signal.)
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a child that 404s is swallowed — never throws, others still fetch", async () => {
+    // FIXTURE_KEY child → 200, UNRELATED_KEY child → 404. Keyed on the
+    // callkey URL so the response is deterministic under concurrency.
+    fetchMock.mockImplementation((input) => {
+      const url = typeof input === "string" ? input : (input as Request).url;
+      if (url.includes(FIXTURE_KEY.selector)) {
+        return Promise.resolve(
+          new Response(JSON.stringify(indexResponse()), { status: 200 }),
+        );
+      }
+      return Promise.resolve(new Response("nope", { status: 404 }));
+    });
+    mocks.installDeclarativeBundle.mockResolvedValue({
+      decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
+      bundle_id: "uniswap/v2/swapExactTokensForTokens@1.0.0",
+    });
+
+    await expect(
+      prefetchChildAdapters([FIXTURE_KEY, UNRELATED_KEY], {
+        registry: { fetchImpl: fetchMock },
+      }),
+    ).resolves.toBeUndefined();
+    // Both callkeys were attempted — the 404 did not abort the other.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -119,6 +119,38 @@ export async function resolveAdapter(
 }
 
 /**
+ * Best-effort child-bundle prefetch for `multicall_recurse`.
+ *
+ * Resolves (fetch + install + mount) every child callkey so a subsequent
+ * WASM `declarative_route_request_json` finds each child in the engine
+ * bridge. Unlike `resolveAdapter`, this never throws and never surfaces a
+ * verdict: a child that 404s, times out, or fails integrity is simply left
+ * un-mounted — the WASM `WasmChildResolver` then produces its own
+ * `map_failed` for that child, which the orchestrator already degrades to
+ * the static path.
+ *
+ * Children resolve in parallel via `Promise.allSettled`. Identical callkeys
+ * are de-duped up front, and `resolveAdapter`'s `inflight` map collapses any
+ * remaining concurrent same-callkey fetches, so a multicall with duplicate
+ * child selectors costs one network round-trip per distinct callkey.
+ */
+export async function prefetchChildAdapters(
+  childKeys: readonly CallMatchKey[],
+  options: ResolveAdapterOptions = {},
+): Promise<void> {
+  if (childKeys.length === 0) return;
+  const seen = new Set<string>();
+  const unique: CallMatchKey[] = [];
+  for (const key of childKeys) {
+    const id = serializeKey(key);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(key);
+  }
+  await Promise.allSettled(unique.map((key) => resolveAdapter(key, options)));
+}
+
+/**
  * Inner JIT fetch + install + cache-on-failure pipeline. Wraps
  * `installBundle` so any failure produces a uniform negative-cache entry
  * matching the spec's TTL map.

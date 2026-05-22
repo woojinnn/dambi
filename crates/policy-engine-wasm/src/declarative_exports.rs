@@ -38,16 +38,17 @@ use std::sync::Arc;
 
 use abi_resolver::{CallMatchKey, DecodedArg, DecodedCall, DecodedValue, DecoderId};
 use alloy_primitives::{I256, U256};
-use mappers::declarative::{AdapterFunctionBundle, DeclarativeMapper};
+use mappers::declarative::multicall::extract_self_array_bytes;
+use mappers::declarative::{AdapterFunctionBundle, DeclarativeMapper, EmitRule};
 use mappers::mapper::{ChildResolver, MapContext, Mapper, MapperError};
 use mappers::token_registry::EmptyTokenRegistry;
 use policy_engine::action::{Address, DecimalString};
 use wasm_bindgen::prelude::*;
 
 use crate::dto::{
-    DecodedArgDto, DecodedCallDto, DecodedValueDto, DeclarativeInstallResultDto,
-    DeclarativeLookupInputDto, DeclarativeRouteRequestInputDto, DeclarativeRouteRequestResultDto,
-    EngineErrorDto, Envelope,
+    DecodedArgDto, DecodedCallDto, DecodedValueDto, DeclarativeChildCallKeyDto,
+    DeclarativeInstallResultDto, DeclarativeLookupInputDto, DeclarativePlanChildrenResultDto,
+    DeclarativeRouteRequestInputDto, DeclarativeRouteRequestResultDto, EngineErrorDto, Envelope,
 };
 use crate::exports::check_input_size;
 
@@ -487,6 +488,122 @@ pub fn declarative_route_request_json(input_json: String) -> String {
             envelopes,
             decoder_id,
         })
+    })();
+
+    match result {
+        Ok(dto) => Envelope::ok(dto).to_json(),
+        Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+    }
+}
+
+/// `multicall_recurse` child-callkey planner (child-prefetch support).
+///
+/// The WASM-side [`WasmChildResolver`] is synchronous and can only resolve a
+/// child sub-call if the child bundle is already mounted in `DECLARATIVE_STATE`
+/// — it cannot fetch. This export lets the TS host run a fetch+install pass
+/// *before* `declarative_route_request_json`:
+///   1. TS calls this with the outer tx tuple (same input shape as
+///      `declarative_route_request_json`).
+///   2. We resolve the outer bundle via the bridge, confirm it is a
+///      `multicall_recurse` bundle, decode the outer calldata against the
+///      bundle ABI, and pull the inner `bytes[]` via `extract_self_array_bytes`.
+///   3. We return one `(chain_id, to, selector)` callkey per child.
+///   4. TS `resolveAdapter`s each child, then calls
+///      `declarative_route_request_json` — the resolver now finds every child.
+///
+/// Depth-1 only: NFPM children (`mint`, `refundETH`) are leaf `single_emit`
+/// functions, so one prefetch level suffices. Nested multicalls are a follow-up.
+///
+/// Miss / non-recurse: returns `ok:true` with `children: []` when no outer
+/// bridge entry exists or the outer bundle is not `multicall_recurse`. A
+/// malformed input returns `ok:false`; the TS caller treats a planner fault as
+/// best-effort and proceeds to `declarative_route_request_json` regardless.
+#[wasm_bindgen]
+pub fn declarative_plan_children_json(input_json: String) -> String {
+    let result = (|| -> Result<DeclarativePlanChildrenResultDto, EngineErrorDto> {
+        check_input_size(&input_json, "declarative_plan_children_json")?;
+        let input: DeclarativeRouteRequestInputDto = serde_json::from_str(&input_json)
+            .map_err(|error| {
+                EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
+            })?;
+
+        let key = BridgeKey {
+            chain_id: input.chain_id,
+            to: input.to.to_ascii_lowercase(),
+            selector: input.selector.to_ascii_lowercase(),
+        };
+
+        // A bridge miss is not an error — return an empty child list so the TS
+        // caller skips the prefetch; `declarative_route_request_json` then
+        // produces the real miss.
+        let lookup = DECLARATIVE_STATE.with(|state| {
+            let state = state.borrow();
+            state.bridge.get(&key).and_then(|decoder_id| {
+                state
+                    .mappers
+                    .get(decoder_id)
+                    .cloned()
+                    .map(|mapper| (decoder_id.clone(), mapper))
+            })
+        });
+        let (decoder_id, mapper) = match lookup {
+            Some(pair) => pair,
+            None => {
+                return Ok(DeclarativePlanChildrenResultDto {
+                    children: Vec::new(),
+                    decoder_id: String::new(),
+                })
+            }
+        };
+
+        // Only `multicall_recurse` bundles have children to prefetch.
+        if !matches!(mapper.bundle().emit, EmitRule::MulticallRecurse { .. }) {
+            return Ok(DeclarativePlanChildrenResultDto {
+                children: Vec::new(),
+                decoder_id,
+            });
+        }
+
+        // Decode the outer calldata against the bundle ABI — same pattern as
+        // `declarative_route_request_json` / `WasmChildResolver`.
+        let calldata_hex = input.calldata.strip_prefix("0x").unwrap_or(&input.calldata);
+        let calldata_bytes = hex::decode(calldata_hex).map_err(|error| {
+            EngineErrorDto::new("invalid_calldata", format!("calldata is not valid hex: {error}"))
+        })?;
+        let abi_json = &mapper.bundle().abi_fragment.abi;
+        let decoded = abi_resolver::bridge::decode_with_json_abi(abi_json, &calldata_bytes)
+            .map_err(|error| {
+                EngineErrorDto::new("decode_failed", format!("calldata decode failed: {error}"))
+            })?;
+
+        let child_calldatas = extract_self_array_bytes(&decoded).map_err(|error| {
+            EngineErrorDto::new(
+                "decode_failed",
+                format!("multicall child extraction failed: {error}"),
+            )
+        })?;
+
+        let mut children = Vec::with_capacity(child_calldatas.len());
+        for (index, child) in child_calldatas.iter().enumerate() {
+            if child.len() < 4 {
+                return Err(EngineErrorDto::new(
+                    "decode_failed",
+                    format!(
+                        "multicall child #{index} calldata shorter than 4 bytes (len={})",
+                        child.len()
+                    ),
+                ));
+            }
+            children.push(DeclarativeChildCallKeyDto {
+                chain_id: input.chain_id,
+                // `self_array_bytes_last_arg` is a self-multicall: a child's
+                // `to` equals the outer `to` (mirrors `multicall::execute`).
+                to: input.to.to_ascii_lowercase(),
+                selector: format!("0x{}", hex::encode(&child[..4])),
+            });
+        }
+
+        Ok(DeclarativePlanChildrenResultDto { children, decoder_id })
     })();
 
     match result {
@@ -1114,5 +1231,184 @@ mod tests {
             message.contains("no declarative mapper"),
             "expected no-mapper diagnostic, got: {message}"
         );
+    }
+
+    // ── declarative_plan_children_json ──────────────────────────────────────
+
+    #[test]
+    fn plan_children_lists_inner_callkey_for_multicall() {
+        let outer_out = declarative_install_json(NFPM_MULTICALL_BUNDLE_JSON.to_owned());
+        assert_eq!(
+            serde_json::from_str::<Value>(&outer_out).unwrap()["ok"],
+            true
+        );
+
+        let input = nfpm_multicall_route_input(4242);
+        let out = declarative_plan_children_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["decoder_id"],
+            "declarative.uniswap/v3/nfpm-multicall"
+        );
+        let children = parsed["data"]["children"]
+            .as_array()
+            .expect("children array");
+        assert_eq!(children.len(), 1, "{parsed}");
+        assert_eq!(children[0]["chain_id"], 1);
+        assert_eq!(children[0]["selector"], "0x42966c68");
+        assert_eq!(
+            children[0]["to"],
+            "0xc36442b4a4522e871399cd717abdd847ab11fe88"
+        );
+    }
+
+    #[test]
+    fn plan_children_lists_multiple_children_in_order() {
+        use alloy_dyn_abi::DynSolValue;
+        declarative_install_json(NFPM_MULTICALL_BUNDLE_JSON.to_owned());
+
+        // multicall([ burn(11), <selector 0xdeadbeef + 32B pad> ]) — the
+        // planner extracts selectors regardless of whether a child has a
+        // bundle, so a fabricated second selector exercises ordering.
+        let mut second = vec![0xde, 0xad, 0xbe, 0xef];
+        second.extend_from_slice(&[0u8; 32]);
+        let calldata = encode_calldata(
+            "0xac9650d8",
+            &[DynSolValue::Array(vec![
+                DynSolValue::Bytes(burn_calldata(11)),
+                DynSolValue::Bytes(second),
+            ])],
+        );
+        let input = json!({
+            "chain_id": 1,
+            "to":       "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+            "selector": "0xac9650d8",
+            "ctx": {
+                "chain_id": 1,
+                "from": "0x000000000000000000000000000000000000aaaa",
+                "to":   "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+                "value_wei": "0",
+                "block_timestamp": 1_700_000_000_u64
+            },
+            "calldata": calldata
+        });
+        let out = declarative_plan_children_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        let children = parsed["data"]["children"]
+            .as_array()
+            .expect("children array");
+        assert_eq!(children.len(), 2, "{parsed}");
+        // Order MUST mirror the `bytes[]` order.
+        assert_eq!(children[0]["selector"], "0x42966c68");
+        assert_eq!(children[1]["selector"], "0xdeadbeef");
+    }
+
+    #[test]
+    fn plan_children_empty_for_non_recurse_bundle() {
+        let burn_out = declarative_install_json(NFPM_BURN_BUNDLE_JSON.to_owned());
+        assert_eq!(
+            serde_json::from_str::<Value>(&burn_out).unwrap()["ok"],
+            true
+        );
+
+        // Point at the burn callkey — a `single_emit` bundle, not multicall.
+        // The planner returns early (children:[]) before decoding calldata.
+        let input = json!({
+            "chain_id": 1,
+            "to":       "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+            "selector": "0x42966c68",
+            "ctx": {
+                "chain_id": 1,
+                "from": "0x000000000000000000000000000000000000aaaa",
+                "to":   "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+                "value_wei": "0",
+                "block_timestamp": 1_700_000_000_u64
+            },
+            "calldata": "0x42966c68"
+        });
+        let out = declarative_plan_children_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["decoder_id"], "declarative.uniswap/v3/burn");
+        assert_eq!(
+            parsed["data"]["children"].as_array().expect("array").len(),
+            0
+        );
+    }
+
+    #[test]
+    fn plan_children_empty_when_no_bundle_mounted() {
+        // A callkey no test ever installs — a bridge miss must yield an empty
+        // child list (ok:true), NOT an error, so the caller skips the prefetch.
+        let input = json!({
+            "chain_id": 1,
+            "to":       "0x0000000000000000000000000000000000009999",
+            "selector": "0x99999999",
+            "ctx": {
+                "chain_id": 1,
+                "from": "0x000000000000000000000000000000000000aaaa",
+                "to":   "0x0000000000000000000000000000000000009999",
+                "value_wei": "0",
+                "block_timestamp": 1_700_000_000_u64
+            },
+            "calldata": "0x99999999"
+        });
+        let out = declarative_plan_children_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["children"].as_array().expect("array").len(),
+            0
+        );
+        assert_eq!(parsed["data"]["decoder_id"], "");
+    }
+
+    #[test]
+    fn plan_children_rejects_invalid_json() {
+        let out = declarative_plan_children_json("{not json".to_owned());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "invalid_input_json");
+    }
+
+    #[test]
+    fn route_request_resolves_two_child_multicall() {
+        use alloy_dyn_abi::DynSolValue;
+        declarative_install_json(NFPM_BURN_BUNDLE_JSON.to_owned());
+        declarative_install_json(NFPM_MULTICALL_BUNDLE_JSON.to_owned());
+
+        // multicall([ burn(11), burn(22) ]) — both children resolve to the
+        // installed burn mapper, so the route MUST emit two envelopes. This is
+        // the unit-level analogue of the real Base NFPM multicall([mint,
+        // refundETH]) the child-prefetch fix targets.
+        let calldata = encode_calldata(
+            "0xac9650d8",
+            &[DynSolValue::Array(vec![
+                DynSolValue::Bytes(burn_calldata(11)),
+                DynSolValue::Bytes(burn_calldata(22)),
+            ])],
+        );
+        let input = json!({
+            "chain_id": 1,
+            "to":       "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+            "selector": "0xac9650d8",
+            "ctx": {
+                "chain_id": 1,
+                "from": "0x000000000000000000000000000000000000aaaa",
+                "to":   "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+                "value_wei": "0",
+                "block_timestamp": 1_700_000_000_u64
+            },
+            "calldata": calldata
+        });
+        let out = declarative_route_request_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        let envelopes = parsed["data"]["envelopes"].as_array().expect("array");
+        assert_eq!(envelopes.len(), 2, "{parsed}");
+        assert_eq!(envelopes[0]["fields"]["nft"]["tokenId"], "11");
+        assert_eq!(envelopes[1]["fields"]["nft"]["tokenId"], "22");
     }
 }

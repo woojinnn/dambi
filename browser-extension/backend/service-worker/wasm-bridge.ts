@@ -27,6 +27,10 @@ interface WasmExports {
   // (chain_id, to, selector) through the engine-internal bridge populated
   // at install time, then runs the matching declarative mapper.
   declarative_route_request_json(input_json: string): string;
+  // multicall_recurse child-callkey planner. Decodes the outer multicall in
+  // WASM and returns the inner sub-call callkeys the host must fetch+install
+  // before declarative_route_request_json.
+  declarative_plan_children_json(input_json: string): string;
   // Phase 7A — evaluate Cedar policies against caller-supplied envelopes.
   // Skips the route → plan stages so the declarative pipeline can drive
   // verdicts directly from its post-processed envelopes.
@@ -116,6 +120,27 @@ export interface DeclarativeRouteRequestInput {
  */
 export interface DeclarativeRouteRequestResult {
   envelopes: Record<string, unknown>[];
+  decoder_id: string;
+}
+
+/**
+ * One child callkey from `declarative_plan_children_json`. Mirrors
+ * `DeclarativeChildCallKeyDto` in `crates/policy-engine-wasm/src/dto.rs`.
+ * `to` echoes the outer `to` (self-multicall); `selector` is `"0x"` + 8 hex.
+ */
+export interface DeclarativeChildCallKey {
+  chain_id: number;
+  to: string;
+  selector: string;
+}
+
+/**
+ * Result of `declarative_plan_children_json`. `children` is empty when the
+ * outer bundle is not `multicall_recurse` (or no bundle is mounted for the
+ * callkey) — the caller then skips the child-prefetch pass.
+ */
+export interface DeclarativePlanChildrenResult {
+  children: DeclarativeChildCallKey[];
   decoder_id: string;
 }
 
@@ -405,6 +430,29 @@ export async function declarativeRouteRequest(
   const exports = await load();
   return unwrap<DeclarativeRouteRequestResult>(
     exports.declarative_route_request_json(JSON.stringify(input)),
+  );
+}
+
+/**
+ * Plan the child callkeys of a `multicall_recurse` outer call.
+ *
+ * The WASM `WasmChildResolver` is synchronous and can only resolve a child
+ * sub-call whose bundle is already mounted. This entry decodes the outer
+ * multicall calldata in WASM and returns one `(chain_id, to, selector)` per
+ * inner sub-call so the orchestrator can fetch+install them first.
+ *
+ * Returns `{ children: [], decoder_id: "" }` for a non-`multicall_recurse`
+ * bundle or when no bundle is mounted. Throws `EngineError("decode_failed" |
+ * "invalid_calldata" | "invalid_input_json", …)` on a malformed outer call;
+ * callers treat a throw as best-effort and continue to
+ * `declarativeRouteRequest`.
+ */
+export async function declarativePlanChildren(
+  input: DeclarativeRouteRequestInput,
+): Promise<DeclarativePlanChildrenResult> {
+  const exports = await load();
+  return unwrap<DeclarativePlanChildrenResult>(
+    exports.declarative_plan_children_json(JSON.stringify(input)),
   );
 }
 

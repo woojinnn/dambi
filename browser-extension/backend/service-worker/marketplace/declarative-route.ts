@@ -17,10 +17,15 @@
  *      returns `null` (Layer 1/JIT miss, WASM decode failure, …) the caller
  *      falls through to the static Tier B pipeline.
  *
- * Out of scope for this PoC: multicall_recurse host resolver wiring (V2
- * single_emit only). A bundle that requires recursion hits the existing
- * `MapperError("multicall_recurse requires ctx.resolver")` path inside
- * the WASM and surfaces as `EngineError("map_failed", …)` to the caller.
+ * multicall_recurse: between step 2 (`resolveAdapter` for the outer bundle)
+ * and step 3 (`declarativeRouteRequest`) the orchestrator runs a child-prefetch
+ * pass. `declarativePlanChildren` decodes the outer multicall in WASM and
+ * returns the inner sub-call callkeys; each is fetch+installed via
+ * `prefetchChildAdapters` so the WASM-side `WasmChildResolver` finds every
+ * child in the engine bridge. Best-effort — a planner fault or an
+ * un-publishable child does not abort the route; the WASM resolver still
+ * surfaces a precise `map_failed`. Depth-1 only (NFPM children are leaf
+ * `single_emit` functions); nested multicalls are a follow-up.
  */
 
 import type { CallMatchKey } from "../registry/client";
@@ -30,11 +35,16 @@ import {
 } from "../registry/token-client";
 import {
   EngineError,
+  declarativePlanChildren,
   declarativeRouteRequest,
   type DeclarativeRouteRequestResult,
 } from "../wasm-bridge";
 import { buildRouteInput, extractSelector } from "./declarative-decode";
-import { resolveAdapter, type AdapterOrVerdict } from "./jit-fetcher";
+import {
+  prefetchChildAdapters,
+  resolveAdapter,
+  type AdapterOrVerdict,
+} from "./jit-fetcher";
 
 const DEFAULT_REGISTRY_BASE_URL =
   typeof process !== "undefined" && process.env?.REGISTRY_BASE_URL
@@ -253,6 +263,40 @@ export async function tryDeclarativeRoute(args: {
     blockTimestamp,
     calldata: args.calldataHex!,
   });
+
+  // ── multicall_recurse child-prefetch ────────────────────────────────────
+  // When the outer bundle is a `multicall_recurse` strategy, the WASM-side
+  // `WasmChildResolver` can only resolve an inner sub-call if that child's
+  // bundle is already mounted (WASM is synchronous — it cannot fetch). So
+  // before `declarativeRouteRequest`, ask the engine to decode the outer
+  // multicall and hand back the child callkeys, then fetch+install each one.
+  // `adapter.bundle.emit.strategy` is already on the resolved `MountResult`,
+  // so non-multicall txs skip the planner WASM call entirely.
+  //
+  // Strictly best-effort: a planner fault or a child that 404s must NOT abort
+  // the route. `declarativeRouteRequest` still runs; the WASM resolver
+  // produces a precise `map_failed` for any child it cannot find, which the
+  // orchestrator degrades to the static path.
+  if (adapter.bundle.emit.strategy === "multicall_recurse") {
+    try {
+      const plan = await declarativePlanChildren(routeInput);
+      if (plan.children.length > 0) {
+        await prefetchChildAdapters(plan.children, {
+          registry: {
+            baseUrl:
+              args.options?.registryBaseUrl ?? DEFAULT_REGISTRY_BASE_URL,
+          },
+        });
+      }
+    } catch (err) {
+      console.debug("[Scopeball] multicall child-prefetch skipped", {
+        chainId: args.chainId,
+        to: args.to,
+        selector,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   let result: DeclarativeRouteRequestResult;
   try {

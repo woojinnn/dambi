@@ -319,6 +319,29 @@ pub struct DeclarativeRouteRequestResultDto {
     pub decoder_id: String,
 }
 
+/// One child callkey produced by `declarative_plan_children_json`.
+///
+/// `to` echoes the outer request `to` — `self_array_bytes_last_arg` is a
+/// self-multicall, so a child's `to` equals the outer `to`. `selector` is the
+/// first 4 bytes of the child calldata as `"0x" + 8 hex`.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeclarativeChildCallKeyDto {
+    pub chain_id: u64,
+    pub to: String,
+    pub selector: String,
+}
+
+/// Result of `declarative_plan_children_json`.
+///
+/// `children` is empty when the outer bundle is not `multicall_recurse` (or no
+/// bundle is mounted for the callkey) — the caller then skips the prefetch
+/// pass. `decoder_id` echoes the outer bundle's declarative decoder id.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeclarativePlanChildrenResultDto {
+    pub children: Vec<DeclarativeChildCallKeyDto>,
+    pub decoder_id: String,
+}
+
 /// One entry in the base alias table surfaced through `get_alias_table_json`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

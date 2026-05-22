@@ -38,6 +38,8 @@ const mocks = vi.hoisted(() => {
     MockEngineError,
     resolveAdapter: vi.fn(),
     declarativeRouteRequest: vi.fn(),
+    declarativePlanChildren: vi.fn(),
+    prefetchChildAdapters: vi.fn(),
   };
 });
 
@@ -51,11 +53,13 @@ vi.mock("webextension-polyfill", () => ({
 
 vi.mock("../jit-fetcher", () => ({
   resolveAdapter: mocks.resolveAdapter,
+  prefetchChildAdapters: mocks.prefetchChildAdapters,
 }));
 
 vi.mock("../../wasm-bridge", () => ({
   EngineError: mocks.MockEngineError,
   declarativeRouteRequest: mocks.declarativeRouteRequest,
+  declarativePlanChildren: mocks.declarativePlanChildren,
 }));
 
 import { tryDeclarativeRoute } from "../declarative-route";
@@ -70,6 +74,31 @@ function adapterHit(source: "layer1" | "jit" = "layer1") {
       decoderId: "declarative.uniswap/v2/swapExactTokensForTokens",
       bundleId: "uniswap/v2/swapExactTokensForTokens@1.0.0",
       bundle: fixtureBundle,
+    },
+  };
+}
+
+/**
+ * Adapter hit whose bundle uses the `multicall_recurse` strategy — exercises
+ * the child-prefetch branch. The route helper only reads
+ * `adapter.bundle.emit.strategy`, so a spread of the fixture with `emit`
+ * overridden is enough.
+ */
+function multicallAdapterHit(source: "layer1" | "jit" = "jit") {
+  return {
+    kind: "adapter" as const,
+    source,
+    adapter: {
+      decoderId: "declarative.uniswap/v3/nfpm-multicall",
+      bundleId: "uniswap/v3/nfpm-multicall@1.0.0",
+      bundle: {
+        ...fixtureBundle,
+        emit: {
+          strategy: "multicall_recurse",
+          recurse_rule_id: "self_array_bytes_last_arg",
+          max_depth: 3,
+        },
+      },
     },
   };
 }
@@ -204,6 +233,86 @@ describe("tryDeclarativeRoute", () => {
     if (outcome.kind === "fault") {
       expect(outcome.reason).toBe("decode_failed");
     }
+    expect(mocks.declarativeRouteRequest).toHaveBeenCalledOnce();
+  });
+
+  // ── multicall_recurse child-prefetch ──────────────────────────────────────
+
+  it("non-recurse bundle: skips the child-prefetch planner entirely", async () => {
+    mocks.resolveAdapter.mockResolvedValueOnce(adapterHit("layer1"));
+    mocks.declarativeRouteRequest.mockResolvedValueOnce({
+      envelopes: [],
+      decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
+    });
+
+    const outcome = await tryDeclarativeRoute({
+      chainId: 1,
+      from: "0x" + "1".repeat(40),
+      to: V2_ROUTER,
+      calldataHex: calldata,
+    });
+
+    expect(outcome.kind).toBe("hit");
+    // single_emit fixture → strategy guard is false → planner never runs.
+    expect(mocks.declarativePlanChildren).not.toHaveBeenCalled();
+    expect(mocks.prefetchChildAdapters).not.toHaveBeenCalled();
+    expect(mocks.declarativeRouteRequest).toHaveBeenCalledOnce();
+  });
+
+  it("multicall_recurse bundle: prefetches children before the route call", async () => {
+    mocks.resolveAdapter.mockResolvedValueOnce(multicallAdapterHit("jit"));
+    mocks.declarativePlanChildren.mockResolvedValueOnce({
+      children: [
+        { chain_id: 1, to: V2_ROUTER, selector: "0x88316456" },
+        { chain_id: 1, to: V2_ROUTER, selector: "0x12210e8a" },
+      ],
+      decoder_id: "declarative.uniswap/v3/nfpm-multicall",
+    });
+    mocks.prefetchChildAdapters.mockResolvedValueOnce(undefined);
+    mocks.declarativeRouteRequest.mockResolvedValueOnce({
+      envelopes: [],
+      decoder_id: "declarative.uniswap/v3/nfpm-multicall",
+    });
+
+    const outcome = await tryDeclarativeRoute({
+      chainId: 1,
+      from: "0x" + "1".repeat(40),
+      to: V2_ROUTER,
+      calldataHex: calldata,
+    });
+
+    expect(outcome.kind).toBe("hit");
+    expect(mocks.declarativePlanChildren).toHaveBeenCalledOnce();
+    expect(mocks.prefetchChildAdapters).toHaveBeenCalledOnce();
+    // The planner's child list is forwarded verbatim to the prefetch pass.
+    expect(mocks.prefetchChildAdapters.mock.calls[0][0]).toHaveLength(2);
+    // Prefetch MUST settle before the route call — children must be mounted
+    // before the WASM `WasmChildResolver` runs.
+    expect(
+      mocks.prefetchChildAdapters.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.declarativeRouteRequest.mock.invocationCallOrder[0]);
+  });
+
+  it("multicall_recurse: a planner fault does not abort the route", async () => {
+    mocks.resolveAdapter.mockResolvedValueOnce(multicallAdapterHit("jit"));
+    mocks.declarativePlanChildren.mockRejectedValueOnce(
+      new mocks.MockEngineError("decode_failed", "bad outer calldata"),
+    );
+    mocks.declarativeRouteRequest.mockResolvedValueOnce({
+      envelopes: [],
+      decoder_id: "declarative.uniswap/v3/nfpm-multicall",
+    });
+
+    const outcome = await tryDeclarativeRoute({
+      chainId: 1,
+      from: "0x" + "1".repeat(40),
+      to: V2_ROUTER,
+      calldataHex: calldata,
+    });
+
+    // Planner threw → prefetch skipped → but the route still runs (best-effort).
+    expect(outcome.kind).toBe("hit");
+    expect(mocks.prefetchChildAdapters).not.toHaveBeenCalled();
     expect(mocks.declarativeRouteRequest).toHaveBeenCalledOnce();
   });
 });
