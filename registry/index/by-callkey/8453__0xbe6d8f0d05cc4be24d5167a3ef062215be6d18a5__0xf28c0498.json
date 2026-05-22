@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aerodrome/slipstream/exactOutput@1.0.0",
   "manifest_path": "manifests/aerodrome/slipstream/exactOutput@1.0.0.json",
-  "bundle_sha256": "0x47fde2ba38c2d6d35e6a07ffcec9d8ed823174f694ec55a673307674b4e97f4e",
+  "bundle_sha256": "0xd6a9fa3d7c17b6beb70e422108a5734b79c8a0677fcd433db6b42875fd16d5d4",
   "bundle": {
     "type": "adapter_function",
     "id": "aerodrome/slipstream/exactOutput@1.0.0",
@@ -12,7 +12,7 @@
         8453
       ],
       "to": [
-        "0xBE6D8f0d05cc4be24d5167a3eF062215bE6D18a5"
+        "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5"
       ],
       "selector": "0xf28c0498"
     },

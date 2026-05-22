@@ -49,6 +49,13 @@ echo "[upload] registry    : $REGISTRY_ROOT"
 echo "[upload] index 재생성 — npm run build ..."
 ( cd "$REGISTRY_ROOT" && npm run build )
 
+# --- 2.5. 주소 on-chain 존재검증 게이트 (감사 Phase E) -----------------------
+# verify-addresses = audit-addresses.ts. manifest 의 (chain,addr) 를 eth_getCode
+# 로 검증 — bogus(미배포 = dead callkey) 가 있으면 set -e 로 업로드 전 중단.
+# --allow-unknown: 공개 RPC 간헐 실패(unknown)는 warn 만 — 거짓 차단 방지.
+echo "[upload] 주소 검증 — npm run verify-addresses ..."
+( cd "$REGISTRY_ROOT" && npm run verify-addresses -- --allow-unknown )
+
 # --- 3. additive 업로드 ------------------------------------------------------
 for prefix in index manifests tokens; do
   src="$REGISTRY_ROOT/$prefix"

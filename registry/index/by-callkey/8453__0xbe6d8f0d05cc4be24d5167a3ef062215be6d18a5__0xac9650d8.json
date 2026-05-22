@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aerodrome/slipstream/multicall@1.0.0",
   "manifest_path": "manifests/aerodrome/slipstream/multicall@1.0.0.json",
-  "bundle_sha256": "0xc6bcebfe1a985fb2ae6f2ba451f2987a5346b9244b2a1b1db3c1db1fd49acc6e",
+  "bundle_sha256": "0x648e4ad7ee5a4281918d883137ff14278103e92ac138514747d1753263ee17f7",
   "bundle": {
     "type": "adapter_function",
     "id": "aerodrome/slipstream/multicall@1.0.0",
@@ -12,7 +12,7 @@
         8453
       ],
       "to": [
-        "0xBE6D8f0d05cc4be24d5167a3eF062215bE6D18a5"
+        "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5"
       ],
       "selector": "0xac9650d8"
     },
