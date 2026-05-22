@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/increaseLiquidity-unichain@1.0.0",
   "manifest_path": "manifests/uniswap/v3/increaseLiquidity-unichain@1.0.0.json",
-  "bundle_sha256": "0x5c6ed96b00cbf1fac9461597b2a0060f9ad2735c5aac0ff0f7446fbb48989ea8",
+  "bundle_sha256": "0x7f106d9d5e29d311d986e5c32aef3a20dfffe620c2eb6cb6dd2e3a05142edc84",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/increaseLiquidity-unichain@1.0.0",
@@ -70,7 +70,7 @@
           "from": "$.args.tokenId"
         },
         "inputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputTokens[0].amount.kind": {
           "literal": "max"
@@ -79,7 +79,7 @@
           "from": "$.args.amount0Desired"
         },
         "inputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputTokens[1].amount.kind": {
           "literal": "max"

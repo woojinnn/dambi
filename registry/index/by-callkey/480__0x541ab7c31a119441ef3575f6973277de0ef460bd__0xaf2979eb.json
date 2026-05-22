@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-worldchain@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-worldchain@1.0.0.json",
-  "bundle_sha256": "0x65a6b4f8a7a8302db67c9bb34b1eae4ddb92075a87fdceaaf7ae77904bbfbee2",
+  "bundle_sha256": "0x7b398beb1f2259acb4c637f6f19923b5757ae95b3649e2319ca71ac22b3a7e17",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-worldchain@1.0.0",
@@ -61,7 +61,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

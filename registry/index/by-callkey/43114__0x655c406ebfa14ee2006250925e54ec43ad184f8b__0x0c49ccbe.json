@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/decreaseLiquidity-avalanche@1.0.0",
   "manifest_path": "manifests/uniswap/v3/decreaseLiquidity-avalanche@1.0.0.json",
-  "bundle_sha256": "0x10d164a4ed3e0a16a1194150d538bedb76f6be1904ae869b84628b2434465e18",
+  "bundle_sha256": "0xa273074fc2f1e9e3a8b5309c4282b0314db3c6308672e916b0fb344bd00752bb",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/decreaseLiquidity-avalanche@1.0.0",
@@ -72,7 +72,7 @@
           "from": "$.args.liquidity"
         },
         "outputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[0].amount.kind": {
           "literal": "min"
@@ -81,7 +81,7 @@
           "from": "$.args.amount0Min"
         },
         "outputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[1].amount.kind": {
           "literal": "min"

@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidityETHWithPermit-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidityETHWithPermit-bnb@1.0.0.json",
-  "bundle_sha256": "0xd8e6cfc2138a1208fbdb7063ae02046438e6d3593f33acb0b02ebea34b3138c2",
+  "bundle_sha256": "0x6f6af1909ce8f93ceb330bfa143b4f75434e4781e801ac32b47bc3a73c0e9da4",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidityETHWithPermit-bnb@1.0.0",
@@ -79,7 +79,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

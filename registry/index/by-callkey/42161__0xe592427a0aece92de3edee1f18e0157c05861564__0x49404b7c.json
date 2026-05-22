@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/unwrapWETH9@1.0.0",
   "manifest_path": "manifests/uniswap/v3/unwrapWETH9@1.0.0.json",
-  "bundle_sha256": "0xbfcd7f2e15a49a9ff7fccc6c7500b1751678608253d06147395d3eb385bdf690",
+  "bundle_sha256": "0x1bfdc65439131a8d972e3eb903de602450da439f789954e9678a618acb960ee2",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/unwrapWETH9@1.0.0",
@@ -42,7 +42,7 @@
       "action": "unwrap",
       "fields": {
         "wrappedAsset.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "wrappedAsset.amount.kind": {
           "literal": "exact"

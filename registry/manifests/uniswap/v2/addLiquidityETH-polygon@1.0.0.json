@@ -75,7 +75,7 @@
         "from": "$.tx.value_wei"
       },
       "outputLp.asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "outputLp.amount.kind": {
         "literal": "min"

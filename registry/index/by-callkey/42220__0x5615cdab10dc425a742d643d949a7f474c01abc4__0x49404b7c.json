@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/swap-router-02/unwrapWETH9-celo@1.0.0",
   "manifest_path": "manifests/uniswap/swap-router-02/unwrapWETH9-celo@1.0.0.json",
-  "bundle_sha256": "0x3a0500e9a5304e13cfca67ed247c2e43a3cb4b635c2cbe5960ae5c845d86e431",
+  "bundle_sha256": "0xe8163b8f6f1061f9dd50f3d89f4b8ade35f2dc0dc185926195282dbd6aac07d9",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/swap-router-02/unwrapWETH9-celo@1.0.0",
@@ -39,7 +39,7 @@
       "action": "unwrap",
       "fields": {
         "wrappedAsset.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "wrappedAsset.amount.kind": {
           "literal": "exact"

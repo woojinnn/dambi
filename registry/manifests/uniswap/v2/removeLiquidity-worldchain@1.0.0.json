@@ -60,7 +60,7 @@
         "literal": "0x0000000000000000000000000000000000000000"
       },
       "inputLp.asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "inputLp.amount.kind": {
         "literal": "exact"

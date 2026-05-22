@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidityWithPermit-optimism@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidityWithPermit-optimism@1.0.0.json",
-  "bundle_sha256": "0xbffd7f5b7693a62d82b747f75f309b2792403729afac18b523d3c4262e2efdf9",
+  "bundle_sha256": "0x57762b593701b7cdb80b611a3c18fb2beb3b19e37756eb73a8c935d6fb521cc4",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidityWithPermit-optimism@1.0.0",
@@ -81,7 +81,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

@@ -87,7 +87,7 @@
         "from": "$.args.amountBDesired"
       },
       "outputLp.asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "outputLp.amount.kind": {
         "literal": "min"

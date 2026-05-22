@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/decreaseLiquidity-celo@1.0.0",
   "manifest_path": "manifests/uniswap/v3/decreaseLiquidity-celo@1.0.0.json",
-  "bundle_sha256": "0xc57253bbc9330a6115e9d8aec1867c7ed11299c0c210057d936af23dbc86a2e8",
+  "bundle_sha256": "0xade5f41143697e7b039394e90ad8232f8a8f49f2d3f3b52674f859c9dad65cf0",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/decreaseLiquidity-celo@1.0.0",
@@ -72,7 +72,7 @@
           "from": "$.args.liquidity"
         },
         "outputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[0].amount.kind": {
           "literal": "min"
@@ -81,7 +81,7 @@
           "from": "$.args.amount0Min"
         },
         "outputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[1].amount.kind": {
           "literal": "min"

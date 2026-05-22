@@ -40,7 +40,7 @@
         "from": "$.args.value"
       },
       "wrappedAsset.asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "wrappedAsset.amount.kind": {
         "literal": "exact"

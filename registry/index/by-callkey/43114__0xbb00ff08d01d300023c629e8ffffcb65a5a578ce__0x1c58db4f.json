@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/swap-router-02/wrapETH-avalanche@1.0.0",
   "manifest_path": "manifests/uniswap/swap-router-02/wrapETH-avalanche@1.0.0.json",
-  "bundle_sha256": "0xd43a9c15b29031833dfeaf18e3712b04e7833b3de6e9d510684d17adc6e92c7c",
+  "bundle_sha256": "0xbf85e920b937bf27a59ec4f541a5c7cc1acd2235a718eb70958efcbb1a62881d",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/swap-router-02/wrapETH-avalanche@1.0.0",
@@ -45,7 +45,7 @@
           "from": "$.args.value"
         },
         "wrappedAsset.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "wrappedAsset.amount.kind": {
           "literal": "exact"

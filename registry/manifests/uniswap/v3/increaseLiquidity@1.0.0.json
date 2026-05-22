@@ -68,7 +68,7 @@
         "from": "$.args.tokenId"
       },
       "inputTokens[0].asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "inputTokens[0].amount.kind": {
         "literal": "max"
@@ -77,7 +77,7 @@
         "from": "$.args.amount0Desired"
       },
       "inputTokens[1].asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "inputTokens[1].amount.kind": {
         "literal": "max"

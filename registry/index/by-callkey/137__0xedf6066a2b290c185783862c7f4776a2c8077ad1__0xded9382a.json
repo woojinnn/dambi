@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidityETHWithPermit-polygon@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidityETHWithPermit-polygon@1.0.0.json",
-  "bundle_sha256": "0x81d16c0fcc0abe3561ea5113d1ca1cc72967593c15e1b37a7faab5b2e2dbb03e",
+  "bundle_sha256": "0x3f0cedfdfaef93d9e080746319506abeefab6242698004b61cefa5038278b951",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidityETHWithPermit-polygon@1.0.0",
@@ -77,7 +77,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

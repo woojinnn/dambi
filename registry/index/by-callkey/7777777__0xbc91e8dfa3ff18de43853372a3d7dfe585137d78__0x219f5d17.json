@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/increaseLiquidity-zora@1.0.0",
   "manifest_path": "manifests/uniswap/v3/increaseLiquidity-zora@1.0.0.json",
-  "bundle_sha256": "0xe8545311f313ec16f473f20ba53a4c45b2bbdd3cceb507e81ba07ef6f6416ed6",
+  "bundle_sha256": "0xeaeadf00ddd1033cc99dd4b25eb92cb77f3b6dc107daf57a237d352922b40518",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/increaseLiquidity-zora@1.0.0",
@@ -70,7 +70,7 @@
           "from": "$.args.tokenId"
         },
         "inputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputTokens[0].amount.kind": {
           "literal": "max"
@@ -79,7 +79,7 @@
           "from": "$.args.amount0Desired"
         },
         "inputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputTokens[1].amount.kind": {
           "literal": "max"

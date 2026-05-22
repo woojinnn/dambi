@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/addLiquidityETH-worldchain@1.0.0",
   "manifest_path": "manifests/uniswap/v2/addLiquidityETH-worldchain@1.0.0.json",
-  "bundle_sha256": "0xdf899e34ca6d3bfe79b13a295e1f362928adaa27d2c508c0e0a4eb0406db2778",
+  "bundle_sha256": "0xb5bea4aeabe8248dd7118ae2c8a98a0dc0f8ce8dc0c875ae7c182397005c40d1",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/addLiquidityETH-worldchain@1.0.0",
@@ -80,7 +80,7 @@
           "from": "$.tx.value_wei"
         },
         "outputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputLp.amount.kind": {
           "literal": "min"

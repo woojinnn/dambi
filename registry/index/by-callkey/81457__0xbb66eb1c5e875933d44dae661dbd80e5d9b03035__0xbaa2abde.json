@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidity-blast@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidity-blast@1.0.0.json",
-  "bundle_sha256": "0xba40e27e36ae6fae928be8f3943efa0573669ca9dddedaba66ca92728213f0e0",
+  "bundle_sha256": "0x3d6151eff539007570b069f4f605a174e34cb8bee95458b4bc56666e853a8345",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidity-blast@1.0.0",
@@ -65,7 +65,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

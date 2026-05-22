@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/decreaseLiquidity-zora@1.0.0",
   "manifest_path": "manifests/uniswap/v3/decreaseLiquidity-zora@1.0.0.json",
-  "bundle_sha256": "0x7af7425fc13a4b4ea920105e43e18fd42ba7a7d813b6320538c2e6e28f510154",
+  "bundle_sha256": "0x1dcaf2199dbb68054622712f59a9ba3fec3581475378b38d8f829df790c5d63f",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/decreaseLiquidity-zora@1.0.0",
@@ -72,7 +72,7 @@
           "from": "$.args.liquidity"
         },
         "outputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[0].amount.kind": {
           "literal": "min"
@@ -81,7 +81,7 @@
           "from": "$.args.amount0Min"
         },
         "outputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[1].amount.kind": {
           "literal": "min"

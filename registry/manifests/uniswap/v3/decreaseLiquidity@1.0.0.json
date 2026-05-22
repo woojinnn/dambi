@@ -70,7 +70,7 @@
         "from": "$.args.liquidity"
       },
       "outputTokens[0].asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "outputTokens[0].amount.kind": {
         "literal": "min"
@@ -79,7 +79,7 @@
         "from": "$.args.amount0Min"
       },
       "outputTokens[1].asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "outputTokens[1].amount.kind": {
         "literal": "min"

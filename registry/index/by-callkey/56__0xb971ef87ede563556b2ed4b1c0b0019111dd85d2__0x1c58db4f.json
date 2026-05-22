@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/swap-router-02/wrapETH-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/swap-router-02/wrapETH-bnb@1.0.0.json",
-  "bundle_sha256": "0xb9d1c4e93de186adeb7e6469d46e94192590497e2347cff621a3e8054fc679fb",
+  "bundle_sha256": "0xcb1944fe963c1d0f6ef038567dd4b11245b5b5af1f1ddae296c22bb59a4c7aa9",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/swap-router-02/wrapETH-bnb@1.0.0",
@@ -45,7 +45,7 @@
           "from": "$.args.value"
         },
         "wrappedAsset.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "wrappedAsset.amount.kind": {
           "literal": "exact"

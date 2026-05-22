@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidity-polygon@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidity-polygon@1.0.0.json",
-  "bundle_sha256": "0xddaada2ea2b983f5fa2079127a12782f8facb56e5b7575072a83d20831e1e71a",
+  "bundle_sha256": "0xbfd40013c4e72c7b88760a124cde958d5ed009793a7b9351f6e9ad5cc6a756a6",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidity-polygon@1.0.0",
@@ -65,7 +65,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/swap-router-02/unwrapWETH9-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/swap-router-02/unwrapWETH9-bnb@1.0.0.json",
-  "bundle_sha256": "0xce8c44131dae5f8c814e841f77e577a55725e61ea3ea15a3882e2b8b6a61eee2",
+  "bundle_sha256": "0x5ddff2c3abf06d13da95cf4f6b93b65c440db8476f504a15aa340de56eecfe87",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/swap-router-02/unwrapWETH9-bnb@1.0.0",
@@ -39,7 +39,7 @@
       "action": "unwrap",
       "fields": {
         "wrappedAsset.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "wrappedAsset.amount.kind": {
           "literal": "exact"

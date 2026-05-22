@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/addLiquidity-polygon@1.0.0",
   "manifest_path": "manifests/uniswap/v2/addLiquidity-polygon@1.0.0.json",
-  "bundle_sha256": "0x041663551f52e0422cff7aaa71c45accd478faa91cb800727e6d5454d956eb6a",
+  "bundle_sha256": "0xcbf0b2b3cd615e8579b0ce8ebdea61a1da81172fe3697f37512ee6a284be12a0",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/addLiquidity-polygon@1.0.0",
@@ -90,7 +90,7 @@
           "from": "$.args.amountBDesired"
         },
         "outputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputLp.amount.kind": {
           "literal": "min"

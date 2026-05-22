@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/decreaseLiquidity-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/v3/decreaseLiquidity-bnb@1.0.0.json",
-  "bundle_sha256": "0xab2caa17843878640d0ced970b9dec28b9e549a9a785d5bf66994ec1e9142cf7",
+  "bundle_sha256": "0x1661e3b585c94abc34c9d647064ead3916b392a386c296889c2525864e942e44",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/decreaseLiquidity-bnb@1.0.0",
@@ -72,7 +72,7 @@
           "from": "$.args.liquidity"
         },
         "outputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[0].amount.kind": {
           "literal": "min"
@@ -81,7 +81,7 @@
           "from": "$.args.amount0Min"
         },
         "outputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[1].amount.kind": {
           "literal": "min"

@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-bnb@1.0.0.json",
-  "bundle_sha256": "0x493fca361a8ed466a24dc7947fa142a12376c28737c6270a450422bfb0c307f8",
+  "bundle_sha256": "0xbc10c7d23ade333a80903d20dc889ddd48df2146484c3cd00c8252d0f654d2c4",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-bnb@1.0.0",
@@ -63,7 +63,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

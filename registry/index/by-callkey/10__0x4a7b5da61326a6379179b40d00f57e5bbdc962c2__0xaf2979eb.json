@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-optimism@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-optimism@1.0.0.json",
-  "bundle_sha256": "0x4dd288113fe094f2bbdaf350d993b373fd23f32d542462368569156b031c76bb",
+  "bundle_sha256": "0xdbfb4144aa96f429625549cee18ff80568d26f425ba8a58a7f6a1a71334fc1aa",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidityETHSupportingFeeOnTransferTokens-optimism@1.0.0",
@@ -61,7 +61,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

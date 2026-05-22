@@ -41,7 +41,7 @@
     "action": "unwrap",
     "fields": {
       "wrappedAsset.asset.kind": {
-        "literal": "erc20"
+        "literal": "unknown"
       },
       "wrappedAsset.amount.kind": {
         "literal": "exact"

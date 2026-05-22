@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/addLiquidity-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/v2/addLiquidity-bnb@1.0.0.json",
-  "bundle_sha256": "0x78719fb1f7328e9705f4fee4a27bfc222b30579f7c630b77b51b856b60ab07f1",
+  "bundle_sha256": "0x5d4fa25ddbe08bb9eb505a35b4c72b979788c2cc14854c03d70f58748bcb6dcc",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/addLiquidity-bnb@1.0.0",
@@ -92,7 +92,7 @@
           "from": "$.args.amountBDesired"
         },
         "outputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputLp.amount.kind": {
           "literal": "min"

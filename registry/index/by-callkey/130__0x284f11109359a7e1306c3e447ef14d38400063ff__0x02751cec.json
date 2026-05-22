@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidityETH-unichain@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidityETH-unichain@1.0.0.json",
-  "bundle_sha256": "0x8a65fb2316e864beaa8142e685b869dde0d9a408db662c7b55167ba625c8190d",
+  "bundle_sha256": "0x1aa494df749e04ef48d590d5df1bb45e799a0987172e9393c6d6e6f566b4ac51",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidityETH-unichain@1.0.0",
@@ -61,7 +61,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

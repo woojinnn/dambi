@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v2/removeLiquidity-bnb@1.0.0",
   "manifest_path": "manifests/uniswap/v2/removeLiquidity-bnb@1.0.0.json",
-  "bundle_sha256": "0xc86caceb1c7afdeb461b653dfa3896320900ed1eb892417fa9c0cfab1a9f3abf",
+  "bundle_sha256": "0xf102691a1974381d09743c51fcb31d0ef8e807d929b67995e65884bc008fb141",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v2/removeLiquidity-bnb@1.0.0",
@@ -67,7 +67,7 @@
           "literal": "0x0000000000000000000000000000000000000000"
         },
         "inputLp.asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "inputLp.amount.kind": {
           "literal": "exact"

@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/decreaseLiquidity-ink@1.0.0",
   "manifest_path": "manifests/uniswap/v3/decreaseLiquidity-ink@1.0.0.json",
-  "bundle_sha256": "0xacf666008a01e19aa01eab9de68bc741d083725029d4b5125f1c6255eaea02a9",
+  "bundle_sha256": "0x8640b5e170ed9abd4dbf6e6ef8f97dbf920cd50e667fdf95f1f12eee718586f3",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/decreaseLiquidity-ink@1.0.0",
@@ -72,7 +72,7 @@
           "from": "$.args.liquidity"
         },
         "outputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[0].amount.kind": {
           "literal": "min"
@@ -81,7 +81,7 @@
           "from": "$.args.amount0Min"
         },
         "outputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[1].amount.kind": {
           "literal": "min"

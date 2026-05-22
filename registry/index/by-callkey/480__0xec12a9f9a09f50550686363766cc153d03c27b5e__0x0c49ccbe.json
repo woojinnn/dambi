@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/v3/decreaseLiquidity-worldchain@1.0.0",
   "manifest_path": "manifests/uniswap/v3/decreaseLiquidity-worldchain@1.0.0.json",
-  "bundle_sha256": "0xb17aa7bacef174f74e5898489632d41b5231d30d406233cc7d24df83ccc530a9",
+  "bundle_sha256": "0xf4ff1225b2729553e15403f42571f7bd9a7acba58acb51038b3ae3dbd009173e",
   "bundle": {
     "type": "adapter_function",
     "id": "uniswap/v3/decreaseLiquidity-worldchain@1.0.0",
@@ -72,7 +72,7 @@
           "from": "$.args.liquidity"
         },
         "outputTokens[0].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[0].amount.kind": {
           "literal": "min"
@@ -81,7 +81,7 @@
           "from": "$.args.amount0Min"
         },
         "outputTokens[1].asset.kind": {
-          "literal": "erc20"
+          "literal": "unknown"
         },
         "outputTokens[1].amount.kind": {
           "literal": "min"
