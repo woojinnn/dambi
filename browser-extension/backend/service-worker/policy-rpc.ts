@@ -220,19 +220,22 @@ export interface AuditMatchedPolicy {
 
 /**
  * Project a `VerdictDto` into the matched-policies list that gets
- * persisted in the audit log. Preserves the `__system__` id verbatim
- * (D9) and propagates its `reason` so the dashboard's audit view can
- * distinguish "Cedar policy blocked this" from "the engine couldn't
- * evaluate it".
+ * persisted in the audit log. Preserves engine-emitted synthetic ids
+ * (`__system__`, `__engine::*`) verbatim and propagates their `reason`
+ * so the dashboard's audit view can distinguish "Cedar policy blocked
+ * this" from "the engine couldn't evaluate it".
  */
 export function formatAuditMatched(verdict: VerdictDto): AuditMatchedPolicy[] {
   if (!verdict.matched) return [];
   return verdict.matched.map((m) => {
     const base: AuditMatchedPolicy = { id: m.policy_id, severity: m.severity };
-    // Only attach `reason` for the synthetic `__system__` matched entry
-    // — ordinary policy matches keep the payload small (the dashboard
-    // already has the reason in the catalog).
-    if (m.policy_id === SYSTEM_POLICY_ID && typeof m.reason === "string") {
+    // Synthetic engine matches carry a runtime diagnostic the dashboard
+    // can't reconstruct from the catalog — keep the `reason`. Ordinary
+    // policy matches stay payload-light; the dashboard pulls their
+    // human text from the catalog by id.
+    const isSynthetic =
+      m.policy_id === SYSTEM_POLICY_ID || m.policy_id.startsWith("__engine::");
+    if (isSynthetic && typeof m.reason === "string") {
       base.reason = m.reason;
     }
     return base;

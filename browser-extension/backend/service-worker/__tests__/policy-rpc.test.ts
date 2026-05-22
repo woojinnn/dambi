@@ -300,6 +300,25 @@ describe("policy-rpc coordinator", () => {
     expect(matched[0].reason).toMatch(/^rpc-unavailable:/);
   });
 
+  it("formatAuditMatched preserves __engine::* reason so the audit page can show the underlying cause", () => {
+    const verdict = {
+      kind: "fail" as const,
+      matched: [
+        {
+          policy_id: "__engine::policy",
+          reason: "context attribute `inputAmountNano` is missing",
+          severity: "deny" as const,
+          origin: "engine_error" as const,
+        },
+      ],
+    };
+    const matched = formatAuditMatched(verdict);
+    expect(matched[0].id).toBe("__engine::policy");
+    expect(matched[0].reason).toBe(
+      "context attribute `inputAmountNano` is missing",
+    );
+  });
+
   it("formatAuditMatched omits reason for ordinary policy matches", () => {
     const verdict = {
       kind: "fail" as const,
