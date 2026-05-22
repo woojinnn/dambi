@@ -20,6 +20,7 @@ import type {
   PreviewManifestOutput,
   ManifestPutResult,
 } from "@scopeball/sdk";
+import type { TypedPathsResult } from "../policy/builder-wasm";
 
 // Mock the WASM bridge so the editor's typed-paths fetch + selector
 // picker's schema fetch don't try to load the real WASM module under
@@ -29,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   fetchActionSchema: vi.fn(async () => ({
     schema: { action: "swap", principalType: "Wallet", resourceType: "Protocol", fields: [] },
   })),
-  fetchTypedPaths: vi.fn(async () => ({
+  fetchTypedPaths: vi.fn(async (): Promise<TypedPathsResult> => ({
     paths: { action: "swap", scalars: [], records: [] },
   })),
 }));

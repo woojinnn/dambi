@@ -73,7 +73,7 @@ fn decimal_with_optional_parent_installs() {
             },
         ],
     };
-    let text = compile(&rule, &swap::schema()).expect("compile");
+    let text = compile(&rule, &swap::schema_with_legacy_custom()).expect("compile");
     // totalInputUsd is a custom (manifest-enriched) field. The bundled
     // schema's SwapCustomContext is `{}`, so the only access path Cedar can
     // type-check is via `context has custom && context.custom has X` — both
@@ -152,7 +152,7 @@ fn usd_valuation_sources_predicate_installs() {
             value: PredicateValue::Single("chainlink".into()),
         }],
     };
-    let text = compile(&rule, &swap::schema()).expect("compile");
+    let text = compile(&rule, &swap::schema_with_legacy_custom()).expect("compile");
     let result = PolicyEngineBuilder::new().add_text(text.clone()).build();
     assert!(
         result.is_ok(),
@@ -174,7 +174,7 @@ fn bool_predicate_installs() {
             value: PredicateValue::None,
         }],
     };
-    let text = compile(&rule, &swap::schema()).expect("compile");
+    let text = compile(&rule, &swap::schema_with_legacy_custom()).expect("compile");
     let result = PolicyEngineBuilder::new().add_text(text.clone()).build();
     assert!(
         result.is_ok(),

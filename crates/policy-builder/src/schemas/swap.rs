@@ -217,19 +217,24 @@ pub fn schema() -> ActionSchema {
     }
 }
 
-/// Test-only helper that returns the `swap` schema augmented with the
+/// Test-facing helper that returns the `swap` schema augmented with the
 /// legacy hand-coded custom fields that lived in this file before Phase 8.
 ///
 /// Production code MUST NOT use this — at runtime those fields come from
 /// the WASM overlay path (`get_action_schema_with_overlay_json`) which
 /// pulls them from the engine's enriched schema. The helper exists only
-/// so generator/parser/validator tests keep their original fixtures
-/// without re-implementing manifest-style enrichment in every test.
+/// so generator/parser/validator + round-trip tests keep their original
+/// fixtures without re-implementing manifest-style enrichment in every test.
 ///
 /// The added fields mirror what `extensions/DEX/swap.policy-rpc.json`
 /// declares as outputs, expanded through `aliases::record_leaves` for
 /// the record-typed ones (`UsdValuation`, `WindowStats`).
-#[cfg(test)]
+///
+/// Not `#[cfg(test)]`: `tests/roundtrip.rs` is an integration test (a
+/// separate crate) that links `policy-builder` without `cfg(test)`, so a
+/// `cfg(test)` item would be invisible to it. `#[doc(hidden)]` keeps this
+/// helper off the public API surface instead.
+#[doc(hidden)]
 #[must_use]
 pub fn schema_with_legacy_custom() -> ActionSchema {
     let mut s = schema();
@@ -240,7 +245,7 @@ pub fn schema_with_legacy_custom() -> ActionSchema {
     s
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 fn legacy_custom_fields() -> Vec<FieldSpec> {
     use crate::aliases::record_leaves;
     let mut out = Vec::new();

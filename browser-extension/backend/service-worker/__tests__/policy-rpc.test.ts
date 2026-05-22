@@ -343,7 +343,7 @@ describe("policy-rpc coordinator", () => {
     expect(formatAuditMatched({ kind: "pass" as const })).toEqual([]);
   });
 
-  it("rejects malformed RPC responses before WASM evaluation", async () => {
+  it("treats a malformed RPC response as missing rather than throwing", async () => {
     const plan = {
       request_id: "req-1",
       root: {
@@ -359,14 +359,29 @@ describe("policy-rpc coordinator", () => {
       diagnostics: [],
     };
     mocks.planPolicyRpc.mockResolvedValue(plan);
+    // `request_id` mismatch → `postPolicyRpc` throws "malformed response".
+    // `dispatchCalls` fails open on transport errors (see its comment):
+    // each remote call becomes an `rpc_unreachable` error result instead
+    // of a thrown error, so a flaky enrichment server can't deny every tx.
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: async () => ({ request_id: "different", results: [] }),
     } as Response);
+    const verdict = { kind: "pass" as const };
+    mocks.evaluatePolicyRpc.mockResolvedValue(verdict);
 
-    await expect(evaluateWithPolicyRpc(txMessage())).rejects.toThrow(
-      "policy-rpc returned malformed response",
+    const result = await evaluateWithPolicyRpc(txMessage());
+
+    // No throw — evaluation still runs against the engine.
+    expect(result.verdict).toEqual(verdict);
+    // The malformed response is not passed through as a valid result:
+    // `call-1` reaches the engine as a failed (`rpc_unreachable`) result.
+    expect(mocks.evaluatePolicyRpc).toHaveBeenCalledTimes(1);
+    const passed = mocks.evaluatePolicyRpc.mock.calls[0][0];
+    const callResult = passed.rpc_response.results.find(
+      (r: { id: string }) => r.id === "call-1",
     );
-    expect(mocks.evaluatePolicyRpc).not.toHaveBeenCalled();
+    expect(callResult?.ok).toBe(false);
+    expect(callResult?.error?.code).toBe("rpc_unreachable");
   });
 });
