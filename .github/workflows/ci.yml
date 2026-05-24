@@ -104,9 +104,13 @@ jobs:
 
       - working-directory: browser-extension
         run: yarn build:chrome
+        env:
+          SCOPEBALL_ALLOW_INSECURE_REGISTRY: '1'
 
       - working-directory: browser-extension
         run: yarn build:firefox
+        env:
+          SCOPEBALL_ALLOW_INSECURE_REGISTRY: '1'
 
       - working-directory: browser-extension/dashboard
         name: Dashboard build (tsc --noEmit + vite build)
