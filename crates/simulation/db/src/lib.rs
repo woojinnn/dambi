@@ -15,6 +15,20 @@
 //! })?;
 //! ```
 
+#![deny(unsafe_code)]
+#![deny(unused_must_use)]
+#![deny(rustdoc::bare_urls)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![warn(missing_docs)]
+#![warn(unreachable_pub)]
+#![warn(rust_2018_idioms)]
+#![warn(rust_2021_compatibility)]
+#![warn(missing_debug_implementations)]
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![warn(clippy::dbg_macro)]
+
 pub mod error;
 
 // 단계적 활성화:
