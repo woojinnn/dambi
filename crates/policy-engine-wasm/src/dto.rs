@@ -319,6 +319,87 @@ pub struct DeclarativeRouteRequestResultDto {
     pub decoder_id: String,
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 4B — v3 route entry (raw Tx / sig → `Vec<Action>`)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Input for `declarative_route_request_v3_json`.
+///
+/// This is the v3 (PDF FSM spec) route entry that emits the new hierarchical
+/// [`simulation_reducer::action::Action`] tree, in contrast to the legacy
+/// `declarative_route_request_json` which emits the flat
+/// [`policy_engine::ActionEnvelope`].
+///
+/// The wire shape mirrors the SW orchestrator's [`decideMessage`] output:
+///   * `chain_id`/`to`/`selector`/`calldata` — registry-v2 callkey + raw
+///     calldata. (Mirrors the legacy v1 entry.)
+///   * `value` — `msg.value` as a decimal string (`"0"` default).
+///   * `gas_limit` — declared gas limit as a decimal string. The orchestrator
+///     forwards the dApp's value verbatim; defaults to `"0"` when missing.
+///   * `gas_price` — current gas price as a decimal string. Phase 4B wraps
+///     this in a [`LiveField`] with a Pyth `gas/<chain_id>` source — the
+///     actual Sync Orchestrator wiring is deferred (Phase 5+).
+///   * `submitter` — `tx.from`. Echoed into `ActionMeta.submitter`.
+///   * `submitted_at` — Unix epoch seconds. Echoed into `ActionMeta.submitted_at`.
+///   * `nonce` — declared sequential nonce. `0` when missing.
+///
+/// `block_timestamp` (optional) — block.timestamp at which the Action would
+/// land, distinct from `submitted_at`. Mappers may use this for deadlines.
+///
+/// `selector` and `block_timestamp` are part of the stable wire shape but are
+/// not consumed by the Phase 4B stub — they will be threaded into the
+/// registry-v2 callkey lookup + emit-rule decode in Phase 4D. The
+/// `#[allow(dead_code)]` reflects that intentional staging; do NOT remove
+/// either field as that would break the SW wire layer.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeclarativeRouteRequestV3InputDto {
+    pub chain_id: u64,
+    /// "0x" + 40 hex. Case-insensitive.
+    pub to: String,
+    /// "0x" + 8 hex. Case-insensitive.
+    pub selector: String,
+    /// Raw "0x"-prefixed calldata.
+    pub calldata: String,
+    /// `msg.value` as a base-10 decimal string. Defaults to `"0"`.
+    #[serde(default = "default_zero_decimal")]
+    pub value: String,
+    /// Declared gas limit as a base-10 decimal string. Defaults to `"0"`.
+    #[serde(default = "default_zero_decimal")]
+    pub gas_limit: String,
+    /// Current gas price as a base-10 decimal string. Defaults to `"0"`.
+    /// Wrapped in a [`LiveField`] by the WASM entry with a Pyth
+    /// `gas/<chain_id>` source (Phase 4B stub — Sync Orchestrator wiring TBD).
+    #[serde(default = "default_zero_decimal")]
+    pub gas_price: String,
+    /// `tx.from` — "0x" + 40 hex.
+    pub submitter: String,
+    /// Unix epoch seconds at which the Action was submitted.
+    pub submitted_at: u64,
+    /// Sequential transaction nonce of `submitter`. Defaults to `0`.
+    #[serde(default)]
+    pub nonce: u64,
+    /// Optional block timestamp.
+    #[serde(default)]
+    pub block_timestamp: Option<u64>,
+}
+
+fn default_zero_decimal() -> String {
+    "0".to_string()
+}
+
+/// Result returned by `declarative_route_request_v3_json` on success.
+///
+/// `actions` is the `Vec<simulation_reducer::action::Action>` produced for the
+/// raw Tx — Phase 4B emits a single `ActionBody::Unknown` stub. `decoder_id`
+/// echoes the bundle id when a registry match exists (Phase 4D+); empty
+/// string when no match (stub fallback).
+#[derive(Debug, Clone, Serialize)]
+pub struct DeclarativeRouteRequestV3ResultDto {
+    pub actions: Vec<simulation_reducer::action::Action>,
+    pub decoder_id: String,
+}
+
 /// One child callkey produced by `declarative_plan_children_json`.
 ///
 /// `to` echoes the outer request `to` — `self_array_bytes_last_arg` is a

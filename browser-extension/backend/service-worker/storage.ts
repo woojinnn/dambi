@@ -41,6 +41,22 @@ export interface AuditEntry {
     reason?: string;
   };
   /**
+   * Phase 4B — v3 declarative pipeline audit. Observability-only at
+   * Phase 4B: the v3 WASM entry returns a single `ActionBody::Unknown`
+   * stub so this column always shows `outcome: "hit"` with `action_count:
+   * 1` for transactions, and `outcome: "miss"` for typed/untyped sigs
+   * (Phase 4C adds the SignAdapter). Phase 4D promotes the column to
+   * carry a real `decoder_id` once registry-v2 manifest lookup is wired.
+   * See `orchestrator.ts::DeclarativeV3AuditMeta` for the contract.
+   */
+  declarativeV3?: {
+    outcome: "hit" | "miss" | "fault";
+    nature: "onchain_tx" | "offchain_sig" | "untyped_sig";
+    decoder_id?: string;
+    action_count?: number;
+    reason?: string;
+  };
+  /**
    * Phase 7F — which Cedar pipeline produced the verdict.
    * `"declarative"` ⇒ `evaluate_with_envelopes_json` (Phase 7A).
    * `"static"` ⇒ legacy `evaluateWithPolicyRpc` path.

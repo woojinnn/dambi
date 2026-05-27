@@ -37,7 +37,9 @@ import {
   EngineError,
   declarativePlanChildren,
   declarativeRouteRequest,
+  declarativeRouteRequestV3,
   type DeclarativeRouteRequestResult,
+  type DeclarativeRouteRequestV3Result,
 } from "../wasm-bridge";
 import { buildRouteInput, extractSelector } from "./declarative-decode";
 import {
@@ -410,6 +412,92 @@ export async function tryDeclarativeRoute(args: {
       decoderId: result.decoder_id,
       bundleId: adapter.bundleId,
       source: resolution.source,
+    },
+  };
+}
+
+/**
+ * Phase 4B — v3 outcome shape. Mirrors [`DeclarativeRouteOutcome`] but the
+ * hit payload carries the new `Action[]` (PDF FSM `Vec<Action>`) instead of
+ * the flat envelope list. `decoder_id` is empty under the Phase 4B stub —
+ * Phase 4D populates it from the registry-v2 manifest match.
+ */
+export interface DeclarativeRouteV3Hit {
+  actions: Record<string, unknown>[];
+  decoderId: string;
+}
+
+export type DeclarativeRouteV3Outcome =
+  | { kind: "hit"; value: DeclarativeRouteV3Hit }
+  | { kind: "miss"; reason: "no_selector" }
+  | { kind: "fault"; reason: "engine_error" | "unexpected"; cause: unknown };
+
+/**
+ * Phase 4B — v3 route entry. Pure stub wrapper around
+ * `declarativeRouteRequestV3` that:
+ *   1. extracts the 4-byte selector,
+ *   2. forwards the meta fields the v3 `ActionMeta` carries (value /
+ *      gas_limit / gas_price / submitter / submitted_at / nonce),
+ *   3. unwraps the WASM result into a TS-friendly outcome.
+ *
+ * The Phase 4B Rust stub does NOT do a registry lookup — it returns a
+ * single `ActionBody::Unknown`. That keeps the SW v3 path online while
+ * Phase 4D wires the registry-v2 manifest decode. The TS helper here
+ * intentionally skips the `resolveAdapter` + JIT path (no bundle is
+ * consulted) so we don't double-call the registry for the stub run.
+ *
+ * On `fault` the caller falls back to the legacy v1 path.
+ */
+export async function tryDeclarativeRouteV3(args: {
+  chainId: number;
+  from: string;
+  to: string;
+  valueWei?: string;
+  gasLimit?: string;
+  gasPrice?: string;
+  nonce?: number;
+  submittedAt?: number;
+  blockTimestamp?: number;
+  calldataHex: string | undefined;
+}): Promise<DeclarativeRouteV3Outcome> {
+  const selector = extractSelector(args.calldataHex);
+  if (!selector) {
+    return { kind: "miss", reason: "no_selector" };
+  }
+  const submittedAt = args.submittedAt ?? Math.floor(Date.now() / 1000);
+
+  let result: DeclarativeRouteRequestV3Result;
+  try {
+    result = await declarativeRouteRequestV3({
+      chain_id: args.chainId,
+      to: args.to,
+      selector,
+      calldata: args.calldataHex!,
+      ...(args.valueWei !== undefined ? { value: args.valueWei } : {}),
+      ...(args.gasLimit !== undefined ? { gas_limit: args.gasLimit } : {}),
+      ...(args.gasPrice !== undefined ? { gas_price: args.gasPrice } : {}),
+      submitter: args.from,
+      submitted_at: submittedAt,
+      ...(args.nonce !== undefined ? { nonce: args.nonce } : {}),
+      ...(args.blockTimestamp !== undefined
+        ? { block_timestamp: args.blockTimestamp }
+        : {}),
+    });
+  } catch (err) {
+    // The Phase 4B WASM stub only throws on malformed input — promote any
+    // EngineError to `engine_error` so the caller can audit it. Other
+    // throws (network glitch, etc.) bucket into `unexpected`.
+    if (err instanceof EngineError) {
+      return { kind: "fault", reason: "engine_error", cause: err };
+    }
+    return { kind: "fault", reason: "unexpected", cause: err };
+  }
+
+  return {
+    kind: "hit",
+    value: {
+      actions: result.actions,
+      decoderId: result.decoder_id,
     },
   };
 }

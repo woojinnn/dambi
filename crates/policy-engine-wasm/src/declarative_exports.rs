@@ -64,10 +64,19 @@ use wasm_bindgen::prelude::*;
 use crate::dto::{
     DeclarativeChildCallKeyDto, DeclarativeInstallResultDto, DeclarativeLookupInputDto,
     DeclarativePlanChildrenResultDto, DeclarativeRouteRequestInputDto,
-    DeclarativeRouteRequestResultDto, DecodedArgDto, DecodedCallDto, DecodedValueDto,
+    DeclarativeRouteRequestResultDto, DeclarativeRouteRequestV3InputDto,
+    DeclarativeRouteRequestV3ResultDto, DecodedArgDto, DecodedCallDto, DecodedValueDto,
     EngineErrorDto, Envelope,
 };
 use crate::exports::check_input_size;
+
+// Phase 4B — v3 action tree imports. Kept namespaced under `v3_action` so the
+// legacy `policy_engine::action` path stays readable for the v1 entries above.
+use simulation_reducer::action as v3_action;
+use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
+use simulation_state::primitives::{
+    Address as V3Address, ChainId as V3ChainId, Time as V3Time, U256 as V3U256,
+};
 
 /// Process-local state for the declarative pipeline. Two halves:
 ///
@@ -671,6 +680,163 @@ pub fn declarative_plan_children_json(input_json: String) -> String {
         Ok(dto) => Envelope::ok(dto).to_json(),
         Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
     }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 4B — `declarative_route_request_v3_json`
+// ───────────────────────────────────────────────────────────────────────────
+//
+// v3 route entry. Same callkey lookup pattern as
+// `declarative_route_request_json` (v1), but emits the new hierarchical
+// `simulation_reducer::action::Action` tree (PDF FSM spec) instead of the flat
+// `policy_engine::ActionEnvelope`.
+//
+// Phase 4B scope = **WASM boundary only**:
+//   * Define the TS↔Rust wire (input/output JSON shape).
+//   * Build a minimal stub `Action` whose body is `ActionBody::Unknown` —
+//     the registry-v2 manifest lookup + decode + emit-rule → ActionBody
+//     conversion is the responsibility of Phase 4D (Multicall handler /
+//     adapters-v3 crate). The stub is enough to wire the SW orchestrator
+//     and round-trip through Cedar without blocking on the full mapping.
+//
+// Legacy `declarative_route_request_json` stays untouched — Phase 4 keeps
+// both entries in parallel so the existing SW path (envelope-driven Cedar
+// pipeline) continues to function during cutover.
+
+/// Phase 4B — v3 orchestrator entry emitting the PDF FSM `Action` tree.
+///
+/// Input JSON shape (see [`DeclarativeRouteRequestV3InputDto`]):
+/// ```json
+/// {
+///   "chain_id": 1,
+///   "to":       "0x7a25...",
+///   "selector": "0x38ed1739",
+///   "calldata": "0x38ed1739...",
+///   "value":      "0",
+///   "gas_limit":  "200000",
+///   "gas_price":  "20000000000",
+///   "submitter":  "0xaaaa...",
+///   "submitted_at": 1700000000,
+///   "nonce": 42,
+///   "block_timestamp": 1700000010
+/// }
+/// ```
+///
+/// Output:
+/// ```json
+/// { "ok": true, "data": { "actions": [<Action>], "decoder_id": "" } }
+/// ```
+/// or `{ "ok": false, "error": { "kind": "...", "message": "..." } }`.
+///
+/// Phase 4B emits a single-element `actions` vec whose body is
+/// `ActionBody::Unknown { target, chain, calldata, value }` — the policy
+/// engine downstream evaluates Unknown with a warn/deny default per
+/// `action-design.md`. Phase 4D replaces this stub with the registry-v2
+/// manifest lookup + emit-rule decode pipeline.
+#[wasm_bindgen]
+pub fn declarative_route_request_v3_json(input_json: String) -> String {
+    let result = (|| -> Result<DeclarativeRouteRequestV3ResultDto, EngineErrorDto> {
+        check_input_size(&input_json, "declarative_route_request_v3_json")?;
+        let input: DeclarativeRouteRequestV3InputDto = serde_json::from_str(&input_json)
+            .map_err(|error| {
+                EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
+            })?;
+
+        // ── Parse + normalise ──────────────────────────────────────────────
+        let submitter = parse_v3_address(&input.submitter, "submitter")?;
+        let target = parse_v3_address(&input.to, "to")?;
+        let value = parse_v3_u256(&input.value, "value")?;
+        let gas_limit = parse_v3_u256(&input.gas_limit, "gas_limit")?;
+        let gas_price = parse_v3_u256(&input.gas_price, "gas_price")?;
+
+        let chain = V3ChainId::new(format!("eip155:{}", input.chain_id));
+        let submitted_at = V3Time::from_unix(input.submitted_at);
+
+        // ── Build ActionMeta (OnchainTx nature) ────────────────────────────
+        //
+        // Phase 4B wraps `gas_price` in a stub `LiveField` whose source =
+        // Pyth `gas/eip155:<chain_id>`. The Sync Orchestrator is not wired
+        // into this entry yet — `synced_at` collapses to `submitted_at` and
+        // `ttl`/`confidence` are left at default. Phase 5+ replaces this
+        // stub with a proper LiveField sourced from the Sync layer.
+        let gas_price_live = LiveField::new(
+            gas_price,
+            DataSource::OracleFeed {
+                provider: OracleProvider::Pyth,
+                feed_id: format!("gas/eip155:{}", input.chain_id),
+            },
+            submitted_at,
+        );
+
+        let meta = v3_action::ActionMeta {
+            submitted_at,
+            submitter,
+            nature: v3_action::ActionNature::OnchainTx {
+                chain: chain.clone(),
+                nonce: input.nonce,
+                gas_limit,
+                gas_price: gas_price_live,
+                value,
+            },
+        };
+
+        // ── Build ActionBody (Phase 4B stub: Unknown) ──────────────────────
+        //
+        // Manifest lookup + emit-rule → ActionBody conversion lives in
+        // Phase 4D. The Unknown body carries the verbatim calldata + value
+        // so a Cedar policy can already decide on a per-target deny / warn
+        // basis even before the typed bodies arrive.
+        //
+        // `calldata` is passed through as-is (the canonical "0x" + hex
+        // serialization the rest of the codebase uses). We do NOT
+        // re-encode — that would lose information when a downstream test
+        // wants to compare round-trips byte-for-byte.
+        let body = v3_action::ActionBody::Unknown {
+            target,
+            chain,
+            calldata: input.calldata.clone(),
+            value,
+        };
+
+        let action = v3_action::Action { meta, body };
+
+        Ok(DeclarativeRouteRequestV3ResultDto {
+            actions: vec![action],
+            // Phase 4B: no manifest lookup yet, so no decoder_id. Phase 4D
+            // populates this from the matched bundle id.
+            decoder_id: String::new(),
+        })
+    })();
+
+    match result {
+        Ok(dto) => Envelope::ok(dto).to_json(),
+        Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+    }
+}
+
+/// Parse a "0x"-prefixed 40-hex string into an [`Address`](V3Address).
+/// Wraps the alloy parser to produce a uniform `EngineErrorDto` shape.
+fn parse_v3_address(raw: &str, field: &str) -> Result<V3Address, EngineErrorDto> {
+    raw.parse::<V3Address>().map_err(|error| {
+        EngineErrorDto::new(
+            "invalid_input_json",
+            format!("invalid {field} address {raw:?}: {error}"),
+        )
+    })
+}
+
+/// Parse a base-10 decimal string into a [`U256`](V3U256). Empty input
+/// behaves like the explicit serde default (`"0"`).
+fn parse_v3_u256(raw: &str, field: &str) -> Result<V3U256, EngineErrorDto> {
+    if raw.is_empty() {
+        return Ok(V3U256::ZERO);
+    }
+    V3U256::from_str_radix(raw, 10).map_err(|error| {
+        EngineErrorDto::new(
+            "invalid_input_json",
+            format!("invalid {field} decimal {raw:?}: {error}"),
+        )
+    })
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1790,5 +1956,118 @@ mod tests {
         assert_eq!(envelopes.len(), 2, "{parsed}");
         assert_eq!(envelopes[0]["fields"]["nft"]["tokenId"], "11");
         assert_eq!(envelopes[1]["fields"]["nft"]["tokenId"], "22");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Phase 4B — declarative_route_request_v3_json (stub Unknown emitter)
+    // ──────────────────────────────────────────────────────────────────────
+
+    fn v3_route_input() -> Value {
+        json!({
+            "chain_id":    1,
+            "to":          "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+            "selector":    "0x38ed1739",
+            "calldata":    "0x38ed1739dead",
+            "value":       "0",
+            "gas_limit":   "200000",
+            "gas_price":   "20000000000",
+            "submitter":   "0x000000000000000000000000000000000000aaaa",
+            "submitted_at": 1_700_000_000_u64,
+            "nonce": 42_u64,
+            "block_timestamp": 1_700_000_010_u64
+        })
+    }
+
+    #[test]
+    fn route_request_v3_emits_single_unknown_action_stub() {
+        let out = declarative_route_request_v3_json(v3_route_input().to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+
+        // Phase 4B contract: actions is a single-element Vec, decoder_id empty.
+        let actions = parsed["data"]["actions"].as_array().expect("actions array");
+        assert_eq!(actions.len(), 1, "{parsed}");
+        assert_eq!(parsed["data"]["decoder_id"], "", "{parsed}");
+
+        // ActionMeta echoes the submitter + submitted_at + OnchainTx nature.
+        let meta = &actions[0]["meta"];
+        assert_eq!(meta["submitted_at"], 1_700_000_000_u64);
+        assert_eq!(
+            meta["submitter"],
+            "0x000000000000000000000000000000000000aaaa"
+        );
+
+        let nature = &meta["nature"];
+        assert_eq!(nature["kind"], "onchain_tx");
+        assert_eq!(nature["chain"], "eip155:1");
+        assert_eq!(nature["nonce"], 42);
+        // `U256` serialises through alloy's serde impl as a "0x"-prefixed
+        // hex string. Hand-decoded via i64-from-hex to keep the assertion
+        // robust to leading-zero handling.
+        assert_eq!(nature["gas_limit"], "0x30d40"); // 200000 == 0x30d40
+        assert_eq!(nature["value"], "0x0");
+        // gas_price is wrapped in a stub LiveField with Pyth gas/<chain> source.
+        assert_eq!(nature["gas_price"]["value"], "0x4a817c800"); // 20000000000
+        assert_eq!(nature["gas_price"]["source"]["kind"], "oracle_feed");
+        assert_eq!(nature["gas_price"]["source"]["provider"], "pyth");
+        assert_eq!(nature["gas_price"]["source"]["feed_id"], "gas/eip155:1");
+
+        // ActionBody is the Unknown stub — manifest lookup is Phase 4D.
+        let body = &actions[0]["body"];
+        assert_eq!(body["domain"], "unknown");
+        assert_eq!(body["target"], "0x7a250d5630b4cf539739df2c5dacb4c659f2488d");
+        assert_eq!(body["chain"], "eip155:1");
+        assert_eq!(body["calldata"], "0x38ed1739dead");
+        assert_eq!(body["value"], "0x0");
+    }
+
+    #[test]
+    fn route_request_v3_rejects_invalid_json() {
+        let out = declarative_route_request_v3_json("{not json".to_owned());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "invalid_input_json");
+    }
+
+    #[test]
+    fn route_request_v3_rejects_invalid_address() {
+        let mut input = v3_route_input();
+        input["submitter"] = json!("not-an-address");
+        let out = declarative_route_request_v3_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "invalid_input_json");
+        let message = parsed["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("submitter"),
+            "expected submitter diagnostic, got: {message}"
+        );
+    }
+
+    #[test]
+    fn route_request_v3_uses_defaults_for_omitted_fields() {
+        // Only the truly required fields — value / gas_limit / gas_price /
+        // nonce default to "0"/0. The serde defaults are part of the wire
+        // contract; this test pins them so a future refactor cannot
+        // silently change them.
+        let input = json!({
+            "chain_id":    8453,
+            "to":          "0x0000000000000000000000000000000000001234",
+            "selector":    "0x12345678",
+            "calldata":    "0x12345678",
+            "submitter":   "0x000000000000000000000000000000000000aaaa",
+            "submitted_at": 1_700_000_000_u64
+        });
+        let out = declarative_route_request_v3_json(input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        let actions = parsed["data"]["actions"].as_array().expect("actions array");
+        let nature = &actions[0]["meta"]["nature"];
+        assert_eq!(nature["nonce"], 0);
+        // U256 alloy-serde encodes zero as "0x0".
+        assert_eq!(nature["gas_limit"], "0x0");
+        assert_eq!(nature["value"], "0x0");
+        assert_eq!(nature["gas_price"]["value"], "0x0");
+        assert_eq!(nature["chain"], "eip155:8453");
     }
 }

@@ -30,7 +30,7 @@ mod sim_types;
 
 pub use declarative_exports::{
     declarative_install_json, declarative_lookup_json, declarative_plan_children_json,
-    declarative_route_request_json,
+    declarative_route_request_json, declarative_route_request_v3_json,
 };
 pub use exports::{
     evaluate_policy_rpc_json, evaluate_with_envelopes_json, get_alias_table_json,
