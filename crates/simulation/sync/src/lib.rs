@@ -21,6 +21,7 @@ pub mod error;
 pub mod fetchers;
 pub mod orchestrator;
 pub mod scheduler;
+pub mod subscription;
 pub mod topo;
 pub mod walker;
 
@@ -33,5 +34,6 @@ pub use fetchers::rpc::{
 };
 pub use orchestrator::{Orchestrator, RefreshReport};
 pub use scheduler::{Scheduler, SchedulerConfig, TickReport, WalletStore};
+pub use subscription::{BlockSubscription, NewBlock, PollingBlockSubscription};
 pub use topo::{DepNode, topological_sort};
 pub use walker::{FieldLocation, StaleField, WalkStats, walk_stale};
