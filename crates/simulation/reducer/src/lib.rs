@@ -16,11 +16,19 @@
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(clippy::dbg_macro)]
+// Phase 2 skeleton: every reducer / helper returns `Result` but the concrete
+// error contract is not yet decided (bodies are `todo!()`). Lift this allow
+// as implementations land and proper `# Errors` sections can be written.
+#![allow(clippy::missing_errors_doc)]
 
 pub mod action;
+pub mod apply;
+pub mod effect;
 pub mod error;
+pub mod helpers;
 
 pub use action::{
     Action, ActionBody, ActionMeta, ActionNature, AirdropAction, AmmAction, Bytes, Eip712Domain,
     LaunchpadAction, LendingAction, PerpAction, TokenAction,
 };
+pub use apply::{apply, Reducer};
