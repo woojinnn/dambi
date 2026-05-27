@@ -3,11 +3,13 @@
 //! state 도 action 도 LiveField 도 아닌, 호출자가 reducer 에게 알려주는 정황.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use crate::primitives::{ChainId, Time};
 
 /// RootRequest.requestKind 와 같은 의미.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub enum RequestKind {
     Transaction,
@@ -17,14 +19,16 @@ pub enum RequestKind {
 
 /// 평가 모드. Preview = 사용자에게 미리 보여주기 위한 시뮬,
 /// Commit = 서명 끝나고 실제 state 반영.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum SimulationMode {
     Preview,
     Commit,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct EvalContext {
     /// 어느 체인 기준으로 평가할지.
     pub chain: ChainId,

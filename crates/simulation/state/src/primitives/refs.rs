@@ -2,20 +2,25 @@
 //! 여기서는 join key 로만 사용.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use super::{address::Address, chain::ChainId, decimal::Weight};
 
 /// 프로토콜 식별자. name 은 Defillama 컨벤션 (예: "aave_v3", "uniswap_v3", "hyperliquid").
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ProtocolRef {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub version: Option<String>,
     /// off-chain venue (Hyperliquid/dYdX 등) 는 None.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub chain: Option<ChainId>,
     /// Morpho Blue 처럼 sub-market 이 있는 경우.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub market: Option<String>,
 }
 
@@ -41,26 +46,32 @@ impl ProtocolRef {
 }
 
 /// Pool 식별자. V2/V3 는 pool_addr, V4 는 pool_id, 오프체인은 pool_id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PoolRef {
     pub protocol: ProtocolRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "string")]
     pub pool_addr: Option<Address>,
     /// V4 PoolId bytes32 의 hex 또는 off-chain id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub pool_id: Option<String>,
     /// V3 의 feeTier 처럼 fee 가 pool key 의 일부인 경우. bps × 100 단위
     /// (예: 0.05% = 500).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub fee_tier: Option<Weight>,
 }
 
 /// 거래 venue (CEX-like, perp DEX 등).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct VenueRef {
     /// "hyperliquid", "gmx_v2", "dydx_v4", "uniswap_x" 등.
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub chain: Option<ChainId>,
 }
 
@@ -74,7 +85,8 @@ impl VenueRef {
 }
 
 /// Market 식별자. 보통 "ETH-USD", "BTC-PERP" 같은 symbol.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct MarketRef {
     pub symbol: String,
     pub venue: VenueRef,

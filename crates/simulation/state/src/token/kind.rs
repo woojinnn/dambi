@@ -1,12 +1,14 @@
 //! TokenKind — 의미 분류 (10 variants). spec §4.3.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use super::lp::{LpShape, ShareForm};
 use super::token_ref::TokenRef;
 use crate::primitives::{PoolRef, ProtocolRef, Time, U256};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum FiatCurrency {
     Usd,
@@ -16,7 +18,8 @@ pub enum FiatCurrency {
     Gbp,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PegTarget {
     /// 오프체인 법정화폐 (USDC → USD 등).
@@ -25,7 +28,8 @@ pub enum PegTarget {
     Token(TokenRef),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BaseCategory {
     Stable,
@@ -36,7 +40,8 @@ pub enum BaseCategory {
     Governance { protocol: ProtocolRef },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum PegKind {
     HardPeg,
@@ -44,14 +49,16 @@ pub enum PegKind {
     Rebasing,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum RebaseForm {
     Rebasing,
     Index,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum RateMode {
     Variable,
@@ -60,7 +67,8 @@ pub enum RateMode {
 }
 
 /// Stake / lock 자산이 언제 풀리는지.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UnlockSchedule {
     /// 단일 시각에 unlock (esGMX 등).
@@ -71,7 +79,8 @@ pub enum UnlockSchedule {
     Cooldown { cooldown_secs: u64 },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum NoteKind {
     /// 원금 토큰 (Pendle PT).
@@ -81,7 +90,8 @@ pub enum NoteKind {
 }
 
 /// 토큰의 의미 분류. 정책 패턴 매칭의 핵심.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TokenKind {
     /// 기초 자산 (USDC, USDT, WBTC, WETH, UNI 등).
@@ -129,6 +139,7 @@ pub enum TokenKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unlock: Option<UnlockSchedule>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[tsify(optional, type = "string")]
         voting_power: Option<U256>,
     },
 

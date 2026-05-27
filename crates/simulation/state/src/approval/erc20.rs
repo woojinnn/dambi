@@ -1,11 +1,14 @@
 //! ERC20 allowance — (owner, chain, token contract, spender) 의 spender 별 한도.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use crate::primitives::{Time, U256};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct AllowanceSpec {
+    #[tsify(type = "string")]
     pub amount: U256,
     /// 2^256-1 또는 sufficiently_high 한도. 정책의 빠른 검사용.
     pub is_unlimited: bool,

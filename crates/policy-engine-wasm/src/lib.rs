@@ -26,6 +26,8 @@ pub fn _start() {
     console_error_panic_hook::set_once();
 }
 
+mod sim_types;
+
 pub use declarative_exports::{
     declarative_install_json, declarative_lookup_json, declarative_plan_children_json,
     declarative_route_request_json,

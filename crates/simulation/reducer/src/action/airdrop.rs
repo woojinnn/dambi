@@ -1,6 +1,7 @@
 //! `AirdropAction` — `Claim`, `Delegate`. See spec §7.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use simulation_state::position::MerkleProof;
 use simulation_state::primitives::{Address, ChainId, ProtocolRef, Time, U256};
@@ -11,7 +12,8 @@ use super::Bytes;
 
 /// Airdrop-related actions: claiming a one-time distribution or delegating governance voting power.
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum AirdropAction {
     /// Claim eligibility for a one-time airdrop (Merkle, signature, or staking-based).
@@ -21,26 +23,31 @@ pub enum AirdropAction {
 }
 
 /// Claim eligibility right for a one-time airdrop (Merkle, signature, or staking-based).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ClaimAirdropAction {
     /// Source of the airdrop (e.g. Optimism, Arbitrum DAO, Jupiter).
     pub source: ProtocolRef,
     /// Distributor mechanism used to deliver the claim (Merkle, signature, or staking).
     pub claim_target: ClaimTarget,
     /// Address that will receive the claimed tokens.
+    #[tsify(type = "string")]
     pub recipient: Address,
     /// Required for a `MerkleDistributor` claim; supplies the inclusion proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub proof: Option<MerkleProof>,
     /// EIP-712 signature for signature-based claims (e.g. Optimism v2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "string")]
     pub sig: Option<Bytes>,
     /// Live-fetched inputs (claimability, dynamic amount, token, claim window).
     pub live_inputs: ClaimAirdropLiveInputs,
 }
 
 /// Distributor variant identifying how the airdrop is claimed on-chain.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClaimTarget {
     /// Merkle-tree distributor; the user supplies an inclusion `proof` and leaf `index`.
@@ -48,6 +55,7 @@ pub enum ClaimTarget {
         /// Chain hosting the distributor contract.
         chain: ChainId,
         /// Distributor contract address.
+        #[tsify(type = "string")]
         contract: Address,
         /// Leaf index in the Merkle tree corresponding to the recipient.
         index: u64,
@@ -57,6 +65,7 @@ pub enum ClaimTarget {
         /// Chain hosting the distributor contract.
         chain: ChainId,
         /// Distributor contract address.
+        #[tsify(type = "string")]
         contract: Address,
     },
     /// Staking-reward claim from protocols such as Lido, Pendle, or Convex.
@@ -64,16 +73,19 @@ pub enum ClaimTarget {
         /// Chain hosting the staking contract.
         chain: ChainId,
         /// Staking/rewards contract address.
+        #[tsify(type = "string")]
         contract: Address,
     },
 }
 
 /// Live-fetched inputs for a `ClaimAirdropAction` — checks claimability and resolves dynamic fields.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ClaimAirdropLiveInputs {
     /// Whether the claim is still available (not expired and not already claimed).
     pub is_still_claimable: LiveField<bool>,
     /// Actual claimable amount; some airdrops are dynamic (e.g. linear vesting).
+    #[tsify(type = "LiveField<string>")]
     pub actual_amount: LiveField<U256>,
     /// Token to be received; some distributions resolve the token dynamically.
     pub claim_token: LiveField<TokenRef>,
@@ -82,21 +94,26 @@ pub struct ClaimAirdropLiveInputs {
 }
 
 /// Delegate governance voting power of a governance token (e.g. UNI, COMP, ENS) to another address.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct DelegateGovernanceAction {
     /// Governance token whose voting power is being delegated (e.g. UNI, COMP, ENS).
     pub token: TokenRef,
     /// Address receiving the delegated voting power.
+    #[tsify(type = "string")]
     pub delegatee: Address,
     /// Live-fetched delegation state (current delegate, voting power).
     pub live_inputs: DelegateLiveInputs,
 }
 
 /// Live-fetched inputs for a `DelegateGovernanceAction` — current delegation state.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct DelegateLiveInputs {
     /// Address currently delegated to, if any.
+    #[tsify(type = "LiveField<string | null>")]
     pub current_delegate: LiveField<Option<Address>>,
     /// Current voting power held by the delegator.
+    #[tsify(type = "LiveField<string>")]
     pub voting_power: LiveField<U256>,
 }

@@ -11,3 +11,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 alloy-primitives = { workspace = true }
 hex = { workspace = true }
+# Tsify-next derives TypeScript types for every pub type. wasm-bindgen is
+# pulled in transitively because Tsify's #[tsify(into_wasm_abi, from_wasm_abi)]
+# emits trait impls that touch the wasm-bindgen serde glue.
+tsify-next = { workspace = true }
+wasm-bindgen = { workspace = true }

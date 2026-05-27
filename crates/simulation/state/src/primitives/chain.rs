@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 /// CAIP-2 형식의 체인 식별자. 예: "eip155:1", "eip155:42161", "solana:..." 등.
 ///
 /// EVM L1/L2 외 비-EVM 체인도 같은 타입으로 표현 가능.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(transparent)]
 pub struct ChainId(pub String);
 
@@ -48,7 +50,8 @@ impl std::fmt::Display for ChainId {
 }
 
 /// 한 체인의 sync 시점 블록 정보.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct BlockHeight {
     pub number: u64,
     pub time: u64,

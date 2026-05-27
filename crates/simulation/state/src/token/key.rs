@@ -5,6 +5,7 @@
 //! 별개 자산이므로 token_id 까지 포함한다.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use crate::primitives::{Address, ChainId, U256};
 
@@ -12,20 +13,27 @@ use crate::primitives::{Address, ChainId, U256};
 pub type TokenId = U256;
 
 /// 한 holding 의 fungibility 단위. 같은 key 안의 모든 unit 은 서로 교환 가능.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "standard", rename_all = "snake_case")]
 pub enum TokenKey {
     /// 체인의 native gas 자산 (ETH on Ethereum, SOL on Solana 등).
     Native { chain: ChainId },
 
     /// ERC20 — contract 단위가 곧 fungibility 단위.
-    Erc20 { chain: ChainId, address: Address },
+    Erc20 {
+        chain: ChainId,
+        #[tsify(type = "string")]
+        address: Address,
+    },
 
     /// ERC721 — (contract, token_id) 쌍이 고유.
     /// Uniswap V3/V4 LP NFT, Sudoswap pool LP 등.
     Erc721 {
         chain: ChainId,
+        #[tsify(type = "string")]
         contract: Address,
+        #[tsify(type = "string")]
         token_id: TokenId,
     },
 
@@ -33,7 +41,9 @@ pub enum TokenKey {
     /// 게임 아이템, Trader Joe LB bin token 등.
     Erc1155 {
         chain: ChainId,
+        #[tsify(type = "string")]
         contract: Address,
+        #[tsify(type = "string")]
         token_id: TokenId,
     },
 }

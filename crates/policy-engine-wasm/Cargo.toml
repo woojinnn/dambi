@@ -37,6 +37,13 @@ wasm-bindgen.workspace = true
 js-sys.workspace = true
 console_error_panic_hook.workspace = true
 thiserror.workspace = true
+# Simulation types are re-exported through a dummy wasm-bindgen fn so that
+# tsify-next emits `.d.ts` declarations for every Action / WalletState /
+# StateDelta. The simulation crates themselves are pure types; this is the
+# canonical TS bridge.
+simulation-state.workspace = true
+simulation-reducer.workspace = true
+tsify-next = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom.workspace = true

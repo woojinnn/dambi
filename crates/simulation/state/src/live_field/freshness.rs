@@ -1,10 +1,12 @@
 //! LiveField 의 신선도/품질 메타.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use crate::primitives::BasisPoints;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct Confidence {
     /// oracle deviation, venue precision 등. basis points.
     pub deviation_bp: BasisPoints,

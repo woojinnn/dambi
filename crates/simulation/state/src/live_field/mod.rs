@@ -5,6 +5,7 @@
 //! `source` 와 `ttl` 은 불변 (어디서 가져오는지의 명세).
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 pub mod freshness;
 pub mod source;
@@ -17,15 +18,18 @@ pub use source::{
 
 use crate::primitives::{Duration, Time};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct LiveField<T> {
     pub value: T,
     pub source: DataSource,
     pub synced_at: Time,
     /// 권장 갱신 주기. None = orchestrator 기본값.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "Duration")]
     pub ttl: Option<Duration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub confidence: Option<Confidence>,
 }
 

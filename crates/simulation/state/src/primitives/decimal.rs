@@ -7,11 +7,13 @@
 //! - `Price` 는 의미적 alias (값 자체는 Decimal).
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 pub use alloy_primitives::{I256 as SignedI256, U128, U256};
 
 /// 소수 표기를 안전하게 다루기 위한 newtype. 내부는 decimal-문자열.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(transparent)]
 pub struct Decimal(pub String);
 

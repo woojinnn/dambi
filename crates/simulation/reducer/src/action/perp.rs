@@ -1,6 +1,7 @@
 //! `PerpAction` — `OpenPosition`/`ClosePosition`/`AdjustMargin`/`PlaceLimitOrder`/`PlaceStopOrder`/`CancelOrder`/`ClaimFunding`. See spec §9.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use simulation_state::position::{MarginMode, PerpSide, PositionId};
 use simulation_state::primitives::{Address, ChainId, Decimal, MarketRef, Price, SignedI256, U256};
@@ -12,7 +13,8 @@ use simulation_state::LiveField;
 // ---------------------------------------------------------------------------
 
 /// Top-level perpetuals action dispatched by the reducer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum PerpAction {
     /// Open a new perpetual position.
@@ -44,7 +46,8 @@ pub enum PerpAction {
 // ---------------------------------------------------------------------------
 
 /// Perpetual trading venue (protocol + chain).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "name", rename_all = "snake_case")]
 pub enum PerpVenue {
     /// `Hyperliquid` L1 (off-chain orderbook).
@@ -92,6 +95,7 @@ pub enum PerpVenue {
         /// Chain on which the contract is deployed.
         chain: ChainId,
         /// Address of the perpetual contract.
+        #[tsify(type = "string")]
         contract: Address,
     },
 }
@@ -101,22 +105,26 @@ pub enum PerpVenue {
 // ---------------------------------------------------------------------------
 
 /// How the caller specifies position / order size.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SizeSpec {
     /// Base asset units (e.g. "1 ETH").
     BaseAmount {
         /// Amount denominated in the base asset.
+        #[tsify(type = "string")]
         amount: U256,
     },
     /// Quote (USD) units (e.g. "$5000 worth").
     QuoteAmount {
         /// Amount denominated in USD quote units.
+        #[tsify(type = "string")]
         amount_usd: U256,
     },
     /// Derived from collateral * leverage.
     LeverageImplied {
         /// Collateral committed to the position.
+        #[tsify(type = "string")]
         collateral: U256,
         /// Leverage multiplier applied to `collateral`.
         leverage: Decimal,
@@ -128,7 +136,8 @@ pub enum SizeSpec {
 // ---------------------------------------------------------------------------
 
 /// Order time-in-force policy.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TimeInForce {
     /// Good Till Cancelled.
@@ -147,7 +156,8 @@ pub enum TimeInForce {
 }
 
 /// Kind of stop / take-profit order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum StopOrderKind {
     /// Stop order that executes as a market order once triggered.
@@ -165,24 +175,32 @@ pub enum StopOrderKind {
 // ---------------------------------------------------------------------------
 
 /// Aggregate margin / collateral snapshot for a perp account.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PerpAccountState {
     /// Total collateral on the account, in USD.
+    #[tsify(type = "string")]
     pub total_collateral_usd: U256,
     /// Margin currently locked by open positions / orders, in USD.
+    #[tsify(type = "string")]
     pub used_margin_usd: U256,
     /// Margin available for new positions / orders, in USD.
+    #[tsify(type = "string")]
     pub free_margin_usd: U256,
     /// Existing exposure per market.
+    #[tsify(type = "Array<[MarketRef, string]>")]
     pub open_positions: Vec<(MarketRef, U256)>,
 }
 
 /// Live snapshot of a single perp position.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PerpPositionLive {
     /// Position size in base asset units.
+    #[tsify(type = "string")]
     pub size_base: U256,
     /// Notional value of the position in USD.
+    #[tsify(type = "string")]
     pub notional_usd: U256,
     /// Average entry `Price`.
     pub entry_price: Price,
@@ -190,8 +208,10 @@ pub struct PerpPositionLive {
     pub mark_price: Price,
     /// Liquidation `Price` if computable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub liq_price: Option<Price>,
     /// Unrealized `PnL` as a `SignedI256` (positive = profit).
+    #[tsify(type = "string")]
     pub unrealized_pnl: SignedI256,
 }
 
@@ -200,7 +220,8 @@ pub struct PerpPositionLive {
 // ---------------------------------------------------------------------------
 
 /// Open a new perpetual position at market price.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct OpenPerpAction {
     /// Perpetual venue (e.g. `Hyperliquid`, `GmxV2`).
     pub venue: PerpVenue,
@@ -213,6 +234,7 @@ pub struct OpenPerpAction {
     /// Leverage multiplier to use for this position.
     pub leverage: Decimal,
     /// Collateral token and amount posted.
+    #[tsify(type = "[TokenRef, string]")]
     pub collateral: (TokenRef, U256),
     /// Cross or isolated `MarginMode`.
     pub margin_mode: MarginMode,
@@ -225,7 +247,8 @@ pub struct OpenPerpAction {
 }
 
 /// Live inputs read at execution time for `OpenPerpAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct OpenPerpLiveInputs {
     /// Venue mark `Price` for the market.
     pub mark_price: LiveField<Price>,
@@ -234,6 +257,7 @@ pub struct OpenPerpLiveInputs {
     /// Current funding rate (e.g. 1h or 8h).
     pub funding_rate: LiveField<Decimal>,
     /// Remaining venue/market open-interest (OI) capacity.
+    #[tsify(type = "LiveField<string>")]
     pub available_oi: LiveField<U256>,
     /// Maximum leverage allowed by the venue/market.
     pub max_leverage: LiveField<Decimal>,
@@ -250,7 +274,8 @@ pub struct OpenPerpLiveInputs {
 }
 
 /// Close (fully or partially) an existing perpetual position.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ClosePerpAction {
     /// Perpetual venue hosting the position.
     pub venue: PerpVenue,
@@ -258,6 +283,7 @@ pub struct ClosePerpAction {
     pub position_id: PositionId,
     /// None = full close.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub size: Option<SizeSpec>,
     /// Maximum acceptable slippage in basis points.
     pub slippage_bp: u32,
@@ -266,20 +292,24 @@ pub struct ClosePerpAction {
 }
 
 /// Live inputs read at execution time for `ClosePerpAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ClosePerpLiveInputs {
     /// Current mark `Price` for the market.
     pub mark_price: LiveField<Price>,
     /// Unrealized `PnL` on the position at execution time.
+    #[tsify(type = "LiveField<string>")]
     pub unrealized_pnl_now: LiveField<SignedI256>,
     /// Funding accrued on the position so far.
+    #[tsify(type = "LiveField<string>")]
     pub funding_accrued: LiveField<SignedI256>,
     /// Fee in basis points to apply on close.
     pub fee_bp: LiveField<u32>,
 }
 
 /// Increase size of an existing perpetual position.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct IncreasePerpAction {
     /// Perpetual venue hosting the position.
     pub venue: PerpVenue,
@@ -289,6 +319,7 @@ pub struct IncreasePerpAction {
     pub size: SizeSpec,
     /// Optional extra collateral token and amount to post.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "[TokenRef, string]")]
     pub add_collateral: Option<(TokenRef, U256)>,
     /// Maximum acceptable slippage in basis points.
     pub slippage_bp: u32,
@@ -297,7 +328,8 @@ pub struct IncreasePerpAction {
 }
 
 /// Decrease size of an existing perpetual position without closing it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct DecreasePerpAction {
     /// Perpetual venue hosting the position.
     pub venue: PerpVenue,
@@ -316,29 +348,34 @@ pub struct DecreasePerpAction {
 // ---------------------------------------------------------------------------
 
 /// Add or withdraw collateral from an existing position.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct AdjustMarginAction {
     /// Perpetual venue hosting the position.
     pub venue: PerpVenue,
     /// Identifier of the position being adjusted (`PositionId`).
     pub position_id: PositionId,
     /// Positive = deposit, negative = withdraw.
+    #[tsify(type = "string")]
     pub delta: SignedI256,
     /// Live position / margin inputs.
     pub live_inputs: AdjustMarginLiveInputs,
 }
 
 /// Live inputs read at execution time for `AdjustMarginAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct AdjustMarginLiveInputs {
     /// Current `PerpPositionLive` state.
     pub position_state: LiveField<PerpPositionLive>,
     /// Free margin remaining after the adjustment is applied.
+    #[tsify(type = "LiveField<string>")]
     pub free_margin_after: LiveField<U256>,
 }
 
 /// Change the leverage setting for a market.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ChangeLeverageAction {
     /// Perpetual venue on which leverage is being changed.
     pub venue: PerpVenue,
@@ -351,7 +388,8 @@ pub struct ChangeLeverageAction {
 }
 
 /// Live inputs read at execution time for `ChangeLeverageAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ChangeLeverageLiveInputs {
     /// Maximum leverage allowed by the venue/market.
     pub max_leverage: LiveField<Decimal>,
@@ -362,7 +400,8 @@ pub struct ChangeLeverageLiveInputs {
 }
 
 /// Switch margin mode (`Cross` <-> `Isolated`) for a market.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ChangeMarginModeAction {
     /// Perpetual venue on which margin mode is being changed.
     pub venue: PerpVenue,
@@ -375,11 +414,13 @@ pub struct ChangeMarginModeAction {
 }
 
 /// Live inputs read at execution time for `ChangeMarginModeAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ChangeMarginModeLiveInputs {
     /// Positions affected by the margin-mode switch.
     pub affected_positions: LiveField<Vec<PositionId>>,
     /// Resulting margin reallocation per affected position.
+    #[tsify(type = "LiveField<Array<[PositionId, string]>>")]
     pub margin_reallocation: LiveField<Vec<(PositionId, U256)>>,
 }
 
@@ -388,7 +429,8 @@ pub struct ChangeMarginModeLiveInputs {
 // ---------------------------------------------------------------------------
 
 /// Place a limit order on the venue's orderbook.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PlaceLimitOrderAction {
     /// Perpetual venue receiving the order.
     pub venue: PerpVenue,
@@ -409,7 +451,8 @@ pub struct PlaceLimitOrderAction {
 }
 
 /// Live inputs read at execution time for `PlaceLimitOrderAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PlaceLimitLiveInputs {
     /// Current mark `Price` for the market.
     pub mark_price: LiveField<Price>,
@@ -422,7 +465,8 @@ pub struct PlaceLimitLiveInputs {
 }
 
 /// Place a stop / take-profit order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PlaceStopOrderAction {
     /// Perpetual venue receiving the order.
     pub venue: PerpVenue,
@@ -438,6 +482,7 @@ pub struct PlaceStopOrderAction {
     pub order_kind: StopOrderKind,
     /// Required only for `StopLimit` / `TakeProfitLimit`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub limit_price: Option<Price>,
     /// If `true`, the order may only reduce existing exposure.
     pub reduce_only: bool,
@@ -446,7 +491,8 @@ pub struct PlaceStopOrderAction {
 }
 
 /// Live inputs read at execution time for `PlaceStopOrderAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PlaceStopLiveInputs {
     /// Current mark `Price` for the market.
     pub mark_price: LiveField<Price>,
@@ -455,7 +501,8 @@ pub struct PlaceStopLiveInputs {
 }
 
 /// Cancel a previously placed open order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct CancelOrderAction {
     /// Perpetual venue holding the order.
     pub venue: PerpVenue,
@@ -464,20 +511,24 @@ pub struct CancelOrderAction {
 }
 
 /// Claim accrued funding payments from one or all markets.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ClaimFundingAction {
     /// Perpetual venue to claim funding from.
     pub venue: PerpVenue,
     /// None = all markets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub market: Option<MarketRef>,
     /// Live claimable-funding inputs.
     pub live_inputs: ClaimFundingLiveInputs,
 }
 
 /// Live inputs read at execution time for `ClaimFundingAction`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ClaimFundingLiveInputs {
     /// Claimable funding amounts grouped by `TokenRef`.
+    #[tsify(type = "LiveField<Array<[TokenRef, string]>>")]
     pub claimable: LiveField<Vec<(TokenRef, U256)>>,
 }

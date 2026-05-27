@@ -10,6 +10,7 @@
 //! The module layout mirrors the section structure of action-design.md §3–§9.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use simulation_state::primitives::{Address, ChainId, Time, U256};
 use simulation_state::{LiveField, NonceKey};
@@ -39,21 +40,26 @@ pub type Bytes = String;
 
 /// `EIP-712` domain separator info. Carried by `OffchainSig` natures to
 /// support signature verification, replay checks, and audit reproduction.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct Eip712Domain {
     /// Domain name (e.g. `"UniswapX"`, `"Permit2"`).
     pub name: String,
     /// Optional domain version string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub version: Option<String>,
     /// `EIP-155` chain id the domain is bound to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub chain_id: Option<u64>,
     /// Address of the contract that will verify the signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "string")]
     pub verifying_contract: Option<Address>,
     /// `EIP-712` salt field — rarely used but part of the spec.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "string")]
     pub salt: Option<Bytes>,
 }
 
@@ -62,7 +68,8 @@ pub struct Eip712Domain {
 // ---------------------------------------------------------------------------
 
 /// A single user-signed (or about-to-be-signed) intent.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct Action {
     /// When / who / how the action was submitted.
     pub meta: ActionMeta,
@@ -72,11 +79,13 @@ pub struct Action {
 
 /// Submission metadata attached to every `Action`: timing, submitter, and
 /// the submission "nature" (`OnchainTx` vs `OffchainSig`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ActionMeta {
     /// Wall-clock time at which the `Action` is submitted to the simulator.
     pub submitted_at: Time,
     /// Submitter `Address` — usually the wallet owner.
+    #[tsify(type = "string")]
     pub submitter: Address,
     /// Submission shape: on-chain transaction or off-chain signature.
     pub nature: ActionNature,
@@ -84,7 +93,8 @@ pub struct ActionMeta {
 
 /// How the `Action` enters the system — either a broadcast transaction or
 /// an `EIP-712` signature awaiting a matcher / resolver.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActionNature {
     /// Transaction signing -> broadcast -> immediate on-chain attempt.
@@ -94,12 +104,15 @@ pub enum ActionNature {
         /// Sequential transaction nonce of `submitter`.
         nonce: u64,
         /// Gas limit declared by the transaction.
+        #[tsify(type = "string")]
         gas_limit: U256,
         /// Gas price as a `LiveField`. Under `EIP-1559` both `maxFee` and
         /// `maxPriority` may be needed; Phase 1 keeps a single value and
         /// can be extended into a fee struct in a follow-up spec.
+        #[tsify(type = "LiveField<string>")]
         gas_price: LiveField<U256>,
         /// Native value attached to the call (`msg.value`).
+        #[tsify(type = "string")]
         value: U256,
     },
 
@@ -112,6 +125,7 @@ pub enum ActionNature {
         deadline: Time,
         /// Optional collision / replay key (e.g. `Permit2` nonce).
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[tsify(optional)]
         nonce_key: Option<NonceKey>,
     },
 }
@@ -119,7 +133,8 @@ pub enum ActionNature {
 /// Domain-specific body plus cross-cutting variants (`Multicall`, `Unknown`).
 #[allow(clippy::large_enum_variant)]
 #[allow(clippy::module_name_repetitions)]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "domain", rename_all = "snake_case")]
 pub enum ActionBody {
     /// Token-domain action (transfer, approve, permit, ...).
@@ -138,18 +153,24 @@ pub enum ActionBody {
     /// Batched multi-call (e.g. `Uniswap Universal Router`, `Aave`).
     Multicall {
         /// Inner `ActionBody` entries executed atomically as a batch.
+        /// `Vec<Self>` recurses; the explicit type override emits `ActionBody[]`
+        /// in `.d.ts` (tsify defaults to `Self[]`, which is invalid in TS).
+        #[tsify(type = "ActionBody[]")]
         actions: Vec<Self>,
     },
 
     /// Unidentified call. Policy default: warn / deny.
     Unknown {
         /// Destination contract `Address`.
+        #[tsify(type = "string")]
         target: Address,
         /// Chain on which the call is being made.
         chain: ChainId,
         /// Raw call data (hex-encoded).
+        #[tsify(type = "string")]
         calldata: Bytes,
         /// Native value attached to the call (`msg.value`).
+        #[tsify(type = "string")]
         value: U256,
     },
 }
@@ -481,5 +502,347 @@ mod smoke {
         let json = serde_json::to_string(&swap).unwrap();
         let back: amm::AmmAction = serde_json::from_str(&json).unwrap();
         assert_eq!(swap, back);
+    }
+
+    // PDF §11 fixture #5: Uniswap V3 USDC → WETH single hop on Arbitrum.
+    // OnchainTx, single path, single hop, no aggregator. Live route source = pool slot0.
+    #[allow(clippy::too_many_lines)]
+    #[test]
+    fn uniswap_v3_arbitrum_single_hop_round_trip() {
+        let chain = ChainId::arbitrum();
+        // Arbitrum native USDC (Circle official).
+        let usdc = simulation_state::token::TokenRef {
+            key: TokenKey::Erc20 {
+                chain: chain.clone(),
+                address: Address::from_str("0xaf88d065e77c8cc2239327c5edb3a432268e5831").unwrap(),
+            },
+        };
+        // Arbitrum WETH (canonical bridge wrapper).
+        let weth = simulation_state::token::TokenRef {
+            key: TokenKey::Erc20 {
+                chain: chain.clone(),
+                address: Address::from_str("0x82af49447d8a07e3bd95bd0d56f35241523fbab1").unwrap(),
+            },
+        };
+        // Placeholder pool address — PDF §11 uses `0xPoolUsdcEth_005`.
+        let pool = Address::from_str("0xc6962004f452be9203591991d15f6b388e09e8d0").unwrap();
+
+        let v3 = amm::AmmVenue::UniswapV3 {
+            chain: chain.clone(),
+            pool,
+            fee_tier_bp: 500,
+        };
+
+        let pool_state = amm::PoolState::Concentrated {
+            sqrt_price_x96: U256::from(1u64),
+            tick: 0,
+            liquidity: simulation_state::primitives::U128::from(0u64),
+            ticks: vec![],
+        };
+
+        let pool_source = DataSource::OnchainView {
+            chain: chain.clone(),
+            contract: pool,
+            function: "slot0()".into(),
+            decoder_id: "uniswap_v3_slot0".into(),
+        };
+
+        let route = amm::SwapRoute {
+            paths: vec![amm::RoutePath {
+                share_bp: 10000,
+                hops: vec![amm::RouteHop {
+                    token_in: usdc.clone(),
+                    token_out: weth.clone(),
+                    venue: v3.clone(),
+                    pool_state,
+                    effective_fee_bp: 5,
+                    estimated_out: U256::from(305_000_000_000_000_000u64),
+                }],
+                estimated_out: U256::from(305_000_000_000_000_000u64),
+            }],
+            aggregator: None,
+        };
+
+        let swap = amm::AmmAction::Swap(amm::SwapAction {
+            venue: v3,
+            params: amm::SwapParams {
+                token_in: usdc,
+                token_out: weth,
+                direction: amm::SwapDirection::ExactInput {
+                    amount_in: U256::from(1_000_000_000u64),
+                    min_amount_out: U256::from(300_000_000_000_000_000u64),
+                },
+                recipient: user(),
+                slippage_bp: 50,
+            },
+            live_inputs: amm::SwapLiveInputs {
+                route: LiveField::new(route, pool_source.clone(), now())
+                    .with_ttl(Duration::from_secs(12)),
+                expected_amount_out: LiveField::new(
+                    U256::from(305_000_000_000_000_000u64),
+                    pool_source.clone(),
+                    now(),
+                ),
+                price_impact_bp: LiveField::new(12u32, pool_source, now()),
+                gas_estimate: LiveField::new(
+                    U256::from(180_000u64),
+                    DataSource::OracleFeed {
+                        provider: OracleProvider::Pyth,
+                        feed_id: "gas/arbitrum".into(),
+                    },
+                    now(),
+                ),
+            },
+        });
+
+        let action = Action {
+            meta: ActionMeta {
+                submitted_at: now(),
+                submitter: user(),
+                nature: ActionNature::OnchainTx {
+                    chain,
+                    nonce: 42,
+                    gas_limit: U256::from(200_000u64),
+                    gas_price: LiveField::new(
+                        U256::from(100_000_000u64),
+                        DataSource::OracleFeed {
+                            provider: OracleProvider::Pyth,
+                            feed_id: "ETH/USD".into(),
+                        },
+                        now(),
+                    ),
+                    value: U256::ZERO,
+                },
+            },
+            body: ActionBody::Amm(swap),
+        };
+
+        let json = serde_json::to_string(&action).unwrap();
+        let back: Action = serde_json::from_str(&json).unwrap();
+        assert_eq!(action, back);
+    }
+
+    // PDF §11 fixture #6: Aave V3 borrow USDC on Optimism. OnchainTx, Variable rate mode,
+    // health_factor 2.4 from `getUserAccountData`.
+    #[allow(clippy::too_many_lines)]
+    #[test]
+    fn aave_v3_borrow_optimism_round_trip() {
+        let chain = ChainId::new("eip155:10");
+        // Optimism native USDC (Circle official).
+        let usdc = simulation_state::token::TokenRef {
+            key: TokenKey::Erc20 {
+                chain: chain.clone(),
+                address: Address::from_str("0x0b2c639c533813f4aa9d7837caf62653d097ff85").unwrap(),
+            },
+        };
+        // Aave V3 Pool — placeholder (PDF §11 uses `0xAavePool`).
+        let pool = Address::from_str("0x794a61358d6845594f94dc1db02a252b5b4814ad").unwrap();
+
+        let reserve_source = DataSource::OnchainView {
+            chain: chain.clone(),
+            contract: pool,
+            function: "getReserveData(address)".into(),
+            decoder_id: "aave_v3_reserve_data".into(),
+        };
+        let user_source = DataSource::OnchainView {
+            chain: chain.clone(),
+            contract: pool,
+            function: "getUserAccountData(address)".into(),
+            decoder_id: "aave_v3_user_account_data".into(),
+        };
+
+        let borrow = lending::LendingAction::Borrow(lending::BorrowAction {
+            venue: lending::LendingVenue::AaveV3 {
+                chain: chain.clone(),
+                pool,
+                market_id: None,
+            },
+            asset: usdc,
+            amount: U256::from(500_000_000u64),
+            rate_mode: simulation_state::token::RateMode::Variable,
+            on_behalf_of: None,
+            live_inputs: lending::BorrowLiveInputs {
+                reserve_state: LiveField::new(
+                    lending::ReserveState {
+                        total_supply: U256::from(50_000_000_000_000u64),
+                        total_borrow: U256::from(30_000_000_000_000u64),
+                        utilization_bp: 6000,
+                        supply_cap: None,
+                        borrow_cap: None,
+                        ltv_bp: 7500,
+                        liquidation_threshold_bp: 8500,
+                        liquidation_bonus_bp: 500,
+                        reserve_factor_bp: 1000,
+                        is_frozen: false,
+                        is_paused: false,
+                    },
+                    reserve_source.clone(),
+                    now(),
+                ),
+                user_state_before: LiveField::new(
+                    lending::UserLendingState {
+                        health_factor: simulation_state::primitives::Decimal::new("2.4"),
+                        total_collat_usd: U256::from(10_000u64),
+                        total_debt_usd: U256::from(4_000u64),
+                        available_borrow_usd: U256::from(3_500u64),
+                    },
+                    user_source,
+                    now(),
+                ),
+                asset_price_usd: LiveField::new(
+                    simulation_state::primitives::Decimal::new("1.0"),
+                    DataSource::OracleFeed {
+                        provider: OracleProvider::Chainlink,
+                        feed_id: "USDC/USD".into(),
+                    },
+                    now(),
+                ),
+                current_borrow_rate: LiveField::new(
+                    simulation_state::primitives::Decimal::new("0.045"),
+                    reserve_source.clone(),
+                    now(),
+                ),
+                available_liquidity: LiveField::new(
+                    U256::from(12_000_000_000_000u64),
+                    reserve_source,
+                    now(),
+                ),
+            },
+        });
+
+        let action = Action {
+            meta: ActionMeta {
+                submitted_at: now(),
+                submitter: user(),
+                nature: ActionNature::OnchainTx {
+                    chain,
+                    nonce: 13,
+                    gas_limit: U256::from(350_000u64),
+                    gas_price: LiveField::new(
+                        U256::from(1_000_000u64),
+                        DataSource::OracleFeed {
+                            provider: OracleProvider::Pyth,
+                            feed_id: "gas/optimism".into(),
+                        },
+                        now(),
+                    ),
+                    value: U256::ZERO,
+                },
+            },
+            body: ActionBody::Lending(borrow),
+        };
+
+        let json = serde_json::to_string(&action).unwrap();
+        let back: Action = serde_json::from_str(&json).unwrap();
+        assert_eq!(action, back);
+    }
+
+    // PDF §11 fixture #7: Hyperliquid open long ETH-USD 5x. OffchainSig (Hyperliquid is an
+    // off-chain orderbook), domain.name = "Hyperliquid", chain identifier = "hl-mainnet"
+    // (non-EIP-155 CAIP-2).
+    #[test]
+    fn hyperliquid_open_long_eth_5x_round_trip() {
+        let chain = ChainId::new("hl-mainnet");
+        // Placeholder collateral USDC — Hyperliquid USDC bridge token, PDF §11 doesn't pin
+        // an address. Real Hyperliquid USDC bridges via Arbitrum; left placeholder here
+        // because the fixture verifies serde round-trip, not on-chain identity.
+        let usdc = simulation_state::token::TokenRef {
+            key: TokenKey::Erc20 {
+                chain: chain.clone(),
+                address: Address::from_str("0x000000000000000000000000000000000000beef").unwrap(),
+            },
+        };
+
+        let market = MarketRef {
+            symbol: "ETH-USD".into(),
+            venue: VenueRef::new("hyperliquid"),
+        };
+
+        let venue_source = |parser_id: &str| DataSource::VenueApi {
+            endpoint: "https://api.hyperliquid.xyz/info".into(),
+            parser_id: parser_id.into(),
+            auth: None,
+        };
+
+        let open = perp::PerpAction::OpenPosition(perp::OpenPerpAction {
+            venue: perp::PerpVenue::Hyperliquid { chain },
+            market,
+            side: simulation_state::position::PerpSide::Long,
+            size: perp::SizeSpec::BaseAmount {
+                amount: U256::from(2_000_000_000_000_000_000u64),
+            },
+            leverage: simulation_state::primitives::Decimal::new("5.0"),
+            collateral: (usdc, U256::from(1_500_000_000u64)),
+            margin_mode: simulation_state::position::MarginMode::Cross,
+            slippage_bp: 30,
+            reduce_only: false,
+            live_inputs: perp::OpenPerpLiveInputs {
+                mark_price: LiveField::new(
+                    simulation_state::primitives::Price::new("3750.0"),
+                    venue_source("hl_mids"),
+                    now(),
+                ),
+                oracle_price: LiveField::new(
+                    simulation_state::primitives::Price::new("3751.2"),
+                    venue_source("hl_oracle"),
+                    now(),
+                ),
+                funding_rate: LiveField::new(
+                    simulation_state::primitives::Decimal::new("0.0001"),
+                    venue_source("hl_funding"),
+                    now(),
+                ),
+                available_oi: LiveField::new(
+                    U256::from(1_000_000_000_000_000u64),
+                    venue_source("hl_oi"),
+                    now(),
+                ),
+                max_leverage: LiveField::new(
+                    simulation_state::primitives::Decimal::new("20.0"),
+                    venue_source("hl_market_meta"),
+                    now(),
+                ),
+                initial_margin_bp: LiveField::new(500u32, venue_source("hl_market_meta"), now()),
+                maintenance_bp: LiveField::new(250u32, venue_source("hl_market_meta"), now()),
+                fee_taker_bp: LiveField::new(5u32, venue_source("hl_fees"), now()),
+                fee_maker_bp: LiveField::new(1u32, venue_source("hl_fees"), now()),
+                user_account_state: LiveField::new(
+                    perp::PerpAccountState {
+                        total_collateral_usd: U256::from(1_500u64),
+                        used_margin_usd: U256::ZERO,
+                        free_margin_usd: U256::from(1_500u64),
+                        open_positions: vec![],
+                    },
+                    venue_source("hl_account"),
+                    now(),
+                ),
+            },
+        });
+
+        let action = Action {
+            meta: ActionMeta {
+                submitted_at: now(),
+                submitter: user(),
+                nature: ActionNature::OffchainSig {
+                    domain: Eip712Domain {
+                        name: "Hyperliquid".into(),
+                        version: Some("1".into()),
+                        chain_id: None,
+                        verifying_contract: None,
+                        salt: None,
+                    },
+                    deadline: Time::from_unix(1_738_000_060),
+                    nonce_key: Some(simulation_state::NonceKey::OrderHash {
+                        hash: "0xfeed00000000000000000000000000000000000000000000000000000000ffff"
+                            .into(),
+                    }),
+                },
+            },
+            body: ActionBody::Perp(open),
+        };
+
+        let json = serde_json::to_string(&action).unwrap();
+        let back: Action = serde_json::from_str(&json).unwrap();
+        assert_eq!(action, back);
     }
 }

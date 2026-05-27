@@ -1,8 +1,10 @@
 //! 시간 표기 — unix epoch 초.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(transparent)]
 pub struct Time(pub u64);
 
@@ -35,7 +37,8 @@ impl From<u64> for Time {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(transparent)]
 pub struct Duration(pub u64);
 
