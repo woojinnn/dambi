@@ -167,6 +167,34 @@ pub fn set_nft_approve(
     Ok(())
 }
 
+/// Revoke a `Permit2` on-chain allowance entry (e.g. `Permit2.lockdown`).
+///
+/// Emits `TokenChange::ApprovalRevoke { scope: Permit2 }`. The owning
+/// `apply_delta` routes the revoke to `approvals.permit2`.
+///
+/// `token.key` must be `TokenKey::Erc20` — `Permit2` allowances are always
+/// keyed by the underlying ERC20.
+pub fn revoke_permit2_allowance(
+    _state: &WalletState,
+    delta: &mut StateDelta,
+    token: &TokenRef,
+    spender: Address,
+) -> ReducerResult<()> {
+    if !matches!(token.key, TokenKey::Erc20 { .. }) {
+        return Err(ReducerError::Invariant(
+            "revoke_permit2_allowance on non-Erc20 token".into(),
+        ));
+    }
+
+    delta.token_changes.push(TokenChange::ApprovalRevoke {
+        key: token.key.clone(),
+        spender: Spender::from(spender),
+        scope: ApprovalScope::Permit2,
+    });
+
+    Ok(())
+}
+
 /// Upsert a `Permit2` on-chain allowance entry (`Permit2.approve`).
 ///
 /// `token.key` must be `TokenKey::Erc20` — `Permit2` allowances are always
@@ -535,6 +563,40 @@ mod tests {
             now(),
         )
         .unwrap_err();
+        assert!(matches!(err, ReducerError::Invariant(_)));
+        assert!(delta.token_changes.is_empty());
+    }
+
+    // ---------- revoke_permit2_allowance ----------
+
+    #[test]
+    fn revoke_permit2_allowance_emits_permit2_scoped_revoke() {
+        let state = empty_state();
+        let mut delta = StateDelta::new();
+
+        revoke_permit2_allowance(&state, &mut delta, &usdc_ref(), spender()).unwrap();
+
+        assert_eq!(delta.token_changes.len(), 1);
+        let TokenChange::ApprovalRevoke {
+            key,
+            spender: s,
+            scope,
+        } = &delta.token_changes[0]
+        else {
+            panic!("expected ApprovalRevoke");
+        };
+        assert_eq!(*key, usdc_ref().key);
+        assert_eq!(*s, spender());
+        assert_eq!(*scope, ApprovalScope::Permit2);
+    }
+
+    #[test]
+    fn revoke_permit2_allowance_rejects_non_erc20() {
+        let state = empty_state();
+        let mut delta = StateDelta::new();
+
+        let bad = TokenRef { key: nft_key(1) };
+        let err = revoke_permit2_allowance(&state, &mut delta, &bad, spender()).unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(_)));
         assert!(delta.token_changes.is_empty());
     }

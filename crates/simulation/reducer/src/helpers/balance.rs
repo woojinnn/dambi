@@ -119,6 +119,54 @@ pub fn transfer(
     debit(state, delta, key, amount)
 }
 
+/// Outgoing NFT-style transfer from this wallet to `recipient`.
+///
+/// Routes by `TokenKey` standard:
+/// * `Erc1155` — fungible per-id semantics; `amount` must be `Some(_)` and is
+///   subtracted from the balance via [`debit`].
+/// * `Erc721`  — non-fungible; `amount` is ignored. The wallet's `Owned`
+///   holding is dropped via a synthetic `BalanceDelta { delta: -1 }`. The
+///   `apply_delta` step recognises a signed `-1` on an `Owned` ERC721 key as
+///   an ownership transfer (Phase 2 follow-up; today `apply_balance_delta`
+///   on a non-fungible holding errors, so reducer-side this helper emits the
+///   change for audit and downstream extension is tracked separately).
+/// * `Native` / `Erc20` — invariant violation (use [`transfer`] for those).
+pub fn transfer_nft(
+    state: &WalletState,
+    delta: &mut StateDelta,
+    key: &TokenKey,
+    recipient: Address,
+    amount: Option<U256>,
+) -> ReducerResult<()> {
+    let _ = recipient;
+
+    match key {
+        TokenKey::Erc1155 { .. } => {
+            let amt = amount.ok_or_else(|| {
+                ReducerError::Invariant(format!(
+                    "transfer_nft on ERC1155 {key:?} requires an explicit amount"
+                ))
+            })?;
+            debit(state, delta, key, amt)
+        }
+        TokenKey::Erc721 { .. } => {
+            // Verify the wallet owns the NFT before emitting the change.
+            let _holding = state
+                .tokens
+                .get(key)
+                .ok_or_else(|| ReducerError::TokenNotFound(key.clone()))?;
+            delta.token_changes.push(TokenChange::BalanceDelta {
+                key: key.clone(),
+                delta: -SignedI256::ONE,
+            });
+            Ok(())
+        }
+        TokenKey::Native { .. } | TokenKey::Erc20 { .. } => Err(ReducerError::Invariant(format!(
+            "transfer_nft requires Erc721 or Erc1155 key, got {key:?}"
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,6 +428,123 @@ mod tests {
         let recipient =
             Address::from_str("0x000000000000000000000000000000000000dead").unwrap_or_default();
         let err = transfer(&state, &mut delta, &key, recipient, U256::from(11u64)).unwrap_err();
+        assert!(matches!(err, ReducerError::Invariant(_)));
+    }
+
+    // ------------------------------------------------------------
+    // transfer_nft
+    // ------------------------------------------------------------
+
+    fn erc1155_key(id: u64) -> TokenKey {
+        TokenKey::Erc1155 {
+            chain: ChainId::ethereum_mainnet(),
+            contract: Address::from_str("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d").unwrap(),
+            token_id: U256::from(id),
+        }
+    }
+
+    fn erc721_key(id: u64) -> TokenKey {
+        TokenKey::Erc721 {
+            chain: ChainId::ethereum_mainnet(),
+            contract: Address::from_str("0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d").unwrap(),
+            token_id: U256::from(id),
+        }
+    }
+
+    /// `transfer_nft` on ERC1155 routes to `debit` (fungible per-id).
+    #[test]
+    fn transfer_nft_erc1155_emits_negative_balance_delta() {
+        let key = erc1155_key(11);
+        let mut state = empty_state();
+        state.tokens.insert(
+            key.clone(),
+            make_fungible_holding(key.clone(), 10),
+        );
+        let mut delta = StateDelta::new();
+        let recipient =
+            Address::from_str("0x000000000000000000000000000000000000beef").unwrap_or_default();
+
+        transfer_nft(&state, &mut delta, &key, recipient, Some(U256::from(3u64))).unwrap();
+
+        assert_eq!(delta.token_changes.len(), 1);
+        match &delta.token_changes[0] {
+            TokenChange::BalanceDelta { key: k, delta: d } => {
+                assert_eq!(*k, key);
+                assert_eq!(*d, -SignedI256::try_from(3i64).unwrap());
+            }
+            other => panic!("expected BalanceDelta, got {other:?}"),
+        }
+    }
+
+    /// `transfer_nft` on ERC1155 without amount is an invariant error.
+    #[test]
+    fn transfer_nft_erc1155_without_amount_errors() {
+        let key = erc1155_key(11);
+        let mut state = empty_state();
+        state.tokens.insert(
+            key.clone(),
+            make_fungible_holding(key.clone(), 10),
+        );
+        let mut delta = StateDelta::new();
+        let err = transfer_nft(
+            &state,
+            &mut delta,
+            &key,
+            Address::from_str("0x000000000000000000000000000000000000beef").unwrap_or_default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ReducerError::Invariant(_)));
+    }
+
+    /// `transfer_nft` on ERC721 emits a -1 `BalanceDelta` and verifies ownership.
+    #[test]
+    fn transfer_nft_erc721_emits_minus_one_balance_delta() {
+        let key = erc721_key(42);
+        let mut state = empty_state();
+        state.tokens.insert(key.clone(), make_owned_holding(key.clone()));
+        let mut delta = StateDelta::new();
+        let recipient =
+            Address::from_str("0x000000000000000000000000000000000000beef").unwrap_or_default();
+
+        transfer_nft(&state, &mut delta, &key, recipient, None).unwrap();
+
+        assert_eq!(delta.token_changes.len(), 1);
+        match &delta.token_changes[0] {
+            TokenChange::BalanceDelta { key: k, delta: d } => {
+                assert_eq!(*k, key);
+                assert_eq!(*d, -SignedI256::ONE);
+            }
+            other => panic!("expected BalanceDelta, got {other:?}"),
+        }
+    }
+
+    /// `transfer_nft` on ERC721 without the wallet owning the NFT errors.
+    #[test]
+    fn transfer_nft_erc721_missing_holding_errors() {
+        let key = erc721_key(42);
+        let state = empty_state();
+        let mut delta = StateDelta::new();
+        let err = transfer_nft(
+            &state,
+            &mut delta,
+            &key,
+            Address::from_str("0x000000000000000000000000000000000000beef").unwrap_or_default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ReducerError::TokenNotFound(_)));
+    }
+
+    /// `transfer_nft` rejects ERC20 / Native keys with an invariant error.
+    #[test]
+    fn transfer_nft_rejects_non_nft_keys() {
+        let state = empty_state();
+        let mut delta = StateDelta::new();
+        let erc20 = mainnet_usdc_key();
+        let recipient =
+            Address::from_str("0x000000000000000000000000000000000000beef").unwrap_or_default();
+        let err = transfer_nft(&state, &mut delta, &erc20, recipient, None).unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(_)));
     }
 }
