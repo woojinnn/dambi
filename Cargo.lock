@@ -3097,6 +3097,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "simulation-db"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "simulation-state",
+ "thiserror",
+]
+
+[[package]]
+name = "simulation-reducer"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "simulation-state",
+ "thiserror",
+]
+
+[[package]]
+name = "simulation-state"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "simulation-sync"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "simulation-db",
+ "simulation-state",
+ "thiserror",
+]
+
+[[package]]
 name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
