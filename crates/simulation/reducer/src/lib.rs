@@ -1,24 +1,26 @@
-//! `simulation-reducer` — Action 을 받아 WalletState 를 갱신하는 pure function.
+//! `simulation-reducer` — pure function that applies an `Action` to a `WalletState`.
 //!
-//! 외부 IO 없음 (DB / RPC / 시계 안 부름). 입력은 `state` + `action` + `eval`,
-//! 출력은 `(newState, StateDelta)`. wasm 빌드 가능.
-//!
-//! 구조:
-//! * [`apply`] / [`dispatch`]  — 진입점
-//! * [`helpers`]               — debit/credit/upsert_position 같은 변경 헬퍼
-//! * [`strategy`]              — protocol 별로 갈아끼우는 trait (SwapStrategy 등)
-//! * [`reducers`]              — action × category × protocol 별 구현
-//!
-//! 시작 권장 순서:
-//! 1. `reducers/misc/approve.rs`          (가장 단순 — 패턴 잡기)
-//! 2. `reducers/dex/swap.rs` + UniswapV3   (strategy 패턴 확정)
-//! 3. `reducers/lending/supply.rs` + AaveV3 (token + position + DerivedFrom 다층 케이스)
+//! No external IO (no DB, no RPC, no clock). Inputs: `state` + `action` + `eval`.
+//! Output: `(newState, StateDelta)`. wasm-buildable.
 
+#![deny(unsafe_code)]
+#![deny(unused_must_use)]
+#![deny(rustdoc::bare_urls)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![warn(missing_docs)]
+#![warn(unreachable_pub)]
+#![warn(rust_2018_idioms)]
+#![warn(rust_2021_compatibility)]
+#![warn(missing_debug_implementations)]
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![warn(clippy::dbg_macro)]
+
+pub mod action;
 pub mod error;
 
-// 단계적 활성화. 각 모듈은 비어있는 상태로 시작.
-// pub mod apply;
-// pub mod dispatch;
-// pub mod helpers;
-// pub mod strategy;
-// pub mod reducers;
+pub use action::{
+    Action, ActionBody, ActionMeta, ActionNature, AirdropAction, AmmAction, Bytes, Eip712Domain,
+    LaunchpadAction, LendingAction, PerpAction, TokenAction,
+};
