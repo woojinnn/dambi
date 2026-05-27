@@ -114,6 +114,15 @@ impl Orchestrator {
         Ok(report)
     }
 
+    pub(crate) async fn process_batch_public(
+        &self,
+        batch: FetchBatch,
+        state: &mut WalletState,
+        now: Time,
+    ) -> Result<(usize, usize), SyncError> {
+        self.process_batch(batch, state, now).await
+    }
+
     async fn process_batch(
         &self,
         batch: FetchBatch,

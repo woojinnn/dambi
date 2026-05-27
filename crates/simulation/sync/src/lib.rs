@@ -14,6 +14,7 @@
 //!
 //! reducer 와 달리 외부 IO 가 있으므로 native only — wasm 빌드 안 됨.
 
+pub mod action_scope;
 pub mod batcher;
 pub mod calc;
 pub mod error;
@@ -23,6 +24,7 @@ pub mod scheduler;
 pub mod topo;
 pub mod walker;
 
+pub use action_scope::{ActionScope, walk_scope};
 pub use batcher::{BatchKind, FetchBatch, batch_by_source};
 pub use calc::{CalcContext, CalcFn, CalcRegistry};
 pub use error::{SyncError, SyncResult};
