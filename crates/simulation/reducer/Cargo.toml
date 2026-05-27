@@ -13,3 +13,5 @@ thiserror = { workspace = true }
 # Tsify-next derives TS bindings for every pub Action / ActionBody type.
 tsify-next = { workspace = true }
 wasm-bindgen = { workspace = true }
+# Fixed-point decimal arithmetic for `helpers/derived.rs` (HF / LTV / PnL).
+rust_decimal = { workspace = true }
