@@ -14,18 +14,20 @@
 //!
 //! reducer 와 달리 외부 IO 가 있으므로 native only — wasm 빌드 안 됨.
 
+pub mod batcher;
 pub mod error;
 pub mod fetchers;
+pub mod walker;
 
+pub use batcher::{BatchKind, FetchBatch, batch_by_source};
 pub use error::{SyncError, SyncResult};
 pub use fetchers::rpc::{
     BlockTag, EthCallRequest, ProviderName, RpcConfig, RpcProvider, RpcRouter,
 };
+pub use walker::{FieldLocation, StaleField, WalkStats, walk_stale};
 
 // 단계적 활성화:
 // pub mod orchestrator;   // sync_wallet, sync_global, refresh_for_action
-// pub mod walker;         // state walk → stale LiveField 수집
-// pub mod batcher;        // 같은 DataSource 묶기
 // pub mod topo;           // DerivedFrom 위상정렬
 // pub mod scheduler;      // ttl 기반 주기적 refresh
 // pub mod calc;           // DerivedFrom 계산 함수 (HF, PnL, liq_price)
