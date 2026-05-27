@@ -17,8 +17,8 @@ use simulation_state::{Confidence, LiveField, PositionKind, Price, Time, WalletS
 
 use crate::batcher::{BatchKind, FetchBatch, batch_by_source};
 use crate::error::SyncError;
-use crate::fetchers::OnchainViewFetcher;
 use crate::fetchers::onchain::OnchainCall;
+use crate::fetchers::{ChainlinkFetcher, OnchainViewFetcher};
 use crate::walker::{FieldLocation, WalkStats, walk_stale};
 
 /// 한 wallet refresh 결과 요약 — 디버깅 / 메트릭용.
@@ -33,8 +33,8 @@ pub struct RefreshReport {
 
 pub struct Orchestrator {
     onchain: OnchainViewFetcher,
+    chainlink: Option<ChainlinkFetcher>,
     // 향후 추가:
-    // oracle:   OracleFetcher,
     // registry: RegistryFetcher,
     // venue:    VenueRegistry,
     // calc:     CalcRegistry,
@@ -42,11 +42,24 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     pub fn new(onchain: OnchainViewFetcher) -> Self {
-        Self { onchain }
+        Self {
+            onchain,
+            chainlink: None,
+        }
+    }
+
+    pub fn with_chainlink(mut self, chainlink: ChainlinkFetcher) -> Self {
+        self.chainlink = Some(chainlink);
+        self
     }
 
     pub fn from_rpc_router(router: Arc<crate::RpcRouter>) -> Self {
-        Self::new(OnchainViewFetcher::new(router))
+        let onchain = OnchainViewFetcher::new(router.clone());
+        let chainlink = ChainlinkFetcher::new(router);
+        Self {
+            onchain,
+            chainlink: Some(chainlink),
+        }
     }
 
     /// `state` 안의 모든 stale LiveField 를 `now` 기준으로 갱신.
@@ -116,9 +129,33 @@ impl Orchestrator {
                 Ok((ok, fail))
             }
 
-            // Phase 5/6/7/8 에서 점진적 추가
-            BatchKind::Oracle
-            | BatchKind::Venue { .. }
+            BatchKind::Oracle => {
+                let chainlink = match self.chainlink.as_ref() {
+                    Some(c) => c,
+                    None => return Ok((0, batch.items.len())),
+                };
+
+                let mut ok = 0;
+                let mut fail = 0;
+                for item in batch.items {
+                    match chainlink.fetch_price(&item.source).await {
+                        Ok(price) => {
+                            apply_value(
+                                state,
+                                &item.location,
+                                serde_json::Value::String(price.0),
+                                now,
+                            );
+                            ok += 1;
+                        }
+                        Err(_) => fail += 1,
+                    }
+                }
+                Ok((ok, fail))
+            }
+
+            // Phase 6/7/8 에서 점진적 추가
+            BatchKind::Venue { .. }
             | BatchKind::Registry { .. }
             | BatchKind::Derived
             | BatchKind::UserSupplied => Ok((0, 0)),
