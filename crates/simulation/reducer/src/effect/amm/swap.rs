@@ -26,7 +26,7 @@
 //! requires inverse hop math (`getAmountIn`) which we defer with the rest of
 //! the V3 cases.
 
-use simulation_state::primitives::U256;
+use simulation_state::primitives::{Address, U256};
 use simulation_state::{EvalContext, StateDelta, WalletState};
 
 use crate::action::amm::{AmmVenue, SwapAction, SwapDirection};
@@ -34,7 +34,7 @@ use crate::apply::Reducer;
 use crate::error::{ReducerError, ReducerResult};
 use crate::helpers;
 
-use super::{uniswap_v2, uniswap_v3};
+use super::{uniswap_v2, uniswap_v3, uniswap_v4};
 
 impl Reducer for SwapAction {
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
@@ -74,12 +74,24 @@ impl Reducer for SwapAction {
                     AmmVenue::UniswapV3 { .. } => {
                         uniswap_v3::quote_swap_hop(state, ctx, self, &hop.pool_state, hop_in)?
                     }
-                    // Phase 2F — V4 singleton + hooks.
-                    AmmVenue::UniswapV4 { .. } => {
-                        return Err(ReducerError::UnsupportedProtocol {
-                            action: "swap".into(),
-                            protocol: "uniswap_v4".into(),
-                        });
+                    // Phase 2F — V4 singleton. Hooks dispatch is deferred:
+                    // pools with a non-zero `hooks` address may override the
+                    // swap curve / fees / accounting via `beforeSwap` /
+                    // `afterSwap` callbacks, which we cannot soundly
+                    // simulate without a known-hook registry. We reject
+                    // those upfront with a distinct protocol tag so policy
+                    // / observability can target them. Hooks-free pools
+                    // share the V3 active-tick closed form behind the
+                    // singleton, so we delegate to `uniswap_v4::quote_swap_hop`
+                    // which in turn reuses the V3 helper.
+                    AmmVenue::UniswapV4 { hooks, .. } => {
+                        if *hooks != Address::ZERO {
+                            return Err(ReducerError::UnsupportedProtocol {
+                                action: "swap".into(),
+                                protocol: "uniswap_v4_with_hooks".into(),
+                            });
+                        }
+                        uniswap_v4::quote_swap_hop(state, ctx, self, &hop.pool_state, hop_in)?
                     }
                     // Phase 2 follow-up batches — Curve, Balancer, Trader Joe,
                     // Maverick. Surface each one with a distinct protocol tag
@@ -712,6 +724,111 @@ mod tests {
         );
         let err = swap.apply(&state, &ctx()).unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("slippage")));
+    }
+
+    /// Phase 2F V4 happy path — a single V4 hop on a hooks-free pool
+    /// (`hooks == Address::ZERO`). The math is identical to V3: a
+    /// `price = 1` pool (`sqrt_price_x96 = Q96 = 2^96`) with
+    /// `liquidity = 1_000_000` swapping `1_000` in gives
+    /// `L*a/(L+a) = 1e9 / 1_001_000 = 999`. Verifies outer-only accounting
+    /// (USDC debit, WETH credit) and the magnitude matches the V3 fixture
+    /// exactly — proving the V4 path delegates to the shared helper.
+    #[test]
+    fn v4_single_hop_happy_path_hooks_zero() {
+        let state = state_with_pair(U256::from(1_000_000u64), U256::ZERO);
+        let v4 = AmmVenue::UniswapV4 {
+            chain: ChainId::ethereum_mainnet(),
+            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001"
+                .into(),
+            pool_manager: Address::from_str("0x000000000004444c5dc75cb358380d2e3de08a90")
+                .unwrap(),
+            hooks: Address::ZERO,
+        };
+        let q96 = U256::from(1u64) << 96;
+        let pool_state = PoolState::Concentrated {
+            sqrt_price_x96: q96,
+            tick: 0,
+            liquidity: simulation_state::primitives::U128::from(1_000_000u64),
+            ticks: vec![],
+        };
+        let swap = exact_in_swap(
+            U256::from(1_000u64),
+            U256::from(900u64),
+            usdc_ref(),
+            weth_ref(),
+            v4,
+            pool_state,
+        );
+        let delta = swap.apply(&state, &ctx()).unwrap();
+        assert_eq!(delta.token_changes.len(), 2);
+        let mut saw_debit = false;
+        let mut saw_credit = false;
+        for tc in &delta.token_changes {
+            let TokenChange::BalanceDelta { key, delta: d } = tc else {
+                panic!("expected BalanceDelta, got {tc:?}");
+            };
+            if key == &usdc_ref().key {
+                assert!(d.is_negative());
+                assert_eq!(d.unsigned_abs().to_string(), "1000");
+                saw_debit = true;
+            } else if key == &weth_ref().key {
+                assert!(d.is_positive());
+                assert_eq!(d.unsigned_abs().to_string(), "999");
+                saw_credit = true;
+            } else {
+                panic!("unexpected key {key:?}");
+            }
+        }
+        assert!(saw_debit && saw_credit);
+    }
+
+    /// Phase 2F V4 with a non-zero `hooks` address must surface as
+    /// `UnsupportedProtocol { protocol: "uniswap_v4_with_hooks" }` *before*
+    /// any pool math runs. Phase 2F defers arbitrary-hook dispatch —
+    /// hooks can override `beforeSwap` / `afterSwap` curves and fees, so
+    /// the reducer cannot soundly simulate them without a known-hook
+    /// registry. A pool snapshot with zero liquidity would *otherwise*
+    /// surface as `Invariant`, so this fixture proves the hooks short-
+    /// circuit fires first.
+    #[test]
+    fn v4_hop_with_hooks_returns_unsupported_protocol() {
+        let state = state_with_pair(U256::from(1_000_000u64), U256::ZERO);
+        let v4_with_hooks = AmmVenue::UniswapV4 {
+            chain: ChainId::ethereum_mainnet(),
+            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001"
+                .into(),
+            pool_manager: Address::from_str("0x000000000004444c5dc75cb358380d2e3de08a90")
+                .unwrap(),
+            // Non-zero hooks address — deliberate, must trigger the
+            // unsupported-protocol short-circuit regardless of pool state.
+            hooks: Address::from([0x42u8; 20]),
+        };
+        // Pool state would otherwise trigger an Invariant (zero liquidity);
+        // if the short-circuit *didn't* fire, this test would fail with the
+        // wrong error type, catching a regression where the hooks branch
+        // is bypassed.
+        let pool_state = PoolState::Concentrated {
+            sqrt_price_x96: U256::from(1u64),
+            tick: 0,
+            liquidity: simulation_state::primitives::U128::from(0u64),
+            ticks: vec![],
+        };
+        let swap = exact_in_swap(
+            U256::from(1_000u64),
+            U256::ZERO,
+            usdc_ref(),
+            weth_ref(),
+            v4_with_hooks,
+            pool_state,
+        );
+        let err = swap.apply(&state, &ctx()).unwrap_err();
+        match err {
+            ReducerError::UnsupportedProtocol { protocol, action } => {
+                assert_eq!(protocol, "uniswap_v4_with_hooks");
+                assert_eq!(action, "swap");
+            }
+            other => panic!("expected UnsupportedProtocol, got {other:?}"),
+        }
     }
 
     /// Curve hop also surfaces as `UnsupportedProtocol` with the appropriate

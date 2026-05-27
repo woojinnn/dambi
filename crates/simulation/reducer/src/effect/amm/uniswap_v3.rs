@@ -71,9 +71,115 @@ use crate::action::amm::{PoolState, SwapAction};
 use crate::error::{ReducerError, ReducerResult};
 
 /// `Q96 = 2^96`. The fixed-point scale used by `sqrt_price_x96` in
-/// Uniswap V3.
+/// Uniswap V3 / V4.
 fn q96() -> U256 {
     U256::from(1u64) << 96
+}
+
+/// Shared concentrated-liquidity single-hop math used by both
+/// `uniswap_v3::quote_swap_hop` and `uniswap_v4::quote_swap_hop`.
+///
+/// Implements the Phase 2E **simplified active-tick closed form** in the
+/// `zeroForOne` direction (see `uniswap_v3` module docs for the algebra,
+/// direction assumption and fee-accounting caveat). V4 with `hooks == 0`
+/// reuses the same math identically — the singleton `PoolManager` invokes
+/// the same `SwapMath::computeSwapStep` library on its V4-pool snapshot,
+/// and Phase 2F defers tick traversal alongside V3.
+///
+/// `protocol_tag` is woven into the `Invariant` message so callers can keep
+/// their per-protocol error trails (the V3 + V4 unit tests assert on
+/// substrings like `"zero active liquidity"` and `"Concentrated"`).
+///
+/// Errors with `Invariant` on:
+///   * `liquidity == 0` (empty pool — division by zero downstream),
+///   * `sqrt_price_x96 == 0` (degenerate price — multiplication trivially
+///     zero, but also signals an invalid pool snapshot),
+///   * any `U256` overflow in the closed-form arithmetic,
+///   * `PoolState` variant other than `Concentrated`.
+pub(super) fn concentrated_swap_math(
+    pool_state: &PoolState,
+    amount_in: U256,
+    protocol_tag: &str,
+) -> ReducerResult<U256> {
+    match pool_state {
+        PoolState::Concentrated {
+            sqrt_price_x96,
+            tick: _,
+            liquidity,
+            ticks: _,
+        } => {
+            if liquidity.is_zero() {
+                return Err(ReducerError::Invariant(format!(
+                    "{protocol_tag} quote: zero active liquidity"
+                )));
+            }
+            if sqrt_price_x96.is_zero() {
+                return Err(ReducerError::Invariant(format!(
+                    "{protocol_tag} quote: zero sqrt_price_x96"
+                )));
+            }
+            // `liquidity` is `U128`; widen to `U256` for the closed-form math.
+            let l: U256 = U256::from(*liquidity);
+            let sp = *sqrt_price_x96;
+            let q96 = q96();
+
+            // Short-circuit: `amount_in == 0` ⇒ `amount_out == 0`. Skipping
+            // the closed-form here avoids a denominator of `L * Q96` that
+            // would still produce a zero numerator (`sp - sp_next == 0`),
+            // but the explicit branch keeps the intent obvious and matches
+            // the V2 helper's behaviour.
+            if amount_in.is_zero() {
+                return Ok(U256::ZERO);
+            }
+
+            // sqrt_price_next = L * sp * Q96 / (L * Q96 + amount_in * sp)
+            //
+            // Numerator and denominator are split into checked multiplications
+            // so an overflow surfaces as an `Invariant` rather than a panic.
+            let num_l_sp = l.checked_mul(sp).ok_or_else(|| {
+                ReducerError::Invariant(format!("{protocol_tag} quote: L*sp overflow"))
+            })?;
+            let numerator = num_l_sp.checked_mul(q96).ok_or_else(|| {
+                ReducerError::Invariant(format!("{protocol_tag} quote: L*sp*Q96 overflow"))
+            })?;
+
+            let denom_l_q96 = l.checked_mul(q96).ok_or_else(|| {
+                ReducerError::Invariant(format!("{protocol_tag} quote: L*Q96 overflow"))
+            })?;
+            let denom_in_sp = amount_in.checked_mul(sp).ok_or_else(|| {
+                ReducerError::Invariant(format!("{protocol_tag} quote: amount_in*sp overflow"))
+            })?;
+            let denominator = denom_l_q96.checked_add(denom_in_sp).ok_or_else(|| {
+                ReducerError::Invariant(format!("{protocol_tag} quote: denominator overflow"))
+            })?;
+
+            // Guarded above: `liquidity` and `sqrt_price_x96` are both
+            // non-zero, so `denom_l_q96 > 0` and the sum is too.
+            let sqrt_price_next = numerator / denominator;
+
+            // amount_out = L * (sp - sqrt_price_next) / Q96
+            //
+            // The `zeroForOne` closed form guarantees `sqrt_price_next <= sp`
+            // when `amount_in > 0` (price falls as token0 enters), so the
+            // checked subtraction is structurally safe; we still
+            // `checked_sub` so a numerical-rounding case surfaces cleanly.
+            let sp_drop = sp.checked_sub(sqrt_price_next).ok_or_else(|| {
+                ReducerError::Invariant(format!(
+                    "{protocol_tag} quote: sqrt_price_next > sp (direction violation)"
+                ))
+            })?;
+            let out_num = l.checked_mul(sp_drop).ok_or_else(|| {
+                ReducerError::Invariant(format!(
+                    "{protocol_tag} quote: L*(sp-sp_next) overflow"
+                ))
+            })?;
+            // `q96` is non-zero, division is safe.
+            Ok(out_num / q96)
+        }
+        _ => Err(ReducerError::Invariant(format!(
+            "non-Concentrated pool_state for {protocol_tag} swap"
+        ))),
+    }
 }
 
 /// Quote a single hop on a Uniswap V3 pool given its `Concentrated`
@@ -96,83 +202,7 @@ pub(super) fn quote_swap_hop(
     pool_state: &PoolState,
     amount_in: U256,
 ) -> ReducerResult<U256> {
-    match pool_state {
-        PoolState::Concentrated {
-            sqrt_price_x96,
-            tick: _,
-            liquidity,
-            ticks: _,
-        } => {
-            if liquidity.is_zero() {
-                return Err(ReducerError::Invariant(
-                    "uniswap_v3 quote: zero active liquidity".into(),
-                ));
-            }
-            if sqrt_price_x96.is_zero() {
-                return Err(ReducerError::Invariant(
-                    "uniswap_v3 quote: zero sqrt_price_x96".into(),
-                ));
-            }
-            // `liquidity` is `U128`; widen to `U256` for the closed-form math.
-            let l: U256 = U256::from(*liquidity);
-            let sp = *sqrt_price_x96;
-            let q96 = q96();
-
-            // Short-circuit: `amount_in == 0` ⇒ `amount_out == 0`. Skipping
-            // the closed-form here avoids a denominator of `L * Q96` that
-            // would still produce a zero numerator (`sp - sp_next == 0`),
-            // but the explicit branch keeps the intent obvious and matches
-            // the V2 helper's behaviour.
-            if amount_in.is_zero() {
-                return Ok(U256::ZERO);
-            }
-
-            // sqrt_price_next = L * sp * Q96 / (L * Q96 + amount_in * sp)
-            //
-            // Numerator and denominator are split into checked multiplications
-            // so an overflow surfaces as an `Invariant` rather than a panic.
-            let num_l_sp = l.checked_mul(sp).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v3 quote: L*sp overflow".into())
-            })?;
-            let numerator = num_l_sp.checked_mul(q96).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v3 quote: L*sp*Q96 overflow".into())
-            })?;
-
-            let denom_l_q96 = l.checked_mul(q96).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v3 quote: L*Q96 overflow".into())
-            })?;
-            let denom_in_sp = amount_in.checked_mul(sp).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v3 quote: amount_in*sp overflow".into())
-            })?;
-            let denominator = denom_l_q96.checked_add(denom_in_sp).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v3 quote: denominator overflow".into())
-            })?;
-
-            // Guarded above: `liquidity` and `sqrt_price_x96` are both
-            // non-zero, so `denom_l_q96 > 0` and the sum is too.
-            let sqrt_price_next = numerator / denominator;
-
-            // amount_out = L * (sp - sqrt_price_next) / Q96
-            //
-            // The `zeroForOne` closed form guarantees `sqrt_price_next <= sp`
-            // when `amount_in > 0` (price falls as token0 enters), so the
-            // checked subtraction is structurally safe; we still
-            // `checked_sub` so a numerical-rounding case surfaces cleanly.
-            let sp_drop = sp.checked_sub(sqrt_price_next).ok_or_else(|| {
-                ReducerError::Invariant(
-                    "uniswap_v3 quote: sqrt_price_next > sp (direction violation)".into(),
-                )
-            })?;
-            let out_num = l.checked_mul(sp_drop).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v3 quote: L*(sp-sp_next) overflow".into())
-            })?;
-            // `q96` is non-zero, division is safe.
-            Ok(out_num / q96)
-        }
-        _ => Err(ReducerError::Invariant(
-            "non-Concentrated pool_state for uniswap_v3 swap".into(),
-        )),
-    }
+    concentrated_swap_math(pool_state, amount_in, "uniswap_v3")
 }
 
 // ===========================================================================
