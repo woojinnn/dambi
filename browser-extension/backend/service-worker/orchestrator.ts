@@ -202,51 +202,54 @@ async function decideInner(
     );
     return { ok, verdict };
   } catch (err) {
-    const errInfo =
-      err instanceof Error
+    // Plan §M10 (2026-05-28) — v1 manifest cutover 후 evaluateWithPolicyRpc
+    // 의 routing 이 항상 no_adapter throw → `route_failed` 는 정상 outcome
+    // (engineErrorVerdict 가 default pass 로 downgrade). silent — 사용자
+    // console 의 v1-time noise (`[Scopeball] decideMessage threw {kind:
+    // route_failed}`) 제거 통과 기준 §M10 #10. 다른 EngineError 는
+    // console.error 유지 (real fault detection).
+    const isRouteFailedKnown =
+      err instanceof EngineError && err.kind === "route_failed";
+    if (!isRouteFailedKnown) {
+      const errInfo =
+        err instanceof Error
+          ? {
+              name: err.name,
+              message: err.message,
+              kind:
+                err instanceof EngineError
+                  ? err.kind
+                  : (err as { kind?: string }).kind,
+              stack: err.stack,
+            }
+          : { raw: String(err) };
+      // Surface `to`/`chainId`/`selector` so unexpected error logs let us
+      // tell at a glance whether the cause was a new UR deployment,
+      // an off-chain settlement contract, or a different chain entirely.
+      const txCtx = isTransaction(message)
         ? {
-            name: err.name,
-            message: err.message,
-            kind:
-              err instanceof EngineError
-                ? err.kind
-                : (err as { kind?: string }).kind,
-            stack: err.stack,
+            to: message.data.transaction.to,
+            chainId: message.data.chainId,
+            selector:
+              typeof message.data.transaction.data === "string"
+                ? message.data.transaction.data.slice(0, 10)
+                : undefined,
+            dataLen:
+              typeof message.data.transaction.data === "string"
+                ? message.data.transaction.data.length
+                : undefined,
+            data: message.data.transaction.data,
           }
-        : { raw: String(err) };
-    // route_failed is a known no-op outcome (we pass it through in
-    // engineErrorVerdict), so log at warn to avoid noisy red counters
-    // on chrome://extensions. Other errors stay at error.
-    const logAt =
-      err instanceof EngineError && err.kind === "route_failed"
-        ? console.warn
-        : console.error;
-    // Surface `to`/`chainId`/`selector` so `route_failed` logs let us
-    // tell at a glance whether the unknown router was a new UR deployment,
-    // an off-chain settlement contract, or a different chain entirely.
-    const txCtx = isTransaction(message)
-      ? {
-          to: message.data.transaction.to,
-          chainId: message.data.chainId,
-          selector:
-            typeof message.data.transaction.data === "string"
-              ? message.data.transaction.data.slice(0, 10)
-              : undefined,
-          dataLen:
-            typeof message.data.transaction.data === "string"
-              ? message.data.transaction.data.length
-              : undefined,
-          data: message.data.transaction.data,
-        }
-      : undefined;
-    logAt("[Scopeball] decideMessage threw", {
-      requestId: message.requestId,
-      hostname: message.data.hostname,
-      type: pending.type,
-      ...(txCtx ?? {}),
-      ...errInfo,
-      err,
-    });
+        : undefined;
+      console.error("[Scopeball] decideMessage threw", {
+        requestId: message.requestId,
+        hostname: message.data.hostname,
+        type: pending.type,
+        ...(txCtx ?? {}),
+        ...errInfo,
+        err,
+      });
+    }
     const verdict = engineErrorVerdict(err);
     await appendAudit(message, pending.type, verdict);
     // `engineErrorVerdict` may downgrade some failures (e.g. route_failed)
