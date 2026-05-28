@@ -69,6 +69,12 @@ console_error_panic_hook = "0.1"
 wasm-bindgen-test = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 
+# Sync crate deps (native only)
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+toml = "0.8"
+async-trait = "0.1"
+
 # TS .d.ts generation — derives `Tsify` on every pub type that crosses the
 # wasm boundary. `wasm-bindgen` is required at build time even when only the
 # type bindings are emitted (Tsify uses wasm-bindgen's serde glue).

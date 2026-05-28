@@ -27,14 +27,38 @@
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(clippy::dbg_macro)]
+// Phase 1~11 의 본문은 동작 우선 — 후속 패스에서 # Errors / # Panics doc 보강.
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_docs_in_private_items)]
+#![allow(missing_docs)]
 
+pub mod action_scope;
+pub mod action_walk;
+pub mod batcher;
+pub mod calc;
 pub mod error;
+pub mod fetchers;
+pub mod orchestrator;
+pub mod primitives_sync;
+pub mod resolver;
+pub mod scheduler;
+pub mod subscription;
+pub mod topo;
+pub mod walker;
 
-// 단계적 활성화:
-// pub mod orchestrator;   // sync_wallet, sync_global, refresh_for_action
-// pub mod walker;         // state walk → stale LiveField 수집
-// pub mod batcher;        // 같은 DataSource 묶기
-// pub mod topo;           // DerivedFrom 위상정렬
-// pub mod scheduler;      // ttl 기반 주기적 refresh
-// pub mod fetchers;       // OnchainView / OracleFeed / VenueApi / DerivedFrom
-// pub mod calc;           // DerivedFrom 계산 함수 (HF, PnL, liq_price)
+pub use action_scope::{ActionScope, walk_scope};
+pub use action_walk::{apply_value_to_action, walk_action_stale};
+pub use batcher::{BatchKind, FetchBatch, batch_by_source};
+pub use calc::{CalcContext, CalcFn, CalcRegistry};
+pub use error::{SyncError, SyncResult};
+pub use fetchers::rpc::{
+    BlockTag, EthCallRequest, ProviderName, RpcConfig, RpcProvider, RpcRouter,
+};
+pub use orchestrator::{Orchestrator, RefreshReport};
+pub use primitives_sync::PrimitivesReport;
+pub use resolver::{GlobalValues, resolve_field, resolve_inputs};
+pub use scheduler::{Scheduler, SchedulerConfig, TickReport, WalletStore};
+pub use subscription::{BlockSubscription, NewBlock, PollingBlockSubscription};
+pub use topo::{DepNode, topological_sort};
+pub use walker::{ActionSlot, FieldLocation, StaleField, WalkStats, walk_stale};
