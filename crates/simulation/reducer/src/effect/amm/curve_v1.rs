@@ -70,7 +70,12 @@ const MAX_ITER: u32 = 255;
 ///   * `balances` empty (n=0),
 ///   * any `U256` overflow during the iteration,
 ///   * non-convergence after `MAX_ITER` rounds.
-fn compute_d(balances: &[U256], a: u32) -> ReducerResult<U256> {
+///
+/// Shared with `balancer_v2` / `balancer_v3` so the StableSwap-family pool
+/// types in those venues can reuse the same Vyper-equivalent solver instead
+/// of duplicating it (Balancer `StablePool.sol::_calcOutGivenIn` calls the
+/// same StableSwap invariant under the hood).
+pub(super) fn compute_d(balances: &[U256], a: u32) -> ReducerResult<U256> {
     let n_u32 = u32::try_from(balances.len())
         .map_err(|_| ReducerError::Invariant("curve_v1 D: too many coins".into()))?;
     if n_u32 == 0 {
@@ -184,7 +189,9 @@ fn compute_d(balances: &[U256], a: u32) -> ReducerResult<U256> {
 ///   b  = S' + D / Ann
 ///   y² + (b - D)·y - c = 0           ⇒    y = (y² + c) / (2y + b - D)
 /// ```
-fn compute_y(
+///
+/// Shared with `balancer_v2` / `balancer_v3` — see `compute_d` doc note.
+pub(super) fn compute_y(
     balances: &[U256],
     i: usize,
     j: usize,
