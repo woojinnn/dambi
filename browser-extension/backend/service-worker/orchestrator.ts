@@ -457,6 +457,17 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
                     : v3Outcome.cause,
               }),
       });
+      // Plan §M5/M8 (2026-05-28 사용자 e2e 확인) — DevTools 의 lazy object
+      // expansion 없이 actions[] 의 정확한 ActionBody JSON 을 string 으로
+      // 직접 출력. narrow scope "ActionEnvelope[] devtool console 에서
+      // 정확하게 나오는지 확인" 의 직접 검증용. JSON.stringify(null, 2) 로
+      // pretty-print — console 에서 expand 클릭 없이 readable.
+      if (v3Outcome.kind === "hit") {
+        console.info(
+          "[Scopeball] declarative-route-v3 actions JSON",
+          JSON.stringify(v3Outcome.value.actions, null, 2),
+        );
+      }
     } catch (err) {
       console.warn("[Scopeball] declarative-route-v3 threw", {
         requestId: message.requestId,
