@@ -1,0 +1,28 @@
+// Lending::DisableCollateral — unmark an asset as collateral.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/set_collateral.rs`
+// (`SetCollateralAction` + `SetCollateralLiveInputs`). Both
+// `LendingAction::EnableCollateral` and `LendingAction::DisableCollateral`
+// wrap the same `SetCollateralAction` body; the toggle direction is
+// distinguished by the action tag itself.
+
+namespace Lending {
+  type DisableCollateralContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Asset whose collateral flag is being disabled.
+    asset: Core::TokenRef,
+    // Live inputs (flattened from LiveField<T>).
+    reserveState: ReserveState,
+    userStateBefore: UserLendingState,
+    custom?: DisableCollateralCustomContext,
+  };
+
+  type DisableCollateralCustomContext = {};
+
+  action "DisableCollateral" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: DisableCollateralContext,
+  };
+}

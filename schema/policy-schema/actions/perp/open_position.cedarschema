@@ -1,0 +1,54 @@
+// Perp::OpenPosition — open a new perpetual position at market price.
+//
+// Rust source: `crates/simulation/reducer/src/action/perp/open.rs`
+// (`OpenPerpAction` + `OpenPerpLiveInputs`).
+//
+// Notes:
+//   - `PerpVenue` is a discriminated record (Rust enum, serde tag = "name",
+//     rename_all = snake_case). Field set varies by name; `contract` is
+//     present only for "generic".
+//   - `MarketRef` follows the simulation_state shape: `{ symbol, venue }`
+//     where `venue: VenueRef { name, chain? }`. This is NOT the same as
+//     `PerpVenue` (which is the per-action venue discriminator).
+//   - `SizeSpec`, `TimeInForce` are also discriminated records.
+//   - `LiveField<T>` is unwrapped inline at the policy layer.
+//   - 3-layer amount: collateralAmount (raw U256 hex), collateralAmountNano
+//     (host-populated Long), collateralAmountUsd (host-populated decimal).
+
+namespace Perp {
+  type OpenPositionContext = {
+    meta: Core::ActionMeta,
+    venue: PerpVenue,
+    market: MarketRef,
+    side: String,                       // PerpSide: "long" | "short"
+    size: SizeSpec,
+    leverage: String,                   // Decimal as string
+    collateralToken: Core::TokenRef,
+    collateralAmount: String,           // raw U256 hex
+    collateralAmountNano?: Long,        // host-populated
+    collateralAmountUsd?: decimal,      // host-populated
+    marginMode: String,                 // MarginMode: "cross" | "isolated"
+    slippageBp: Long,
+    reduceOnly: Bool,
+    // OpenPerpLiveInputs flattened.
+    markPrice: String,
+    oraclePrice: String,
+    fundingRate: String,
+    availableOi: String,
+    maxLeverage: String,
+    initialMarginBp: Long,
+    maintenanceBp: Long,
+    feeTakerBp: Long,
+    feeMakerBp: Long,
+    userAccountState: PerpAccountState,
+    custom?: OpenPositionCustomContext,
+  };
+
+  type OpenPositionCustomContext = {};
+
+  action "OpenPosition" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: OpenPositionContext,
+  };
+}

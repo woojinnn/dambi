@@ -1,0 +1,36 @@
+// Amm::CancelIntentOrder — cancel a previously signed intent order (UniswapX /
+// CowSwap / 1inch Fusion / Bebop). Some venues require an EIP-712 signature
+// authorizing the cancellation; for others, the cancel is an on-chain
+// transaction that needs no extra signature.
+//
+// Policies on cancellation are usually permissive but may require:
+//   - venue allowlist (parallel to SignIntentOrder)
+//   - rate-limit on cancels (anti-griefing)
+//   - that orderHash corresponds to an order this wallet actually signed
+//     (cross-checked off-policy by the host)
+
+namespace Amm {
+  type CancelIntentOrderContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Intent venue the order was signed against.
+    venue: IntentVenue,
+    // 32-byte hex order hash being cancelled.
+    orderHash: String,
+    // EIP-712 signature authorizing the cancellation (0x-hex bytes). Present
+    // only for venues that require a separate cancel-sig (e.g. CowSwap
+    // off-chain cancel).
+    signature?: String,
+    // Manifest-extensible slot.
+    custom?: CancelIntentOrderCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type CancelIntentOrderCustomContext = {};
+
+  action "CancelIntentOrder" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: CancelIntentOrderContext,
+  };
+}

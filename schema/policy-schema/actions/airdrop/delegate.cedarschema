@@ -1,0 +1,42 @@
+// Airdrop::Delegate — delegate governance voting power of a governance token.
+//
+// Rust source: `crates/simulation/reducer/src/action/airdrop/delegate.rs`
+// (`DelegateGovernanceAction` + `DelegateLiveInputs`).
+//
+// Models the ERC20Votes/Comp-style `delegate(address)` call used by tokens
+// like UNI, COMP, and ENS. Voting power equal to the delegator's balance is
+// transferred from `currentDelegate` (if any) to `delegatee`.
+//
+// `LiveField<T>` wrappers are inlined to `T`; `Option<Address>` for the
+// current delegate maps to an optional Cedar field (absent ≡ no current
+// delegate, i.e. self-delegation has never been set).
+
+namespace Airdrop {
+  type DelegateContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Governance token whose voting power is being delegated.
+    token: Core::TokenRef,
+    // Address receiving the delegated voting power.
+    delegatee: String,
+    // ----- Live inputs (flattened from `DelegateLiveInputs`) -----
+    // Address currently delegated to. Absent means no current delegate has
+    // ever been recorded (most ERC20Votes tokens initialise to zero/self).
+    currentDelegate?: String,
+    // Current voting power held by the delegator (U256 hex). For balance-
+    // backed tokens this is the delegator's token balance.
+    votingPower: String,
+    // Manifest-extensible slot.
+    custom?: DelegateCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type DelegateCustomContext = {};
+
+  action "Delegate" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: DelegateContext,
+  };
+}

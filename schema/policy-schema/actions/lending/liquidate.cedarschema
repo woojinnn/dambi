@@ -1,21 +1,48 @@
-type LiquidateContext = {
-  market?: Pool,
-  borrower: String,
-  collateralAsset?: AssetRef,
-  debtAsset: AssetRef,
-  debtToCover?: AmountConstraint,
-  seizedCollateralAmount?: AmountConstraint,
-  liquidationKind: String,
-  liquidateMode?: String,
-  recipient?: String,
-  receiveAToken?: Bool,
-  custom?: LiquidateCustomContext,
-};
+// Lending::Liquidate — liquidate an unhealthy position.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/liquidate.rs`
+// (`LiquidateAction` + `LiquidateLiveInputs`). Typically not invoked from a
+// user wallet, but included for completeness. `receiveAToken` is the Aave V3
+// option to receive seized collateral as aToken instead of underlying.
+//
+// `debtToCover` follows the same 3-layer projection as `amount`:
+//   - `debtToCover`     : String  — raw U256 hex
+//   - `debtToCoverNano` : Long?   — token-native nano
+//   - `debtToCoverUsd`  : decimal? — host-populated fiat estimate.
 
-type LiquidateCustomContext = {};
+namespace Lending {
+  type LiquidateContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Borrower being liquidated.
+    victim: String,
+    // Debt asset being repaid by the liquidator.
+    debtAsset: Core::TokenRef,
+    // Collateral asset being seized.
+    collatAsset: Core::TokenRef,
+    // Debt amount the liquidator covers (U256 hex).
+    debtToCover: String,
+    debtToCoverNano?: Long,
+    debtToCoverUsd?: decimal,
+    // Aave V3 option — receive seized collateral as aToken instead of underlying.
+    receiveAToken: Bool,
+    // Live inputs (flattened from LiveField<T>).
+    // Account state of the borrower being liquidated.
+    victimState: UserLendingState,
+    // Liquidation bonus, in basis points.
+    liquidationBonus: Long,
+    // Debt asset price in USD (Price/Decimal as string).
+    debtAssetPrice: String,
+    // Collateral asset price in USD (Price/Decimal as string).
+    collatAssetPrice: String,
+    custom?: LiquidateCustomContext,
+  };
 
-action "liquidate" appliesTo {
-  principal: Wallet,
-  resource: Protocol,
-  context: LiquidateContext,
-};
+  type LiquidateCustomContext = {};
+
+  action "Liquidate" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: LiquidateContext,
+  };
+}

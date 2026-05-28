@@ -1,0 +1,55 @@
+// Token::Permit2SignAllowance — `Uniswap` `Permit2` signed allowance.
+//
+// Off-chain signature consumed by the `Permit2` contract to grant `spender`
+// an allowance on the underlying `token` until `expiresAt`. The signature
+// itself expires at `sigDeadline`. The `nonce` is a `(word, bit)` coordinate
+// pair into the `Permit2` nonce bitmap (carried inline; the LiveField metadata
+// wrapper is dropped at the policy layer).
+//
+// Amount is exposed through the 3-layer projection:
+//   - `amount`     : String  — raw U256 hex
+//   - `amountNano` : Long?   — token-native nano: `raw × 10^(9 − asset.decimals)`
+//                              Host-populated, not manifest-driven.
+//   - `amountUsd`  : decimal? — host-populated fiat estimate.
+
+namespace Token {
+  // `Permit2` nonce bitmap coordinates: `LiveField<(U256, u8)>` flattened.
+  // `word` is the 256-bit slot index (U256 hex), `bit` is the bit position
+  // within that word (0..256).
+  type Permit2Nonce = {
+    word: String,
+    bit: Long,
+  };
+
+  type Permit2SignAllowanceContext = {
+    // Common envelope. `meta.nature.kind` is `"offchain_sig"`.
+    meta: Core::ActionMeta,
+    // Underlying token whose allowance is delegated through `Permit2`.
+    token: Core::TokenRef,
+    // Address authorized to spend.
+    spender: String,
+    // Allowance amount (U256 hex).
+    amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    amountUsd?: decimal,
+    // Timestamp at which the allowance expires (unix seconds).
+    expiresAt: Long,
+    // Timestamp at which the signature itself expires (unix seconds).
+    sigDeadline: Long,
+    // `Permit2` nonce bitmap coordinates (LiveField inner value).
+    nonce: Permit2Nonce,
+    // Manifest-extensible slot.
+    custom?: Permit2SignAllowanceCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type Permit2SignAllowanceCustomContext = {};
+
+  action "Permit2SignAllowance" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: Permit2SignAllowanceContext,
+  };
+}

@@ -1,0 +1,26 @@
+// Perp::ClaimFunding — claim accrued funding payments from one or all markets.
+//
+// Rust source: `crates/simulation/reducer/src/action/perp/claim_funding.rs`
+// (`ClaimFundingAction` + `ClaimFundingLiveInputs`).
+//
+// `market` is optional — `None` means claim from all markets. `claimable` is
+// `Vec<(TokenRef, U256)>` → `Set<{ token, amount }>`.
+
+namespace Perp {
+  type ClaimFundingContext = {
+    meta: Core::ActionMeta,
+    venue: PerpVenue,
+    market?: MarketRef,                       // None ≡ all markets
+    // ClaimFundingLiveInputs flattened.
+    claimable: Set<{ token: Core::TokenRef, amount: String }>,
+    custom?: ClaimFundingCustomContext,
+  };
+
+  type ClaimFundingCustomContext = {};
+
+  action "ClaimFunding" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: ClaimFundingContext,
+  };
+}

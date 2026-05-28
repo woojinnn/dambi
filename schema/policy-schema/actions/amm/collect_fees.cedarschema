@@ -1,0 +1,35 @@
+// Amm::CollectFees — collect accrued, uncollected fees from a Uniswap V3 / V4
+// position NFT (or compatible concentrated-liquidity venue). The position
+// itself is unaffected; only fees that have accrued since the last collect are
+// transferred to `recipient`.
+//
+// Policies typically guard recipient whitelisting and may inspect the per-token
+// fee amounts in `feesOwed` (e.g., refuse to forward fees above a threshold to
+// an EOA).
+
+namespace Amm {
+  type CollectFeesContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Pool holding the position.
+    venue: AmmVenue,
+    // NFT position key whose fees are being collected.
+    nftKey: Core::TokenKey,
+    // Recipient of the collected fees (Address).
+    recipient: String,
+    // LiveField<Vec<(TokenRef, U256)>>: fees owed to the position at
+    // simulation time (set-like; original Vec order lost).
+    feesOwed: Set<{ token: Core::TokenRef, amount: String }>,
+    // Manifest-extensible slot.
+    custom?: CollectFeesCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type CollectFeesCustomContext = {};
+
+  action "CollectFees" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: CollectFeesContext,
+  };
+}

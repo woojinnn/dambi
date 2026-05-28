@@ -3187,7 +3187,9 @@ dependencies = [
 name = "simulation-sync"
 version = "0.1.0"
 dependencies = [
+ "alloy-dyn-abi",
  "alloy-primitives",
+ "alloy-sol-types",
  "async-trait",
  "hex",
  "reqwest",

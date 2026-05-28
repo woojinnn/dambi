@@ -1,0 +1,41 @@
+// Launchpad::Refund — `LaunchpadAction::Refund` (oversubscription / failed sale).
+//
+// Rust source: `crates/simulation/reducer/src/action/launchpad/refund.rs`
+// (`RefundAction` + `RefundLiveInputs`).
+//
+// Amount is exposed through the 3-layer projection
+// (`refundAmount` / `refundAmountNano` / `refundAmountUsd`).
+
+namespace Launchpad {
+  type RefundContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Launchpad platform identifier.
+    platform: Core::ProtocolRef,
+    // Identifier of the sale within the platform.
+    saleId: String,
+    // Address receiving the refunded tokens.
+    recipient: String,
+    // ----- Live inputs (flattened from `RefundLiveInputs`) -----
+    // Amount eligible to be refunded (U256 hex).
+    refundAmount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    refundAmountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    refundAmountUsd?: decimal,
+    // Token of the asset being refunded.
+    refundToken: Core::TokenRef,
+    // Manifest-extensible slot.
+    custom?: RefundCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type RefundCustomContext = {};
+
+  action "Refund" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: RefundContext,
+  };
+}

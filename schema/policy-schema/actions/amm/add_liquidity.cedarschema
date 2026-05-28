@@ -1,0 +1,97 @@
+// Amm::AddLiquidity — deposit liquidity into an AMM pool. Three variants
+// covered by the `params.kind` discriminator:
+//
+//   - "pooled"                Uniswap V2 / Curve / Balancer-style proportional
+//                             deposit. Mints LP tokens.
+//   - "concentrated_mint"     Uniswap V3 — mint a new position NFT in a tick
+//                             range.
+//   - "concentrated_increase" Uniswap V3 — add liquidity to an existing
+//                             position NFT.
+//
+// Policies typically guard recipient whitelisting, slippage floors (amountMin),
+// and concentrated-range geometry (range width / proximity to current price).
+//
+// `live_inputs.pool_state` is reducer-internal and not exposed at the policy
+// layer; only `currentPrice` is surfaced.
+
+namespace Amm {
+  // -------------------------------------------------------------------------
+  // RangeSpec — concentrated-liquidity range geometry. Maps Rust enum
+  // `simulation_state::token::RangeSpec` (Tick / Bin / Custom). Cedar lacks
+  // unions, so the variant is discriminated by `kind` and per-variant fields
+  // are optional.
+  //
+  //   - "tick"   (Uniswap V3/V4): tickLower, tickUpper, liquidity
+  //   - "bin"    (Trader Joe LB): activeId, distribution
+  //   - "custom" (Maverick / unknown): protocol
+  // -------------------------------------------------------------------------
+  type RangeSpec = {
+    // "tick" | "bin" | "custom"
+    kind: String,
+    // Tick lower bound (signed). Present iff kind = "tick".
+    tickLower?: Long,
+    // Tick upper bound (signed). Present iff kind = "tick".
+    tickUpper?: Long,
+    // U128 hex liquidity at mint time. Present iff kind = "tick".
+    liquidity?: String,
+    // Active bin id at mint time. Present iff kind = "bin".
+    activeId?: Long,
+    // Free-form protocol identifier. Present iff kind = "custom".
+    protocol?: String,
+  };
+
+  // -------------------------------------------------------------------------
+  // AddLiquidityParams — projected from Rust enum (Pooled / ConcentratedMint /
+  // ConcentratedIncrease). Discriminator = `kind`. Field presence per variant:
+  //
+  //   - "pooled":                tokens, minLpOut, recipient
+  //   - "concentrated_mint":     poolPair, amountDesired, amountMin, range,
+  //                              recipient
+  //   - "concentrated_increase": nftKey, amountDesired, amountMin
+  // -------------------------------------------------------------------------
+  type AddLiquidityParams = {
+    // "pooled" | "concentrated_mint" | "concentrated_increase"
+    kind: String,
+    // Tokens deposited (set-like; original Vec order lost). Pooled.
+    tokens?: Set<{ token: Core::TokenRef, amount: String }>,
+    // Minimum LP tokens out (U256 hex). Pooled.
+    minLpOut?: String,
+    // Token pair of the pool. ConcentratedMint.
+    poolPair?: { tokenA: Core::TokenRef, tokenB: Core::TokenRef },
+    // Desired amounts (a = first of pair, b = second). U256 hex.
+    amountDesired?: { a: String, b: String },
+    // Minimum acceptable amounts (slippage floor). U256 hex.
+    amountMin?: { a: String, b: String },
+    // Tick / bin / custom range for the new position. ConcentratedMint.
+    range?: RangeSpec,
+    // Existing NFT position key. ConcentratedIncrease.
+    nftKey?: Core::TokenKey,
+    // Recipient of LP tokens (Pooled) or position NFT (ConcentratedMint).
+    // ConcentratedIncrease has no recipient field (target is the existing NFT).
+    recipient?: String,
+  };
+
+  type AddLiquidityContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Pool receiving the deposit.
+    venue: AmmVenue,
+    // User-signed deposit parameters.
+    params: AddLiquidityParams,
+    // LiveField<Price>: current pool price (decimal serialized as string),
+    // used by policies to validate concentrated-range geometry against the
+    // current tick. `pool_state` is reducer-internal and omitted.
+    currentPrice: String,
+    // Manifest-extensible slot.
+    custom?: AddLiquidityCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type AddLiquidityCustomContext = {};
+
+  action "AddLiquidity" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: AddLiquidityContext,
+  };
+}

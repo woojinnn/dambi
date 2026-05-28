@@ -1,17 +1,34 @@
-type WithdrawContext = {
-  market?: Pool,
-  asset: AssetRef,
-  amount: AmountConstraint,
-  amountMode?: String,
-  recipient: String,
-  onBehalf?: String,
-  custom?: WithdrawCustomContext,
-};
+// Lending::Withdraw — withdraw a previously supplied asset.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/withdraw.rs`
+// (`WithdrawAction` + `WithdrawLiveInputs`). `amount == U256::MAX` encodes
+// "withdraw maximum available".
 
-type WithdrawCustomContext = {};
+namespace Lending {
+  type WithdrawContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Asset being withdrawn.
+    asset: Core::TokenRef,
+    // Amount to withdraw (U256 hex); U256::MAX = max-withdraw.
+    amount: String,
+    amountNano?: Long,
+    amountUsd?: decimal,
+    // Address receiving the withdrawn funds.
+    recipient: String,
+    // Live inputs (flattened from LiveField<T>).
+    reserveState: ReserveState,
+    // Maximum amount the user can withdraw right now (U256 hex).
+    availableToWithdraw: String,
+    userStateBefore: UserLendingState,
+    custom?: WithdrawCustomContext,
+  };
 
-action "withdraw" appliesTo {
-  principal: Wallet,
-  resource: Protocol,
-  context: WithdrawContext,
-};
+  type WithdrawCustomContext = {};
+
+  action "Withdraw" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: WithdrawContext,
+  };
+}

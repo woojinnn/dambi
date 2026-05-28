@@ -1,0 +1,35 @@
+// Token::NftTransfer — `ERC721`/`ERC1155` transfer of a specific token id.
+//
+// `amount` is the `ERC1155` quantity; absent (or implicitly `1`) for `ERC721`.
+// No USD layer for NFTs — fungible USD pricing is not meaningful for an NFT.
+//
+// Amount projection (NFT-flavor, 2 layers):
+//   - `amount`     : String? — raw U256 hex (absent ⇒ `ERC721`/single)
+//   - `amountNano` : Long?   — token-native nano: `raw × 10^(9 − asset.decimals)`
+//                              Host-populated, not manifest-driven.
+
+namespace Token {
+  type NftTransferContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // `TokenKey::Erc721` or `TokenKey::Erc1155` identifying the token.
+    nftKey: Core::TokenKey,
+    // `ERC1155` quantity (U256 hex); absent for `ERC721` (implicitly 1).
+    amount?: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // Address receiving the NFT.
+    recipient: String,
+    // Manifest-extensible slot.
+    custom?: NftTransferCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type NftTransferCustomContext = {};
+
+  action "NftTransfer" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: NftTransferContext,
+  };
+}

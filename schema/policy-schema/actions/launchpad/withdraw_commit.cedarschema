@@ -1,0 +1,42 @@
+// Launchpad::WithdrawCommit — `LaunchpadAction::WithdrawCommit`.
+//
+// Rust source: `crates/simulation/reducer/src/action/launchpad/withdraw_commit.rs`
+// (`WithdrawCommitAction` + `WithdrawCommitLiveInputs`); `SaleState` is defined
+// in `crates/simulation/reducer/src/action/launchpad/mod.rs`.
+//
+// Cancels a prior commitment on platforms that allow pre-sale withdrawal.
+// The `(start, end)` window inside `SaleState` is flattened to two parallel
+// Long fields (`saleWindowStart` / `saleWindowEnd`).
+
+namespace Launchpad {
+  // -------------------------------------------------------------------------
+  // WithdrawCommit context.
+  // -------------------------------------------------------------------------
+  type WithdrawCommitContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Launchpad platform identifier.
+    platform: Core::ProtocolRef,
+    // Identifier of the sale within the platform.
+    saleId: String,
+    // Amount to withdraw (U256 hex); absent withdraws the full committed balance.
+    amount?: String,
+    // ----- Live inputs (flattened from `WithdrawCommitLiveInputs`) -----
+    // Amount currently available to withdraw (U256 hex).
+    withdrawable: String,
+    // Current sale state used to verify withdrawal is still permitted.
+    saleState: SaleState,
+    // Manifest-extensible slot.
+    custom?: WithdrawCommitCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type WithdrawCommitCustomContext = {};
+
+  action "WithdrawCommit" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: WithdrawCommitContext,
+  };
+}

@@ -1,0 +1,27 @@
+// Token::NftApprove — `ERC721`/`ERC1155` single-token `approve`.
+//
+// Grants `spender` operator rights on a single NFT identified by `nftKey`
+// (a `TokenKey` with `standard ∈ {"erc721", "erc1155"}` and a `tokenId`).
+// No amount layer — this approval covers exactly one token id.
+
+namespace Token {
+  type NftApproveContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // `TokenKey::Erc721 { .., tokenId }` (or `ERC1155` equivalent).
+    nftKey: Core::TokenKey,
+    // Address authorized to operate the NFT.
+    spender: String,
+    // Manifest-extensible slot.
+    custom?: NftApproveCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type NftApproveCustomContext = {};
+
+  action "NftApprove" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: NftApproveContext,
+  };
+}
