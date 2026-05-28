@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "standard/erc20/transferFrom@1.0.0",
   "manifest_path": "manifests/standard/erc20/transferFrom@1.0.0.json",
-  "bundle_sha256": "0xc5deb1b4b9481aaf985253874ffc05594792f8445b9a0125cbd9c94b68ff0cfa",
+  "bundle_sha256": "0x5a32a2a24e14caf918181eabd79e62ed2d69c57744da91d020b64fb3d5afd883",
   "bundle": {
     "type": "adapter_action",
     "id": "standard/erc20/transferFrom@1.0.0",
@@ -87,7 +87,8 @@
         "8453": [
           "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
           "0x4200000000000000000000000000000000000006",
-          "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+          "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2"
         ],
         "42161": [
           "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",

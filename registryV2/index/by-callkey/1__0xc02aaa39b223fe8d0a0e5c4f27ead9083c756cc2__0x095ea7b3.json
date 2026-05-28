@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "standard/erc20/approve@1.0.0",
   "manifest_path": "manifests/standard/erc20/approve@1.0.0.json",
-  "bundle_sha256": "0xb3c6ce0f8692eeb01aaa7037fba58097213a534f89ea226bcb82e35b45cddc58",
+  "bundle_sha256": "0x7684a4c80ef61d15c1d511d792750521a475cd011eea7fff72d24af526a774bb",
   "bundle": {
     "type": "adapter_action",
     "id": "standard/erc20/approve@1.0.0",
@@ -83,7 +83,8 @@
         "8453": [
           "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
           "0x4200000000000000000000000000000000000006",
-          "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+          "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2"
         ],
         "42161": [
           "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
