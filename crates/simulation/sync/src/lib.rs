@@ -54,6 +54,7 @@ pub use args_resolver::resolve_args;
 pub use batcher::{BatchKind, FetchBatch, batch_by_source};
 pub use calc::{CalcContext, CalcFn, CalcRegistry};
 pub use error::{SyncError, SyncResult};
+pub use fetchers::abi_decoder::{AbiDecoder, AbiTypeRegistry};
 pub use fetchers::rpc::{
     BlockTag, EthCallRequest, ProviderName, RpcConfig, RpcProvider, RpcRouter,
 };
