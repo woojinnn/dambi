@@ -502,6 +502,11 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         submittedAt: Math.floor(Date.now() / 1000),
       });
       declarativeV3Meta = auditFromDeclarativeV3Outcome(v3Outcome, nature);
+      // Plan §M4 — DevTools console 검증 entry. PDF FSM hierarchical
+      // ActionBody JSON 을 hit 시 dump (Plan 의 narrow scope 의 핵심
+      // deliverable: SW DevTools 에서 actions[] shape 정확히 출력).
+      // JSON.stringify with pretty-print so users can visually inspect
+      // each ActionBody's `domain` / `action` / payload / live_inputs.
       console.info("[Scopeball] declarative-route-v3", {
         requestId: message.requestId,
         chainId: message.data.chainId,
@@ -511,6 +516,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
           ? {
               decoderId: v3Outcome.value.decoderId,
               actionCount: v3Outcome.value.actions.length,
+              actions: v3Outcome.value.actions,
             }
           : v3Outcome.kind === "miss"
             ? { reason: v3Outcome.reason }

@@ -47,6 +47,10 @@ import {
   resolveAdapter,
   type AdapterOrVerdict,
 } from "./jit-fetcher";
+import {
+  installDeclarativeBundleV3,
+  InstallDeclarativeV3Error,
+} from "./declarative-adapter-loader";
 
 const DEFAULT_REGISTRY_BASE_URL =
   typeof process !== "undefined" && process.env?.REGISTRY_BASE_URL
@@ -429,22 +433,29 @@ export interface DeclarativeRouteV3Hit {
 
 export type DeclarativeRouteV3Outcome =
   | { kind: "hit"; value: DeclarativeRouteV3Hit }
-  | { kind: "miss"; reason: "no_selector" }
-  | { kind: "fault"; reason: "engine_error" | "unexpected"; cause: unknown };
+  | {
+      kind: "miss";
+      reason: "no_selector" | "bundle_not_installed";
+    }
+  | {
+      kind: "fault";
+      reason: "engine_error" | "install_failed" | "unexpected";
+      cause: unknown;
+    };
 
 /**
- * Phase 4B — v3 route entry. Pure stub wrapper around
- * `declarativeRouteRequestV3` that:
- *   1. extracts the 4-byte selector,
- *   2. forwards the meta fields the v3 `ActionMeta` carries (value /
- *      gas_limit / gas_price / submitter / submitted_at / nonce),
- *   3. unwraps the WASM result into a TS-friendly outcome.
+ * Phase M4 — v3 route entry. Pipeline:
+ *   1. extract 4-byte selector,
+ *   2. JIT install (registry-api-v3 fetch + WASM `declarative_install_v3_json`)
+ *      via `installDeclarativeBundleV3` — same callkey ((chainId, to, selector))
+ *      gets `null` on registry miss (returns `miss/bundle_not_installed`),
+ *   3. forward meta fields (value / gas_limit / gas_price / submitter /
+ *      submitted_at / nonce) to WASM `declarative_route_request_v3_json`,
+ *   4. unwrap the WASM result into a TS-friendly outcome.
  *
- * The Phase 4B Rust stub does NOT do a registry lookup — it returns a
- * single `ActionBody::Unknown`. That keeps the SW v3 path online while
- * Phase 4D wires the registry-v2 manifest decode. The TS helper here
- * intentionally skips the `resolveAdapter` + JIT path (no bundle is
- * consulted) so we don't double-call the registry for the stub run.
+ * registry-v3 anonymous fetch is enabled via Cloud Run `allUsers/run.invoker`
+ * grant (Plan §M0). Bundle hydration lives in `declarative-adapter-loader.ts`
+ * (Plan §M3 — JIT + 2-layer cache; v1 path is untouched).
  *
  * On `fault` the caller falls back to the legacy v1 path.
  */
@@ -465,6 +476,26 @@ export async function tryDeclarativeRouteV3(args: {
     return { kind: "miss", reason: "no_selector" };
   }
   const submittedAt = args.submittedAt ?? Math.floor(Date.now() / 1000);
+
+  // Plan §M4 — JIT install via registry-api-v3. If the callkey has no
+  // matching v3 manifest (404 / `matched: false`), `installDeclarativeBundleV3`
+  // returns `null`; we surface that as a clean miss so the caller falls
+  // through to v1 without surfacing it as a fault.
+  try {
+    const installed = await installDeclarativeBundleV3({
+      chainId: args.chainId,
+      to: args.to,
+      selector,
+    });
+    if (installed === null) {
+      return { kind: "miss", reason: "bundle_not_installed" };
+    }
+  } catch (err) {
+    if (err instanceof InstallDeclarativeV3Error) {
+      return { kind: "fault", reason: "install_failed", cause: err };
+    }
+    return { kind: "fault", reason: "unexpected", cause: err };
+  }
 
   let result: DeclarativeRouteRequestV3Result;
   try {
