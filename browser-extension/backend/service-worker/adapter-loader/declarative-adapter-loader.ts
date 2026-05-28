@@ -39,6 +39,10 @@ import {
   type AdapterFunctionBundle,
   type V3Bundle,
 } from "./bundle-schema";
+import {
+  declarativeV3Cache,
+  type DeclarativeV3CacheEntry,
+} from "./declarative-v3-cache";
 
 export interface MountResult {
   decoderId: string;
@@ -434,6 +438,48 @@ export async function installDeclarativeBundleV3(
     // Cache desync — fall through to a full re-hydration.
   }
 
+  // Layer 2 — chrome.storage.local mirror (plan §M3 SW restart 영속화).
+  // SW cold start 후 in-memory v3InstallCache 는 비어있지만 chrome.storage
+  // 에 직전 lifetime 의 bundle 이 남아있을 수 있음. hit 시 WASM 에 다시
+  // install 하고 in-memory cache 도 재구성 — registry-api-v3 round-trip 없음.
+  try {
+    const storageEntry = await declarativeV3Cache.get(cacheKey);
+    if (storageEntry) {
+      const reinstalled = await declarativeInstallV3(
+        JSON.stringify(storageEntry.bundle),
+      );
+      v3InstallCache.set(cacheKey, reinstalled);
+      v3CachedBundleByCallKey.set(cacheKey, storageEntry.bundle);
+      v3InstalledBundleIds.add(reinstalled.bundle_id);
+      // chain_to_addresses cross-mirror (Layer 1 측). storage 측은 이미
+      // 직전 lifetime fresh-install 시 자체 cross-mirror 됨 — 본 hit 도
+      // touch 로 LRU 만 갱신.
+      const sel = storageEntry.bundle.match.selector.toLowerCase();
+      for (const [cid, addr] of matchEntriesV3(storageEntry.bundle.match)) {
+        const k = v3CallkeyCacheKey(cid, addr, sel);
+        v3InstallCache.set(k, reinstalled);
+        v3CachedBundleByCallKey.set(k, storageEntry.bundle);
+      }
+      console.info("[Scopeball] installDeclarativeBundleV3 storage-hit", {
+        callkey: cacheKey,
+        bundleId: reinstalled.bundle_id,
+        decoderId: reinstalled.decoder_id,
+      });
+      return {
+        decoderId: reinstalled.decoder_id,
+        bundleId: reinstalled.bundle_id,
+        bundle: storageEntry.bundle,
+      };
+    }
+  } catch (err) {
+    // chrome.storage 읽기 실패 / WASM install 실패 — 무음으로 cold fetch 로
+    // 떨어뜨림. storage corruption 이 SW 를 brick 시키지 않게 함.
+    console.warn(
+      "[Scopeball] installDeclarativeBundleV3 storage rehydrate failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const baseUrl = args.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
   const doFetch = args.fetchImpl ?? fetch;
   const url = v3CallkeyUrl(baseUrl, args.chainId, args.to, args.selector);
@@ -513,18 +559,49 @@ export async function installDeclarativeBundleV3(
   // chain (same bundle) finds the cached install entry without a second
   // network round-trip. The WASM-side bridge already covers the engine
   // routing side; this is purely a JS cache mirror.
+  const sel = parsedBundle.match.selector.toLowerCase();
   for (const [cid, addr] of matchEntriesV3(parsedBundle.match)) {
-    const sel = parsedBundle.match.selector.toLowerCase();
     const k = v3CallkeyCacheKey(cid, addr, sel);
     v3InstallCache.set(k, installed);
     v3CachedBundleByCallKey.set(k, parsedBundle);
   }
 
+  // Layer 2 persist — mirror the fresh install into chrome.storage.local
+  // so the next SW cold-start can rehydrate without another
+  // registry-api-v3 fetch. We mirror EVERY callkey the bundle covers
+  // (chain_to_addresses cartesian) under the same entry shape; the
+  // serialized payload is small (single shared bundle reference per
+  // record on disk after JSON serialize-deserialize) and the cap of 256
+  // entries gates DoS.
+  const fetchedAtMs = Date.now();
+  const sha256 = parsedResponse.bundle_sha256 ?? "";
+  const persistEntry: DeclarativeV3CacheEntry = {
+    bundle: parsedBundle,
+    bundleId: installed.bundle_id,
+    decoderId: installed.decoder_id,
+    bundleSha256: sha256,
+    fetchedAtMs,
+  };
+  try {
+    await declarativeV3Cache.put(cacheKey, persistEntry);
+    for (const [cid, addr] of matchEntriesV3(parsedBundle.match)) {
+      const k = v3CallkeyCacheKey(cid, addr, sel);
+      if (k === cacheKey) continue; // already persisted above
+      await declarativeV3Cache.put(k, persistEntry);
+    }
+  } catch (err) {
+    // Persisting is best-effort — degrade gracefully so a storage fault
+    // (quota exceeded etc.) cannot block the v3 install path itself.
+    console.warn(
+      "[Scopeball] installDeclarativeBundleV3 storage persist failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   // Plan §M5 — 사용자 시각 확인용 console marker. fresh install path =
   // registry-api-v3 fetch + parseBundleV3 + WASM declarative_install_v3
-  // 까지 통과한 상태. v3 어뎁터는 chrome.storage 가 아닌 WASM heap 의
-  // `DECLARATIVE_V3_STATE` thread_local + SW in-memory cache 에 저장됨
-  // (SW restart 시 잃음).
+  // 까지 통과 + chrome.storage.local mirror 완료. SW restart 후 같은
+  // callkey 재진입 시 storage-hit 으로 떨어짐.
   console.info("[Scopeball] installDeclarativeBundleV3 fresh-install", {
     callkey: cacheKey,
     url,
@@ -551,4 +628,5 @@ export function __resetDeclarativeV3CacheForTest(): void {
   v3InstallCache.clear();
   v3CachedBundleByCallKey.clear();
   v3InstalledBundleIds.clear();
+  declarativeV3Cache.reset();
 }

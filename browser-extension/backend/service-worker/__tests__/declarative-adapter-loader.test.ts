@@ -15,14 +15,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const mocks = vi.hoisted(() => ({
-  installDeclarativeBundle: vi.fn(),
-  declarativeInstallV3: vi.fn(),
-  getURL: vi.fn((p: string) => `chrome-extension://scopeball/${p}`),
-}));
+const mocks = vi.hoisted(() => {
+  const localStore = new Map<string, unknown>();
+  return {
+    installDeclarativeBundle: vi.fn(),
+    declarativeInstallV3: vi.fn(),
+    getURL: vi.fn((p: string) => `chrome-extension://scopeball/${p}`),
+    localStore,
+    storageLocal: {
+      get: vi.fn(async (key: string) => ({ [key]: localStore.get(key) })),
+      set: vi.fn(async (entries: Record<string, unknown>) => {
+        for (const [k, v] of Object.entries(entries)) localStore.set(k, v);
+      }),
+    },
+  };
+});
 
 vi.mock("webextension-polyfill", () => ({
-  default: { runtime: { getURL: mocks.getURL } },
+  default: {
+    runtime: { getURL: mocks.getURL },
+    storage: { local: mocks.storageLocal },
+  },
 }));
 
 vi.mock("../wasm-bridge", () => ({
@@ -219,6 +232,7 @@ describe("installDeclarativeBundleV3", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.localStore.clear();
     __resetDeclarativeV3CacheForTest();
     fetchMock.mockReset();
   });
@@ -428,5 +442,96 @@ describe("installDeclarativeBundleV3", () => {
         fetchImpl: fetchMock as unknown as typeof fetch,
       }),
     ).rejects.toBeInstanceOf(InstallDeclarativeV3Error);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Layer 2 — chrome.storage.local mirror (plan §M3 SW restart 영속화)
+  // ---------------------------------------------------------------------------
+
+  it("persists the fresh install into chrome.storage.local (one entry per chain_to_addresses pair)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          matched: true,
+          bundle_id: v3Bundle.id,
+          manifest_path: "manifests/x",
+          bundle_sha256: "0x" + "a".repeat(64),
+          bundle: v3Bundle,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    mocks.declarativeInstallV3.mockResolvedValueOnce({
+      decoder_id: v3Bundle.id,
+      bundle_id: v3Bundle.id,
+    });
+
+    await installDeclarativeBundleV3({
+      chainId: 1,
+      to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+      selector: "0x18cbafe5",
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const stored = mocks.localStore.get("registry:adapter-bundles-v3") as
+      | Record<string, { bundleId: string; decoderId: string; bundleSha256: string; fetchedAtMs: number }>
+      | undefined;
+    expect(stored).toBeTruthy();
+    const keys = Object.keys(stored!);
+    // chain_to_addresses 가 2 chain (1 + 8453) × 1 addr/chain = 2 callkey.
+    expect(keys.length).toBe(2);
+    expect(keys).toContain(
+      "v3:1__0x7a250d5630b4cf539739df2c5dacb4c659f2488d__0x18cbafe5",
+    );
+    expect(keys).toContain(
+      "v3:8453__0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24__0x18cbafe5",
+    );
+    for (const k of keys) {
+      expect(stored![k].bundleId).toBe(v3Bundle.id);
+      expect(stored![k].bundleSha256).toBe("0x" + "a".repeat(64));
+    }
+  });
+
+  it("rehydrates from chrome.storage.local on a cold SW (storage-hit path)", async () => {
+    // 직전 lifetime 의 storage 를 흉내냄 — fresh entry seed.
+    const seedKey =
+      "v3:1__0x7a250d5630b4cf539739df2c5dacb4c659f2488d__0x18cbafe5";
+    const crossKey =
+      "v3:8453__0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24__0x18cbafe5";
+    const seedEntry = {
+      bundle: v3Bundle,
+      bundleId: v3Bundle.id,
+      decoderId: v3Bundle.id,
+      bundleSha256: "0x" + "b".repeat(64),
+      fetchedAtMs: Date.now() - 60 * 1000,
+    };
+    mocks.localStore.set("registry:adapter-bundles-v3", {
+      [seedKey]: seedEntry,
+      [crossKey]: seedEntry,
+    });
+
+    mocks.declarativeInstallV3.mockResolvedValueOnce({
+      decoder_id: v3Bundle.id,
+      bundle_id: v3Bundle.id,
+    });
+
+    const result = await installDeclarativeBundleV3({
+      chainId: 1,
+      to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+      selector: "0x18cbafe5",
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.bundleId).toBe(v3Bundle.id);
+    expect(result!.bundle.schema_version).toBe("3");
+    // storage-hit path = registry-api-v3 fetch 없이 WASM 재install 만.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.declarativeInstallV3).toHaveBeenCalledTimes(1);
+    expect(mocks.declarativeInstallV3).toHaveBeenCalledWith(
+      JSON.stringify(v3Bundle),
+    );
   });
 });
