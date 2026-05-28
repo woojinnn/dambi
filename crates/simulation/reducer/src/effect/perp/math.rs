@@ -237,7 +237,7 @@ pub(super) fn liquidation_price_simple(
         )));
     }
     let buffer = (free_margin - maintenance) / size;
-    let liq = match action.side {
+    let liq = match &action.side {
         simulation_state::position::PerpSide::Long => mark - buffer,
         simulation_state::position::PerpSide::Short => mark + buffer,
     };

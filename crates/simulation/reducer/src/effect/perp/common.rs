@@ -72,27 +72,28 @@ pub(super) const fn is_orderbook_venue(venue: &PerpVenue) -> bool {
 /// to attach later `Close`/`Update` changes; we synthesize it from venue +
 /// market + side so re-evaluating the same action produces the same id.
 pub(super) fn synth_position_id(venue: &PerpVenue, market: &str, side: PerpSide) -> String {
-    let side_s = match side {
+    format!("{}:{market}:{}", venue_tag(venue), side_tag(&side))
+}
+
+/// Stable string tag for a `PerpSide`.
+pub(super) fn side_tag(side: &PerpSide) -> &'static str {
+    match side {
         PerpSide::Long => "long",
         PerpSide::Short => "short",
-    };
-    format!("{}:{market}:{side_s}", venue_tag(venue))
+    }
 }
 
 /// Compose a deterministic PendingTx id for a limit order.
 pub(super) fn pending_id_for_limit_order(
     venue: &PerpVenue,
     market: &str,
-    side: PerpSide,
+    side: &PerpSide,
     price: &simulation_state::primitives::Price,
 ) -> String {
-    let side_s = match side {
-        PerpSide::Long => "long",
-        PerpSide::Short => "short",
-    };
     format!(
-        "limit:{}:{market}:{side_s}:{}",
+        "limit:{}:{market}:{}:{}",
         venue_tag(venue),
+        side_tag(side),
         price.as_str()
     )
 }
@@ -101,14 +102,10 @@ pub(super) fn pending_id_for_limit_order(
 pub(super) fn pending_id_for_stop_order(
     venue: &PerpVenue,
     market: &str,
-    side: PerpSide,
-    kind: StopOrderKind,
+    side: &PerpSide,
+    kind: &StopOrderKind,
     trigger: &simulation_state::primitives::Price,
 ) -> String {
-    let side_s = match side {
-        PerpSide::Long => "long",
-        PerpSide::Short => "short",
-    };
     let kind_s = match kind {
         StopOrderKind::StopMarket => "stop_market",
         StopOrderKind::StopLimit => "stop_limit",
@@ -116,15 +113,16 @@ pub(super) fn pending_id_for_stop_order(
         StopOrderKind::TakeProfitLimit => "take_profit_limit",
     };
     format!(
-        "{kind_s}:{}:{market}:{side_s}:{}",
+        "{kind_s}:{}:{market}:{}:{}",
         venue_tag(venue),
+        side_tag(side),
         trigger.as_str()
     )
 }
 
 /// Map a `StopOrderKind` to the `PerpOrderKind` carried inside
 /// `PendingKind::PerpVenueOrder`.
-pub(super) const fn perp_order_kind_from_stop(kind: StopOrderKind) -> PerpOrderKind {
+pub(super) const fn perp_order_kind_from_stop(kind: &StopOrderKind) -> PerpOrderKind {
     match kind {
         StopOrderKind::StopMarket => PerpOrderKind::StopMarket,
         StopOrderKind::StopLimit | StopOrderKind::TakeProfitLimit => PerpOrderKind::StopLimit,
@@ -193,7 +191,7 @@ mod tests {
         let id = pending_id_for_limit_order(
             &PerpVenue::Hyperliquid { chain: chain() },
             "ETH-PERP",
-            PerpSide::Long,
+            &PerpSide::Long,
             &Decimal::new("3000"),
         );
         assert_eq!(id, "limit:hyperliquid:ETH-PERP:long:3000");
@@ -206,19 +204,19 @@ mod tests {
         // same orderbook lane), preserving the precise StopOrderKind on the
         // emitting action for downstream UI / policy.
         assert!(matches!(
-            perp_order_kind_from_stop(StopOrderKind::StopLimit),
+            perp_order_kind_from_stop(&StopOrderKind::StopLimit),
             PerpOrderKind::StopLimit
         ));
         assert!(matches!(
-            perp_order_kind_from_stop(StopOrderKind::TakeProfitLimit),
+            perp_order_kind_from_stop(&StopOrderKind::TakeProfitLimit),
             PerpOrderKind::StopLimit
         ));
         assert!(matches!(
-            perp_order_kind_from_stop(StopOrderKind::StopMarket),
+            perp_order_kind_from_stop(&StopOrderKind::StopMarket),
             PerpOrderKind::StopMarket
         ));
         assert!(matches!(
-            perp_order_kind_from_stop(StopOrderKind::TakeProfit),
+            perp_order_kind_from_stop(&StopOrderKind::TakeProfit),
             PerpOrderKind::TakeProfit
         ));
     }
