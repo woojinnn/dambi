@@ -1,67 +1,345 @@
+// core.cedarschema — Core namespace: shared primitive aliases, TokenKey/TokenRef,
+// ActionMeta/ActionNature/Eip712Domain.
+//
+// Every per-domain action schema (Token::*, Amm::*, Lending::*, Airdrop::*,
+// Launchpad::*, Perp::*) references types defined here via `Core::<Type>`.
+//
+// Note: `Wallet` and `Protocol` entities are declared at the TOP LEVEL (not
+// inside `namespace Core`) so that legacy `Action::"..."` policies and the new
+// `<Namespace>::Action::"..."` policies can share a single entity definition
+// without `TypeShadowingError` when both schema sets are concatenated.
+//
+// Type mapping note: Cedar 4.10 lacks enums / unions / generics. We model
+// Rust enums as discriminated records (`{ kind: String, ...optional }`) and
+// `LiveField<T>` is inlined as the underlying `T` (the source/ttl/synced_at
+// metadata is not exposed at the policy layer).
+
+// -------------------------------------------------------------------------
+// Entities — every action's `appliesTo` (legacy + new) declares these as
+// principal / resource.
+// -------------------------------------------------------------------------
 entity Wallet {
-  address: String,
+  address: String,         // EVM address "0x" + 40 hex (Cedar has no Address)
 };
 entity Protocol;
 
-type AssetRefWithAmountConstraint = {
-    asset: AssetRef,
-    amount: AmountConstraint,
-};
+namespace Core {
+  // -------------------------------------------------------------------------
+  // TokenKey (CAIP-2 + standard discriminator).
+  //
+  // Rust: enum with serde tag = "standard", rename_all = "snake_case".
+  //   - Native { chain }            standard = "native"
+  //   - Erc20  { chain, address }   standard = "erc20"
+  //   - Erc721 { chain, contract, token_id }   standard = "erc721"
+  //   - Erc1155{ chain, contract, token_id }   standard = "erc1155"
+  // -------------------------------------------------------------------------
+  type TokenKey = {
+    standard: String,         // "native" | "erc20" | "erc721" | "erc1155"
+    chain: String,            // CAIP-2 id, e.g. "eip155:1"
+    address?: String,         // present iff standard = "erc20"
+    contract?: String,        // present iff standard ∈ {"erc721","erc1155"}
+    tokenId?: String,         // U256 hex; present iff standard ∈ {"erc721","erc1155"}
+  };
 
-type TickRange = {
-  lower: Long,
-  upper: Long,
-};
+  type TokenRef = {
+    key: TokenKey,
+  };
 
-type AssetRef = {
-  kind: String,
-  address: String,
-  tokenId?: String,
-  symbol: String,
-  decimals: Long,
-};
+  // -------------------------------------------------------------------------
+  // EIP-712 domain (carried by off-chain signature natures).
+  // -------------------------------------------------------------------------
+  type Eip712Domain = {
+    name: String,
+    version?: String,
+    chainId?: Long,
+    verifyingContract?: String,
+    salt?: String,            // 0x-hex bytes
+  };
 
-type AmountConstraint = {
-  kind: String,
-  value?: String,
-};
+  // -------------------------------------------------------------------------
+  // ActionNature — onchain transaction vs offchain signature.
+  //
+  // Rust: enum with serde tag = "kind", rename_all = "snake_case".
+  //   - OnchainTx { chain, nonce, gas_limit, gas_price, value }
+  //   - OffchainSig { domain, deadline, nonce_key }
+  //
+  // Cedar has no unions: union-flattened, discriminator = kind.
+  // -------------------------------------------------------------------------
+  type ActionNature = {
+    kind: String,             // "onchain_tx" | "offchain_sig"
+    // onchain_tx fields (all optional in schema, required by `kind`)
+    chain?: String,           // CAIP-2 id
+    nonce?: Long,
+    gasLimit?: String,        // U256 hex (raw)
+    gasPrice?: String,        // U256 hex (LiveField inner value)
+    value?: String,           // U256 hex
+    // offchain_sig fields
+    domain?: Eip712Domain,
+    deadline?: Long,          // unix seconds
+    nonceKey?: String,        // app-specific key (Permit2 word/bit, etc.)
+  };
 
-type Validity = {
-  expiresAt: String,
-  source: String,
-};
+  // -------------------------------------------------------------------------
+  // ActionMeta — common to every per-domain action context.
+  // -------------------------------------------------------------------------
+  type ActionMeta = {
+    submittedAt: Long,        // unix seconds
+    submitter: String,        // Address
+    nature: ActionNature,
+  };
 
-type UsdValuation = {
-  value: decimal,
-  asOfTs: Long,
-  staleSec: Long,
-  sources: Set<String>,
-};
+  // -------------------------------------------------------------------------
+  // MulticallChildSummary — flat summary of a child Action inside Multicall.
+  //
+  // Cedar lacks recursive types, so `ActionBody::Multicall { actions: Vec<ActionBody> }`
+  // is projected to a `Set<MulticallChildSummary>` carrying (domain, action)
+  // discriminators only. Per-child detail evaluation is delegated to the
+  // service worker (each child is evaluated as a separate envelope).
+  // -------------------------------------------------------------------------
+  type MulticallChildSummary = {
+    domain: String,           // "token" | "amm" | "lending" | "airdrop" | "launchpad" | "perp" | "unknown"
+    action: String,           // snake_case action tag, e.g. "swap", "erc20_approve"
+  };
 
-type WindowStats = {
-  swapVolumeUsd24h?: decimal,
-  swapCount24h?: Long
-};
+  // -------------------------------------------------------------------------
+  // ProtocolRef — lightweight identifier for a source protocol (Defillama-style
+  // name). Used cross-domain by Airdrop::Claim and Launchpad::{Commit,
+  // ClaimAllocation, Refund, WithdrawCommit}. Mirrors
+  // `simulation_state::primitives::ProtocolRef`.
+  // -------------------------------------------------------------------------
+  type ProtocolRef = {
+    // Protocol slug, e.g. "optimism", "arbitrum_dao", "coinlist", "fjord".
+    name: String,
+    // Optional protocol version (e.g. "v2").
+    version?: String,
+    // CAIP-2 id of the chain the protocol lives on; off-chain venues omit it.
+    chain?: String,
+    // Optional sub-market identifier (Morpho Blue-style).
+    market?: String,
+  };
+}
 
-type Pool = {
-  address: String,
-  id?: String,
-  label?: String,
-};
+// =============================================================================
+// Per-domain shared types — hoisted out of leaf files because Cedar 4.10
+// rejects duplicate `type` declarations within a namespace. Each leaf action
+// file re-opens its namespace and adds only per-action types + the action.
+// =============================================================================
 
-type HookPermissions = {
-  beforeInitialize: Bool,
-  afterInitialize: Bool,
-  beforeAddLiquidity: Bool,
-  afterAddLiquidity: Bool,
-  beforeRemoveLiquidity: Bool,
-  afterRemoveLiquidity: Bool,
-  beforeSwap: Bool,
-  afterSwap: Bool,
-  beforeDonate: Bool,
-  afterDonate: Bool,
-  beforeSwapReturnDelta: Bool,
-  afterSwapReturnDelta: Bool,
-  afterAddLiquidityReturnDelta: Bool,
-  afterRemoveLiquidityReturnDelta: Bool,
-};
+namespace Amm {
+  // -------------------------------------------------------------------------
+  // AmmVenue — single-pool venue or aggregator route. Per-variant field
+  // presence:
+  //   - "uniswap_v2":        pool, factory
+  //   - "uniswap_v3":        pool, feeTierBp
+  //   - "uniswap_v4":        poolId, poolManager, hooks
+  //   - "sushi_v2":          pool
+  //   - "curve_v1":          pool, nCoins, isMeta
+  //   - "curve_v2":          pool
+  //   - "balancer_v2":       vault, poolId, poolType
+  //   - "balancer_v3":       poolId, poolType
+  //   - "trader_joe_lb":     pair, binStep
+  //   - "maverick_v2":       pool
+  //   - "aggregator_route":  router, routeHash
+  //
+  // `poolType` (Balancer V2/V3) values:
+  //   "weighted" | "stable" | "composable_stable" | "meta_stable"
+  //   | "liquidity_bootstrapping" | "linear"
+  // -------------------------------------------------------------------------
+  type AmmVenue = {
+    // Venue discriminator (snake_case).
+    name: String,
+    // CAIP-2 chain id.
+    chain: String,
+    // Pool contract address (V2/V3/Sushi/Curve/Maverick).
+    pool?: String,
+    // Uniswap V2 factory that minted the pool.
+    factory?: String,
+    // Uniswap V3 fee tier in bp×100 (e.g. 0.05% = 500).
+    feeTierBp?: Long,
+    // bytes32 pool id (hex), V4 / Balancer.
+    poolId?: String,
+    // Uniswap V4 singleton PoolManager.
+    poolManager?: String,
+    // Uniswap V4 hooks contract (zero address if none).
+    hooks?: String,
+    // Balancer V2 Vault contract.
+    vault?: String,
+    // Balancer math model.
+    poolType?: String,
+    // Trader Joe LB pair contract.
+    pair?: String,
+    // Trader Joe LB bin step (bp).
+    binStep?: Long,
+    // Curve V1 number of coins.
+    nCoins?: Long,
+    // Curve V1 meta-pool flag.
+    isMeta?: Bool,
+    // Aggregator router contract.
+    router?: String,
+    // 32-byte hex hash of aggregator route calldata.
+    routeHash?: String,
+  };
+
+  // -------------------------------------------------------------------------
+  // IntentVenue — off-chain intent-order venue. Discriminated by `name`:
+  //
+  //   - "uniswap_x":      chain, reactor
+  //   - "cow_swap":       chain, settlement
+  //   - "one_inch_fusion":chain
+  //   - "bebop":          chain
+  // -------------------------------------------------------------------------
+  type IntentVenue = {
+    // "uniswap_x" | "cow_swap" | "one_inch_fusion" | "bebop"
+    name: String,
+    // CAIP-2 chain id.
+    chain: String,
+    // UniswapX reactor contract. Present iff name = "uniswap_x".
+    reactor?: String,
+    // CowSwap GPv2Settlement contract. Present iff name = "cow_swap".
+    settlement?: String,
+  };
+}
+
+namespace Lending {
+  // -------------------------------------------------------------------------
+  // LendingVenue — fields are present according to `name`:
+  //   - "aave_v3"          → `pool`, optional `marketId`
+  //   - "aave_v2"          → `pool`
+  //   - "compound_v3"      → `comet`, `baseAsset`
+  //   - "compound_v2"      → `comptroller`
+  //   - "morpho_blue"      → `marketIdStr`
+  //   - "morpho_optimizer" → `vault`
+  //   - "spark"            → `pool`
+  //   - "fluid"            → `vault`
+  // -------------------------------------------------------------------------
+  type LendingVenue = {
+    name: String,                // 8 variants discriminated by name
+    chain: String,               // CAIP-2 id, e.g. "eip155:1"
+    pool?: String,               // Aave v2/v3, Spark
+    marketId?: Long,             // Aave v3 eMode market id (small int)
+    marketIdStr?: String,        // Morpho Blue market id (32-byte hex)
+    comet?: String,              // Compound V3
+    baseAsset?: Core::TokenRef,  // Compound V3
+    comptroller?: String,        // Compound V2
+    vault?: String,              // Morpho Optimizer / Fluid
+  };
+
+  // Reserve-level metadata — supply/borrow caps, LTV, etc.
+  type ReserveState = {
+    totalSupply: String,           // U256 hex
+    totalBorrow: String,           // U256 hex
+    utilizationBp: Long,
+    supplyCap?: String,            // U256 hex
+    borrowCap?: String,            // U256 hex
+    ltvBp: Long,
+    liquidationThresholdBp: Long,
+    liquidationBonusBp: Long,
+    reserveFactorBp: Long,
+    isFrozen: Bool,
+    isPaused: Bool,
+  };
+
+  // Aggregated lending account state for one user — mirrors Aave's
+  // `getUserAccountData`.
+  type UserLendingState = {
+    healthFactor: String,         // Decimal as string
+    totalCollatUsd: String,       // U256 hex
+    totalDebtUsd: String,         // U256 hex
+    availableBorrowUsd: String,   // U256 hex
+  };
+}
+
+namespace Launchpad {
+  // Vesting curve (Rust `VestCurve`, serde tag = "kind", rename_all = "snake_case").
+  //   - "linear"   : no extra fields.
+  //   - "stepped"  : `points` carries `(time, amount)` pairs flattened to two
+  //                  parallel Sets so each index aligns.
+  //   - "custom"   : free-form `description` string.
+  type VestCurve = {
+    // "linear" | "stepped" | "custom".
+    kind: String,
+    // Step times (unix seconds). Present iff kind = "stepped".
+    steppedPointTimes?: Set<Long>,
+    // Step amounts (U256 hex). Present iff kind = "stepped".
+    steppedPointAmounts?: Set<String>,
+    // Free-form description. Present iff kind = "custom".
+    description?: String,
+  };
+
+  // Vesting parameters (Rust `simulation_state::position::VestSchedule`).
+  type VestSchedule = {
+    // Vesting start (unix seconds).
+    start: Long,
+    // Optional cliff (unix seconds).
+    cliff?: Long,
+    // Optional vesting end (unix seconds).
+    end?: Long,
+    // Unlock curve.
+    curve: VestCurve,
+    // Total amount being vested (U256 hex).
+    total: String,
+  };
+
+  // Snapshot of a launchpad sale (Rust `SaleState`). The `sale_window` tuple
+  // is flattened to `saleWindowStart` / `saleWindowEnd`.
+  type SaleState = {
+    // Whether the sale is currently open for commitments.
+    isActive: Bool,
+    // Total amount committed across all participants (U256 hex).
+    totalCommitted: String,
+    // Optional hard cap (U256 hex).
+    hardCap?: String,
+    // Optional soft cap (U256 hex).
+    softCap?: String,
+    // Sale open timestamp (unix seconds); first half of `sale_window`.
+    saleWindowStart: Long,
+    // Sale close timestamp (unix seconds); second half of `sale_window`.
+    saleWindowEnd: Long,
+    // Optional vesting schedule applied to the claimed allocation.
+    vestSchedule?: VestSchedule,
+  };
+}
+
+namespace Perp {
+  // PerpVenue — Rust enum, serde tag = "name", rename_all = "snake_case".
+  // Field set varies by name; `contract` is present only for "generic".
+  type PerpVenue = {
+    name: String,                // "hyperliquid" | "gmx_v2" | "dy_dx_v4" | "vertex" | "aevo" | "drift" | "jupiter_perps" | "synthetix" | "generic"
+    chain: String,
+    contract?: String,           // only for "generic"
+  };
+
+  // VenueRef — light identifier embedded inside MarketRef. NOT the same as
+  // PerpVenue (which is the per-action venue discriminator).
+  type VenueRef = {
+    name: String,
+    chain?: String,
+  };
+
+  // MarketRef — `{ symbol, venue }` per simulation_state.
+  type MarketRef = {
+    symbol: String,
+    venue: VenueRef,
+  };
+
+  // SizeSpec — discriminated record.
+  //   "base_amount"       → amount (U256 hex)
+  //   "quote_amount"      → amountUsd (U256 hex USD), amountUsdNano
+  //   "leverage_implied"  → collateral (U256 hex), leverage (Decimal)
+  type SizeSpec = {
+    kind: String,                // "base_amount" | "quote_amount" | "leverage_implied"
+    amount?: String,             // base_amount: U256 hex
+    amountUsd?: String,          // quote_amount: U256 hex (USD units)
+    amountUsdNano?: Long,        // host-populated nano view
+    collateral?: String,         // leverage_implied: U256 hex
+    leverage?: String,           // leverage_implied: Decimal as string
+  };
+
+  // PerpAccountState — aggregated perp account state for one user.
+  type PerpAccountState = {
+    totalCollateralUsd: String,
+    usedMarginUsd: String,
+    freeMarginUsd: String,
+    openPositions: Set<{ market: MarketRef, sizeBase: String }>,
+  };
+}

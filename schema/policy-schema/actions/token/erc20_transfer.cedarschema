@@ -1,0 +1,37 @@
+// Token::Erc20Transfer — `ERC20` `transfer(recipient, amount)`.
+//
+// Direct token transfer from the actor (`principal.address`) to `recipient`.
+//
+// Amount is exposed through the 3-layer projection:
+//   - `amount`     : String  — raw U256 hex
+//   - `amountNano` : Long?   — token-native nano: `raw × 10^(9 − asset.decimals)`
+//                              Host-populated, not manifest-driven.
+//   - `amountUsd`  : decimal? — host-populated fiat estimate.
+
+namespace Token {
+  type Erc20TransferContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // Token being transferred.
+    token: Core::TokenRef,
+    // Address receiving the tokens.
+    recipient: String,
+    // Amount to transfer (U256 hex).
+    amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    amountUsd?: decimal,
+    // Manifest-extensible slot.
+    custom?: Erc20TransferCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type Erc20TransferCustomContext = {};
+
+  action "Erc20Transfer" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: Erc20TransferContext,
+  };
+}

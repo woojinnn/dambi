@@ -1,0 +1,29 @@
+// Core::Multicall — `ActionBody::Multicall { actions: Vec<ActionBody> }`.
+//
+// Children are projected to a flat `Set<MulticallChildSummary>` carrying
+// (domain, action) tags only — Cedar lacks recursive types. Per-child
+// detail evaluation happens elsewhere: the service worker dispatches each
+// child as its own envelope through `runLifecycle`.
+//
+// Policies inspecting Multicall typically guard against dangerous bundles
+// (e.g., "forbid approve+swap fused in one tx") via `children.containsAny(...)`
+// over the (domain, action) summary set.
+
+namespace Core {
+  type MulticallContext = {
+    meta: ActionMeta,
+    childCount: Long,
+    children: Set<MulticallChildSummary>,
+    custom?: MulticallCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type MulticallCustomContext = {};
+
+  action "Multicall" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: MulticallContext,
+  };
+}

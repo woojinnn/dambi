@@ -1,0 +1,42 @@
+// Token::Permit2Approve — `Uniswap` `Permit2` on-chain `approve`.
+//
+// Sets `spender`'s allowance on the `Permit2` contract for the underlying
+// `token`, valid until `expiresAt`. Distinct from `Erc20Approve` in that the
+// allowance is delegated through the `Permit2` singleton, not the token
+// contract itself.
+//
+// Amount is exposed through the 3-layer projection:
+//   - `amount`     : String  — raw U256 hex
+//   - `amountNano` : Long?   — token-native nano: `raw × 10^(9 − asset.decimals)`
+//                              Host-populated, not manifest-driven.
+//   - `amountUsd`  : decimal? — host-populated fiat estimate.
+
+namespace Token {
+  type Permit2ApproveContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // Underlying token whose allowance is delegated through `Permit2`.
+    token: Core::TokenRef,
+    // Address authorized to spend.
+    spender: String,
+    // Allowance amount (U256 hex).
+    amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    amountUsd?: decimal,
+    // Timestamp at which the allowance expires (unix seconds).
+    expiresAt: Long,
+    // Manifest-extensible slot.
+    custom?: Permit2ApproveCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type Permit2ApproveCustomContext = {};
+
+  action "Permit2Approve" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: Permit2ApproveContext,
+  };
+}

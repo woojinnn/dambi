@@ -1,0 +1,37 @@
+// Lending::SetEMode — select an Aave V3 e-mode category for the user.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/set_emode.rs`
+// (`SetEModeAction` + `SetEModeLiveInputs` + `EModeConfig`). `categoryId == 0`
+// disables e-mode. `EModeCategory` in the state crate is a `u8` alias, so the
+// optional `categoryCode` field is exposed as `Long`.
+
+namespace Lending {
+  // E-mode category configuration.
+  type EModeConfig = {
+    ltvBp: Long,
+    liquidationThresholdBp: Long,
+    liquidationBonusBp: Long,
+    priceSource?: String,                  // Address (optional)
+    assetsInCategory: Set<Core::TokenRef>, // assets eligible under this category
+    categoryCode?: Long,                   // EModeCategory id (u8 alias in state)
+  };
+
+  type SetEModeContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Target category id; 0 = disable e-mode.
+    categoryId: Long,
+    // Live inputs (flattened from LiveField<T>).
+    categoryConfig: EModeConfig,
+    userStateBefore: UserLendingState,
+    custom?: SetEModeCustomContext,
+  };
+
+  type SetEModeCustomContext = {};
+
+  action "SetEMode" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: SetEModeContext,
+  };
+}

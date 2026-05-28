@@ -1,0 +1,31 @@
+// Perp::ClosePosition — close (fully or partially) an existing perpetual position.
+//
+// Rust source: `crates/simulation/reducer/src/action/perp/close.rs`
+// (`ClosePerpAction` + `ClosePerpLiveInputs`).
+//
+// `size` is optional: `None` ≡ full close. `unrealizedPnlNow` and
+// `fundingAccrued` are `SignedI256` exposed as strings.
+
+namespace Perp {
+  type ClosePositionContext = {
+    meta: Core::ActionMeta,
+    venue: PerpVenue,
+    positionId: String,
+    size?: SizeSpec,                    // None ≡ full close
+    slippageBp: Long,
+    // ClosePerpLiveInputs flattened.
+    markPrice: String,
+    unrealizedPnlNow: String,           // SignedI256
+    fundingAccrued: String,             // SignedI256
+    feeBp: Long,
+    custom?: ClosePositionCustomContext,
+  };
+
+  type ClosePositionCustomContext = {};
+
+  action "ClosePosition" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: ClosePositionContext,
+  };
+}

@@ -1,0 +1,29 @@
+// Perp::ChangeLeverage — change the leverage setting for a market.
+//
+// Rust source: `crates/simulation/reducer/src/action/perp/change_leverage.rs`
+// (`ChangeLeverageAction` + `ChangeLeverageLiveInputs`).
+//
+// `affectedPositions` is `Vec<PositionId>` → `Set<String>`. `newLiqPrices` is
+// `Vec<(PositionId, Option<Price>)>` → `Set<{ positionId, liqPrice? }>`.
+
+namespace Perp {
+  type ChangeLeverageContext = {
+    meta: Core::ActionMeta,
+    venue: PerpVenue,
+    market: MarketRef,
+    newLeverage: String,                // Decimal as string
+    // ChangeLeverageLiveInputs flattened.
+    maxLeverage: String,
+    affectedPositions: Set<String>,
+    newLiqPrices: Set<{ positionId: String, liqPrice?: String }>,
+    custom?: ChangeLeverageCustomContext,
+  };
+
+  type ChangeLeverageCustomContext = {};
+
+  action "ChangeLeverage" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: ChangeLeverageContext,
+  };
+}

@@ -1,5 +1,21 @@
-//! Action-name conventions: `snake_case` ↔ `PascalCase` and the registry of
-//! actions whose cedarschemas ship with the policy engine.
+//! Action-name conventions and the registry of actions whose cedarschemas
+//! ship with the policy engine.
+//!
+//! ## Two coexisting forms
+//!
+//! 1. **snake_case bare action name** — used internally by composer /
+//!    manifest_fragment paths. `REGISTERED_ACTIONS` is the Phase 1 action set
+//!    derived from `ActionBody`'s domain enums (45 entries).
+//!
+//! 2. **`<Namespace>::<PascalCaseAction>`** — the fully-qualified Cedar action
+//!    id under the namespace migration. Composed via [`namespace_action_id`].
+//!    The Cedar context type id is `<Namespace>::<PascalCase>Context` via
+//!    [`namespace_context_type_id`].
+//!
+//! The composer/manifest_fragment paths continue to operate on bare PascalCase
+//! type names (e.g. `SwapCustomContext`) — text search in the concatenated
+//! `base_schema_text()` finds them inside their namespace block. Migrating
+//! those paths to namespace-qualified ids is tracked as follow-up work.
 
 /// Convert a `snake_case` action name to its `PascalCase` Cedar type prefix.
 #[must_use]
@@ -21,42 +37,96 @@ pub fn snake_to_pascal(s: &str) -> String {
     out
 }
 
-/// All action kinds whose cedarschemas ship in `schema/policy-schema/actions/`.
+/// Compose a fully-qualified Cedar action id (`<Namespace>::<PascalCaseAction>`)
+/// from a snake_case namespace / action pair.
+///
+/// ```
+/// # use policy_engine::schema::action_name::namespace_action_id;
+/// assert_eq!(namespace_action_id("amm", "swap"), "Amm::Swap");
+/// assert_eq!(namespace_action_id("token", "erc20_approve"), "Token::Erc20Approve");
+/// assert_eq!(namespace_action_id("core", "multicall"), "Core::Multicall");
+/// ```
+#[must_use]
+pub fn namespace_action_id(domain: &str, action: &str) -> String {
+    format!("{}::{}", snake_to_pascal(domain), snake_to_pascal(action))
+}
+
+/// Compose the bare PascalCase context type name for an action
+/// (`<PascalCase>Context`). For the fully-qualified Cedar id including the
+/// namespace prefix, use [`namespace_context_type_id`].
+#[must_use]
+pub fn context_type_name(action: &str) -> String {
+    format!("{}Context", snake_to_pascal(action))
+}
+
+/// Compose the fully-qualified Cedar context type id `<Namespace>::<PascalCase>Context`.
+#[must_use]
+pub fn namespace_context_type_id(domain: &str, action: &str) -> String {
+    format!(
+        "{}::{}Context",
+        snake_to_pascal(domain),
+        snake_to_pascal(action)
+    )
+}
+
+/// Phase 1 snake_case action set (45 entries) — produced by `ActionBody`'s
+/// domain enums. Each maps to a `.cedarschema` file under
+/// `schema/policy-schema/actions/{token,amm,lending,airdrop,launchpad,perp}/`
+/// and to a Cedar action id `<Namespace>::<PascalCase>` (via
+/// [`namespace_action_id`]).
 pub const REGISTERED_ACTIONS: &[&str] = &[
-    "swap",
-    "add_liquidity",
-    "remove_liquidity",
-    "mint_liquidity_nft",
-    "burn_liquidity_nft",
-    "increase_liquidity",
-    "decrease_liquidity",
-    "initialize_pool",
-    "donate",
-    "supply",
-    "withdraw",
-    "borrow",
-    "repay",
-    "liquidate",
-    "flash_loan",
-    "set_authorization",
-    "sign_authorization",
-    "revoke",
-    "stake",
-    "request_unstake",
-    "claim_unstake",
-    "restake",
-    "request_restake_withdrawal",
-    "claim_restake_withdrawal",
-    "wrap",
-    "unwrap",
-    "approve",
-    "set_approval_for_all",
-    "transfer",
-    "permit",
-    "claim_rewards",
-    "sign_message",
+    // Core structural (ActionBody::Multicall / ActionBody::Unknown)
+    "multicall",
+    "unknown",
+    // Airdrop (2)
+    "claim",
     "delegate",
-    "vote",
+    // Amm (6)
+    "add_liquidity",
+    "cancel_intent_order",
+    "collect_fees",
+    "remove_liquidity",
+    "sign_intent_order",
+    "swap",
+    // Lending (10)
+    "borrow",
+    "delegate_borrow",
+    "disable_collateral",
+    "enable_collateral",
+    "liquidate",
+    "repay",
+    "set_emode",
+    "supply",
+    "swap_rate_mode",
+    "withdraw",
+    // Launchpad (5)
+    "claim_allocation",
+    "claim_vested",
+    "commit",
+    "refund",
+    "withdraw_commit",
+    // Perp (11)
+    "adjust_margin",
+    "cancel_order",
+    "change_leverage",
+    "change_margin_mode",
+    "claim_funding",
+    "close_position",
+    "decrease_position",
+    "increase_position",
+    "open_position",
+    "place_limit_order",
+    "place_stop_order",
+    // Token (9) — `delegate` already listed above under Airdrop
+    "erc20_approve",
+    "erc20_permit",
+    "erc20_transfer",
+    "nft_approve",
+    "nft_set_approval_for_all",
+    "nft_transfer",
+    "permit2_approve",
+    "permit2_sign_allowance",
+    "revoke_approval",
 ];
 
 #[cfg(test)]
@@ -67,7 +137,34 @@ mod tests {
     fn snake_to_pascal_basic() {
         assert_eq!(snake_to_pascal("swap"), "Swap");
         assert_eq!(snake_to_pascal("add_liquidity"), "AddLiquidity");
+        assert_eq!(snake_to_pascal("erc20_approve"), "Erc20Approve");
+        assert_eq!(snake_to_pascal("open_position"), "OpenPosition");
         assert_eq!(snake_to_pascal("mint_liquidity_nft"), "MintLiquidityNft");
+    }
+
+    #[test]
+    fn namespace_action_id_basic() {
+        assert_eq!(namespace_action_id("amm", "swap"), "Amm::Swap");
+        assert_eq!(
+            namespace_action_id("token", "erc20_approve"),
+            "Token::Erc20Approve"
+        );
+        assert_eq!(namespace_action_id("core", "multicall"), "Core::Multicall");
+    }
+
+    #[test]
+    fn namespace_context_type_id_basic() {
+        assert_eq!(namespace_context_type_id("amm", "swap"), "Amm::SwapContext");
+        assert_eq!(
+            namespace_context_type_id("lending", "borrow"),
+            "Lending::BorrowContext"
+        );
+    }
+
+    #[test]
+    fn context_type_name_basic() {
+        assert_eq!(context_type_name("swap"), "SwapContext");
+        assert_eq!(context_type_name("erc20_approve"), "Erc20ApproveContext");
     }
 
     #[test]
@@ -79,7 +176,16 @@ mod tests {
     }
 
     #[test]
-    fn registry_size_matches_shipped_schemas() {
-        assert_eq!(REGISTERED_ACTIONS.len(), 34);
+    fn registry_size_matches_phase1() {
+        // 2 Core + 2 Airdrop + 6 Amm + 10 Lending + 5 Launchpad + 11 Perp + 9 Token = 45.
+        assert_eq!(REGISTERED_ACTIONS.len(), 45);
+    }
+
+    #[test]
+    fn registered_actions_unique() {
+        let mut seen = std::collections::BTreeSet::new();
+        for a in REGISTERED_ACTIONS {
+            assert!(seen.insert(*a), "duplicate action `{a}` in REGISTERED_ACTIONS");
+        }
     }
 }

@@ -1,0 +1,39 @@
+// Perp::IncreasePosition — add size to an existing perpetual position.
+//
+// Rust source: `crates/simulation/reducer/src/action/perp/increase.rs`
+// (`IncreasePerpAction`; reuses `OpenPerpLiveInputs`).
+//
+// Optional collateral top-up is exposed via the 3-layer amount projection.
+
+namespace Perp {
+  type IncreasePositionContext = {
+    meta: Core::ActionMeta,
+    venue: PerpVenue,
+    positionId: String,
+    size: SizeSpec,
+    addCollateralToken?: Core::TokenRef,
+    addCollateralAmount?: String,            // raw U256 hex
+    addCollateralAmountNano?: Long,          // host-populated
+    slippageBp: Long,
+    // OpenPerpLiveInputs flattened (same 10 fields as OpenPosition).
+    markPrice: String,
+    oraclePrice: String,
+    fundingRate: String,
+    availableOi: String,
+    maxLeverage: String,
+    initialMarginBp: Long,
+    maintenanceBp: Long,
+    feeTakerBp: Long,
+    feeMakerBp: Long,
+    userAccountState: PerpAccountState,
+    custom?: IncreasePositionCustomContext,
+  };
+
+  type IncreasePositionCustomContext = {};
+
+  action "IncreasePosition" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: IncreasePositionContext,
+  };
+}

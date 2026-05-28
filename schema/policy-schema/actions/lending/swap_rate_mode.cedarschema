@@ -1,0 +1,32 @@
+// Lending::SwapRateMode — switch the rate mode of an existing Aave debt position.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/swap_rate_mode.rs`
+// (`SwapRateModeAction` + `SwapRateModeLiveInputs`). The Rust LiveInputs use
+// `(U256, U256)` / `(Decimal, Decimal)` tuples for (variable, stable) pairs;
+// Cedar has no tuple type so we expose them as two separately-named string
+// fields.
+
+namespace Lending {
+  type SwapRateModeContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Asset whose debt rate mode is being switched.
+    asset: Core::TokenRef,
+    // Target rate mode after the swap: "variable" | "stable".
+    newMode: String,
+    // Live inputs — (variable, stable) tuples flattened to named fields.
+    currentDebtVariable: String,   // U256 hex
+    currentDebtStable: String,     // U256 hex
+    rateVariable: String,          // Decimal as string
+    rateStable: String,            // Decimal as string
+    custom?: SwapRateModeCustomContext,
+  };
+
+  type SwapRateModeCustomContext = {};
+
+  action "SwapRateMode" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: SwapRateModeContext,
+  };
+}

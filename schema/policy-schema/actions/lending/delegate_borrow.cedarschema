@@ -1,0 +1,31 @@
+// Lending::DelegateBorrow — Aave credit-delegation.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/delegate_borrow.rs`
+// (`DelegateBorrowAction`). Authorizes `delegatee` to borrow on behalf of the
+// submitter up to `amount` of `asset` under the given rate mode. No LiveInputs.
+
+namespace Lending {
+  type DelegateBorrowContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Asset whose borrow allowance is being delegated.
+    asset: Core::TokenRef,
+    // Address being granted the borrow allowance.
+    delegatee: String,
+    // Allowance amount (U256 hex).
+    amount: String,
+    amountNano?: Long,
+    amountUsd?: decimal,
+    // Rate mode covered by the delegation: "variable" | "stable".
+    rateMode: String,
+    custom?: DelegateBorrowCustomContext,
+  };
+
+  type DelegateBorrowCustomContext = {};
+
+  action "DelegateBorrow" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: DelegateBorrowContext,
+  };
+}

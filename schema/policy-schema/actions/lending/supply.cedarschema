@@ -1,18 +1,50 @@
-type SupplyContext = {
-  market?: Pool,
-  asset: AssetRef,
-  amount: AmountConstraint,
-  amountMode?: String,
-  recipient: String,
-  from?: String,
-  validity?: Validity,
-  custom?: SupplyCustomContext,
-};
+// Lending::Supply — supply (deposit) an asset into a lending market.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/supply.rs`
+// (`SupplyAction` + `SupplyLiveInputs`). `LiveField<T>` is inlined as the
+// underlying `T` at the policy layer (source/ttl/synced_at metadata is not
+// exposed).
+//
+// Amount is exposed through the 3-layer projection:
+//   - `amount`     : String  — raw U256 hex (canonical wire value)
+//   - `amountNano` : Long?   — token-native nano: `raw × 10^(9 − asset.decimals)`
+//   - `amountUsd`  : decimal? — host-populated fiat estimate.
 
-type SupplyCustomContext = {};
+namespace Lending {
+  // ---------------------------------------------------------------------------
+  // Action context.
+  // ---------------------------------------------------------------------------
+  type SupplyContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Lending venue (e.g. AaveV3 on Optimism).
+    venue: LendingVenue,
+    // Asset being supplied.
+    asset: Core::TokenRef,
+    // Amount to supply (U256 hex).
+    amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    amountUsd?: decimal,
+    // Beneficiary; defaults to submitter when omitted.
+    onBehalfOf?: String,
+    // Live inputs (LiveField<T> flattened to T).
+    reserveState: ReserveState,
+    supplyApy: String,             // Decimal as string
+    aTokenPriceUsd: String,        // Price/Decimal as string
+    eligibleAsCollat: Bool,
+    userStateBefore: UserLendingState,
+    // Manifest-extensible slot.
+    custom?: SupplyCustomContext,
+  };
 
-action "supply" appliesTo {
-  principal: Wallet,
-  resource: Protocol,
-  context: SupplyContext,
-};
+  // Manifest-extensible slot. Placeholder (no fields).
+  type SupplyCustomContext = {};
+
+  action "Supply" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: SupplyContext,
+  };
+}

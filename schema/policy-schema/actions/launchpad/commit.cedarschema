@@ -1,0 +1,58 @@
+// Launchpad::Commit — `LaunchpadAction::Commit` (subscribes funds to a sale).
+//
+// Rust source: `crates/simulation/reducer/src/action/launchpad/commit.rs`
+// (`CommitAction` + `CommitLiveInputs`); `SaleState` is defined in
+// `crates/simulation/reducer/src/action/launchpad/mod.rs`.
+//
+// Amount is exposed through the 3-layer projection:
+//   - `amount`     : String   — raw U256 hex (canonical wire value).
+//   - `amountNano` : Long?    — token-native nano (host-populated).
+//   - `amountUsd`  : decimal? — host-populated fiat estimate.
+//
+// `LiveField<T>` wrappers are inlined to `T`. The `(start, end)` sale window
+// tuple inside `SaleState` is flattened to two parallel Long fields.
+
+namespace Launchpad {
+  // -------------------------------------------------------------------------
+  // Commit context.
+  // -------------------------------------------------------------------------
+  type CommitContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Launchpad platform identifier.
+    platform: Core::ProtocolRef,
+    // Identifier of the sale within the platform.
+    saleId: String,
+    // Token used to pay into the sale.
+    payToken: Core::TokenRef,
+    // Amount of `payToken` to commit (U256 hex).
+    amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    amountUsd?: decimal,
+    // Address receiving the resulting allocation/claim rights.
+    recipient: String,
+    // ----- Live inputs (flattened from `CommitLiveInputs`) -----
+    // Current sale state (cap, window, vest schedule, totals).
+    saleState: SaleState,
+    // Per-user commit cap enforced by the platform (U256 hex).
+    userCap: String,
+    // Amount already committed by the user (U256 hex).
+    userCommitted: String,
+    // Expected sale price (Decimal as string). Optional inside `LiveField<Option<Price>>`.
+    expectedTokenPrice?: String,
+    // Manifest-extensible slot.
+    custom?: CommitCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type CommitCustomContext = {};
+
+  action "Commit" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: CommitContext,
+  };
+}

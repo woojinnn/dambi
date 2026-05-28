@@ -1,20 +1,40 @@
-type BorrowContext = {
-  market?: Pool,
-  asset: AssetRef,
-  amount: AmountConstraint,
-  amountMode?: String,
-  recipient: String,
-  onBehalf: String,
-  collateralAsset?: AssetRef,
-  collateralAmount?: AmountConstraint,
-  validity?: Validity,
-  custom?: BorrowCustomContext,
-};
+// Lending::Borrow — borrow an asset against existing collateral.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/borrow.rs`
+// (`BorrowAction` + `BorrowLiveInputs`). `rateMode` is "variable" | "stable"
+// (serde-renamed from Rust `RateMode`).
 
-type BorrowCustomContext = {};
+namespace Lending {
+  type BorrowContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Asset being borrowed.
+    asset: Core::TokenRef,
+    // Amount to borrow (U256 hex).
+    amount: String,
+    amountNano?: Long,
+    amountUsd?: decimal,
+    // Borrow rate mode: "variable" | "stable".
+    rateMode: String,
+    // Borrower of record; defaults to submitter when omitted.
+    onBehalfOf?: String,
+    // Live inputs (flattened from LiveField<T>).
+    reserveState: ReserveState,
+    userStateBefore: UserLendingState,
+    // Borrow asset price in USD (Price/Decimal as string).
+    assetPriceUsd: String,
+    // Current borrow rate for the chosen RateMode (Decimal as string).
+    currentBorrowRate: String,
+    // Liquidity available in the reserve for borrowing (U256 hex).
+    availableLiquidity: String,
+    custom?: BorrowCustomContext,
+  };
 
-action "borrow" appliesTo {
-  principal: Wallet,
-  resource: Protocol,
-  context: BorrowContext,
-};
+  type BorrowCustomContext = {};
+
+  action "Borrow" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: BorrowContext,
+  };
+}

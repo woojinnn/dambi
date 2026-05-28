@@ -1,0 +1,46 @@
+// Launchpad::ClaimAllocation — `LaunchpadAction::ClaimAllocation`.
+//
+// Rust source: `crates/simulation/reducer/src/action/launchpad/claim_allocation.rs`
+// (`ClaimAllocationAction` + `ClaimAllocationLiveInputs`).
+//
+// `LiveField<(TokenRef, U256)>` for the allocation is flattened to a
+// `(allocatedToken, allocatedAmount)` pair. Amount is exposed through the
+// 3-layer projection (`amount` / `amountNano` / `amountUsd`).
+
+namespace Launchpad {
+  type ClaimAllocationContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Launchpad platform identifier.
+    platform: Core::ProtocolRef,
+    // Identifier of the sale within the platform.
+    saleId: String,
+    // Address receiving the claimed allocation.
+    recipient: String,
+    // ----- Live inputs (flattened from `ClaimAllocationLiveInputs`) -----
+    // Token component of `LiveField<(TokenRef, U256)>`.
+    allocatedToken: Core::TokenRef,
+    // Amount component of `LiveField<(TokenRef, U256)>` (U256 hex).
+    allocatedAmount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    allocatedAmountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    allocatedAmountUsd?: decimal,
+    // Refund owed due to oversubscription (U256 hex).
+    refundDue: String,
+    // Whether the allocation is currently claimable.
+    isClaimable: Bool,
+    // Manifest-extensible slot.
+    custom?: ClaimAllocationCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type ClaimAllocationCustomContext = {};
+
+  action "ClaimAllocation" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: ClaimAllocationContext,
+  };
+}

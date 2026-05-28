@@ -1,0 +1,23 @@
+// Core::Unknown — `ActionBody::Unknown { target, chain, calldata, value }`.
+//
+// Catch-all for calldata that no manifest matched. Policies typically forbid
+// these outright, or whitelist specific `(chain, target)` pairs.
+
+namespace Core {
+  type UnknownContext = {
+    meta: ActionMeta,
+    target: String,           // contract Address
+    chain: String,            // CAIP-2 chain id
+    calldata: String,         // 0x-hex raw calldata (use length-based heuristics in policy)
+    value: String,            // U256 hex (raw ETH value attached)
+    custom?: UnknownCustomContext,
+  };
+
+  type UnknownCustomContext = {};
+
+  action "Unknown" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: UnknownContext,
+  };
+}
