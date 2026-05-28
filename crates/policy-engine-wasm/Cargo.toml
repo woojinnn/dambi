@@ -25,6 +25,13 @@ curve-realtx = []
 
 [dependencies]
 alloy-primitives.workspace = true
+# `alloy-json-abi` provides the `Function::parse` + `.selector()` chain the
+# v3 opcode-stream `inputs_abi` decoder uses to wrap a bare Solidity tuple
+# signature into something `abi_resolver::decode::decode_with_function`
+# accepts. `alloy-dyn-abi` is *not* a direct dep — abi-resolver already
+# links it transitively for the `DynSolValue` flow, and we route through
+# `bridge::convert_value` so this crate never names `DynSolValue` directly.
+alloy-json-abi.workspace = true
 abi-resolver.workspace = true
 policy-engine.workspace = true
 request-router.workspace = true
