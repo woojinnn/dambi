@@ -417,6 +417,14 @@ export async function installDeclarativeBundleV3(
     // alongside the cache.
     const parsedBundle = v3CachedBundleByCallKey.get(cacheKey);
     if (parsedBundle) {
+      // Plan §M5 — 사용자 시각 확인용 console marker. cache hit path =
+      // 같은 callkey 두 번째+ 호출. WASM in-memory `DECLARATIVE_V3_STATE`
+      // thread_local 에는 이미 등록된 상태 (= chrome.storage 와 별개).
+      console.info("[Scopeball] installDeclarativeBundleV3 cache-hit", {
+        callkey: cacheKey,
+        bundleId: cached.bundle_id,
+        decoderId: cached.decoder_id,
+      });
       return {
         decoderId: cached.decoder_id,
         bundleId: cached.bundle_id,
@@ -511,6 +519,20 @@ export async function installDeclarativeBundleV3(
     v3InstallCache.set(k, installed);
     v3CachedBundleByCallKey.set(k, parsedBundle);
   }
+
+  // Plan §M5 — 사용자 시각 확인용 console marker. fresh install path =
+  // registry-api-v3 fetch + parseBundleV3 + WASM declarative_install_v3
+  // 까지 통과한 상태. v3 어뎁터는 chrome.storage 가 아닌 WASM heap 의
+  // `DECLARATIVE_V3_STATE` thread_local + SW in-memory cache 에 저장됨
+  // (SW restart 시 잃음).
+  console.info("[Scopeball] installDeclarativeBundleV3 fresh-install", {
+    callkey: cacheKey,
+    url,
+    bundleId: installed.bundle_id,
+    decoderId: installed.decoder_id,
+    cachedCallkeys: v3InstallCache.size,
+    installedBundleIds: v3InstalledBundleIds.size,
+  });
 
   return {
     decoderId: installed.decoder_id,
