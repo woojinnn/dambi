@@ -7,14 +7,13 @@
   "name": "Coinbase Wrapped Staked ETH",
   "source": "https://help.coinbase.com/en/coinbase/trading-and-funding/staking-rewards/cbeth",
   "token_kind": {
-    "kind": "stake_receipt",
-    "protocol": { "name": "coinbase" },
+    "kind": "wrapped",
     "underlying": {
       "key": {
-        "standard": "erc20",
-        "chain": "eip155:8453",
-        "address": "0x4200000000000000000000000000000000000006"
+        "standard": "native",
+        "chain": "eip155:8453"
       }
-    }
+    },
+    "peg_kind": "rebasing"
   }
 }
