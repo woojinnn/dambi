@@ -7,9 +7,16 @@
 mod declarative_exports;
 mod dto;
 mod exports;
+mod policy_request_exports;
 
 /// Part 5 — Curve real-transaction coverage verification harness (test-only).
-#[cfg(test)]
+///
+/// Disabled in registry v2 cutover: this harness depends on
+/// `registry/manifests/curve/**` which is out of scope until Phase C.
+/// Re-enable after Curve manifest migration. The `curve-realtx` feature is
+/// declared in `Cargo.toml` but never selected by default; the module body
+/// is gated to keep the registry v2 build tree free of Curve dependencies.
+#[cfg(all(test, feature = "curve-realtx"))]
 mod curve_realtx_tests;
 
 use wasm_bindgen::prelude::*;
@@ -20,12 +27,16 @@ pub fn _start() {
     console_error_panic_hook::set_once();
 }
 
+mod sim_types;
+
 pub use declarative_exports::{
-    declarative_install_json, declarative_lookup_json, declarative_plan_children_json,
-    declarative_route_request_json,
+    declarative_install_json, declarative_install_v3_json, declarative_lookup_json,
+    declarative_plan_children_json, declarative_route_request_json,
+    declarative_route_request_v3_json,
 };
 pub use exports::{
     evaluate_policy_rpc_json, evaluate_with_envelopes_json, get_alias_table_json,
     install_policies_json, plan_policy_rpc_json, preview_custom_schema_json,
     preview_installed_schema_json, preview_schema_json, route_request_json,
 };
+pub use policy_request_exports::evaluate_policy_request_json;

@@ -4,10 +4,12 @@
 //! (예: aUSDC.kind = YieldReceipt { underlying: TokenRef(USDC.key) })
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use super::key::TokenKey;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TokenRef {
     pub key: TokenKey,
 }

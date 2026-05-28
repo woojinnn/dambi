@@ -1,6 +1,7 @@
 //! PendingTx — 서명되었지만 아직 체결되지 않은 상태. spec §6.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 pub mod commitment;
 pub mod kind;
@@ -16,7 +17,8 @@ use crate::primitives::Time;
 
 pub type PendingId = String;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum PendingStatus {
     Active,
@@ -27,15 +29,19 @@ pub enum PendingStatus {
     Unknown,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PendingLifecycle {
     pub status: PendingStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub valid_until: Option<Time>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub nonce: Option<NonceKey>,
     /// 부분 fill 또는 settler tx.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub on_chain_tx: Option<TxHash>,
 }
 
@@ -52,7 +58,8 @@ impl PendingLifecycle {
 /// 감사용 서명 페이로드. EIP-712 의 도메인 + 메시지 원본 등.
 pub type SignaturePayload = Vec<u8>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PendingTx {
     pub id: PendingId,
     pub kind: PendingKind,
@@ -70,5 +77,6 @@ pub struct PendingTx {
     pub signed_at: Time,
     /// EIP-712 원본 (감사용).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[tsify(type = "Array<number>")]
     pub signature_payload: SignaturePayload,
 }

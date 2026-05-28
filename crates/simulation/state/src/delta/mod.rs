@@ -4,6 +4,7 @@
 //! 볼 수 있어야 한다 ("이 swap 이 USDC 잔고의 50% 이상을 줄이는지" 같은 정책).
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 pub mod pending_change;
 pub mod position_change;
@@ -16,7 +17,8 @@ pub use token_change::{ApprovalScope, TokenChange};
 use crate::primitives::U256;
 use crate::token::TokenRef;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct StateDelta {
     #[serde(default)]
     pub token_changes: Vec<TokenChange>,
@@ -26,6 +28,7 @@ pub struct StateDelta {
     pub pending_changes: Vec<PendingChange>,
     /// 가스 결제 (transaction 인 경우만).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "[TokenRef, string]")]
     pub gas_paid: Option<(TokenRef, U256)>,
 }
 

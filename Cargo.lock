@@ -1892,6 +1892,8 @@ dependencies = [
  "policy-engine",
  "serde",
  "serde_json",
+ "simulation-reducer",
+ "simulation-state",
  "thiserror",
 ]
 
@@ -2209,6 +2211,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "simulation-reducer",
  "thiserror",
 ]
 
@@ -2234,6 +2237,7 @@ version = "0.1.0"
 dependencies = [
  "abi-resolver",
  "alloy-dyn-abi",
+ "alloy-json-abi",
  "alloy-primitives",
  "anyhow",
  "console_error_panic_hook",
@@ -2245,7 +2249,10 @@ dependencies = [
  "request-router",
  "serde",
  "serde_json",
+ "simulation-reducer",
+ "simulation-state",
  "thiserror",
+ "tsify-next",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]
@@ -2735,6 +2742,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_decimal"
+version = "1.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c5108e3d4d903e21aac27f12ba5377b6b34f9f44b325e4894c7924169d06995"
+dependencies = [
+ "arrayvec 0.7.6",
+ "num-traits",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2930,6 +2949,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2943,6 +2973,17 @@ name = "serde_derive"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3120,10 +3161,13 @@ dependencies = [
 name = "simulation-reducer"
 version = "0.1.0"
 dependencies = [
+ "rust_decimal",
  "serde",
  "serde_json",
  "simulation-state",
  "thiserror",
+ "tsify-next",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3135,6 +3179,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tsify-next",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3701,6 +3747,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "tsify-next"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d0f2208feeb5f7a6edb15a2389c14cd42480ef6417318316bb866da5806a61d"
+dependencies = [
+ "serde",
+ "serde-wasm-bindgen",
+ "tsify-next-macros",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "tsify-next-macros"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81253930d0d388a3ab8fa4ae56da9973ab171ef833d1be2e9080fc3ce502bd6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "typed-arena"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3900,6 +3970,7 @@ dependencies = [
  "cfg-if",
  "once_cell",
  "rustversion",
+ "serde",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
 ]

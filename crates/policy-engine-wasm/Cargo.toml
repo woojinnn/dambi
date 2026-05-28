@@ -16,8 +16,22 @@ wasm-opt = ["-Oz", "--strip-debug", "--enable-bulk-memory", "--enable-mutable-gl
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Curve real-tx coverage verification harness — disabled by default in v2
+# cutover (depends on Curve manifests, scheduled for Phase C). Declared here
+# so `#[cfg(feature = "curve-realtx")]` in `lib.rs` passes the strict clippy
+# `unexpected_cfgs` lint when the feature is not selected.
+curve-realtx = []
+
 [dependencies]
 alloy-primitives.workspace = true
+# `alloy-json-abi` provides the `Function::parse` + `.selector()` chain the
+# v3 opcode-stream `inputs_abi` decoder uses to wrap a bare Solidity tuple
+# signature into something `abi_resolver::decode::decode_with_function`
+# accepts. `alloy-dyn-abi` is *not* a direct dep — abi-resolver already
+# links it transitively for the `DynSolValue` flow, and we route through
+# `bridge::convert_value` so this crate never names `DynSolValue` directly.
+alloy-json-abi.workspace = true
 abi-resolver.workspace = true
 policy-engine.workspace = true
 request-router.workspace = true
@@ -30,6 +44,13 @@ wasm-bindgen.workspace = true
 js-sys.workspace = true
 console_error_panic_hook.workspace = true
 thiserror.workspace = true
+# Simulation types are re-exported through a dummy wasm-bindgen fn so that
+# tsify-next emits `.d.ts` declarations for every Action / WalletState /
+# StateDelta. The simulation crates themselves are pure types; this is the
+# canonical TS bridge.
+simulation-state.workspace = true
+simulation-reducer.workspace = true
+tsify-next = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom.workspace = true

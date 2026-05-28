@@ -1,6 +1,7 @@
 //! TokenHolding — 한 fungibility 단위의 보유 상태.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use super::key::TokenKey;
 use super::kind::TokenKind;
@@ -8,11 +9,15 @@ use crate::live_field::{DataSource, LiveField};
 use crate::primitives::{Address, Price, Time, U256};
 
 /// 보유 양 표현. ERC20/Native/ERC1155 는 Fungible 수량, ERC721 은 Owned 만으로 충분.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "form", rename_all = "snake_case")]
 pub enum Balance {
     /// ERC20 / Native / ERC1155 — 같은 fungibility 단위 안의 수량.
-    Fungible { amount: U256 },
+    Fungible {
+        #[tsify(type = "string")]
+        amount: U256,
+    },
     /// ERC721 — 보유 사실 자체로 충분. entry 존재 = owned.
     Owned,
 }
@@ -44,7 +49,8 @@ impl Balance {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TokenHolding {
     pub key: TokenKey,
     pub kind: TokenKind,
@@ -58,10 +64,12 @@ pub struct TokenHolding {
 
     /// ERC721 *개별 NFT* 에 대한 approve(tokenId, spender). 그 외 표준에선 None.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "string")]
     pub approved_to: Option<Address>,
 
     /// 가격 매김 가능한 자산만 채움.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional)]
     pub price_usd: Option<LiveField<Price>>,
 
     pub last_synced_at: Time,

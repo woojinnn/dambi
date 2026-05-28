@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use tsify_next::Tsify;
 
 use crate::approval::ApprovalSet;
 use crate::pending::PendingTx;
@@ -15,9 +16,12 @@ use crate::token::{TokenHolding, TokenKey};
 /// (account address, 추적 chain set).
 /// EVM 은 address 가 chain 간 공통이라 single Address.
 /// 비-EVM 추가 시 (예: Solana) confederate identity 가 필요 — 후속.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct WalletId {
+    #[tsify(type = "string")]
     pub address: Address,
+    #[tsify(type = "Array<ChainId>")]
     pub chains: BTreeSet<ChainId>,
 }
 
@@ -30,13 +34,15 @@ impl WalletId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct WalletState {
     pub wallet_id: WalletId,
 
     /// per-instance fungibility 단위로 holding 1개.
     /// (TokenKey 가 enum 이라 JSON object key 로 못 쓰므로 pairs 로 직렬화.)
     #[serde(default, with = "crate::serde_helpers::map_as_pairs")]
+    #[tsify(type = "Array<[TokenKey, TokenHolding]>")]
     pub tokens: BTreeMap<TokenKey, TokenHolding>,
 
     /// scope 별로 분리된 wallet-level 권한 컬렉션.
@@ -53,6 +59,7 @@ pub struct WalletState {
 
     /// 마지막 sync 시점의 체인별 블록.
     #[serde(default)]
+    #[tsify(type = "Array<[ChainId, BlockHeight]>")]
     pub block_heights: BTreeMap<ChainId, BlockHeight>,
 }
 

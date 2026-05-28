@@ -1,9 +1,11 @@
 import Browser from "webextension-polyfill";
-import { ensureSeedBundlesInstalled } from "./marketplace/declarative-adapter-loader";
+import { ensureSeedBundlesInstalled } from "./adapter-loader/declarative-adapter-loader";
 import {
   tryDeclarativeRoute,
+  tryDeclarativeRouteV3,
   type DeclarativeRouteOutcome,
-} from "./marketplace/declarative-route";
+  type DeclarativeRouteV3Outcome,
+} from "./adapter-loader/declarative-route";
 import {
   ensureDefaultPoliciesInstalled,
   getActivePolicyRpcManifests,
@@ -29,6 +31,32 @@ import {
   type Message,
 } from "@lib/types";
 
+/**
+ * Phase 4A — submission-shape classifier. Maps the SW `Message` envelope
+ * onto the `ActionNature` discriminator the v3 reducer uses:
+ *
+ *   - `"onchain_tx"`   ⇒ `eth_sendTransaction` (TransactionPayload).
+ *     Carries the broadcast tx fields (chain, gas, value, nonce).
+ *   - `"offchain_sig"` ⇒ `eth_signTypedData{,_v3,_v4}` (TypedSignaturePayload).
+ *     Carries an `EIP-712` domain — verifying contract, name, chain id.
+ *   - `"untyped_sig"`  ⇒ `personal_sign` / `eth_sign` (UntypedSignaturePayload).
+ *     No structured domain — body falls back to `ActionBody::Unknown` in
+ *     v3 because we cannot tell what the signer is approving.
+ *
+ * The classifier is a pure lookup. The orchestrator uses it to route into
+ * the v3 WASM entry (`tryDeclarativeRouteV3`) for transactions and to keep
+ * the legacy untyped-sig short-circuit for personal_sign — Phase 4B does
+ * NOT yet add a typed-data v3 entry; that arrives in Phase 4C alongside
+ * the SignAdapter.
+ */
+export type ActionNatureKind = "onchain_tx" | "offchain_sig" | "untyped_sig";
+
+export function classifyMessage(message: Message): ActionNatureKind {
+  if (isTransaction(message)) return "onchain_tx";
+  if (isTypedSignature(message)) return "offchain_sig";
+  return "untyped_sig";
+}
+
 // Caps `runLifecycle`. Aligned to be a few seconds shorter than the
 // proxy's PHASE1_MS so the SW always has time to post back a real verdict
 // (or an `awaiting-user` extension request) before the proxy gives up.
@@ -46,7 +74,7 @@ interface DecisionOptions {
 /**
  * Phase 6 — audit telemetry capturing the declarative pipeline's contribution
  * to a single decision. Surfaced in the audit log so we can tell which
- * marketplace bundle handled (or failed to handle) a given tx.
+ * adapter-loader bundle handled (or failed to handle) a given tx.
  *
  * Phase 7F update: when `outcome === "hit"` AND `envelope_count > 0`, the
  * declarative path now drives the Cedar verdict via
@@ -60,6 +88,24 @@ export interface DeclarativeAuditMeta {
   decoder_id?: string;
   bundle_id?: string;
   envelope_count?: number;
+  reason?: string;
+}
+
+/**
+ * Phase 4B — v3 route audit meta. Observability-only at Phase 4B (the v3
+ * fn is a stub that always returns one `Unknown` action). Phase 4D fills
+ * in `decoder_id` once registry-v2 manifest lookup is wired.
+ *
+ * Kept separate from `DeclarativeAuditMeta` so the audit log can show
+ * both pipelines running in parallel during cutover — when Phase 5
+ * promotes v3 to verdict driver, this meta moves into the `verdict`
+ * branch and `DeclarativeAuditMeta` is retired.
+ */
+export interface DeclarativeV3AuditMeta {
+  outcome: DeclarativeRouteV3Outcome["kind"]; // "hit" | "miss" | "fault"
+  nature: ActionNatureKind;
+  decoder_id?: string;
+  action_count?: number;
   reason?: string;
 }
 
@@ -79,6 +125,12 @@ interface LifecycleResult {
   verdictSource: VerdictSource;
   policyRpc?: PolicyRpcAuditMeta;
   declarative?: DeclarativeAuditMeta;
+  /**
+   * Phase 4B — v3 declarative route audit meta. Always observability-only
+   * for the moment; the verdict is still driven by the v1 declarative or
+   * static path.
+   */
+  declarativeV3?: DeclarativeV3AuditMeta;
 }
 
 /**
@@ -176,6 +228,7 @@ async function decideInner(
       lifecycle.verdictSource,
       lifecycle.policyRpc,
       lifecycle.declarative,
+      lifecycle.declarativeV3,
     );
     return { ok, verdict };
   } catch (err) {
@@ -243,6 +296,7 @@ async function appendAudit(
   verdictSource?: VerdictSource,
   policyRpc?: PolicyRpcAuditMeta,
   declarative?: DeclarativeAuditMeta,
+  declarativeV3?: DeclarativeV3AuditMeta,
 ): Promise<void> {
   logDecision(message, verdict);
   await auditAppend({
@@ -257,6 +311,7 @@ async function appendAudit(
     matchedPolicies: formatAuditMatched(verdict),
     ...(policyRpc ? { policyRpc } : {}),
     ...(declarative ? { declarative } : {}),
+    ...(declarativeV3 ? { declarativeV3 } : {}),
     ...(verdictSource ? { verdictSource } : {}),
     decidedAtMs: Date.now(),
   });
@@ -351,16 +406,28 @@ function logDecision(message: Message, verdict: VerdictDto): void {
 }
 
 async function runLifecycle(message: Message): Promise<LifecycleResult> {
+  // Phase 4A classifier — `nature` lets us tell the v3 path apart at a
+  // glance (audit telemetry + the upcoming v3 verdict driver). Untyped
+  // sigs short-circuit just as before; the new classifier doesn't move
+  // any verdict decisions, it only labels the audit row.
+  const nature = classifyMessage(message);
   if (isUntypedSignature(message)) {
     return {
       verdict: unsupportedUntypedSignatureVerdict(),
       verdictSource: "static",
+      // Phase 4B audit: record the v3 nature even when we short-circuit
+      // so the audit log shows we *saw* a personal_sign / eth_sign tx.
+      declarativeV3: {
+        outcome: "miss",
+        nature,
+        reason: "untyped_signature_short_circuit",
+      },
     };
   }
 
   // Phase 6 → Phase 7F — declarative path is now a verdict driver, not
   // observability-only. For transactions we hand off
-  // `(chainId, to, calldata)` to the marketplace router. A hit with one or
+  // `(chainId, to, calldata)` to the adapter-loader router. A hit with one or
   // more enriched envelopes lets us run `evaluate_with_envelopes_json`
   // directly, skipping `plan_policy_rpc_json` and the RPC enrichment hop.
   //
@@ -417,6 +484,82 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     }
   }
 
+  // Phase 4B — v3 route, observability-only. Calls the new WASM v3 entry
+  // alongside the v1 path so the audit log shows both running. The Phase 4B
+  // Rust stub always returns one `ActionBody::Unknown` — verdict driving is
+  // intentionally deferred to Phase 5+ once manifest decode (Phase 4D)
+  // lands. Failures here MUST never disrupt the v1 verdict pipeline; we
+  // fence the call and log faults into audit only.
+  let declarativeV3Meta: DeclarativeV3AuditMeta | undefined;
+  if (isTransaction(message)) {
+    try {
+      const v3Outcome = await tryDeclarativeRouteV3({
+        chainId: message.data.chainId,
+        from: message.data.transaction.from ?? "0x" + "0".repeat(40),
+        to: message.data.transaction.to ?? "0x" + "0".repeat(40),
+        valueWei: txValueToWeiDecimal(message.data.transaction.value),
+        calldataHex: message.data.transaction.data,
+        submittedAt: Math.floor(Date.now() / 1000),
+      });
+      declarativeV3Meta = auditFromDeclarativeV3Outcome(v3Outcome, nature);
+      // Plan §M4 — DevTools console 검증 entry. PDF FSM hierarchical
+      // ActionBody JSON 을 hit 시 dump (Plan 의 narrow scope 의 핵심
+      // deliverable: SW DevTools 에서 actions[] shape 정확히 출력).
+      // JSON.stringify with pretty-print so users can visually inspect
+      // each ActionBody's `domain` / `action` / payload / live_inputs.
+      console.info("[Scopeball] declarative-route-v3", {
+        requestId: message.requestId,
+        chainId: message.data.chainId,
+        outcome: v3Outcome.kind,
+        nature,
+        ...(v3Outcome.kind === "hit"
+          ? {
+              decoderId: v3Outcome.value.decoderId,
+              actionCount: v3Outcome.value.actions.length,
+              actions: v3Outcome.value.actions,
+            }
+          : v3Outcome.kind === "miss"
+            ? { reason: v3Outcome.reason }
+            : {
+                reason: v3Outcome.reason,
+                // Plan §M5 — e2e 진단용 cause exposure. fault 발생 시
+                // WASM EngineError 의 kind / message + stack 가 console 에
+                // 보여야 어떤 opcode / placeholder / serde 가 실패했는지
+                // 추적 가능.
+                cause:
+                  v3Outcome.cause instanceof Error
+                    ? {
+                        name: v3Outcome.cause.name,
+                        message: v3Outcome.cause.message,
+                        ...("kind" in v3Outcome.cause
+                          ? { kind: (v3Outcome.cause as { kind: unknown }).kind }
+                          : {}),
+                      }
+                    : v3Outcome.cause,
+              }),
+      });
+    } catch (err) {
+      console.warn("[Scopeball] declarative-route-v3 threw", {
+        requestId: message.requestId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      declarativeV3Meta = {
+        outcome: "fault",
+        nature,
+        reason: "unexpected",
+      };
+    }
+  } else {
+    // Typed-sig path — Phase 4B does NOT yet route signatures through the
+    // v3 WASM entry (SignAdapter arrives in Phase 4C). Record a miss with
+    // the nature so the audit log still shows the v3 column populated.
+    declarativeV3Meta = {
+      outcome: "miss",
+      nature,
+      reason: "typed_sig_not_yet_routed",
+    };
+  }
+
   // Declarative verdict path — only taken when the declarative router
   // returned a hit with ≥1 enriched envelope AND the message is a
   // transaction. Failures here fall through to the static path so a flaky
@@ -458,6 +601,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         verdict,
         verdictSource: "declarative",
         ...(declarativeMeta ? { declarative: declarativeMeta } : {}),
+        ...(declarativeV3Meta ? { declarativeV3: declarativeV3Meta } : {}),
       };
     } catch (err) {
       // evaluateWithEnvelopes threw — most likely an EngineError on the
@@ -503,7 +647,30 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     verdictSource: "static",
     policyRpc: result.audit,
     ...(declarativeMeta ? { declarative: declarativeMeta } : {}),
+    ...(declarativeV3Meta ? { declarativeV3: declarativeV3Meta } : {}),
   };
+}
+
+/**
+ * Phase 4B — map a v3 outcome into the audit shape. Pulled out into a
+ * standalone fn for symmetry with `auditFromDeclarativeOutcome` (v1).
+ */
+function auditFromDeclarativeV3Outcome(
+  outcome: DeclarativeRouteV3Outcome,
+  nature: ActionNatureKind,
+): DeclarativeV3AuditMeta {
+  if (outcome.kind === "hit") {
+    return {
+      outcome: "hit",
+      nature,
+      decoder_id: outcome.value.decoderId,
+      action_count: outcome.value.actions.length,
+    };
+  }
+  if (outcome.kind === "miss") {
+    return { outcome: "miss", nature, reason: outcome.reason };
+  }
+  return { outcome: "fault", nature, reason: outcome.reason };
 }
 
 function auditFromDeclarativeOutcome(

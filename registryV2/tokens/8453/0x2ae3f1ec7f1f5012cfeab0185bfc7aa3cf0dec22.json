@@ -1,0 +1,19 @@
+{
+  "erc_kind": "erc20",
+  "chainId": 8453,
+  "address": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+  "symbol": "cbETH",
+  "decimals": 18,
+  "name": "Coinbase Wrapped Staked ETH",
+  "source": "https://help.coinbase.com/en/coinbase/trading-and-funding/staking-rewards/cbeth",
+  "token_kind": {
+    "kind": "wrapped",
+    "underlying": {
+      "key": {
+        "standard": "native",
+        "chain": "eip155:8453"
+      }
+    },
+    "peg_kind": "rebasing"
+  }
+}

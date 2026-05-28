@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use tsify_next::Tsify;
 
 pub mod erc20;
 pub mod permit2;
@@ -20,22 +21,26 @@ pub type ContractAddrKey = (ChainId, Address);
 /// 한 (chain, contract, spender) 트리플로 식별.
 pub type SpenderKey = (ChainId, Address, Spender);
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ApprovalSet {
     /// ERC20 allowance.
     /// (chain, token contract) → spender 별 한도.
     /// (tuple key 라 JSON pairs 로 직렬화.)
     #[serde(default, with = "crate::serde_helpers::map_as_pairs")]
+    #[tsify(type = "Array<[[ChainId, string], Array<[string, AllowanceSpec]>]>")]
     pub erc20: BTreeMap<ContractAddrKey, BTreeMap<Spender, AllowanceSpec>>,
 
     /// ERC721/ERC1155 setApprovalForAll.
     /// (chain, NFT/1155 contract) → set-for-all 권한이 부여된 spender 들.
     #[serde(default, with = "crate::serde_helpers::map_as_pairs")]
+    #[tsify(type = "Array<[[ChainId, string], Array<string>]>")]
     pub set_for_all: BTreeMap<ContractAddrKey, BTreeSet<Spender>>,
 
     /// Permit2 contract 기록상의 allowance.
     /// (chain, token contract, spender) → 한도.
     #[serde(default, with = "crate::serde_helpers::map_as_pairs")]
+    #[tsify(type = "Array<[[ChainId, string, string], Permit2Allowance]>")]
     pub permit2: BTreeMap<SpenderKey, Permit2Allowance>,
 }
 

@@ -23,10 +23,20 @@ interface WasmExports {
   // `crates/policy-engine-wasm/src/declarative_exports.rs`.
   declarative_install_json(bundle_json: string): string;
   declarative_lookup_json(input_json: string): string;
+  // M2 — v3 install entry. Parallel to `declarative_install_json` but
+  // stores the raw v3 manifest (`type: "adapter_action"`,
+  // `schema_version: "3"`, hierarchical `emit.body`) in
+  // `DECLARATIVE_V3_STATE` for the v3 route entry to consume.
+  declarative_install_v3_json(bundle_json: string): string;
   // Phase 6 — orchestrator route entry. Resolves
   // (chain_id, to, selector) through the engine-internal bridge populated
   // at install time, then runs the matching declarative mapper.
   declarative_route_request_json(input_json: string): string;
+  // Phase 4B — v3 orchestrator route entry. Same callkey shape as the v1
+  // entry but emits the PDF FSM `simulation_reducer::action::Action` tree
+  // instead of the flat `ActionEnvelope`. Phase 4B stub returns a single
+  // `ActionBody::Unknown` — manifest lookup arrives in Phase 4D.
+  declarative_route_request_v3_json(input_json: string): string;
   // multicall_recurse child-callkey planner. Decodes the outer multicall in
   // WASM and returns the inner sub-call callkeys the host must fetch+install
   // before declarative_route_request_json.
@@ -116,10 +126,73 @@ export interface DeclarativeRouteRequestInput {
  * Result of a successful `declarative_route_request_json` call. `decoder_id`
  * is the bundle id the bridge resolved (`declarative.<path>`); the
  * orchestrator surfaces it in audit telemetry so we can tell which
- * marketplace adapter handled a given tx.
+ * adapter loader handled a given tx.
  */
 export interface DeclarativeRouteRequestResult {
   envelopes: Record<string, unknown>[];
+  decoder_id: string;
+}
+
+/**
+ * Phase 4B — wire shape for `declarative_route_request_v3_json`.
+ *
+ * Same callkey as the v1 entry, plus the meta fields the new
+ * `simulation_reducer::action::ActionMeta` carries (`value` / `gas_limit` /
+ * `gas_price` / `submitter` / `submitted_at` / `nonce`). All numeric fields
+ * are passed as base-10 decimal strings — the WASM converts them to
+ * `U256`/`u64` internally; passing JS `number` would lose precision for
+ * uint256 values.
+ *
+ * `selector` and `block_timestamp` are reserved for Phase 4D's registry-v2
+ * manifest lookup. They must be supplied; the Phase 4B stub does not read
+ * them but the wire shape is locked so adding the lookup later is purely a
+ * Rust-side change.
+ */
+export interface DeclarativeRouteRequestV3Input {
+  chain_id: number;
+  /** "0x" + 40 hex. Case-insensitive on the engine side. */
+  to: string;
+  /** "0x" + 8 hex. Case-insensitive on the engine side. */
+  selector: string;
+  /** Raw "0x"-prefixed calldata. */
+  calldata: string;
+  /** `msg.value` as a base-10 decimal string. Defaults to `"0"`. */
+  value?: string;
+  /** Declared gas limit as a base-10 decimal string. Defaults to `"0"`. */
+  gas_limit?: string;
+  /**
+   * Current gas price as a base-10 decimal string. Defaults to `"0"`. The
+   * WASM wraps this in a stub `LiveField` whose source is Pyth
+   * `gas/eip155:<chain_id>` — Phase 5+ replaces this with a Sync
+   * Orchestrator hookup.
+   */
+  gas_price?: string;
+  /** `tx.from` — "0x" + 40 hex. */
+  submitter: string;
+  /** Unix epoch seconds at which the Action was submitted. */
+  submitted_at: number;
+  /** Sequential transaction nonce of `submitter`. Defaults to `0`. */
+  nonce?: number;
+  /**
+   * Optional block.timestamp — distinct from `submitted_at`. Reserved for
+   * Phase 4D's deadline / validity mapping.
+   */
+  block_timestamp?: number;
+}
+
+/**
+ * Result of a successful `declarative_route_request_v3_json` call.
+ *
+ * `actions` is the JSON-serialised `Vec<simulation_reducer::action::Action>`
+ * the WASM produced. Phase 4B emits a single-element vec whose body is the
+ * `Unknown` stub; Phase 4D fills in the real `ActionBody` per registry-v2
+ * manifest emit-rule.
+ *
+ * `decoder_id` echoes the matched bundle's declarative decoder id when a
+ * manifest matched (`""` when no match — the Phase 4B stub never matches).
+ */
+export interface DeclarativeRouteRequestV3Result {
+  actions: Record<string, unknown>[];
   decoder_id: string;
 }
 
@@ -323,7 +396,7 @@ export async function planPolicyRpc(
 
 /**
  * Phase 1B — install a declarative adapter bundle into the engine. The
- * bundle JSON must conform to `ADAPTER_MARKETPLACE_ARCHITECTURE.md` §4.1; the
+ * bundle JSON must conform to `ADAPTER_LOADER_ARCHITECTURE.md` §4.1; the
  * engine returns the `declarative.<path>` decoder id keyed off the bundle.
  *
  * Re-installing the same bundle is idempotent on the engine side — the
@@ -336,6 +409,36 @@ export async function installDeclarativeBundle(
   const exports = await load();
   return unwrap<DeclarativeInstallResult>(
     exports.declarative_install_json(bundleJson),
+  );
+}
+
+/**
+ * M2 — install a v3 declarative bundle (`type: "adapter_action"`,
+ * `schema_version: "3"`, hierarchical `emit.body`) into the engine's
+ * `DECLARATIVE_V3_STATE` so subsequent `declarative_route_request_v3_json`
+ * calls find it via the same callkey `(chain_id, to, selector)` bridge.
+ *
+ * Parallel to {@link installDeclarativeBundle} (v1). The v1 install path
+ * is untouched — both states coexist throughout the cutover.
+ *
+ * Error semantics:
+ *   - `EngineError("invalid_bundle_json", …)` — payload is not valid JSON
+ *     once stringified on the SW side. The caller built a bad request and
+ *     must fix it.
+ *   - `EngineError("missing_id", …)` — bundle has no `id` string.
+ *   - `EngineError("invalid_match", …)` — `match` is missing or its
+ *     `BundleMatch` deserialisation failed inside WASM.
+ *
+ * The caller MUST stringify the bundle exactly as it received it from the
+ * registry (no re-canonicalisation) — `bundle_sha256` integrity downstream
+ * depends on byte stability.
+ */
+export async function declarativeInstallV3(
+  bundleJson: string,
+): Promise<DeclarativeInstallResult> {
+  const exports = await load();
+  return unwrap<DeclarativeInstallResult>(
+    exports.declarative_install_v3_json(bundleJson),
   );
 }
 
@@ -430,6 +533,35 @@ export async function declarativeRouteRequest(
   const exports = await load();
   return unwrap<DeclarativeRouteRequestResult>(
     exports.declarative_route_request_json(JSON.stringify(input)),
+  );
+}
+
+/**
+ * Phase 4B — v3 orchestrator route entry.
+ *
+ * Same callkey shape as `declarativeRouteRequest` (v1) but produces the
+ * PDF FSM `simulation_reducer::action::Action` tree instead of the flat
+ * `ActionEnvelope`. The wire boundary is locked at Phase 4B; the Rust
+ * stub currently returns a single `ActionBody::Unknown` so the SW + Cedar
+ * path can already exercise the v3 type — manifest lookup + emit-rule
+ * decoding lands in Phase 4D.
+ *
+ * Error semantics mirror the v1 entry:
+ *   - `EngineError("invalid_input_json", …)` — malformed wire payload.
+ *     The caller built a bad request and must fix it.
+ *   - `EngineError("input_too_large", …)` — JSON exceeded the WASM input
+ *     budget. Caller should split / shorten the request.
+ *
+ * The v1 `declarative_route_request_json` is intentionally NOT removed —
+ * both entries run in parallel during the v3 cutover so the legacy
+ * envelope-driven Cedar path keeps working.
+ */
+export async function declarativeRouteRequestV3(
+  input: DeclarativeRouteRequestV3Input,
+): Promise<DeclarativeRouteRequestV3Result> {
+  const exports = await load();
+  return unwrap<DeclarativeRouteRequestV3Result>(
+    exports.declarative_route_request_v3_json(JSON.stringify(input)),
   );
 }
 

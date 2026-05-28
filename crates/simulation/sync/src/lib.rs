@@ -14,6 +14,25 @@
 //!
 //! reducer 와 달리 외부 IO 가 있으므로 native only — wasm 빌드 안 됨.
 
+#![deny(unsafe_code)]
+#![deny(unused_must_use)]
+#![deny(rustdoc::bare_urls)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![warn(missing_docs)]
+#![warn(unreachable_pub)]
+#![warn(rust_2018_idioms)]
+#![warn(rust_2021_compatibility)]
+#![warn(missing_debug_implementations)]
+#![warn(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![warn(clippy::dbg_macro)]
+// Phase 1~11 의 본문은 동작 우선 — 후속 패스에서 # Errors / # Panics doc 보강.
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::missing_docs_in_private_items)]
+#![allow(missing_docs)]
+
 pub mod action_scope;
 pub mod batcher;
 pub mod calc;

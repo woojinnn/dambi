@@ -3,11 +3,13 @@
 //! `value` 자체는 LiveField 안에 들고, source 는 갱신 주체가 보는 명세.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use crate::primitives::{Address, ChainId};
 
 /// 오라클 공급자.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum OracleProvider {
     Pyth,
@@ -18,7 +20,8 @@ pub enum OracleProvider {
 }
 
 /// 외부 API 호출 시 인증 방식.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuthSpec {
     None,
@@ -28,12 +31,14 @@ pub enum AuthSpec {
 }
 
 /// Sync orchestrator 가 사용하는 데이터 출처.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DataSource {
     /// `eth_call` 같은 view 함수.
     OnchainView {
         chain: ChainId,
+        #[tsify(type = "string")]
         contract: Address,
         function: String,
         /// 결과를 어떻게 decode 할지 식별자 (외부 registry).
@@ -51,6 +56,7 @@ pub enum DataSource {
         endpoint: String,
         parser_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[tsify(optional)]
         auth: Option<AuthSpec>,
     },
 
@@ -90,7 +96,8 @@ pub enum RegistryResource {
 }
 
 /// 다른 LiveField 를 가리키는 참조 (DerivedFrom 의 inputs 에 사용).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "scope", rename_all = "snake_case")]
 pub enum FieldRef {
     TokenField {
@@ -112,13 +119,15 @@ pub enum FieldRef {
     Global { name: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum TokenFieldName {
     PriceUsd,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum PositionFieldName {
     HealthFactor,
@@ -131,7 +140,8 @@ pub enum PositionFieldName {
     Leverage,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum PendingFieldName {
     Status,

@@ -3,11 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tsify_next::Tsify;
 
 use super::token_ref::TokenRef;
 use crate::primitives::{U128, U256, Weight};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum ShareForm {
     Fungible,
@@ -15,12 +17,14 @@ pub enum ShareForm {
 }
 
 /// LP share 의 가격 분포 모양.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LpShape {
     /// 풀 전체에 비례 — Uniswap V2, Curve V1, Balancer.
     Pooled {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[tsify(optional)]
         weights: Option<Vec<Weight>>,
     },
 
@@ -28,29 +32,41 @@ pub enum LpShape {
     Concentrated {
         range: RangeSpec,
         #[serde(default)]
+        #[tsify(type = "Array<[TokenRef, string]>")]
         fees_owed: Vec<(TokenRef, U256)>,
     },
 
     /// 위 두 모양에 안 맞는 LP — escape hatch.
-    Custom { protocol: String, raw: Value },
+    Custom {
+        protocol: String,
+        #[tsify(type = "unknown")]
+        raw: Value,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RangeSpec {
     /// Uniswap V3/V4 의 tick 단위 집중.
     Tick {
         lower: i32,
         upper: i32,
+        #[tsify(type = "string")]
         liquidity: U128,
     },
 
     /// Trader Joe LB 의 bin 단위 분포.
     Bin {
         active_id: u32,
+        #[tsify(type = "Array<[number, string]>")]
         distribution: Vec<(u32, U128)>,
     },
 
     /// Maverick 등 형식이 다른 경우.
-    Custom { protocol: String, raw: Value },
+    Custom {
+        protocol: String,
+        #[tsify(type = "unknown")]
+        raw: Value,
+    },
 }

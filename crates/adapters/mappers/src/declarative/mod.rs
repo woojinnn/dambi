@@ -1,8 +1,8 @@
-//! Declarative DSL (Tier A) for adapter marketplace.
+//! Declarative DSL (Tier A) for adapter loader.
 //!
 //! Phase 0: serde-able Bundle JSON types only (no execution / mapper impl yet).
 //!
-//! Spec: `ADAPTER_MARKETPLACE_ARCHITECTURE.md` §4.1, §5.1 (BNF), §5.3 (WhitelistedFn).
+//! Spec: `ADAPTER_LOADER_ARCHITECTURE.md` §4.1, §5.1 (BNF), §5.3 (WhitelistedFn).
 //!
 //! Module layout (Phase 1A):
 //! ```text
@@ -18,6 +18,7 @@
 //!   - Phase 5: `OpcodeStreamDispatch` execution (Universal Router)
 //!   - 향후:    `EnumTaggedDispatch` (Balancer V2 등)
 
+pub mod action_builder;
 pub mod array_emit;
 pub mod builtin_fn;
 pub mod enum_tagged;

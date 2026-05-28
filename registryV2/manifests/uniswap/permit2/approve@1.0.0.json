@@ -1,0 +1,55 @@
+{
+  "type": "adapter_action",
+  "id": "uniswap/permit2/approve@1.0.0",
+  "publisher": "uniswap.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x87517c45",
+    "chain_to_addresses": {
+      "1":     ["0x000000000022d473030f116ddee9f6b43ac78ba3"],
+      "10":    ["0x000000000022d473030f116ddee9f6b43ac78ba3"],
+      "8453":  ["0x000000000022d473030f116ddee9f6b43ac78ba3"],
+      "42161": ["0x000000000022d473030f116ddee9f6b43ac78ba3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "approve",
+    "abi": {
+      "name": "approve",
+      "type": "function",
+      "inputs": [
+        { "name": "token", "type": "address" },
+        { "name": "spender", "type": "address" },
+        { "name": "amount", "type": "uint160" },
+        { "name": "expiration", "type": "uint48" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "permit2_approve",
+        "permit2_approve": {
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "$chain",
+              "address": "$args.token"
+            }
+          },
+          "spender": "$args.spender",
+          "amount": "$args.amount",
+          "expires_at": "$args.expiration"
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}
