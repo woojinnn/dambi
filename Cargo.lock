@@ -3194,6 +3194,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simulation-db",
+ "simulation-reducer",
  "simulation-state",
  "thiserror",
  "tokio",
