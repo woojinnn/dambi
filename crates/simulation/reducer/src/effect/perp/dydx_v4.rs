@@ -10,7 +10,7 @@
 //! liquidation-price formula degenerates to the same single-asset form when
 //! exactly one position dominates the subaccount; for true multi-position
 //! cross-margin the venue's `clob` module surfaces the canonical figure via
-//! the indexer API and our LiveField source should switch to
+//! the indexer API and our `LiveField` source should switch to
 //! `DataSource::VenueApi { provider: "dydx_v4_indexer", ... }`.
 //!
 //! ## Primary sources
@@ -22,9 +22,9 @@
 //!
 //! ## Cosmos signing note
 //!
-//! DyDx V4 trade orders are signed via Cosmos SDK `SIGN_MODE_DIRECT`, not
+//! `DyDx` V4 trade orders are signed via Cosmos SDK `SIGN_MODE_DIRECT`, not
 //! EIP-712. The orderbook-vs-on-chain dispatch in the per-action reducers
-//! treats DyDx V4 the same as Hyperliquid (pending-only state mutation at
+//! treats `DyDx` V4 the same as Hyperliquid (pending-only state mutation at
 //! signing); the actual signature payload format differs, but our
 //! `PendingTx.signature_payload: Vec<u8>` is signature-scheme-agnostic.
 
@@ -66,18 +66,18 @@ pub(super) fn liquidation_price(
 /// mark price.
 pub(super) fn unrealized_pnl(
     size_base: U256,
-    entry: Price,
-    mark: Price,
+    entry: &Price,
+    mark: &Price,
     is_long: bool,
 ) -> ReducerResult<SignedI256> {
-    math::unrealized_pnl_common(size_base, &entry, &mark, is_long)
+    math::unrealized_pnl_common(size_base, entry, mark, is_long)
 }
 
 /// Compute funding accrued on a position since `last_funding_at` on dYdX V4.
 pub(super) fn funding_accrued(
     size_base: U256,
-    funding_rate: Decimal,
+    funding_rate: &Decimal,
     hours_elapsed: u32,
 ) -> ReducerResult<SignedI256> {
-    math::funding_accrued_common(size_base, &funding_rate, hours_elapsed)
+    math::funding_accrued_common(size_base, funding_rate, hours_elapsed)
 }

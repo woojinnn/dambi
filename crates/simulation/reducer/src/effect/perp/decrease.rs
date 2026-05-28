@@ -3,9 +3,9 @@
 //! ## Effect
 //!
 //! 1. Resolve the reduction `Δsize` from the action's `SizeSpec` against the
-//!    LiveField mark price.
+//!    `LiveField` mark price.
 //! 2. Validate `Δsize ≤ old_size_base` (cannot reduce more than open).
-//! 3. Compute realized PnL pro-rata: `realized = unrealized_pnl_now × Δsize
+//! 3. Compute realized `PnL` pro-rata: `realized = unrealized_pnl_now × Δsize
 //!    / old_size_base`. Fee = `fee_bp × Δsize × mark / 10_000`. Funding is
 //!    settled in full (matches venue behaviour — funding is per-position not
 //!    per-size).
@@ -31,6 +31,7 @@ use crate::helpers;
 use super::{common, math};
 
 impl Reducer for DecreasePerpAction {
+    #[allow(clippy::too_many_lines)]
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
         let _ = ctx;
 
@@ -49,14 +50,11 @@ impl Reducer for DecreasePerpAction {
             .iter()
             .find(|p| p.id == self.position_id)
             .ok_or_else(|| ReducerError::PositionNotFound(self.position_id.clone()))?;
-        let old_perp = match &position.kind {
-            PositionKind::PerpPosition(p) => p,
-            _ => {
-                return Err(ReducerError::Invariant(format!(
-                    "decrease_perp: position {} is not a PerpPosition",
-                    self.position_id
-                )));
-            }
+        let PositionKind::PerpPosition(old_perp) = &position.kind else {
+            return Err(ReducerError::Invariant(format!(
+                "decrease_perp: position {} is not a PerpPosition",
+                self.position_id
+            )));
         };
 
         let delta_size =
@@ -89,10 +87,10 @@ impl Reducer for DecreasePerpAction {
         .map_err(|e| {
             ReducerError::Invariant(format!("decrease_perp: pnl parse: {e}"))
         })?;
-        let realized = pnl_d * delta_size_d.clone() / old_size_d;
+        let realized = pnl_d * delta_size_d / old_size_d;
 
         let mark = math::parse_decimal(&self.live_inputs.mark_price.value)?;
-        let notional = delta_size_d * mark.clone();
+        let notional = delta_size_d * mark;
         let fee = notional * rust_decimal::Decimal::from(self.live_inputs.fee_bp.value)
             / rust_decimal::Decimal::from(10_000_u32);
 
@@ -284,7 +282,7 @@ mod tests {
         }
     }
 
-    /// Decrease 1 of 2 ETH with PnL +200: pro-rata realized = 100. No fee /
+    /// Decrease 1 of 2 ETH with `PnL` +200: pro-rata realized = 100. No fee /
     /// funding → +100 credit. Size shrinks to 1.
     #[test]
     fn decrease_realizes_prorata_pnl_and_shrinks_size() {
@@ -317,7 +315,7 @@ mod tests {
         }
     }
 
-    /// Full-size decrease redirected to ClosePerpAction.
+    /// Full-size decrease redirected to `ClosePerpAction`.
     #[test]
     fn decrease_full_size_rejected() {
         let mut s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));

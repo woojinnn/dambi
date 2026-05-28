@@ -9,14 +9,14 @@
 //! Updates `position.collateral[0]` (primary collateral token) and
 //! recomputes `liq_price` would be ideal, but the per-position liq-price
 //! recalc lives in `helpers::derived::recompute_liq_price` (already
-//! callable but requires the full mutated PerpPosition). We refresh the
-//! `liq_price` LiveField synthetically as `UserSupplied` so the policy
+//! callable but requires the full mutated `PerpPosition`). We refresh the
+//! `liq_price` `LiveField` synthetically as `UserSupplied` so the policy
 //! layer can decide whether to trust the stale derived value or wait for
 //! the orchestrator's next venue-API poll.
 //!
 //! ## Free-margin invariant
 //!
-//! On withdraw we verify `free_margin_after >= 0` from the LiveField — the
+//! On withdraw we verify `free_margin_after >= 0` from the `LiveField` — the
 //! orchestrator pre-computes this as `position.collateral_after_withdraw −
 //! maintenance_margin`. Negative `free_margin_after` would liquidate the
 //! position immediately, so we reject with `Invariant`.
@@ -39,14 +39,11 @@ impl Reducer for AdjustMarginAction {
             .iter()
             .find(|p| p.id == self.position_id)
             .ok_or_else(|| ReducerError::PositionNotFound(self.position_id.clone()))?;
-        let perp = match &position.kind {
-            PositionKind::PerpPosition(p) => p,
-            _ => {
-                return Err(ReducerError::Invariant(format!(
-                    "adjust_margin: position {} is not a PerpPosition",
-                    self.position_id
-                )));
-            }
+        let PositionKind::PerpPosition(perp) = &position.kind else {
+            return Err(ReducerError::Invariant(format!(
+                "adjust_margin: position {} is not a PerpPosition",
+                self.position_id
+            )));
         };
 
         let (collateral_token, current_locked) = perp.collateral.first().cloned().ok_or_else(|| {

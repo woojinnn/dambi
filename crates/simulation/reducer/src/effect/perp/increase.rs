@@ -3,7 +3,7 @@
 //! ## Effect
 //!
 //! 1. Resolve the additional `size_base` from the action's `SizeSpec` against
-//!    the LiveField mark price.
+//!    the `LiveField` mark price.
 //! 2. (Optional) Debit any extra collateral the user posts via
 //!    `add_collateral`.
 //! 3. Upsert the position via `helpers::position::upsert_perp_position`:
@@ -16,7 +16,7 @@
 //! ## Orderbook vs on-chain
 //!
 //! Phase 2 treats Increase as on-chain only — for orderbook venues
-//! (Hyperliquid / Aevo / DyDx V4) the increase is a separate orderbook
+//! (Hyperliquid / Aevo / `DyDx` V4) the increase is a separate orderbook
 //! signing event that should be modeled by a dedicated
 //! `PlaceLimitOrderAction` (with `reduce_only = false`) and is therefore
 //! out of scope for this reducer. The reducer rejects orderbook venues
@@ -52,14 +52,11 @@ impl Reducer for IncreasePerpAction {
             .iter()
             .find(|p| p.id == self.position_id)
             .ok_or_else(|| ReducerError::PositionNotFound(self.position_id.clone()))?;
-        let old_perp = match &position.kind {
-            PositionKind::PerpPosition(p) => p,
-            _ => {
-                return Err(ReducerError::Invariant(format!(
-                    "increase_perp: position {} is not a PerpPosition",
-                    self.position_id
-                )));
-            }
+        let PositionKind::PerpPosition(old_perp) = &position.kind else {
+            return Err(ReducerError::Invariant(format!(
+                "increase_perp: position {} is not a PerpPosition",
+                self.position_id
+            )));
         };
 
         let delta_size =
@@ -79,8 +76,8 @@ impl Reducer for IncreasePerpAction {
         let old_entry = math::parse_decimal(&old_perp.entry_price)?;
         let mark = math::parse_decimal(&self.live_inputs.mark_price.value)?;
         let new_entry_d =
-            (old_size * old_entry + math::u256_to_decimal(delta_size)? * mark.clone())
-                / new_size.clone();
+            (old_size * old_entry + math::u256_to_decimal(delta_size)? * mark)
+                / new_size;
 
         // Optional extra collateral debit.
         if let Some((collateral_token, amount)) = &self.add_collateral {
@@ -311,7 +308,7 @@ mod tests {
         }
     }
 
-    /// add_collateral fires a debit.
+    /// `add_collateral` fires a debit.
     #[test]
     fn increase_with_extra_collateral_debits() {
         let mut s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));

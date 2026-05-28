@@ -61,18 +61,18 @@ pub(super) fn liquidation_price(
 /// mark price.
 pub(super) fn unrealized_pnl(
     size_base: U256,
-    entry: Price,
-    mark: Price,
+    entry: &Price,
+    mark: &Price,
     is_long: bool,
 ) -> ReducerResult<SignedI256> {
-    math::unrealized_pnl_common(size_base, &entry, &mark, is_long)
+    math::unrealized_pnl_common(size_base, entry, mark, is_long)
 }
 
 /// Compute funding accrued on a position since `last_funding_at` on Synthetix.
 pub(super) fn funding_accrued(
     size_base: U256,
-    funding_rate: Decimal,
+    funding_rate: &Decimal,
     hours_elapsed: u32,
 ) -> ReducerResult<SignedI256> {
-    math::funding_accrued_common(size_base, &funding_rate, hours_elapsed)
+    math::funding_accrued_common(size_base, funding_rate, hours_elapsed)
 }

@@ -22,7 +22,7 @@
 //! form used by Hyperliquid's Python SDK (`hyperliquid-python-sdk` ::
 //! `info.user_state` returns `liquidationPx` with the same algebraic shape).
 //! Cross-margin accounts use the same formula with `free_margin` = total
-//! account collateral; the LiveField `user_account_state.free_margin_usd`
+//! account collateral; the `LiveField` `user_account_state.free_margin_usd`
 //! captures whichever the venue reports.
 //!
 //! ## Primary sources
@@ -33,6 +33,7 @@
 //!   `info.user_state` `liquidationPx` field shape
 
 #![allow(clippy::module_name_repetitions)]
+#![allow(dead_code)]
 
 use simulation_state::primitives::{Decimal, Price, SignedI256, U256};
 use simulation_state::{EvalContext, WalletState};
@@ -85,52 +86,52 @@ pub(super) fn liquidation_price(
 /// toward zero (venues book at integer denom).
 pub(super) fn unrealized_pnl(
     size_base: U256,
-    entry: Price,
-    mark: Price,
+    entry: &Price,
+    mark: &Price,
     is_long: bool,
 ) -> ReducerResult<SignedI256> {
-    math::unrealized_pnl_common(size_base, &entry, &mark, is_long)
+    math::unrealized_pnl_common(size_base, entry, mark, is_long)
 }
 
 /// Compute funding accrued on a position since `last_funding_at`.
 ///
 /// Simplified formula: `funding = size_base × funding_rate × hours_elapsed
 /// / 24`. Hyperliquid pays funding hourly; the divisor stays at `24` so the
-/// LiveField `funding_rate` carries the venue's natural denomination (daily
+/// `LiveField` `funding_rate` carries the venue's natural denomination (daily
 /// rate). Positive result = funding paid *to* the position (long during
 /// negative funding); negative = funding paid *from*.
 pub(super) fn funding_accrued(
     size_base: U256,
-    funding_rate: Decimal,
+    funding_rate: &Decimal,
     hours_elapsed: u32,
 ) -> ReducerResult<SignedI256> {
-    math::funding_accrued_common(size_base, &funding_rate, hours_elapsed)
+    math::funding_accrued_common(size_base, funding_rate, hours_elapsed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// PnL long: 2 ETH × (3100 − 3000) = +200.
+    /// `PnL` long: 2 ETH × (3100 − 3000) = +200.
     #[test]
     fn pnl_long_profit_matches_helpers_derived_fixture() {
         let pnl = unrealized_pnl(
             U256::from(2_u64),
-            Decimal::new("3000"),
-            Decimal::new("3100"),
+            &Decimal::new("3000"),
+            &Decimal::new("3100"),
             true,
         )
         .unwrap();
         assert_eq!(pnl, SignedI256::try_from(200_i32).unwrap());
     }
 
-    /// PnL short: 3 ETH × (3000 − 2800) = +600 for a short on a drop.
+    /// `PnL` short: 3 ETH × (3000 − 2800) = +600 for a short on a drop.
     #[test]
     fn pnl_short_profit_on_drop() {
         let pnl = unrealized_pnl(
             U256::from(3_u64),
-            Decimal::new("3000"),
-            Decimal::new("2800"),
+            &Decimal::new("3000"),
+            &Decimal::new("2800"),
             false,
         )
         .unwrap();
@@ -142,7 +143,7 @@ mod tests {
     #[test]
     fn funding_accrued_trunc_to_zero_for_sub_integer() {
         let fund =
-            funding_accrued(U256::from(1_u64), Decimal::new("0.01"), 24).unwrap();
+            funding_accrued(U256::from(1_u64), &Decimal::new("0.01"), 24).unwrap();
         assert_eq!(fund, SignedI256::ZERO);
     }
 
@@ -150,7 +151,7 @@ mod tests {
     #[test]
     fn funding_accrued_integer_result() {
         let fund =
-            funding_accrued(U256::from(1_000_u64), Decimal::new("0.01"), 24).unwrap();
+            funding_accrued(U256::from(1_000_u64), &Decimal::new("0.01"), 24).unwrap();
         assert_eq!(fund, SignedI256::try_from(10_i32).unwrap());
     }
 
@@ -160,8 +161,8 @@ mod tests {
         use crate::error::ReducerError;
         let err = unrealized_pnl(
             U256::from(1_u64),
-            Decimal::new("3000"),
-            Decimal::new("not-a-number"),
+            &Decimal::new("3000"),
+            &Decimal::new("not-a-number"),
             true,
         )
         .unwrap_err();

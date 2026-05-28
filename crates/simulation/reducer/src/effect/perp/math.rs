@@ -12,21 +12,21 @@
 //! `simulation_state::primitives::Decimal` is a `String` newtype safe for
 //! transport / serde but lacking arithmetic. We bridge to
 //! `rust_decimal::Decimal` for math (parse → arithmetic → format), matching
-//! the convention already used by `helpers::derived` for HF / LTV / PnL.
+//! the convention already used by `helpers::derived` for HF / LTV / `PnL`.
 //!
 //! ## Liquidation-price models
 //!
 //! Two flavors are exposed:
 //!   - [`liquidation_price_simple`] — single-asset isolated-margin closed
 //!     form: `entry ± (free_margin − maintenance_margin) / size_base`.
-//!     Used by Hyperliquid / Aevo / Vertex / DyDx V4 / Drift.
+//!     Used by Hyperliquid / Aevo / Vertex / `DyDx` V4 / Drift.
 //!   - [`liquidation_price_deferred`] — returns
 //!     `UnsupportedProtocol { … "deferred — full liq price requires …" }`
 //!     for venues whose accurate liquidation price requires multi-collateral
 //!     / funding / borrowing-fee accumulator state we cannot soundly derive
 //!     from `OpenPerpLiveInputs` today. GMX V2 / Synthetix V3 / Jupiter
 //!     Perps fall in this bucket; the field is computed off-chain by the
-//!     venue's official subgraph / SDK and surfaced via a separate LiveField
+//!     venue's official subgraph / SDK and surfaced via a separate `LiveField`
 //!     on the existing position in subsequent batches.
 
 #![allow(dead_code)]
@@ -167,10 +167,10 @@ pub(super) fn notional_usd(
 ///   required_margin = notional / leverage + taker_fee_bp × notional / 10_000
 /// ```
 ///
-/// `leverage` comes from `action.leverage` (Hyperliquid / GMX V2 / DyDx V4
+/// `leverage` comes from `action.leverage` (Hyperliquid / GMX V2 / `DyDx` V4
 /// all allow user-specified leverage up to the venue's `max_leverage`).
-/// `fee_taker_bp` is venue-quoted via the LiveField. Returns the margin in
-/// the venue's quote denom (USDC for most, USDC.e for Vertex, USDe for Aevo).
+/// `fee_taker_bp` is venue-quoted via the `LiveField`. Returns the margin in
+/// the venue's quote denom (USDC for most, USDC.e for Vertex, `USDe` for Aevo).
 pub(super) fn required_initial_margin_common(
     venue_label: &str,
     action: &OpenPerpAction,
@@ -226,7 +226,7 @@ pub(super) fn liquidation_price_simple(
     }
     let mark = parse_decimal(&live.mark_price.value)?;
     let size = u256_to_decimal(size_base)?;
-    let notional = size * mark.clone();
+    let notional = size * mark;
     let maintenance =
         notional * RustDecimal::from(live.maintenance_bp.value)
             / RustDecimal::from(10_000_u32);
@@ -302,7 +302,7 @@ pub(super) fn unrealized_pnl_common(
 ///
 /// `funding_rate` is the venue's natural daily rate (Hyperliquid hourly
 /// rates are pre-summed by the orchestrator into a daily-equivalent before
-/// the LiveField is published). Truncates toward zero. Positive result =
+/// the `LiveField` is published). Truncates toward zero. Positive result =
 /// funding accrued *to* the position; negative = paid *from*.
 pub(super) fn funding_accrued_common(
     size_base: U256,
@@ -349,6 +349,7 @@ mod tests {
         })
     }
 
+    #[allow(clippy::too_many_arguments, clippy::similar_names)]
     fn mk_open(
         side: PerpSide,
         leverage_str: &str,
@@ -362,7 +363,7 @@ mod tests {
         let mark = Decimal::new(mark_str);
         let live_inputs = OpenPerpLiveInputs {
             mark_price: live(mark.clone()),
-            oracle_price: live(mark.clone()),
+            oracle_price: live(mark),
             funding_rate: live(Decimal::new("0")),
             available_oi: live(U256::from(u128::MAX)),
             max_leverage: live(Decimal::new(max_leverage_str)),
@@ -398,7 +399,7 @@ mod tests {
     }
 
     /// 1 ETH × $3000 = $3000 notional / leverage 5 = $600.
-    /// Plus 5 bp taker fee: 5 × 3000 / 10_000 = 1.5 → trunc → $601.
+    /// Plus 5 bp taker fee: 5 × 3000 / `10_000` = 1.5 → trunc → $601.
     #[test]
     fn required_initial_margin_basic() {
         let (action, live_inputs) = mk_open(
@@ -418,7 +419,7 @@ mod tests {
         assert_eq!(m, U256::from(601_u64));
     }
 
-    /// Leverage > max_leverage → Invariant.
+    /// Leverage > `max_leverage` → Invariant.
     #[test]
     fn required_initial_margin_leverage_cap_rejected() {
         let (action, live_inputs) = mk_open(
@@ -439,7 +440,7 @@ mod tests {
     }
 
     /// Long: size 2 × mark 3000 = 6000 notional. Maintenance bp 200 → 120.
-    /// free_margin 10000 → buffer = (10000 − 120) / 2 = 4940. liq = 3000 −
+    /// `free_margin` 10000 → buffer = (10000 − 120) / 2 = 4940. liq = 3000 −
     /// 4940 = −1940 → clip → 0.
     #[test]
     fn liquidation_price_long_clips_to_zero_when_overcollateralized() {
@@ -460,7 +461,7 @@ mod tests {
     }
 
     /// Long with thin margin: size 1 @ mark 3000, maintenance bp 200 → 60.
-    /// free_margin = 100 → buffer = (100 − 60) / 1 = 40. liq = 3000 − 40 =
+    /// `free_margin` = 100 → buffer = (100 − 60) / 1 = 40. liq = 3000 − 40 =
     /// 2960.
     #[test]
     fn liquidation_price_long_thin_margin() {
@@ -481,7 +482,7 @@ mod tests {
     }
 
     /// Short: liq = mark + buffer. size 1 @ mark 3000, maintenance bp 200
-    /// → 60. free_margin = 100 → buffer = 40 → liq = 3040.
+    /// → 60. `free_margin` = 100 → buffer = 40 → liq = 3040.
     #[test]
     fn liquidation_price_short_thin_margin() {
         let (action, live_inputs) = mk_open(
@@ -500,7 +501,7 @@ mod tests {
         assert_eq!(liq.unwrap().as_str(), "3040");
     }
 
-    /// QuoteAmount size resolution: $6000 at mark $3000 → 2 ETH.
+    /// `QuoteAmount` size resolution: $6000 at mark $3000 → 2 ETH.
     #[test]
     fn resolve_size_base_quote_amount() {
         let s = resolve_size_base(
@@ -513,7 +514,7 @@ mod tests {
         assert_eq!(s, U256::from(2_u64));
     }
 
-    /// LeverageImplied: $1000 × 6x / $3000 = 2 ETH.
+    /// `LeverageImplied`: $1000 × 6x / $3000 = 2 ETH.
     #[test]
     fn resolve_size_base_leverage_implied() {
         let s = resolve_size_base(

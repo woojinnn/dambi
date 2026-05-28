@@ -59,7 +59,7 @@ mod tests {
         WalletState::new(WalletId::new(addr, [ChainId::ethereum_mainnet()]))
     }
 
-    /// Cancel emits a single PendingChange::Remove with Cancelled reason.
+    /// Cancel emits a single `PendingChange::Remove` with Cancelled reason.
     #[test]
     fn cancel_emits_remove_with_cancelled_reason() {
         let action = CancelOrderAction {

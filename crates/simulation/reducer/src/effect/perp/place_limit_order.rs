@@ -13,7 +13,7 @@
 //!
 //! ## Per-user limits
 //!
-//! Validates `open_orders_count` (LiveField) against venue maximums via a
+//! Validates `open_orders_count` (`LiveField`) against venue maximums via a
 //! best-effort 100-order cap — most venues allow at least 100 open orders
 //! per market; we surface a soft `Invariant` if the count exceeds that
 //! conservative limit. Real per-venue limits surface as a separate
@@ -56,12 +56,11 @@ impl Reducer for PlaceLimitOrderAction {
         let bid = math::parse_decimal(best_bid)?;
         let ask = math::parse_decimal(best_ask)?;
         let mid = (bid + ask) / rust_decimal::Decimal::from(2_u32);
-        let bracket_lo = mid.clone() * rust_decimal::Decimal::new(5, 1); // 0.5
+        let bracket_lo = mid * rust_decimal::Decimal::new(5, 1); // 0.5
         let bracket_hi = mid * rust_decimal::Decimal::new(15, 1); // 1.5
         if limit < bracket_lo || limit > bracket_hi {
             return Err(ReducerError::Invariant(format!(
-                "place_limit: limit price {} outside ±50% of mid-spread bracket",
-                limit
+                "place_limit: limit price {limit} outside ±50% of mid-spread bracket"
             )));
         }
 
@@ -217,7 +216,7 @@ mod tests {
         }
     }
 
-    /// GTD time-in-force populates valid_until.
+    /// GTD time-in-force populates `valid_until`.
     #[test]
     fn place_limit_gtd_populates_valid_until() {
         let later = Time::from_unix(1_738_086_400);

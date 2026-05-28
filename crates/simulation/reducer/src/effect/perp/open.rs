@@ -26,8 +26,8 @@
 //!
 //! 1. `required_initial_margin` (venue helper) — also rejects
 //!    leverage > venue max.
-//! 2. `free_margin_usd >= required_margin` invariant (LiveField).
-//! 3. `available_oi >= notional` invariant (LiveField).
+//! 2. `free_margin_usd >= required_margin` invariant (`LiveField`).
+//! 3. `available_oi >= notional` invariant (`LiveField`).
 //! 4. `liquidation_price` (venue helper) — may surface
 //!    `UnsupportedProtocol` for the deferred-liq-price venues
 //!    (`gmx_v2` / `synthetix` / `jupiter_perps`), which the caller
@@ -56,6 +56,7 @@ use crate::helpers;
 use super::{aevo, common, drift, dydx_v4, gmx_v2, hyperliquid, jupiter_perps, math, synthetix, vertex};
 
 impl Reducer for OpenPerpAction {
+    #[allow(clippy::too_many_lines)]
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
         let mut delta = StateDelta::new();
 
@@ -109,7 +110,7 @@ impl Reducer for OpenPerpAction {
 
         // Build the PerpPosition.
         let position_id =
-            common::synth_position_id(&self.venue, &self.market.symbol, self.side.clone());
+            common::synth_position_id(&self.venue, &self.market.symbol, &self.side);
         let venue_ref = common::venue_ref(&self.venue);
         let entry_price = self.live_inputs.mark_price.value.clone();
         let notional_decimal =
@@ -173,7 +174,7 @@ impl Reducer for OpenPerpAction {
                 fill_effect: Box::new({
                     let mut fill = StateDelta::new();
                     fill.position_changes
-                        .push(PositionChange::Open { position: position.clone() });
+                        .push(PositionChange::Open { position });
                     fill
                 }),
                 lifecycle: PendingLifecycle {
@@ -189,12 +190,11 @@ impl Reducer for OpenPerpAction {
             delta.pending_changes.push(PendingChange::Add {
                 pending: Box::new(pending),
             });
-            Ok(delta)
         } else {
             // On-chain venues: open the position now.
             helpers::position::open_position(state, &mut delta, position)?;
-            Ok(delta)
         }
+        Ok(delta)
     }
 }
 
@@ -519,7 +519,7 @@ mod tests {
         }
     }
 
-    /// Orderbook venue (Hyperliquid): emit PendingTx, no on-chain debit.
+    /// Orderbook venue (Hyperliquid): emit `PendingTx`, no on-chain debit.
     #[test]
     fn open_hyperliquid_emits_pending_with_hardlock() {
         let state = empty_state();

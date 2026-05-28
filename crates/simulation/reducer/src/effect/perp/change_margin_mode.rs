@@ -184,7 +184,7 @@ mod tests {
         }
     }
 
-    /// Affected position missing → PositionNotFound.
+    /// Affected position missing → `PositionNotFound`.
     #[test]
     fn change_margin_mode_missing_position_returns_position_not_found() {
         let s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));

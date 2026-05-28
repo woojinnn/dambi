@@ -3,10 +3,10 @@
 //!
 //! ## Effect
 //!
-//! 1. Validate `new_leverage <= max_leverage` (LiveField).
+//! 1. Validate `new_leverage <= max_leverage` (`LiveField`).
 //! 2. For each `affected_positions[i]`, upsert the position with:
 //!    - `leverage = new_leverage`
-//!    - `liq_price = new_liq_prices[i]` (sourced from the LiveField vector)
+//!    - `liq_price = new_liq_prices[i]` (sourced from the `LiveField` vector)
 //!
 //! No on-chain balance change — leverage adjustment is purely a policy /
 //! risk-recompute knob.
@@ -226,7 +226,7 @@ mod tests {
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("must be > 0")));
     }
 
-    /// Affected position missing → PositionNotFound.
+    /// Affected position missing → `PositionNotFound`.
     #[test]
     fn change_leverage_missing_position_returns_position_not_found() {
         let s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));

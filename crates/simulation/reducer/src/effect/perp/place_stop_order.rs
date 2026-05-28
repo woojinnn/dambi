@@ -58,12 +58,13 @@ impl Reducer for PlaceStopOrderAction {
             self.order_kind,
             StopOrderKind::StopMarket | StopOrderKind::StopLimit
         );
-        let valid_side = match (is_stop, &self.side) {
-            (true, PerpSide::Long) => trigger < mark,
-            (true, PerpSide::Short) => trigger > mark,
-            (false, PerpSide::Long) => trigger > mark,
-            (false, PerpSide::Short) => trigger < mark,
-        };
+        // Stop-Long / TP-Short → trigger must be below mark.
+        // Stop-Short / TP-Long → trigger must be above mark.
+        let want_below = matches!(
+            (is_stop, &self.side),
+            (true, PerpSide::Long) | (false, PerpSide::Short)
+        );
+        let valid_side = if want_below { trigger < mark } else { trigger > mark };
         if !valid_side {
             return Err(ReducerError::Invariant(format!(
                 "place_stop: trigger {trigger} is on the wrong side of mark {mark} \
@@ -192,7 +193,7 @@ mod tests {
         }
     }
 
-    /// StopMarket Long: trigger below mark → valid.
+    /// `StopMarket` Long: trigger below mark → valid.
     #[test]
     fn stop_market_long_below_mark_emits_pending() {
         let action = stop_action(StopOrderKind::StopMarket, PerpSide::Long, "2900", None);
@@ -209,7 +210,7 @@ mod tests {
         }
     }
 
-    /// TakeProfit Long: trigger above mark → valid.
+    /// `TakeProfit` Long: trigger above mark → valid.
     #[test]
     fn take_profit_long_above_mark_emits_pending() {
         let action = stop_action(StopOrderKind::TakeProfit, PerpSide::Long, "3100", None);
@@ -225,7 +226,7 @@ mod tests {
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("wrong side")));
     }
 
-    /// StopLimit without limit_price → Invariant.
+    /// `StopLimit` without `limit_price` → Invariant.
     #[test]
     fn stop_limit_without_limit_price_rejected() {
         let action = stop_action(StopOrderKind::StopLimit, PerpSide::Long, "2900", None);
@@ -233,8 +234,8 @@ mod tests {
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("requires limit_price")));
     }
 
-    /// TakeProfitLimit short with trigger below mark → valid. Maps to
-    /// PerpOrderKind::StopLimit (collapsed lane).
+    /// `TakeProfitLimit` short with trigger below mark → valid. Maps to
+    /// `PerpOrderKind::StopLimit` (collapsed lane).
     #[test]
     fn take_profit_limit_short_collapses_to_stop_limit() {
         let action = stop_action(

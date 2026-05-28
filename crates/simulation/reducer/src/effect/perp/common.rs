@@ -22,7 +22,7 @@ use crate::action::perp::{PerpVenue, StopOrderKind};
 /// Derive a short string venue tag from `PerpVenue` — used for `position_id`
 /// namespacing and `PendingTx.id` prefixes. Matches the Defillama-style
 /// names already used by `VenueRef` constructors elsewhere.
-pub(super) fn venue_tag(venue: &PerpVenue) -> &'static str {
+pub(super) const fn venue_tag(venue: &PerpVenue) -> &'static str {
     match venue {
         PerpVenue::Hyperliquid { .. } => "hyperliquid",
         PerpVenue::GmxV2 { .. } => "gmx_v2",
@@ -59,7 +59,7 @@ pub(super) fn venue_ref(venue: &PerpVenue) -> VenueRef {
 /// Returns true if the venue routes new positions through an off-chain
 /// orderbook (signed-only at the reducer; on-chain settlement happens later).
 ///
-/// Hyperliquid / Aevo / DyDx V4 are off-chain-orderbook; the others execute
+/// Hyperliquid / Aevo / `DyDx` V4 are off-chain-orderbook; the others execute
 /// trades on-chain at the venue's gateway contract.
 pub(super) const fn is_orderbook_venue(venue: &PerpVenue) -> bool {
     matches!(
@@ -71,19 +71,19 @@ pub(super) const fn is_orderbook_venue(venue: &PerpVenue) -> bool {
 /// Compose a deterministic position id. The reducer needs a stable handle
 /// to attach later `Close`/`Update` changes; we synthesize it from venue +
 /// market + side so re-evaluating the same action produces the same id.
-pub(super) fn synth_position_id(venue: &PerpVenue, market: &str, side: PerpSide) -> String {
-    format!("{}:{market}:{}", venue_tag(venue), side_tag(&side))
+pub(super) fn synth_position_id(venue: &PerpVenue, market: &str, side: &PerpSide) -> String {
+    format!("{}:{market}:{}", venue_tag(venue), side_tag(side))
 }
 
 /// Stable string tag for a `PerpSide`.
-pub(super) fn side_tag(side: &PerpSide) -> &'static str {
+pub(super) const fn side_tag(side: &PerpSide) -> &'static str {
     match side {
         PerpSide::Long => "long",
         PerpSide::Short => "short",
     }
 }
 
-/// Compose a deterministic PendingTx id for a limit order.
+/// Compose a deterministic `PendingTx` id for a limit order.
 pub(super) fn pending_id_for_limit_order(
     venue: &PerpVenue,
     market: &str,
@@ -98,7 +98,7 @@ pub(super) fn pending_id_for_limit_order(
     )
 }
 
-/// Compose a deterministic PendingTx id for a stop / take-profit order.
+/// Compose a deterministic `PendingTx` id for a stop / take-profit order.
 pub(super) fn pending_id_for_stop_order(
     venue: &PerpVenue,
     market: &str,
@@ -181,7 +181,7 @@ mod tests {
         let id = synth_position_id(
             &PerpVenue::Hyperliquid { chain: chain() },
             "ETH-PERP",
-            PerpSide::Long,
+            &PerpSide::Long,
         );
         assert_eq!(id, "hyperliquid:ETH-PERP:long");
     }

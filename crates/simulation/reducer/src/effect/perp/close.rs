@@ -21,7 +21,7 @@
 //! either:
 //!   - a `DecreasePerpAction` (already exists for the partial path), or
 //!   - position field-walker (`PositionPatch.fields` `after` snapshot
-//!     replacement is the wrong shape for "shrink size_base").
+//!     replacement is the wrong shape for "shrink `size_base`").
 //!
 //! For now `ClosePerpAction { size: Some(_), … }` returns `Invariant` with
 //! a guiding message. Phase 3 can lift this by routing the
@@ -61,14 +61,11 @@ impl Reducer for ClosePerpAction {
             .find(|p| p.id == self.position_id)
             .ok_or_else(|| ReducerError::PositionNotFound(self.position_id.clone()))?;
 
-        let perp = match &position.kind {
-            PositionKind::PerpPosition(p) => p,
-            _ => {
-                return Err(ReducerError::Invariant(format!(
-                    "close_perp: position {} is not a PerpPosition",
-                    self.position_id
-                )));
-            }
+        let PositionKind::PerpPosition(perp) = &position.kind else {
+            return Err(ReducerError::Invariant(format!(
+                "close_perp: position {} is not a PerpPosition",
+                self.position_id
+            )));
         };
 
         // Compute cash delta: PnL − fee + funding.
@@ -327,7 +324,7 @@ mod tests {
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("partial close")));
     }
 
-    /// Missing position → PositionNotFound.
+    /// Missing position → `PositionNotFound`.
     #[test]
     fn close_missing_position_returns_position_not_found() {
         let state = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));
