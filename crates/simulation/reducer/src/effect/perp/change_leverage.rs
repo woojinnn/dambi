@@ -63,14 +63,10 @@ impl Reducer for ChangeLeverageAction {
             let new_lev_str = self.new_leverage.clone();
             helpers::position::upsert_perp_position(state, &mut delta, position_id, |p| {
                 if let PositionKind::PerpPosition(pp) = &mut p.kind {
-                    pp.leverage = LiveField::new(
-                        new_lev_str.clone(),
-                        DataSource::UserSupplied,
-                        ctx.now,
-                    );
+                    pp.leverage =
+                        LiveField::new(new_lev_str.clone(), DataSource::UserSupplied, ctx.now);
                     if let Some(liq) = new_liq.clone() {
-                        pp.liq_price =
-                            LiveField::new(liq, DataSource::UserSupplied, ctx.now);
+                        pp.liq_price = LiveField::new(liq, DataSource::UserSupplied, ctx.now);
                     }
                 }
             })?;
@@ -85,11 +81,9 @@ mod tests {
     use super::*;
     use simulation_state::delta::PositionChange;
     use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
-    use simulation_state::position::{
-        MarginMode, PerpPosition, PerpSide, Position, PositionKind,
-    };
+    use simulation_state::position::{MarginMode, PerpPosition, PerpSide, Position, PositionKind};
     use simulation_state::primitives::{
-        Address, ChainId, Decimal, MarketRef, ProtocolRef, SignedI256, Time, U256, VenueRef,
+        Address, ChainId, Decimal, MarketRef, ProtocolRef, SignedI256, Time, VenueRef, U256,
     };
     use simulation_state::token::{TokenKey, TokenRef};
     use simulation_state::wallet::WalletId;
@@ -230,8 +224,7 @@ mod tests {
     #[test]
     fn change_leverage_missing_position_returns_position_not_found() {
         let s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));
-        let action =
-            change_lev_action("10", "50", vec!["ghost".to_string()], vec![]);
+        let action = change_lev_action("10", "50", vec!["ghost".to_string()], vec![]);
         let err = action.apply(&s, &ctx()).unwrap_err();
         assert!(matches!(err, ReducerError::PositionNotFound(_)));
     }

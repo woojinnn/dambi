@@ -64,8 +64,7 @@ impl Reducer for PlaceLimitOrderAction {
             )));
         }
 
-        let size_base =
-            math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
+        let size_base = math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
         if size_base.is_zero() {
             return Err(ReducerError::Invariant(
                 "place_limit: resolved size_base is zero".into(),
@@ -122,7 +121,9 @@ mod tests {
     use super::*;
     use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
     use simulation_state::position::PerpSide;
-    use simulation_state::primitives::{Address, ChainId, Decimal, MarketRef, Time, VenueRef, U256};
+    use simulation_state::primitives::{
+        Address, ChainId, Decimal, MarketRef, Time, VenueRef, U256,
+    };
     use simulation_state::wallet::WalletId;
     use std::str::FromStr;
 

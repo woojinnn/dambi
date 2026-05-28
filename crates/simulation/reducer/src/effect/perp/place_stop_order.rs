@@ -64,7 +64,11 @@ impl Reducer for PlaceStopOrderAction {
             (is_stop, &self.side),
             (true, PerpSide::Long) | (false, PerpSide::Short)
         );
-        let valid_side = if want_below { trigger < mark } else { trigger > mark };
+        let valid_side = if want_below {
+            trigger < mark
+        } else {
+            trigger > mark
+        };
         if !valid_side {
             return Err(ReducerError::Invariant(format!(
                 "place_stop: trigger {trigger} is on the wrong side of mark {mark} \
@@ -73,8 +77,7 @@ impl Reducer for PlaceStopOrderAction {
             )));
         }
 
-        let size_base =
-            math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
+        let size_base = math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
 
         let pending_id = common::pending_id_for_stop_order(
             &self.venue,
@@ -123,13 +126,13 @@ mod tests {
     use super::*;
     use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
     use simulation_state::pending::PerpOrderKind;
-    use simulation_state::primitives::{Address, ChainId, Decimal, MarketRef, Time, U256, VenueRef};
+    use simulation_state::primitives::{
+        Address, ChainId, Decimal, MarketRef, Time, VenueRef, U256,
+    };
     use simulation_state::wallet::WalletId;
     use std::str::FromStr;
 
-    use crate::action::perp::{
-        PerpAccountState, PerpVenue, PlaceStopLiveInputs, SizeSpec,
-    };
+    use crate::action::perp::{PerpAccountState, PerpVenue, PlaceStopLiveInputs, SizeSpec};
 
     fn now() -> Time {
         Time::from_unix(1_738_000_000)
@@ -231,7 +234,9 @@ mod tests {
     fn stop_limit_without_limit_price_rejected() {
         let action = stop_action(StopOrderKind::StopLimit, PerpSide::Long, "2900", None);
         let err = action.apply(&state(), &ctx()).unwrap_err();
-        assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("requires limit_price")));
+        assert!(
+            matches!(err, ReducerError::Invariant(msg) if msg.contains("requires limit_price"))
+        );
     }
 
     /// `TakeProfitLimit` short with trigger below mark → valid. Maps to

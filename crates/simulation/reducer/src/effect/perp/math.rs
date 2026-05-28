@@ -47,10 +47,7 @@ use crate::error::{ReducerError, ReducerResult};
 /// `rust_decimal::Decimal` for arithmetic.
 pub(super) fn parse_decimal(d: &Decimal) -> ReducerResult<RustDecimal> {
     RustDecimal::from_str(d.as_str()).map_err(|e| {
-        ReducerError::Invariant(format!(
-            "invalid Decimal string {:?}: {e}",
-            d.as_str()
-        ))
+        ReducerError::Invariant(format!("invalid Decimal string {:?}: {e}", d.as_str()))
     })
 }
 
@@ -60,11 +57,8 @@ pub(super) fn parse_decimal(d: &Decimal) -> ReducerResult<RustDecimal> {
 /// this covers all realistic positions.
 pub(super) fn u256_to_decimal(amount: U256) -> ReducerResult<RustDecimal> {
     let s = amount.to_string();
-    RustDecimal::from_str(&s).map_err(|e| {
-        ReducerError::Invariant(format!(
-            "U256 {s} exceeds rust_decimal range: {e}"
-        ))
-    })
+    RustDecimal::from_str(&s)
+        .map_err(|e| ReducerError::Invariant(format!("U256 {s} exceeds rust_decimal range: {e}")))
 }
 
 /// Render a `rust_decimal::Decimal` back into the state-side `Decimal`
@@ -79,9 +73,8 @@ pub(super) fn decimal_to_state(d: RustDecimal) -> Decimal {
 /// Hyperliquid realized-PnL accounting).
 fn decimal_trunc_to_signed(d: RustDecimal) -> ReducerResult<SignedI256> {
     let s = d.trunc().to_string();
-    SignedI256::from_dec_str(&s).map_err(|e| {
-        ReducerError::Invariant(format!("decimal {s} overflows SignedI256: {e}"))
-    })
+    SignedI256::from_dec_str(&s)
+        .map_err(|e| ReducerError::Invariant(format!("decimal {s} overflows SignedI256: {e}")))
 }
 
 /// Truncate a `rust_decimal::Decimal` toward zero and render it as `U256`.
@@ -93,9 +86,8 @@ fn decimal_trunc_to_u256(d: RustDecimal, label: &str) -> ReducerResult<U256> {
         )));
     }
     let s = d.trunc().to_string();
-    U256::from_str_radix(&s, 10).map_err(|e| {
-        ReducerError::Invariant(format!("{label}: U256 parse of {s} failed: {e}"))
-    })
+    U256::from_str_radix(&s, 10)
+        .map_err(|e| ReducerError::Invariant(format!("{label}: U256 parse of {s} failed: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -112,10 +104,7 @@ fn decimal_trunc_to_u256(d: RustDecimal, label: &str) -> ReducerResult<U256> {
 ///
 /// All math truncates toward zero (venues round size to the nearest tick
 /// off-chain; we leave any tick alignment to the venue itself).
-pub(super) fn resolve_size_base(
-    spec: &SizeSpec,
-    mark: &Price,
-) -> ReducerResult<U256> {
+pub(super) fn resolve_size_base(spec: &SizeSpec, mark: &Price) -> ReducerResult<U256> {
     match spec {
         SizeSpec::BaseAmount { amount } => Ok(*amount),
         SizeSpec::QuoteAmount { amount_usd } => {
@@ -128,7 +117,10 @@ pub(super) fn resolve_size_base(
             let usd = u256_to_decimal(*amount_usd)?;
             decimal_trunc_to_u256(usd / mark_d, "size_base from QuoteAmount")
         }
-        SizeSpec::LeverageImplied { collateral, leverage } => {
+        SizeSpec::LeverageImplied {
+            collateral,
+            leverage,
+        } => {
             let mark_d = parse_decimal(mark)?;
             if mark_d.is_zero() {
                 return Err(ReducerError::Invariant(
@@ -137,20 +129,14 @@ pub(super) fn resolve_size_base(
             }
             let coll = u256_to_decimal(*collateral)?;
             let lev = parse_decimal(leverage)?;
-            decimal_trunc_to_u256(
-                coll * lev / mark_d,
-                "size_base from LeverageImplied",
-            )
+            decimal_trunc_to_u256(coll * lev / mark_d, "size_base from LeverageImplied")
         }
     }
 }
 
 /// Compute the notional value of a position (`size_base × mark_price`) in
 /// quote units (USD-denominated for every supported venue).
-pub(super) fn notional_usd(
-    size_base: U256,
-    mark: &Price,
-) -> ReducerResult<RustDecimal> {
+pub(super) fn notional_usd(size_base: U256, mark: &Price) -> ReducerResult<RustDecimal> {
     let mark_d = parse_decimal(mark)?;
     let size = u256_to_decimal(size_base)?;
     Ok(size * mark_d)
@@ -228,8 +214,7 @@ pub(super) fn liquidation_price_simple(
     let size = u256_to_decimal(size_base)?;
     let notional = size * mark;
     let maintenance =
-        notional * RustDecimal::from(live.maintenance_bp.value)
-            / RustDecimal::from(10_000_u32);
+        notional * RustDecimal::from(live.maintenance_bp.value) / RustDecimal::from(10_000_u32);
     let free_margin = u256_to_decimal(live.user_account_state.value.free_margin_usd)?;
     if size.is_zero() {
         return Err(ReducerError::Invariant(format!(
@@ -434,8 +419,7 @@ mod tests {
             200,
             "50", // max
         );
-        let err =
-            required_initial_margin_common("hyperliquid", &action, &live_inputs).unwrap_err();
+        let err = required_initial_margin_common("hyperliquid", &action, &live_inputs).unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(_)));
     }
 

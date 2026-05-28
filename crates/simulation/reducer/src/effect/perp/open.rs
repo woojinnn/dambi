@@ -44,16 +44,16 @@ use simulation_state::pending::{
 };
 use simulation_state::position::{PerpPosition, Position, PositionKind};
 use simulation_state::primitives::{ProtocolRef, SignedI256};
-use simulation_state::{
-    Decimal, EvalContext, PendingChange, StateDelta, U256, WalletState,
-};
+use simulation_state::{Decimal, EvalContext, PendingChange, StateDelta, WalletState, U256};
 
 use crate::action::perp::{OpenPerpAction, PerpVenue};
 use crate::apply::Reducer;
 use crate::error::{ReducerError, ReducerResult};
 use crate::helpers;
 
-use super::{aevo, common, drift, dydx_v4, gmx_v2, hyperliquid, jupiter_perps, math, synthetix, vertex};
+use super::{
+    aevo, common, drift, dydx_v4, gmx_v2, hyperliquid, jupiter_perps, math, synthetix, vertex,
+};
 
 impl Reducer for OpenPerpAction {
     #[allow(clippy::too_many_lines)]
@@ -72,8 +72,7 @@ impl Reducer for OpenPerpAction {
         }
 
         // OI capacity invariant.
-        let size_base =
-            math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
+        let size_base = math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
         if self.live_inputs.available_oi.value < size_base {
             return Err(ReducerError::Invariant(format!(
                 "open_perp: available_oi {} < size_base {size_base}",
@@ -100,21 +99,14 @@ impl Reducer for OpenPerpAction {
         // the margin (margin is moved by a prior on-chain deposit, modeled
         // as a separate `Erc20Transfer` action).
         if !common::is_orderbook_venue(&self.venue) {
-            helpers::balance::debit(
-                state,
-                &mut delta,
-                &collateral_token.key,
-                collateral_amount,
-            )?;
+            helpers::balance::debit(state, &mut delta, &collateral_token.key, collateral_amount)?;
         }
 
         // Build the PerpPosition.
-        let position_id =
-            common::synth_position_id(&self.venue, &self.market.symbol, &self.side);
+        let position_id = common::synth_position_id(&self.venue, &self.market.symbol, &self.side);
         let venue_ref = common::venue_ref(&self.venue);
         let entry_price = self.live_inputs.mark_price.value.clone();
-        let notional_decimal =
-            math::notional_usd(size_base, &self.live_inputs.mark_price.value)?;
+        let notional_decimal = math::notional_usd(size_base, &self.live_inputs.mark_price.value)?;
         let notional_usd = U256::from_str_radix(&notional_decimal.trunc().to_string(), 10)
             .map_err(|e| {
                 ReducerError::Invariant(format!("open_perp: notional_usd U256 parse: {e}"))
@@ -315,18 +307,14 @@ fn dispatch_liquidation_price(
             action,
             &action.live_inputs,
         ),
-        PerpVenue::Generic { .. } => math::liquidation_price_simple(
-            "generic_perp",
-            action,
-            &action.live_inputs,
-        ),
+        PerpVenue::Generic { .. } => {
+            math::liquidation_price_simple("generic_perp", action, &action.live_inputs)
+        }
     }
 }
 
 /// Returns the chain associated with the venue (or `None` for off-chain).
-const fn chain_for_venue(
-    venue: &PerpVenue,
-) -> Option<simulation_state::primitives::ChainId> {
+const fn chain_for_venue(venue: &PerpVenue) -> Option<simulation_state::primitives::ChainId> {
     // ChainId is a String newtype (non-Copy), so we cannot return a borrowed
     // reference inside Option without unwinding the API. We return None here
     // for off-chain venues and Some(clone) for on-chain; the wrapper below
@@ -381,9 +369,7 @@ mod tests {
     use simulation_state::wallet::WalletId;
     use std::str::FromStr;
 
-    use crate::action::perp::{
-        OpenPerpLiveInputs, PerpAccountState, PerpVenue, SizeSpec,
-    };
+    use crate::action::perp::{OpenPerpLiveInputs, PerpAccountState, PerpVenue, SizeSpec};
 
     fn now() -> Time {
         Time::from_unix(1_738_000_000)
@@ -566,7 +552,10 @@ mod tests {
         let state = state_with_collateral(10_000);
         let action = gmx_v2_open(1, "3000", "5");
         let delta = action.apply(&state, &ctx()).unwrap();
-        assert!(delta.pending_changes.is_empty(), "on-chain emits no pending");
+        assert!(
+            delta.pending_changes.is_empty(),
+            "on-chain emits no pending"
+        );
         // 1 BalanceDelta (collateral debit) + 1 Open position
         assert_eq!(delta.token_changes.len(), 1);
         assert_eq!(delta.position_changes.len(), 1);

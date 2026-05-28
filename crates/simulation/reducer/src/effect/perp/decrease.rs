@@ -21,7 +21,7 @@
 
 use simulation_state::position::PositionKind;
 use simulation_state::primitives::SignedI256;
-use simulation_state::{EvalContext, StateDelta, U256, WalletState};
+use simulation_state::{EvalContext, StateDelta, WalletState, U256};
 
 use crate::action::perp::DecreasePerpAction;
 use crate::apply::Reducer;
@@ -57,8 +57,7 @@ impl Reducer for DecreasePerpAction {
             )));
         };
 
-        let delta_size =
-            math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
+        let delta_size = math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
         if delta_size == U256::ZERO {
             return Err(ReducerError::Invariant(
                 "decrease_perp: resolved Δsize is zero".into(),
@@ -72,8 +71,7 @@ impl Reducer for DecreasePerpAction {
         }
         if delta_size == old_perp.size_base {
             return Err(ReducerError::Invariant(
-                "decrease_perp: Δsize equals open size — use ClosePerpAction for full close"
-                    .into(),
+                "decrease_perp: Δsize equals open size — use ClosePerpAction for full close".into(),
             ));
         }
 
@@ -84,9 +82,7 @@ impl Reducer for DecreasePerpAction {
             &self.live_inputs.unrealized_pnl_now.value.to_string(),
             10,
         )
-        .map_err(|e| {
-            ReducerError::Invariant(format!("decrease_perp: pnl parse: {e}"))
-        })?;
+        .map_err(|e| ReducerError::Invariant(format!("decrease_perp: pnl parse: {e}")))?;
         let realized = pnl_d * delta_size_d / old_size_d;
 
         let mark = math::parse_decimal(&self.live_inputs.mark_price.value)?;
@@ -98,9 +94,7 @@ impl Reducer for DecreasePerpAction {
             &self.live_inputs.funding_accrued.value.to_string(),
             10,
         )
-        .map_err(|e| {
-            ReducerError::Invariant(format!("decrease_perp: funding parse: {e}"))
-        })?;
+        .map_err(|e| ReducerError::Invariant(format!("decrease_perp: funding parse: {e}")))?;
 
         let cash_delta_d = realized - fee + funding_d;
         let cash_delta_str = cash_delta_d.trunc().to_string();
@@ -137,13 +131,10 @@ impl Reducer for DecreasePerpAction {
         })?;
         let new_size_d = math::u256_to_decimal(new_size)?;
         let new_notional_d = new_size_d * mark;
-        let new_notional_u256 = U256::from_str_radix(
-            &new_notional_d.trunc().to_string(),
-            10,
-        )
-        .map_err(|e| {
-            ReducerError::Invariant(format!("decrease_perp: notional U256 parse: {e}"))
-        })?;
+        let new_notional_u256 = U256::from_str_radix(&new_notional_d.trunc().to_string(), 10)
+            .map_err(|e| {
+                ReducerError::Invariant(format!("decrease_perp: notional U256 parse: {e}"))
+            })?;
 
         helpers::position::upsert_perp_position(state, &mut delta, &self.position_id, |p| {
             if let PositionKind::PerpPosition(pp) = &mut p.kind {

@@ -30,7 +30,7 @@
 use simulation_state::delta::PositionChange;
 use simulation_state::position::PositionKind;
 use simulation_state::primitives::SignedI256;
-use simulation_state::{EvalContext, StateDelta, U256, WalletState};
+use simulation_state::{EvalContext, StateDelta, WalletState, U256};
 
 use crate::action::perp::ClosePerpAction;
 use crate::apply::Reducer;
@@ -45,8 +45,7 @@ impl Reducer for ClosePerpAction {
 
         if self.size.is_some() {
             return Err(ReducerError::Invariant(
-                "close_perp: partial close (size = Some) deferred — use DecreasePerpAction"
-                    .into(),
+                "close_perp: partial close (size = Some) deferred — use DecreasePerpAction".into(),
             ));
         }
 
@@ -131,9 +130,7 @@ mod tests {
     use super::*;
     use simulation_state::delta::TokenChange;
     use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
-    use simulation_state::position::{
-        MarginMode, PerpPosition, PerpSide, Position, PositionKind,
-    };
+    use simulation_state::position::{MarginMode, PerpPosition, PerpSide, Position, PositionKind};
     use simulation_state::primitives::{
         Address, ChainId, Decimal, MarketRef, ProtocolRef, Time, VenueRef,
     };

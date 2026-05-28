@@ -66,11 +66,9 @@ mod tests {
     use super::*;
     use simulation_state::delta::PositionChange;
     use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
-    use simulation_state::position::{
-        MarginMode, PerpPosition, PerpSide, Position, PositionKind,
-    };
+    use simulation_state::position::{MarginMode, PerpPosition, PerpSide, Position, PositionKind};
     use simulation_state::primitives::{
-        Address, ChainId, Decimal, MarketRef, ProtocolRef, SignedI256, Time, U256, VenueRef,
+        Address, ChainId, Decimal, MarketRef, ProtocolRef, SignedI256, Time, VenueRef, U256,
     };
     use simulation_state::token::{TokenKey, TokenRef};
     use simulation_state::wallet::WalletId;
@@ -188,8 +186,7 @@ mod tests {
     #[test]
     fn change_margin_mode_missing_position_returns_position_not_found() {
         let s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));
-        let action =
-            change_mode_action(MarginMode::Cross, vec!["ghost".to_string()], vec![]);
+        let action = change_mode_action(MarginMode::Cross, vec!["ghost".to_string()], vec![]);
         let err = action.apply(&s, &ctx()).unwrap_err();
         assert!(matches!(err, ReducerError::PositionNotFound(_)));
     }

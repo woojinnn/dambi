@@ -23,7 +23,7 @@
 //! with `Invariant`.
 
 use simulation_state::position::PositionKind;
-use simulation_state::{EvalContext, StateDelta, U256, WalletState};
+use simulation_state::{EvalContext, StateDelta, WalletState, U256};
 
 use crate::action::perp::IncreasePerpAction;
 use crate::apply::Reducer;
@@ -59,8 +59,7 @@ impl Reducer for IncreasePerpAction {
             )));
         };
 
-        let delta_size =
-            math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
+        let delta_size = math::resolve_size_base(&self.size, &self.live_inputs.mark_price.value)?;
         if delta_size == U256::ZERO {
             return Err(ReducerError::Invariant(
                 "increase_perp: resolved Δsize is zero".into(),
@@ -76,8 +75,7 @@ impl Reducer for IncreasePerpAction {
         let old_entry = math::parse_decimal(&old_perp.entry_price)?;
         let mark = math::parse_decimal(&self.live_inputs.mark_price.value)?;
         let new_entry_d =
-            (old_size * old_entry + math::u256_to_decimal(delta_size)? * mark)
-                / new_size;
+            (old_size * old_entry + math::u256_to_decimal(delta_size)? * mark) / new_size;
 
         // Optional extra collateral debit.
         if let Some((collateral_token, amount)) = &self.add_collateral {
@@ -85,13 +83,10 @@ impl Reducer for IncreasePerpAction {
         }
 
         let new_notional_d = new_size * mark;
-        let new_notional_u256 = U256::from_str_radix(
-            &new_notional_d.trunc().to_string(),
-            10,
-        )
-        .map_err(|e| {
-            ReducerError::Invariant(format!("increase_perp: notional U256 parse: {e}"))
-        })?;
+        let new_notional_u256 = U256::from_str_radix(&new_notional_d.trunc().to_string(), 10)
+            .map_err(|e| {
+                ReducerError::Invariant(format!("increase_perp: notional U256 parse: {e}"))
+            })?;
         let extra_collat = self.add_collateral.clone();
         let new_entry_state = math::decimal_to_state(new_entry_d);
 
@@ -284,7 +279,10 @@ mod tests {
             }
             other => panic!("expected Update, got {other:?}"),
         }
-        assert!(delta.token_changes.is_empty(), "no add_collateral → no debit");
+        assert!(
+            delta.token_changes.is_empty(),
+            "no add_collateral → no debit"
+        );
     }
 
     /// Weighted entry: 1 ETH @ 3000 + 1 ETH @ 3100 → entry = 3050.

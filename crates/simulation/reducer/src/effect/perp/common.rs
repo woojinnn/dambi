@@ -166,13 +166,19 @@ mod tests {
 
     #[test]
     fn orderbook_venues_classified_correctly() {
-        assert!(is_orderbook_venue(&PerpVenue::Hyperliquid { chain: chain() }));
+        assert!(is_orderbook_venue(&PerpVenue::Hyperliquid {
+            chain: chain()
+        }));
         assert!(is_orderbook_venue(&PerpVenue::Aevo { chain: chain() }));
         assert!(is_orderbook_venue(&PerpVenue::DyDxV4 { chain: chain() }));
         assert!(!is_orderbook_venue(&PerpVenue::GmxV2 { chain: chain() }));
         assert!(!is_orderbook_venue(&PerpVenue::Drift { chain: chain() }));
-        assert!(!is_orderbook_venue(&PerpVenue::JupiterPerps { chain: chain() }));
-        assert!(!is_orderbook_venue(&PerpVenue::Synthetix { chain: chain() }));
+        assert!(!is_orderbook_venue(&PerpVenue::JupiterPerps {
+            chain: chain()
+        }));
+        assert!(!is_orderbook_venue(&PerpVenue::Synthetix {
+            chain: chain()
+        }));
         assert!(!is_orderbook_venue(&PerpVenue::Vertex { chain: chain() }));
     }
 
@@ -220,5 +226,4 @@ mod tests {
             PerpOrderKind::TakeProfit
         ));
     }
-
 }

@@ -22,7 +22,7 @@
 //! position immediately, so we reject with `Invariant`.
 
 use simulation_state::position::PositionKind;
-use simulation_state::{EvalContext, StateDelta, U256, WalletState};
+use simulation_state::{EvalContext, StateDelta, WalletState, U256};
 
 use crate::action::perp::AdjustMarginAction;
 use crate::apply::Reducer;
@@ -46,20 +46,18 @@ impl Reducer for AdjustMarginAction {
             )));
         };
 
-        let (collateral_token, current_locked) = perp.collateral.first().cloned().ok_or_else(|| {
-            ReducerError::Invariant(format!(
-                "adjust_margin: position {} has no collateral",
-                self.position_id
-            ))
-        })?;
+        let (collateral_token, current_locked) =
+            perp.collateral.first().cloned().ok_or_else(|| {
+                ReducerError::Invariant(format!(
+                    "adjust_margin: position {} has no collateral",
+                    self.position_id
+                ))
+            })?;
 
-        let delta_amount_u256 = U256::from_str_radix(
-            &self.delta.unsigned_abs().to_string(),
-            10,
-        )
-        .map_err(|e| {
-            ReducerError::Invariant(format!("adjust_margin: delta U256 parse: {e}"))
-        })?;
+        let delta_amount_u256 = U256::from_str_radix(&self.delta.unsigned_abs().to_string(), 10)
+            .map_err(|e| {
+                ReducerError::Invariant(format!("adjust_margin: delta U256 parse: {e}"))
+            })?;
 
         let new_collateral_amount = if self.delta.is_positive() {
             // Deposit: debit wallet, add to position.
@@ -75,8 +73,7 @@ impl Reducer for AdjustMarginAction {
             // which means the position would go under maintenance.
             if free_after == U256::ZERO {
                 return Err(ReducerError::Invariant(
-                    "adjust_margin: withdrawal would leave zero free margin (liquidatable)"
-                        .into(),
+                    "adjust_margin: withdrawal would leave zero free margin (liquidatable)".into(),
                 ));
             }
             if current_locked < delta_amount_u256 {
@@ -111,9 +108,7 @@ mod tests {
     use super::*;
     use simulation_state::delta::{PositionChange, TokenChange};
     use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
-    use simulation_state::position::{
-        MarginMode, PerpPosition, PerpSide, Position, PositionKind,
-    };
+    use simulation_state::position::{MarginMode, PerpPosition, PerpSide, Position, PositionKind};
     use simulation_state::primitives::{
         Address, ChainId, Decimal, MarketRef, ProtocolRef, SignedI256, Time, VenueRef,
     };

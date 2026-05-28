@@ -17,7 +17,7 @@
 //! `live_inputs.claimable`). Reducer-side this distinction is invisible —
 //! we iterate the slice either way.
 
-use simulation_state::{EvalContext, StateDelta, U256, WalletState};
+use simulation_state::{EvalContext, StateDelta, WalletState, U256};
 
 use crate::action::perp::ClaimFundingAction;
 use crate::apply::Reducer;
@@ -91,7 +91,10 @@ mod tests {
     }
 
     fn make_holding(key: TokenKey, amount: u128, symbol: &str) -> TokenHolding {
-        let contract = key.contract().copied().unwrap_or_else(|| Address::from([0u8; 20]));
+        let contract = key
+            .contract()
+            .copied()
+            .unwrap_or_else(|| Address::from([0u8; 20]));
         TokenHolding {
             key,
             kind: TokenKind::Base {
@@ -116,8 +119,10 @@ mod tests {
 
     fn state_with_two_tokens() -> WalletState {
         let mut s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));
-        s.tokens.insert(usdc_ref().key, make_holding(usdc_ref().key, 0, "USDC"));
-        s.tokens.insert(weth_ref().key, make_holding(weth_ref().key, 0, "WETH"));
+        s.tokens
+            .insert(usdc_ref().key, make_holding(usdc_ref().key, 0, "USDC"));
+        s.tokens
+            .insert(weth_ref().key, make_holding(weth_ref().key, 0, "WETH"));
         s
     }
 

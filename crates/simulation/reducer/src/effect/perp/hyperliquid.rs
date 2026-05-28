@@ -142,16 +142,14 @@ mod tests {
     /// (sub-integer truncation; matches venue integer-denom booking).
     #[test]
     fn funding_accrued_trunc_to_zero_for_sub_integer() {
-        let fund =
-            funding_accrued(U256::from(1_u64), &Decimal::new("0.01"), 24).unwrap();
+        let fund = funding_accrued(U256::from(1_u64), &Decimal::new("0.01"), 24).unwrap();
         assert_eq!(fund, SignedI256::ZERO);
     }
 
     /// Funding: 1000 ETH × 0.01 × 24h / 24 = 10.
     #[test]
     fn funding_accrued_integer_result() {
-        let fund =
-            funding_accrued(U256::from(1_000_u64), &Decimal::new("0.01"), 24).unwrap();
+        let fund = funding_accrued(U256::from(1_000_u64), &Decimal::new("0.01"), 24).unwrap();
         assert_eq!(fund, SignedI256::try_from(10_i32).unwrap());
     }
 
