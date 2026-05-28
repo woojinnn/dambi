@@ -113,7 +113,7 @@ interface BundleMatchSpecific {
 
 interface BundleMatchSourced {
   selector: Hex;
-  chain_to_addresses_source: TokenErcKindSource;
+  chain_to_addresses_source: ChainToAddressesSource;
   chain_ids: ChainId[];
 }
 
@@ -122,6 +122,26 @@ type BundleMatch = BundleMatchSpecific | BundleMatchSourced;
 /** ERC contract kind (registry-level, distinct from semantic TokenKind). */
 type TokenErcKind = "erc20" | "erc721" | "erc1155";
 type TokenErcKindSource = `tokens:${TokenErcKind}`;
+
+/**
+ * Protocol-aware source kind — build-time RPC enumerate via
+ * `scripts/resolvers/<protocol>.ts`. Format: `<protocol>:<scope>` where
+ * `<protocol>` matches Defillama convention (e.g. `aave_v3`) and `<scope>`
+ * is protocol-specific (e.g. `atokens`, `variable_debts`).
+ *
+ * See `registryV2/docs/PROTOCOL_SOURCE_CATALOG.md` for the full catalog.
+ */
+type ProtocolSourceKind =
+  | "aave_v3:atokens"
+  | "aave_v3:variable_debts"
+  | "aave_v3:stable_debts";
+
+/**
+ * Source spec for `chain_to_addresses_source` — union of token erc_kind
+ * enumeration and protocol-aware RPC enumeration. Validators dispatch on
+ * prefix (`tokens:` → static token table, anything else → protocol resolver).
+ */
+type ChainToAddressesSource = TokenErcKindSource | ProtocolSourceKind;
 
 interface AdapterBundle {
   type: "adapter_action";
@@ -176,6 +196,18 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const SCHEMA_VERSION_REQUIRED = "3" as const;
 const ADAPTER_TYPE_REQUIRED = "adapter_action" as const;
 const TOKEN_ERC_KINDS: ReadonlySet<TokenErcKind> = new Set(["erc20", "erc721", "erc1155"]);
+
+/**
+ * Protocol-aware source kinds that pass the validator. Resolution itself is
+ * delegated to `scripts/resolvers/<protocol>.ts` at `resolveBundle` time —
+ * this set only gates whether a manifest's `chain_to_addresses_source` is
+ * a recognized protocol source vs an unknown string.
+ */
+const PROTOCOL_SOURCE_KINDS: ReadonlySet<ProtocolSourceKind> = new Set([
+  "aave_v3:atokens",
+  "aave_v3:variable_debts",
+  "aave_v3:stable_debts",
+]);
 
 // ---------------------------------------------------------------------------
 // Filesystem helpers
@@ -397,10 +429,20 @@ function validateMatchShape(path: string, match: unknown): asserts match is Bund
     if (typeof m.chain_to_addresses_source !== "string") {
       throw new Error(`manifests/: ${path} match.chain_to_addresses_source must be a string`);
     }
-    const parts = m.chain_to_addresses_source.split(":");
-    if (parts.length !== 2 || parts[0] !== "tokens" || !TOKEN_ERC_KINDS.has(parts[1] as TokenErcKind)) {
+    const sourceSpec = m.chain_to_addresses_source;
+    const parts = sourceSpec.split(":");
+    const isTokenSource =
+      parts.length === 2 &&
+      parts[0] === "tokens" &&
+      TOKEN_ERC_KINDS.has(parts[1] as TokenErcKind);
+    const isProtocolSource = PROTOCOL_SOURCE_KINDS.has(sourceSpec as ProtocolSourceKind);
+    if (!isTokenSource && !isProtocolSource) {
+      const tokenList = `"tokens:erc20" | "tokens:erc721" | "tokens:erc1155"`;
+      const protocolList = Array.from(PROTOCOL_SOURCE_KINDS)
+        .map((k) => `"${k}"`)
+        .join(" | ");
       throw new Error(
-        `manifests/: ${path} match.chain_to_addresses_source must be one of "tokens:erc20" | "tokens:erc721" | "tokens:erc1155", got ${JSON.stringify(m.chain_to_addresses_source)}`,
+        `manifests/: ${path} match.chain_to_addresses_source must be one of ${tokenList} (token erc_kind) or ${protocolList} (protocol-aware), got ${JSON.stringify(sourceSpec)}`,
       );
     }
     if (!Array.isArray(m.chain_ids) || m.chain_ids.length === 0) {
@@ -448,17 +490,17 @@ function validateEmitShape(path: string, emit: unknown): void {
 // Source resolution — sourced bundles → effective chain_to_addresses
 // ---------------------------------------------------------------------------
 
-function resolveBundle(
+import {
+  PROTOCOL_SOURCE_RESOLVERS,
+  rpcClient,
+} from "./resolvers/index.ts";
+
+function resolveTokenBundle(
   bundle: AdapterBundle,
+  sourced: BundleMatchSourced,
   tokens: TokensByChainKind,
   manifestPath: string,
 ): ResolvedBundle {
-  if ("chain_to_addresses" in bundle.match) {
-    // already concrete
-    return bundle as ResolvedBundle;
-  }
-
-  const sourced = bundle.match as BundleMatchSourced;
   const ercKind = sourced.chain_to_addresses_source.split(":")[1] as TokenErcKind;
 
   const effective: Record<string, Hex[]> = {};
@@ -472,7 +514,6 @@ function resolveBundle(
     }
     const addresses = Array.from(perKind.get(ercKind)!).sort();
     if (addresses.length === 0) {
-      // not an error — a chain with no tokens of this kind simply produces zero callkeys.
       console.error(
         `[build-index] WARN ${manifestPath}: chain ${chainId} has no tokens of erc_kind=${ercKind} — 0 callkeys for this (chain, selector)`,
       );
@@ -488,14 +529,85 @@ function resolveBundle(
     );
   }
 
-  // Build resolved bundle — replace sourced match with concrete map, drop source/chain_ids fields
+  return buildResolvedFromEffective(bundle, sourced, effective);
+}
+
+async function resolveProtocolBundle(
+  bundle: AdapterBundle,
+  sourced: BundleMatchSourced,
+  manifestPath: string,
+  forceRefresh: boolean,
+): Promise<ResolvedBundle> {
+  const sourceSpec = sourced.chain_to_addresses_source as keyof typeof PROTOCOL_SOURCE_RESOLVERS;
+  const resolver = PROTOCOL_SOURCE_RESOLVERS[sourceSpec];
+  if (!resolver) {
+    throw new Error(
+      `manifests/: ${manifestPath} match.chain_to_addresses_source "${sourceSpec}" has no registered resolver (PROTOCOL_SOURCE_RESOLVERS map mismatch — see scripts/resolvers/index.ts)`,
+    );
+  }
+
+  const effective: Record<string, Hex[]> = {};
+  let totalAddresses = 0;
+  const results = await Promise.all(
+    sourced.chain_ids.map(async (chainId) => {
+      const addresses = await resolver.resolve(chainId, { rpc: rpcClient, forceRefresh });
+      return { chainId, addresses };
+    }),
+  );
+
+  for (const { chainId, addresses } of results) {
+    if (addresses.length === 0) {
+      console.error(
+        `[build-index] WARN ${manifestPath}: chain ${chainId} resolver "${sourceSpec}" returned 0 addresses — 0 callkeys for this (chain, selector)`,
+      );
+      continue;
+    }
+    effective[String(chainId)] = addresses;
+    totalAddresses += addresses.length;
+  }
+
+  if (totalAddresses === 0) {
+    throw new Error(
+      `manifests/: ${manifestPath} match.chain_to_addresses_source "${sourceSpec}" resolved to 0 addresses across all chain_ids`,
+    );
+  }
+
+  return buildResolvedFromEffective(bundle, sourced, effective);
+}
+
+function buildResolvedFromEffective(
+  bundle: AdapterBundle,
+  sourced: BundleMatchSourced,
+  effective: Record<string, Hex[]>,
+): ResolvedBundle {
   const resolvedMatch: BundleMatchSpecific = {
     selector: sourced.selector,
     chain_to_addresses: effective,
   };
-
   const { match: _omit, ...rest } = bundle;
   return { ...rest, match: resolvedMatch } as ResolvedBundle;
+}
+
+async function resolveBundle(
+  bundle: AdapterBundle,
+  tokens: TokensByChainKind,
+  manifestPath: string,
+  forceRefresh: boolean,
+): Promise<ResolvedBundle> {
+  if ("chain_to_addresses" in bundle.match) {
+    // already concrete
+    return bundle as ResolvedBundle;
+  }
+
+  const sourced = bundle.match as BundleMatchSourced;
+  const sourceSpec = sourced.chain_to_addresses_source;
+
+  // Dispatch on prefix: `tokens:*` → static token table, anything else →
+  // protocol resolver (validator already rejected unknown prefixes).
+  if (sourceSpec.startsWith("tokens:")) {
+    return resolveTokenBundle(bundle, sourced, tokens, manifestPath);
+  }
+  return resolveProtocolBundle(bundle, sourced, manifestPath, forceRefresh);
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +630,14 @@ function callkeyFilename(chainId: ChainId, to: Hex, selector: Hex): string {
 // Main
 // ---------------------------------------------------------------------------
 
-function main(): void {
+async function main(): Promise<void> {
+  // CLI flag: `--force-refresh` invalidates the protocol-source disk cache
+  // and re-fetches via RPC. Default uses cache when fresh (30-day TTL).
+  const forceRefresh = process.argv.includes("--force-refresh");
+  if (forceRefresh) {
+    console.error(`[build-index] --force-refresh: protocol-aware sources will re-fetch via RPC`);
+  }
+
   const skipDirs = new Set(["_template"]);
   const manifestFiles = walkJsonFiles(MANIFESTS_DIR, { skipDirs });
   if (manifestFiles.length === 0) {
@@ -550,7 +669,7 @@ function main(): void {
     const manifestPath = relative(REGISTRY_ROOT, file).split(/[\\/]/).join("/");
     try {
       const bundle = loadBundle(file);
-      const resolved = resolveBundle(bundle, tokens, manifestPath);
+      const resolved = await resolveBundle(bundle, tokens, manifestPath, forceRefresh);
       const bundleSha256 = computeBundleSha256(resolved);
 
       const pairs = Object.entries(resolved.match.chain_to_addresses);
@@ -592,4 +711,7 @@ function main(): void {
   console.error(`[build-index] done — ${totalCallkeys} callkey(s) written across ${manifestFiles.length} manifest(s)`);
 }
 
-main();
+main().catch((err) => {
+  console.error(`[build-index] fatal: ${(err as Error).message}`);
+  process.exit(1);
+});
