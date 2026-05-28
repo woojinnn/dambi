@@ -155,3 +155,153 @@ async fn live_sync_primitives_block_height_and_balances() {
     let eth_bal = state.tokens[&native_key].balance.as_fungible().unwrap();
     println!("ETH balance (wei) = {}", eth_bal);
 }
+
+#[tokio::test]
+#[ignore]
+async fn live_chainlink_real_prices() {
+    // ChainlinkFetcher 가 실제 mainnet Chainlink AggregatorV3 로 USDC/USD, ETH/USD,
+    // WBTC/USD 가격을 가져오는지.
+    use simulation_state::{DataSource, OracleProvider};
+    use simulation_sync::fetchers::ChainlinkFetcher;
+    use std::sync::Arc;
+
+    let router = Arc::new(RpcRouter::from_config(live_config()).unwrap());
+    let fetcher = ChainlinkFetcher::new(router);
+
+    for feed in ["USDC/USD", "ETH/USD", "WBTC/USD"] {
+        let source = DataSource::OracleFeed {
+            provider: OracleProvider::Chainlink,
+            feed_id: feed.into(),
+        };
+        let price = fetcher.fetch_price(&source).await.expect(feed);
+        println!("{} = {}", feed, price.as_str());
+
+        // 살아있는 가격은 0 아님
+        assert!(price.as_str() != "0", "{} returned zero", feed);
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn live_multicall_5_token_total_supplies() {
+    // Multicall3 가 한 번의 RPC 호출로 5개 토큰의 totalSupply 를 다 가져오는지.
+    use simulation_sync::fetchers::rpc::multicall::{Call3, Multicall};
+    use simulation_sync::BlockTag;
+    use std::sync::Arc;
+
+    let router = Arc::new(RpcRouter::from_config(live_config()).unwrap());
+    let mc = Multicall::new(router.clone());
+
+    let totalsupply_selector = vec![0x18, 0x16, 0x0d, 0xdd]; // totalSupply()
+    let tokens: Vec<(&str, &str)> = vec![
+        ("USDC", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+        ("USDT", "0xdac17f958d2ee523a2206206994597c13d831ec7"),
+        ("DAI", "0x6b175474e89094c44da98b954eedeac495271d0f"),
+        ("WETH", "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+        ("WBTC", "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599"),
+    ];
+
+    use std::str::FromStr as _;
+    let calls: Vec<Call3> = tokens
+        .iter()
+        .map(|(_, addr)| Call3 {
+            target: alloy_primitives::Address::from_str(addr).unwrap(),
+            allow_failure: true,
+            call_data: totalsupply_selector.clone(),
+        })
+        .collect();
+
+    let results = mc
+        .aggregate3(&ChainId::ethereum_mainnet(), calls, BlockTag::Latest)
+        .await
+        .expect("multicall aggregate3");
+
+    assert_eq!(results.len(), 5);
+    for ((name, _), result) in tokens.iter().zip(results.iter()) {
+        assert!(result.success, "{} failed", name);
+        assert_eq!(result.return_data.len(), 32);
+        let supply = alloy_primitives::U256::from_be_slice(&result.return_data);
+        println!("{} totalSupply = {}", name, supply);
+        assert!(supply > alloy_primitives::U256::ZERO);
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn live_orchestrator_refresh_end_to_end() {
+    // Orchestrator.refresh — stale LiveField 가 실제로 새 값으로 갱신되는지.
+    // (Chainlink 경로) USDC.price_usd 를 stale(ttl=1s, synced_at=1) 로 만들고
+    // → refresh 후 → value 가 새 가격으로, synced_at 이 now 로 바뀌어야 함.
+    use simulation_state::{
+        Address, Balance, BaseCategory, DataSource, Decimal, Duration as SDuration, FiatCurrency,
+        LiveField, OracleProvider, PegTarget, Time, TokenHolding, TokenKey, TokenKind, WalletId,
+        WalletState,
+    };
+    use simulation_sync::Orchestrator;
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    let router = Arc::new(RpcRouter::from_config(live_config()).unwrap());
+    let orch = Orchestrator::from_rpc_router(router);
+
+    let usdc_addr = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+    let usdc_key = TokenKey::Erc20 {
+        chain: ChainId::ethereum_mainnet(),
+        address: usdc_addr,
+    };
+
+    let mut state = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+    state.tokens.insert(
+        usdc_key.clone(),
+        TokenHolding {
+            key: usdc_key.clone(),
+            kind: TokenKind::Base {
+                category: BaseCategory::Stable,
+                peg_to: Some(PegTarget::Fiat(FiatCurrency::Usd)),
+            },
+            symbol: "USDC".into(),
+            decimals: 6,
+            balance: Balance::zero_fungible(),
+            committed: Balance::zero_fungible(),
+            approved_to: None,
+            // ⚠ 의도적으로 stale 한 LiveField: synced_at=1, ttl=1s
+            price_usd: Some(
+                LiveField::new(
+                    Decimal::new("999.99"), // 잘못된 placeholder
+                    DataSource::OracleFeed {
+                        provider: OracleProvider::Chainlink,
+                        feed_id: "USDC/USD".into(),
+                    },
+                    Time::from_unix(1),
+                )
+                .with_ttl(SDuration::from_secs(1)),
+            ),
+            last_synced_at: Time::from_unix(1),
+            primitives_source: DataSource::UserSupplied,
+        },
+    );
+
+    let before_value = state.tokens[&usdc_key]
+        .price_usd
+        .as_ref()
+        .unwrap()
+        .value
+        .as_str()
+        .to_string();
+    println!("before: USDC price = {}", before_value);
+    assert_eq!(before_value, "999.99");
+
+    let report = orch
+        .refresh(&mut state, Time::from_unix(1_738_000_000))
+        .await
+        .unwrap();
+    println!("refresh report: {:?}", report);
+
+    let after = state.tokens[&usdc_key].price_usd.as_ref().unwrap();
+    println!("after:  USDC price = {} (synced_at={})", after.value.as_str(), after.synced_at.as_unix());
+
+    assert_ne!(after.value.as_str(), "999.99", "price should have been refreshed");
+    assert_eq!(after.synced_at, Time::from_unix(1_738_000_000));
+    assert_eq!(report.fields_updated, 1);
+    assert!(report.errors.is_empty(), "errors: {:?}", report.errors);
+}
