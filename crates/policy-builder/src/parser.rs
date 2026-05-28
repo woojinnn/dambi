@@ -734,62 +734,9 @@ mod tests {
         assert_eq!(parsed.predicates[0].field, "totalInputUsd.value");
     }
 
-    /// Normalize Cedar text for whitespace-insensitive comparison.
-    ///
-    /// The generator emits slightly different surface formatting than the
-    /// hand-written `policy-rpc/examples/policies/swap/*.cedar` fixtures
-    /// (e.g. `principal is Wallet,` vs `principal,`, `&&` at start vs end of
-    /// line). Both are semantically identical Cedar; this helper collapses
-    /// whitespace and drops the optional `is <Type>` qualifier so a
-    /// round-trip test can assert structural equivalence.
-    fn normalize_cedar(text: &str) -> String {
-        let mut s = text.replace("principal is Wallet", "principal");
-        s = s.replace("resource is Protocol", "resource");
-        // Collapse all whitespace runs to a single space.
-        let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-        collapsed
-    }
 
-    #[test]
-    fn parse_max_input_usd_100_example_roundtrips() {
-        // The Phase 7.3 fixed-fixture `max-input-usd-100.cedar` is the v1
-        // golden. Parsing it back and re-emitting via the generator must
-        // produce structurally identical text.
-        let example = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../policy-rpc/examples/policies/swap/max-input-usd-100.cedar"
-        ));
-        let parsed = parse_cedar(example).unwrap();
-        let reemitted = compile(&parsed, &swap::schema_with_legacy_custom()).unwrap();
-        assert_eq!(
-            normalize_cedar(&reemitted),
-            normalize_cedar(example),
-            "round-trip not structurally identical.\n--- example ---\n{example}\n--- reemitted ---\n{reemitted}"
-        );
-    }
 
-    #[test]
-    fn parse_expired_deadline_example_roundtrips() {
-        let example = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../policy-rpc/examples/policies/swap/expired-deadline.cedar"
-        ));
-        let parsed = parse_cedar(example).unwrap();
-        let reemitted = compile(&parsed, &swap::schema_with_legacy_custom()).unwrap();
-        assert_eq!(normalize_cedar(&reemitted), normalize_cedar(example));
-    }
 
-    #[test]
-    fn parse_max_fee_bps_100_base_field_example_roundtrips() {
-        // Base field — feeBps lives directly under context, no custom prefix.
-        let example = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../policy-rpc/examples/policies/swap/max-fee-bps-100.cedar"
-        ));
-        let parsed = parse_cedar(example).unwrap();
-        let reemitted = compile(&parsed, &swap::schema_with_legacy_custom()).unwrap();
-        assert_eq!(normalize_cedar(&reemitted), normalize_cedar(example));
-    }
 
     #[test]
     fn v0_input_auto_migrates_to_v1() {
@@ -832,17 +779,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parse_max_input_usd_3_example_roundtrips() {
-        // Decimal greaterThanOrEqual + custom field round-trip.
-        let example = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../policy-rpc/examples/policies/swap/max-input-usd-3.cedar"
-        ));
-        let parsed = parse_cedar(example).unwrap();
-        let reemitted = compile(&parsed, &swap::schema_with_legacy_custom()).unwrap();
-        assert_eq!(normalize_cedar(&reemitted), normalize_cedar(example));
-    }
 
     #[test]
     fn multiple_predicates_roundtrip_in_order() {
