@@ -231,7 +231,8 @@ describe("orchestrator", () => {
     );
   });
 
-  it("records declarative-route hit metadata in the audit trail", async () => {
+  // Plan §M10 (2026-05-28) — v1 cutover. 본 test 7건은 v1 routing/Cedar 검증.
+  it.skip("records declarative-route hit metadata in the audit trail", async () => {
     mocks.tryDeclarativeRoute.mockResolvedValueOnce({
       kind: "hit",
       value: {
@@ -260,7 +261,7 @@ describe("orchestrator", () => {
     );
   });
 
-  it("records declarative-route miss in the audit trail", async () => {
+  it.skip("records declarative-route miss in the audit trail", async () => {
     mocks.tryDeclarativeRoute.mockResolvedValueOnce({
       kind: "miss",
       reason: "no_publisher",
@@ -298,7 +299,7 @@ describe("orchestrator", () => {
     },
   };
 
-  it("phase7F: declarative hit drives Cedar verdict (verdictSource=declarative)", async () => {
+  it.skip("phase7F: declarative hit drives Cedar verdict (verdictSource=declarative)", async () => {
     mocks.tryDeclarativeRoute.mockResolvedValueOnce(hitOutcome);
     mocks.evaluateWithEnvelopes.mockResolvedValueOnce({ kind: "pass" });
 
@@ -329,7 +330,7 @@ describe("orchestrator", () => {
     );
   });
 
-  it("phase7F: declarative miss falls back to static path (verdictSource=static)", async () => {
+  it.skip("phase7F: declarative miss falls back to static path (verdictSource=static)", async () => {
     mocks.tryDeclarativeRoute.mockResolvedValueOnce({
       kind: "miss",
       reason: "no_publisher",
@@ -348,7 +349,7 @@ describe("orchestrator", () => {
     );
   });
 
-  it("phase7F: declarative fault falls back to static path (verdictSource=static)", async () => {
+  it.skip("phase7F: declarative fault falls back to static path (verdictSource=static)", async () => {
     mocks.tryDeclarativeRoute.mockResolvedValueOnce({
       kind: "fault",
       reason: "map_failed",
@@ -368,7 +369,7 @@ describe("orchestrator", () => {
     );
   });
 
-  it("phase7F: declarative hit with 0 envelopes falls back to static path", async () => {
+  it.skip("phase7F: declarative hit with 0 envelopes falls back to static path", async () => {
     mocks.tryDeclarativeRoute.mockResolvedValueOnce({
       kind: "hit",
       value: {
@@ -395,7 +396,7 @@ describe("orchestrator", () => {
     );
   });
 
-  it("phase7F: evaluateWithEnvelopes throw falls through to static path", async () => {
+  it.skip("phase7F: evaluateWithEnvelopes throw falls through to static path", async () => {
     mocks.tryDeclarativeRoute.mockResolvedValueOnce(hitOutcome);
     mocks.evaluateWithEnvelopes.mockRejectedValueOnce(
       new mocks.MockEngineError(

@@ -1,9 +1,7 @@
 import Browser from "webextension-polyfill";
 import { ensureSeedBundlesInstalled } from "./adapter-loader/declarative-adapter-loader";
 import {
-  tryDeclarativeRoute,
   tryDeclarativeRouteV3,
-  type DeclarativeRouteOutcome,
   type DeclarativeRouteV3Outcome,
 } from "./adapter-loader/declarative-route";
 import {
@@ -17,7 +15,7 @@ import {
   pendingPut,
   type PendingRequest,
 } from "./storage";
-import { EngineError, evaluateWithEnvelopes } from "./wasm-bridge";
+import { EngineError } from "./wasm-bridge";
 import {
   evaluateWithPolicyRpc,
   formatAuditMatched,
@@ -72,34 +70,9 @@ interface DecisionOptions {
 }
 
 /**
- * Phase 6 — audit telemetry capturing the declarative pipeline's contribution
- * to a single decision. Surfaced in the audit log so we can tell which
- * adapter-loader bundle handled (or failed to handle) a given tx.
- *
- * Phase 7F update: when `outcome === "hit"` AND `envelope_count > 0`, the
- * declarative path now drives the Cedar verdict via
- * `evaluate_with_envelopes_json` (Phase 7A). The static `evaluateWithPolicyRpc`
- * remains the fallback for miss/fault outcomes and the legacy ground truth
- * for cases the declarative path does not yet cover.
- */
-export interface DeclarativeAuditMeta {
-  outcome: DeclarativeRouteOutcome["kind"]; // "hit" | "miss" | "fault"
-  source?: "layer1" | "layer2" | "jit";
-  decoder_id?: string;
-  bundle_id?: string;
-  envelope_count?: number;
-  reason?: string;
-}
-
-/**
- * Phase 4B — v3 route audit meta. Observability-only at Phase 4B (the v3
- * fn is a stub that always returns one `Unknown` action). Phase 4D fills
- * in `decoder_id` once registry-v2 manifest lookup is wired.
- *
- * Kept separate from `DeclarativeAuditMeta` so the audit log can show
- * both pipelines running in parallel during cutover — when Phase 5
- * promotes v3 to verdict driver, this meta moves into the `verdict`
- * branch and `DeclarativeAuditMeta` is retired.
+ * Plan §M10 (2026-05-28) — v1 DeclarativeAuditMeta 제거. v3 audit meta 만
+ * 유지 (observability-only). Verdict driving 은 static path. Cedar v3 schema
+ * 적응은 별 plan.
  */
 export interface DeclarativeV3AuditMeta {
   outcome: DeclarativeRouteV3Outcome["kind"]; // "hit" | "miss" | "fault"
@@ -124,11 +97,9 @@ interface LifecycleResult {
   verdict: VerdictDto;
   verdictSource: VerdictSource;
   policyRpc?: PolicyRpcAuditMeta;
-  declarative?: DeclarativeAuditMeta;
   /**
-   * Phase 4B — v3 declarative route audit meta. Always observability-only
-   * for the moment; the verdict is still driven by the v1 declarative or
-   * static path.
+   * Plan §M10 — v1 declarative-route 제거 후 v3 audit meta 만 유지.
+   * Observability-only (verdict 는 static path 가 생성).
    */
   declarativeV3?: DeclarativeV3AuditMeta;
 }
@@ -227,7 +198,6 @@ async function decideInner(
       verdict,
       lifecycle.verdictSource,
       lifecycle.policyRpc,
-      lifecycle.declarative,
       lifecycle.declarativeV3,
     );
     return { ok, verdict };
@@ -295,7 +265,6 @@ async function appendAudit(
   verdict: VerdictDto,
   verdictSource?: VerdictSource,
   policyRpc?: PolicyRpcAuditMeta,
-  declarative?: DeclarativeAuditMeta,
   declarativeV3?: DeclarativeV3AuditMeta,
 ): Promise<void> {
   logDecision(message, verdict);
@@ -310,7 +279,6 @@ async function appendAudit(
     // first-class verdict.
     matchedPolicies: formatAuditMatched(verdict),
     ...(policyRpc ? { policyRpc } : {}),
-    ...(declarative ? { declarative } : {}),
     ...(declarativeV3 ? { declarativeV3 } : {}),
     ...(verdictSource ? { verdictSource } : {}),
     decidedAtMs: Date.now(),
@@ -425,64 +393,12 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     };
   }
 
-  // Phase 6 → Phase 7F — declarative path is now a verdict driver, not
-  // observability-only. For transactions we hand off
-  // `(chainId, to, calldata)` to the adapter-loader router. A hit with one or
-  // more enriched envelopes lets us run `evaluate_with_envelopes_json`
-  // directly, skipping `plan_policy_rpc_json` and the RPC enrichment hop.
-  //
-  // The static `evaluateWithPolicyRpc` remains the fallback for miss/fault
-  // outcomes, hit-with-zero-envelopes edges, and any unexpected throw
-  // inside `tryDeclarativeRoute`. We deliberately fence both call sites in
-  // try/catch so a glitch (registry server down, malformed bundle, race)
-  // cannot block a verdict.
-  let declarativeMeta: DeclarativeAuditMeta | undefined;
-  let declarativeHit: {
-    envelopes: Record<string, unknown>[];
-    decoderId: string;
-  } | undefined;
-  if (isTransaction(message)) {
-    try {
-      const outcome = await tryDeclarativeRoute({
-        chainId: message.data.chainId,
-        from: message.data.transaction.from ?? "0x" + "0".repeat(40),
-        to: message.data.transaction.to ?? "0x" + "0".repeat(40),
-        valueWei: txValueToWeiDecimal(message.data.transaction.value),
-        calldataHex: message.data.transaction.data,
-      });
-      declarativeMeta = auditFromDeclarativeOutcome(outcome);
-      console.info("[Scopeball] declarative-route", {
-        requestId: message.requestId,
-        chainId: message.data.chainId,
-        outcome: outcome.kind,
-        ...(outcome.kind === "hit"
-          ? {
-              decoderId: outcome.value.decoderId,
-              bundleId: outcome.value.bundleId,
-              source: outcome.value.source,
-              envelopeCount: outcome.value.envelopes.length,
-            }
-          : outcome.kind === "miss"
-            ? { reason: outcome.reason }
-            : { reason: outcome.reason }),
-      });
-      if (outcome.kind === "hit" && outcome.value.envelopes.length > 0) {
-        declarativeHit = {
-          envelopes: outcome.value.envelopes,
-          decoderId: outcome.value.decoderId,
-        };
-      }
-    } catch (err) {
-      // tryDeclarativeRoute already classifies known errors. Anything
-      // reaching here is truly unexpected — log and continue with the
-      // static path.
-      console.warn("[Scopeball] declarative-route threw", {
-        requestId: message.requestId,
-        err: err instanceof Error ? err.message : String(err),
-      });
-      declarativeMeta = { outcome: "fault", reason: "unexpected" };
-    }
-  }
+  // Plan §M10 — v1 declarative-route 호출 + console.info `[Scopeball]
+  // declarative-route` + Cedar verdict 분기 (declarativeHit 의존) 모두 제거
+  // (사용자 결정 2026-05-28). registry/ 디렉토리는 runtime 미참조 + console
+  // 에서 v1 marker 부재. v3 path 만 console.info observability 로 유지. Cedar
+  // verdict 는 v3 ActionBody schema 적응 별 plan. Verdict 는 static path
+  // (evaluateWithPolicyRpc) 가 모두 생성.
 
   // Phase 4B — v3 route, observability-only. Calls the new WASM v3 entry
   // alongside the v1 path so the audit log shows both running. The Phase 4B
@@ -560,61 +476,9 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     };
   }
 
-  // Declarative verdict path — only taken when the declarative router
-  // returned a hit with ≥1 enriched envelope AND the message is a
-  // transaction. Failures here fall through to the static path so a flaky
-  // WASM call does NOT take out a tx whose static path would have passed.
-  if (declarativeHit && isTransaction(message)) {
-    try {
-      const verdict = await evaluateWithEnvelopes({
-        envelopes: declarativeHit.envelopes,
-        from: message.data.transaction.from ?? "0x" + "0".repeat(40),
-        to: message.data.transaction.to ?? "0x" + "0".repeat(40),
-        value_wei: txValueToWeiDecimal(message.data.transaction.value),
-        chain_id: message.data.chainId,
-        block_timestamp: Math.floor(Date.now() / 1000),
-        manifests: getActivePolicyRpcManifests(),
-        // Phase 7F MVP: declarative verdict path runs without RPC
-        // enrichment. Manifests that declare `requires` are NOT yet
-        // wired through this path — when they exist the WASM will fail
-        // closed via `__engine::projection_failed`, which is the
-        // desired conservative behaviour until 7G/7H wire policy-rpc
-        // results into the declarative branch.
-        rpc_response: {
-          request_id: message.requestId,
-          results: [],
-        },
-      });
-      console.info("[Scopeball] declarative-verdict", {
-        requestId: message.requestId,
-        verdictSource: "declarative",
-        verdict: verdict.kind,
-        envelopeCount: declarativeHit.envelopes.length,
-        decoderId: declarativeHit.decoderId,
-        matched:
-          verdict.matched?.map((m) => ({
-            id: m.policy_id,
-            severity: m.severity,
-          })) ?? [],
-      });
-      return {
-        verdict,
-        verdictSource: "declarative",
-        ...(declarativeMeta ? { declarative: declarativeMeta } : {}),
-        ...(declarativeV3Meta ? { declarativeV3: declarativeV3Meta } : {}),
-      };
-    } catch (err) {
-      // evaluateWithEnvelopes threw — most likely an EngineError on the
-      // installed_manifest_hash_mismatch path. Log and fall through to
-      // the static path so we don't lose a verdict.
-      console.warn("[Scopeball] declarative-verdict threw", {
-        requestId: message.requestId,
-        decoderId: declarativeHit.decoderId,
-        err: err instanceof Error ? err.message : String(err),
-      });
-      // Fall through to static path below.
-    }
-  }
+  // Plan §M10 — Cedar verdict 분기 (declarativeHit 의존 + evaluateWithEnvelopes)
+  // 제거. v1 envelope schema 결합 상태 — v3 ActionBody → Cedar schema 매핑은
+  // 별 plan. static path (evaluateWithPolicyRpc) 가 모든 verdict 생성.
 
   // Phase 7 codex carry-over H: at evaluate-time the orchestrator MUST
   // use the same manifest set the WASM engine was last installed with.
@@ -646,14 +510,13 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     verdict: result.verdict,
     verdictSource: "static",
     policyRpc: result.audit,
-    ...(declarativeMeta ? { declarative: declarativeMeta } : {}),
     ...(declarativeV3Meta ? { declarativeV3: declarativeV3Meta } : {}),
   };
 }
 
 /**
- * Phase 4B — map a v3 outcome into the audit shape. Pulled out into a
- * standalone fn for symmetry with `auditFromDeclarativeOutcome` (v1).
+ * Plan §M10 — v3 outcome → audit shape. v1 의 auditFromDeclarativeOutcome
+ * 은 함께 제거 (caller 가 v1 routing 와 함께 cutover).
  */
 function auditFromDeclarativeV3Outcome(
   outcome: DeclarativeRouteV3Outcome,
@@ -671,24 +534,6 @@ function auditFromDeclarativeV3Outcome(
     return { outcome: "miss", nature, reason: outcome.reason };
   }
   return { outcome: "fault", nature, reason: outcome.reason };
-}
-
-function auditFromDeclarativeOutcome(
-  outcome: DeclarativeRouteOutcome,
-): DeclarativeAuditMeta {
-  if (outcome.kind === "hit") {
-    return {
-      outcome: "hit",
-      source: outcome.value.source,
-      decoder_id: outcome.value.decoderId,
-      bundle_id: outcome.value.bundleId,
-      envelope_count: outcome.value.envelopes.length,
-    };
-  }
-  if (outcome.kind === "miss") {
-    return { outcome: "miss", reason: outcome.reason };
-  }
-  return { outcome: "fault", reason: outcome.reason };
 }
 
 /**

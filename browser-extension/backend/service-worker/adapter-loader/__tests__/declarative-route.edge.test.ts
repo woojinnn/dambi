@@ -477,7 +477,10 @@ function txMessage(requestId = "edge-tx-1"): Message {
   } as Message;
 }
 
-describe("verdictSource audit + default policy Cedar verdict", () => {
+// Plan §M10 (2026-05-28) — v1 declarative-route + Cedar verdict 분기가
+// orchestrator 에서 cutover. 본 describe 의 5 test 는 v1 envelope → Cedar
+// verdict path 를 검증하던 것. v3 ActionBody → Cedar schema 매핑은 별 plan.
+describe.skip("verdictSource audit + default policy Cedar verdict", () => {
   let decideMessage: typeof import("../../orchestrator").decideMessage;
 
   beforeEach(async () => {

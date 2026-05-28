@@ -223,6 +223,10 @@ async function enrichAssetRef(
 /**
  * Try to route a tx through the declarative pipeline. Returns an outcome
  * the orchestrator can switch on.
+ *
+ * @deprecated Plan §M10 (2026-05-28) — orchestrator 의 v1 routing call site
+ * 가 v3 로 cutover. 본 함수는 caller 0 (test 외). registry/ 디렉토리는
+ * runtime 미참조 상태. 별 cleanup task 에서 함수 + 관련 helper / test 삭제.
  */
 export async function tryDeclarativeRoute(args: {
   chainId: number;
