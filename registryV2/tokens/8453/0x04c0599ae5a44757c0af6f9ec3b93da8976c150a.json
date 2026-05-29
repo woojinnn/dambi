@@ -11,6 +11,6 @@
     "underlying": {
       "key": { "standard": "erc20", "chain": "eip155:1", "address": "0x35fa164735182de50811e8e2e824cfb9b6118ac2" }
     },
-    "peg_kind": "rebasing"
+    "peg_kind": "hard_peg"
   }
 }

@@ -11,6 +11,6 @@
     "underlying": {
       "key": { "standard": "native", "chain": "eip155:1" }
     },
-    "peg_kind": "rebasing"
+    "peg_kind": "hard_peg"
   }
 }
