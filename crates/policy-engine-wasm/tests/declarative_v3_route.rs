@@ -4853,3 +4853,276 @@ fn t22_balancer_vault_swap_given_out_exact_output() {
         "{body}"
     );
 }
+
+// ===========================================================================
+// b4 — LayerZero ZRO airdrop / OFT cover
+// ===========================================================================
+//
+// Five user-facing entrypoints on the LayerZero ZRO airdrop ClaimContract
+// (Arbitrum hub) + the ZRO OFT token. Selectors `cast sig`-verified:
+//   claim            0xf9429637  → Airdrop(Claim)  MerkleDistributor
+//   donateAndClaim   0xac6ae3ee  → Airdrop(Claim)  MerkleDistributor
+//   donate           0xcd139742  → Unknown
+//   withdrawDonation 0x46d7ce37  → Unknown
+//   OFT send         0xc7c7f5b3  → Unknown (cross-chain bridge; no bridge domain)
+//
+// chain_to_addresses: claim/donate fns cover the Arbitrum hub
+// 0xd6b6a6701303B5Ea36fa0eDf7389b562d8F894DB (chain 42161) ONLY — per-satellite
+// ClaimRemote addresses are NOT 1차-verified (limited cover). OFT send covers the
+// ZRO ERC20 0x6985884c4392d348587b19cb9eaaf157f13271cd (same on 7 chains).
+//
+// claim is PAUSED at deploy (merkleRoot=0) and EIP-712 is ABSENT — neither
+// affects calldata decode (PAUSED is a verdict concern; no sig-routing here).
+
+const LZ_CLAIM_MANIFEST: &str =
+    include_str!("../../../registryV2/manifests/layerzero/claim-contract/claim@1.0.0.json");
+const LZ_DONATE_AND_CLAIM_MANIFEST: &str = include_str!(
+    "../../../registryV2/manifests/layerzero/claim-contract/donateAndClaim@1.0.0.json"
+);
+const LZ_DONATE_MANIFEST: &str =
+    include_str!("../../../registryV2/manifests/layerzero/claim-contract/donate@1.0.0.json");
+const LZ_WITHDRAW_DONATION_MANIFEST: &str = include_str!(
+    "../../../registryV2/manifests/layerzero/claim-contract/withdrawDonation@1.0.0.json"
+);
+const LZ_OFT_SEND_MANIFEST: &str =
+    include_str!("../../../registryV2/manifests/layerzero/oft/send@1.0.0.json");
+
+// Verified 1차 addresses (task body).
+const LZ_HUB: &str = "0xd6b6a6701303b5ea36fa0edf7389b562d8f894db"; // ClaimContract, Arbitrum
+const LZ_ZRO: &str = "0x6985884c4392d348587b19cb9eaaf157f13271cd"; // ZRO ERC20 / OFT
+const LZ_ARBITRUM: u64 = 42161;
+const LZ_SUBMITTER: &str = "0x000000000000000000000000000000000000aaaa";
+const LZ_RECIPIENT: &str = "0x00000000000000000000000000000000deadbeef";
+
+// Two Merkle proof siblings (bytes32) — fixed test vector.
+fn lz_proof_siblings() -> Vec<DynSolValue> {
+    vec![
+        DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0x11), 32),
+        DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0x22), 32),
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// b4.claim — claim(uint8,uint256,bytes32[],address,bytes) → Airdrop(Claim)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b4_layerzero_claim() {
+    let install = install_ok(LZ_CLAIM_MANIFEST);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "layerzero/claim-contract/claim@1.0.0"
+    );
+
+    // claim(currency=1 (ZRO), amount, proof=[0x11,0x22], to, extraOptions=0x)
+    let calldata = encode_calldata(
+        "0xf9429637",
+        &[
+            DynSolValue::Uint(AlloyU256::from(1u64), 8), // currency
+            DynSolValue::Uint(AlloyU256::from(5_000_000_000_000_000_000u128), 256), // amount
+            DynSolValue::Array(lz_proof_siblings()),
+            DynSolValue::Address(addr(LZ_RECIPIENT)),
+            DynSolValue::Bytes(vec![]),
+        ],
+    );
+    let input = route_input(LZ_ARBITRUM, LZ_HUB, "0xf9429637", calldata, LZ_SUBMITTER);
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"],
+        "layerzero/claim-contract/claim@1.0.0"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "airdrop", "{parsed}");
+    assert_eq!(body["action"], "claim", "{parsed}");
+    assert_eq!(body["source"]["name"], "layerzero", "{parsed}");
+    // MerkleDistributor claim_target: chain = $chain, contract = $to (hub).
+    assert_eq!(body["claim_target"]["kind"], "merkle_distributor", "{parsed}");
+    assert_eq!(body["claim_target"]["chain"], "eip155:42161", "{parsed}");
+    assert_eq!(body["claim_target"]["contract"], LZ_HUB, "{parsed}");
+    // recipient = $args.to.
+    assert_eq!(body["recipient"], LZ_RECIPIENT, "{parsed}");
+    // proof.siblings = $args.proof (2 bytes32 → 2 hex strings).
+    let siblings = body["proof"]["siblings"]
+        .as_array()
+        .expect("proof.siblings array");
+    assert_eq!(siblings.len(), 2, "{parsed}");
+    // leaf_index is a literal 0 (NOT in calldata — claim is proof-based, no index arg).
+    assert_eq!(body["proof"]["leaf_index"], 0, "{parsed}");
+    // live_inputs default value injected (PAUSED → catalog default false).
+    assert_eq!(
+        body["live_inputs"]["is_still_claimable"]["value"], false,
+        "{parsed}"
+    );
+    // U256 LiveField value round-trips as a hex string through alloy serde.
+    assert_eq!(
+        body["live_inputs"]["actual_amount"]["value"], "0x0",
+        "{parsed}"
+    );
+    // claim_token live source descriptor present (derived_from ZRO).
+    assert_eq!(
+        body["live_inputs"]["claim_token"]["source"]["kind"], "derived_from",
+        "{parsed}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// b4.donateAndClaim — donateAndClaim(...) → Airdrop(Claim) (claim side captured;
+// donation amountToDonate not surfaced)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b4_layerzero_donate_and_claim() {
+    let install = install_ok(LZ_DONATE_AND_CLAIM_MANIFEST);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "layerzero/claim-contract/donateAndClaim@1.0.0"
+    );
+
+    // donateAndClaim(currency, amountToDonate, zroAmount, proof, to, extraOptions)
+    let calldata = encode_calldata(
+        "0xac6ae3ee",
+        &[
+            DynSolValue::Uint(AlloyU256::from(0u64), 8), // currency = 0 (native fee)
+            DynSolValue::Uint(AlloyU256::from(1_000_000_000_000_000u128), 256), // amountToDonate
+            DynSolValue::Uint(AlloyU256::from(7_000_000_000_000_000_000u128), 256), // zroAmount
+            DynSolValue::Array(lz_proof_siblings()),
+            DynSolValue::Address(addr(LZ_RECIPIENT)),
+            DynSolValue::Bytes(vec![]),
+        ],
+    );
+    let input = route_input(LZ_ARBITRUM, LZ_HUB, "0xac6ae3ee", calldata, LZ_SUBMITTER);
+    let parsed = route_ok(input);
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "airdrop", "{parsed}");
+    assert_eq!(body["action"], "claim", "{parsed}");
+    assert_eq!(body["claim_target"]["kind"], "merkle_distributor", "{parsed}");
+    assert_eq!(body["claim_target"]["contract"], LZ_HUB, "{parsed}");
+    assert_eq!(body["recipient"], LZ_RECIPIENT, "{parsed}");
+    assert_eq!(
+        body["proof"]["siblings"].as_array().unwrap().len(),
+        2,
+        "{parsed}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// b4.donate — donate(uint8,uint256,address) → Unknown
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b4_layerzero_donate() {
+    let install = install_ok(LZ_DONATE_MANIFEST);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "layerzero/claim-contract/donate@1.0.0"
+    );
+
+    let calldata = encode_calldata(
+        "0xcd139742",
+        &[
+            DynSolValue::Uint(AlloyU256::from(0u64), 8), // currency
+            DynSolValue::Uint(AlloyU256::from(1_000_000_000_000_000u128), 256), // amount
+            DynSolValue::Address(addr(LZ_RECIPIENT)),
+        ],
+    );
+    // donate is payable — msg.value carries the donation.
+    let input = route_input_with_value(
+        LZ_ARBITRUM,
+        LZ_HUB,
+        "0xcd139742",
+        calldata,
+        LZ_SUBMITTER,
+        "1000000000000000",
+    );
+    let parsed = route_ok(input);
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "unknown", "{parsed}");
+    assert_eq!(body["target"], LZ_HUB, "{parsed}");
+    assert_eq!(body["chain"], "eip155:42161", "{parsed}");
+    // value = $tx.value (donate is payable). U256 → hex string; 1e15 wei = 0x38d7ea4c68000.
+    assert_eq!(body["value"], "0x38d7ea4c68000", "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// b4.withdrawDonation — withdrawDonation(uint8,uint256) → Unknown
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b4_layerzero_withdraw_donation() {
+    let install = install_ok(LZ_WITHDRAW_DONATION_MANIFEST);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "layerzero/claim-contract/withdrawDonation@1.0.0"
+    );
+
+    let calldata = encode_calldata(
+        "0x46d7ce37",
+        &[
+            DynSolValue::Uint(AlloyU256::from(1u64), 8), // currency
+            DynSolValue::Uint(AlloyU256::from(500_000_000_000_000u128), 256), // amount
+        ],
+    );
+    let input = route_input(LZ_ARBITRUM, LZ_HUB, "0x46d7ce37", calldata, LZ_SUBMITTER);
+    let parsed = route_ok(input);
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "unknown", "{parsed}");
+    assert_eq!(body["target"], LZ_HUB, "{parsed}");
+    // not payable → value literal "0" → U256 hex string "0x0".
+    assert_eq!(body["value"], "0x0", "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// b4.oftSend — send((SendParam),(MessagingFee),address) → Unknown
+// ---------------------------------------------------------------------------
+//
+// The route ALWAYS decodes calldata against abi_fragment.abi before building
+// the body — so the SendParam / MessagingFee tuple components must round-trip.
+// We encode a realistic bridge (dstEid=30101 Ethereum endpoint, amountLD, etc.)
+// and assert the Unknown body targets the ZRO OFT contract.
+
+#[test]
+fn b4_layerzero_oft_send() {
+    let install = install_ok(LZ_OFT_SEND_MANIFEST);
+    assert_eq!(install["data"]["bundle_id"], "layerzero/oft/send@1.0.0");
+
+    let send_param = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(30101u64), 32), // dstEid (LZ V2 Ethereum eid)
+        DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0xcd), 32), // to (bytes32)
+        DynSolValue::Uint(AlloyU256::from(3_000_000_000_000_000_000u128), 256), // amountLD
+        DynSolValue::Uint(AlloyU256::from(2_970_000_000_000_000_000u128), 256), // minAmountLD
+        DynSolValue::Bytes(vec![]),                       // extraOptions
+        DynSolValue::Bytes(vec![]),                       // composeMsg
+        DynSolValue::Bytes(vec![]),                       // oftCmd
+    ]);
+    let fee = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(1_000_000_000_000_000u128), 256), // nativeFee
+        DynSolValue::Uint(AlloyU256::from(0u64), 256),                      // lzTokenFee
+    ]);
+    let calldata = encode_calldata(
+        "0xc7c7f5b3",
+        &[send_param, fee, DynSolValue::Address(addr(LZ_SUBMITTER))],
+    );
+    // send is payable — msg.value covers nativeFee.
+    let input = route_input_with_value(
+        LZ_ARBITRUM,
+        LZ_ZRO,
+        "0xc7c7f5b3",
+        calldata,
+        LZ_SUBMITTER,
+        "1000000000000000",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(parsed["data"]["decoder_id"], "layerzero/oft/send@1.0.0");
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "unknown", "{parsed}");
+    // target = $to = the ZRO OFT contract.
+    assert_eq!(body["target"], LZ_ZRO, "{parsed}");
+    assert_eq!(body["chain"], "eip155:42161", "{parsed}");
+    // value = $tx.value (send is payable). 1e15 wei = 0x38d7ea4c68000.
+    assert_eq!(body["value"], "0x38d7ea4c68000", "{parsed}");
+}
