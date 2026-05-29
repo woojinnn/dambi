@@ -77,6 +77,20 @@ pub enum V3BuildError {
     /// `emit.array_source` points at the wrong field.
     #[error("array_emit array_source did not resolve to an array: {0}")]
     ArraySourceNotArray(String),
+    /// A discriminant value-map (`{ $match, $cases, $default? }`) resolved its
+    /// `$match` to a key that is absent from `$cases` and the map declares no
+    /// `$default`. Fail-loud — the manifest author missed an on-chain enum
+    /// value (e.g. an `InterestRateMode` the `$cases` table doesn't list).
+    #[error("value-map: no case for matched key '{matched}' and no $default")]
+    ValueMapNoMatch {
+        /// The lookup key the `$match` value resolved to.
+        matched: String,
+    },
+    /// A discriminant value-map is structurally invalid: `$cases` missing or
+    /// not a JSON object, or the `$match` value resolved to a type that has no
+    /// canonical key form (anything other than String / Number / Bool).
+    #[error("value-map malformed: {0}")]
+    ValueMapMalformed(String),
 }
 
 /// Fallback type for unresolved `$resolved.<k>` / `$derived.<k>` placeholders.
@@ -185,11 +199,34 @@ pub struct V3MapContext<'a> {
 /// Strings without a `$` prefix and all non-string values pass through
 /// unchanged. Containers are walked depth-first.
 ///
+/// ## Discriminant value-map (`$match` / `$cases` / `$default`)
+///
+/// A JSON **object** that carries the reserved key `"$match"` is NOT walked
+/// field-by-field; it is resolved as a *value-map* by [`resolve_value_map`].
+/// This maps a discriminant `uint` / `bool` arg onto an enum-variant value or a
+/// whole sub-action object (something a bare `$args.x` substitution cannot do,
+/// because it would inject the raw number):
+///
+/// ```jsonc
+/// { "$match": "<placeholder|literal>",
+///   "$cases": { "<key>": <value>, ... },
+///   "$default": <value>           // optional
+/// }
+/// ```
+///
+/// `$match`, `$cases`, and `$default` are RESERVED object keys — an object that
+/// happens to contain `$match` is always interpreted as a value-map. The
+/// matched-against value and the selected case value are both run back through
+/// `substitute_placeholders`, so cases may themselves embed placeholders or
+/// nested structures (field-level AND action-tag-level switches compose).
+///
 /// # Errors
 ///
 /// Returns [`V3BuildError::UnresolvedPlaceholder`] when a `$resolved.x` /
-/// `$derived.x` / `$inputs.*` lookup is empty, and
-/// [`V3BuildError::InvalidArgPath`] when a `$args.*` JSONPath walk fails.
+/// `$derived.x` / `$inputs.*` lookup is empty, [`V3BuildError::InvalidArgPath`]
+/// when a `$args.*` JSONPath walk fails, and
+/// [`V3BuildError::ValueMapNoMatch`] / [`V3BuildError::ValueMapMalformed`] for
+/// value-map resolution failures.
 pub fn substitute_placeholders(
     ctx: &V3MapContext<'_>,
     template: &JsonValue,
@@ -204,6 +241,11 @@ pub fn substitute_placeholders(
             Ok(JsonValue::Array(out))
         }
         JsonValue::Object(map) => {
+            // A `$match` key turns this object into a discriminant value-map
+            // (resolved instead of walked field-by-field).
+            if map.contains_key("$match") {
+                return resolve_value_map(ctx, map);
+            }
             let mut out = JsonMap::with_capacity(map.len());
             for (k, v) in map {
                 out.insert(k.clone(), substitute_placeholders(ctx, v)?);
@@ -212,6 +254,57 @@ pub fn substitute_placeholders(
         }
         // Strings without `$`, numbers, bools, nulls pass through.
         other => Ok(other.clone()),
+    }
+}
+
+/// Resolve a discriminant value-map object `{ $match, $cases, $default? }`.
+///
+/// 1. `$match` is run through [`substitute_placeholders`] (so it may itself be
+///    `$args.rateMode`, a literal, or any placeholder).
+/// 2. The resolved value is collapsed to a lookup-key string: JSON String →
+///    as-is; JSON Number → `to_string()` (integer `1` → `"1"`); JSON Bool →
+///    `"true"` / `"false"`. Any other type → [`V3BuildError::ValueMapMalformed`].
+/// 3. The key is looked up in `$cases` (which must be a JSON object). On a hit
+///    the case value is returned, recursively substituted. On a miss `$default`
+///    is used (also recursively substituted) if present, else
+///    [`V3BuildError::ValueMapNoMatch`].
+fn resolve_value_map(
+    ctx: &V3MapContext<'_>,
+    map: &JsonMap<String, JsonValue>,
+) -> Result<JsonValue, V3BuildError> {
+    // 1. Resolve the matched-against value.
+    let match_template = map
+        .get("$match")
+        .ok_or_else(|| V3BuildError::ValueMapMalformed("$match key missing".into()))?;
+    let matched = substitute_placeholders(ctx, match_template)?;
+
+    // 2. Collapse to a canonical lookup key. uint256 args arrive as decimal
+    //    strings (Fix B: width > 64 → string), smaller uints as numbers, bools
+    //    as bools — handle all three.
+    let key = match &matched {
+        JsonValue::String(s) => s.clone(),
+        JsonValue::Number(n) => n.to_string(),
+        JsonValue::Bool(b) => b.to_string(),
+        other => {
+            return Err(V3BuildError::ValueMapMalformed(format!(
+                "$match resolved to a non-keyable type: {other}"
+            )));
+        }
+    };
+
+    // 3. Look up the case (then $default) and recursively substitute.
+    let cases = map
+        .get("$cases")
+        .and_then(JsonValue::as_object)
+        .ok_or_else(|| {
+            V3BuildError::ValueMapMalformed("$cases missing or not a JSON object".into())
+        })?;
+    if let Some(case_value) = cases.get(&key) {
+        substitute_placeholders(ctx, case_value)
+    } else if let Some(default_value) = map.get("$default") {
+        substitute_placeholders(ctx, default_value)
+    } else {
+        Err(V3BuildError::ValueMapNoMatch { matched: key })
     }
 }
 
@@ -1639,5 +1732,85 @@ mod tests {
             V3BuildError::ArraySourceNotArray(s) => assert_eq!(s, "$args.transfers"),
             other => panic!("expected ArraySourceNotArray, got {other:?}"),
         }
+    }
+
+    // ── B.2-infra — discriminant value-map ($match / $cases / $default) ──────
+
+    // (a) Field-level value-map on a uint256 arg. uint256 args arrive as a
+    // decimal STRING (Fix B coercion: width > 64 → string), so the match key
+    // is `"2"` and the case lookup yields the RateMode serde value `"variable"`.
+    #[test]
+    fn value_map_field_number_string_match() {
+        let args = json!({ "rateMode": "2" });
+        let ctx = mk_ctx(&args);
+        let template = json!({
+            "$match": "$args.rateMode",
+            "$cases": { "1": "stable", "2": "variable" }
+        });
+        let out = substitute_placeholders(&ctx, &template).unwrap();
+        assert_eq!(out, json!("variable"));
+    }
+
+    // (b) Bool match selecting a whole object case (action-tag-level switch).
+    // `useAsCollateral` is a `bool` arg → JSON `true`, key `"true"`. The chosen
+    // case is an object that ITSELF contains a placeholder (`$args.asset`),
+    // proving the recursive substitution of the selected case value.
+    #[test]
+    fn value_map_bool_object_case_recursive() {
+        let args = json!({ "useAsCollateral": false, "asset": "0xabc" });
+        let ctx = mk_ctx(&args);
+        let template = json!({
+            "$match": "$args.useAsCollateral",
+            "$cases": {
+                "true":  { "action": "enable_collateral",  "tag_asset": "$args.asset" },
+                "false": { "action": "disable_collateral", "tag_asset": "$args.asset" }
+            }
+        });
+        let out = substitute_placeholders(&ctx, &template).unwrap();
+        assert_eq!(
+            out,
+            json!({ "action": "disable_collateral", "tag_asset": "0xabc" })
+        );
+    }
+
+    // (c) No matching case → fall back to `$default` (also recursively
+    // substituted).
+    #[test]
+    fn value_map_no_match_uses_default() {
+        let args = json!({ "rateMode": "0" });
+        let ctx = mk_ctx(&args);
+        let template = json!({
+            "$match": "$args.rateMode",
+            "$cases": { "1": "stable", "2": "variable" },
+            "$default": "fixed"
+        });
+        let out = substitute_placeholders(&ctx, &template).unwrap();
+        assert_eq!(out, json!("fixed"));
+    }
+
+    // (d) No matching case AND no `$default` → fail-loud ValueMapNoMatch.
+    #[test]
+    fn value_map_no_match_no_default_errors() {
+        let args = json!({ "rateMode": "0" });
+        let ctx = mk_ctx(&args);
+        let template = json!({
+            "$match": "$args.rateMode",
+            "$cases": { "1": "stable", "2": "variable" }
+        });
+        let err = substitute_placeholders(&ctx, &template).unwrap_err();
+        match err {
+            V3BuildError::ValueMapNoMatch { matched } => assert_eq!(matched, "0"),
+            other => panic!("expected ValueMapNoMatch, got {other:?}"),
+        }
+    }
+
+    // (e) Malformed value-map (`$cases` not an object) → ValueMapMalformed.
+    #[test]
+    fn value_map_malformed_cases_errors() {
+        let args = json!({ "rateMode": "1" });
+        let ctx = mk_ctx(&args);
+        let template = json!({ "$match": "$args.rateMode", "$cases": "not-an-object" });
+        let err = substitute_placeholders(&ctx, &template).unwrap_err();
+        assert!(matches!(err, V3BuildError::ValueMapMalformed(_)));
     }
 }

@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aave/v3/borrow@1.0.0",
   "manifest_path": "manifests/aave/v3/borrow@1.0.0.json",
-  "bundle_sha256": "0xd71c1d064f1c794c03a42c6173259d705d1543f959e2952efea6eb6c44083849",
+  "bundle_sha256": "0x60d17e4d6daef75dc8fa0e56a95fc551f869253ed3796ef1c2d4901e3bddba4d",
   "bundle": {
     "type": "adapter_action",
     "id": "aave/v3/borrow@1.0.0",
@@ -77,7 +77,13 @@
               }
             },
             "amount": "$args.amount",
-            "rate_mode": "$derived.aave_v3_rate_mode",
+            "rate_mode": {
+              "$match": "$args.interestRateMode",
+              "$cases": {
+                "1": "stable",
+                "2": "variable"
+              }
+            },
             "on_behalf_of": "$args.onBehalfOf"
           }
         }

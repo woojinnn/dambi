@@ -3,7 +3,7 @@
   "id": "aave/v3/repayWithPermit@1.0.0",
   "publisher": "aave.eth",
   "schema_version": "3",
-  "note": "Aave V3 Pool.repayWithPermit — repay + bundled EIP-2612 permit (the permit grants the Pool ERC20 allowance in the same call). emit.body is the SAME RepayAction shape as aave/v3/repay@1.0.0: asset/amount/onBehalfOf carry the lending intent. The interestRateMode arg is decoded by abi_fragment but, exactly as in repay@1.0.0, it is NOT bound into the RepayAction.rate_mode field via $args — the on-chain uint (1=stable/2=variable) does not deserialize into the RateMode enum (variable/stable/fixed), and repay@1.0.0 uses a $derived placeholder that has no registered fallback type. The route-green literal `variable` mirrors the swapBorrowRateMode manifest's `new_mode` and the dominant Aave V3 debt mode; a future enrichment can derive the actual mode from interestRateMode. The four trailing permit args (deadline/permitV/permitR/permitS) are bundled approval authorization, NOT part of the repay intent, so they are decoded but left UNREFERENCED in emit.body. The wallet's standalone EIP-2612 sign is handled by A.1's standard/erc20/permit route.",
+  "note": "Aave V3 Pool.repayWithPermit — repay + bundled EIP-2612 permit (the permit grants the Pool ERC20 allowance in the same call). emit.body is the SAME RepayAction shape as aave/v3/repay@1.0.0: asset/amount/onBehalfOf carry the lending intent. The interestRateMode arg (Aave DataTypes.InterestRateMode: 1=STABLE, 2=VARIABLE) is mapped onto RepayAction.rate_mode via a $match value-map (1->stable, 2->variable) — exactly as repay@1.0.0. This is the mode of the debt being repaid, so it maps directly (no complement). The four trailing permit args (deadline/permitV/permitR/permitS) are bundled approval authorization, NOT part of the repay intent, so they are decoded but left UNREFERENCED in emit.body. The wallet's standalone EIP-2612 sign is handled by A.1's standard/erc20/permit route.",
   "match": {
     "selector": "0xee3e210b",
     "chain_to_addresses": {
@@ -49,7 +49,7 @@
           },
           "asset":        { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
           "amount":       "$args.amount",
-          "rate_mode":    "variable",
+          "rate_mode":    { "$match": "$args.interestRateMode", "$cases": { "1": "stable", "2": "variable" } },
           "on_behalf_of": "$args.onBehalfOf",
           "use_a_tokens": false
         }

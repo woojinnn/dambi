@@ -43,7 +43,7 @@
           },
           "asset":        { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
           "amount":       "$args.amount",
-          "rate_mode":    "$derived.aave_v3_rate_mode",
+          "rate_mode":    { "$match": "$args.interestRateMode", "$cases": { "1": "stable", "2": "variable" } },
           "on_behalf_of": "$args.onBehalfOf"
         }
       }

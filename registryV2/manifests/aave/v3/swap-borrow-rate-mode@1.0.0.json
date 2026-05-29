@@ -3,6 +3,7 @@
   "id": "aave/v3/swapBorrowRateMode@1.0.0",
   "publisher": "aave.eth",
   "schema_version": "3",
+  "note": "Aave V3 Pool.swapBorrowRateMode(asset, interestRateMode). Per the Aave V3 IPool NatSpec the interestRateMode arg is 'The current interest rate mode of the position being swapped: 1 for Stable, 2 for Variable' — i.e. the mode being swapped FROM. BorrowLogic.executeSwapBorrowRateMode burns the named-mode debt and mints the OTHER mode, so SwapRateModeAction.new_mode (the mode AFTER the swap) is the COMPLEMENT of the arg: arg 1 (STABLE) -> new_mode variable; arg 2 (VARIABLE) -> new_mode stable.",
   "match": {
     "selector": "0x94ba89a2",
     "chain_to_addresses": {
@@ -39,7 +40,7 @@
             "market_id": null
           },
           "asset":    { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
-          "new_mode": "variable"
+          "new_mode": { "$match": "$args.interestRateMode", "$cases": { "1": "variable", "2": "stable" } }
         }
       }
     },

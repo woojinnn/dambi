@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "aave/v3/repay@1.0.0",
   "manifest_path": "manifests/aave/v3/repay@1.0.0.json",
-  "bundle_sha256": "0x04a1ff45473580c1652061a348888e964775675c3a6ebbbb07de93e2c74f0f02",
+  "bundle_sha256": "0x5475877947dc88b26bf96446d4b50583dd418b0ece30a5edcbf8c0b994b81974",
   "bundle": {
     "type": "adapter_action",
     "id": "aave/v3/repay@1.0.0",
@@ -78,7 +78,13 @@
               }
             },
             "amount": "$args.amount",
-            "rate_mode": "$derived.aave_v3_rate_mode",
+            "rate_mode": {
+              "$match": "$args.rateMode",
+              "$cases": {
+                "1": "stable",
+                "2": "variable"
+              }
+            },
             "on_behalf_of": "$args.onBehalfOf",
             "use_a_tokens": false
           }

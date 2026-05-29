@@ -1094,7 +1094,7 @@ const T9_AAVE_SWAP_RATE_MODE_V3: &str = r#"{
         "swap_rate_mode": {
           "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
           "asset":    { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
-          "new_mode": "variable"
+          "new_mode": { "$match": "$args.interestRateMode", "$cases": { "1": "variable", "2": "stable" } }
         }
       }
     },
@@ -1128,7 +1128,8 @@ fn t9_aave_swap_borrow_rate_mode() {
                     .parse::<AlloyAddress>()
                     .unwrap(),
             ),
-            // interestRateMode (current mode being swapped from)
+            // interestRateMode = 2 (VARIABLE) — the CURRENT mode being swapped
+            // FROM (Aave IPool NatSpec). new_mode is the COMPLEMENT → "stable".
             DynSolValue::Uint(AlloyU256::from(2u64), 256),
         ],
     );
@@ -1155,7 +1156,11 @@ fn t9_aave_swap_borrow_rate_mode() {
         body["asset"]["key"]["address"],
         "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
     );
-    assert_eq!(body["new_mode"], "variable");
+    // interestRateMode=2 (currently VARIABLE) → swaps TO stable. new_mode is
+    // the COMPLEMENT of the arg per the `$match` value-map { "1":"variable",
+    // "2":"stable" } (Aave IPool NatSpec: arg = "current rate mode of the
+    // position being swapped"; BorrowLogic burns that mode and mints the other).
+    assert_eq!(body["new_mode"], "stable");
     // live_input 2-tuple defaults wrapped + deserialized. `current_debts` is
     // `(U256, U256)` → alloy serialises each U256 as a hex string; `rates` is
     // `(Decimal, Decimal)` (transparent over String) → decimal "0".
@@ -1314,12 +1319,16 @@ fn t10_aave_supply() {
 // trailing permit params (deadline / permitV / permitR / permitS) are bundled
 // approval authorization, decoded by `abi_fragment` but UNREFERENCED in
 // `emit.body` — the lending intent is exactly the SupplyAction / RepayAction
-// shape of supply@1.0.0 / repay@1.0.0. `repayWithPermit` binds a literal
-// `rate_mode: "variable"` (mirroring swapBorrowRateMode's `new_mode`) because
-// the on-chain `interestRateMode` uint does not deserialize into the `RateMode`
-// enum and repay@1.0.0's `$derived.aave_v3_rate_mode` has no registered
-// fallback type. Both route FULLY GREEN (`ok:true`) on the B.2-infra
-// foundation (lending `live_input_default` skeletons + uint≤64 coercion).
+// shape of supply@1.0.0 / repay@1.0.0. `repayWithPermit` maps the on-chain
+// `interestRateMode` uint onto `RepayAction.rate_mode` via the B.2-infra
+// discriminant value-map `{ "$match": "$args.interestRateMode", "$cases":
+// { "1": "stable", "2": "variable" } }` — Aave `DataTypes.InterestRateMode`
+// (1=STABLE, 2=VARIABLE) → the `RateMode` serde value of the debt being repaid
+// (direct map, no complement; the swapBorrowRateMode `new_mode` IS a complement
+// — see t9). This replaces the earlier route-green literal `"variable"` that
+// mislabeled a stable-rate repay. Both route FULLY GREEN (`ok:true`) on the
+// B.2-infra foundation (lending `live_input_default` skeletons + uint≤64
+// coercion + the `$match` value-map placeholder).
 
 // ---------------------------------------------------------------------------
 // t11 — Aave V3 supplyWithPermit → LendingAction::Supply
@@ -1493,7 +1502,7 @@ const T12_AAVE_REPAY_WITH_PERMIT_V3: &str = r#"{
           "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
           "asset":        { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
           "amount":       "$args.amount",
-          "rate_mode":    "variable",
+          "rate_mode":    { "$match": "$args.interestRateMode", "$cases": { "1": "stable", "2": "variable" } },
           "on_behalf_of": "$args.onBehalfOf",
           "use_a_tokens": false
         }
@@ -1517,9 +1526,9 @@ fn t12_aave_repay_with_permit() {
 
     // 8 args: asset, amount, interestRateMode, onBehalfOf, deadline, permitV,
     // permitR, permitS. The body references asset/amount/onBehalfOf; the
-    // `interestRateMode` arg is decoded but the body binds a literal
-    // `rate_mode: "variable"` (the on-chain uint can't deserialize into the
-    // RateMode enum); the 4 permit params are decoded but ignored.
+    // `interestRateMode` arg (here 2 = VARIABLE) is mapped onto `rate_mode` via
+    // the `$match` value-map → `"variable"`; the 4 permit params are decoded
+    // but ignored.
     let calldata = encode_calldata(
         "0xee3e210b",
         &[
@@ -1531,7 +1540,7 @@ fn t12_aave_repay_with_permit() {
             ),
             // amount (load-bearing)
             DynSolValue::Uint(AlloyU256::from(750_000u64), 256),
-            // interestRateMode (2 = variable; decoded but not bound via $args)
+            // interestRateMode (2 = VARIABLE → value-map yields rate_mode "variable")
             DynSolValue::Uint(AlloyU256::from(2u64), 256),
             // onBehalfOf
             DynSolValue::Address(
@@ -1558,7 +1567,8 @@ fn t12_aave_repay_with_permit() {
     );
 
     // Bundled-permit repay routes fully green — same RepayAction body as
-    // repay@1.0.0 but with the route-green literal `rate_mode: "variable"`.
+    // repay@1.0.0, with `rate_mode` now derived from `interestRateMode` via the
+    // `$match` value-map (arg 2 = VARIABLE → "variable").
     let parsed = route_ok(input);
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "lending");
@@ -1575,6 +1585,7 @@ fn t12_aave_repay_with_permit() {
         body["on_behalf_of"],
         "0x000000000000000000000000000000000000cccc"
     );
+    // interestRateMode=2 → value-map → "variable".
     assert_eq!(body["rate_mode"], "variable");
     assert_eq!(body["use_a_tokens"], false);
     // live_input defaults wrapped + deserialized (same 3 as repay@1.0.0).
@@ -1583,4 +1594,290 @@ fn t12_aave_repay_with_permit() {
         "0x0"
     );
     assert_eq!(body["live_inputs"]["current_debt"]["value"], "0x0");
+}
+
+// ===========================================================================
+// B.2-infra — discriminant value-map ($match / $cases / $default) route tests
+// ===========================================================================
+//
+// These exercise the value-map placeholder END-TO-END through the WASM route
+// (calldata decode → uint256 arg → Fix-B decimal-string coercion → `$match`
+// key extraction → `$cases` lookup → typed ActionBody). They mirror the
+// committed fixtures under `registryV2/manifests/aave/v3/`:
+//   * t13 repay (0x573ade81)                  — field-level value-map on `rateMode`.
+//   * t14 swapBorrowRateMode (0x94ba89a2)       — field-level COMPLEMENT value-map.
+//   * t15 setUserUseReserveAsCollateral (0x5a3b74b9) — ACTION-TAG-level value-map
+//       on a `bool` arg selecting EnableCollateral vs DisableCollateral.
+// t15 is the load-bearing proof that an action-level value-map composes with
+// `strip_inline_live_inputs` + `flatten_body` + live-input injection.
+
+// ---------------------------------------------------------------------------
+// t13 — Aave V3 repay → LendingAction::Repay (rate_mode via $match value-map)
+// ---------------------------------------------------------------------------
+
+const T13_AAVE_REPAY_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "aave/v3/repay@1.0.0",
+  "publisher": "aave.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x573ade81",
+    "chain_to_addresses": { "1": ["0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"] }
+  },
+  "abi_fragment": {
+    "function_name": "repay",
+    "abi": {
+      "name": "repay",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "asset",      "type": "address" },
+        { "name": "amount",     "type": "uint256" },
+        { "name": "rateMode",   "type": "uint256" },
+        { "name": "onBehalfOf", "type": "address" }
+      ],
+      "outputs": [ { "name": "", "type": "uint256" } ]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "action": "repay",
+        "repay": {
+          "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
+          "asset":        { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
+          "amount":       "$args.amount",
+          "rate_mode":    { "$match": "$args.rateMode", "$cases": { "1": "stable", "2": "variable" } },
+          "on_behalf_of": "$args.onBehalfOf",
+          "use_a_tokens": false
+        }
+      }
+    },
+    "live_inputs": {
+      "reserve_state":     { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getReserveData(address)", "decoder_id": "aave_v3_reserve_data" }, "ttl_s": 30 },
+      "current_debt":      { "source": { "kind": "derived_from", "inputs": [], "calc_id": "aave_v3_current_debt" }, "ttl_s": 12 },
+      "user_state_before": { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getUserAccountData(address)", "decoder_id": "aave_v3_user_account_data" }, "ttl_s": 12 }
+    }
+  }
+}"#;
+
+/// Encode a `repay(asset, amount, rateMode, onBehalfOf)` calldata + route it,
+/// returning the resolved `body` JSON.
+fn route_repay_with_rate_mode(rate_mode_arg: u64) -> Value {
+    install_ok(T13_AAVE_REPAY_V3);
+    let calldata = encode_calldata(
+        "0x573ade81",
+        &[
+            DynSolValue::Address(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            // rateMode (uint256 → decimal string → $match key).
+            DynSolValue::Uint(AlloyU256::from(rate_mode_arg), 256),
+            DynSolValue::Address(
+                "0x000000000000000000000000000000000000cccc"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "0x573ade81",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t13_aave_repay_rate_mode_value_map() {
+    // rateMode = 1 (STABLE) → rate_mode "stable" (direct map: mode of the debt
+    // being repaid; no complement).
+    let body = route_repay_with_rate_mode(1);
+    assert_eq!(body["domain"], "lending");
+    assert_eq!(body["action"], "repay");
+    assert_eq!(body["rate_mode"], "stable");
+
+    // rateMode = 2 (VARIABLE) → rate_mode "variable".
+    let body = route_repay_with_rate_mode(2);
+    assert_eq!(body["action"], "repay");
+    assert_eq!(body["rate_mode"], "variable");
+}
+
+// ---------------------------------------------------------------------------
+// t14 — Aave V3 swapBorrowRateMode → SwapRateMode (new_mode COMPLEMENT value-map)
+// ---------------------------------------------------------------------------
+//
+// Reuses the t9 manifest const (now carrying the complement value-map). The
+// arg is "the current rate mode of the position being swapped" (Aave IPool
+// NatSpec); BorrowLogic.executeSwapBorrowRateMode burns that mode's debt and
+// mints the OTHER mode, so `new_mode` (post-swap) is the COMPLEMENT:
+//   arg 1 (STABLE)   → new_mode "variable"
+//   arg 2 (VARIABLE) → new_mode "stable"
+
+fn route_swap_rate_mode_with_arg(rate_mode_arg: u64) -> Value {
+    install_ok(T9_AAVE_SWAP_RATE_MODE_V3);
+    let calldata = encode_calldata(
+        "0x94ba89a2",
+        &[
+            DynSolValue::Address(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            DynSolValue::Uint(AlloyU256::from(rate_mode_arg), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "0x94ba89a2",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t14_aave_swap_borrow_rate_mode_complement_value_map() {
+    // arg 1 (currently STABLE) → swaps TO variable.
+    let body = route_swap_rate_mode_with_arg(1);
+    assert_eq!(body["action"], "swap_rate_mode");
+    assert_eq!(body["new_mode"], "variable");
+
+    // arg 2 (currently VARIABLE) → swaps TO stable.
+    let body = route_swap_rate_mode_with_arg(2);
+    assert_eq!(body["action"], "swap_rate_mode");
+    assert_eq!(body["new_mode"], "stable");
+}
+
+// ---------------------------------------------------------------------------
+// t15 — Aave V3 setUserUseReserveAsCollateral → Enable/DisableCollateral
+//       (ACTION-TAG-level value-map on a bool arg)
+// ---------------------------------------------------------------------------
+//
+// Inline-mirrors `registryV2/manifests/aave/v3/set-user-use-reserve-as-collateral@1.0.0.json`
+// (mainnet-only chain_to_addresses here). The `lending` sub-object is itself a
+// `$match` value-map keyed by the `useAsCollateral` bool — true selects the
+// `enable_collateral` action-tag object, false selects `disable_collateral`.
+// This proves the action-level value-map composes with strip_inline_live_inputs
+// (the value-map has no `action` key yet → strips nothing), flatten_body (sees
+// a normal nested body AFTER substitution), and the
+// `(lending, enable_collateral|disable_collateral, …)` live_input_default
+// skeletons.
+
+const T15_AAVE_SET_COLLATERAL_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "aave/v3/setUserUseReserveAsCollateral@1.0.0",
+  "publisher": "aave.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x5a3b74b9",
+    "chain_to_addresses": { "1": ["0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"] }
+  },
+  "abi_fragment": {
+    "function_name": "setUserUseReserveAsCollateral",
+    "abi": {
+      "name": "setUserUseReserveAsCollateral",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "asset",           "type": "address" },
+        { "name": "useAsCollateral", "type": "bool"    }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "$match": "$args.useAsCollateral",
+        "$cases": {
+          "true": {
+            "action": "enable_collateral",
+            "enable_collateral": {
+              "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
+              "asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } }
+            }
+          },
+          "false": {
+            "action": "disable_collateral",
+            "disable_collateral": {
+              "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
+              "asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } }
+            }
+          }
+        }
+      }
+    },
+    "live_inputs": {
+      "reserve_state":     { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getReserveData(address)", "decoder_id": "aave_v3_reserve_data" }, "ttl_s": 30 },
+      "user_state_before": { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getUserAccountData(address)", "decoder_id": "aave_v3_user_account_data" }, "ttl_s": 12 }
+    }
+  }
+}"#;
+
+fn route_set_collateral_with_flag(use_as_collateral: bool) -> Value {
+    install_ok(T15_AAVE_SET_COLLATERAL_V3);
+    let calldata = encode_calldata(
+        "0x5a3b74b9",
+        &[
+            DynSolValue::Address(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            DynSolValue::Bool(use_as_collateral),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "0x5a3b74b9",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t15_aave_set_user_use_reserve_as_collateral_action_value_map() {
+    // useAsCollateral = true → EnableCollateral (action tag "enable_collateral").
+    let body = route_set_collateral_with_flag(true);
+    assert_eq!(body["domain"], "lending");
+    assert_eq!(body["action"], "enable_collateral");
+    assert_eq!(body["venue"]["name"], "aave_v3");
+    assert_eq!(
+        body["asset"]["key"]["address"],
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    );
+    // live_inputs injected for the selected action tag (skeleton defaults).
+    assert_eq!(
+        body["live_inputs"]["reserve_state"]["value"]["total_supply"],
+        "0x0"
+    );
+    assert_eq!(
+        body["live_inputs"]["user_state_before"]["value"]["health_factor"],
+        "0"
+    );
+
+    // useAsCollateral = false → DisableCollateral (action tag "disable_collateral").
+    let body = route_set_collateral_with_flag(false);
+    assert_eq!(body["action"], "disable_collateral");
+    assert_eq!(body["venue"]["name"], "aave_v3");
+    assert_eq!(
+        body["asset"]["key"]["address"],
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    );
 }
