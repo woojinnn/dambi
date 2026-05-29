@@ -25,6 +25,7 @@ members = [
     "crates/simulation/reducer",
     "crates/simulation/db",
     "crates/simulation/sync",
+    "crates/simulation/server",
 ]
 
 [workspace.package]
