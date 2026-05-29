@@ -49,6 +49,17 @@ pub fn run_synthetic_single_emit(global_seed: u64, iters: u64) -> Result<report:
     Ok(report)
 }
 
+/// Run **all** strategy fuzzers (single_emit + opcode_stream + tagged_dispatch +
+/// typed_data) over the whole local surface with a fixed `global_seed`.
+pub fn run_synthetic_all(global_seed: u64, iters: u64) -> Result<report::Report> {
+    let surface = adapters::load_and_install()?;
+    let mut report = report::Report::default();
+    with_silenced_panics(|| {
+        fuzz::fuzz_all(&surface, global_seed, iters, &mut report);
+    });
+    Ok(report)
+}
+
 /// Run `f` with the panic hook silenced (so per-iteration `catch_unwind`
 /// recoveries don't spam stderr), restoring the previous hook afterwards.
 pub fn with_silenced_panics<R>(f: impl FnOnce() -> R) -> R {

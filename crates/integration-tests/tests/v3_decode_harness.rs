@@ -66,3 +66,19 @@ fn synthetic_fuzz_single_emit() {
         report.summary(),
     );
 }
+
+#[test]
+fn synthetic_fuzz_all_strategies() {
+    let report = harness::run_synthetic_all(GLOBAL_SEED, ITERS_PER_CALLKEY)
+        .expect("run synthetic all-strategy fuzz");
+
+    eprintln!("{}", report.summary());
+
+    assert_eq!(
+        report.hard_failures(),
+        0,
+        "synthetic all-strategy fuzz found {} hard failure(s):\n{}",
+        report.hard_failures(),
+        report.summary(),
+    );
+}

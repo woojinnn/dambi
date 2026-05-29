@@ -56,6 +56,94 @@ fn soltype(ty: &str, components: Option<&[AbiInput]>) -> Result<DynSolType> {
         .map_err(|e| anyhow!("parse soltype `{ty}`: {e}"))
 }
 
+/// Parse a Solidity signature fragment (a tuple or param-list, possibly with
+/// parameter names) into a `DynSolType::Tuple`.
+///
+/// Used for `inputs_abi` strings on opcode-stream / tagged-dispatch entries,
+/// e.g. `"(address recipient, uint256 amountIn, bytes path, bool payerIsUser)"`.
+/// `DynSolType::parse` rejects parameter names and bare param-lists, so names
+/// are stripped and components split paren/bracket-aware.
+pub fn parse_sig_to_soltype(sig: &str) -> Result<DynSolType> {
+    let s = sig.trim();
+    let inner = s
+        .strip_prefix('(')
+        .and_then(|x| x.strip_suffix(')'))
+        .unwrap_or(s);
+    let mut types = Vec::new();
+    for seg in split_top_level(inner) {
+        let seg = seg.trim();
+        if seg.is_empty() {
+            continue;
+        }
+        types.push(parse_one_param(seg)?);
+    }
+    Ok(DynSolType::Tuple(types))
+}
+
+fn split_top_level(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut cur = String::new();
+    for c in s.chars() {
+        match c {
+            '(' | '[' => {
+                depth += 1;
+                cur.push(c);
+            }
+            ')' | ']' => {
+                depth -= 1;
+                cur.push(c);
+            }
+            ',' if depth == 0 => out.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+fn parse_one_param(seg: &str) -> Result<DynSolType> {
+    let seg = seg.trim();
+    // Strip a trailing bare-identifier parameter name, if present.
+    let ty = match seg.rfind(' ') {
+        Some(idx) => {
+            let (head, tail) = seg.split_at(idx);
+            let tail = tail.trim();
+            if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                head.trim()
+            } else {
+                seg
+            }
+        }
+        None => seg,
+    };
+    soltype_str(ty)
+}
+
+fn soltype_str(ty: &str) -> Result<DynSolType> {
+    if let Some(base) = ty.strip_suffix("[]") {
+        return Ok(DynSolType::Array(Box::new(soltype_str(base)?)));
+    }
+    if ty.ends_with(']') {
+        if let Some(open) = ty.rfind('[') {
+            let n: usize = ty[open + 1..ty.len() - 1]
+                .parse()
+                .map_err(|_| anyhow!("bad array size in `{ty}`"))?;
+            return Ok(DynSolType::FixedArray(
+                Box::new(soltype_str(&ty[..open])?),
+                n,
+            ));
+        }
+    }
+    if ty.starts_with('(') {
+        return parse_sig_to_soltype(ty);
+    }
+    ty.parse::<DynSolType>()
+        .map_err(|e| anyhow!("parse soltype `{ty}`: {e}"))
+}
+
 /// Generate a `DynSolValue` for `ty`.
 pub fn gen_value(rng: &mut SplitMix64, ty: &DynSolType, edge: Edge) -> DynSolValue {
     match ty {
