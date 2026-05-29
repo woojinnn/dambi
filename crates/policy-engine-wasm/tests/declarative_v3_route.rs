@@ -2380,3 +2380,132 @@ fn t19_aave_repay_eth() {
     // live_input defaults wrapped + deserialized (same 3 as repay@1.0.0).
     assert_eq!(body["live_inputs"]["current_debt"]["value"], "0x0");
 }
+
+// ---------------------------------------------------------------------------
+// t20 — Aave V3 repayWithATokens → LendingAction::Repay (use_a_tokens = true)
+// ---------------------------------------------------------------------------
+//
+// Inline-mirrors `registryV2/manifests/aave/v3/repay-with-atokens@1.0.0.json`.
+// `repayWithATokens(asset, amount, interestRateMode)` repays debt directly from
+// the submitter's aToken balance (no underlying transfer) → maps to the SAME
+// `lending.repay` ActionBody as repay@1.0.0 EXCEPT:
+//   * `use_a_tokens` = true (the one distinguishing value vs t13's false).
+//   * NO `onBehalfOf` arg — you can only repay your OWN debt with your OWN
+//     aTokens, so `on_behalf_of` is OMITTED from the body (Option + skip-if-None
+//     defaults to the submitter). Asserted absent from the serialized JSON.
+//   * `rate_mode` value-map keys on `$args.interestRateMode` (same Aave
+//     InterestRateMode 1=STABLE / 2=VARIABLE map as t13's `rateMode`).
+// Selector `cast sig`-verified: 0x2dad97d4. Returns uint256 (final amount
+// repaid) per the canonical Aave V3 IPool — declared in `outputs`.
+
+const T20_AAVE_REPAY_WITH_ATOKENS_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "aave/v3/repayWithATokens@1.0.0",
+  "publisher": "aave.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x2dad97d4",
+    "chain_to_addresses": { "1": ["0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"] }
+  },
+  "abi_fragment": {
+    "function_name": "repayWithATokens",
+    "abi": {
+      "name": "repayWithATokens",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "asset",            "type": "address" },
+        { "name": "amount",           "type": "uint256" },
+        { "name": "interestRateMode", "type": "uint256" }
+      ],
+      "outputs": [ { "name": "", "type": "uint256" } ]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "action": "repay",
+        "repay": {
+          "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
+          "asset":        { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
+          "amount":       "$args.amount",
+          "rate_mode":    { "$match": "$args.interestRateMode", "$cases": { "1": "stable", "2": "variable" } },
+          "use_a_tokens": true
+        }
+      }
+    },
+    "live_inputs": {
+      "reserve_state":     { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getReserveData(address)", "decoder_id": "aave_v3_reserve_data" }, "ttl_s": 30 },
+      "current_debt":      { "source": { "kind": "derived_from", "inputs": [], "calc_id": "aave_v3_current_debt" }, "ttl_s": 12 },
+      "user_state_before": { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getUserAccountData(address)", "decoder_id": "aave_v3_user_account_data" }, "ttl_s": 12 }
+    }
+  }
+}"#;
+
+/// Encode a `repayWithATokens(asset, amount, interestRateMode)` calldata + route
+/// it, returning the resolved `body` JSON.
+fn route_repay_with_atokens(rate_mode_arg: u64) -> Value {
+    install_ok(T20_AAVE_REPAY_WITH_ATOKENS_V3);
+    let calldata = encode_calldata(
+        "0x2dad97d4",
+        &[
+            // asset (load-bearing) — USDC.
+            DynSolValue::Address(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            // amount (load-bearing).
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            // interestRateMode (uint256 → decimal string → $match key).
+            DynSolValue::Uint(AlloyU256::from(rate_mode_arg), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "0x2dad97d4",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t20_aave_repay_with_atokens() {
+    let install = install_ok(T20_AAVE_REPAY_WITH_ATOKENS_V3);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "aave/v3/repayWithATokens@1.0.0"
+    );
+
+    // interestRateMode = 2 (VARIABLE) → rate_mode "variable".
+    let body = route_repay_with_atokens(2);
+    assert_eq!(body["domain"], "lending");
+    assert_eq!(body["action"], "repay");
+    assert_eq!(body["venue"]["name"], "aave_v3");
+    // load-bearing $args field resolved from calldata.
+    assert_eq!(
+        body["asset"]["key"]["address"],
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    );
+    assert_eq!(body["amount"], "0xf4240"); // 1_000_000
+    assert_eq!(body["rate_mode"], "variable");
+    // The distinguishing value vs t13 repay@1.0.0 (false).
+    assert_eq!(body["use_a_tokens"], true, "{body}");
+    // No `onBehalfOf` arg → `on_behalf_of` OMITTED (Option + skip_serializing_if
+    // defaults to the submitter). Must be ABSENT from the serialized body.
+    assert!(
+        body.get("on_behalf_of").is_none(),
+        "on_behalf_of must be absent (no arg; defaults to submitter): {body}"
+    );
+
+    // interestRateMode = 1 (STABLE) → rate_mode "stable" (direct map).
+    let body = route_repay_with_atokens(1);
+    assert_eq!(body["action"], "repay");
+    assert_eq!(body["rate_mode"], "stable");
+    assert_eq!(body["use_a_tokens"], true, "{body}");
+}
