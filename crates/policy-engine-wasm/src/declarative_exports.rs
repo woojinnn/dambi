@@ -20,8 +20,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
 use mappers::declarative::action_builder::{
-    build_action_body, build_array_emit, build_multicall_from_opcode_stream,
-    substitute_placeholders, UnknownOpcodePolicy as V3UnknownOpcodePolicy, V3MapContext,
+    build_action_body, build_array_emit, substitute_placeholders,
+    UnknownOpcodePolicy as V3UnknownOpcodePolicy, V3MapContext,
 };
 use mappers::declarative::eval::args_to_json;
 use mappers::declarative::types::BundleMatch;
@@ -586,69 +586,37 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                         (commands_bytes, inputs_array)
                     };
 
-                // Per-opcode `inputs_abi` ABI-decode pass. The v3 manifest
-                // attaches the Solidity tuple signature next to each
-                // opcode's `body` template (e.g. UR V3_SWAP_EXACT_IN:
-                // `(address recipient, uint256 amountIn, uint256
-                // amountOutMin, bytes path, bool payerIsUser)`). Decoding
-                // here yields a JSON value the action_builder's
-                // `$inputs.<path>` placeholder walker can consume.
-                //
-                // M2 narrow scope: we go through abi-resolver's existing
-                // `decode_with_signature` helper rather than re-implementing
-                // the alloy `Function::parse` + `abi_decode_input` chain.
-                // The helper expects a 4-byte selector prefix — we prepend a
-                // synthetic zero selector (`0x00000000`) since the opcode
-                // dispatch already established the function shape via the
-                // manifest. Best-effort: missing `inputs_abi`, parse
-                // failure, or decode failure all degrade to `Value::Null`,
-                // which the action_builder's `$inputs.<x>` walker surfaces
-                // as a clear `UnresolvedPlaceholder` error rather than a
-                // silent bogus default — that is the M5 manual-e2e
-                // contract.
-                let mut decoded_inputs_array = Vec::with_capacity(inputs_array.len());
-                for (i, input_hex) in inputs_array.iter().enumerate() {
-                    let input_hex_str = input_hex.as_str().ok_or_else(|| {
-                        EngineErrorDto::new("invalid_inputs", format!("inputs[{i}] not string"))
-                    })?;
-                    let input_bytes =
-                        hex::decode(input_hex_str.strip_prefix("0x").unwrap_or(input_hex_str))
-                            .map_err(|error| {
-                                EngineErrorDto::new(
-                                    "invalid_inputs_hex",
-                                    format!("inputs[{i}]: {error}"),
-                                )
-                            })?;
+                // Per-opcode `inputs_abi` ABI-decode pass (factored into
+                // [`decode_stream_inputs`] so the recursive
+                // [`dispatch_opcode_stream`] inner pass reuses the exact same
+                // decode logic — see B.1.c.2). The v3 manifest attaches the
+                // Solidity tuple signature next to each opcode's `body` /
+                // `nested` template; decoding here yields a JSON value the
+                // action_builder's `$inputs.<path>` placeholder walker can
+                // consume. Best-effort: missing `inputs_abi`, parse failure,
+                // or decode failure all degrade to `Value::Null`, which the
+                // action_builder's `$inputs.<x>` walker surfaces as a clear
+                // `UnresolvedPlaceholder` error rather than a silent bogus
+                // default — that is the M5 manual-e2e contract.
+                let decoded_inputs_array =
+                    decode_stream_inputs(per_opcode_body, &commands_bytes, inputs_array, mask)?;
 
-                    let opcode_byte = *commands_bytes.get(i).ok_or_else(|| {
-                        EngineErrorDto::new(
-                            "invalid_commands",
-                            format!("commands shorter than inputs at {i}"),
-                        )
-                    })?;
-                    let opcode_id = opcode_byte & mask;
-                    let opcode_key = format!("0x{opcode_id:02x}");
+                // B.1.c.2 — recursive opcode-stream dispatch. The helper loops
+                // the masked command bytes and, per opcode, EITHER builds a
+                // leaf `body` (flat — byte-identical to the prior
+                // `build_multicall_from_opcode_stream` path) OR, when the entry
+                // carries `nested`, abi-decodes that opcode's inner action
+                // stream and RECURSES one level deeper (UR `V4_SWAP` 0x10 =
+                // `(bytes actions, bytes[] params)`; UR `EXECUTE_SUB_PLAN`
+                // 0x21 = `(bytes commands, bytes[] inputs)`), producing a child
+                // `ActionBody::Multicall`. `depth`/`max_depth` (default 3) is a
+                // fail-loud infinite-recursion backstop.
+                let max_depth = emit
+                    .get("max_depth")
+                    .and_then(serde_json::Value::as_u64)
+                    .map_or(3u32, |v| u32::try_from(v).unwrap_or(u32::MAX));
 
-                    let mut decoded_input = per_opcode_body
-                        .get(&opcode_key)
-                        .and_then(|entry| entry.get("inputs_abi"))
-                        .and_then(serde_json::Value::as_str)
-                        .and_then(|sig| decode_inputs_abi_tuple(sig, &input_bytes).ok())
-                        .unwrap_or(serde_json::Value::Null);
-                    // B.1.c — Uniswap V4 MINT_POSITION carries an INLINE PoolKey
-                    // (head-flattened currency0/currency1/fee/tickSpacing/hooks).
-                    // The manifest references `$inputs.pool_id`, but the manifest
-                    // can't hash, so compute pool_id = keccak256(abi.encode(
-                    // poolKey)) in Rust and splice it into the decoded inputs
-                    // object as a synthetic field. Gated on the 5 PoolKey field
-                    // names being present (only MINT in modifyLiquidities carries
-                    // an inline PoolKey — INCREASE/DECREASE/BURN carry only
-                    // tokenId), so this is manifest-agnostic + a no-op otherwise.
-                    maybe_inject_v4_pool_id(&mut decoded_input);
-                    decoded_inputs_array.push(decoded_input);
-                }
-
-                build_multicall_from_opcode_stream(
+                dispatch_opcode_stream(
                     &ctx,
                     per_opcode_body,
                     &commands_bytes,
@@ -656,8 +624,9 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                     mask,
                     allow_revert_bit,
                     unknown_policy,
-                )
-                .map_err(|error| EngineErrorDto::new("build_multicall_failed", error.to_string()))?
+                    0,
+                    max_depth,
+                )?
             }
             // Phase A.2 — homogeneous-array fan-out. `emit.array_source` is a
             // `$args.<path>` placeholder resolving to a JSON array; each
@@ -1027,6 +996,311 @@ fn parse_v3_u256(raw: &str, field: &str) -> Result<V3U256, EngineErrorDto> {
     })
 }
 
+/// B.1.c.2 — per-opcode `inputs_abi` ABI-decode pass for one opcode-stream
+/// level.
+///
+/// For each `inputs_array[i]` (a `bytes` hex string), look up the opcode (from
+/// `commands_bytes[i] & mask`) in `per_opcode_body`, decode the raw bytes
+/// against that entry's `inputs_abi` tuple signature via
+/// [`decode_inputs_abi_tuple`], and splice a synthetic V4 `pool_id` when an
+/// inline `PoolKey` is present ([`maybe_inject_v4_pool_id`]). Missing /
+/// unparseable / undecodable `inputs_abi` degrades to `Value::Null` (the
+/// action_builder then surfaces a precise `UnresolvedPlaceholder`).
+///
+/// This is the SAME decode that the outer `opcode_stream_dispatch` arm and the
+/// recursive [`dispatch_opcode_stream`] inner pass both run — factored out so
+/// the flat path stays byte-identical (DD5) and the inner pass is guaranteed
+/// to decode inner params identically (DD3).
+fn decode_stream_inputs(
+    per_opcode_body: &serde_json::Map<String, serde_json::Value>,
+    commands_bytes: &[u8],
+    inputs_array: &[serde_json::Value],
+    mask: u8,
+) -> Result<Vec<serde_json::Value>, EngineErrorDto> {
+    let mut decoded_inputs_array = Vec::with_capacity(inputs_array.len());
+    for (i, input_hex) in inputs_array.iter().enumerate() {
+        let input_hex_str = input_hex.as_str().ok_or_else(|| {
+            EngineErrorDto::new("invalid_inputs", format!("inputs[{i}] not string"))
+        })?;
+        let input_bytes = hex::decode(input_hex_str.strip_prefix("0x").unwrap_or(input_hex_str))
+            .map_err(|error| {
+                EngineErrorDto::new("invalid_inputs_hex", format!("inputs[{i}]: {error}"))
+            })?;
+
+        let opcode_byte = *commands_bytes.get(i).ok_or_else(|| {
+            EngineErrorDto::new(
+                "invalid_commands",
+                format!("commands shorter than inputs at {i}"),
+            )
+        })?;
+        let opcode_id = opcode_byte & mask;
+        let opcode_key = format!("0x{opcode_id:02x}");
+
+        let mut decoded_input = per_opcode_body
+            .get(&opcode_key)
+            .and_then(|entry| entry.get("inputs_abi"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|sig| decode_inputs_abi_tuple(sig, &input_bytes).ok())
+            .unwrap_or(serde_json::Value::Null);
+        // B.1.c — Uniswap V4 MINT_POSITION carries an INLINE PoolKey
+        // (head-flattened currency0/currency1/fee/tickSpacing/hooks). The
+        // manifest references `$inputs.pool_id`, but the manifest can't hash,
+        // so compute pool_id = keccak256(abi.encode(poolKey)) in Rust and
+        // splice it in. Gated on the 5 PoolKey field names being present, so
+        // this is a no-op for non-MINT inputs.
+        maybe_inject_v4_pool_id(&mut decoded_input);
+        decoded_inputs_array.push(decoded_input);
+    }
+    Ok(decoded_inputs_array)
+}
+
+/// B.1.c.2 — recursive opcode-stream → `ActionBody::Multicall` dispatch.
+///
+/// Loops the masked `commands_bytes` and, per opcode, dispatches the matching
+/// `per_opcode_body["0x<hh>"]` entry by its shape:
+///
+///   * `body` (no `nested`) → leaf build via the mappers
+///     [`build_action_body`] with a child [`V3MapContext`] whose `inputs` is
+///     `decoded_inputs[i]`. This is BYTE-IDENTICAL to the prior
+///     `build_multicall_from_opcode_stream` path (same child-ctx clone, same
+///     `build_action_body(_, body, None)` call) — DD5.
+///   * `nested` → this opcode's input is ITSELF an opcode stream. Read the
+///     inner action bytes + inner param array from `decoded_inputs[i]` (keyed
+///     by `inner_actions_source` / `inner_params_source`, default
+///     `$inputs.actions` / `$inputs.params`), abi-decode each inner param via
+///     [`decode_stream_inputs`] against the inner `per_opcode_body`, then
+///     RECURSE one level deeper (`depth + 1`). The child is an
+///     `ActionBody::Multicall` (nesting is natural — `Multicall { actions }`
+///     accepts a child `Multicall`).
+///
+/// `unknown_opcode_policy` (Deny / Warn / Skip) and the `allow_revert_bit`
+/// audit-only mask mirror [`build_multicall_from_opcode_stream`].
+///
+/// # Errors
+///
+/// * `max_depth_exceeded` — `depth > max_depth` (fail-loud infinite-recursion
+///   backstop, DD4).
+/// * `build_multicall_failed` — an inner [`build_action_body`] failed, or an
+///   unknown opcode hit under [`V3UnknownOpcodePolicy::Deny`] (kind preserved
+///   from the prior wrapping so existing route-test error assertions hold).
+/// * `invalid_*` — malformed inner action/param bytes.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_opcode_stream(
+    ctx: &V3MapContext<'_>,
+    per_opcode_body: &serde_json::Map<String, serde_json::Value>,
+    commands_bytes: &[u8],
+    decoded_inputs: &[serde_json::Value],
+    mask: u8,
+    allow_revert_bit: u8,
+    unknown_policy: V3UnknownOpcodePolicy,
+    depth: u32,
+    max_depth: u32,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    if depth > max_depth {
+        return Err(EngineErrorDto::new(
+            "max_depth_exceeded",
+            format!("opcode_stream recursion exceeded max_depth={max_depth} at depth={depth}"),
+        ));
+    }
+
+    let mut actions = Vec::with_capacity(commands_bytes.len());
+
+    for (i, raw_byte) in commands_bytes.iter().enumerate() {
+        let opcode = raw_byte & mask;
+        let _allow_revert = (raw_byte & allow_revert_bit) != 0; // audit-only.
+
+        let opcode_key = format!("0x{opcode:02x}");
+        let Some(opcode_entry) = per_opcode_body.get(&opcode_key) else {
+            match unknown_policy {
+                V3UnknownOpcodePolicy::Deny => {
+                    return Err(EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!("unknown opcode 0x{opcode:02x} (policy: deny)"),
+                    ));
+                }
+                V3UnknownOpcodePolicy::Warn => {
+                    eprintln!(
+                        "[declarative_exports] warn: unknown opcode 0x{opcode:02x} at index {i}"
+                    );
+                    continue;
+                }
+                V3UnknownOpcodePolicy::Skip => continue,
+            }
+        };
+
+        let inputs_for_this = decoded_inputs.get(i);
+
+        if let Some(nested) = opcode_entry.get("nested") {
+            // ── Nested opcode stream: recurse one level deeper. ────────────
+            let child = build_nested_multicall(
+                ctx,
+                nested,
+                inputs_for_this,
+                depth,
+                max_depth,
+                &opcode_key,
+            )?;
+            actions.push(child);
+            continue;
+        }
+
+        // ── Flat leaf: byte-identical to build_multicall_from_opcode_stream.
+        let body_template = opcode_entry.get("body").ok_or_else(|| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("{opcode_key}.body missing"),
+            )
+        })?;
+        let child_ctx = V3MapContext {
+            chain: ctx.chain.clone(),
+            tx_to: ctx.tx_to,
+            tx_from: ctx.tx_from,
+            value: ctx.value,
+            submitted_at: ctx.submitted_at,
+            args_json: ctx.args_json,
+            resolved: ctx.resolved.clone(),
+            derived: ctx.derived.clone(),
+            inputs: inputs_for_this,
+        };
+        let child_action = build_action_body(&child_ctx, body_template, None)
+            .map_err(|error| EngineErrorDto::new("build_multicall_failed", error.to_string()))?;
+        actions.push(child_action);
+    }
+
+    Ok(v3_action::ActionBody::Multicall { actions })
+}
+
+/// B.1.c.2 — expand ONE `nested` opcode entry into a child
+/// `ActionBody::Multicall` by decoding its inner action stream and recursing
+/// [`dispatch_opcode_stream`] at `depth + 1`.
+///
+/// `nested` shape (all but `per_opcode_body` optional):
+/// ```jsonc
+/// { "inner_actions_source": "$inputs.actions",   // default
+///   "inner_params_source":  "$inputs.params",    // default
+///   "mask": "0xff", "allow_revert_bit": "0x00",
+///   "unknown_opcode_policy": "warn",
+///   "per_opcode_body": { "0x06": { ... }, ... } }
+/// ```
+///
+/// The inner action bytes + param array are read from the ALREADY-abi-decoded
+/// `parent_input` (this opcode's `inputs_abi` produced e.g. `{actions, params}`
+/// for `V4_SWAP` or `{commands, inputs}` for `EXECUTE_SUB_PLAN`). The source
+/// placeholders name which decoded field is the action blob vs the param array
+/// (`$inputs.<field>` → `<field>`).
+fn build_nested_multicall(
+    ctx: &V3MapContext<'_>,
+    nested: &serde_json::Value,
+    parent_input: Option<&serde_json::Value>,
+    depth: u32,
+    max_depth: u32,
+    opcode_key: &str,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    let inner_per_opcode = nested
+        .get("per_opcode_body")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| {
+            EngineErrorDto::new(
+                "invalid_bundle",
+                format!("{opcode_key}.nested missing per_opcode_body"),
+            )
+        })?;
+    let inner_mask = parse_hex_u8(
+        nested
+            .get("mask")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("0xff"),
+        "nested.mask",
+    )?;
+    let inner_allow_revert_bit = parse_hex_u8(
+        nested
+            .get("allow_revert_bit")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("0x00"),
+        "nested.allow_revert_bit",
+    )?;
+    let inner_unknown_policy = match nested
+        .get("unknown_opcode_policy")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("warn")
+    {
+        "deny" => V3UnknownOpcodePolicy::Deny,
+        "skip" => V3UnknownOpcodePolicy::Skip,
+        _ => V3UnknownOpcodePolicy::Warn,
+    };
+
+    // `$inputs.<field>` → `<field>`; the inner action blob + param array are
+    // looked up by that field name in the already-decoded parent input.
+    let actions_field = nested
+        .get("inner_actions_source")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("$inputs.actions")
+        .strip_prefix("$inputs.")
+        .unwrap_or("actions");
+    let params_field = nested
+        .get("inner_params_source")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("$inputs.params")
+        .strip_prefix("$inputs.")
+        .unwrap_or("params");
+
+    let parent_obj = parent_input
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| {
+            EngineErrorDto::new(
+                "invalid_nested_input",
+                format!("{opcode_key}.nested: parent input did not abi-decode to an object"),
+            )
+        })?;
+    let actions_hex = parent_obj
+        .get(actions_field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            EngineErrorDto::new(
+                "invalid_nested_input",
+                format!("{opcode_key}.nested: missing inner action bytes `{actions_field}`"),
+            )
+        })?;
+    let inner_commands_bytes = hex::decode(actions_hex.strip_prefix("0x").unwrap_or(actions_hex))
+        .map_err(|error| {
+        EngineErrorDto::new(
+            "invalid_nested_input",
+            format!("{opcode_key}.nested: inner actions not hex: {error}"),
+        )
+    })?;
+    let inner_params = parent_obj
+        .get(params_field)
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            EngineErrorDto::new(
+                "invalid_nested_input",
+                format!("{opcode_key}.nested: missing inner param array `{params_field}`"),
+            )
+        })?;
+
+    // Decode each inner param against the inner action's `inputs_abi` — the
+    // SAME pass the outer level ran (DD3: inner params are abi-decoded, never
+    // handed to build_action_body as raw hex).
+    let inner_decoded = decode_stream_inputs(
+        inner_per_opcode,
+        &inner_commands_bytes,
+        inner_params,
+        inner_mask,
+    )?;
+
+    dispatch_opcode_stream(
+        ctx,
+        inner_per_opcode,
+        &inner_commands_bytes,
+        &inner_decoded,
+        inner_mask,
+        inner_allow_revert_bit,
+        inner_unknown_policy,
+        depth + 1,
+        max_depth,
+    )
+}
+
 /// Parse a `"0x" + 1-2 hex` literal into a `u8`. Used for `emit.mask` and
 /// `emit.allow_revert_bit` in v3 `opcode_stream_dispatch` manifests.
 fn parse_hex_u8(raw: &str, field: &str) -> Result<u8, EngineErrorDto> {
@@ -1167,17 +1441,26 @@ fn decode_v4_unlock_data(
     Ok((actions_bytes, params))
 }
 
-/// B.1.c — if a decoded V4 action's inputs object carries an INLINE `PoolKey`
-/// (the head-flattened `currency0`/`currency1`/`fee`/`tickSpacing`/`hooks`
-/// fields of `MINT_POSITION`), compute `pool_id = keccak256(abi.encode(
-/// poolKey))` and splice it in as a synthetic `pool_id` field.
+/// B.1.c / B.1.c.2 — if a decoded V4 action's inputs object carries an inline
+/// `PoolKey`, compute `pool_id = keccak256(abi.encode(poolKey))` and splice it
+/// in as a synthetic top-level `pool_id` field.
+///
+/// Two carry shapes are recognised:
+///   * HEAD-FLATTENED (`MINT_POSITION` 0x02 inside `modifyLiquidities`): the
+///     `currency0`/`currency1`/`fee`/`tickSpacing`/`hooks` fields sit at the
+///     TOP level of the decoded inputs object.
+///   * NESTED (`SWAP_EXACT_IN_SINGLE` 0x06 / `SWAP_EXACT_OUT_SINGLE` 0x08
+///     inside a UR `V4_SWAP`): the struct's first member is a `PoolKey poolKey`
+///     sub-tuple, so the 5 fields live under a nested `poolKey` object.
+/// The top-level shape is tried first (byte-identical to the prior
+/// MINT-only behaviour); the nested `poolKey` shape is the B.1.c.2 addition.
 ///
 /// `PoolId.toId` is `keccak256(poolKey, 0xa0)` over the 5 contiguous 32-byte
 /// slots — identical to `keccak256(abi.encode(poolKey))` since `PoolKey` has no
-/// dynamic members (`cast`-verified 0xa0 length). Only `MINT_POSITION` (0x02)
-/// carries an inline PoolKey inside `modifyLiquidities`; INCREASE/DECREASE/BURN
-/// carry only `tokenId`, so the field-presence gate makes this a no-op for
-/// them (their `pool_id` stays the manifest's `"unknown"` sentinel).
+/// dynamic members (`cast`-verified 0xa0 length). Actions carrying NO PoolKey
+/// (INCREASE/DECREASE/BURN, SETTLE/TAKE, multi-hop SWAP_EXACT_IN) hit neither
+/// gate and stay a no-op (their `pool_id` keeps the manifest's `"unknown"`
+/// sentinel).
 ///
 /// The canonical 0xa0 encoding is built by hand (address left-pad, `uint24`
 /// big-endian, `int24` two's-complement big-endian) so this crate keeps
@@ -1187,18 +1470,36 @@ fn maybe_inject_v4_pool_id(decoded: &mut serde_json::Value) {
     let Some(obj) = decoded.as_object() else {
         return;
     };
-    // Gate: all 5 PoolKey fields present ⇒ this is a MINT inline PoolKey.
-    let (Some(c0), Some(c1), Some(fee), Some(spacing), Some(hooks)) = (
-        obj.get("currency0").and_then(serde_json::Value::as_str),
-        obj.get("currency1").and_then(serde_json::Value::as_str),
-        obj.get("fee"),
-        obj.get("tickSpacing"),
-        obj.get("hooks").and_then(serde_json::Value::as_str),
-    ) else {
-        return;
-    };
 
-    let Some(pool_id) = compute_v4_pool_id(c0, c1, fee, spacing, hooks) else {
+    // Extract the 5 PoolKey fields from a NAMED object (head-flattened MINT).
+    fn pool_id_from_obj(src: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+        let c0 = src.get("currency0").and_then(serde_json::Value::as_str)?;
+        let c1 = src.get("currency1").and_then(serde_json::Value::as_str)?;
+        let fee = src.get("fee")?;
+        let spacing = src.get("tickSpacing")?;
+        let hooks = src.get("hooks").and_then(serde_json::Value::as_str)?;
+        compute_v4_pool_id(c0, c1, fee, spacing, hooks)
+    }
+    // Extract from a POSITIONAL array (a nested `poolKey` tuple — alloy renders
+    // nested tuples as positional JSON arrays `[c0, c1, fee, tickSpacing,
+    // hooks]`, NOT named objects).
+    fn pool_id_from_arr(arr: &[serde_json::Value]) -> Option<String> {
+        let c0 = arr.first()?.as_str()?;
+        let c1 = arr.get(1)?.as_str()?;
+        let fee = arr.get(2)?;
+        let spacing = arr.get(3)?;
+        let hooks = arr.get(4)?.as_str()?;
+        compute_v4_pool_id(c0, c1, fee, spacing, hooks)
+    }
+
+    // Top-level (MINT head-flatten) first, then nested `poolKey` (V4_SWAP
+    // SWAP_EXACT_*_SINGLE), which is a positional array.
+    let pool_id = pool_id_from_obj(obj).or_else(|| {
+        obj.get("poolKey")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|arr| pool_id_from_arr(arr))
+    });
+    let Some(pool_id) = pool_id else {
         return;
     };
     if let Some(obj_mut) = decoded.as_object_mut() {

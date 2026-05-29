@@ -4171,3 +4171,376 @@ fn t2_uniswapx_cancel_invalidate_unordered_nonces() {
     // signature omitted (None) → absent from the body.
     assert!(body.get("signature").is_none(), "{parsed}");
 }
+
+// ---------------------------------------------------------------------------
+// t21 — B.1.c.2 recursive opcode_stream_dispatch: UR execute(V4_SWAP) fully
+// expands the inner V4 action stream into a NESTED Multicall with real values.
+// ---------------------------------------------------------------------------
+//
+// Universal Router `execute(bytes commands, bytes[] inputs, uint256 deadline)`
+// where commands = [0x10 V4_SWAP] and the V4_SWAP input is itself
+// `abi.encode(bytes actions, bytes[] params)` carrying
+// [0x06 SWAP_EXACT_IN_SINGLE, 0x0c SETTLE_ALL, 0x0f TAKE_ALL]. The outer body
+// must be a Multicall whose single child (the V4_SWAP) is ITSELF a Multicall of
+// the 3 inner legs, each carrying the REAL decoded token/amount (not the old
+// zero placeholder). Action ids + struct shapes are 1차-sourced from
+// Uniswap v4-periphery Actions.sol / IV4Router.sol @ commit 2827167f8b.
+
+const T21_UR_V4_SWAP_NESTED: &str = r#"{
+  "type": "adapter_action",
+  "id": "uniswap/universal-router/execute-v4nested@1.0.0",
+  "publisher": "uniswap.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x3593564c",
+    "chain_to_addresses": { "1": ["0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af"] }
+  },
+  "abi_fragment": {
+    "function_name": "execute",
+    "abi": {
+      "name": "execute",
+      "type": "function",
+      "inputs": [
+        { "name": "commands", "type": "bytes" },
+        { "name": "inputs", "type": "bytes[]" },
+        { "name": "deadline", "type": "uint256" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "opcode_stream_dispatch",
+    "mask": "0x7f",
+    "allow_revert_bit": "0x80",
+    "unknown_opcode_policy": "warn",
+    "max_depth": 3,
+    "per_opcode_body": {
+      "0x10": {
+        "name": "V4_SWAP",
+        "inputs_abi": "(bytes actions, bytes[] params)",
+        "nested": {
+          "inner_actions_source": "$inputs.actions",
+          "inner_params_source": "$inputs.params",
+          "mask": "0xff",
+          "unknown_opcode_policy": "warn",
+          "per_opcode_body": {
+            "0x06": {
+              "name": "SWAP_EXACT_IN_SINGLE",
+              "inputs_abi": "((address,address,uint24,int24,address) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, bytes hookData)",
+              "body": {
+                "domain": "amm",
+                "amm": { "action": "swap", "swap": {
+                  "venue": { "name": "uniswap_v4", "chain": "$chain", "pool_id": "$inputs.pool_id", "pool_manager": "$resolved.pool_manager", "hooks": "$inputs.poolKey[4]" },
+                  "params": {
+                    "token_in":  { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.poolKey[0]" } },
+                    "token_out": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.poolKey[1]" } },
+                    "direction": { "kind": "exact_input", "amount_in": "$inputs.amountIn", "min_amount_out": "$inputs.amountOutMinimum" },
+                    "recipient": "$tx.from",
+                    "slippage_bp": 50
+                  },
+                  "live_inputs": {
+                    "route": { "source": { "kind": "user_supplied" } },
+                    "expected_amount_out": { "source": { "kind": "user_supplied" } },
+                    "price_impact_bp": { "source": { "kind": "user_supplied" } },
+                    "gas_estimate": { "source": { "kind": "user_supplied" } }
+                  }
+                } }
+              }
+            },
+            "0x0c": {
+              "name": "SETTLE_ALL",
+              "inputs_abi": "(address currency, uint256 maxAmount)",
+              "body": {
+                "domain": "token",
+                "token": { "action": "erc20_transfer", "erc20_transfer": {
+                  "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.currency" } },
+                  "recipient": "0x000000000000000000000000000000000000dEaD",
+                  "amount": "$inputs.maxAmount"
+                } }
+              }
+            },
+            "0x0f": {
+              "name": "TAKE_ALL",
+              "inputs_abi": "(address currency, uint256 minAmount)",
+              "body": {
+                "domain": "token",
+                "token": { "action": "erc20_transfer", "erc20_transfer": {
+                  "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.currency" } },
+                  "recipient": "$tx.from",
+                  "amount": "$inputs.minAmount"
+                } }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": ["opcode-stream-dispatch@^1.0"],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+/// `abi.encode` a v4 `SWAP_EXACT_IN_SINGLE` param tuple
+/// `(PoolKey poolKey, bool zeroForOne, uint128 amountIn, uint128
+/// amountOutMinimum, bytes hookData)` with the canonical PoolKey head-flatten.
+fn v4_swap_exact_in_single_param(
+    currency0: &str,
+    currency1: &str,
+    amount_in: u128,
+    amount_out_min: u128,
+) -> Vec<u8> {
+    let pool_key = DynSolValue::Tuple(vec![
+        DynSolValue::Address(currency0.parse::<AlloyAddress>().unwrap()),
+        DynSolValue::Address(currency1.parse::<AlloyAddress>().unwrap()),
+        DynSolValue::Uint(AlloyU256::from(3000u64), 24), // fee 0.3%
+        DynSolValue::Int(alloy_primitives::I256::try_from(60i64).unwrap(), 24), // tickSpacing
+        DynSolValue::Address(AlloyAddress::ZERO),        // hooks
+    ]);
+    DynSolValue::Tuple(vec![
+        pool_key,
+        DynSolValue::Bool(true), // zeroForOne
+        DynSolValue::Uint(AlloyU256::from(amount_in), 128),
+        DynSolValue::Uint(AlloyU256::from(amount_out_min), 128),
+        DynSolValue::Bytes(vec![]), // hookData
+    ])
+    .abi_encode_params()
+}
+
+/// `abi.encode` a v4 `(address currency, uint256 amount)` settle/take param.
+fn v4_currency_amount_param(currency: &str, amount: u128) -> Vec<u8> {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(currency.parse::<AlloyAddress>().unwrap()),
+        DynSolValue::Uint(AlloyU256::from(amount), 256),
+    ])
+    .abi_encode_params()
+}
+
+#[test]
+fn t21_ur_execute_v4_swap_nested_expands_to_inner_multicall() {
+    install_ok(T21_UR_V4_SWAP_NESTED);
+
+    let currency0 = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
+    let currency1 = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"; // WETH
+    let amount_in: u128 = 1_000_000_000; // 1000 USDC (6 dp)
+    let amount_out_min: u128 = 250_000_000_000_000_000; // 0.25 WETH
+
+    // Inner V4 action stream: SWAP_EXACT_IN_SINGLE (0x06) + SETTLE_ALL (0x0c)
+    // + TAKE_ALL (0x0f).
+    let inner_actions = vec![0x06u8, 0x0c, 0x0f];
+    let inner_params = vec![
+        DynSolValue::Bytes(v4_swap_exact_in_single_param(
+            currency0,
+            currency1,
+            amount_in,
+            amount_out_min,
+        )),
+        DynSolValue::Bytes(v4_currency_amount_param(currency0, amount_in)),
+        DynSolValue::Bytes(v4_currency_amount_param(currency1, amount_out_min)),
+    ];
+
+    // V4_SWAP input = abi.encode(bytes actions, bytes[] params).
+    let v4_swap_input = DynSolValue::Tuple(vec![
+        DynSolValue::Bytes(inner_actions),
+        DynSolValue::Array(inner_params),
+    ])
+    .abi_encode_params();
+
+    // Outer UR execute: commands = [0x10], inputs = [v4_swap_input].
+    let calldata = encode_calldata(
+        "0x3593564c",
+        &[
+            DynSolValue::Bytes(vec![0x10]),
+            DynSolValue::Array(vec![DynSolValue::Bytes(v4_swap_input)]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "0x3593564c",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+
+    // Outer = Multicall with one child (the V4_SWAP).
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let v4_child = &body["actions"][0];
+
+    // The V4_SWAP child is ITSELF a Multicall of the 3 inner legs.
+    assert_eq!(
+        v4_child["domain"], "multicall",
+        "V4_SWAP must expand to a nested Multicall, got: {parsed}"
+    );
+    let legs = v4_child["actions"].as_array().expect("inner legs array");
+    assert_eq!(
+        legs.len(),
+        3,
+        "expected 3 inner legs (swap+settle+take): {parsed}"
+    );
+
+    // Leg 0 — SWAP_EXACT_IN_SINGLE with REAL token + amount (not zero).
+    let swap = &legs[0];
+    assert_eq!(swap["domain"], "amm", "{parsed}");
+    assert_eq!(swap["action"], "swap", "{parsed}");
+    assert_eq!(swap["venue"]["name"], "uniswap_v4", "{parsed}");
+    assert_eq!(
+        swap["params"]["token_in"]["key"]["address"], currency0,
+        "token_in must be the decoded PoolKey.currency0, not zero: {parsed}"
+    );
+    assert_eq!(
+        swap["params"]["token_out"]["key"]["address"], currency1,
+        "{parsed}"
+    );
+    assert_eq!(
+        swap["params"]["direction"]["kind"], "exact_input",
+        "{parsed}"
+    );
+    // U256 fields serialize as 0x-prefixed hex (alloy serde convention).
+    let amount_in_hex = format!("0x{amount_in:x}");
+    let amount_out_min_hex = format!("0x{amount_out_min:x}");
+    assert_eq!(
+        swap["params"]["direction"]["amount_in"], amount_in_hex,
+        "amount_in must be the REAL decoded uint128, not the old zero placeholder: {parsed}"
+    );
+    assert_eq!(
+        swap["params"]["direction"]["min_amount_out"], amount_out_min_hex,
+        "{parsed}"
+    );
+    // pool_id was computed in Rust (keccak256 of the inline PoolKey) — present
+    // and a 0x-prefixed 32-byte hash, not the "unknown" sentinel.
+    let pool_id = swap["venue"]["pool_id"].as_str().unwrap_or("");
+    assert!(
+        pool_id.starts_with("0x") && pool_id.len() == 66,
+        "pool_id must be the Rust-computed keccak256, got {pool_id:?}: {parsed}"
+    );
+
+    // Leg 1 — SETTLE_ALL → erc20_transfer of currency0 (amount_in).
+    let settle = &legs[1];
+    assert_eq!(settle["domain"], "token", "{parsed}");
+    assert_eq!(settle["action"], "erc20_transfer", "{parsed}");
+    assert_eq!(settle["token"]["key"]["address"], currency0, "{parsed}");
+    assert_eq!(settle["amount"], amount_in_hex, "{parsed}");
+
+    // Leg 2 — TAKE_ALL → erc20_transfer of currency1 (amount_out_min) to $tx.from.
+    let take = &legs[2];
+    assert_eq!(take["domain"], "token", "{parsed}");
+    assert_eq!(take["token"]["key"]["address"], currency1, "{parsed}");
+    assert_eq!(take["amount"], amount_out_min_hex, "{parsed}");
+    assert_eq!(
+        take["recipient"], "0x000000000000000000000000000000000000aaaa",
+        "TAKE_ALL recipient = $tx.from (the submitter): {parsed}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// t22 — B.1.c.2 max_depth guard: a manifest with max_depth=0 whose opcode
+// carries a `nested` block fails LOUD with `max_depth_exceeded` when the
+// nested expansion would recurse to depth=1 (> 0). No silent truncation (DD4).
+// ---------------------------------------------------------------------------
+
+const T22_MAX_DEPTH_FIXTURE: &str = r#"{
+  "type": "adapter_action",
+  "id": "test/universal-router/maxdepth@1.0.0",
+  "publisher": "test.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x3593564c",
+    "chain_to_addresses": { "1": ["0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af"] }
+  },
+  "abi_fragment": {
+    "function_name": "execute",
+    "abi": {
+      "name": "execute",
+      "type": "function",
+      "inputs": [
+        { "name": "commands", "type": "bytes" },
+        { "name": "inputs", "type": "bytes[]" },
+        { "name": "deadline", "type": "uint256" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "opcode_stream_dispatch",
+    "mask": "0x7f",
+    "allow_revert_bit": "0x80",
+    "unknown_opcode_policy": "warn",
+    "max_depth": 0,
+    "per_opcode_body": {
+      "0x10": {
+        "name": "V4_SWAP",
+        "inputs_abi": "(bytes actions, bytes[] params)",
+        "nested": {
+          "mask": "0xff",
+          "unknown_opcode_policy": "warn",
+          "per_opcode_body": {
+            "0x0f": {
+              "name": "TAKE_ALL",
+              "inputs_abi": "(address currency, uint256 minAmount)",
+              "body": {
+                "domain": "token",
+                "token": { "action": "erc20_transfer", "erc20_transfer": {
+                  "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.currency" } },
+                  "recipient": "$tx.from",
+                  "amount": "$inputs.minAmount"
+                } }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": ["opcode-stream-dispatch@^1.0"],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+#[test]
+fn t22_max_depth_exceeded_fails_loud() {
+    install_ok(T22_MAX_DEPTH_FIXTURE);
+
+    // Inner stream = [TAKE_ALL]; recursing it requires depth 1 > max_depth 0.
+    let inner_actions = vec![0x0fu8];
+    let inner_params = vec![DynSolValue::Bytes(v4_currency_amount_param(
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        1u128,
+    ))];
+    let v4_swap_input = DynSolValue::Tuple(vec![
+        DynSolValue::Bytes(inner_actions),
+        DynSolValue::Array(inner_params),
+    ])
+    .abi_encode_params();
+
+    let calldata = encode_calldata(
+        "0x3593564c",
+        &[
+            DynSolValue::Bytes(vec![0x10]),
+            DynSolValue::Array(vec![DynSolValue::Bytes(v4_swap_input)]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "0x3593564c",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let out = declarative_route_request_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], false, "max_depth must fail loud: {parsed}");
+    assert_eq!(
+        parsed["error"]["kind"], "max_depth_exceeded",
+        "expected max_depth_exceeded, got: {parsed}"
+    );
+}
