@@ -1000,9 +1000,12 @@ fn typed_data_permit2_permit_batch_array_emit() {
 // VERBATIM — `type:"adapter_action"`, `schema_version:"3"`, the canonical
 // Permit2 CREATE2 address on 4 chains, named per-item `$inputs.*` access). This
 // is the off-chain EIP-712 `permitBatch` SIGNATURE — the analysis surface a
-// wallet actually sees (the on-chain `permit(...)` calldata is a relayer
-// submission and hits a uint48→Time ABI-width gap, documented in
-// `declarative_v3_route.rs::b2_permit2_permit_batch_calldata_width_gap`).
+// wallet actually sees. (The on-chain `permit(...)` calldata is a relayer
+// submission; its nested uint48→Time ABI-width decode is now handled by the
+// b1-infra bridge fix — see the positional-access calldata test
+// `declarative_v3_route.rs::b2_permit2_permit_batch_calldata_decodes`. This
+// on-disk manifest's NAMED `$inputs.token` access remains the typed-data
+// convention, so the calldata route resolves it positionally.)
 //
 // Distinct from the `@2.0.0` fixture above (which exercised the same array_emit
 // engine with the older `schema_version "2"` shape): this one is byte-for-byte

@@ -50,9 +50,13 @@ pub fn decoded_value_to_json(value: &DecodedValue) -> serde_json::Value {
 ///     (> 2^53). The width comes from the ABI param type, the only place it is
 ///     available — `DynSolValue::Uint` keeps the bit width but the
 ///     `DecodedValue::Uint(U256)` shape drops it, so we thread the type string.
-///   * `Int` → JSON decimal string (unchanged). No narrow **signed** struct
-///     field is in scope today; if one lands, apply the analogous `iN <= 64`
-///     rule here.
+///   * `Int` → JSON **number** when `abi_type` is a scalar `intN` with
+///     `N <= 64` (the value provably fits in `i64`); otherwise a JSON decimal
+///     **string**. Symmetric to the `Uint` rule — a narrow **signed** field
+///     such as Uniswap V3/V4 `int24` ticks deserialises into an `i32`/`i64`
+///     `ActionBody` field, which (like `u64`) parses a JSON number and rejects
+///     a string. Wider signed ints (`int128` liquidity delta, `int256`) stay
+///     decimal strings to preserve precision.
 ///   * `Bool` → JSON boolean.
 ///   * `Bytes` → JSON string `"0x.." + hex`.
 ///   * `String` → JSON string.
@@ -66,7 +70,7 @@ pub fn decoded_value_to_json_typed(value: &DecodedValue, abi_type: &str) -> serd
     match value {
         DecodedValue::Address(address) => serde_json::Value::String(address.to_string()),
         DecodedValue::Uint(value) => uint_to_json(*value, abi_type),
-        DecodedValue::Int(value) => serde_json::Value::String(i256_to_decimal_string(*value)),
+        DecodedValue::Int(value) => int_to_json(*value, abi_type),
         DecodedValue::Bool(value) => serde_json::Value::Bool(*value),
         DecodedValue::Bytes(bytes) => {
             serde_json::Value::String(format!("0x{}", hex::encode(bytes)))
@@ -130,6 +134,44 @@ fn uint_bits(abi_type: &str) -> Option<u32> {
     }
     // A scalar `uintN` is all-ASCII-digits after the prefix; a bracket or any
     // other char (array suffix, etc.) means this is not a scalar uint.
+    if digits.bytes().all(|b| b.is_ascii_digit()) {
+        digits.parse::<u32>().ok()
+    } else {
+        None
+    }
+}
+
+/// Encode an `I256` either as a JSON number (scalar `intN`, `N <= 64`) or a
+/// JSON decimal string (everything else). Mirror of [`uint_to_json`]; see
+/// [`decoded_value_to_json_typed`] for the rationale.
+fn int_to_json(value: I256, abi_type: &str) -> serde_json::Value {
+    match int_bits(abi_type) {
+        // `N <= 64` ⇒ the value fits in `i64` by construction; the `try_into`
+        // is a belt-and-braces guard — on the (unreachable) failure path we
+        // fall back to the lossless decimal string rather than truncating.
+        Some(bits) if bits <= 64 => match i64::try_from(value) {
+            Ok(n) => serde_json::Value::Number(serde_json::Number::from(n)),
+            Err(_) => serde_json::Value::String(i256_to_decimal_string(value)),
+        },
+        _ => serde_json::Value::String(i256_to_decimal_string(value)),
+    }
+}
+
+/// Parse the bit width of a SCALAR signed-integer ABI type string.
+///
+/// `"int8"` → 8, `"int24"` → 24, `"int256"` → 256, bare `"int"` → 256
+/// (Solidity alias). Anything that is not a scalar int (`"int24[]"`, `"tuple"`,
+/// `"uint256"`, `""`) → `None`. Mirrors [`uint_bits`]; the trailing array
+/// suffix is NOT stripped here (array element typing is the caller's job).
+fn int_bits(abi_type: &str) -> Option<u32> {
+    let t = abi_type.trim();
+    // `strip_prefix("int")` would also match the `int` inside `uint8` after a
+    // `u`-strip elsewhere, but here `t` is the raw type — a uint starts with
+    // `u`, so `strip_prefix("int")` correctly rejects it.
+    let digits = t.strip_prefix("int")?;
+    if digits.is_empty() {
+        return Some(256); // bare `int` == `int256`
+    }
     if digits.bytes().all(|b| b.is_ascii_digit()) {
         digits.parse::<u32>().ok()
     } else {
@@ -696,6 +738,104 @@ mod tests {
         let ctx = dummy_ctx(1, &from, &to, &value, &registry);
         let args_json = args_to_json(decoded);
         evaluate(&ctx, &args_json, expr).unwrap()
+    }
+
+    // ── nested-tuple narrow-int width threading (b1-infra) ────────────────
+    //
+    // Pin `decoded_value_to_json_typed` against a tuple[] whose components mix
+    // a narrow uint (uint48), a signed int (int24), a wide uint (uint160 →
+    // string), and a wide signed int (int128 → string). The full parenthesised
+    // component type string is what the bridge now threads onto `abi_type`.
+
+    #[test]
+    fn typed_nested_tuple_threads_component_widths() {
+        // `(uint48,int24,uint160,int128)` — a single tuple value.
+        let value = DecodedValue::Tuple(vec![
+            DecodedValue::Uint(U256::from(1_738_001_800_u64)),
+            DecodedValue::Int(I256::try_from(-12_345_i64).unwrap()),
+            DecodedValue::Uint(U256::from(1_000_u64)),
+            DecodedValue::Int(I256::try_from(-9_000_000_000_i128).unwrap()),
+        ]);
+        let json = decoded_value_to_json_typed(&value, "(uint48,int24,uint160,int128)");
+        // uint48 ≤ 64 → JSON number.
+        assert_eq!(json[0], serde_json::json!(1_738_001_800u64));
+        assert!(json[0].is_number(), "uint48 must be a JSON number, got {}", json[0]);
+        // int24 ≤ 64 → JSON number (negative).
+        assert_eq!(json[1], serde_json::json!(-12_345i64));
+        assert!(json[1].is_number(), "int24 must be a JSON number, got {}", json[1]);
+        // uint160 > 64 → decimal string.
+        assert_eq!(json[2], serde_json::json!("1000"));
+        // int128 > 64 → decimal string.
+        assert_eq!(json[3], serde_json::json!("-9000000000"));
+    }
+
+    #[test]
+    fn typed_tuple_array_threads_element_component_widths() {
+        // `(address,uint160,uint48,uint48)[]` — the Permit2 `PermitDetails[]`
+        // shape: each element's uint48 fields must surface as JSON numbers.
+        let token =
+            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let element = DecodedValue::Tuple(vec![
+            DecodedValue::Address(token),
+            DecodedValue::Uint(U256::from(1_000_u64)),     // uint160
+            DecodedValue::Uint(U256::from(1_738_001_800_u64)), // uint48
+            DecodedValue::Uint(U256::from(7_u64)),          // uint48 nonce
+        ]);
+        let value = DecodedValue::Array(vec![element]);
+        let json = decoded_value_to_json_typed(&value, "(address,uint160,uint48,uint48)[]");
+        let el = &json[0];
+        assert_eq!(el[0], serde_json::json!("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"));
+        assert_eq!(el[1], serde_json::json!("1000")); // uint160 → string
+        assert_eq!(el[2], serde_json::json!(1_738_001_800u64)); // uint48 → number
+        assert!(el[2].is_number(), "nested uint48 must be a number, got {}", el[2]);
+        assert_eq!(el[3], serde_json::json!(7u64)); // uint48 → number
+    }
+
+    #[test]
+    fn typed_bare_tuple_string_falls_back_to_decimal_strings() {
+        // Regression guard: a BARE `"tuple"` (no component types — the shape
+        // alloy emits before the bridge canonicalises it) must still produce a
+        // value, with every component as the type-agnostic decimal string.
+        let value = DecodedValue::Tuple(vec![
+            DecodedValue::Uint(U256::from(48_u64)),
+            DecodedValue::Int(I256::try_from(-5_i64).unwrap()),
+        ]);
+        let json = decoded_value_to_json_typed(&value, "tuple");
+        assert_eq!(json[0], serde_json::json!("48"));
+        assert_eq!(json[1], serde_json::json!("-5"));
+    }
+
+    #[test]
+    fn typed_scalar_signed_int_width_rule() {
+        // Top-level scalar `intN` (carried directly on `DecodedArg.abi_type`).
+        let small = DecodedValue::Int(I256::try_from(-12_345_i64).unwrap());
+        assert_eq!(
+            decoded_value_to_json_typed(&small, "int24"),
+            serde_json::json!(-12_345i64)
+        );
+        // int256 (and bare "int") stay decimal strings.
+        let big = DecodedValue::Int(I256::try_from(-12_345_i64).unwrap());
+        assert_eq!(
+            decoded_value_to_json_typed(&big, "int256"),
+            serde_json::json!("-12345")
+        );
+        // No type context → decimal string (unchanged historic behaviour).
+        assert_eq!(
+            decoded_value_to_json(&small),
+            serde_json::json!("-12345")
+        );
+    }
+
+    #[test]
+    fn int_bits_parses_scalar_signed_only() {
+        assert_eq!(int_bits("int24"), Some(24));
+        assert_eq!(int_bits("int"), Some(256));
+        assert_eq!(int_bits("int256"), Some(256));
+        // Not a scalar signed int.
+        assert_eq!(int_bits("uint48"), None);
+        assert_eq!(int_bits("int24[]"), None);
+        assert_eq!(int_bits("tuple"), None);
+        assert_eq!(int_bits(""), None);
     }
 
     #[test]

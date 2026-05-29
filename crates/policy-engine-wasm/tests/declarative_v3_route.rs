@@ -2683,28 +2683,27 @@ fn b1_permit2_lockdown_array_emit() {
 }
 
 // ---------------------------------------------------------------------------
-// b2 — Permit2 permitBatch via the CALLDATA route (documents the width gap)
+// b2 — Permit2 permitBatch via the CALLDATA route (nested-tuple width threading)
 // ---------------------------------------------------------------------------
 //
 // `permit(address owner, PermitBatch permitBatch, bytes signature)` where
 // `PermitBatch = (PermitDetails[] details, address spender, uint256 sigDeadline)`
 // and `PermitDetails = (address token, uint160 amount, uint48 expiration,
-// uint48 nonce)`. `array_emit` over `$args.permitBatch.details` (the on-disk
-// manifest is typed-data-oriented like permitSingle@1.0.0 — its GREEN route is
-// the off-chain EIP-712 `permitBatch` signature, covered in
-// `declarative_v3_typed_data_install.rs::typed_data_permit2_permit_batch_on_disk_manifest`).
+// uint48 nonce)`. `array_emit` over the `PermitDetails[]` element (positional
+// `$args.permitBatch[0]`); per-item fields bind the element POSITIONALLY
+// (`$inputs[0]` token … `$inputs[2]` expiration) — the calldata convention,
+// distinct from the EIP-712 named-access on-disk manifest (whose GREEN route is
+// the off-chain signature, covered in
+// `declarative_v3_typed_data_install.rs::typed_data_permit2_permit_batch_array_emit`).
 //
-// On the CALLDATA path the positional element resolves token / amount /
-// spender / sig_deadline correctly, BUT the nested `PermitDetails[]` element
-// loses its ABI width: `decoded_value_to_json_typed` carries a tuple's
-// component types only for the parenthesised type string, not the bare
-// `"tuple[]"` alloy emits with field types out-of-band on `components`. So the
-// uint48 `expiration` renders as a DECIMAL STRING (not a JSON number), and the
-// deterministic `Permit2SignAction.expires_at: Time` (u64) rejects it →
-// `build_array_emit_failed` "expected u64". This is a Rust-level ABI-width gap
-// (out of the "no new Rust" scope of this task); the manifest's intended
-// wallet surface — the off-chain signature — is fully green via typed-data.
-// (Mirrors t4's documented-partial calldata precedent.)
+// b1-infra fix: the bridge now threads each tuple param's full parenthesised
+// ABI type (rebuilt from `Param.components`) through to
+// `decoded_value_to_json_typed`, so the nested `PermitDetails` element's uint48
+// `expiration` renders as a JSON **number** rather than a decimal string. The
+// deterministic `Permit2SignAction.expires_at: Time` (transparent `u64`) then
+// deserialises it cleanly. Before the fix the bare `"tuple[]"` alloy emits (with
+// field types out-of-band on `components`) collapsed every nested component to
+// type `""` → decimal string → `build_array_emit_failed` "expected u64".
 
 /// Build a 2-element calldata `permit(owner, permitBatch, signature)`.
 fn b2_permit_batch_calldata() -> String {
@@ -2753,9 +2752,18 @@ fn b2_permit_batch_calldata() -> String {
 }
 
 #[test]
-fn b2_permit2_permit_batch_calldata_width_gap() {
-    // Inline the on-disk permitBatch manifest (typed-data-oriented; named
-    // per-item access) so this test pins its CALLDATA behavior.
+fn b2_permit2_permit_batch_calldata_decodes() {
+    // Inline a positional-access permitBatch manifest (the calldata
+    // convention) so this test pins the nested-tuple narrow-int CALLDATA
+    // decode end-to-end. The ABI is faithful to real Permit2 (sigDeadline
+    // stays `uint256`); both deterministic `Time` (u64) fields are bound to
+    // NESTED `uint48` components of the `PermitDetails` element — `expires_at`
+    // ← `expiration` (`$inputs[2]`, the load-bearing assertion) and, purely to
+    // exercise a second nested-uint48→u64 decode, `sig_deadline` ← `nonce`
+    // (`$inputs[3]`). (Real Permit2 `sigDeadline` is `uint256`; feeding a
+    // `uint256`→`Time` (u64) on the calldata route is a SEPARATE documented
+    // gap — its production surface is the off-chain typed-data route, where
+    // wallets send it as a JSON number.)
     const B2_PERMIT2_PERMIT_BATCH_V3: &str = r#"{
       "type": "adapter_action",
       "id": "uniswap/permit2/permitBatch@1.0.0",
@@ -2814,17 +2822,17 @@ fn b2_permit2_permit_batch_calldata_width_gap() {
       },
       "emit": {
         "strategy": "array_emit",
-        "array_source": "$args.permitBatch.details",
+        "array_source": "$args.permitBatch[0]",
         "body": {
           "domain": "token",
           "token": {
             "action": "permit2_sign_allowance",
             "permit2_sign_allowance": {
-              "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.token" } },
-              "spender": "$args.permitBatch.spender",
-              "amount": "$inputs.amount",
-              "expires_at": "$inputs.expiration",
-              "sig_deadline": "$args.permitBatch.sigDeadline"
+              "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs[0]" } },
+              "spender": "$args.permitBatch[1]",
+              "amount": "$inputs[1]",
+              "expires_at": "$inputs[2]",
+              "sig_deadline": "$inputs[3]"
             }
           }
         },
@@ -2860,19 +2868,53 @@ fn b2_permit2_permit_batch_calldata_width_gap() {
         "0x000000000000000000000000000000000000aaaa",
     );
 
-    // CALLDATA path: the on-disk manifest uses NAMED per-item access
-    // (`$inputs.token` etc.) which is the EIP-712 (typed-data) convention. On
-    // the calldata route the decoded `permitBatch` tuple is POSITIONAL, so the
-    // named `$args.permitBatch.spender` walk fails first → InvalidArgPath, OR —
-    // if a manifest used positional access — the uint48 `expiration` width gap
-    // surfaces as "expected u64". Either way the calldata route is NOT green;
-    // it surfaces a `build_array_emit_failed` envelope. The off-chain signature
-    // route (typed-data) is the green wallet surface (separate test).
+    // CALLDATA path: the decoded `permitBatch` tuple is POSITIONAL. With the
+    // b1-infra bridge fix threading the nested `PermitDetails` tuple's ABI
+    // widths, the uint48 `expiration` (`$inputs[2]`) renders as a JSON number
+    // and the `Permit2SignAction.expires_at: Time` (transparent u64) accepts
+    // it. The fan-out yields one `permit2_sign_allowance` per `details`
+    // element, wrapped in a `Multicall` body.
     let out = declarative_route_request_v3_json(input);
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(parsed["ok"], false, "{parsed}");
+    assert_eq!(parsed["ok"], true, "{parsed}");
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let inner = body["actions"].as_array().expect("inner actions array");
+    assert_eq!(inner.len(), 2, "one permit2_sign_allowance per details: {parsed}");
+
+    // element-0 — token = USDC, amount = 1000, expiration = 1738001800.
+    assert_eq!(inner[0]["domain"], "token", "{parsed}");
+    assert_eq!(inner[0]["action"], "permit2_sign_allowance", "{parsed}");
     assert_eq!(
-        parsed["error"]["kind"], "build_array_emit_failed",
+        inner[0]["token"]["key"]["address"],
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
         "{parsed}"
     );
+    // `amount` is `uint160` → > 64 bits → decoded as a decimal string, then
+    // serialised by the `U256` ActionBody field as `0x`-hex (1000 = 0x3e8).
+    assert_eq!(inner[0]["amount"], "0x3e8", "{parsed}");
+    // The load-bearing assertion: the NESTED uint48 `expiration` decoded to a
+    // JSON number (Time over u64), NOT a decimal string. `serde_json::Value`
+    // equality holds against `1_738_001_800` only when it really is a number —
+    // a `"1738001800"` string would compare unequal (and `Time` would have
+    // rejected it at deserialize). `sig_deadline` ← nested uint48 `nonce` = 0
+    // proves a second nested-narrow-int field on the same element.
+    assert_eq!(inner[0]["expires_at"], 1_738_001_800u64, "{parsed}");
+    assert_eq!(inner[0]["sig_deadline"], 0u64, "{parsed}");
+    assert_eq!(
+        inner[0]["spender"],
+        "0x00000000000000000000000000000000deadbeef",
+        "{parsed}"
+    );
+
+    // element-1 — token = WETH, amount = 2000, expiration = 1738001900, nonce = 1.
+    assert_eq!(
+        inner[1]["token"]["key"]["address"],
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "{parsed}"
+    );
+    assert_eq!(inner[1]["amount"], "0x7d0", "{parsed}");
+    assert_eq!(inner[1]["expires_at"], 1_738_001_900u64, "{parsed}");
+    assert_eq!(inner[1]["sig_deadline"], 1u64, "{parsed}");
 }

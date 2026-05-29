@@ -327,11 +327,23 @@ fn resolve_value_map(
 
 /// Resolve a single `$<root>` / `$<root>.<rest>` placeholder string.
 fn resolve_placeholder(ctx: &V3MapContext<'_>, raw: &str) -> Result<JsonValue, V3BuildError> {
-    // Strip the leading `$`. Split on the first `.` to identify the root.
+    // Strip the leading `$`. The root token ends at the first `.` OR `[`.
+    // A `.` separator is dropped from `rest` (`$args.x` → root `args`, rest
+    // `x`); a `[` is KEPT (`$inputs[0]` → root `inputs`, rest `[0]`) so the
+    // index segment survives into `walk_json_path`. This lets a tuple/tuple[]
+    // element be indexed POSITIONALLY straight off a root — the calldata
+    // convention for nested tuples (Permit2 `PermitDetails`, V4
+    // `modifyLiquidities` params) where decoded tuples are positional arrays.
     let body = &raw[1..];
-    let (root, rest) = match body.find('.') {
-        Some(idx) => (&body[..idx], &body[idx + 1..]),
-        None => (body, ""),
+    let dot = body.find('.');
+    let bracket = body.find('[');
+    let (root, rest) = match (dot, bracket) {
+        // `[` present and not after a `.` → keep the bracket in `rest`.
+        (None, Some(b)) => (&body[..b], &body[b..]),
+        (Some(d), Some(b)) if b < d => (&body[..b], &body[b..]),
+        // `.` separator → drop it.
+        (Some(d), _) => (&body[..d], &body[d + 1..]),
+        (None, None) => (body, ""),
     };
 
     match root {
