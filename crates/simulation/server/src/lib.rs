@@ -13,15 +13,20 @@
 //!
 //! # Status
 //!
-//! This crate currently provides the service **DTO contract** ([`dto`]) — the
+//! This crate provides the service **DTO contract** ([`dto`]) — the
 //! request/response shapes the extension and backend agree on, matching +
-//! extending the legacy Node.js `scopeball.evaluate_v3` contract. The axum
-//! server, the wallet-store boundary, and the orchestration handler land in
-//! subsequent tasks.
+//! extending the legacy Node.js `scopeball.evaluate_v3` contract — plus the
+//! axum [`app`] (router + shared state), the [`handler`] that simulates action
+//! envelopes over wallet state (load → reduce → save), and the wallet-store
+//! boundary ([`store`]). Live-input refresh and enrichment-call execution are
+//! marked `TODO(prep)` and land in subsequent tasks.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
 
+pub mod app;
 pub mod dto;
+pub mod handler;
+pub mod store;
