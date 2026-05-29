@@ -61,6 +61,9 @@ const mocks = vi.hoisted(() => {
       kind: "miss",
       reason: "no_selector",
     })),
+    routeTypedSignaturePayload: vi.fn<
+      (...args: unknown[]) => Promise<unknown>
+    >(async () => null),
     browser: {
       storage: {
         session: {
@@ -148,6 +151,12 @@ vi.mock("../policy-rpc", () => ({
 vi.mock("../adapter-loader/declarative-route", () => ({
   tryDeclarativeRoute: mocks.tryDeclarativeRoute,
 }));
+// Phase A.1 (Task 6) — the orchestrator now routes typed signatures through
+// `routeTypedSignaturePayload`. Mock it so the real sig-routing module (and
+// its WASM-bridge + registry-client transitive imports) never loads here.
+vi.mock("../sig-routing", () => ({
+  routeTypedSignaturePayload: mocks.routeTypedSignaturePayload,
+}));
 
 import { decideMessage } from "../orchestrator";
 
@@ -179,6 +188,28 @@ function untypedMessage(requestId = "sig-1"): Message {
   };
 }
 
+function typedMessage(requestId = "typed-1"): Message {
+  return {
+    requestId,
+    data: {
+      type: RequestType.TYPED_SIGNATURE,
+      chainId: 1,
+      hostname: "app.uniswap.org",
+      address: OWNER,
+      typedData: {
+        domain: {
+          name: "Permit2",
+          chainId: 1,
+          verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        },
+        primaryType: "PermitSingle",
+        types: { PermitSingle: [{ name: "spender", type: "address" }] },
+        message: { spender: ROUTER },
+      },
+    },
+  } as Message;
+}
+
 function approve(requestId: string, ok: boolean): void {
   for (const listener of [...mocks.runtimeMessageListeners]) {
     listener({ type: "scopeball:verdict-decision", requestId, ok });
@@ -208,6 +239,7 @@ describe("orchestrator", () => {
       reason: "no_selector",
     });
     mocks.evaluateWithEnvelopes.mockResolvedValue({ kind: "pass" });
+    mocks.routeTypedSignaturePayload.mockResolvedValue(null);
   });
 
   it("evaluates transactions through policy-rpc coordinator", async () => {
@@ -229,6 +261,98 @@ describe("orchestrator", () => {
         }),
       }),
     );
+  });
+
+  // ── Phase A.1 (Task 6) — typed-sig v3 route wire ────────────────────
+  it("routes typed signatures through routeTypedSignaturePayload + logs declarative-v3-sig actions", async () => {
+    const fakeActions = [
+      { meta: { nature: { kind: "offchain_sig" } }, body: { domain: "permit" } },
+    ];
+    mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
+      actions: fakeActions,
+      decoderId: "uniswap/permit2/permitSingle@1.0.0",
+    });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    try {
+      const result = await decideMessage(typedMessage("typed-hit-1"));
+
+      expect(result.ok).toBe(true);
+      // The sig-router was handed the raw TypedSignaturePayload.
+      expect(mocks.routeTypedSignaturePayload).toHaveBeenCalledOnce();
+      const [sigArgs] = mocks.routeTypedSignaturePayload.mock.calls[0] as [
+        { payload: { type: string }; submittedAt?: number },
+      ];
+      expect(sigArgs.payload.type).toBe(RequestType.TYPED_SIGNATURE);
+      expect(typeof sigArgs.submittedAt).toBe("number");
+      // The actions[] JSON is surfaced to the SW DevTools console.
+      const sigLog = infoSpy.mock.calls.find(
+        (c) => c[0] === "[Scopeball] declarative-v3-sig",
+      );
+      expect(sigLog).toBeDefined();
+      expect(sigLog?.[1]).toMatchObject({
+        decoderId: "uniswap/permit2/permitSingle@1.0.0",
+        actionsCount: 1,
+        actions: fakeActions,
+        primaryType: "PermitSingle",
+      });
+      // The audit row carries the symmetric v3 meta (offchain_sig hit).
+      expect(mocks.auditAppend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          declarativeV3: {
+            outcome: "hit",
+            nature: "offchain_sig",
+            decoder_id: "uniswap/permit2/permitSingle@1.0.0",
+            action_count: 1,
+          },
+        }),
+      );
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it("records a no_manifest_matched miss when the typed-sig router returns null", async () => {
+    mocks.routeTypedSignaturePayload.mockResolvedValueOnce(null);
+
+    const result = await decideMessage(typedMessage("typed-miss-1"));
+
+    expect(result.ok).toBe(true);
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        declarativeV3: {
+          outcome: "miss",
+          nature: "offchain_sig",
+          reason: "no_manifest_matched",
+        },
+      }),
+    );
+  });
+
+  it("fences a typed-sig router throw into a fault audit row", async () => {
+    mocks.routeTypedSignaturePayload.mockRejectedValueOnce(
+      new Error("decode blew up"),
+    );
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const result = await decideMessage(typedMessage("typed-fault-1"));
+
+      expect(result.ok).toBe(true);
+      // Static path still produces the final verdict — fault is observability only.
+      expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+      expect(mocks.auditAppend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          declarativeV3: {
+            outcome: "fault",
+            nature: "offchain_sig",
+            reason: "unexpected",
+          },
+        }),
+      );
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   // Plan §M10 (2026-05-28) — v1 cutover. 본 test 7건은 v1 routing/Cedar 검증.

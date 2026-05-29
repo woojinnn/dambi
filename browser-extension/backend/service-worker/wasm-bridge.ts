@@ -458,26 +458,38 @@ export async function declarativeRouteTypedDataV3(
   data?: { actions: unknown[]; decoder_id: string };
   error?: { kind: string; message: string };
 }> {
-  const exports = await load();
-  const raw = exports.declarative_route_typed_data_v3_json(
-    JSON.stringify({
-      chain_id: input.chainId,
-      verifying_contract: input.verifyingContract,
-      primary_type: input.primaryType,
-      domain_name: input.domainName,
-      message: input.message,
-      submitter: input.submitter,
-      submitted_at: input.submittedAt,
-    }),
-  );
-  const parsed = JSON.parse(raw) as Envelope<{
-    actions: unknown[];
-    decoder_id: string;
-  }>;
-  if (parsed.ok === true) {
-    return { ok: true, data: parsed.data };
+  // T5 review fix — honor the non-throwing contract. A WASM-layer fault
+  // (init failure, a non-JSON panic string from the export, or a serde
+  // hiccup) must surface as a `{ ok: false }` envelope so the SW
+  // sig-router treats it as a transparent miss, NOT as a thrown
+  // `EngineError` that would bubble past the orchestrator's try/catch.
+  try {
+    const exports = await load();
+    const raw = exports.declarative_route_typed_data_v3_json(
+      JSON.stringify({
+        chain_id: input.chainId,
+        verifying_contract: input.verifyingContract,
+        primary_type: input.primaryType,
+        domain_name: input.domainName,
+        message: input.message,
+        submitter: input.submitter,
+        submitted_at: input.submittedAt,
+      }),
+    );
+    const parsed = JSON.parse(raw) as Envelope<{
+      actions: unknown[];
+      decoder_id: string;
+    }>;
+    if (parsed.ok === true) {
+      return { ok: true, data: parsed.data };
+    }
+    return { ok: false, error: parsed.error };
+  } catch (err) {
+    return {
+      ok: false,
+      error: { kind: "parse_failed", message: String(err) },
+    };
   }
-  return { ok: false, error: parsed.error };
 }
 
 /**

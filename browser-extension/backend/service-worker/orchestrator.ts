@@ -3,6 +3,7 @@ import {
   tryDeclarativeRouteV3,
   type DeclarativeRouteV3Outcome,
 } from "./adapter-loader/declarative-route";
+import { routeTypedSignaturePayload } from "./sig-routing";
 import {
   ensureDefaultPoliciesInstalled,
   getActivePolicyRpcManifests,
@@ -497,15 +498,53 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         reason: "unexpected",
       };
     }
-  } else {
-    // Typed-sig path — Phase 4B does NOT yet route signatures through the
-    // v3 WASM entry (SignAdapter arrives in Phase 4C). Record a miss with
-    // the nature so the audit log still shows the v3 column populated.
-    declarativeV3Meta = {
-      outcome: "miss",
-      nature,
-      reason: "typed_sig_not_yet_routed",
-    };
+  } else if (isTypedSignature(message)) {
+    // Phase A.1 (Task 6) — typed-sig path now routes the EIP-712 request
+    // through the manifest-driven `routeTypedSignaturePayload` (Task 5),
+    // mirroring the on-chain tx branch above: a non-null hit dumps the
+    // decoded `actions[]` JSON to the SW DevTools console and records a
+    // `hit` audit row; a null result is a transparent miss
+    // (`no_manifest_matched`); a throw is fenced into a `fault` row so a
+    // sig-router fault never disrupts the static verdict pipeline.
+    try {
+      const sigResult = await routeTypedSignaturePayload({
+        payload: message.data,
+        submittedAt: Math.floor(Date.now() / 1000),
+      });
+      if (sigResult) {
+        console.info("[Scopeball] declarative-v3-sig", {
+          requestId: message.requestId,
+          chainId: message.data.chainId,
+          primaryType: (message.data.typedData as { primaryType?: string })
+            ?.primaryType,
+          decoderId: sigResult.decoderId,
+          actionsCount: sigResult.actions.length,
+          actions: sigResult.actions,
+        });
+        declarativeV3Meta = {
+          outcome: "hit",
+          nature,
+          decoder_id: sigResult.decoderId,
+          action_count: sigResult.actions.length,
+        };
+      } else {
+        declarativeV3Meta = {
+          outcome: "miss",
+          nature,
+          reason: "no_manifest_matched",
+        };
+      }
+    } catch (err) {
+      console.error("[Scopeball] declarative-v3-sig fault", {
+        requestId: message.requestId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      declarativeV3Meta = {
+        outcome: "fault",
+        nature,
+        reason: "unexpected",
+      };
+    }
   }
 
   // Plan §M10 — Cedar verdict 분기 (declarativeHit 의존 + evaluateWithEnvelopes)

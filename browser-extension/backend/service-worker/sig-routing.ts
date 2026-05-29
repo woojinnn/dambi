@@ -25,7 +25,7 @@
  *   3. `declarativeRouteTypedDataV3` — decode the manifest emit-rules over the
  *      typed-data `message`. The WASM owns all `$args.*` substitution and the
  *      numeric coercion (`amount` / `nonce` / `deadline`) that the deleted
- *      `routePermit2PermitSingle` used to do by hand.
+ *      Phase 4C per-protocol hardcode used to do by hand.
  *
  * The orchestrator wiring (replacing the legacy typed-sig path with this
  * async router) is Task 6 — this module only exposes the async entries.

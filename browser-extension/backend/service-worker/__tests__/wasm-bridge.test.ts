@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseVerdict, WasmDecodeError } from "../wasm-bridge.types";
 import {
   EngineError,
+  declarativeRouteTypedDataV3,
   installPolicies,
   evaluatePolicyRpc,
   planPolicyRpc,
@@ -14,6 +15,7 @@ const wasmMocks = vi.hoisted(() => ({
   evaluatePolicyRpcJson: vi.fn(),
   planPolicyRpcJson: vi.fn(),
   routeRequestJson: vi.fn(),
+  declarativeRouteTypedDataV3Json: vi.fn(),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -30,6 +32,8 @@ vi.mock("../../wasm/policy_engine_wasm", () => ({
   evaluate_policy_rpc_json: wasmMocks.evaluatePolicyRpcJson,
   plan_policy_rpc_json: wasmMocks.planPolicyRpcJson,
   route_request_json: wasmMocks.routeRequestJson,
+  declarative_route_typed_data_v3_json:
+    wasmMocks.declarativeRouteTypedDataV3Json,
 }));
 
 describe("wasm bridge parsers", () => {
@@ -222,5 +226,59 @@ describe("wasm bridge parsers", () => {
     expect(wasmMocks.evaluatePolicyRpcJson).toHaveBeenCalledWith(
       JSON.stringify(input),
     );
+  });
+
+  // ── Phase A.1 (T5 review) — declarativeRouteTypedDataV3 non-throwing ──
+  const typedDataInput = {
+    chainId: 1,
+    verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+    primaryType: "PermitSingle",
+    domainName: "Permit2",
+    message: {},
+    submitter: "0x1111111111111111111111111111111111111111",
+    submittedAt: 1_700_000_000,
+  };
+
+  it("declarativeRouteTypedDataV3 unwraps the ok envelope into { ok, data }", async () => {
+    const data = {
+      actions: [{ meta: {}, body: {} }],
+      decoder_id: "uniswap/permit2/permitSingle@1.0.0",
+    };
+    wasmMocks.declarativeRouteTypedDataV3Json.mockReturnValue(
+      JSON.stringify({ ok: true, data }),
+    );
+
+    await expect(declarativeRouteTypedDataV3(typedDataInput)).resolves.toEqual({
+      ok: true,
+      data,
+    });
+  });
+
+  it("declarativeRouteTypedDataV3 does NOT throw on a non-JSON WASM panic — returns { ok: false }", async () => {
+    // A WASM-layer fault (panic) returns a raw non-JSON string. The bridge
+    // must honor its non-throwing contract: surface `{ ok: false }` with a
+    // `parse_failed` kind so the SW sig-router treats it as a transparent
+    // miss instead of a thrown EngineError that escapes the orchestrator.
+    wasmMocks.declarativeRouteTypedDataV3Json.mockReturnValue("PANIC");
+
+    const result = await declarativeRouteTypedDataV3(typedDataInput);
+
+    expect(result.ok).toBe(false);
+    expect(result.data).toBeUndefined();
+    expect(result.error?.kind).toBe("parse_failed");
+  });
+
+  it("declarativeRouteTypedDataV3 surfaces an err envelope without throwing", async () => {
+    wasmMocks.declarativeRouteTypedDataV3Json.mockReturnValue(
+      JSON.stringify({
+        ok: false,
+        error: { kind: "no_declarative_v3_mapper", message: "no bundle" },
+      }),
+    );
+
+    await expect(declarativeRouteTypedDataV3(typedDataInput)).resolves.toEqual({
+      ok: false,
+      error: { kind: "no_declarative_v3_mapper", message: "no bundle" },
+    });
   });
 });
