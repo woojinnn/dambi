@@ -2509,3 +2509,370 @@ fn t20_aave_repay_with_atokens() {
     assert_eq!(body["rate_mode"], "stable");
     assert_eq!(body["use_a_tokens"], true, "{body}");
 }
+
+// ===========================================================================
+// b1 — Uniswap Permit2 batch manifests (array_emit; mirrors on-disk
+//      registryV2/manifests/uniswap/permit2/{lockdown,permitBatch}@1.0.0.json)
+// ===========================================================================
+//
+// Two clean wallet-facing Permit2 BATCH functions fan out via `array_emit`
+// into a homogeneous `ActionBody::Multicall`:
+//   * b1 lockdown    → Multicall[RevokeApproval{Permit2Lockdown}]   (calldata)
+//   * b2 permitBatch → Multicall[Permit2SignAllowance]              (off-chain
+//                       EIP-712 sig; the GREEN coverage is the typed-data
+//                       route — see `declarative_v3_typed_data_install.rs`. On
+//                       the CALLDATA path the nested-tuple-array element loses
+//                       its ABI width so the uint48 `expiration` → `Time`/u64
+//                       deterministic field rejects the decimal string; this
+//                       test pins that documented gap.)
+//
+// Both manifests are inlined here VERBATIM from the on-disk fixtures (same
+// `match` / `abi_fragment` / `emit`). The selectors are `cast sig`-verified
+// (0xcc53287f / 0x2a2d80d1) and the `chain_to_addresses` mirror the existing
+// permit2 `approve@1.0.0` / `permitSingle@1.0.0` manifests (the Permit2
+// canonical CREATE2 address on all 4 chains; mainnet shown here, the on-disk
+// fixtures carry 1/10/8453/42161).
+
+// ---------------------------------------------------------------------------
+// b1 — Permit2 lockdown → ActionBody::Multicall { RevokeApproval x N }
+// ---------------------------------------------------------------------------
+//
+// `lockdown((address token, address spender)[] approvals)`. `array_emit` over
+// `$args.approvals` (a `tuple[]` → positional element array) emits one
+// `revoke_approval` per element with a `RevokeScope::Permit2Lockdown` scope.
+// All element fields are addresses → fully GREEN on the calldata route. The
+// two elements differ (token / spender), proving per-element `$inputs.[i]`
+// binding.
+
+const B1_PERMIT2_LOCKDOWN_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "uniswap/permit2/lockdown@1.0.0",
+  "publisher": "uniswap.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0xcc53287f",
+    "chain_to_addresses": {
+      "1":     ["0x000000000022d473030f116ddee9f6b43ac78ba3"],
+      "10":    ["0x000000000022d473030f116ddee9f6b43ac78ba3"],
+      "8453":  ["0x000000000022d473030f116ddee9f6b43ac78ba3"],
+      "42161": ["0x000000000022d473030f116ddee9f6b43ac78ba3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "lockdown",
+    "abi": {
+      "name": "lockdown",
+      "type": "function",
+      "inputs": [
+        {
+          "name": "approvals",
+          "type": "tuple[]",
+          "components": [
+            { "name": "token", "type": "address" },
+            { "name": "spender", "type": "address" }
+          ]
+        }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "array_emit",
+    "array_source": "$args.approvals",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "revoke_approval",
+        "revoke_approval": {
+          "scope": {
+            "kind": "permit2_lockdown",
+            "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.[0]" } },
+            "spender": "$inputs.[1]"
+          }
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+/// Build a 2-element `lockdown` calldata. `approvals` is a `tuple[]` so the
+/// args_json `approvals` field is a 2-element array of positional `[token,
+/// spender]` arrays (calldata tuples decode positionally — NOT named objects).
+fn b1_two_element_lockdown_calldata() -> String {
+    encode_calldata(
+        "0xcc53287f",
+        &[DynSolValue::Array(vec![
+            DynSolValue::Tuple(vec![
+                DynSolValue::Address(
+                    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+                DynSolValue::Address(
+                    "0x00000000000000000000000000000000deadbeef"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+            ]),
+            DynSolValue::Tuple(vec![
+                DynSolValue::Address(
+                    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+                DynSolValue::Address(
+                    "0x00000000000000000000000000000000cafef00d"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+            ]),
+        ])],
+    )
+}
+
+#[test]
+fn b1_permit2_lockdown_array_emit() {
+    let install = install_ok(B1_PERMIT2_LOCKDOWN_V3);
+    assert_eq!(install["data"]["bundle_id"], "uniswap/permit2/lockdown@1.0.0");
+
+    let input = route_input(
+        1,
+        "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        "0xcc53287f",
+        b1_two_element_lockdown_calldata(),
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(parsed["data"]["decoder_id"], "uniswap/permit2/lockdown@1.0.0");
+
+    // array_emit → Multicall with one revoke_approval per approvals element.
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let actions = body["actions"].as_array().expect("inner actions array");
+    assert_eq!(actions.len(), 2, "{parsed}");
+
+    // element-0 — RevokeScope::Permit2Lockdown (serde tag kind=permit2_lockdown).
+    assert_eq!(actions[0]["domain"], "token");
+    assert_eq!(actions[0]["action"], "revoke_approval");
+    assert_eq!(actions[0]["scope"]["kind"], "permit2_lockdown");
+    assert_eq!(
+        actions[0]["scope"]["token"]["key"]["address"],
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    );
+    assert_eq!(
+        actions[0]["scope"]["spender"],
+        "0x00000000000000000000000000000000deadbeef"
+    );
+
+    // element-1 — DIFFERENT token + spender prove per-element $inputs.[i] bind.
+    assert_eq!(actions[1]["action"], "revoke_approval");
+    assert_eq!(actions[1]["scope"]["kind"], "permit2_lockdown");
+    assert_eq!(
+        actions[1]["scope"]["token"]["key"]["address"],
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    );
+    assert_eq!(
+        actions[1]["scope"]["spender"],
+        "0x00000000000000000000000000000000cafef00d"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// b2 — Permit2 permitBatch via the CALLDATA route (documents the width gap)
+// ---------------------------------------------------------------------------
+//
+// `permit(address owner, PermitBatch permitBatch, bytes signature)` where
+// `PermitBatch = (PermitDetails[] details, address spender, uint256 sigDeadline)`
+// and `PermitDetails = (address token, uint160 amount, uint48 expiration,
+// uint48 nonce)`. `array_emit` over `$args.permitBatch.details` (the on-disk
+// manifest is typed-data-oriented like permitSingle@1.0.0 — its GREEN route is
+// the off-chain EIP-712 `permitBatch` signature, covered in
+// `declarative_v3_typed_data_install.rs::typed_data_permit2_permit_batch_on_disk_manifest`).
+//
+// On the CALLDATA path the positional element resolves token / amount /
+// spender / sig_deadline correctly, BUT the nested `PermitDetails[]` element
+// loses its ABI width: `decoded_value_to_json_typed` carries a tuple's
+// component types only for the parenthesised type string, not the bare
+// `"tuple[]"` alloy emits with field types out-of-band on `components`. So the
+// uint48 `expiration` renders as a DECIMAL STRING (not a JSON number), and the
+// deterministic `Permit2SignAction.expires_at: Time` (u64) rejects it →
+// `build_array_emit_failed` "expected u64". This is a Rust-level ABI-width gap
+// (out of the "no new Rust" scope of this task); the manifest's intended
+// wallet surface — the off-chain signature — is fully green via typed-data.
+// (Mirrors t4's documented-partial calldata precedent.)
+
+/// Build a 2-element calldata `permit(owner, permitBatch, signature)`.
+fn b2_permit_batch_calldata() -> String {
+    fn permit_details(token: &str, amount: u64, expiration: u64, nonce: u64) -> DynSolValue {
+        DynSolValue::Tuple(vec![
+            DynSolValue::Address(token.parse::<AlloyAddress>().unwrap()),
+            DynSolValue::Uint(AlloyU256::from(amount), 160),
+            DynSolValue::Uint(AlloyU256::from(expiration), 48),
+            DynSolValue::Uint(AlloyU256::from(nonce), 48),
+        ])
+    }
+    let permit_batch = DynSolValue::Tuple(vec![
+        DynSolValue::Array(vec![
+            permit_details(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                1000,
+                1_738_001_800,
+                0,
+            ),
+            permit_details(
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                2000,
+                1_738_001_900,
+                1,
+            ),
+        ]),
+        DynSolValue::Address(
+            "0x00000000000000000000000000000000deadbeef"
+                .parse::<AlloyAddress>()
+                .unwrap(),
+        ),
+        DynSolValue::Uint(AlloyU256::from(1_738_002_000u64), 256),
+    ]);
+    encode_calldata(
+        "0x2a2d80d1",
+        &[
+            DynSolValue::Address(
+                "0x000000000000000000000000000000000000a01c"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            permit_batch,
+            DynSolValue::Bytes(vec![0xab, 0xcd]),
+        ],
+    )
+}
+
+#[test]
+fn b2_permit2_permit_batch_calldata_width_gap() {
+    // Inline the on-disk permitBatch manifest (typed-data-oriented; named
+    // per-item access) so this test pins its CALLDATA behavior.
+    const B2_PERMIT2_PERMIT_BATCH_V3: &str = r#"{
+      "type": "adapter_action",
+      "id": "uniswap/permit2/permitBatch@1.0.0",
+      "publisher": "uniswap.eth",
+      "schema_version": "3",
+      "match": {
+        "selector": "0x2a2d80d1",
+        "chain_to_addresses": { "1": ["0x000000000022d473030f116ddee9f6b43ac78ba3"] },
+        "typed_data": {
+          "domain_name": "Permit2",
+          "verifying_contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+          "primary_type": "PermitBatch",
+          "types": {
+            "PermitBatch": [
+              { "name": "details", "type": "PermitDetails[]" },
+              { "name": "spender", "type": "address" },
+              { "name": "sigDeadline", "type": "uint256" }
+            ],
+            "PermitDetails": [
+              { "name": "token", "type": "address" },
+              { "name": "amount", "type": "uint160" },
+              { "name": "expiration", "type": "uint48" },
+              { "name": "nonce", "type": "uint48" }
+            ]
+          }
+        }
+      },
+      "abi_fragment": {
+        "function_name": "permit",
+        "abi": {
+          "name": "permit",
+          "type": "function",
+          "inputs": [
+            { "name": "owner", "type": "address" },
+            {
+              "name": "permitBatch",
+              "type": "tuple",
+              "components": [
+                {
+                  "name": "details",
+                  "type": "tuple[]",
+                  "components": [
+                    { "name": "token", "type": "address" },
+                    { "name": "amount", "type": "uint160" },
+                    { "name": "expiration", "type": "uint48" },
+                    { "name": "nonce", "type": "uint48" }
+                  ]
+                },
+                { "name": "spender", "type": "address" },
+                { "name": "sigDeadline", "type": "uint256" }
+              ]
+            },
+            { "name": "signature", "type": "bytes" }
+          ]
+        }
+      },
+      "emit": {
+        "strategy": "array_emit",
+        "array_source": "$args.permitBatch.details",
+        "body": {
+          "domain": "token",
+          "token": {
+            "action": "permit2_sign_allowance",
+            "permit2_sign_allowance": {
+              "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.token" } },
+              "spender": "$args.permitBatch.spender",
+              "amount": "$inputs.amount",
+              "expires_at": "$inputs.expiration",
+              "sig_deadline": "$args.permitBatch.sigDeadline"
+            }
+          }
+        },
+        "live_inputs": {
+          "nonce": {
+            "source": {
+              "kind": "onchain_view",
+              "chain": "$chain",
+              "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+              "function": "nonceBitmap(address,uint256)",
+              "decoder_id": "permit2_nonce_bitmap"
+            },
+            "ttl_s": 12
+          }
+        }
+      },
+      "requires": {
+        "imperative": [],
+        "adapter_capabilities": ["token_metadata"],
+        "host_capabilities": [],
+        "extension": ">=0.1.0"
+      }
+    }"#;
+
+    let install = install_ok(B2_PERMIT2_PERMIT_BATCH_V3);
+    assert_eq!(install["data"]["bundle_id"], "uniswap/permit2/permitBatch@1.0.0");
+
+    let input = route_input(
+        1,
+        "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        "0x2a2d80d1",
+        b2_permit_batch_calldata(),
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    // CALLDATA path: the on-disk manifest uses NAMED per-item access
+    // (`$inputs.token` etc.) which is the EIP-712 (typed-data) convention. On
+    // the calldata route the decoded `permitBatch` tuple is POSITIONAL, so the
+    // named `$args.permitBatch.spender` walk fails first → InvalidArgPath, OR —
+    // if a manifest used positional access — the uint48 `expiration` width gap
+    // surfaces as "expected u64". Either way the calldata route is NOT green;
+    // it surfaces a `build_array_emit_failed` envelope. The off-chain signature
+    // route (typed-data) is the green wallet surface (separate test).
+    let out = declarative_route_request_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], false, "{parsed}");
+    assert_eq!(
+        parsed["error"]["kind"], "build_array_emit_failed",
+        "{parsed}"
+    );
+}
