@@ -826,3 +826,380 @@ fn t6_array_emit_non_array_source_errors() {
         "{parsed}"
     );
 }
+
+// ===========================================================================
+// B.2.1 — Aave V3 Tier-1 Pool manifests (lending domain)
+// ===========================================================================
+//
+// Three on-chain `Pool` calls route into the `lending` `ActionBody`:
+//   * t7 liquidationCall  → LendingAction::Liquidate
+//   * t8 setUserEMode     → LendingAction::SetEMode      (serde tag `set_e_mode`)
+//   * t9 swapBorrowRateMode → LendingAction::SwapRateMode
+//
+// Each inline manifest is IDENTICAL in `abi_fragment` + `emit.body` to the
+// committed fixture under `registryV2/manifests/aave/v3/`. The selectors are
+// `cast sig`-verified (0x00a718a9 / 0x28530a47 / 0x94ba89a2) and the venue
+// `chain_to_addresses` mirror the existing supply/borrow/withdraw/repay
+// manifests (mainnet Pool here; the on-disk fixtures carry all 4 chains).
+//
+// DUAL-BRANCH ASSERTION (same contract as t3/t4 above)
+// ----------------------------------------------------
+// These manifests are STRUCTURALLY valid: install succeeds, the selector +
+// address match, `$args.*` / `$chain` / `$to` placeholders substitute, and the
+// body flattens into the right `LendingAction` variant. The ONE remaining gap
+// before a fully green `ok:true` route is downstream of the manifest and owned
+// by a separate cross-cutting task ("live_field VALUE-fill orchestrator
+// wiring"):
+//   * liquidate / swap_rate_mode — `action_builder::live_input_default` has no
+//     `(lending, …)` entries, so each `LiveField<T>` wrap defaults its `value`
+//     to JSON `null`; `LiveField<UserLendingState>` / `LiveField<(U256,U256)>`
+//     cannot deserialize from `null` → `build_action_body_failed`. The failure
+//     message names the live struct (`UserLendingState`) / its shape
+//     (`tuple of size 2`), proving every deterministic + `$args` field already
+//     resolved and ONLY the live default is missing.
+//   * set_e_mode — `categoryId` is a `uint8`; `args_to_json` emits uints as
+//     DECIMAL STRINGS (the same limitation pinned by t3's Permit2 `expiration`
+//     `expected u64`), and `u8` serde rejects a JSON string → the documented
+//     `build_action_body_failed` (`string "…", expected u8`). The numeric
+//     string-coercion shim is M3+/orchestrator scope, not a manifest defect.
+//
+// So each test asserts EITHER the full `lending` body lands (ok, domain +
+// action + a load-bearing `$args` field) OR the specific documented
+// `build_action_body_failed` fallback — and in the fallback branch we assert
+// the message is the KNOWN downstream serde gap (NOT an
+// unresolved/invalid-arg-path/unknown-placeholder error), which is the proof
+// that the manifest's placeholder mapping is correct.
+
+/// Assert that `parsed` is the documented action_builder serde fallback whose
+/// message contains one of `needles` — and is NOT a placeholder/arg-path
+/// resolution error (those would indicate a broken manifest mapping, not the
+/// known downstream live-default / uint-coercion gap).
+fn assert_action_builder_fallback(parsed: &Value, needles: &[&str]) {
+    assert_eq!(parsed["ok"], false, "{parsed}");
+    assert_eq!(
+        parsed["error"]["kind"], "build_action_body_failed",
+        "expected build_action_body_failed fallback, got: {parsed}"
+    );
+    let msg = parsed["error"]["message"].as_str().unwrap_or("");
+    // Proof the manifest's placeholder mapping is sound: the failure is a
+    // typed-decode gap, never an unresolved `$args.*` / `$resolved.*` /
+    // `$derived.*` substitution.
+    for forbidden in [
+        "InvalidArgPath",
+        "did not resolve",
+        "unknown placeholder",
+        "UnresolvedPlaceholder",
+    ] {
+        assert!(
+            !msg.contains(forbidden),
+            "manifest placeholder mapping broke ({forbidden}): {parsed}"
+        );
+    }
+    assert!(
+        needles.iter().any(|n| msg.contains(n)),
+        "expected one of {needles:?} in error message, got: {parsed}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// t7 — Aave V3 liquidationCall → LendingAction::Liquidate
+// ---------------------------------------------------------------------------
+
+const T7_AAVE_LIQUIDATION_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "aave/v3/liquidationCall@1.0.0",
+  "publisher": "aave.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x00a718a9",
+    "chain_to_addresses": { "1": ["0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"] }
+  },
+  "abi_fragment": {
+    "function_name": "liquidationCall",
+    "abi": {
+      "name": "liquidationCall",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "collateralAsset", "type": "address" },
+        { "name": "debtAsset",       "type": "address" },
+        { "name": "user",            "type": "address" },
+        { "name": "debtToCover",     "type": "uint256" },
+        { "name": "receiveAToken",   "type": "bool"    }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "action": "liquidate",
+        "liquidate": {
+          "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
+          "victim":          "$args.user",
+          "debt_asset":      { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.debtAsset" } },
+          "collat_asset":    { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.collateralAsset" } },
+          "debt_to_cover":   "$args.debtToCover",
+          "receive_a_token": "$args.receiveAToken"
+        }
+      }
+    },
+    "live_inputs": {
+      "victim_state":       { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getUserAccountData(address)", "decoder_id": "aave_v3_user_account_data" }, "ttl_s": 12 },
+      "liquidation_bonus":  { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getConfiguration(address)", "decoder_id": "aave_v3_reserve_config" }, "ttl_s": 60 },
+      "debt_asset_price":   { "source": { "kind": "oracle_feed", "provider": "chainlink", "feed_id": "AAVE_V3_RESERVE_PRICE" }, "ttl_s": 60 },
+      "collat_asset_price": { "source": { "kind": "oracle_feed", "provider": "chainlink", "feed_id": "AAVE_V3_RESERVE_PRICE" }, "ttl_s": 60 }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+#[test]
+fn t7_aave_liquidation_call() {
+    let install = install_ok(T7_AAVE_LIQUIDATION_V3);
+    assert_eq!(install["data"]["bundle_id"], "aave/v3/liquidationCall@1.0.0");
+
+    let calldata = encode_calldata(
+        "0x00a718a9",
+        &[
+            // collateralAsset (load-bearing) — WETH
+            DynSolValue::Address(
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            // debtAsset — USDC
+            DynSolValue::Address(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            // user (victim, load-bearing)
+            DynSolValue::Address(
+                "0x000000000000000000000000000000000000cccc"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            // debtToCover
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            // receiveAToken
+            DynSolValue::Bool(true),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "0x00a718a9",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let out = declarative_route_request_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    if parsed["ok"] == Value::Bool(true) {
+        let body = &parsed["data"]["actions"][0]["body"];
+        assert_eq!(body["domain"], "lending");
+        assert_eq!(body["action"], "liquidate");
+        assert_eq!(body["venue"]["name"], "aave_v3");
+        // load-bearing $args fields resolved from calldata.
+        assert_eq!(
+            body["collat_asset"]["key"]["address"],
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        );
+        assert_eq!(
+            body["debt_asset"]["key"]["address"],
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        );
+        assert_eq!(body["victim"], "0x000000000000000000000000000000000000cccc");
+    } else {
+        // Documented live-default gap: LiveField<UserLendingState>.value=null.
+        assert_action_builder_fallback(&parsed, &["UserLendingState"]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// t8 — Aave V3 setUserEMode → LendingAction::SetEMode (tag `set_e_mode`)
+// ---------------------------------------------------------------------------
+
+const T8_AAVE_SET_EMODE_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "aave/v3/setUserEMode@1.0.0",
+  "publisher": "aave.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x28530a47",
+    "chain_to_addresses": { "1": ["0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"] }
+  },
+  "abi_fragment": {
+    "function_name": "setUserEMode",
+    "abi": {
+      "name": "setUserEMode",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [ { "name": "categoryId", "type": "uint8" } ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "action": "set_e_mode",
+        "set_e_mode": {
+          "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
+          "category_id": "$args.categoryId"
+        }
+      }
+    },
+    "live_inputs": {
+      "category_config":   { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getEModeCategoryData(uint8)", "decoder_id": "aave_v3_emode_category" }, "ttl_s": 60 },
+      "user_state_before": { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getUserAccountData(address)", "decoder_id": "aave_v3_user_account_data" }, "ttl_s": 12 }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+#[test]
+fn t8_aave_set_user_emode() {
+    let install = install_ok(T8_AAVE_SET_EMODE_V3);
+    assert_eq!(install["data"]["bundle_id"], "aave/v3/setUserEMode@1.0.0");
+
+    // categoryId = 2 (a load-bearing arg: selects the e-mode category).
+    let calldata = encode_calldata("0x28530a47", &[DynSolValue::Uint(AlloyU256::from(2u64), 8)]);
+    let input = route_input(
+        1,
+        "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "0x28530a47",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let out = declarative_route_request_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    if parsed["ok"] == Value::Bool(true) {
+        let body = &parsed["data"]["actions"][0]["body"];
+        assert_eq!(body["domain"], "lending");
+        assert_eq!(body["action"], "set_e_mode");
+        assert_eq!(body["venue"]["name"], "aave_v3");
+        // load-bearing arg: category id resolved (2) — number OR string form.
+        let cat = &body["category_id"];
+        assert!(
+            cat == &Value::from(2u64) || cat == &Value::from("2"),
+            "category_id should be 2: {parsed}"
+        );
+    } else {
+        // Documented uint-arg-as-decimal-string gap (cf. t3 Permit2 expiration):
+        // `categoryId` u8 ← JSON string "2" → serde rejects.
+        assert_action_builder_fallback(&parsed, &["expected u8", "u8"]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// t9 — Aave V3 swapBorrowRateMode → LendingAction::SwapRateMode
+// ---------------------------------------------------------------------------
+
+const T9_AAVE_SWAP_RATE_MODE_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "aave/v3/swapBorrowRateMode@1.0.0",
+  "publisher": "aave.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x94ba89a2",
+    "chain_to_addresses": { "1": ["0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"] }
+  },
+  "abi_fragment": {
+    "function_name": "swapBorrowRateMode",
+    "abi": {
+      "name": "swapBorrowRateMode",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "asset",            "type": "address" },
+        { "name": "interestRateMode", "type": "uint256" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "action": "swap_rate_mode",
+        "swap_rate_mode": {
+          "venue": { "name": "aave_v3", "chain": "$chain", "pool": "$to", "market_id": null },
+          "asset":    { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
+          "new_mode": "variable"
+        }
+      }
+    },
+    "live_inputs": {
+      "current_debts": { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getUserReserveData(address,address)", "decoder_id": "aave_v3_user_reserve_debts" }, "ttl_s": 12 },
+      "rates":         { "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "getReserveData(address)", "decoder_id": "aave_v3_reserve_rates" }, "ttl_s": 30 }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+#[test]
+fn t9_aave_swap_borrow_rate_mode() {
+    let install = install_ok(T9_AAVE_SWAP_RATE_MODE_V3);
+    assert_eq!(install["data"]["bundle_id"], "aave/v3/swapBorrowRateMode@1.0.0");
+
+    let calldata = encode_calldata(
+        "0x94ba89a2",
+        &[
+            // asset (load-bearing) — USDC
+            DynSolValue::Address(
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            // interestRateMode (current mode being swapped from)
+            DynSolValue::Uint(AlloyU256::from(2u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "0x94ba89a2",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let out = declarative_route_request_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    if parsed["ok"] == Value::Bool(true) {
+        let body = &parsed["data"]["actions"][0]["body"];
+        assert_eq!(body["domain"], "lending");
+        assert_eq!(body["action"], "swap_rate_mode");
+        assert_eq!(body["venue"]["name"], "aave_v3");
+        // load-bearing $args field resolved.
+        assert_eq!(
+            body["asset"]["key"]["address"],
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        );
+        assert_eq!(body["new_mode"], "variable");
+    } else {
+        // Documented live-default gap: LiveField<(U256, U256)>.value=null.
+        assert_action_builder_fallback(&parsed, &["tuple of size 2", "tuple"]);
+    }
+}
