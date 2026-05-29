@@ -126,10 +126,11 @@ mod tests {
     const FROM: &str = "0x1111111111111111111111111111111111111111";
     const TO: &str = "0x2222222222222222222222222222222222222222";
 
-    /// A not-yet-lowered action (here `Unknown`, whose domain is still a stub)
-    /// returns `Unsupported` with the expected label — never a silent success.
+    /// An `Unknown` action (catch-all for unmatched calldata) routes through
+    /// dispatch and lowers to the `Core::Action::"Unknown"` uid — confirming the
+    /// `Multicall` / `Unknown` struct-variant arms reach their leaf lowerings.
     #[test]
-    fn unsupported_action_returns_unsupported_with_label() {
+    fn unknown_action_lowers_to_core_unknown() {
         let now = Time::from_unix(1_738_000_000);
         let body = ActionBody::Unknown {
             target: Address::from_str("0xfeed000000000000000000000000000000000001").unwrap(),
@@ -156,9 +157,7 @@ mod tests {
             },
         };
 
-        let err = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap_err();
-        match err {
-            LowerError::Unsupported(label) => assert_eq!(label, "unknown"),
-        }
+        let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        assert_eq!(lowered.action_uid, r#"Core::Action::"Unknown""#);
     }
 }
