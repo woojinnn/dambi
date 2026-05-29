@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use mappers::declarative::action_builder::{
     build_action_body, build_array_emit, build_multicall_from_opcode_stream,
-    UnknownOpcodePolicy as V3UnknownOpcodePolicy, V3MapContext,
+    substitute_placeholders, UnknownOpcodePolicy as V3UnknownOpcodePolicy, V3MapContext,
 };
 use mappers::declarative::eval::args_to_json;
 use mappers::declarative::types::BundleMatch;
@@ -427,6 +427,27 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             );
         }
 
+        // B.1.c — Uniswap V4 singleton `PoolManager` per chain. It is the
+        // `IPoolManager` immutable wired into the PositionManager at deploy
+        // and is NEVER in `modifyLiquidities` calldata, but is fixed per chain,
+        // so it is pre-populated here (mirroring the static WETH injection) for
+        // the V4 manifest's `$resolved.pool_manager` venue field. Addresses are
+        // the verified V4 deployments (docs UNISWAP_B1_SOURCE_RESEARCH.md §2;
+        // mainnet + Base explorer "Exact Match", OP/ARB docs-table sourced).
+        let v4_pool_manager: Option<&'static str> = match input.chain_id {
+            1 => Some("0x000000000004444c5dc75cb358380d2e3de08a90"),
+            8453 => Some("0x498581ff718922c3f8e6a244956af099b2652b2b"),
+            10 => Some("0x9a13f98cb987694c9f086b1f5eb990eea8264ec3"),
+            42161 => Some("0x360e68faccca8ca495c1b759fd9eee466db9fb32"),
+            _ => None,
+        };
+        if let Some(addr) = v4_pool_manager {
+            resolved.insert(
+                "pool_manager".to_owned(),
+                serde_json::Value::String(addr.to_owned()),
+            );
+        }
+
         let ctx = V3MapContext {
             chain: chain.clone(),
             tx_to: target,
@@ -479,28 +500,64 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                     _ => V3UnknownOpcodePolicy::Warn,
                 };
 
-                let commands_str = args_json
-                    .get("commands")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        EngineErrorDto::new("invalid_args", "missing args.commands".to_string())
-                    })?;
-                let commands_bytes = hex::decode(
-                    commands_str.strip_prefix("0x").unwrap_or(commands_str),
-                )
-                .map_err(|error| {
-                    EngineErrorDto::new(
-                        "invalid_commands",
-                        format!("commands not hex: {error}"),
-                    )
-                })?;
-
-                let inputs_array = args_json
-                    .get("inputs")
-                    .and_then(serde_json::Value::as_array)
-                    .ok_or_else(|| {
-                        EngineErrorDto::new("invalid_args", "missing args.inputs".to_string())
-                    })?;
+                // Commands + inputs come from one of two shapes:
+                //
+                //   * Universal Router: top-level ABI args `commands` (bytes) +
+                //     `inputs` (bytes[]). The default — used when the manifest
+                //     omits `emit.unlock_data_source`.
+                //   * Uniswap V4 `modifyLiquidities`: ONE `unlockData` bytes
+                //     arg that is itself `abi.encode(bytes actions, bytes[]
+                //     params)`. When `emit.unlock_data_source` is present we
+                //     resolve that `$args.<name>` placeholder to the bytes hex
+                //     and abi-decode it into `(actions, params[])` — the SAME
+                //     `(commands, inputs[])` shape, just nested one decode deep.
+                //     Everything downstream (per-opcode `inputs_abi` decode +
+                //     `build_multicall_from_opcode_stream`) is identical.
+                //
+                // `unlock_decoded` owns the V4 path's decoded `bytes[]` so the
+                // `inputs_array` borrow below outlives the match.
+                let unlock_decoded: Option<Vec<serde_json::Value>>;
+                let (commands_bytes, inputs_array): (Vec<u8>, &Vec<serde_json::Value>) =
+                    if let Some(src) = emit
+                        .get("unlock_data_source")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        let (actions, params) =
+                            decode_v4_unlock_data(&ctx, src).map_err(|error| {
+                                EngineErrorDto::new("invalid_unlock_data", error)
+                            })?;
+                        unlock_decoded = Some(params);
+                        (actions, unlock_decoded.as_ref().expect("just set"))
+                    } else {
+                        let commands_str = args_json
+                            .get("commands")
+                            .and_then(serde_json::Value::as_str)
+                            .ok_or_else(|| {
+                                EngineErrorDto::new(
+                                    "invalid_args",
+                                    "missing args.commands".to_string(),
+                                )
+                            })?;
+                        let commands_bytes = hex::decode(
+                            commands_str.strip_prefix("0x").unwrap_or(commands_str),
+                        )
+                        .map_err(|error| {
+                            EngineErrorDto::new(
+                                "invalid_commands",
+                                format!("commands not hex: {error}"),
+                            )
+                        })?;
+                        let inputs_array = args_json
+                            .get("inputs")
+                            .and_then(serde_json::Value::as_array)
+                            .ok_or_else(|| {
+                                EngineErrorDto::new(
+                                    "invalid_args",
+                                    "missing args.inputs".to_string(),
+                                )
+                            })?;
+                        (commands_bytes, inputs_array)
+                    };
 
                 // Per-opcode `inputs_abi` ABI-decode pass. The v3 manifest
                 // attaches the Solidity tuple signature next to each
@@ -549,12 +606,22 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                     let opcode_id = opcode_byte & mask;
                     let opcode_key = format!("0x{opcode_id:02x}");
 
-                    let decoded_input = per_opcode_body
+                    let mut decoded_input = per_opcode_body
                         .get(&opcode_key)
                         .and_then(|entry| entry.get("inputs_abi"))
                         .and_then(serde_json::Value::as_str)
                         .and_then(|sig| decode_inputs_abi_tuple(sig, &input_bytes).ok())
                         .unwrap_or(serde_json::Value::Null);
+                    // B.1.c — Uniswap V4 MINT_POSITION carries an INLINE PoolKey
+                    // (head-flattened currency0/currency1/fee/tickSpacing/hooks).
+                    // The manifest references `$inputs.pool_id`, but the manifest
+                    // can't hash, so compute pool_id = keccak256(abi.encode(
+                    // poolKey)) in Rust and splice it into the decoded inputs
+                    // object as a synthetic field. Gated on the 5 PoolKey field
+                    // names being present (only MINT in modifyLiquidities carries
+                    // an inline PoolKey — INCREASE/DECREASE/BURN carry only
+                    // tokenId), so this is manifest-agnostic + a no-op otherwise.
+                    maybe_inject_v4_pool_id(&mut decoded_input);
                     decoded_inputs_array.push(decoded_input);
                 }
 
@@ -986,14 +1053,177 @@ fn decode_inputs_abi_tuple(
 
     let mut obj = serde_json::Map::with_capacity(decoded.args.len());
     for arg in &decoded.args {
-        let decoded_value = abi_resolver::bridge::convert_value(arg.value.clone())
+        // `bridge::convert_arg` both converts the `DynSolValue` AND rebuilds the
+        // canonical ABI type from `sol_type` + `components` (`canonical_abi_type`)
+        // — the bare `decode::DecodedArg.sol_type` is `"tuple"` for compound
+        // params, so we need the rebuilt `abi_type` to thread per-field widths.
+        let converted = abi_resolver::bridge::convert_arg(arg.clone())
             .map_err(|error| format!("convert {inputs_abi:?}.{}: {error}", arg.name))?;
+        // Thread the per-field ABI width (`uint24` / `int24` / `uint48` ...) so
+        // narrow ints render as JSON NUMBERS, matching `args_to_json`'s
+        // `decoded_value_to_json_typed` convention (commit 6a24f09). Without it
+        // a `uint24 fee` / `int24 tickSpacing|tickLower` collapses to a decimal
+        // string — which both fails the `i32 RangeSpec::Tick.lower` deserialize
+        // AND breaks `compute_v4_pool_id`'s `as_u64`/`as_i64` reads. `uint256`
+        // / `address` / `bytes` / `bool` are unaffected (string/bool either
+        // way), so existing UR opcode-stream bodies keep their shape.
         obj.insert(
-            arg.name.clone(),
-            mappers::declarative::eval::decoded_value_to_json(&decoded_value),
+            converted.name.clone(),
+            mappers::declarative::eval::decoded_value_to_json_typed(
+                &converted.value,
+                &converted.abi_type,
+            ),
         );
     }
     Ok(serde_json::Value::Object(obj))
+}
+
+/// B.1.c — decode a Uniswap V4 `unlockData` bytes arg into `(actions, params)`.
+///
+/// `modifyLiquidities(bytes unlockData, ...)` carries `unlockData =
+/// abi.encode(bytes actions, bytes[] params)` (verified against
+/// `BaseActionsRouter._unlockCallback` / `CalldataDecoder.
+/// decodeActionsRouterParams`). `src` is the `$args.<name>` placeholder naming
+/// the bytes arg (`"$args.unlockData"`); we resolve it against `ctx`, hex-decode
+/// the bytes, then ABI-decode the canonical `(bytes, bytes[])` tuple.
+///
+/// Returns `(actions_bytes, params_hex_array)` where `actions_bytes` is the
+/// packed one-byte-per-action command blob (used as `commands_bytes`) and
+/// `params_hex_array` is the parallel `bytes[]` of per-action tuples (used as
+/// `inputs_array`). This reuses [`decode_inputs_abi_tuple`] — which routes
+/// through `abi_resolver` — so this crate never names `DynSolValue` directly
+/// (matching the `alloy-dyn-abi`-is-dev-only constraint).
+///
+/// A standard `(bytes, bytes[])` ABI decode matches the wire: the
+/// `OFFSET_OR_LENGTH_MASK` (`& 0xffffffff`) the strict on-chain decoder applies
+/// is irrelevant for honest calls (offsets never exceed 32 bits).
+fn decode_v4_unlock_data(
+    ctx: &V3MapContext<'_>,
+    src: &str,
+) -> Result<(Vec<u8>, Vec<serde_json::Value>), String> {
+    // Resolve the `$args.<name>` placeholder to the unlockData bytes hex.
+    let unlock_hex =
+        substitute_placeholders(ctx, &serde_json::Value::String(src.to_owned()))
+            .map_err(|error| format!("resolve {src:?}: {error}"))?;
+    let unlock_str = unlock_hex
+        .as_str()
+        .ok_or_else(|| format!("{src:?} did not resolve to a bytes hex string"))?;
+    let unlock_bytes =
+        hex::decode(unlock_str.strip_prefix("0x").unwrap_or(unlock_str))
+            .map_err(|error| format!("unlockData not hex: {error}"))?;
+
+    // ABI-decode `(bytes actions, bytes[] params)` via the shared tuple decoder.
+    let decoded =
+        decode_inputs_abi_tuple("(bytes actions, bytes[] params)", &unlock_bytes)?;
+
+    let actions_str = decoded
+        .get("actions")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "decoded unlockData missing `actions` bytes".to_string())?;
+    let actions_bytes =
+        hex::decode(actions_str.strip_prefix("0x").unwrap_or(actions_str))
+            .map_err(|error| format!("actions not hex: {error}"))?;
+
+    let params = decoded
+        .get("params")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "decoded unlockData missing `params` array".to_string())?
+        .clone();
+
+    if actions_bytes.len() != params.len() {
+        return Err(format!(
+            "InputLengthMismatch: {} actions vs {} params",
+            actions_bytes.len(),
+            params.len()
+        ));
+    }
+
+    Ok((actions_bytes, params))
+}
+
+/// B.1.c — if a decoded V4 action's inputs object carries an INLINE `PoolKey`
+/// (the head-flattened `currency0`/`currency1`/`fee`/`tickSpacing`/`hooks`
+/// fields of `MINT_POSITION`), compute `pool_id = keccak256(abi.encode(
+/// poolKey))` and splice it in as a synthetic `pool_id` field.
+///
+/// `PoolId.toId` is `keccak256(poolKey, 0xa0)` over the 5 contiguous 32-byte
+/// slots — identical to `keccak256(abi.encode(poolKey))` since `PoolKey` has no
+/// dynamic members (`cast`-verified 0xa0 length). Only `MINT_POSITION` (0x02)
+/// carries an inline PoolKey inside `modifyLiquidities`; INCREASE/DECREASE/BURN
+/// carry only `tokenId`, so the field-presence gate makes this a no-op for
+/// them (their `pool_id` stays the manifest's `"unknown"` sentinel).
+///
+/// The canonical 0xa0 encoding is built by hand (address left-pad, `uint24`
+/// big-endian, `int24` two's-complement big-endian) so this crate keeps
+/// `alloy-dyn-abi` out of its non-dev surface — only `alloy_primitives::
+/// keccak256` (a regular dep) is used.
+fn maybe_inject_v4_pool_id(decoded: &mut serde_json::Value) {
+    let Some(obj) = decoded.as_object() else {
+        return;
+    };
+    // Gate: all 5 PoolKey fields present ⇒ this is a MINT inline PoolKey.
+    let (Some(c0), Some(c1), Some(fee), Some(spacing), Some(hooks)) = (
+        obj.get("currency0").and_then(serde_json::Value::as_str),
+        obj.get("currency1").and_then(serde_json::Value::as_str),
+        obj.get("fee"),
+        obj.get("tickSpacing"),
+        obj.get("hooks").and_then(serde_json::Value::as_str),
+    ) else {
+        return;
+    };
+
+    let Some(pool_id) = compute_v4_pool_id(c0, c1, fee, spacing, hooks) else {
+        return;
+    };
+    if let Some(obj_mut) = decoded.as_object_mut() {
+        obj_mut.insert("pool_id".to_owned(), serde_json::Value::String(pool_id));
+    }
+}
+
+/// Build the canonical 0xa0 `abi.encode(PoolKey)` and return
+/// `0x` + `keccak256` hex, or `None` on any malformed field.
+///
+/// `fee` (`uint24`, ≤64 bits) arrives as a JSON number; `tickSpacing` (`int24`)
+/// as a (possibly negative) JSON number — both per `eval::*_to_json`'s
+/// width-aware rendering. Addresses are `0x`-prefixed 20-byte hex.
+fn compute_v4_pool_id(
+    currency0: &str,
+    currency1: &str,
+    fee: &serde_json::Value,
+    tick_spacing: &serde_json::Value,
+    hooks: &str,
+) -> Option<String> {
+    let mut buf = [0u8; 0xa0]; // 5 × 32 bytes.
+
+    write_address_word(&mut buf[0x00..0x20], currency0)?;
+    write_address_word(&mut buf[0x20..0x40], currency1)?;
+    // fee: uint24, zero-extended big-endian in the low 3 bytes of the word.
+    let fee_u = fee.as_u64()?;
+    buf[0x5d..0x60].copy_from_slice(&fee_u.to_be_bytes()[5..8]);
+    // tickSpacing: int24, sign-extended two's-complement big-endian.
+    let spacing_i = tick_spacing.as_i64()?;
+    let spacing_bytes = spacing_i.to_be_bytes(); // i64 two's-complement, 8 bytes.
+    let fill = if spacing_i < 0 { 0xffu8 } else { 0x00u8 };
+    for b in &mut buf[0x60..0x80] {
+        *b = fill;
+    }
+    // Low 3 bytes hold the int24; the sign-extension above covers the rest.
+    buf[0x7d..0x80].copy_from_slice(&spacing_bytes[5..8]);
+    write_address_word(&mut buf[0x80..0xa0], hooks)?;
+
+    Some(format!("0x{}", hex::encode(alloy_primitives::keccak256(buf))))
+}
+
+/// Write a `0x`-prefixed 20-byte address into a 32-byte word slot (left-padded
+/// with 12 zero bytes). Returns `None` if the hex is malformed.
+fn write_address_word(word: &mut [u8], addr_hex: &str) -> Option<()> {
+    let stripped = addr_hex.strip_prefix("0x").unwrap_or(addr_hex);
+    let bytes = hex::decode(stripped).ok()?;
+    if bytes.len() != 20 {
+        return None;
+    }
+    word[12..32].copy_from_slice(&bytes);
+    Some(())
 }
 
 #[cfg(test)]

@@ -3184,3 +3184,328 @@ fn b1_nfpm_burn_concentrated_burn() {
     );
     assert_eq!(body["params"]["nft_key"]["token_id"], "0x67932", "{parsed}"); // 424242
 }
+
+// ===========================================================================
+// b1.c — Uniswap V4 PositionManager.modifyLiquidities dispatch
+// ===========================================================================
+//
+// `modifyLiquidities(bytes unlockData, uint256 deadline)` selector 0xdd46508f.
+// `unlockData = abi.encode(bytes actions, bytes[] params)` — a packed
+// one-byte-per-action `actions` blob + a parallel `params[]` of abi-encoded
+// per-action tuples (the SAME `(commands, inputs[])` shape as the Universal
+// Router, just nested one `abi.decode` deep). The manifest uses
+// `emit.strategy: "opcode_stream_dispatch"` extended with an
+// `unlock_data_source: "$args.unlockData"` that pre-decodes the bytes arg into
+// commands+inputs before the shared per-opcode dispatch runs.
+//
+// Per-action mapping (PositionManager `_handleAction` table only):
+//   * 0x02 MINT_POSITION   → amm.add_liquidity / concentrated_mint. PoolKey is
+//     INLINE (head-flattened 5 fields) → pool_id = keccak256(abi.encode(poolKey))
+//     computed in Rust + injected as `$inputs.pool_id`.
+//   * 0x00 INCREASE        → amm.add_liquidity / concentrated_increase. Only
+//     tokenId in calldata → pool_id NOT statically recoverable → "unknown".
+//   * 0x01 DECREASE        → amm.remove_liquidity / concentrated_decrease.
+//   * 0x03 BURN            → amm.remove_liquidity / concentrated_burn.
+//   * settlement 0x0b-0x16 → skipped (unknown_opcode_policy=skip; absent from
+//     per_opcode_body). The liquidity action is the intent.
+//   * 0x04/0x05 DEPRECATED → emitted as Unknown (preserve the sandwich-risk
+//     signal without crashing).
+
+const V4_PM_MODIFY_LIQ_V3: &str =
+    include_str!("../../../registryV2/manifests/uniswap/v4-position-manager/modify-liquidities@1.0.0.json");
+
+// Verified V4 deployments (docs §2): mainnet (1).
+const V4_PM_MAINNET: &str = "0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e";
+const V4_POOL_MANAGER_MAINNET: &str = "0x000000000004444c5dc75cb358380d2e3de08a90";
+const V4_HOOKS: &str = "0x0000000000000000000000000000000000000000"; // no-hook pool
+const V4_SUBMITTER: &str = "0x000000000000000000000000000000000000aaaa";
+const V4_CURRENCY0: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
+const V4_CURRENCY1: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"; // WETH
+const V4_SELECTOR: &str = "0xdd46508f";
+
+/// Build `modifyLiquidities` calldata: `abi.encode(bytes actions, bytes[]
+/// params)` wrapped as the `unlockData` bytes arg + a `deadline` uint256.
+fn v4_modify_liquidities_calldata(actions: &[u8], params: Vec<Vec<u8>>) -> String {
+    let unlock_data = DynSolValue::Tuple(vec![
+        DynSolValue::Bytes(actions.to_vec()),
+        DynSolValue::Array(params.into_iter().map(DynSolValue::Bytes).collect()),
+    ])
+    .abi_encode_params();
+    encode_calldata(
+        V4_SELECTOR,
+        &[
+            DynSolValue::Bytes(unlock_data),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    )
+}
+
+/// Independently compute `pool_id = keccak256(abi.encode(poolKey))` over the 5
+/// PoolKey fields, exactly as the dispatcher does — pins the on-the-wire bytes.
+fn v4_pool_id(currency0: &str, currency1: &str, fee: u32, tick_spacing: i32, hooks: &str) -> String {
+    let encoded = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(currency0)),
+        DynSolValue::Address(addr(currency1)),
+        DynSolValue::Uint(AlloyU256::from(fee), 24),
+        DynSolValue::Int(alloy_primitives::I256::try_from(tick_spacing).unwrap(), 24),
+        DynSolValue::Address(addr(hooks)),
+    ])
+    .abi_encode_params();
+    format!("0x{}", hex::encode(alloy_primitives::keccak256(&encoded)))
+}
+
+/// MINT_POSITION (0x02) params tuple — PoolKey INLINE (head-flattened 5 fields)
+/// then tickLower/tickUpper/liquidity/amount0Max/amount1Max/owner/hookData.
+fn v4_mint_params(fee: u32, tick_spacing: i32, tick_lower: i32, tick_upper: i32) -> Vec<u8> {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(V4_CURRENCY0)),                     // currency0
+        DynSolValue::Address(addr(V4_CURRENCY1)),                     // currency1
+        DynSolValue::Uint(AlloyU256::from(fee), 24),                  // fee
+        DynSolValue::Int(alloy_primitives::I256::try_from(tick_spacing).unwrap(), 24), // tickSpacing
+        DynSolValue::Address(addr(V4_HOOKS)),                         // hooks
+        DynSolValue::Int(alloy_primitives::I256::try_from(tick_lower).unwrap(), 24),  // tickLower
+        DynSolValue::Int(alloy_primitives::I256::try_from(tick_upper).unwrap(), 24),  // tickUpper
+        DynSolValue::Uint(AlloyU256::from(5_000u64), 256),           // liquidity
+        DynSolValue::Uint(AlloyU256::from(1_000_000u64), 128),       // amount0Max
+        DynSolValue::Uint(AlloyU256::from(500u64), 128),             // amount1Max
+        DynSolValue::Address(addr(V4_SUBMITTER)),                     // owner
+        DynSolValue::Bytes(vec![]),                                   // hookData
+    ])
+    .abi_encode_params()
+}
+
+/// SETTLE_PAIR (0x0d) params tuple — (Currency currency0, Currency currency1).
+fn v4_settle_pair_params() -> Vec<u8> {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(V4_CURRENCY0)),
+        DynSolValue::Address(addr(V4_CURRENCY1)),
+    ])
+    .abi_encode_params()
+}
+
+// ---------------------------------------------------------------------------
+// b1.c.mint — MINT_POSITION + SETTLE_PAIR → concentrated_mint (settle skipped)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b1_v4_modify_liquidities_mint_settle_pair() {
+    let install = install_ok(V4_PM_MODIFY_LIQ_V3);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "uniswap/v4-position-manager/modify-liquidities@1.0.0"
+    );
+
+    // actions = [MINT_POSITION (0x02), SETTLE_PAIR (0x0d)]
+    let calldata = v4_modify_liquidities_calldata(
+        &[0x02, 0x0d],
+        vec![
+            v4_mint_params(3000, 60, -887_220, 887_220),
+            v4_settle_pair_params(),
+        ],
+    );
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"],
+        "uniswap/v4-position-manager/modify-liquidities@1.0.0"
+    );
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    // SETTLE_PAIR is skipped — exactly ONE child (the mint).
+    assert_eq!(body["actions"].as_array().unwrap().len(), 1, "{parsed}");
+
+    let mint = &body["actions"][0];
+    assert_eq!(mint["domain"], "amm", "{parsed}");
+    assert_eq!(mint["action"], "add_liquidity", "{parsed}");
+    assert_eq!(mint["venue"]["name"], "uniswap_v4", "{parsed}");
+    // pool_id computed in Rust = keccak256(abi.encode(poolKey)).
+    assert_eq!(
+        mint["venue"]["pool_id"],
+        v4_pool_id(V4_CURRENCY0, V4_CURRENCY1, 3000, 60, V4_HOOKS),
+        "{parsed}"
+    );
+    // pool_manager injected per-chain (mainnet V4 PoolManager).
+    assert_eq!(
+        mint["venue"]["pool_manager"], V4_POOL_MANAGER_MAINNET,
+        "{parsed}"
+    );
+    // hooks from calldata (real PoolKey.hooks).
+    assert_eq!(mint["venue"]["hooks"], V4_HOOKS, "{parsed}");
+    assert_eq!(mint["params"]["kind"], "concentrated_mint", "{parsed}");
+    // pool_pair = (currency0, currency1).
+    assert_eq!(
+        mint["params"]["pool_pair"][0]["key"]["address"], V4_CURRENCY0,
+        "{parsed}"
+    );
+    assert_eq!(
+        mint["params"]["pool_pair"][1]["key"]["address"], V4_CURRENCY1,
+        "{parsed}"
+    );
+    // range from tickLower/tickUpper (int24 → signed JSON numbers).
+    assert_eq!(mint["params"]["range"]["kind"], "tick", "{parsed}");
+    assert_eq!(mint["params"]["range"]["lower"], -887_220i64, "{parsed}");
+    assert_eq!(mint["params"]["range"]["upper"], 887_220i64, "{parsed}");
+    // amounts from amount0Max/amount1Max (uint128 → hex).
+    assert_eq!(mint["params"]["amount_desired"][0], "0xf4240", "{parsed}"); // 1_000_000
+    assert_eq!(mint["params"]["amount_desired"][1], "0x1f4", "{parsed}"); // 500
+    assert_eq!(mint["params"]["recipient"], V4_SUBMITTER, "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// b1.c.increase — INCREASE_LIQUIDITY + SETTLE_PAIR → concentrated_increase
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b1_v4_modify_liquidities_increase_settle_pair() {
+    install_ok(V4_PM_MODIFY_LIQ_V3);
+
+    // INCREASE_LIQUIDITY (0x00): (tokenId, liquidity, amount0Max, amount1Max, hookData)
+    let increase = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(424_242u64), 256),   // tokenId
+        DynSolValue::Uint(AlloyU256::from(7_777u64), 256),     // liquidity
+        DynSolValue::Uint(AlloyU256::from(2_000_000u64), 128), // amount0Max
+        DynSolValue::Uint(AlloyU256::from(1000u64), 128),      // amount1Max
+        DynSolValue::Bytes(vec![]),                            // hookData
+    ])
+    .abi_encode_params();
+    let calldata =
+        v4_modify_liquidities_calldata(&[0x00, 0x0d], vec![increase, v4_settle_pair_params()]);
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    assert_eq!(body["actions"].as_array().unwrap().len(), 1, "{parsed}");
+
+    let inc = &body["actions"][0];
+    assert_eq!(inc["domain"], "amm", "{parsed}");
+    assert_eq!(inc["action"], "add_liquidity", "{parsed}");
+    assert_eq!(inc["venue"]["name"], "uniswap_v4", "{parsed}");
+    // pool_id NOT statically recoverable for increase → "unknown" sentinel.
+    assert_eq!(inc["venue"]["pool_id"], "unknown", "{parsed}");
+    assert_eq!(
+        inc["venue"]["pool_manager"], V4_POOL_MANAGER_MAINNET,
+        "{parsed}"
+    );
+    assert_eq!(inc["params"]["kind"], "concentrated_increase", "{parsed}");
+    // nft_key = ERC721 off the PositionManager (`$to`) + tokenId.
+    assert_eq!(inc["params"]["nft_key"]["standard"], "erc721", "{parsed}");
+    assert_eq!(
+        inc["params"]["nft_key"]["contract"], V4_PM_MAINNET,
+        "{parsed}"
+    );
+    assert_eq!(inc["params"]["nft_key"]["token_id"], "0x67932", "{parsed}"); // 424242
+    // amounts from amount0Max/amount1Max.
+    assert_eq!(inc["params"]["amount_desired"][0], "0x1e8480", "{parsed}"); // 2_000_000
+    assert_eq!(inc["params"]["amount_desired"][1], "0x3e8", "{parsed}"); // 1000
+}
+
+// ---------------------------------------------------------------------------
+// b1.c.decrease — DECREASE_LIQUIDITY + TAKE_PAIR → concentrated_decrease
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b1_v4_modify_liquidities_decrease_take_pair() {
+    install_ok(V4_PM_MODIFY_LIQ_V3);
+
+    // DECREASE_LIQUIDITY (0x01): (tokenId, liquidity, amount0Min, amount1Min, hookData)
+    let decrease = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(424_242u64), 256),     // tokenId
+        DynSolValue::Uint(AlloyU256::from(123_456_789u64), 256), // liquidity
+        DynSolValue::Uint(AlloyU256::from(50u64), 128),          // amount0Min
+        DynSolValue::Uint(AlloyU256::from(60u64), 128),          // amount1Min
+        DynSolValue::Bytes(vec![]),                              // hookData
+    ])
+    .abi_encode_params();
+    // TAKE_PAIR (0x11): (Currency currency0, Currency currency1, address recipient)
+    let take_pair = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(V4_CURRENCY0)),
+        DynSolValue::Address(addr(V4_CURRENCY1)),
+        DynSolValue::Address(addr(V4_SUBMITTER)),
+    ])
+    .abi_encode_params();
+    let calldata = v4_modify_liquidities_calldata(&[0x01, 0x11], vec![decrease, take_pair]);
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    // TAKE_PAIR skipped — one child (the decrease).
+    assert_eq!(body["actions"].as_array().unwrap().len(), 1, "{parsed}");
+
+    let dec = &body["actions"][0];
+    assert_eq!(dec["domain"], "amm", "{parsed}");
+    assert_eq!(dec["action"], "remove_liquidity", "{parsed}");
+    assert_eq!(dec["venue"]["name"], "uniswap_v4", "{parsed}");
+    assert_eq!(dec["venue"]["pool_id"], "unknown", "{parsed}");
+    assert_eq!(dec["params"]["kind"], "concentrated_decrease", "{parsed}");
+    assert_eq!(
+        dec["params"]["nft_key"]["contract"], V4_PM_MAINNET,
+        "{parsed}"
+    );
+    assert_eq!(dec["params"]["nft_key"]["token_id"], "0x67932", "{parsed}"); // 424242
+    // liquidity_burn (uint256 wire → U128) = 123456789 = 0x75bcd15.
+    assert_eq!(dec["params"]["liquidity_burn"], "0x75bcd15", "{parsed}");
+    assert_eq!(dec["params"]["amount_min"][0], "0x32", "{parsed}"); // 50
+    assert_eq!(dec["params"]["amount_min"][1], "0x3c", "{parsed}"); // 60
+}
+
+// ---------------------------------------------------------------------------
+// b1.c.burn — BURN_POSITION + TAKE_PAIR → concentrated_burn
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b1_v4_modify_liquidities_burn() {
+    install_ok(V4_PM_MODIFY_LIQ_V3);
+
+    // BURN_POSITION (0x03): (tokenId, amount0Min, amount1Min, hookData)
+    let burn = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(424_242u64), 256), // tokenId
+        DynSolValue::Uint(AlloyU256::from(0u64), 128),       // amount0Min
+        DynSolValue::Uint(AlloyU256::from(0u64), 128),       // amount1Min
+        DynSolValue::Bytes(vec![]),                          // hookData
+    ])
+    .abi_encode_params();
+    let take_pair = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(V4_CURRENCY0)),
+        DynSolValue::Address(addr(V4_CURRENCY1)),
+        DynSolValue::Address(addr(V4_SUBMITTER)),
+    ])
+    .abi_encode_params();
+    let calldata = v4_modify_liquidities_calldata(&[0x03, 0x11], vec![burn, take_pair]);
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    assert_eq!(body["actions"].as_array().unwrap().len(), 1, "{parsed}");
+
+    let b = &body["actions"][0];
+    assert_eq!(b["action"], "remove_liquidity", "{parsed}");
+    assert_eq!(b["params"]["kind"], "concentrated_burn", "{parsed}");
+    assert_eq!(b["params"]["nft_key"]["contract"], V4_PM_MAINNET, "{parsed}");
+    assert_eq!(b["params"]["nft_key"]["token_id"], "0x67932", "{parsed}"); // 424242
+}
+
+// ---------------------------------------------------------------------------
+// b1.c.deprecated — MINT_POSITION_FROM_DELTAS (0x05) → Unknown (no crash)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b1_v4_modify_liquidities_deprecated_emits_unknown() {
+    install_ok(V4_PM_MODIFY_LIQ_V3);
+
+    // 0x05 MINT_POSITION_FROM_DELTAS is DEPRECATED (sandwich-vulnerable). We
+    // don't decode its params; the route must NOT crash and must surface the
+    // action as Unknown so policy can warn/deny. The params blob is opaque.
+    let calldata = v4_modify_liquidities_calldata(&[0x05], vec![vec![0u8; 32]]);
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    assert_eq!(body["actions"].as_array().unwrap().len(), 1, "{parsed}");
+    assert_eq!(body["actions"][0]["domain"], "unknown", "{parsed}");
+    assert_eq!(body["actions"][0]["target"], V4_PM_MAINNET, "{parsed}");
+}
