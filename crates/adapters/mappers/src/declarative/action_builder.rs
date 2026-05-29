@@ -71,6 +71,12 @@ pub enum V3BuildError {
     /// [`placeholder_type_lookup`].
     #[error("unknown placeholder (no fallback type registered): {0}")]
     UnknownPlaceholder(String),
+    /// `array_emit`'s `array_source` placeholder resolved to a non-array JSON
+    /// value (object / string / number / bool / null). The strategy can only
+    /// iterate a homogeneous array, so this is fail-loud — the manifest's
+    /// `emit.array_source` points at the wrong field.
+    #[error("array_emit array_source did not resolve to an array: {0}")]
+    ArraySourceNotArray(String),
 }
 
 /// Fallback type for unresolved `$resolved.<k>` / `$derived.<k>` placeholders.
@@ -738,6 +744,63 @@ pub fn build_multicall_from_opcode_stream(
 }
 
 // ===========================================================================
+// build_array_emit — homogeneous array → Multicall
+// ===========================================================================
+
+/// Translate a homogeneous args/message array into `ActionBody::Multicall`.
+///
+/// `array_source` is a `$args.<path>` / `$inputs.<path>` placeholder that MUST
+/// resolve to a JSON array. Each element becomes the `inputs` of a fresh
+/// child [`V3MapContext`], and `per_item_body` is built against it — so the
+/// per-item template references the element via `$inputs.<field>`.
+///
+/// This REUSES the exact `$inputs` mechanism
+/// [`build_multicall_from_opcode_stream`] uses: per iteration we clone the
+/// parent context and set `inputs: Some(element)`. No new placeholder root.
+///
+/// An empty array yields `ActionBody::Multicall { actions: [] }` (valid, no
+/// error). `array_source` resolving to a non-array surfaces
+/// [`V3BuildError::ArraySourceNotArray`].
+///
+/// # Errors
+///
+/// * [`V3BuildError::ArraySourceNotArray`] — `array_source` did not resolve to
+///   a JSON array.
+/// * Any placeholder / JSONPath / serde error propagated from
+///   [`resolve_placeholder`] or the inner [`build_action_body`] calls.
+pub fn build_array_emit(
+    ctx: &V3MapContext<'_>,
+    array_source: &str,
+    per_item_body: &JsonValue,
+    per_item_live_inputs: Option<&JsonValue>,
+) -> Result<ActionBody, V3BuildError> {
+    // `resolve_placeholder` returns an OWNED value; bind it locally so the
+    // `&element` borrows below live through the whole loop.
+    let array_val = resolve_placeholder(ctx, array_source)?;
+    let arr = array_val
+        .as_array()
+        .ok_or_else(|| V3BuildError::ArraySourceNotArray(array_source.to_owned()))?;
+
+    let mut actions = Vec::with_capacity(arr.len());
+    for element in arr {
+        let child_ctx = V3MapContext {
+            chain: ctx.chain.clone(),
+            tx_to: ctx.tx_to,
+            tx_from: ctx.tx_from,
+            value: ctx.value,
+            submitted_at: ctx.submitted_at,
+            args_json: ctx.args_json,
+            resolved: ctx.resolved.clone(),
+            derived: ctx.derived.clone(),
+            inputs: Some(element),
+        };
+        actions.push(build_action_body(&child_ctx, per_item_body, per_item_live_inputs)?);
+    }
+
+    Ok(ActionBody::Multicall { actions })
+}
+
+// ===========================================================================
 // Inline unit tests (11) — see `## 11 inline unit test` in the M1 plan.
 // ===========================================================================
 
@@ -1355,6 +1418,118 @@ mod tests {
                 assert_eq!(s, "derived.nonexistent_field");
             }
             other => panic!("expected UnknownPlaceholder, got {other:?}"),
+        }
+    }
+
+    // ── Phase A.2 — build_array_emit (homogeneous array → Multicall) ────────
+
+    // array_emit over a 2-element `$args.transfers` array. Each element binds
+    // as `$inputs.<field>` for its own erc20_transfer body — element-0 and
+    // element-1 differ, proving per-element context binding.
+    #[test]
+    fn array_emit_calldata_two_transfers_per_element_binding() {
+        let args = json!({
+            "transfers": [
+                {
+                    "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                    "recipient": "0x00000000000000000000000000000000deadbeef",
+                    "amount": "1000"
+                },
+                {
+                    "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                    "recipient": "0x00000000000000000000000000000000cafef00d",
+                    "amount": "2000"
+                }
+            ]
+        });
+        let ctx = mk_ctx(&args);
+        let per_item_body = json!({
+            "domain": "token",
+            "token": {
+                "action": "erc20_transfer",
+                "erc20_transfer": {
+                    "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.token" } },
+                    "recipient": "$inputs.recipient",
+                    "amount": "$inputs.amount"
+                }
+            }
+        });
+
+        let action = build_array_emit(&ctx, "$args.transfers", &per_item_body, None).unwrap();
+        match action {
+            ActionBody::Multicall { actions } => {
+                assert_eq!(actions.len(), 2);
+                // element-0
+                match &actions[0] {
+                    ActionBody::Token(TokenAction::Erc20Transfer(a)) => {
+                        assert_eq!(a.amount, U256::from(1000u64));
+                        assert_eq!(
+                            a.recipient,
+                            addr("0x00000000000000000000000000000000deadbeef")
+                        );
+                        assert_eq!(
+                            a.token.key.contract(),
+                            Some(&addr("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"))
+                        );
+                    }
+                    other => panic!("expected Erc20Transfer at 0, got {other:?}"),
+                }
+                // element-1 — DIFFERENT fields prove per-element binding.
+                match &actions[1] {
+                    ActionBody::Token(TokenAction::Erc20Transfer(a)) => {
+                        assert_eq!(a.amount, U256::from(2000u64));
+                        assert_eq!(
+                            a.recipient,
+                            addr("0x00000000000000000000000000000000cafef00d")
+                        );
+                        assert_eq!(
+                            a.token.key.contract(),
+                            Some(&addr("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"))
+                        );
+                    }
+                    other => panic!("expected Erc20Transfer at 1, got {other:?}"),
+                }
+            }
+            other => panic!("expected Multicall, got {other:?}"),
+        }
+    }
+
+    // Empty array → empty Multicall (valid, no error).
+    #[test]
+    fn array_emit_empty_array_empty_multicall() {
+        let args = json!({ "transfers": [] });
+        let ctx = mk_ctx(&args);
+        let per_item_body = json!({
+            "domain": "token",
+            "token": {
+                "action": "erc20_transfer",
+                "erc20_transfer": {
+                    "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.token" } },
+                    "recipient": "$inputs.recipient",
+                    "amount": "$inputs.amount"
+                }
+            }
+        });
+        let action = build_array_emit(&ctx, "$args.transfers", &per_item_body, None).unwrap();
+        match action {
+            ActionBody::Multicall { actions } => assert!(actions.is_empty()),
+            other => panic!("expected empty Multicall, got {other:?}"),
+        }
+    }
+
+    // array_source resolving to a non-array → ArraySourceNotArray.
+    #[test]
+    fn array_emit_non_array_source_errors() {
+        let args = json!({ "transfers": "not-an-array" });
+        let ctx = mk_ctx(&args);
+        let per_item_body = json!({
+            "domain": "token",
+            "token": { "action": "erc20_transfer", "erc20_transfer": {} }
+        });
+        let err = build_array_emit(&ctx, "$args.transfers", &per_item_body, None).unwrap_err();
+        match err {
+            V3BuildError::ArraySourceNotArray(s) => assert_eq!(s, "$args.transfers"),
+            other => panic!("expected ArraySourceNotArray, got {other:?}"),
         }
     }
 }

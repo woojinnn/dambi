@@ -807,3 +807,186 @@ fn typed_data_no_typed_data_block_misses() {
     assert_eq!(parsed["ok"], false, "{parsed}");
     assert_eq!(parsed["error"]["kind"], "no_typed_data_mapper", "{parsed}");
 }
+
+// ---------------------------------------------------------------------------
+// #6 — Permit2 PermitBatch (Phase A.2 array_emit, off-chain array sig)
+// ---------------------------------------------------------------------------
+//
+// PermitBatch's ABI payload is a SINGLE `permitBatch` tuple param
+// `(PermitDetails[] details, address spender, uint256 sigDeadline)`, so the
+// wrap rule wraps `args_json = { permitBatch: message }`. The `emit.strategy`
+// is `array_emit` with `array_source: "$args.permitBatch.details"` — the
+// homogeneous `details` array fans out to one `permit2_sign_allowance` per
+// element. Each element binds as `$inputs.*` (token / amount / expiration),
+// while the batch-level `spender` / `sigDeadline` resolve via `$args.*` in the
+// per-item body (the child ctx keeps the full wrapped args_json). Per-element
+// `live_inputs.nonce` wraps into the `LiveField<(U256,u8)>` default.
+//
+// The two `details` elements differ (token / amount) — proving per-element
+// binding through the typed-data route.
+
+const PERMIT2_PERMIT_BATCH_V3: &str = r#"{
+  "type": "adapter_function",
+  "id": "uniswap/permit2/permitBatch@2.0.0",
+  "publisher": "uniswap.eth",
+  "schema_version": "2",
+  "match": {
+    "chain_to_addresses": {
+      "1": ["0x000000000022D473030F116dDEE9F6B43aC78BA3"]
+    },
+    "selector": "0x2a2d80d1",
+    "typed_data": {
+      "domain_name": "Permit2",
+      "verifying_contract": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      "primary_type": "PermitBatch",
+      "types": {
+        "PermitBatch": [
+          { "name": "details", "type": "PermitDetails[]" },
+          { "name": "spender", "type": "address" },
+          { "name": "sigDeadline", "type": "uint256" }
+        ]
+      }
+    }
+  },
+  "abi_fragment": {
+    "function_name": "permit",
+    "abi": {
+      "name": "permit",
+      "type": "function",
+      "inputs": [
+        { "name": "owner", "type": "address" },
+        {
+          "name": "permitBatch",
+          "type": "tuple",
+          "components": [
+            {
+              "name": "details",
+              "type": "tuple[]",
+              "components": [
+                { "name": "token", "type": "address" },
+                { "name": "amount", "type": "uint160" },
+                { "name": "expiration", "type": "uint48" },
+                { "name": "nonce", "type": "uint48" }
+              ]
+            },
+            { "name": "spender", "type": "address" },
+            { "name": "sigDeadline", "type": "uint256" }
+          ]
+        },
+        { "name": "signature", "type": "bytes" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "array_emit",
+    "array_source": "$args.permitBatch.details",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "permit2_sign_allowance",
+        "permit2_sign_allowance": {
+          "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.token" } },
+          "spender": "$args.permitBatch.spender",
+          "amount": "$inputs.amount",
+          "expires_at": "$inputs.expiration",
+          "sig_deadline": "$args.permitBatch.sigDeadline"
+        }
+      }
+    },
+    "live_inputs": {
+      "nonce": {
+        "source": {
+          "kind": "onchain_view",
+          "chain": "$chain",
+          "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+          "function": "nonceBitmap(address,uint256)",
+          "decoder_id": "permit2_nonce_bitmap"
+        },
+        "ttl_s": 12
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+const USDT_MAINNET: &str = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+
+#[test]
+fn typed_data_permit2_permit_batch_array_emit() {
+    let install = install_ok(PERMIT2_PERMIT_BATCH_V3);
+    assert_eq!(install["data"]["bundle_id"], "uniswap/permit2/permitBatch@2.0.0");
+
+    // EIP-712 message — the PermitBatch content directly. `details` is a
+    // 2-element array; the wrap rule supplies the outer `permitBatch` key.
+    // expiration / sigDeadline kept as JSON numbers (Time over u64).
+    let message = json!({
+        "details": [
+            {
+                "token": USDC_MAINNET,
+                "amount": "1000",
+                "expiration": 1_738_001_800_u64,
+                "nonce": "0"
+            },
+            {
+                "token": USDT_MAINNET,
+                "amount": "2000",
+                "expiration": 1_738_001_900_u64,
+                "nonce": "1"
+            }
+        ],
+        "spender": SPENDER,
+        "sigDeadline": 1_738_002_000_u64
+    });
+    let input = typed_data_input(1, PERMIT2, "PermitBatch", "Permit2", message, SIGNER);
+
+    let out = declarative_route_typed_data_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "uniswap/permit2/permitBatch@2.0.0",
+        "{parsed}"
+    );
+
+    let actions = parsed["data"]["actions"].as_array().expect("actions array");
+    assert_eq!(actions.len(), 1, "expected exactly 1 outer action: {parsed}");
+
+    // OffchainSig nature on the single outer Action.
+    let meta = &actions[0]["meta"];
+    assert_eq!(meta["nature"]["kind"], "offchain_sig", "{parsed}");
+    assert_eq!(meta["nature"]["domain"]["name"], "Permit2", "{parsed}");
+    // deadline from message.sigDeadline.
+    assert_eq!(meta["nature"]["deadline"], 1_738_002_000_u64, "{parsed}");
+
+    // Body is a Multicall with 2 permit2_sign_allowance actions.
+    let body = &actions[0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let inner = body["actions"].as_array().expect("inner actions array");
+    assert_eq!(inner.len(), 2, "{parsed}");
+
+    // element-0 — token = USDC, amount = 1000.
+    assert_eq!(inner[0]["domain"], "token", "{parsed}");
+    assert_eq!(inner[0]["action"], "permit2_sign_allowance", "{parsed}");
+    assert_eq!(inner[0]["token"]["key"]["address"], USDC_MAINNET, "{parsed}");
+    assert_eq!(inner[0]["amount"], "0x3e8", "{parsed}"); // 1000
+    // batch-level spender / sig_deadline resolved via $args in per-item body.
+    assert_eq!(inner[0]["spender"], SPENDER, "{parsed}");
+    assert_eq!(inner[0]["sig_deadline"], 1_738_002_000_u64, "{parsed}");
+    assert_eq!(inner[0]["expires_at"], 1_738_001_800_u64, "{parsed}");
+    // nonce LiveField default applied (word 0, bit 0). The U256 word
+    // round-trips as hex "0x0" through alloy serde; the u8 bit as 0.
+    assert_eq!(inner[0]["nonce"]["value"], json!(["0x0", 0]), "{parsed}");
+
+    // element-1 — DIFFERENT token + amount + expiration prove per-element bind.
+    assert_eq!(inner[1]["action"], "permit2_sign_allowance", "{parsed}");
+    assert_eq!(inner[1]["token"]["key"]["address"], USDT_MAINNET, "{parsed}");
+    assert_eq!(inner[1]["amount"], "0x7d0", "{parsed}"); // 2000
+    assert_eq!(inner[1]["expires_at"], 1_738_001_900_u64, "{parsed}");
+    // batch-level fields shared across all elements.
+    assert_eq!(inner[1]["spender"], SPENDER, "{parsed}");
+    assert_eq!(inner[1]["sig_deadline"], 1_738_002_000_u64, "{parsed}");
+}

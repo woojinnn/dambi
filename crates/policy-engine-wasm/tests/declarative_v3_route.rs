@@ -574,3 +574,255 @@ fn t4_ur_execute_single_v3_swap() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// t5 — array_emit (Phase A.2): homogeneous calldata array → Multicall
+// ---------------------------------------------------------------------------
+//
+// A `transferBatch((address token, address recipient, uint256 amount)[])`
+// shape (Permit2 `transferFromBatch` / Balancer `batchSwap` family).
+// `emit.array_source` `"$args.transfers"` resolves to the decoded `transfers`
+// array. NOTE: on the CALLDATA path the ABI decoder (`decoded_value_to_json`)
+// encodes each tuple element as a POSITIONAL array `[token, recipient,
+// amount]` — NOT a named object — so the per-item body references fields by
+// index (`$inputs.[0]` / `$inputs.[1]` / `$inputs.[2]`). (The typed-data path,
+// by contrast, carries named-object EIP-712 message elements — see the
+// PermitBatch fixture in `declarative_v3_typed_data_install.rs`.) The two
+// elements differ (token / recipient / amount) — proving per-element binding.
+
+const T5_ARRAY_EMIT_V3: &str = r#"{
+  "type": "adapter_function",
+  "id": "test/batch/transferBatch@2.0.0",
+  "publisher": "test.eth",
+  "schema_version": "2",
+  "match": {
+    "chain_to_addresses": {
+      "1": ["0x000000000022D473030F116dDEE9F6B43aC78BA3"]
+    },
+    "selector": "0x22c5c901"
+  },
+  "abi_fragment": {
+    "function_name": "transferBatch",
+    "abi": {
+      "name": "transferBatch",
+      "type": "function",
+      "inputs": [
+        {
+          "name": "transfers",
+          "type": "tuple[]",
+          "components": [
+            { "name": "token", "type": "address" },
+            { "name": "recipient", "type": "address" },
+            { "name": "amount", "type": "uint256" }
+          ]
+        }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "array_emit",
+    "array_source": "$args.transfers",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "erc20_transfer",
+        "erc20_transfer": {
+          "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.[0]" } },
+          "recipient": "$inputs.[1]",
+          "amount": "$inputs.[2]"
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+/// Build a 2-element `transferBatch` calldata + route input. `transfers` is a
+/// `tuple[]` so the args_json `transfers` field is a 2-element array of objects.
+fn t5_two_element_calldata() -> String {
+    encode_calldata(
+        "0x22c5c901",
+        &[DynSolValue::Array(vec![
+            DynSolValue::Tuple(vec![
+                DynSolValue::Address(
+                    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+                DynSolValue::Address(
+                    "0x00000000000000000000000000000000deadbeef"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+                DynSolValue::Uint(AlloyU256::from(1000u64), 256),
+            ]),
+            DynSolValue::Tuple(vec![
+                DynSolValue::Address(
+                    "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+                DynSolValue::Address(
+                    "0x00000000000000000000000000000000cafef00d"
+                        .parse::<AlloyAddress>()
+                        .unwrap(),
+                ),
+                DynSolValue::Uint(AlloyU256::from(2000u64), 256),
+            ]),
+        ])],
+    )
+}
+
+#[test]
+fn t5_array_emit_calldata_two_transfers() {
+    install_ok(T5_ARRAY_EMIT_V3);
+
+    let input = route_input(
+        1,
+        "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        "0x22c5c901",
+        t5_two_element_calldata(),
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(parsed["data"]["decoder_id"], "test/batch/transferBatch@2.0.0");
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let actions = body["actions"].as_array().expect("inner actions array");
+    assert_eq!(actions.len(), 2, "{parsed}");
+
+    // element-0
+    assert_eq!(actions[0]["domain"], "token");
+    assert_eq!(actions[0]["action"], "erc20_transfer");
+    assert_eq!(
+        actions[0]["recipient"],
+        "0x00000000000000000000000000000000deadbeef"
+    );
+    assert_eq!(actions[0]["amount"], "0x3e8"); // 1000
+    assert_eq!(
+        actions[0]["token"]["key"]["address"],
+        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    );
+
+    // element-1 — DIFFERENT fields prove per-element $inputs binding.
+    assert_eq!(actions[1]["action"], "erc20_transfer");
+    assert_eq!(
+        actions[1]["recipient"],
+        "0x00000000000000000000000000000000cafef00d"
+    );
+    assert_eq!(actions[1]["amount"], "0x7d0"); // 2000
+    assert_eq!(
+        actions[1]["token"]["key"]["address"],
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    );
+}
+
+#[test]
+fn t5_array_emit_empty_array_empty_multicall() {
+    install_ok(T5_ARRAY_EMIT_V3);
+
+    // Empty `transfers` array → empty Multicall (valid, ok:true).
+    let calldata = encode_calldata("0x22c5c901", &[DynSolValue::Array(vec![])]);
+    let input = route_input(
+        1,
+        "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        "0x22c5c901",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    assert!(
+        body["actions"].as_array().expect("inner actions").is_empty(),
+        "{parsed}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// t6 — array_emit array_source resolving to a NON-array → error
+// ---------------------------------------------------------------------------
+//
+// Same body shape but `array_source` points at a scalar (`$args.notArray`,
+// a single uint). `build_array_emit`'s `as_array` fails → ArraySourceNotArray
+// surfaces as the `build_array_emit_failed` envelope (ok:false).
+
+const T6_ARRAY_EMIT_NONARRAY_V3: &str = r#"{
+  "type": "adapter_function",
+  "id": "test/batch/notArray@2.0.0",
+  "publisher": "test.eth",
+  "schema_version": "2",
+  "match": {
+    "chain_to_addresses": {
+      "1": ["0x000000000022D473030F116dDEE9F6B43aC78BA3"]
+    },
+    "selector": "0xa67a81d2"
+  },
+  "abi_fragment": {
+    "function_name": "notArray",
+    "abi": {
+      "name": "notArray",
+      "type": "function",
+      "inputs": [
+        { "name": "notArray", "type": "uint256" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "array_emit",
+    "array_source": "$args.notArray",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "erc20_transfer",
+        "erc20_transfer": {
+          "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.token" } },
+          "recipient": "$inputs.recipient",
+          "amount": "$inputs.amount"
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}"#;
+
+#[test]
+fn t6_array_emit_non_array_source_errors() {
+    install_ok(T6_ARRAY_EMIT_NONARRAY_V3);
+
+    // `notArray` decodes to a single uint string — `$args.notArray` is NOT an
+    // array, so build_array_emit fails.
+    let calldata = encode_calldata(
+        "0xa67a81d2",
+        &[DynSolValue::Uint(AlloyU256::from(42u64), 256)],
+    );
+    let input = route_input(
+        1,
+        "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        "0xa67a81d2",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let out = declarative_route_request_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], false, "{parsed}");
+    assert_eq!(parsed["error"]["kind"], "build_array_emit_failed", "{parsed}");
+    assert!(
+        parsed["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("did not resolve to an array"),
+        "{parsed}"
+    );
+}

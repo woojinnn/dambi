@@ -20,8 +20,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
 use mappers::declarative::action_builder::{
-    build_action_body, build_multicall_from_opcode_stream, UnknownOpcodePolicy as V3UnknownOpcodePolicy,
-    V3MapContext,
+    build_action_body, build_array_emit, build_multicall_from_opcode_stream,
+    UnknownOpcodePolicy as V3UnknownOpcodePolicy, V3MapContext,
 };
 use mappers::declarative::eval::args_to_json;
 use mappers::declarative::types::BundleMatch;
@@ -571,6 +571,27 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                     EngineErrorDto::new("build_multicall_failed", error.to_string())
                 })?
             }
+            // Phase A.2 — homogeneous-array fan-out. `emit.array_source` is a
+            // `$args.<path>` placeholder resolving to a JSON array; each
+            // element becomes the `$inputs` of a per-item `emit.body` build.
+            // Covers calldata batch shapes (Permit2 `permitBatch` /
+            // `transferFromBatch`, Balancer `batchSwap`).
+            "array_emit" => {
+                let array_source = emit
+                    .get("array_source")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        EngineErrorDto::new("invalid_bundle", "missing emit.array_source".to_string())
+                    })?;
+                let per_item_body = emit.get("body").ok_or_else(|| {
+                    EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
+                })?;
+                let per_item_live_inputs = emit.get("live_inputs");
+                build_array_emit(&ctx, array_source, per_item_body, per_item_live_inputs)
+                    .map_err(|error| {
+                        EngineErrorDto::new("build_array_emit_failed", error.to_string())
+                    })?
+            }
             other => {
                 return Err(EngineErrorDto::new(
                     "unsupported_strategy",
@@ -688,13 +709,15 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
                 EngineErrorDto::new("invalid_bundle", "missing emit.strategy".to_string())
             })?;
 
-        // Typed-data is single_emit only — opcode_stream_dispatch is a
-        // calldata-stream construct (no off-chain sig analogue).
-        if strategy != "single_emit" {
+        // Typed-data supports single_emit OR array_emit (Phase A.2 — Permit2
+        // PermitBatch is an off-chain array sig). opcode_stream_dispatch is a
+        // calldata-stream construct (Universal Router `execute` etc.) with no
+        // off-chain signature analogue, so it stays rejected.
+        if strategy != "single_emit" && strategy != "array_emit" {
             return Err(EngineErrorDto::new(
                 "unsupported_strategy_for_typed_data",
                 format!(
-                    "emit.strategy {strategy:?} is calldata-only; typed-data routing supports single_emit only"
+                    "emit.strategy {strategy:?} is calldata-only; typed-data routing supports single_emit / array_emit only"
                 ),
             ));
         }
@@ -731,13 +754,33 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
             inputs: None,
         };
 
-        let body_template = emit.get("body").ok_or_else(|| {
-            EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
-        })?;
-        let live_inputs_template = emit.get("live_inputs");
-        let body = build_action_body(&ctx, body_template, live_inputs_template).map_err(|error| {
-            EngineErrorDto::new("build_action_body_failed", error.to_string())
-        })?;
+        // Strategy dispatch (gated above to single_emit / array_emit). For
+        // `single_emit` the whole message → one body. For `array_emit` an
+        // `emit.array_source` ($args.<root>.<arrayField>) homogeneous array
+        // fans out to a per-item-body `Multicall` (Permit2 PermitBatch shape).
+        let body = if strategy == "array_emit" {
+            let array_source = emit
+                .get("array_source")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| {
+                    EngineErrorDto::new("invalid_bundle", "missing emit.array_source".to_string())
+                })?;
+            let per_item_body = emit.get("body").ok_or_else(|| {
+                EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
+            })?;
+            let per_item_live_inputs = emit.get("live_inputs");
+            build_array_emit(&ctx, array_source, per_item_body, per_item_live_inputs).map_err(
+                |error| EngineErrorDto::new("build_array_emit_failed", error.to_string()),
+            )?
+        } else {
+            let body_template = emit.get("body").ok_or_else(|| {
+                EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
+            })?;
+            let live_inputs_template = emit.get("live_inputs");
+            build_action_body(&ctx, body_template, live_inputs_template).map_err(|error| {
+                EngineErrorDto::new("build_action_body_failed", error.to_string())
+            })?
+        };
 
         // ── ActionMeta (OffchainSig nature) ─────────────────────────────────
         //
