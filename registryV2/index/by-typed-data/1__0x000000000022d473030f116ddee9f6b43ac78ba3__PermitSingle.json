@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "uniswap/permit2/permitSingle@1.0.0",
   "manifest_path": "manifests/uniswap/permit2/permitSingle@1.0.0.json",
-  "bundle_sha256": "0xa4b96318b9cb3684dc4a330af034c4172eb6ed36e3f14aa5a4f704c0ae1152c6",
+  "bundle_sha256": "0x902d101222980bc78defec8450859402f9f3c968be30ff532c9c547b41806127",
   "bundle": {
     "type": "adapter_action",
     "id": "uniswap/permit2/permitSingle@1.0.0",
@@ -128,14 +128,14 @@
               "key": {
                 "standard": "erc20",
                 "chain": "$chain",
-                "address": "$args.permitSingle.details.token"
+                "address": "$args.permitSingle[0][0]"
               }
             },
-            "spender": "$args.permitSingle.spender",
-            "amount": "$args.permitSingle.details.amount",
-            "expires_at": "$args.permitSingle.details.expiration",
-            "sig_deadline": "$args.permitSingle.sigDeadline",
-            "nonce": "$args.permitSingle.details.nonce"
+            "spender": "$args.permitSingle[1]",
+            "amount": "$args.permitSingle[0][1]",
+            "expires_at": "$args.permitSingle[0][2]",
+            "sig_deadline": "$args.permitSingle[2]",
+            "nonce": "$args.permitSingle[0][3]"
           }
         }
       },

@@ -61,7 +61,7 @@
   },
   "emit": {
     "strategy": "array_emit",
-    "array_source": "$args.permitBatch.details",
+    "array_source": "$args.permitBatch[0]",
     "body": {
       "domain": "token",
       "token": {
@@ -71,13 +71,13 @@
             "key": {
               "standard": "erc20",
               "chain": "$chain",
-              "address": "$inputs.token"
+              "address": "$inputs[0]"
             }
           },
-          "spender": "$args.permitBatch.spender",
-          "amount": "$inputs.amount",
-          "expires_at": "$inputs.expiration",
-          "sig_deadline": "$args.permitBatch.sigDeadline"
+          "spender": "$args.permitBatch[1]",
+          "amount": "$inputs[1]",
+          "expires_at": "$inputs[2]",
+          "sig_deadline": "$args.permitBatch[2]"
         }
       }
     },
