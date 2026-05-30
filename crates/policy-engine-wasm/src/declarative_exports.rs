@@ -698,6 +698,22 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             // trailing args with that action's `inputs_abi` into the ctx
             // `inputs`, and build that ONE action's `body` (NOT a Multicall).
             "tagged_dispatch" => build_tagged_dispatch(&ctx, emit)?,
+            // Cat D — `multicall_recurse` (self-multicall: NFPM / SwapRouter02 /
+            // V4 PositionManager `multicall(bytes[])`). The inner sub-calls are
+            // the single `bytes[]` argument, each ABI-encoded calldata targeting
+            // the SAME contract. We resolve + decode + build EACH inner leg by
+            // re-entering this very entrypoint (so it transparently handles every
+            // strategy — single_emit, opcode_stream_dispatch, even nested
+            // multicall), then wrap the flattened inner bodies in one
+            // `ActionBody::Multicall`.
+            "multicall_recurse" => build_multicall_recurse_body(
+                input.chain_id,
+                &input.to,
+                &input.submitter,
+                input.submitted_at,
+                &args_json,
+                emit,
+            )?,
             other => {
                 return Err(EngineErrorDto::new(
                     "unsupported_strategy",
@@ -1784,6 +1800,188 @@ fn write_address_word(word: &mut [u8], addr_hex: &str) -> Option<()> {
     }
     word[12..32].copy_from_slice(&bytes);
     Some(())
+}
+
+/// `multicall_recurse` (Cat D) — flatten a self-`multicall(bytes[])` into one
+/// [`v3_action::ActionBody::Multicall`].
+///
+/// `self_array_bytes_last_arg`: the inner sub-calls live in the single `bytes[]`
+/// argument (SwapRouter02 `multicall(uint256 deadline, bytes[] data)` has a
+/// leading non-array `deadline`; NFPM / V4 PositionManager `multicall(bytes[]
+/// data)` has only the array). [`args_to_json`] renders that `bytes[]` as a JSON
+/// array of `"0x.."` strings, so we pick the SOLE array-valued arg.
+///
+/// Each inner leg targets the SAME `to`. We resolve + decode + build it by
+/// RE-ENTERING [`declarative_route_request_v3_json`] (the public entrypoint), so
+/// every inner strategy is handled transparently — single_emit, opcode_stream
+/// dispatch (e.g. an inner V4 `modifyLiquidities`), and even a nested
+/// `multicall`. Inner legs with no installed mapper (helper calls Uniswap
+/// routinely bundles — `refundETH` / `sweepToken` / `unwrapWETH9`) are SKIPPED
+/// rather than failing the batch; but if NO leg resolves we reject so the policy
+/// engine never receives a misleading empty no-op for calldata we could not map.
+///
+/// Recursion is bounded: every inner element is a strict sub-slice of the outer
+/// calldata, so a `multicall`-of-`multicall` chain shrinks each level; the
+/// per-level fan-out is capped at [`MAX_MULTICALL_CHILDREN`].
+fn build_multicall_recurse_body(
+    chain_id: u64,
+    to: &str,
+    submitter: &str,
+    submitted_at: u64,
+    args_json: &serde_json::Value,
+    emit: &serde_json::Value,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    const MAX_MULTICALL_CHILDREN: usize = 64;
+
+    let recurse_rule_id = emit
+        .get("recurse_rule_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if recurse_rule_id != "self_array_bytes_last_arg" {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            format!(
+                "unsupported multicall recurse_rule_id {recurse_rule_id:?} \
+                 (only self_array_bytes_last_arg)"
+            ),
+        ));
+    }
+
+    // self_array_bytes_last_arg → exactly one array-valued argument (the
+    // `bytes[]`). A `uint256 deadline` sibling renders as a decimal string, never
+    // an array, so the array arg is unambiguous for every real shape.
+    let array_args: Vec<&serde_json::Value> = args_json
+        .as_object()
+        .map(|obj| obj.values().filter(|v| v.is_array()).collect())
+        .unwrap_or_default();
+    let inner_calls = match array_args.as_slice() {
+        [single] => single.as_array().expect("filtered is_array"),
+        [] => {
+            return Err(EngineErrorDto::new(
+                "build_multicall_failed",
+                "multicall_recurse: no bytes[] array argument".to_string(),
+            ));
+        }
+        _ => {
+            return Err(EngineErrorDto::new(
+                "build_multicall_failed",
+                "multicall_recurse: ambiguous (multiple array arguments)".to_string(),
+            ));
+        }
+    };
+
+    if inner_calls.len() > MAX_MULTICALL_CHILDREN {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            format!(
+                "multicall child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
+                inner_calls.len()
+            ),
+        ));
+    }
+
+    let mut actions: Vec<v3_action::ActionBody> = Vec::new();
+    let mut resolved = 0usize;
+    for (index, item) in inner_calls.iter().enumerate() {
+        let inner_hex = item.as_str().ok_or_else(|| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall child #{index} is not a hex string"),
+            )
+        })?;
+        let stripped = inner_hex.strip_prefix("0x").unwrap_or(inner_hex);
+        let inner_bytes = hex::decode(stripped).map_err(|error| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall child #{index} not hex: {error}"),
+            )
+        })?;
+        if inner_bytes.len() < 4 {
+            return Err(EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall child #{index} calldata < 4 bytes"),
+            ));
+        }
+        let inner_selector = format!("0x{}", hex::encode(&inner_bytes[0..4]));
+
+        // Re-enter the public entrypoint for this leg. Inner calls carry no
+        // independent msg.value (they execute under the outer call's context),
+        // so value is "0".
+        let inner_input = serde_json::json!({
+            "chain_id": chain_id,
+            "to": to,
+            "selector": inner_selector,
+            "calldata": inner_hex,
+            "value": "0",
+            "submitter": submitter,
+            "submitted_at": submitted_at,
+        });
+        let out = declarative_route_request_v3_json(inner_input.to_string());
+        let parsed: serde_json::Value = serde_json::from_str(&out).map_err(|error| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall child #{index} result not JSON: {error}"),
+            )
+        })?;
+
+        if parsed.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+            let kind = parsed
+                .pointer("/error/kind")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            // Unmapped helper leg (refundETH / sweepToken / unwrapWETH9 / a
+            // permit variant we don't model) — skip; the mapped legs carry the
+            // intent. Any OTHER error (a mapped leg that failed to decode) is
+            // surfaced so the batch fails loud rather than silently dropping it.
+            if kind == "no_declarative_v3_mapper" {
+                continue;
+            }
+            let message = parsed
+                .pointer("/error/message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            return Err(EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall child #{index} ({inner_selector}): {kind}: {message}"),
+            ));
+        }
+        resolved += 1;
+
+        let inner_actions = parsed
+            .pointer("/data/actions")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall child #{index} result missing data.actions"),
+                )
+            })?;
+        for action in inner_actions {
+            let body_json = action.get("body").ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall child #{index} action missing body"),
+                )
+            })?;
+            let body: v3_action::ActionBody =
+                serde_json::from_value(body_json.clone()).map_err(|error| {
+                    EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!("multicall child #{index} body deserialize: {error}"),
+                    )
+                })?;
+            actions.push(body);
+        }
+    }
+
+    if resolved == 0 {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            "multicall_recurse: no inner leg resolved to an installed mapper".to_string(),
+        ));
+    }
+
+    Ok(v3_action::ActionBody::Multicall { actions })
 }
 
 #[cfg(test)]

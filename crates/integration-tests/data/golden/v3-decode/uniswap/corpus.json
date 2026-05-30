@@ -329,7 +329,7 @@
     {
       "intent": "SwapRouter02.multicall(uint256 deadline,bytes[]) [0x5ae401dc]",
       "expect": "error",
-      "expect_error": "no_declarative_v3_mapper",
+      "expect_error": "build_multicall_failed",
       "tx_hash": "0x1147ee07a7324d3d13f1e35c6afeb60b7d17ac07f545f773cf117c87e545f76d",
       "chain_id": 1,
       "rpc": {
@@ -345,8 +345,8 @@
     },
     {
       "intent": "NFPM.multicall(bytes[]) [0xac9650d8]",
-      "expect": "error",
-      "expect_error": "no_declarative_v3_mapper",
+      "expect": "pass",
+      "_note": "multicall_recurse port + v3-path install/route arm (2026-05-30). Inner decreaseLiquidity(0x0c49ccbe)+collect(0xfc6f7865) map; unwrapWETH9(0x49404b7c) helper leg skipped (no mapper). Flipped error->pass.",
       "tx_hash": "0xa608996fd773078924afbc60e39017ef4d27017b24e8965dce2bab07b2177048",
       "chain_id": 1,
       "rpc": {
@@ -379,8 +379,8 @@
     },
     {
       "intent": "PositionManager(V4).multicall(bytes[]) [0xac9650d8]",
-      "expect": "error",
-      "expect_error": "no_declarative_v3_mapper",
+      "expect": "pass",
+      "_note": "multicall_recurse port (2026-05-30). Inner nested modifyLiquidities(0xdd46508f) recursed via opcode_stream_dispatch; the permit-via-Permit2 leg (0x002a3e3a) skipped (no mapper). Flipped error->pass.",
       "tx_hash": "0x671966970837109f09edb30cac3a5be24db89cda0931815f02a8b360ae12cbc6",
       "chain_id": 1,
       "rpc": {
