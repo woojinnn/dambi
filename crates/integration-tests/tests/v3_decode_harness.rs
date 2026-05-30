@@ -112,3 +112,59 @@ fn synthetic_fuzz_all_strategies() {
         report.summary(),
     );
 }
+
+/// Recursively find the first `"<field>": "<string>"` entry in a JSON value.
+fn find_string_field(v: &serde_json::Value, field: &str) -> Option<String> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if let Some(serde_json::Value::String(s)) = m.get(field) {
+                return Some(s.clone());
+            }
+            m.values().find_map(|x| find_string_field(x, field))
+        }
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find_string_field(x, field)),
+        _ => None,
+    }
+}
+
+/// Field-level golden (manual oracle layer "A", manual §5c) for the Morpho Blue
+/// `market_id`.
+///
+/// `corpus_replay`'s oracle (`corpus.rs::check_expect`) compares only the
+/// verdict + top-level `domain` — it never inspects body field VALUES. So a
+/// Morpho `supply` whose `market_id` is wrong (say, naively mapped to a plain
+/// `$args.*` field instead of the keccak, or with the Tier B injector removed)
+/// would still pass `corpus_replay` as `pass`/`lending` — a SILENT mis-decode.
+/// This test is the only thing that pins it: it routes a real mainnet supply tx
+/// and asserts the decoded `LendingVenue::MorphoBlue.market_id` equals
+/// `keccak256(abi.encode(marketParams))` (= `MarketParamsLib.id`), the value
+/// `maybe_inject_morpho_market_id` must produce.
+#[test]
+fn morpho_supply_market_id_is_keccak_marketparams() {
+    // R1: install + route on the same thread.
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real mainnet supply tx 0xf2cdff2b1203…: market (loan=WETH 0xC02a…,
+    // collat=0xe1B4…, oracle=0xcb6a…, irm=0x870a…, lltv=91.5%), 2.5157 WETH.
+    const TO: &str = "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb";
+    const CALLDATA: &str = "0xa99aad89000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000e1b4d34e8754600962cd944b535180bd758e6c2e000000000000000000000000cb6a6fdfdb18ec9a004465aef74ff9092fd4f89a000000000000000000000000870ac11d48b15db9a138cf899d20f13f79ba00bc0000000000000000000000000000000000000000000000000cb2bba6f17b800000000000000000000000000000000000000000000000000022e9df45f93190e8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040534e513df8277870b81e97b5107b3f39de4f1500000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000000";
+
+    // keccak256(abi.encode(marketParams)) = MarketParamsLib.id. Cross-checked
+    // independently of the Rust injector via
+    //   cast abi-encode "f((address,address,address,address,uint256))" "(…)" | cast keccak
+    const EXPECTED_MARKET_ID: &str =
+        "0xb7ad412532006bf876534ccae59900ddd9d1d1e394959065cb39b12b22f94ff5";
+
+    let env = harness::route::route_calldata(1, TO, "0xa99aad89", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let market_id =
+        find_string_field(&env, "market_id").expect("decoded supply body carries a market_id");
+    assert_eq!(
+        market_id, EXPECTED_MARKET_ID,
+        "Morpho market_id mismatch — Tier B keccak(MarketParams) regressed"
+    );
+}

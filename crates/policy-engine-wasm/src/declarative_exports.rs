@@ -512,6 +512,15 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             );
         }
 
+        // Tier-B synthetic derivations the declarative grammar cannot express
+        // (it can index/slice but not hash). Morpho Blue's `market_id` =
+        // keccak(MarketParams); inject it as `$derived.morpho_market_id` so the
+        // single_emit `LendingVenue::MorphoBlue.market_id` field resolves. A
+        // no-op for every non-Morpho call (shape-gated on a `marketParams`
+        // 5-tuple). The single_emit analogue of `maybe_inject_v4_pool_id`.
+        let mut derived = BTreeMap::new();
+        maybe_inject_morpho_market_id(&args_json, &mut derived);
+
         let ctx = V3MapContext {
             chain: chain.clone(),
             tx_to: target,
@@ -523,7 +532,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             // placeholder so an `Unknown` body preserves the full calldata.
             raw_calldata: &input.calldata,
             resolved,
-            derived: BTreeMap::new(),
+            derived,
             inputs: None,
         };
 
@@ -1800,6 +1809,71 @@ fn write_address_word(word: &mut [u8], addr_hex: &str) -> Option<()> {
     }
     word[12..32].copy_from_slice(&bytes);
     Some(())
+}
+
+/// Write a base-10 `uint256` (decimal-string, as [`args_to_json`] renders any
+/// `uint` wider than 64 bits) into a 32-byte big-endian word. Returns `None` on
+/// a malformed value.
+fn write_u256_word(word: &mut [u8], value: &serde_json::Value) -> Option<()> {
+    let v = match value {
+        serde_json::Value::String(s) => V3U256::from_str_radix(s, 10).ok()?,
+        // `uint <= 64` would arrive as a JSON number; `lltv` is `uint256` so the
+        // string arm is the live path, but accept a number defensively.
+        serde_json::Value::Number(n) => V3U256::from(n.as_u64()?),
+        _ => return None,
+    };
+    word.copy_from_slice(&v.to_be_bytes::<32>());
+    Some(())
+}
+
+/// Morpho Blue — compute a market id from the decoded `MarketParams` tuple.
+///
+/// `MarketParamsLib.id` (morpho-blue v1.0.0) is `keccak256(marketParams, 5*32)`
+/// — a keccak over the five contiguous 32-byte words of `(address loanToken,
+/// address collateralToken, address oracle, address irm, uint256 lltv)`. Because
+/// the struct has no dynamic members this is byte-identical to
+/// `keccak256(abi.encode(marketParams))`. The four addresses are left-padded;
+/// `lltv` is the raw `uint256`.
+///
+/// Returns `0x` + `keccak256` hex, or `None` on any malformed field. This is the
+/// single_emit analogue of [`maybe_inject_v4_pool_id`]: the declarative grammar
+/// cannot hash, so a `LendingVenue::MorphoBlue.market_id` (a keccak-derived
+/// string) can only be produced in Rust.
+fn compute_morpho_market_id(market_params: &[serde_json::Value]) -> Option<String> {
+    let mut buf = [0u8; 0xa0]; // 5 × 32 bytes.
+    write_address_word(&mut buf[0x00..0x20], market_params[0].as_str()?)?;
+    write_address_word(&mut buf[0x20..0x40], market_params[1].as_str()?)?;
+    write_address_word(&mut buf[0x40..0x60], market_params[2].as_str()?)?;
+    write_address_word(&mut buf[0x60..0x80], market_params[3].as_str()?)?;
+    write_u256_word(&mut buf[0x80..0xa0], &market_params[4])?;
+    Some(format!(
+        "0x{}",
+        hex::encode(alloy_primitives::keccak256(buf))
+    ))
+}
+
+/// If the decoded top-level args carry a Morpho `marketParams` 5-tuple, inject
+/// `$derived.morpho_market_id` so a single_emit manifest can fill a
+/// `LendingVenue::MorphoBlue.market_id`. Shape-gated (a 5-element `marketParams`
+/// array) — a no-op for every other call, and harmless even on the (unlikely)
+/// non-Morpho contract carrying a same-named 5-tuple, since only Morpho
+/// manifests reference the placeholder. See [`compute_morpho_market_id`].
+fn maybe_inject_morpho_market_id(
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    let Some(mp) = args_json
+        .get("marketParams")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    if mp.len() != 5 {
+        return;
+    }
+    if let Some(id) = compute_morpho_market_id(mp) {
+        derived.insert("morpho_market_id".to_owned(), serde_json::Value::String(id));
+    }
 }
 
 /// `multicall_recurse` (Cat D) — flatten a self-`multicall(bytes[])` into one
