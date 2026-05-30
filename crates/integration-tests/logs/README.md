@@ -68,3 +68,19 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- \
 | uniswapx | `uniswapx/2026-05-30-etherscan.json` | 160 | 0 | 3 (reactor execute → Tier B) | 0 |
 
 새 로그를 추가하면 이 표 한 줄을 갱신한다.
+
+## 2026-05-30 커버리지 확장 라운드 — 처치 결과
+
+진단(위 6 로그) → 어댑터 추가. corpus 의 해당 `expect:error` 는 `expect:pass` 로 flip(회귀 baseline).
+
+**처치 완료 (declarative, commit):**
+- `uniswap` V2 fee-on-transfer swap 3종 (0xb6f9de95 / 0x791ac947 / 0x5c11d795) — 기존 V2 swap manifest 복제. 4 chain. commit `4bad8bb`.
+- `layerzero` ZRO erc20 (transfer/approve/transferFrom) — `tokens/<chain>/zro.json`(1/10/8453/42161) 추가로 erc20 auto-enumerate. commit `5e9b842`.
+
+**Tier B 로 재분류 (declarative 불가 — defer, `expect:error` baseline 유지):**
+- `balancer` joinPool/exitPool/batchSwap — `assets[]`/`amounts[]` 가 **동적 길이 배열**(tuple 내부). single_emit field-path 는 정적 인덱스만 → array 전략/Tier B 필요. (단순 swap 만 declarative 로 커버됨.)
+- `aave` L2Pool packed-args (withdraw/repay/setCollateral `bytes32`) — reserve **index**(주소 아님) + bit-field 패킹 → bit-slice 전략/onchain reserve→address 필요. Arbitrum 31%.
+- `uniswap` UR V4 nested action-stream(pool_id/currencyIn) + Permit2 embedded named-tuple(permitSingle.details.token) — opcode_stream/eval. 최고가치 hard.
+- `uniswapx` reactor execute((bytes,bytes)) — SignedOrder inner-bytes 를 reactor family 별 재디코드 → Tier B.
+- `aave` flashLoan/flashLoanSimple — declarative 가능하나 `flash_loan` lending action 스키마 추가 선행 필요. 샘플 트래픽 0.
+- `layerzero` ClaimContract overload 3종 — declarative 가능하나 시그니처 미확정(4byte 부재, Sourcify 확인 필요). ~11 tx.
