@@ -6,7 +6,6 @@ import "./AppShell.css";
 
 const NAV_ITEMS: Array<{ to: string; label: string; end?: boolean }> = [
   { to: "/", label: "Home", end: true },
-  { to: "/editor", label: "Editor" },
   { to: "/policies", label: "Library" },
   { to: "/audit", label: "Audit" },
   { to: "/settings", label: "Settings" },

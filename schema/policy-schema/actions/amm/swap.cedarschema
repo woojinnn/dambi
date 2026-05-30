@@ -1,0 +1,84 @@
+// Amm::Swap — token-for-token swap on a single AMM pool or an aggregator
+// route. Policies typically guard slippage tolerance, recipient whitelisting,
+// and per-aggregator router/executor allowlists.
+//
+// Amounts use the 3-layer projection (raw hex / token-native nano / fiat USD).
+// `routeEstimatedOut` is the only piece of route metadata exposed at the policy
+// layer — the full `SwapRoute` (parallel paths × serial hops) is too complex
+// for Cedar's static type system, so reducer math evaluates it natively and
+// surfaces only the summed estimated-out here.
+//
+// `venue.name` discriminates the 11 supported single-pool venues and the
+// generic aggregator route. Per-venue optional fields are documented inside
+// `AmmVenue`.
+
+namespace Amm {
+  // -------------------------------------------------------------------------
+  // SwapDirection — exact-input vs exact-output, with 3-layer amount fields.
+  //
+  // Rust: enum with serde tag = "kind", rename_all = "snake_case".
+  //   - ExactInput  { amount_in, min_amount_out }
+  //   - ExactOutput { max_amount_in, amount_out }
+  // -------------------------------------------------------------------------
+  type SwapDirection = {
+    // "exact_input" | "exact_output"
+    kind: String,
+    // Exact amount of tokenIn sold (U256 hex). Present iff exact_input.
+    amountIn?: String,
+    // Minimum acceptable tokenOut (U256 hex). Present iff exact_input.
+    minAmountOut?: String,
+    // Maximum tokenIn willing to spend (U256 hex). Present iff exact_output.
+    maxAmountIn?: String,
+    // Exact tokenOut to receive (U256 hex). Present iff exact_output.
+    amountOut?: String,
+    // Token-native nano sibling of amountIn (Host-populated).
+    amountInNano?: Long,
+    // Token-native nano sibling of minAmountOut.
+    minAmountOutNano?: Long,
+    // Token-native nano sibling of maxAmountIn.
+    maxAmountInNano?: Long,
+    // Token-native nano sibling of amountOut.
+    amountOutNano?: Long,
+    // USD estimate of input (Host-populated).
+    amountInUsd?: decimal,
+    // USD estimate of output (Host-populated).
+    amountOutUsd?: decimal,
+  };
+
+  type SwapContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Pool / aggregator the user calls.
+    venue: AmmVenue,
+    // Token being sold.
+    tokenIn: Core::TokenRef,
+    // Token being bought.
+    tokenOut: Core::TokenRef,
+    // Exact-in / exact-out direction and limits.
+    direction: SwapDirection,
+    // Recipient of the output tokens (Address).
+    recipient: String,
+    // Slippage tolerance in basis points, applied across the whole route.
+    slippageBp: Long,
+    // Sum of estimated_out across all RoutePaths (U256 hex). Route shape
+    // (paths × hops) is too complex for Cedar — only the summary is exposed.
+    routeEstimatedOut: String,
+    // LiveField<U256> projection: estimated total output (U256 hex).
+    expectedAmountOut: String,
+    // LiveField<u32>: estimated price impact in basis points.
+    priceImpactBp: Long,
+    // LiveField<U256>: estimated gas cost (U256 hex).
+    gasEstimate: String,
+    // Manifest-extensible slot.
+    custom?: SwapCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type SwapCustomContext = {};
+
+  action "Swap" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: SwapContext,
+  };
+}

@@ -1,40 +1,45 @@
 import Browser from "webextension-polyfill";
 import init, * as wasmExports from "../wasm/policy_engine_wasm";
 import {
-  parsePolicyRpcPlan,
   parseVerdict,
-  type EvaluatePolicyRpcInputDto,
-  type PlanPolicyRpcInputDto,
-  type PolicyRpcPlanDto,
-  type PolicyRpcResponseDto,
+  type EvaluateActionV2InputDto,
+  type PlanActionRpcV2InputDto,
+  type PlannedCallV2Dto,
   type VerdictDto,
 } from "./wasm-bridge.types";
 
 export { WasmDecodeError } from "./wasm-bridge.types";
-export type { VerdictDto } from "./wasm-bridge.types";
+export type {
+  ActionBundleInputDto,
+  ActionTxInputDto,
+  EvaluateActionV2InputDto,
+  PlanActionRpcV2InputDto,
+  PlannedCallV2Dto,
+  VerdictDto,
+} from "./wasm-bridge.types";
 
 interface WasmExports {
   install_policies_json(input: string): string;
-  evaluate_policy_rpc_json(input_json: string): string;
-  plan_policy_rpc_json(input_json: string): string;
-  route_request_json(input_json: string): string;
-  // Phase 1B — declarative adapter pipeline.
+  // M2 — v3 install entry. Stores the raw v3 manifest
+  // (`type: "adapter_action"`, `schema_version: "3"`, hierarchical
+  // `emit.body`) in `DECLARATIVE_V3_STATE` for the v3 route entry to consume.
   // Contract documented in
   // `crates/policy-engine-wasm/src/declarative_exports.rs`.
-  declarative_install_json(bundle_json: string): string;
-  declarative_lookup_json(input_json: string): string;
-  // Phase 6 — orchestrator route entry. Resolves
-  // (chain_id, to, selector) through the engine-internal bridge populated
-  // at install time, then runs the matching declarative mapper.
-  declarative_route_request_json(input_json: string): string;
-  // multicall_recurse child-callkey planner. Decodes the outer multicall in
-  // WASM and returns the inner sub-call callkeys the host must fetch+install
-  // before declarative_route_request_json.
-  declarative_plan_children_json(input_json: string): string;
-  // Phase 7A — evaluate Cedar policies against caller-supplied envelopes.
-  // Skips the route → plan stages so the declarative pipeline can drive
-  // verdicts directly from its post-processed envelopes.
-  evaluate_with_envelopes_json(input_json: string): string;
+  declarative_install_v3_json(bundle_json: string): string;
+  // Phase 4B — v3 orchestrator route entry. Resolves (chain_id, to, selector)
+  // through the engine-internal bridge populated at install time, then emits
+  // the PDF FSM `simulation_reducer::action::Action` tree.
+  declarative_route_request_v3_json(input_json: string): string;
+  // Phase 1 (v2 ActionBody model) — stateless policy-RPC plan + evaluate.
+  // Contract: `crates/policy-engine-wasm/src/action_eval_exports.rs`.
+  // `plan_action_rpc_v2_json` lowers the action + plans its policy-RPC calls
+  // (`{ ok, data: { planned: [...] } }` / `{ ok: false, error }`).
+  plan_action_rpc_v2_json(input_json: string): string;
+  // `evaluate_action_v2_json` replays the host results into context and
+  // aggregates each matching bundle's verdict. ALWAYS returns `ok: true` —
+  // every fault becomes a `Fail` verdict (`__system__` / `__engine::*`).
+  // (`{ ok, data: { verdict: VerdictDto } }`).
+  evaluate_action_v2_json(input_json: string): string;
   // origin/main — manifest-driven schema preview + alias table.
   preview_custom_schema_json(input_json: string): string;
   preview_installed_schema_json(): string;
@@ -42,10 +47,10 @@ interface WasmExports {
 }
 
 /**
- * Result of a successful `declarative_install_json` call. `decoder_id` is the
- * `declarative.<path>` key the engine uses to route lookups; `bundle_id` is the
- * `<path>@<version>` identifier from the bundle JSON, retained for audit /
- * debug surfaces.
+ * Result of a successful `declarative_install_v3_json` call. `decoder_id` is
+ * the `declarative.<path>` key the engine uses to route lookups; `bundle_id`
+ * is the `<path>@<version>` identifier from the bundle JSON, retained for
+ * audit / debug surfaces.
  */
 export interface DeclarativeInstallResult {
   decoder_id: string;
@@ -53,111 +58,66 @@ export interface DeclarativeInstallResult {
 }
 
 /**
- * Wire shape consumed by `declarative_lookup_json`. The
- * `decoded.value.kind` discriminator mirrors `DecodedValueDto` in
- * `crates/policy-engine-wasm/src/dto.rs`.
- */
-export interface DeclarativeLookupInput {
-  decoder_id: string;
-  ctx: {
-    chain_id: number;
-    from: string;
-    to: string;
-    value_wei?: string;
-    block_timestamp?: number;
-  };
-  decoded: {
-    decoder_id: string;
-    function_signature: string;
-    args: Array<{
-      name: string;
-      abi_type: string;
-      value: unknown;
-    }>;
-  };
-}
-
-/**
- * Per Phase 1A, `envelopes` are the JSON-serialised `Vec<ActionEnvelope>` that
- * `DeclarativeMapper::map` produces. We surface them as opaque records so the
- * bridge does not couple to the variant-specific schema yet — downstream
- * consumers (policy-rpc / Cedar) parse them against the action schema.
- */
-export interface DeclarativeLookupResult {
-  envelopes: Record<string, unknown>[];
-}
-
-/**
- * Phase 6 — orchestrator route entry wire shape.
+ * Phase 4B — wire shape for `declarative_route_request_v3_json`.
  *
- * `(chain_id, to, selector)` form the callkey for the engine-side bridge
- * lookup. `calldata` is the raw `"0x"`-prefixed transaction calldata; the
- * WASM route entry decodes it internally using the bridge-resolved bundle's
- * `abi_fragment.abi` (replaces the prior TS-side viem decode step).
+ * `(chain_id, to, selector)` form the callkey, plus the meta fields the
+ * `simulation_reducer::action::ActionMeta` carries (`value` / `gas_limit` /
+ * `gas_price` / `submitter` / `submitted_at` / `nonce`). All numeric fields
+ * are passed as base-10 decimal strings — the WASM converts them to
+ * `U256`/`u64` internally; passing JS `number` would lose precision for
+ * uint256 values.
+ *
+ * `selector` and `block_timestamp` are reserved for Phase 4D's registry-v2
+ * manifest lookup. They must be supplied; the Phase 4B stub does not read
+ * them but the wire shape is locked so adding the lookup later is purely a
+ * Rust-side change.
  */
-export interface DeclarativeRouteRequestInput {
+export interface DeclarativeRouteRequestV3Input {
   chain_id: number;
   /** "0x" + 40 hex. Case-insensitive on the engine side. */
   to: string;
   /** "0x" + 8 hex. Case-insensitive on the engine side. */
   selector: string;
-  ctx: {
-    chain_id: number;
-    from: string;
-    to: string;
-    value_wei?: string;
-    block_timestamp?: number;
-  };
-  /** "0x"-prefixed raw calldata. Decoded inside WASM via the bundle ABI. */
+  /** Raw "0x"-prefixed calldata. */
   calldata: string;
+  /** `msg.value` as a base-10 decimal string. Defaults to `"0"`. */
+  value?: string;
+  /** Declared gas limit as a base-10 decimal string. Defaults to `"0"`. */
+  gas_limit?: string;
+  /**
+   * Current gas price as a base-10 decimal string. Defaults to `"0"`. The
+   * WASM wraps this in a stub `LiveField` whose source is Pyth
+   * `gas/eip155:<chain_id>` — Phase 5+ replaces this with a Sync
+   * Orchestrator hookup.
+   */
+  gas_price?: string;
+  /** `tx.from` — "0x" + 40 hex. */
+  submitter: string;
+  /** Unix epoch seconds at which the Action was submitted. */
+  submitted_at: number;
+  /** Sequential transaction nonce of `submitter`. Defaults to `0`. */
+  nonce?: number;
+  /**
+   * Optional block.timestamp — distinct from `submitted_at`. Reserved for
+   * Phase 4D's deadline / validity mapping.
+   */
+  block_timestamp?: number;
 }
 
 /**
- * Result of a successful `declarative_route_request_json` call. `decoder_id`
- * is the bundle id the bridge resolved (`declarative.<path>`); the
- * orchestrator surfaces it in audit telemetry so we can tell which
- * marketplace adapter handled a given tx.
- */
-export interface DeclarativeRouteRequestResult {
-  envelopes: Record<string, unknown>[];
-  decoder_id: string;
-}
-
-/**
- * One child callkey from `declarative_plan_children_json`. Mirrors
- * `DeclarativeChildCallKeyDto` in `crates/policy-engine-wasm/src/dto.rs`.
- * `to` echoes the outer `to` (self-multicall); `selector` is `"0x"` + 8 hex.
- */
-export interface DeclarativeChildCallKey {
-  chain_id: number;
-  to: string;
-  selector: string;
-}
-
-/**
- * Result of `declarative_plan_children_json`. `children` is empty when the
- * outer bundle is not `multicall_recurse` (or no bundle is mounted for the
- * callkey) — the caller then skips the child-prefetch pass.
- */
-export interface DeclarativePlanChildrenResult {
-  children: DeclarativeChildCallKey[];
-  decoder_id: string;
-}
-
-/**
- * One ActionEnvelope emitted by the new (Phase 5) pipeline.
+ * Result of a successful `declarative_route_request_v3_json` call.
  *
- * `action` is the snake_case discriminator (e.g. "swap", "permit",
- * "approve") and `fields` is the variant-specific payload.
+ * `actions` is the JSON-serialised `Vec<simulation_reducer::action::Action>`
+ * the WASM produced. Phase 4B emits a single-element vec whose body is the
+ * `Unknown` stub; Phase 4D fills in the real `ActionBody` per registry-v2
+ * manifest emit-rule.
  *
- * Field-level typing is intentionally deferred to a follow-up so this
- * minimal binding stays small. Callers that need to introspect specific
- * variants should add per-action zod-style guards as needed.
+ * `decoder_id` echoes the matched bundle's declarative decoder id when a
+ * manifest matched (`""` when no match — the Phase 4B stub never matches).
  */
-export interface RouteEnvelope {
-  category: string;
-  action: string;
-  fields: unknown;
+export interface DeclarativeRouteRequestV3Result {
+  actions: Record<string, unknown>[];
+  decoder_id: string;
 }
 
 interface OkEnvelope<T> {
@@ -259,83 +219,32 @@ export async function installPolicies(input: {
 }
 
 /**
- * Phase 5 pipeline entry. Takes a raw RPC payload and returns the list of
- * `ActionEnvelope` values that the new Decoder/Mapper/CallAdapter or
- * SignAdapter stack produces.
+ * M2 — install a v3 declarative bundle (`type: "adapter_action"`,
+ * `schema_version: "3"`, hierarchical `emit.body`) into the engine's
+ * `DECLARATIVE_V3_STATE` so subsequent `declarative_route_request_v3_json`
+ * calls find it via the callkey `(chain_id, to, selector)` bridge.
  *
- * Input shape: `{ method, params, chain_id, block_timestamp? }`.
- * Throws `EngineError("route_failed", ...)` when no adapter matched.
- */
-export async function routeRequest(input: {
-  method: string;
-  params: unknown;
-  chain_id: number;
-  block_timestamp?: number;
-}): Promise<RouteEnvelope[]> {
-  const exports = await load();
-  const raw = unwrap<unknown>(
-    exports.route_request_json(JSON.stringify(input)),
-  );
-  if (!Array.isArray(raw)) {
-    throw new EngineError(
-      "invalid_route_response",
-      `expected ActionEnvelope[] from WASM, got ${typeof raw}`,
-    );
-  }
-  return raw.map((entry, idx) => {
-    if (
-      typeof entry !== "object" ||
-      entry === null ||
-      typeof (entry as { category?: unknown }).category !== "string" ||
-      typeof (entry as { action?: unknown }).action !== "string"
-    ) {
-      throw new EngineError(
-        "invalid_route_envelope",
-        `route_request_json[${idx}] missing required fields`,
-      );
-    }
-    const obj = entry as { category: string; action: string; fields?: unknown };
-    return { category: obj.category, action: obj.action, fields: obj.fields };
-  });
-}
-
-export async function planPolicyRpc(
-  input: PlanPolicyRpcInputDto,
-): Promise<PolicyRpcPlanDto> {
-  const exports = await load();
-  const startedAtMs = Date.now();
-  const raw = unwrap<unknown>(exports.plan_policy_rpc_json(JSON.stringify(input)));
-  const plan = parsePolicyRpcPlan(raw);
-  console.debug("[Scopeball] wasm.plan", {
-    requestId: input.request_id,
-    method: input.raw_request.method,
-    chainId: input.raw_request.chain_id,
-    manifestCount: input.manifests.length,
-    durationMs: Date.now() - startedAtMs,
-    manifestSetHash: plan.manifest_set_hash,
-    schemaHash: plan.schema_hash,
-    envelopeCount: plan.envelopes.length,
-    calls: plan.calls.map((c) => ({ id: c.id, method: c.method, params: c.params })),
-    diagnostics: plan.diagnostics,
-  });
-  return plan;
-}
-
-/**
- * Phase 1B — install a declarative adapter bundle into the engine. The
- * bundle JSON must conform to `ADAPTER_MARKETPLACE_ARCHITECTURE.md` §4.1; the
- * engine returns the `declarative.<path>` decoder id keyed off the bundle.
+ * Re-installing the same bundle is idempotent on the engine side — it
+ * overwrites the bridge entry + bundle map — so callers don't have to dedupe.
  *
- * Re-installing the same bundle is idempotent on the engine side — the
- * mapper is replaced in the process-local registry — so callers don't have
- * to dedupe.
+ * Error semantics:
+ *   - `EngineError("invalid_bundle_json", …)` — payload is not valid JSON
+ *     once stringified on the SW side. The caller built a bad request and
+ *     must fix it.
+ *   - `EngineError("missing_id", …)` — bundle has no `id` string.
+ *   - `EngineError("invalid_match", …)` — `match` is missing or its
+ *     `BundleMatch` deserialisation failed inside WASM.
+ *
+ * The caller MUST stringify the bundle exactly as it received it from the
+ * registry (no re-canonicalisation) — `bundle_sha256` integrity downstream
+ * depends on byte stability.
  */
-export async function installDeclarativeBundle(
+export async function declarativeInstallV3(
   bundleJson: string,
 ): Promise<DeclarativeInstallResult> {
   const exports = await load();
   return unwrap<DeclarativeInstallResult>(
-    exports.declarative_install_json(bundleJson),
+    exports.declarative_install_v3_json(bundleJson),
   );
 }
 
@@ -377,24 +286,6 @@ export async function previewCustomSchema(input: {
 }
 
 /**
- * Phase 1B — run an installed declarative mapper against a decoded call.
- *
- * The input shape is forwarded verbatim to the WASM contract; see
- * `crates/policy-engine-wasm/src/declarative_exports.rs` for the DTO
- * definitions. Throws `EngineError("decoder_id_not_installed", ...)` when
- * the lookup id is unknown — the caller is expected to fetch + install the
- * bundle via `installDeclarativeBundle` before retrying.
- */
-export async function declarativeMap(
-  input: DeclarativeLookupInput,
-): Promise<DeclarativeLookupResult> {
-  const exports = await load();
-  return unwrap<DeclarativeLookupResult>(
-    exports.declarative_lookup_json(JSON.stringify(input)),
-  );
-}
-
-/**
  * Read back the currently-installed enriched cedarschema + per-action
  * custom-context fields. Used by the dashboard schema viewer to show
  * users what their installed manifests have added on top of the base
@@ -408,51 +299,27 @@ export async function previewInstalledSchema(): Promise<PreviewInstalledSchemaOu
 }
 
 /**
- * Phase 6 — orchestrator route entry.
+ * Phase 4B — v3 orchestrator route entry.
  *
  * Resolves `(chain_id, to, selector)` through the engine-side bridge table
- * populated at install time by `declarative_install_json`, then runs the
- * matching mapper against the caller-supplied `decoded` call.
+ * populated at install time by `declarative_install_v3_json`, then produces
+ * the PDF FSM `simulation_reducer::action::Action` tree. The wire boundary is
+ * locked at Phase 4B; the Rust stub currently returns a single
+ * `ActionBody::Unknown` so the SW + Cedar path can already exercise the v3
+ * type — manifest lookup + emit-rule decoding lands in Phase 4D.
  *
- * Error semantics (mirrored straight from the WASM contract):
- *   - `EngineError("no_declarative_mapper", …)` — no bundle is mounted for
- *     this callkey. The orchestrator MUST treat this as a non-fatal miss
- *     and fall through to the static Tier B pipeline.
- *   - `EngineError("map_failed", …)` — bundle matched but the declarative
- *     interpreter rejected the decoded call (malformed args, type
- *     mismatch). This IS a fault.
- *   - `EngineError("invalid_input_json", …)` — the caller built a bad
- *     wire payload. Treat as a fault.
+ * Error semantics:
+ *   - `EngineError("invalid_input_json", …)` — malformed wire payload.
+ *     The caller built a bad request and must fix it.
+ *   - `EngineError("input_too_large", …)` — JSON exceeded the WASM input
+ *     budget. Caller should split / shorten the request.
  */
-export async function declarativeRouteRequest(
-  input: DeclarativeRouteRequestInput,
-): Promise<DeclarativeRouteRequestResult> {
+export async function declarativeRouteRequestV3(
+  input: DeclarativeRouteRequestV3Input,
+): Promise<DeclarativeRouteRequestV3Result> {
   const exports = await load();
-  return unwrap<DeclarativeRouteRequestResult>(
-    exports.declarative_route_request_json(JSON.stringify(input)),
-  );
-}
-
-/**
- * Plan the child callkeys of a `multicall_recurse` outer call.
- *
- * The WASM `WasmChildResolver` is synchronous and can only resolve a child
- * sub-call whose bundle is already mounted. This entry decodes the outer
- * multicall calldata in WASM and returns one `(chain_id, to, selector)` per
- * inner sub-call so the orchestrator can fetch+install them first.
- *
- * Returns `{ children: [], decoder_id: "" }` for a non-`multicall_recurse`
- * bundle or when no bundle is mounted. Throws `EngineError("decode_failed" |
- * "invalid_calldata" | "invalid_input_json", …)` on a malformed outer call;
- * callers treat a throw as best-effort and continue to
- * `declarativeRouteRequest`.
- */
-export async function declarativePlanChildren(
-  input: DeclarativeRouteRequestInput,
-): Promise<DeclarativePlanChildrenResult> {
-  const exports = await load();
-  return unwrap<DeclarativePlanChildrenResult>(
-    exports.declarative_plan_children_json(JSON.stringify(input)),
+  return unwrap<DeclarativeRouteRequestV3Result>(
+    exports.declarative_route_request_v3_json(JSON.stringify(input)),
   );
 }
 
@@ -466,104 +333,61 @@ export async function getAliasTable(): Promise<{ entries: AliasTableEntry[] }> {
   return unwrap<{ entries: AliasTableEntry[] }>(exports.get_alias_table_json());
 }
 
-export async function evaluatePolicyRpc(
-  input: EvaluatePolicyRpcInputDto,
-): Promise<VerdictDto> {
+/**
+ * Phase 1 (v2 ActionBody model) — PLAN phase.
+ *
+ * Lowers the decoded `ActionBody` + `ActionMeta` and plans the v2 policy-RPC
+ * calls the host must dispatch. Returns the `planned` calls keyed by
+ * `call_id` (`<manifest_id>::<spec_id>`); the host fetches each and feeds the
+ * raw results back to {@link evaluateActionV2}.
+ *
+ * Stateless: the `manifests` arrive inline per call rather than via an install
+ * step. The WASM returns `{ ok, data: { planned: [...] } }`; this wrapper
+ * unwraps the envelope and returns `data.planned`.
+ *
+ * Error semantics:
+ *   - `EngineError("invalid_input_json", …)` — malformed wire payload.
+ *   - `EngineError("plan_failed" | "unsupported_action", …)` — the action
+ *     could not be lowered / planned.
+ */
+export async function planActionRpcV2(
+  input: PlanActionRpcV2InputDto,
+): Promise<PlannedCallV2Dto[]> {
   const exports = await load();
-  const startedAtMs = Date.now();
-  const raw = unwrap<unknown>(
-    exports.evaluate_policy_rpc_json(JSON.stringify(input)),
+  const { planned } = unwrap<{ planned: PlannedCallV2Dto[] }>(
+    exports.plan_action_rpc_v2_json(JSON.stringify(input)),
   );
-  const verdict = parseVerdict(raw);
-  console.debug("[Scopeball] wasm.evaluate", {
-    requestId: input.plan.request_id,
-    planCallCount: input.plan.calls.length,
-    rpcResultCount: input.rpc_response.results.length,
-    manifestCount: input.manifests.length,
-    durationMs: Date.now() - startedAtMs,
-    verdict: verdict.kind,
-    matched:
-      verdict.matched?.map((m) => ({
-        id: m.policy_id,
-        severity: m.severity,
-      })) ?? [],
-  });
-  return verdict;
+  return planned;
 }
 
 /**
- * Wire shape for `evaluateWithEnvelopes`. Mirrors
- * `crates/policy-engine-wasm/src/dto.rs::EvaluateWithEnvelopesInputDto`.
+ * Phase 1 (v2 ActionBody model) — EVALUATE phase.
  *
- * `envelopes` are the post-processed (Phase 7E enriched) ActionEnvelopes the
- * declarative pipeline already produced — the WASM lowers them into Cedar
- * requests directly, skipping `route_request_json` / `plan_policy_rpc_json`.
+ * Re-lowers the action, replays the host's raw `results` into
+ * `context.custom.*`, then evaluates every matching bundle's Cedar policy and
+ * aggregates the per-bundle verdicts by deny-overrides.
  *
- * `rpc_response` carries `policy-rpc` results when manifests declare any
- * `requires`; pass `{ request_id, results: [] }` for pipelines that do not
- * need RPC enrichment (e.g. permit-only policies). The WASM still runs the
- * projection step against this response, so manifests that DO require RPC
- * data must supply matching results or the verdict will fail closed via
- * `__engine::projection_failed`.
+ * The WASM ALWAYS returns `ok: true` — every fault becomes a `Fail` verdict
+ * carrying a synthetic `__system__` (missing required RPC result) or
+ * `__engine::<kind>` matched policy, so there is no `ok: false` / `EngineError`
+ * path here. The envelope nests the verdict under `data.verdict`; this wrapper
+ * runs that through {@link parseVerdict}.
  */
-export interface EvaluateWithEnvelopesInput {
-  envelopes: readonly Record<string, unknown>[];
-  from: string;
-  to: string;
-  value_wei: string;
-  chain_id: number;
-  block_timestamp: number;
-  manifests: readonly unknown[];
-  rpc_response: PolicyRpcResponseDto;
-}
-
-/**
- * Phase 7A entry — evaluate Cedar policies against caller-supplied envelopes.
- *
- * The declarative pipeline produces envelopes via `declarativeRouteRequest`
- * (then post-processes them through `enrichEnvelopeAssets` to fill in
- * AssetRef `symbol`/`decimals`). Handing those enriched envelopes here lets
- * the declarative path drive Cedar verdicts — i.e. the static
- * `evaluatePolicyRpc` path is no longer the sole verdict driver.
- *
- * The WASM enforces:
- *   * Installed policies' `manifest_set_hash` matches `manifests` arg.
- *   * Installed `schema_hash` matches the schema derived from `manifests`.
- *   * RPC projection succeeds (or the response is empty when no calls).
- *
- * Failures surface as a synthetic `Fail` verdict whose `matched[0]` is
- * `__engine::<kind>` — matching the same pattern `evaluatePolicyRpc` uses
- * for engine-side faults.
- */
-export async function evaluateWithEnvelopes(
-  input: EvaluateWithEnvelopesInput,
+export async function evaluateActionV2(
+  input: EvaluateActionV2InputDto,
 ): Promise<VerdictDto> {
   const exports = await load();
   const startedAtMs = Date.now();
-  const inputJson = JSON.stringify(input);
-  // MCP debug: dump WASM input + raw response when matched contains
-  // __engine::invalid_input_json to surface the underlying serde error.
-  const rawResponseStr = exports.evaluate_with_envelopes_json(inputJson);
-  if (rawResponseStr.includes("invalid_input_json")) {
-    console.warn("[Scopeball-MCP-debug] evaluate input (full):", inputJson);
-    console.warn(
-      "[Scopeball-MCP-debug] evaluate raw response (full):",
-      rawResponseStr,
-    );
-    console.warn(
-      "[Scopeball-MCP-debug] envelopes detail:",
-      JSON.parse(JSON.stringify(input.envelopes)),
-    );
-  }
-  const raw = unwrap<unknown>(rawResponseStr);
-  const verdict = parseVerdict(raw);
-  console.debug("[Scopeball] wasm.evaluate-with-envelopes", {
-    chainId: input.chain_id,
-    from: input.from,
-    to: input.to,
-    envelopeCount: input.envelopes.length,
-    rpcResultCount: input.rpc_response.results.length,
-    manifestCount: input.manifests.length,
+  const { verdict: rawVerdict } = unwrap<{ verdict: unknown }>(
+    exports.evaluate_action_v2_json(JSON.stringify(input)),
+  );
+  const verdict = parseVerdict(rawVerdict);
+  console.debug("[Scopeball] wasm.evaluate-action-v2", {
+    chainId: input.tx.chain_id,
+    from: input.tx.from,
+    to: input.tx.to,
+    bundleCount: input.bundles.length,
+    resultCount: Object.keys(input.results).length,
     durationMs: Date.now() - startedAtMs,
     verdict: verdict.kind,
     matched:

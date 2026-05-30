@@ -1,0 +1,72 @@
+// Amm::RemoveLiquidity — withdraw liquidity from an AMM pool. Three variants
+// covered by the `params.kind` discriminator:
+//
+//   - "pooled_burn"            Uniswap V2 / Curve / Balancer-style burn of an
+//                              LP token, redeems underlying tokens.
+//   - "concentrated_decrease"  Uniswap V3 — decrease liquidity on an existing
+//                              position NFT.
+//   - "concentrated_burn"      Uniswap V3 — burn an empty position NFT (caller
+//                              must have decreased liquidity to 0 first).
+//
+// Policies typically guard recipient whitelisting, slippage floors (minOut /
+// amountMin), and refuse to burn position NFTs that still have accrued fees.
+//
+// `live_inputs.pool_state` is reducer-internal and not exposed at the policy
+// layer; only `feesOwed` is surfaced.
+
+namespace Amm {
+  // -------------------------------------------------------------------------
+  // RemoveLiquidityParams — projected from Rust enum (PooledBurn /
+  // ConcentratedDecrease / ConcentratedBurn). Discriminator = `kind`. Field
+  // presence per variant:
+  //
+  //   - "pooled_burn":           lpToken, lpAmount, minOut, recipient
+  //   - "concentrated_decrease": nftKey, liquidityBurn, amountMin
+  //   - "concentrated_burn":     nftKey
+  // -------------------------------------------------------------------------
+  type RemoveLiquidityParams = {
+    // "pooled_burn" | "concentrated_decrease" | "concentrated_burn"
+    kind: String,
+    // LP token being burned. PooledBurn.
+    lpToken?: Core::TokenRef,
+    // Amount of LP token to burn (U256 hex). PooledBurn.
+    lpAmount?: String,
+    // Minimum acceptable output per underlying token (set-like; original Vec
+    // order lost). PooledBurn.
+    minOut?: Set<{ token: Core::TokenRef, amount: String }>,
+    // Recipient of withdrawn tokens. PooledBurn only; the V3 variants send to
+    // the NFT owner / are noop respectively.
+    recipient?: String,
+    // NFT position key. ConcentratedDecrease and ConcentratedBurn.
+    nftKey?: Core::TokenKey,
+    // Amount of V3 liquidity to burn (U128 hex). ConcentratedDecrease.
+    liquidityBurn?: String,
+    // Minimum acceptable amounts (slippage floor). U256 hex.
+    // ConcentratedDecrease.
+    amountMin?: { a: String, b: String },
+  };
+
+  type RemoveLiquidityContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Pool being withdrawn from.
+    venue: AmmVenue,
+    // User-signed withdrawal parameters.
+    params: RemoveLiquidityParams,
+    // LiveField<Vec<(TokenRef, U256)>>: fees owed to the position at
+    // simulation time (set-like; order lost). `pool_state` is reducer-internal
+    // and omitted.
+    feesOwed: Set<{ token: Core::TokenRef, amount: String }>,
+    // Manifest-extensible slot.
+    custom?: RemoveLiquidityCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type RemoveLiquidityCustomContext = {};
+
+  action "RemoveLiquidity" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: RemoveLiquidityContext,
+  };
+}

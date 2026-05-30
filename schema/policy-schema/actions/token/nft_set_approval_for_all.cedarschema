@@ -1,0 +1,32 @@
+// Token::NftSetApprovalForAll — `ERC721`/`ERC1155` `setApprovalForAll`.
+//
+// Toggles operator status across an entire collection: when `approved = true`,
+// `spender` may transfer any token in the `contract` collection on the
+// principal's behalf. When `false`, this encodes a revocation
+// (`setApprovalForAll(false)`). No token amount.
+
+namespace Token {
+  type NftSetApprovalForAllContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // Chain on which the collection lives (CAIP-2 id).
+    chain: String,
+    // `ERC721` or `ERC1155` contract address.
+    contract: String,
+    // Operator being granted or revoked.
+    spender: String,
+    // `true` grants operator rights; `false` revokes them.
+    approved: Bool,
+    // Manifest-extensible slot.
+    custom?: NftSetApprovalForAllCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type NftSetApprovalForAllCustomContext = {};
+
+  action "NftSetApprovalForAll" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: NftSetApprovalForAllContext,
+  };
+}

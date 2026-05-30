@@ -1,0 +1,44 @@
+// Token::Erc20Permit — `ERC20` `EIP-2612` `permit`.
+//
+// Gasless allowance: an off-chain signature that anyone can later submit
+// on-chain to set `spender`'s allowance on `token` up to `amount` until
+// `deadline`. `nonce` is the current `permit` nonce on the token contract
+// (carried inline; the underlying `LiveField<U256>` metadata is dropped).
+//
+// Amount is exposed through the 3-layer projection:
+//   - `amount`     : String  — raw U256 hex
+//   - `amountNano` : Long?   — token-native nano: `raw × 10^(9 − asset.decimals)`
+//                              Host-populated, not manifest-driven.
+//   - `amountUsd`  : decimal? — host-populated fiat estimate.
+
+namespace Token {
+  type Erc20PermitContext = {
+    // Common envelope. `meta.nature.kind` is `"offchain_sig"` for `permit`.
+    meta: Core::ActionMeta,
+    // Token whose `permit` is being signed.
+    token: Core::TokenRef,
+    // Address authorized to spend.
+    spender: String,
+    // Allowance amount (U256 hex).
+    amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    amountUsd?: decimal,
+    // Signature expiration timestamp (unix seconds).
+    deadline: Long,
+    // Current `permit` nonce on the token contract (U256 hex; LiveField inner).
+    nonce: String,
+    // Manifest-extensible slot.
+    custom?: Erc20PermitCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type Erc20PermitCustomContext = {};
+
+  action "Erc20Permit" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: Erc20PermitContext,
+  };
+}

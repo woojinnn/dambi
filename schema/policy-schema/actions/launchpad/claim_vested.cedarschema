@@ -1,0 +1,38 @@
+// Launchpad::ClaimVested — `LaunchpadAction::ClaimVested`.
+//
+// Rust source: `crates/simulation/reducer/src/action/launchpad/claim_vested.rs`
+// (`ClaimVestedAction` + `ClaimVestedLiveInputs`).
+//
+// The `next_unlock` field — `LiveField<Option<(Time, U256)>>` — is flattened
+// to two parallel optional fields (`nextUnlockTime` / `nextUnlockAmount`).
+// Either both are present or both are absent (no next unlock remaining).
+
+namespace Launchpad {
+  type ClaimVestedContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Opaque position identifier — state §5 `LaunchpadAllocation` or `VestingSchedule`.
+    positionId: String,
+    // Amount to claim (U256 hex); absent claims the maximum currently available.
+    amount?: String,
+    // ----- Live inputs (flattened from `ClaimVestedLiveInputs`) -----
+    // Amount currently claimable from the vesting schedule (U256 hex).
+    claimableNow: String,
+    // Next unlock time (unix seconds). Present iff there is a next unlock.
+    nextUnlockTime?: Long,
+    // Next unlock amount (U256 hex). Present iff there is a next unlock.
+    nextUnlockAmount?: String,
+    // Manifest-extensible slot.
+    custom?: ClaimVestedCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type ClaimVestedCustomContext = {};
+
+  action "ClaimVested" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: ClaimVestedContext,
+  };
+}

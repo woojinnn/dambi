@@ -1,0 +1,77 @@
+// Airdrop::Claim — claim eligibility for a one-time airdrop.
+//
+// Rust source: `crates/simulation/reducer/src/action/airdrop/claim.rs`
+// (`ClaimAirdropAction` + `ClaimTarget` + `ClaimAirdropLiveInputs`).
+//
+// Three distributor flavours are unified via `ClaimTarget.kind`:
+//   - "merkle_distributor"     — caller supplies `proof` + `index` (Merkle leaf).
+//   - "signature_distributor"  — caller supplies `sig` (EIP-712, e.g. Optimism v2).
+//   - "staking_claim"          — claim of staking rewards (e.g. Lido, Pendle, Convex).
+//
+// Amount is exposed through the 3-layer projection:
+//   - `actualAmount`     : String   — raw U256 hex (canonical wire value).
+//   - `actualAmountNano` : Long?    — token-native nano (host-populated).
+//   - `actualAmountUsd`  : decimal? — host-populated fiat estimate.
+//
+// `LiveField<T>` wrappers are inlined to `T`; the optional `(start, end)` claim
+// window tuple is flattened to two parallel optional Long fields.
+
+namespace Airdrop {
+  // Discriminated union of distributor mechanisms (Rust `ClaimTarget`,
+  // serde tag = "kind", rename_all = "snake_case").
+  type ClaimTarget = {
+    // "merkle_distributor" | "signature_distributor" | "staking_claim".
+    kind: String,
+    // CAIP-2 id of the chain hosting the distributor contract.
+    chain: String,
+    // Distributor (or staking/rewards) contract address.
+    contract: String,
+    // Leaf index in the Merkle tree; present iff kind = "merkle_distributor".
+    index?: Long,
+  };
+
+  type ClaimContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Source protocol/distribution (e.g. Optimism, Arbitrum DAO, Jupiter).
+    source: Core::ProtocolRef,
+    // Distributor mechanism used to deliver this claim.
+    claimTarget: ClaimTarget,
+    // Address that will receive the claimed tokens.
+    recipient: String,
+    // Merkle inclusion proof; set of 0x-hex sibling hashes.
+    // Required for kind = "merkle_distributor".
+    proof?: Set<String>,
+    // EIP-712 signature (0x-hex bytes) authorizing the claim.
+    // Required for kind = "signature_distributor".
+    sig?: String,
+    // ----- Live inputs (flattened from `ClaimAirdropLiveInputs`) -----
+    // Whether the claim is still available (not expired and not already claimed).
+    isStillClaimable: Bool,
+    // Actual claimable amount (U256 hex). Some airdrops are dynamic (e.g. vesting).
+    actualAmount: String,
+    // Token-native nano projection (raw × 10^(9 − decimals)). Host-populated.
+    actualAmountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    actualAmountUsd?: decimal,
+    // Token to be received; some distributions resolve the token dynamically.
+    claimToken: Core::TokenRef,
+    // Start of the optional claim window (unix seconds). Flattened from
+    // `LiveField<Option<(Time, Time)>>`; either both bounds are present or both absent.
+    claimWindowStart?: Long,
+    // End of the optional claim window (unix seconds). See `claimWindowStart`.
+    claimWindowEnd?: Long,
+    // Manifest-extensible slot.
+    custom?: ClaimCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields); the composer fills
+  // this from per-policy manifest declarations in a follow-up PR.
+  type ClaimCustomContext = {};
+
+  action "Claim" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: ClaimContext,
+  };
+}

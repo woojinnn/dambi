@@ -1,18 +1,39 @@
-type RepayContext = {
-  market?: Pool,
-  asset: AssetRef,
-  amount: AmountConstraint,
-  amountMode?: String,
-  onBehalf: String,
-  repayKind: String,
-  validity?: Validity,
-  custom?: RepayCustomContext,
-};
+// Lending::Repay — repay an outstanding debt position.
+//
+// Rust source: `crates/simulation/reducer/src/action/lending/repay.rs`
+// (`RepayAction` + `RepayLiveInputs`). `amount == U256::MAX` encodes
+// "full repay". `useATokens` is the Aave V3 flag to repay directly from
+// the aToken balance.
 
-type RepayCustomContext = {};
+namespace Lending {
+  type RepayContext = {
+    meta: Core::ActionMeta,
+    venue: LendingVenue,
+    // Asset being repaid.
+    asset: Core::TokenRef,
+    // Amount to repay (U256 hex); U256::MAX = full repay.
+    amount: String,
+    amountNano?: Long,
+    amountUsd?: decimal,
+    // Rate mode of the debt being repaid: "variable" | "stable".
+    rateMode: String,
+    // Debtor of record; defaults to submitter when omitted.
+    onBehalfOf?: String,
+    // Aave V3 flag — repay directly using aToken balance.
+    useATokens: Bool,
+    // Live inputs (flattened from LiveField<T>).
+    reserveState: ReserveState,
+    // Current outstanding debt for the chosen RateMode (U256 hex).
+    currentDebt: String,
+    userStateBefore: UserLendingState,
+    custom?: RepayCustomContext,
+  };
 
-action "repay" appliesTo {
-  principal: Wallet,
-  resource: Protocol,
-  context: RepayContext,
-};
+  type RepayCustomContext = {};
+
+  action "Repay" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: RepayContext,
+  };
+}

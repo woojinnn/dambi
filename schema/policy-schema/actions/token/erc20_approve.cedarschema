@@ -1,0 +1,38 @@
+// Token::Erc20Approve — `ERC20` `approve(spender, amount)`.
+//
+// Grants `spender` an allowance up to `amount` of `token`. `U256::MAX` encodes
+// "unlimited approval", which policies typically flag as risky.
+//
+// Amount is exposed through the 3-layer projection:
+//   - `amount`     : String  — raw U256 hex (canonical wire value)
+//   - `amountNano` : Long?   — token-native nano: `raw × 10^(9 − asset.decimals)`
+//                              Host-populated, not manifest-driven.
+//   - `amountUsd`  : decimal? — host-populated fiat estimate.
+
+namespace Token {
+  type Erc20ApproveContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Token being approved.
+    token: Core::TokenRef,
+    // Address authorized to spend.
+    spender: String,
+    // Allowance amount (U256 hex). `0xff..ff` ≈ unlimited.
+    amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
+    // USD estimate at submission time. Host-populated.
+    amountUsd?: decimal,
+    // Manifest-extensible slot.
+    custom?: Erc20ApproveCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type Erc20ApproveCustomContext = {};
+
+  action "Erc20Approve" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: Erc20ApproveContext,
+  };
+}

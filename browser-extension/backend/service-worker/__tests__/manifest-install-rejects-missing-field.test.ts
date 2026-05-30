@@ -22,12 +22,7 @@
 // envelope shapes.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createHash } from "node:crypto";
-import { RequestType, type Message } from "@lib/types";
 import type { PolicyManifest } from "../manifests/store";
-
-const OWNER = "0x1111111111111111111111111111111111111111";
-const ROUTER = "0x2222222222222222222222222222222222222222";
 
 const mocks = vi.hoisted(() => {
   const localStore = new Map<string, unknown>();
@@ -159,7 +154,7 @@ vi.mock("../policies-loader", () => ({
   loadCurrentEnabledPolicySet: vi.fn(async () => []),
   reinstallAllPolicies: vi.fn(async () => undefined),
 }));
-vi.mock("../marketplace/storage", () => ({
+vi.mock("../adapter-loader/storage", () => ({
   aggregatedPolicySet: mocks.aggregatedPolicySet,
   listInstalled: mocks.listInstalled,
 }));
@@ -167,16 +162,6 @@ vi.mock("../dashboard/storage", () => ({
   aggregatedManagedPolicySet: mocks.aggregatedManagedPolicySet,
   listManaged: mocks.listManaged,
 }));
-
-// Pure SHA-256 hash mirroring `policy_engine::policy_rpc::manifest_set_hash`
-// (sort manifests by `id`, JSON-serialize the canonical Vec, hex-encode).
-function manifestSetHashTs(manifests: PolicyManifest[]): string {
-  const sorted = [...manifests].sort((a, b) =>
-    String(a.id).localeCompare(String(b.id)),
-  );
-  const json = JSON.stringify(sorted);
-  return "sha256:" + createHash("sha256").update(json).digest("hex");
-}
 
 function emptySwapManifest(): PolicyManifest {
   // Has the required top-level fields but no outputs at all — meaning
@@ -188,43 +173,6 @@ function emptySwapManifest(): PolicyManifest {
     schema_version: 1,
     requires: [],
   };
-}
-
-function swapManifestWithTotalInputUsd(): PolicyManifest {
-  return {
-    id: "user.swap.v1",
-    schema_version: 1,
-    requires: [
-      {
-        id: "swap-total-input-usd",
-        when: { action: "swap" },
-        method: "oracle.usd_value",
-        params: { chain_id: "$.root.chain_id" },
-        outputs: [
-          {
-            kind: "context",
-            field: "totalInputUsd",
-            type: "UsdValuation",
-            from: "$.result",
-            required: true,
-          },
-        ],
-        optional: true,
-      },
-    ],
-  } as unknown as PolicyManifest;
-}
-
-function txMessage(requestId: string): Message {
-  return {
-    requestId,
-    data: {
-      type: RequestType.TRANSACTION,
-      chainId: 1,
-      hostname: "app.example",
-      transaction: { from: OWNER, to: ROUTER, value: "0x0", data: "0x" },
-    },
-  } as Message;
 }
 
 describe("Phase 8 / Task 8.2 — atomic install rejects missing field", () => {
@@ -261,99 +209,5 @@ describe("Phase 8 / Task 8.2 — atomic install rejects missing field", () => {
     // Storage was NOT mutated — the install failed closed.
     expect(await getAllManifests()).toEqual({});
     expect(await getHash()).toBeNull();
-  });
-});
-
-describe("Phase 7 codex carry-over H — evaluate passes installed Map manifests", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.localStore.clear();
-    mocks.sessionStore.clear();
-    mocks.runtimeMessageListeners.length = 0;
-    mocks.windowRemovedListeners.length = 0;
-    vi.resetModules();
-
-    // Stale policies-loader Vec (e.g. legacy embedded manifests from
-    // default-policies). Different from what the Map atomic-install
-    // is about to push into WASM.
-    mocks.getActivePolicyRpcManifests.mockReturnValue([
-      {
-        id: "default.stale.vec",
-        schema_version: 1,
-        requires: [],
-      },
-    ]);
-
-    // WASM install accepts the Map and reports a fresh enriched-schema hash.
-    mocks.installPolicies.mockImplementation(async () => {
-      return {
-        enrichedSchemaHash: "sha256:installed-from-map",
-        addedCustomFields: { swap: [{ field: "totalInputUsd" }] },
-      };
-    });
-
-    // The plan + evaluate stubs return success and record their
-    // `manifests` payload via `mock.calls` so the test can compare.
-    mocks.planPolicyRpc.mockImplementation(async (input: any) => ({
-      request_id: input.request_id,
-      root: {
-        chain_id: 1,
-        from: OWNER,
-        to: ROUTER,
-        value_wei: "0",
-        block_timestamp: 0,
-      },
-      envelopes: [],
-      calls: [],
-      manifest_set_hash: manifestSetHashTs(input.manifests as PolicyManifest[]),
-      schema_hash: "sha256:installed-schema",
-      diagnostics: [],
-    }));
-    mocks.evaluatePolicyRpc.mockResolvedValue({ kind: "pass" });
-  });
-
-  it("uses the Map manifest store (not the stale loader Vec) when planning/evaluating", async () => {
-    // 1. Install a Map-shape manifest via the dashboard handler path.
-    const installed = swapManifestWithTotalInputUsd();
-    const { handleManifestRequest } = await import("../manifests/handlers");
-    const putResult = await handleManifestRequest({
-      type: "manifest:put",
-      action: "swap",
-      manifest: installed,
-    });
-    expect(putResult.ok).toBe(true);
-
-    // Sanity: WASM received a Map with exactly that manifest.
-    const installArg = mocks.installPolicies.mock.calls[0]?.[0] as {
-      manifests?: unknown;
-    };
-    expect(installArg.manifests).toEqual({ swap: installed });
-
-    // 2. Run a decide-message lifecycle.
-    const { decideMessage } = await import("../orchestrator");
-    const decision = await decideMessage(txMessage("tx-h-regression"));
-    expect(decision.verdict.kind).toBe("pass");
-
-    // 3. Both plan and evaluate must receive the Map values (sorted),
-    //    NOT the stale `getActivePolicyRpcManifests()` Vec. Equivalent
-    //    way to say it: the manifest-set hash they compute is the same
-    //    as the install just used.
-    expect(mocks.planPolicyRpc).toHaveBeenCalledTimes(1);
-    expect(mocks.evaluatePolicyRpc).toHaveBeenCalledTimes(1);
-
-    const planManifests = (mocks.planPolicyRpc.mock.calls[0]?.[0] as {
-      manifests: PolicyManifest[];
-    }).manifests;
-    const evalManifests = (mocks.evaluatePolicyRpc.mock.calls[0]?.[0] as {
-      manifests: PolicyManifest[];
-    }).manifests;
-
-    const installedHash = manifestSetHashTs([installed]);
-    expect(manifestSetHashTs(planManifests)).toBe(installedHash);
-    expect(manifestSetHashTs(evalManifests)).toBe(installedHash);
-
-    // The stale Vec must NOT have leaked through.
-    const planIds = planManifests.map((m) => String(m.id));
-    expect(planIds).not.toContain("default.stale.vec");
   });
 });

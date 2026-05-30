@@ -1,0 +1,29 @@
+// Perp::DecreasePosition — reduce size of an existing perpetual position
+// without fully closing it.
+//
+// Rust source: `crates/simulation/reducer/src/action/perp/decrease.rs`
+// (`DecreasePerpAction`; reuses `ClosePerpLiveInputs`).
+
+namespace Perp {
+  type DecreasePositionContext = {
+    meta: Core::ActionMeta,
+    venue: PerpVenue,
+    positionId: String,
+    size: SizeSpec,
+    slippageBp: Long,
+    // ClosePerpLiveInputs flattened.
+    markPrice: String,
+    unrealizedPnlNow: String,           // SignedI256
+    fundingAccrued: String,             // SignedI256
+    feeBp: Long,
+    custom?: DecreasePositionCustomContext,
+  };
+
+  type DecreasePositionCustomContext = {};
+
+  action "DecreasePosition" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: DecreasePositionContext,
+  };
+}

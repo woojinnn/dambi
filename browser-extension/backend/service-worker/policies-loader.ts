@@ -1,11 +1,10 @@
 import Browser from "webextension-polyfill";
 import { aggregatedManagedPolicySet } from "./dashboard/storage";
-import { aggregatedPolicySet } from "./marketplace/storage";
+import { aggregatedPolicySet } from "./adapter-loader/storage";
 import { getAllManifests } from "./manifests/store";
 import { getEnabledIds } from "./policy-selection";
 import { installPolicies } from "./wasm-bridge";
 
-let activePolicyRpcManifests: unknown[] = [];
 let installed = false;
 let inflight: Promise<void> | null = null;
 
@@ -20,10 +19,6 @@ async function loadDefaultPolicySet(): Promise<PolicyEntry[]> {
   const setUrl = Browser.runtime.getURL("default-policies/policy-set.json");
   const policySetRaw = await (await fetch(setUrl)).text();
   return JSON.parse(policySetRaw) as PolicyEntry[];
-}
-
-export function getActivePolicyRpcManifests(): unknown[] {
-  return [...activePolicyRpcManifests];
 }
 
 /**
@@ -41,7 +36,7 @@ export function getActivePolicyRpcManifests(): unknown[] {
 export async function loadCurrentEnabledPolicySet(): Promise<
   { id: string; text: string }[]
 > {
-  const [defaults, marketplacePolicies, dashboardPolicies, enabledIds] =
+  const [defaults, adapterLoaderPolicies, dashboardPolicies, enabledIds] =
     await Promise.all([
       loadDefaultPolicySet(),
       aggregatedPolicySet(),
@@ -49,25 +44,14 @@ export async function loadCurrentEnabledPolicySet(): Promise<
       getEnabledIds(),
     ]);
   const enabledSet = new Set(enabledIds);
-  const union = [...defaults, ...marketplacePolicies, ...dashboardPolicies];
+  const union = [...defaults, ...adapterLoaderPolicies, ...dashboardPolicies];
   return union
     .filter((p) => enabledSet.has(p.id))
     .map(({ id, text }) => ({ id, text }));
 }
 
-function collectPolicyRpcManifests(
-  policies: readonly PolicyEntry[],
-): unknown[] {
-  const manifests: unknown[] = [];
-  for (const policy of policies) {
-    if (policy.manifest !== undefined) manifests.push(policy.manifest);
-    if (policy.manifests !== undefined) manifests.push(...policy.manifests);
-  }
-  return manifests;
-}
-
 /**
- * Build the union of (defaults ∪ marketplace) and call installPolicies()
+ * Build the union of (defaults ∪ adapter-loader) and call installPolicies()
  * with the subset whose ids appear in `enabledIds`. Empty `enabledIds`
  * ⇒ install with no policies (the engine's `engine/baseline-allow` rule
  * is auto-injected).
@@ -80,7 +64,7 @@ function collectPolicyRpcManifests(
  * "`Wallet` is declared twice" and kill SW boot.
  */
 async function installFiltered(enabledIds: readonly string[]): Promise<void> {
-  const [defaults, marketplacePolicies, dashboardPolicies, manifestMap] =
+  const [defaults, adapterLoaderPolicies, dashboardPolicies, manifestMap] =
     await Promise.all([
       loadDefaultPolicySet(),
       aggregatedPolicySet(),
@@ -88,7 +72,7 @@ async function installFiltered(enabledIds: readonly string[]): Promise<void> {
       getAllManifests(),
     ]);
   const enabledSet = new Set(enabledIds);
-  const union = [...defaults, ...marketplacePolicies, ...dashboardPolicies];
+  const union = [...defaults, ...adapterLoaderPolicies, ...dashboardPolicies];
   const filtered = union.filter((p) => enabledSet.has(p.id));
   // Phase 7 codex carry-over H follow-up: pass the Map-shape manifest
   // store through to `install_policies_json` instead of the legacy
@@ -103,10 +87,6 @@ async function installFiltered(enabledIds: readonly string[]): Promise<void> {
     policy_set: filtered.map(({ id, text }) => ({ id, text })),
     manifests,
   });
-  // Keep the legacy Vec in sync as a fallback only — the orchestrator
-  // prefers `manifests/store.ts` and reads this Vec just when the Map
-  // is empty (no manifests installed yet).
-  activePolicyRpcManifests = collectPolicyRpcManifests(filtered);
   console.info("[Scopeball] policies installed", {
     requestedIds: [...enabledIds].sort(),
     installedIds: filtered.map((p) => p.id).sort(),

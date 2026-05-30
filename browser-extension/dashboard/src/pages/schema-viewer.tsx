@@ -13,45 +13,12 @@
 // and `schemaHash`. We display `schemaHash` in the hash badge per the
 // design spec (D13) and parse base fields out of `schema_text` for the
 // "base fields" pane.
-//
-// Diff overlay: the plan calls for a green/red/amber diff overlay when
-// the page is reached from the Preview button in `/manifests/:action`.
-// The manifest editor calls `previewManifest` but does NOT persist the
-// draft anywhere the viewer can read, so a real diff would need either
-// a draft-persistence pass in the SW or a navigation-state hand-off
-// from manifest-editor. This v1 deliberately omits the overlay and
-// surfaces a note when `?fromPreview=true` is set; the full diff is
-// tracked as a Phase-7 follow-up.
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { EnrichedSchemaOutput, PreviewManifestOutput } from "@scopeball/sdk";
+import type { EnrichedSchemaOutput } from "@scopeball/sdk";
 import { useExtension } from "../sdk-context";
-import { PREVIEW_HANDOFF_KEY } from "./manifest-editor";
 import "./schema-viewer.css";
-
-interface PreviewHandoff {
-  action: string;
-  output: PreviewManifestOutput;
-  savedAtMs: number;
-}
-
-// Consume + clear the manifest-editor → schema-viewer hand-off slot.
-// Returns the parsed payload when present and matching the requested
-// action, else null. The slot is cleared whether or not the action
-// matched so a stale draft for a different action doesn't survive.
-function consumePreviewHandoff(action: string): PreviewHandoff | null {
-  try {
-    const raw = sessionStorage.getItem(PREVIEW_HANDOFF_KEY);
-    if (!raw) return null;
-    sessionStorage.removeItem(PREVIEW_HANDOFF_KEY);
-    const parsed = JSON.parse(raw) as Partial<PreviewHandoff>;
-    if (!parsed || parsed.action !== action || !parsed.output) return null;
-    return parsed as PreviewHandoff;
-  } catch {
-    return null;
-  }
-}
 
 // Mirror of `crates/policy-engine/src/schema/action_name.rs::REGISTERED_ACTIONS`.
 // Keep ordering identical to the Rust source so the rail matches the
@@ -170,22 +137,10 @@ export function SchemaViewer(): JSX.Element {
   const { client } = useExtension();
   const [searchParams] = useSearchParams();
   const action = searchParams.get("action") ?? "swap";
-  const fromPreview = searchParams.get("fromPreview") === "true";
 
   const [schema, setSchema] = useState<EnrichedSchemaOutput | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
-  // Phase 7 carry-over J: when the user reached this page through the
-  // ManifestEditor's "Preview" button we read the stashed
-  // `PreviewManifestOutput` out of sessionStorage and overlay it on
-  // top of the currently-installed schema. The slot is consumed (and
-  // cleared) once per navigation so a back-and-forth doesn't repeat.
-  const [preview, setPreview] = useState<PreviewHandoff | null>(null);
-
-  useEffect(() => {
-    if (!fromPreview) return;
-    setPreview(consumePreviewHandoff(action));
-  }, [fromPreview, action]);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,118 +158,32 @@ export function SchemaViewer(): JSX.Element {
     return () => {
       cancelled = true;
     };
-    // `fromPreview` reloads the schema when arriving from the manifest
-    // editor's Preview action — the SW may have a freshly composed
-    // schema by then.
-  }, [client, fromPreview]);
+  }, [client]);
 
   const actionPascal = useMemo(() => snakeToPascal(action), [action]);
-  // When a Preview hand-off is present we prefer its `enrichedSchemaText`
-  // so the base-fields parser sees the schema the draft manifest WOULD
-  // produce. Falls back to the installed `schema?.schema_text` otherwise.
-  const effectiveSchemaText = useMemo(() => {
-    if (preview?.output.enrichedSchemaText) {
-      return preview.output.enrichedSchemaText;
-    }
-    return schema?.schema_text ?? "";
-  }, [preview, schema]);
   const baseFields = useMemo(
     () =>
-      effectiveSchemaText
-        ? parseBaseFields(effectiveSchemaText, actionPascal)
+      schema?.schema_text
+        ? parseBaseFields(schema.schema_text, actionPascal)
         : [],
-    [effectiveSchemaText, actionPascal],
+    [schema, actionPascal],
   );
-  // Preview customTypes is keyed by snake_case action name. When the
-  // hand-off matches the selected action, render its fields; otherwise
-  // fall through to the installed schema's `customContexts`.
-  const customFields = useMemo(() => {
-    if (preview) {
-      const match = preview.output.customTypes.find(
-        (entry) => entry.name === action,
-      );
-      if (match) return asCustomFields(match.fields as unknown[]);
-    }
-    return asCustomFields(
-      schema?.customContexts?.[action] as unknown[] | undefined,
-    );
-  }, [preview, schema, action]);
-
-  // Fix P (D14): when in preview mode, compute the diff between the
-  // previewed `customTypes[action]` and the installed
-  // `customContexts[action]` — categorise each field as `added`,
-  // `removed`, `changed`, or `same` so the row renderer can paint a
-  // badge. Removed rows appear in addition to `customFields` so the
-  // user sees what would disappear.
-  const installedCustomFields = useMemo(
+  const customFields = useMemo(
     () =>
       asCustomFields(schema?.customContexts?.[action] as unknown[] | undefined),
     [schema, action],
   );
-  type DiffKind = "added" | "removed" | "changed" | "same";
-  const diffRows = useMemo(() => {
-    if (!preview) return null;
-    const installedByField = new Map<string, CustomFieldSource>();
-    for (const f of installedCustomFields) installedByField.set(f.field, f);
-    const previewByField = new Map<string, CustomFieldSource>();
-    for (const f of customFields) previewByField.set(f.field, f);
-
-    const rows: Array<{ field: CustomFieldSource; kind: DiffKind }> = [];
-    for (const f of customFields) {
-      const installed = installedByField.get(f.field);
-      if (!installed) rows.push({ field: f, kind: "added" });
-      else if (installed.cedar_type !== f.cedar_type)
-        rows.push({ field: f, kind: "changed" });
-      else rows.push({ field: f, kind: "same" });
-    }
-    for (const f of installedCustomFields) {
-      if (!previewByField.has(f.field)) rows.push({ field: f, kind: "removed" });
-    }
-    return rows;
-  }, [preview, customFields, installedCustomFields]);
-
-  const diffBadge = (kind: DiffKind): string => {
-    switch (kind) {
-      case "added":
-        return "+";
-      case "removed":
-        return "−";
-      case "changed":
-        return "~";
-      default:
-        return "";
-    }
-  };
 
   return (
     <div className="schema-viewer">
       <header className="schema-viewer-head">
-        <h1>
-          Enriched cedarschema
-          {preview ? (
-            <span
-              className="schema-viewer-draft-pill"
-              data-testid="schema-viewer-draft-pill"
-            >
-              Draft preview
-            </span>
-          ) : null}
-        </h1>
+        <h1>Enriched cedarschema</h1>
         <div
           className="schema-hash-badge"
           data-testid="schema-hash-badge"
-          title={
-            preview
-              ? "schemaHash — SHA-256 of the previewed (unsaved) enriched schema"
-              : "enrichedSchemaHash — SHA-256 of the installed enriched schema"
-          }
+          title="enrichedSchemaHash — SHA-256 of the installed enriched schema"
         >
-          Hash:{" "}
-          <code>
-            {preview
-              ? preview.output.schemaHash
-              : schema?.schemaHash ?? "—"}
-          </code>
+          Hash: <code>{schema?.schemaHash ?? "—"}</code>
         </div>
       </header>
 
@@ -353,26 +222,9 @@ export function SchemaViewer(): JSX.Element {
 
           {err ? <div className="schema-err">Failed to load: {err}</div> : null}
 
-          {fromPreview && preview ? (
-            <div
-              className="schema-from-preview"
-              data-testid="schema-from-preview-banner"
-            >
-              <strong>Draft preview from your unsaved manifest.</strong>{" "}
-              The schema below reflects the previewed manifest for{" "}
-              <code>{preview.action}</code>; it is NOT yet installed in
-              the engine.
-            </div>
-          ) : fromPreview ? (
-            <div className="schema-from-preview">
-              Showing the currently-installed schema. No unsaved draft
-              was found.
-            </div>
-          ) : null}
-
           {showRaw ? (
             <pre className="schema-raw" data-testid="schema-raw-pre">
-              {preview?.output.enrichedSchemaText ?? schema?.schema_text ?? ""}
+              {schema?.schema_text ?? ""}
             </pre>
           ) : (
             <>
@@ -407,56 +259,7 @@ export function SchemaViewer(): JSX.Element {
 
               <section className="schema-section schema-section-custom">
                 <h3>Custom fields</h3>
-                {diffRows ? (
-                  diffRows.length === 0 ? (
-                    <p className="schema-empty">
-                      No manifest-derived fields for this action.
-                    </p>
-                  ) : (
-                    <ul className="schema-field-list">
-                      {diffRows.map(({ field: f, kind }) => {
-                        const tooltip =
-                          "source_method=" + f.source_method +
-                          ", source_requirement_id=" + f.source_requirement_id +
-                          ", requirement_optional=" + String(f.requirement_optional);
-                        const badge = diffBadge(kind);
-                        return (
-                          <li
-                            key={f.field}
-                            className={
-                              "schema-field schema-field-custom" +
-                              (kind === "same" ? "" : ` schema-field-${kind}`)
-                            }
-                            data-testid="custom-field-row"
-                            data-diff={kind}
-                            title={tooltip}
-                          >
-                            {badge ? (
-                              <span
-                                className={`schema-diff-badge schema-diff-badge-${kind}`}
-                                aria-label={kind}
-                                data-testid={`diff-badge-${kind}`}
-                              >
-                                {badge}
-                              </span>
-                            ) : null}
-                            <span className="schema-field-name custom">
-                              {f.field}
-                            </span>
-                            <span className="schema-field-sep">:</span>
-                            <span className="schema-field-type custom">
-                              {f.cedar_type}
-                            </span>
-                            <span className="schema-field-meta">
-                              via <code>{f.source_method}</code>
-                              {f.requirement_optional ? " (optional)" : ""}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )
-                ) : customFields.length === 0 ? (
+                {customFields.length === 0 ? (
                   <p className="schema-empty">
                     No manifest-derived fields for this action.
                   </p>

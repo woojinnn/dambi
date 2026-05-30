@@ -1,0 +1,37 @@
+// Perp::AdjustMargin — add or withdraw collateral from an existing position.
+//
+// Rust source: `crates/simulation/reducer/src/action/perp/adjust_margin.rs`
+// (`AdjustMarginAction` + `AdjustMarginLiveInputs`).
+//
+// `delta` is a `SignedI256` exposed as a string: positive = deposit,
+// negative = withdraw.
+
+namespace Perp {
+  type PerpPositionLive = {
+    sizeBase: String,
+    notionalUsd: String,
+    entryPrice: String,
+    markPrice: String,
+    liqPrice?: String,
+    unrealizedPnl: String,              // SignedI256
+  };
+
+  type AdjustMarginContext = {
+    meta: Core::ActionMeta,
+    venue: PerpVenue,
+    positionId: String,
+    delta: String,                      // SignedI256 (signed)
+    // AdjustMarginLiveInputs flattened.
+    positionState: PerpPositionLive,
+    freeMarginAfter: String,            // U256
+    custom?: AdjustMarginCustomContext,
+  };
+
+  type AdjustMarginCustomContext = {};
+
+  action "AdjustMargin" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: AdjustMarginContext,
+  };
+}

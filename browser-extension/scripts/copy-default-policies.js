@@ -2,39 +2,12 @@
 // Copy the engine's default policy set + composed schema into
 // extension/public/default-policies/ so the SW can fetch them at install
 // time. Plan 6 will replace this static set with marketplace bundles.
-//
-// Also copies declarative adapter seed bundles (Phase 1B of the Adapter
-// Marketplace PoC) from `crates/adapters/mappers/tests/fixtures/*.json`
-// into `extension/public/seed-bundles/<bundle_id>.json` so the Rust fixture
-// stays the single source of truth — the SW fetches these at boot via
-// `ensureSeedBundlesInstalled()`.
 
 const fs = require("fs");
 const path = require("path");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const DEST = path.resolve(__dirname, "..", "public", "default-policies");
-const SEED_BUNDLES_DEST = path.resolve(
-  __dirname,
-  "..",
-  "public",
-  "seed-bundles",
-);
-
-// Source → on-disk seed bundle filename. The filename is derived from the
-// bundle's `id` field (`<path>@<version>`) so the on-disk name matches the
-// canonical bundle id with `/` → `-`.
-const SEED_BUNDLE_SOURCES = [
-  path.join(
-    REPO_ROOT,
-    "crates",
-    "adapters",
-    "mappers",
-    "tests",
-    "fixtures",
-    "uniswap-v2-swap-exact-tokens.json",
-  ),
-];
 
 function listFilesWithExtension(dir, extension) {
   const files = [];
@@ -66,35 +39,53 @@ function listSchemaFiles() {
   return files;
 }
 
-function copySeedBundles() {
-  if (!fs.existsSync(SEED_BUNDLES_DEST)) {
-    fs.mkdirSync(SEED_BUNDLES_DEST, { recursive: true });
+// Phase 1 / P2 — emit the default v2 policy set alongside the v1
+// `policy-set.json`. v2 is STATELESS: the SW holds these bundles in memory
+// and passes them INLINE to `evaluate_action_v2_json` per call (no install
+// step). The canonical source of truth is the Rust fixture dir
+// `crates/policy-engine/tests/fixtures/default_policies_v2/<id>/{manifest.json,
+// policy.cedar}`, proven consistent by `default_policies_v2.rs`. We enumerate
+// DIRECTORIES (not `.cedar` files), sort for byte-stable output, and ship the
+// policy text + manifest verbatim (no JS-side transform — validity is the
+// Rust fixture gate's job).
+function copyDefaultPoliciesV2() {
+  const v2Dir = path.join(
+    REPO_ROOT,
+    "crates",
+    "policy-engine",
+    "tests",
+    "fixtures",
+    "default_policies_v2",
+  );
+  const destPath = path.join(DEST, "policy-set-v2.json");
+
+  if (!fs.existsSync(v2Dir)) {
+    // Mirror the v1 `[]` fallback so a release build with the fixture
+    // pruned still produces a parseable (empty) asset and never bricks
+    // `prepare:defaults`.
+    fs.writeFileSync(destPath, "[]");
+    console.log(
+      `Wrote empty policy-set-v2.json (no default_policies_v2/ dir found)`,
+    );
+    return;
   }
-  // Wipe stale bundles so renames don't leave orphans in /dist.
-  for (const entry of fs.readdirSync(SEED_BUNDLES_DEST)) {
-    if (entry.endsWith(".json")) {
-      fs.unlinkSync(path.join(SEED_BUNDLES_DEST, entry));
-    }
-  }
-  let copied = 0;
-  for (const src of SEED_BUNDLE_SOURCES) {
-    if (!fs.existsSync(src)) continue;
-    const raw = fs.readFileSync(src, "utf8");
-    const bundle = JSON.parse(raw);
-    if (typeof bundle.id !== "string" || !bundle.id.includes("@")) {
-      throw new Error(
-        `Seed bundle ${src} missing canonical "id" field (must be "<path>@<version>")`,
-      );
-    }
-    // `id` of "uniswap/v2/swapExactTokensForTokens@1.0.0" → on-disk
-    // "uniswap-v2-swap@1.0.0.json" wouldn't be reversible; preserve the id
-    // verbatim except for "/" → "-" so the SW can still read it without
-    // URL escaping path separators.
-    const safeName = bundle.id.replace(/\//g, "-") + ".json";
-    fs.writeFileSync(path.join(SEED_BUNDLES_DEST, safeName), raw);
-    copied += 1;
-  }
-  console.log(`Copied ${copied} seed bundles → ${SEED_BUNDLES_DEST}`);
+
+  const ids = fs
+    .readdirSync(v2Dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort(); // deterministic order so the asset hashes stably across builds
+
+  const set = ids.map((id) => ({
+    id,
+    policy: fs.readFileSync(path.join(v2Dir, id, "policy.cedar"), "utf8"),
+    manifest: JSON.parse(
+      fs.readFileSync(path.join(v2Dir, id, "manifest.json"), "utf8"),
+    ),
+  }));
+
+  fs.writeFileSync(destPath, JSON.stringify(set, null, 2));
+  console.log(`Copied ${set.length} v2 policy bundles → ${DEST}`);
 }
 
 function main() {
@@ -139,7 +130,7 @@ function main() {
     );
   }
 
-  copySeedBundles();
+  copyDefaultPoliciesV2();
 }
 
 main();

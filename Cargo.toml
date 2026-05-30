@@ -12,12 +12,12 @@ members = [
     "crates/policy-engine-wasm",
     "crates/integration-tests",
     "crates/adapters/abi-resolver",
-    "crates/adapters/sign-resolver",
-    "crates/adapters/request-router",
-    "adapter-debug-dashboard",
     "crates/adapters/mappers",
-    "crates/policy-builder",
-    "crates/policy-builder-wasm",
+    "crates/simulation/state",
+    "crates/simulation/reducer",
+    "crates/simulation/db",
+    "crates/simulation/sync",
+    "crates/simulation/server",
 ]
 
 [workspace.package]
@@ -30,9 +30,14 @@ license = "MIT"
 alloy-primitives = { version = "0.8", features = ["serde"] }
 alloy-sol-types = "0.8"
 alloy-dyn-abi = "0.8"
+alloy-json-abi = "0.8"
 anyhow = "1"
 cedar-policy = "4"
 hex = "0.4"
+# Fixed-point decimal arithmetic used by simulation-reducer for derived field
+# recompute (HF / LTV / PnL / liq_price). 1.37 is the latest stable as of
+# 2026-05-28; no_std-friendly with `serde-str` feature.
+rust_decimal = { version = "1.37", default-features = false, features = ["serde-str", "maths"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -41,10 +46,11 @@ thiserror = "2"
 # Internal crates referenced by path.
 policy-engine = { path = "crates/policy-engine", version = "0.1.0" }
 abi-resolver = { path = "crates/adapters/abi-resolver", version = "0.1.0" }
-sign-resolver = { path = "crates/adapters/sign-resolver", version = "0.1.0" }
 mappers = { path = "crates/adapters/mappers", version = "0.1.0" }
-request-router = { path = "crates/adapters/request-router", version = "0.1.0" }
-policy-builder = { path = "crates/policy-builder", version = "0.1.0" }
+simulation-state = { path = "crates/simulation/state", version = "0.1.0" }
+simulation-reducer = { path = "crates/simulation/reducer", version = "0.1.0" }
+simulation-db = { path = "crates/simulation/db", version = "0.1.0" }
+simulation-sync = { path = "crates/simulation/sync", version = "0.1.0" }
 
 # WASM bridge deps
 wasm-bindgen = "0.2"
@@ -52,3 +58,14 @@ js-sys = "0.3"
 console_error_panic_hook = "0.1"
 wasm-bindgen-test = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
+
+# Sync crate deps (native only)
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+toml = "0.8"
+async-trait = "0.1"
+
+# TS .d.ts generation — derives `Tsify` on every pub type that crosses the
+# wasm boundary. `wasm-bindgen` is required at build time even when only the
+# type bindings are emitted (Tsify uses wasm-bindgen's serde glue).
+tsify-next = { version = "0.5", default-features = false, features = ["js"] }

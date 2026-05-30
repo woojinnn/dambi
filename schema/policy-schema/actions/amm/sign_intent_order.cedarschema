@@ -1,0 +1,60 @@
+// Amm::SignIntentOrder — sign an EIP-712 off-chain intent order against an
+// intent-based DEX venue (UniswapX Dutch, CowSwap limit, 1inch Fusion RFQ,
+// Bebop RFQ, ...). No on-chain transaction is broadcast at sign time; a
+// solver / resolver fills the order later.
+//
+// Policies typically guard:
+//   - venue allowlist (e.g. only CowSwap allowed for treasury)
+//   - sell-side size limits (sellAmount / sellAmountUsd)
+//   - buyMin / expected_fill_price slippage floor
+//   - recipient whitelisting
+//   - validUntil bounds (refuse infinite-TTL orders)
+//
+// Amount fields use the 3-layer projection (raw hex / nano / fiat USD).
+
+namespace Amm {
+  type SignIntentOrderContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Intent venue receiving the signed order.
+    venue: IntentVenue,
+    // Token being sold.
+    sell: Core::TokenRef,
+    // Token being bought.
+    buy: Core::TokenRef,
+    // Amount of sell token offered (U256 hex).
+    sellAmount: String,
+    // Token-native nano sibling of sellAmount (Host-populated).
+    sellAmountNano?: Long,
+    // USD estimate of sell side (Host-populated).
+    sellAmountUsd?: decimal,
+    // Minimum acceptable amount of buy token (U256 hex).
+    buyMin: String,
+    // Token-native nano sibling of buyMin (Host-populated).
+    buyMinNano?: Long,
+    // USD estimate of buy side (Host-populated).
+    buyMinUsd?: decimal,
+    // "dutch" | "limit" | "rfq" — order price-discovery semantics.
+    orderKind: String,
+    // Recipient of the buy token when the order fills (Address).
+    recipient: String,
+    // Order expiry (unix seconds).
+    validUntil: Long,
+    // LiveField<Price>: expected fill price at simulation time (decimal
+    // serialized as string).
+    expectedFillPrice: String,
+    // LiveField<u32>: number of active competing orders on the same pair.
+    competingOrders: Long,
+    // Manifest-extensible slot.
+    custom?: SignIntentOrderCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type SignIntentOrderCustomContext = {};
+
+  action "SignIntentOrder" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: SignIntentOrderContext,
+  };
+}

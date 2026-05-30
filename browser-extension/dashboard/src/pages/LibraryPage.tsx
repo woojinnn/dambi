@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import type { ManagedPolicy } from "@scopeball/sdk";
 import { useExtension } from "../sdk-context";
 import { RewriteBanner } from "../migration/rewrite-banner";
@@ -19,7 +18,6 @@ interface ImportEntry {
 
 export function LibraryPage() {
   const { client, catalog, managed, status, refresh } = useExtension();
-  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -355,18 +353,6 @@ export function LibraryPage() {
                   <div className="policy-actions-right">
                     <button
                       type="button"
-                      className="btn-edit"
-                      disabled={rowBusy}
-                      onClick={() =>
-                        navigate("/editor", {
-                          state: { id: p.id, text: p.text },
-                        })
-                      }
-                    >
-                      Editor에서 열기
-                    </button>
-                    <button
-                      type="button"
                       className="btn-delete"
                       disabled={rowBusy}
                       onClick={() => void deletePolicy(p.id)}
@@ -385,16 +371,7 @@ export function LibraryPage() {
         <ConflictModal
           policy={conflictModal.policy}
           hints={conflictModal.hints}
-          allManaged={managed}
           onClose={() => setConflictModal(null)}
-          onOpenOther={(otherId) => {
-            const target = managed.find((m) => m.id === otherId);
-            if (!target) return;
-            setConflictModal(null);
-            navigate("/editor", {
-              state: { id: target.id, text: target.text },
-            });
-          }}
         />
       ) : null}
     </div>
@@ -404,17 +381,12 @@ export function LibraryPage() {
 function ConflictModal({
   policy,
   hints,
-  allManaged,
   onClose,
-  onOpenOther,
 }: {
   policy: ManagedPolicy;
   hints: ConflictHint[];
-  allManaged: ManagedPolicy[];
   onClose: () => void;
-  onOpenOther: (id: string) => void;
 }) {
-  const byId = new Map(allManaged.map((m) => [m.id, m]));
   return (
     <div
       className="conflict-backdrop"
@@ -433,21 +405,13 @@ function ConflictModal({
         </header>
         <ul className="conflict-list">
           {hints.map((h, idx) => {
-            const other = byId.get(h.otherId);
             return (
               <li key={`${h.otherId}-${idx}`} className="conflict-row">
                 <div className="conflict-row-head">
                   <span className={`conflict-kind k-${h.kind}`}>
                     {describeKind(h.kind)}
                   </span>
-                  <button
-                    type="button"
-                    className="conflict-other-id"
-                    onClick={() => onOpenOther(h.otherId)}
-                    disabled={!other}
-                  >
-                    {h.otherId}
-                  </button>
+                  <code className="conflict-other-id">{h.otherId}</code>
                 </div>
                 {h.sharedConjuncts.length > 0 ? (
                   <div className="conflict-shared">

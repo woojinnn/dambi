@@ -1,32 +1,20 @@
-//! Declarative DSL (Tier A) for adapter marketplace.
+//! Declarative DSL (Tier A) for adapter loader — v3 builder surface.
 //!
-//! Phase 0: serde-able Bundle JSON types only (no execution / mapper impl yet).
+//! Phase 1 (action-types) trimmed this module to the v3 path. The legacy v1
+//! interpreter (`eval`, `builtin_fn`, `single_emit`, `multicall`,
+//! `opcode_stream`, `enum_tagged`, `array_emit`, `mapper::DeclarativeMapper`)
+//! has been removed alongside the v1 `Mapper` trait it produced
+//! `ActionEnvelope`s for.
 //!
-//! Spec: `ADAPTER_MARKETPLACE_ARCHITECTURE.md` §4.1, §5.1 (BNF), §5.3 (WhitelistedFn).
-//!
-//! Module layout (Phase 1A):
+//! Module layout:
 //! ```text
-//!   types.rs        — Bundle JSON struct/enum (serde Deserialize / Serialize)
-//!   builtin_fn.rs   — whitelisted functions (Phase 1A: select_address)
-//!   eval.rs         — ValueExpr evaluator + JsonPath walker
-//!   single_emit.rs  — single_emit strategy → ActionEnvelope
-//!   mapper.rs       — DeclarativeMapper (impl Mapper)
+//!   types.rs          — Bundle JSON struct/enum (serde Deserialize / Serialize)
+//!   args_json.rs      — DecodedCall → serde_json args view (v1-free)
+//!   action_builder.rs — body/placeholder template → simulation-reducer ActionBody (v3)
 //! ```
-//!
-//! Future phases extend with:
-//!   - Phase 4: `MulticallRecurse` execution
-//!   - Phase 5: `OpcodeStreamDispatch` execution (Universal Router)
-//!   - 향후:    `EnumTaggedDispatch` (Balancer V2 등)
 
-pub mod array_emit;
-pub mod builtin_fn;
-pub mod enum_tagged;
-pub mod eval;
-pub mod mapper;
-pub mod multicall;
-pub mod opcode_stream;
-pub mod single_emit;
+pub mod action_builder;
+pub mod args_json;
 pub mod types;
 
-pub use mapper::DeclarativeMapper;
-pub use types::{AdapterFunctionBundle, EmitRule, ValueExpr};
+pub use args_json::{args_to_json, decoded_value_to_json};

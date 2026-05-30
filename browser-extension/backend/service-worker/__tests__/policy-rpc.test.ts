@@ -1,280 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RequestType, type Message } from "@lib/types";
 
-const mocks = vi.hoisted(() => ({
-  planPolicyRpc: vi.fn(),
-  evaluatePolicyRpc: vi.fn(),
-}));
+import { dispatchCallsV2, formatAuditMatched } from "../policy-rpc";
+import type { PlannedCallV2Dto } from "../wasm-bridge.types";
 
-vi.mock("../wasm-bridge", () => ({
-  planPolicyRpc: mocks.planPolicyRpc,
-  evaluatePolicyRpc: mocks.evaluatePolicyRpc,
-}));
-
-import { evaluateWithPolicyRpc, formatAuditMatched } from "../policy-rpc";
-
-function txMessage(): Message {
-  return {
-    requestId: "req-1",
-    data: {
-      type: RequestType.TRANSACTION,
-      chainId: 1,
-      hostname: "app.example",
-      transaction: {
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value: "0x0",
-        data: "0x1234",
-      },
-    },
-  } as Message;
-}
-
-describe("policy-rpc coordinator", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.stubGlobal("fetch", vi.fn());
-  });
-
-  it("posts planned calls to policy-rpc and evaluates with the response", async () => {
-    const plan = {
-      request_id: "req-1",
-      root: {
-        chain_id: 1,
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-      },
-      envelopes: [],
-      calls: [{ id: "call-1", method: "oracle.usd_value", params: {} }],
-      manifest_set_hash: "sha256:manifest",
-      schema_hash: "sha256:schema",
-      diagnostics: [],
-    };
-    const rpcResponse = {
-      request_id: "req-1",
-      results: [{ id: "call-1", ok: true, result: { value: "1.00" } }],
-    };
-    const verdict = { kind: "pass" as const };
-    mocks.planPolicyRpc.mockResolvedValue(plan);
-    mocks.evaluatePolicyRpc.mockResolvedValue(verdict);
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => rpcResponse,
-    } as Response);
-
-    const result = await evaluateWithPolicyRpc(txMessage(), {
-      policyRpcUrl: "http://127.0.0.1:8787",
-    });
-
-    expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:8787/v1/rpc",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ request_id: "req-1", calls: plan.calls }),
-      }),
-    );
-    expect(mocks.evaluatePolicyRpc).toHaveBeenCalledWith({
-      plan,
-      rpc_response: rpcResponse,
-      manifests: [],
-    });
-    expect(result).toEqual({
-      verdict,
-      audit: {
-        request_id: "req-1",
-        manifest_set_hash: "sha256:manifest",
-        schema_hash: "sha256:schema",
-        call_ids: ["call-1"],
-        methods: ["oracle.usd_value"],
-      },
-    });
-  });
-
-  it("handles token.normalize_to_nano locally without hitting policy-rpc", async () => {
-    // Pure-math methods (token.normalize_to_nano) compute in-process so the
-    // policy keeps working when the policy-rpc daemon is unreachable.
-    const plan = {
-      request_id: "req-1",
-      root: {
-        chain_id: 1,
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-      },
-      envelopes: [],
-      calls: [
-        {
-          id: "swap-input-amount-nano",
-          method: "token.normalize_to_nano",
-          params: { amount: "1000000000000000000", decimals: 18 },
-        },
-      ],
-      manifest_set_hash: "sha256:manifest",
-      schema_hash: "sha256:schema",
-      diagnostics: [],
-    };
-    mocks.planPolicyRpc.mockResolvedValue(plan);
-    mocks.evaluatePolicyRpc.mockResolvedValue({ kind: "pass" });
-
-    await evaluateWithPolicyRpc(txMessage());
-
-    expect(fetch).not.toHaveBeenCalled();
-    expect(mocks.evaluatePolicyRpc).toHaveBeenCalledWith({
-      plan,
-      rpc_response: {
-        request_id: "req-1",
-        results: [
-          {
-            id: "swap-input-amount-nano",
-            ok: true,
-            result: { nano: 1_000_000_000 },
-          },
-        ],
-      },
-      manifests: [],
-    });
-  });
-
-  it("forwards only non-local methods to policy-rpc and merges results in id order", async () => {
-    // Mixed plan: one method handled locally (token.normalize_to_nano), one
-    // requires external data (oracle.usd_value). HTTP should only see the
-    // remote call; the WASM materializer receives both results in one batch.
-    const plan = {
-      request_id: "req-2",
-      root: {
-        chain_id: 1,
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-      },
-      envelopes: [],
-      calls: [
-        {
-          id: "local-nano",
-          method: "token.normalize_to_nano",
-          params: { amount: "1000000", decimals: 6 },
-        },
-        { id: "remote-usd", method: "oracle.usd_value", params: {} },
-      ],
-      manifest_set_hash: "sha256:manifest",
-      schema_hash: "sha256:schema",
-      diagnostics: [],
-    };
-    mocks.planPolicyRpc.mockResolvedValue(plan);
-    mocks.evaluatePolicyRpc.mockResolvedValue({ kind: "pass" });
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        request_id: "req-2",
-        results: [
-          { id: "remote-usd", ok: true, result: { value: "1.00" } },
-        ],
-      }),
-    } as Response);
-
-    await evaluateWithPolicyRpc(txMessage(), {
-      policyRpcUrl: "http://127.0.0.1:8787",
-    });
-
-    // The remote POST body must NOT include the locally-handled call —
-    // that's the whole point: no HTTP round-trip for pure-math methods.
-    expect(fetch).toHaveBeenCalledTimes(1);
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    const body = JSON.parse(String((fetchCall[1] as RequestInit).body));
-    expect(body.calls).toEqual([
-      { id: "remote-usd", method: "oracle.usd_value", params: {} },
-    ]);
-
-    // Materializer sees both results merged.
-    const evalCall = mocks.evaluatePolicyRpc.mock.calls[0][0];
-    expect(evalCall.rpc_response.results).toEqual([
-      { id: "local-nano", ok: true, result: { nano: 1_000_000_000 } },
-      { id: "remote-usd", ok: true, result: { value: "1.00" } },
-    ]);
-  });
-
-  it("skips HTTP when the plan has no calls", async () => {
-    const plan = {
-      request_id: "req-1",
-      root: {
-        chain_id: 1,
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-      },
-      envelopes: [],
-      calls: [],
-      manifest_set_hash: "sha256:manifest",
-      schema_hash: "sha256:schema",
-      diagnostics: [],
-    };
-    mocks.planPolicyRpc.mockResolvedValue(plan);
-    mocks.evaluatePolicyRpc.mockResolvedValue({ kind: "pass" });
-
-    await evaluateWithPolicyRpc(txMessage());
-
-    expect(fetch).not.toHaveBeenCalled();
-    expect(mocks.evaluatePolicyRpc).toHaveBeenCalledWith({
-      plan,
-      rpc_response: { request_id: "req-1", results: [] },
-      manifests: [],
-    });
-  });
-
-  it("passes per-call RPC failures back into WASM evaluation", async () => {
-    const plan = {
-      request_id: "req-1",
-      root: {
-        chain_id: 1,
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-      },
-      envelopes: [],
-      calls: [{ id: "call-1", method: "oracle.usd_value", params: {} }],
-      manifest_set_hash: "sha256:manifest",
-      schema_hash: "sha256:schema",
-      diagnostics: [],
-    };
-    const rpcResponse = {
-      request_id: "req-1",
-      results: [
-        {
-          id: "call-1",
-          ok: false,
-          error: { code: "invalid_params", message: "bad asset" },
-        },
-      ],
-    };
-    const verdict = {
-      kind: "fail" as const,
-      matched: [
-        {
-          policy_id: "__engine::projection_failed",
-          reason: "__engine::projection_failed",
-          severity: "deny" as const,
-          origin: "engine_error" as const,
-        },
-      ],
-    };
-    mocks.planPolicyRpc.mockResolvedValue(plan);
-    mocks.evaluatePolicyRpc.mockResolvedValue(verdict);
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => rpcResponse,
-    } as Response);
-
-    const result = await evaluateWithPolicyRpc(txMessage());
-
-    expect(mocks.evaluatePolicyRpc).toHaveBeenCalledWith({
-      plan,
-      rpc_response: rpcResponse,
-      manifests: [],
-    });
-    expect(result.verdict).toEqual(verdict);
-  });
-
+describe("formatAuditMatched", () => {
   // D9 surfacing: when WASM returns a `Verdict::Fail` whose first
   // matched entry has `policy_id == "__system__"`, the audit-log
   // matched-policies list must carry that id verbatim (not remap it to
@@ -342,46 +71,143 @@ describe("policy-rpc coordinator", () => {
   it("formatAuditMatched returns [] for pass verdicts", () => {
     expect(formatAuditMatched({ kind: "pass" as const })).toEqual([]);
   });
+});
 
-  it("treats a malformed RPC response as missing rather than throwing", async () => {
-    const plan = {
-      request_id: "req-1",
-      root: {
-        chain_id: 1,
-        from: "0x1111111111111111111111111111111111111111",
-        to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-      },
-      envelopes: [],
-      calls: [{ id: "call-1", method: "oracle.usd_value", params: {} }],
-      manifest_set_hash: "sha256:manifest",
-      schema_hash: "sha256:schema",
-      diagnostics: [],
+// ── Phase 1 / P2 — v2 (ActionBody) dispatch ───────────────────────────────
+describe("dispatchCallsV2", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  function plannedRemote(optional = false): PlannedCallV2Dto {
+    return {
+      manifest_id: "large-swap-usd-warning",
+      call_id: "large-swap-usd-warning::total-input-usd",
+      method: "oracle.usd_value",
+      params: { chain_id: "eip155:1" },
+      outputs: [],
+      optional,
     };
-    mocks.planPolicyRpc.mockResolvedValue(plan);
-    // `request_id` mismatch → `postPolicyRpc` throws "malformed response".
-    // `dispatchCalls` fails open on transport errors (see its comment):
-    // each remote call becomes an `rpc_unreachable` error result instead
-    // of a thrown error, so a flaky enrichment server can't deny every tx.
+  }
+
+  it("returns an empty map for an empty plan (no HTTP)", async () => {
+    const results = await dispatchCallsV2([], "http://127.0.0.1:8787");
+    expect(results).toEqual({});
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("posts remote calls keyed by call_id and folds ok results to unwrapped values", async () => {
+    const call = plannedRemote();
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ request_id: "different", results: [] }),
+      json: async () => ({
+        request_id: `action-v2:${call.call_id}`,
+        results: [
+          { id: call.call_id, ok: true, result: { usd: "3500.1200" } },
+        ],
+      }),
     } as Response);
-    const verdict = { kind: "pass" as const };
-    mocks.evaluatePolicyRpc.mockResolvedValue(verdict);
 
-    const result = await evaluateWithPolicyRpc(txMessage());
+    const results = await dispatchCallsV2([call], "http://127.0.0.1:8787");
 
-    // No throw — evaluation still runs against the engine.
-    expect(result.verdict).toEqual(verdict);
-    // The malformed response is not passed through as a valid result:
-    // `call-1` reaches the engine as a failed (`rpc_unreachable`) result.
-    expect(mocks.evaluatePolicyRpc).toHaveBeenCalledTimes(1);
-    const passed = mocks.evaluatePolicyRpc.mock.calls[0][0];
-    const callResult = passed.rpc_response.results.find(
-      (r: { id: string }) => r.id === "call-1",
+    // The POST body keys the call by `call_id` and hits the same /v1/rpc path.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    expect(fetchCall[0]).toBe("http://127.0.0.1:8787/v1/rpc");
+    const body = JSON.parse(String((fetchCall[1] as RequestInit).body));
+    expect(body.calls).toEqual([
+      {
+        id: "large-swap-usd-warning::total-input-usd",
+        method: "oracle.usd_value",
+        params: { chain_id: "eip155:1" },
+      },
+    ]);
+    // The map carries the UNWRAPPED `$.result` payload (not the envelope).
+    expect(results).toEqual({
+      "large-swap-usd-warning::total-input-usd": { usd: "3500.1200" },
+    });
+  });
+
+  it("handles token.normalize_to_nano locally and never hits the network", async () => {
+    const local: PlannedCallV2Dto = {
+      manifest_id: "m",
+      call_id: "m::nano",
+      method: "token.normalize_to_nano",
+      params: { amount: "1000000000000000000", decimals: 18 },
+      outputs: [],
+      optional: false,
+    };
+    const results = await dispatchCallsV2([local], "http://127.0.0.1:8787");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(results).toEqual({ "m::nano": { nano: 1_000_000_000 } });
+  });
+
+  it("OMITS failed remote results (fail-closed; no error stub)", async () => {
+    const call = plannedRemote();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        request_id: `action-v2:${call.call_id}`,
+        results: [
+          {
+            id: call.call_id,
+            ok: false,
+            error: { code: "invalid_params", message: "bad asset" },
+          },
+        ],
+      }),
+    } as Response);
+
+    const results = await dispatchCallsV2([call], "http://127.0.0.1:8787");
+    // A failed call is dropped, NOT synthesised into an error stub — the
+    // missing required result lets WASM fail closed (`__system__`).
+    expect(results).toEqual({});
+  });
+
+  it("OMITS all remote calls when the daemon is unreachable (fail-closed)", async () => {
+    const call = plannedRemote();
+    vi.mocked(fetch).mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const results = await dispatchCallsV2([call], "http://127.0.0.1:8787");
+    // No `rpc_unreachable` error stub (the v1 fail-OPEN behaviour); the map
+    // is empty so a required call fails closed downstream.
+    expect(results).toEqual({});
+  });
+
+  it("merges local + remote results into one map", async () => {
+    const local: PlannedCallV2Dto = {
+      manifest_id: "m",
+      call_id: "m::nano",
+      method: "token.normalize_to_nano",
+      params: { amount: "1000000", decimals: 6 },
+      outputs: [],
+      optional: false,
+    };
+    const remote = plannedRemote();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        request_id: `action-v2:${remote.call_id}`,
+        results: [{ id: remote.call_id, ok: true, result: { usd: "12.00" } }],
+      }),
+    } as Response);
+
+    const results = await dispatchCallsV2(
+      [local, remote],
+      "http://127.0.0.1:8787",
     );
-    expect(callResult?.ok).toBe(false);
-    expect(callResult?.error?.code).toBe("rpc_unreachable");
+
+    // Only the remote call is POSTed; the local one is computed in-process.
+    const body = JSON.parse(
+      String((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body),
+    );
+    expect(body.calls.map((c: { id: string }) => c.id)).toEqual([
+      "large-swap-usd-warning::total-input-usd",
+    ]);
+    expect(results).toEqual({
+      "m::nano": { nano: 1_000_000_000 },
+      "large-swap-usd-warning::total-input-usd": { usd: "12.00" },
+    });
   });
 });

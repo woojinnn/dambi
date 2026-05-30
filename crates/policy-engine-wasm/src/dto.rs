@@ -2,9 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use policy_engine::policy_rpc::{PolicyManifest, PolicyRpcCall, PolicyRpcResponse, RootInput};
+use policy_engine::policy_rpc::PolicyManifest;
 use policy_engine::schema::CustomFieldSource;
-use policy_engine::ActionEnvelope;
 
 #[derive(Debug, Serialize)]
 pub struct Envelope<T: Serialize> {
@@ -143,67 +142,6 @@ pub struct MatchedPolicyDto {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RawRequestDto {
-    pub method: String,
-    pub params: serde_json::Value,
-    pub chain_id: u64,
-    #[serde(default)]
-    pub block_timestamp: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PlanPolicyRpcInputDto {
-    pub request_id: String,
-    pub raw_request: RawRequestDto,
-    #[serde(default)]
-    pub manifests: Vec<PolicyManifest>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyRpcPlanDto {
-    pub request_id: String,
-    pub root: RootInput,
-    pub envelopes: Vec<ActionEnvelope>,
-    pub calls: Vec<PolicyRpcCall>,
-    pub manifest_set_hash: String,
-    pub schema_hash: String,
-    pub diagnostics: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct EvaluatePolicyRpcInputDto {
-    pub plan: PolicyRpcPlanDto,
-    pub rpc_response: PolicyRpcResponse,
-    #[serde(default)]
-    pub manifests: Vec<PolicyManifest>,
-}
-
-/// Input for `evaluate_with_envelopes_json`.
-///
-/// Bypasses the route → plan stages by accepting envelopes that the caller
-/// (e.g. the declarative pipeline in the orchestrator) has already produced.
-/// `manifests` must match the manifests installed via `install_policies_json`
-/// — the WASM enforces the same `manifest_set_hash` and `schema_hash`
-/// equality as `evaluate_policy_rpc_json`.
-///
-/// `rpc_response` carries `policy-rpc` results when manifests declare any
-/// `requires`; pass `{ "request_id": "...", "results": [] }` for pipelines
-/// that do not need RPC enrichment (e.g. permit-only policies).
-#[derive(Debug, Clone, Deserialize)]
-pub struct EvaluateWithEnvelopesInputDto {
-    pub envelopes: Vec<ActionEnvelope>,
-    pub from: String,
-    pub to: String,
-    pub value_wei: String,
-    pub chain_id: u64,
-    #[serde(default)]
-    pub block_timestamp: u64,
-    #[serde(default)]
-    pub manifests: Vec<PolicyManifest>,
-    pub rpc_response: PolicyRpcResponse,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct PreviewSchemaInputDto {
     #[serde(default)]
     pub manifests: Vec<PolicyManifest>,
@@ -213,7 +151,7 @@ pub struct PreviewSchemaInputDto {
 // Declarative mapper boundary (Phase 1A)
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Result returned by `declarative_install_json` on success.
+/// Result returned by `declarative_install_v3_json` on success.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeclarativeInstallResultDto {
     /// Decoder id derived from the bundle (`declarative.<bundle.id-without-version>`).
@@ -223,122 +161,83 @@ pub struct DeclarativeInstallResultDto {
     pub bundle_id: String,
 }
 
-/// Input for `declarative_lookup_json`.
-///
-/// Phase 1A keeps this self-contained — it carries the decoder selection key
-/// and a JSON-friendly `DecodedCall`. Bridge integration (selector → decoder)
-/// is left for Phase 1B / Phase 2.
-#[derive(Debug, Clone, Deserialize)]
-pub struct DeclarativeLookupInputDto {
-    /// Bundle's declarative decoder id (e.g.
-    /// `"declarative.uniswap/v2/swapExactTokensForTokens"`).
-    pub decoder_id: String,
-    pub ctx: DeclarativeCtxDto,
-    pub decoded: DecodedCallDto,
-}
+// ───────────────────────────────────────────────────────────────────────────
+// Phase 4B — v3 route entry (raw Tx / sig → `Vec<Action>`)
+// ───────────────────────────────────────────────────────────────────────────
 
+/// Input for `declarative_route_request_v3_json`.
+///
+/// This is the v3 (PDF FSM spec) route entry that emits the new hierarchical
+/// `simulation_reducer::action::Action` tree (the legacy flat
+/// `ActionEnvelope` route was removed in the Phase 1 action restructure).
+///
+/// The wire shape mirrors the SW orchestrator's [`decideMessage`] output:
+///   * `chain_id`/`to`/`selector`/`calldata` — registry-v2 callkey + raw
+///     calldata. (Mirrors the legacy v1 entry.)
+///   * `value` — `msg.value` as a decimal string (`"0"` default).
+///   * `gas_limit` — declared gas limit as a decimal string. The orchestrator
+///     forwards the dApp's value verbatim; defaults to `"0"` when missing.
+///   * `gas_price` — current gas price as a decimal string. Phase 4B wraps
+///     this in a [`LiveField`] with a Pyth `gas/<chain_id>` source — the
+///     actual Sync Orchestrator wiring is deferred (Phase 5+).
+///   * `submitter` — `tx.from`. Echoed into `ActionMeta.submitter`.
+///   * `submitted_at` — Unix epoch seconds. Echoed into `ActionMeta.submitted_at`.
+///   * `nonce` — declared sequential nonce. `0` when missing.
+///
+/// `block_timestamp` (optional) — block.timestamp at which the Action would
+/// land, distinct from `submitted_at`. Mappers may use this for deadlines.
+///
+/// `selector` and `block_timestamp` are part of the stable wire shape but are
+/// not consumed by the Phase 4B stub — they will be threaded into the
+/// registry-v2 callkey lookup + emit-rule decode in Phase 4D. The
+/// `#[allow(dead_code)]` reflects that intentional staging; do NOT remove
+/// either field as that would break the SW wire layer.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
-pub struct DeclarativeCtxDto {
+pub struct DeclarativeRouteRequestV3InputDto {
     pub chain_id: u64,
-    pub from: String,
+    /// "0x" + 40 hex. Case-insensitive.
     pub to: String,
+    /// "0x" + 8 hex. Case-insensitive.
+    pub selector: String,
+    /// Raw "0x"-prefixed calldata.
+    pub calldata: String,
+    /// `msg.value` as a base-10 decimal string. Defaults to `"0"`.
+    #[serde(default = "default_zero_decimal")]
+    pub value: String,
+    /// Declared gas limit as a base-10 decimal string. Defaults to `"0"`.
+    #[serde(default = "default_zero_decimal")]
+    pub gas_limit: String,
+    /// Current gas price as a base-10 decimal string. Defaults to `"0"`.
+    /// Wrapped in a [`LiveField`] by the WASM entry with a Pyth
+    /// `gas/<chain_id>` source (Phase 4B stub — Sync Orchestrator wiring TBD).
+    #[serde(default = "default_zero_decimal")]
+    pub gas_price: String,
+    /// `tx.from` — "0x" + 40 hex.
+    pub submitter: String,
+    /// Unix epoch seconds at which the Action was submitted.
+    pub submitted_at: u64,
+    /// Sequential transaction nonce of `submitter`. Defaults to `0`.
     #[serde(default)]
-    pub value_wei: Option<String>,
+    pub nonce: u64,
+    /// Optional block timestamp.
     #[serde(default)]
     pub block_timestamp: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct DecodedCallDto {
-    pub decoder_id: String,
-    pub function_signature: String,
-    #[serde(default)]
-    pub args: Vec<DecodedArgDto>,
+fn default_zero_decimal() -> String {
+    "0".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct DecodedArgDto {
-    pub name: String,
-    pub abi_type: String,
-    pub value: DecodedValueDto,
-}
-
-/// Tagged DTO for the calldata-decoder's value tree.
+/// Result returned by `declarative_route_request_v3_json` on success.
 ///
-/// `kind` discriminates the variant. `value` payloads:
-///   * `address`  — `"0x" + 40 hex` string.
-///   * `uint`     — base-10 decimal string (lossless for `uint256`).
-///   * `int`      — signed decimal string.
-///   * `bool`     — boolean.
-///   * `bytes`    — `"0x" + hex` string.
-///   * `string`   — string.
-///   * `array`    — array of `DecodedValueDto`.
-///   * `tuple`    — array of `DecodedValueDto`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-pub enum DecodedValueDto {
-    Address(String),
-    Uint(String),
-    Int(String),
-    Bool(bool),
-    Bytes(String),
-    String(String),
-    Array(Vec<DecodedValueDto>),
-    Tuple(Vec<DecodedValueDto>),
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Phase 6 — orchestrator route entry
-// ───────────────────────────────────────────────────────────────────────────
-
-/// Input for `declarative_route_request_json`.
-///
-/// `(chain_id, to, selector)` form the callkey for the bridge lookup. `ctx`
-/// and `calldata` are the per-tx execution context and the raw calldata the
-/// WASM decodes internally against the bridge-resolved bundle's
-/// `abi_fragment.abi` (same pattern as `WasmChildResolver::resolve_child`).
-#[derive(Debug, Clone, Deserialize)]
-pub struct DeclarativeRouteRequestInputDto {
-    pub chain_id: u64,
-    /// "0x" + 40 hex. Case-insensitive — the bridge normalises to lowercase.
-    pub to: String,
-    /// "0x" + 8 hex. Case-insensitive — same as `to`.
-    pub selector: String,
-    pub ctx: DeclarativeCtxDto,
-    /// Raw "0x"-prefixed calldata. WASM decodes it against the
-    /// bridge-resolved bundle's abi_fragment.
-    pub calldata: String,
-}
-
-/// Result returned by `declarative_route_request_json` on success.
-/// `decoder_id` lets the caller correlate the envelopes with the bundle the
-/// bridge resolved (useful for audit / telemetry).
+/// `actions` is the `Vec<simulation_reducer::action::Action>` produced for the
+/// raw Tx — Phase 4B emits a single `ActionBody::Unknown` stub. `decoder_id`
+/// echoes the bundle id when a registry match exists (Phase 4D+); empty
+/// string when no match (stub fallback).
 #[derive(Debug, Clone, Serialize)]
-pub struct DeclarativeRouteRequestResultDto {
-    pub envelopes: Vec<policy_engine::ActionEnvelope>,
-    pub decoder_id: String,
-}
-
-/// One child callkey produced by `declarative_plan_children_json`.
-///
-/// `to` echoes the outer request `to` — `self_array_bytes_last_arg` is a
-/// self-multicall, so a child's `to` equals the outer `to`. `selector` is the
-/// first 4 bytes of the child calldata as `"0x" + 8 hex`.
-#[derive(Debug, Clone, Serialize)]
-pub struct DeclarativeChildCallKeyDto {
-    pub chain_id: u64,
-    pub to: String,
-    pub selector: String,
-}
-
-/// Result of `declarative_plan_children_json`.
-///
-/// `children` is empty when the outer bundle is not `multicall_recurse` (or no
-/// bundle is mounted for the callkey) — the caller then skips the prefetch
-/// pass. `decoder_id` echoes the outer bundle's declarative decoder id.
-#[derive(Debug, Clone, Serialize)]
-pub struct DeclarativePlanChildrenResultDto {
-    pub children: Vec<DeclarativeChildCallKeyDto>,
+pub struct DeclarativeRouteRequestV3ResultDto {
+    pub actions: Vec<simulation_reducer::action::Action>,
     pub decoder_id: String,
 }
 
