@@ -23,7 +23,7 @@ use mappers::declarative::action_builder::{
     build_action_body, build_array_emit, substitute_placeholders,
     UnknownOpcodePolicy as V3UnknownOpcodePolicy, V3MapContext,
 };
-use mappers::declarative::eval::args_to_json;
+use mappers::declarative::args_json::args_to_json;
 use mappers::declarative::types::BundleMatch;
 use wasm_bindgen::prelude::*;
 
@@ -1618,7 +1618,7 @@ fn decode_inputs_abi_tuple(
         // way), so existing UR opcode-stream bodies keep their shape.
         obj.insert(
             converted.name.clone(),
-            mappers::declarative::eval::decoded_value_to_json_typed(
+            mappers::declarative::args_json::decoded_value_to_json_typed(
                 &converted.value,
                 &converted.abi_type,
             ),

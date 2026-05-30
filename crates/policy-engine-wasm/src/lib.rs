@@ -26,7 +26,10 @@ pub fn _start() {
 mod sim_types;
 
 pub use action_eval_exports::{evaluate_action_v2_json, plan_action_rpc_v2_json};
-pub use declarative_exports::{declarative_install_v3_json, declarative_route_request_v3_json};
+pub use declarative_exports::{
+    declarative_install_v3_json, declarative_route_request_v3_json,
+    declarative_route_typed_data_v3_json,
+};
 pub use exports::{
     get_alias_table_json, install_policies_json, preview_custom_schema_json,
     preview_installed_schema_json, preview_schema_json,
