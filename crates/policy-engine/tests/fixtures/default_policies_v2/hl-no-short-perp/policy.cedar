@@ -3,7 +3,7 @@
 @reason("Short perp orders on Hyperliquid are blocked by policy")
 forbid(
   principal,
-  action == Perp::Action::"PlaceLimitOrder",
+  action == HyperliquidCore::Action::"HlOrder",
   resource
 )
 when {

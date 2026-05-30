@@ -37,7 +37,12 @@
       "run_at": "document_start"
     },
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "https://app.hyperliquid.xyz/*",
+        "https://hyperliquid.xyz/*",
+        "https://*.hyperliquid.xyz/*",
+        "https://*.hyperliquid-testnet.xyz/*"
+      ],
       "js": ["js/injected/fetch-hook.js"],
       "__chrome__world": "MAIN",
       "all_frames": true,

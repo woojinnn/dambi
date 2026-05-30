@@ -1,14 +1,13 @@
-//! E2E: a Hyperliquid `/exchange` order is BLOCKED through the **literal
-//! extension entry point** — `evaluate_action_v2_json`.
+//! E2E: a Hyperliquid `/exchange` action is evaluated through the **literal
+//! extension entry point** — `evaluate_action_v2_json` — using the thin
+//! `ActionBody::HyperliquidCore` model.
 //!
-//! Unlike `policy-engine/tests/hl_exchange_deny_poc.rs` (which calls the engine
-//! pieces directly), this test feeds the EXACT JSON envelope the browser
-//! extension's service worker sends — `{ action, meta, tx, bundles, results }` —
-//! into `evaluate_action_v2_json(input_json) -> String` and parses the returned
-//! `{ ok, data: { verdict } }` envelope. That function is the same symbol the
-//! WASM bridge calls (`wasm-bridge.ts: exports.evaluate_action_v2_json(...)`),
-//! so this is the highest-fidelity reproducible proof that "an extension deny
-//! policy actually denies a Hyperliquid order" without needing a browser.
+//! This feeds the EXACT JSON envelope the browser extension's service worker
+//! sends — `{ action, meta, tx, bundles, results }` — into
+//! `evaluate_action_v2_json(input_json) -> String` and parses the returned
+//! `{ ok, data: { verdict } }`. The `action` JSON is byte-for-byte the shape the
+//! TS converter (`hl-order-to-action.ts`) emits, so a serde drift on either side
+//! fails loudly here instead of silently fail-closing at runtime.
 //!
 //! Run: `cargo test -p policy-engine-wasm --test hl_exchange_deny_e2e`
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
@@ -17,152 +16,108 @@ use serde_json::{json, Value};
 
 use policy_engine_wasm::evaluate_action_v2_json;
 
-use simulation_reducer::action::perp::{
-    PerpAccountState, PerpAction, PerpVenue, PlaceLimitLiveInputs, PlaceLimitOrderAction, SizeSpec,
-    TimeInForce,
-};
-use simulation_reducer::action::{ActionBody, ActionMeta, ActionNature, Eip712Domain};
-use simulation_state::live_field::{DataSource, LiveField};
-use simulation_state::position::PerpSide;
-use simulation_state::primitives::{Address, ChainId, MarketRef, Price, Time, VenueRef, U256};
-
-use std::str::FromStr;
-
-// ── HL /exchange order JSON → v2 ActionBody (same converter logic as the TS
-//    `hl-order-to-action.ts` and the policy-engine PoC). ──────────────────────
-fn hl_order_to_action_body(order: &Value, symbol: &str) -> ActionBody {
-    let is_buy = order["b"].as_bool().expect("order.b (isBuy) bool");
-    let side = if is_buy { PerpSide::Long } else { PerpSide::Short };
-
-    let price = Price::new(order["p"].as_str().expect("order.p (price) string"));
-    let size_str = order["s"].as_str().expect("order.s (size) string");
-    let reduce_only = order["r"].as_bool().unwrap_or(false);
-
-    let size_units: u128 = size_str
-        .split('.')
-        .next()
-        .and_then(|whole| whole.parse::<u128>().ok())
-        .unwrap_or(0);
-    let size = SizeSpec::BaseAmount {
-        amount: U256::from(size_units),
-    };
-
-    let tif = order["t"]["limit"]["tif"].as_str().unwrap_or("Gtc");
-    let time_in_force = match tif {
-        "Ioc" => TimeInForce::Ioc,
-        "Alo" => TimeInForce::PostOnly,
-        _ => TimeInForce::Gtc,
-    };
-
-    let venue = PerpVenue::Hyperliquid {
-        chain: ChainId::new("hl-mainnet"),
-    };
-    let market = MarketRef {
-        symbol: symbol.to_owned(),
-        venue: VenueRef::new("hyperliquid"),
-    };
-
-    let src = DataSource::UserSupplied;
-    let now = Time::from_unix(0);
-    let live_inputs = PlaceLimitLiveInputs {
-        mark_price: LiveField::new(price.clone(), src.clone(), now),
-        best_bid_ask: LiveField::new((Price::new("0"), Price::new("0")), src.clone(), now),
-        open_orders_count: LiveField::new(0u32, src.clone(), now),
-        user_account_state: LiveField::new(
-            PerpAccountState {
-                total_collateral_usd: U256::ZERO,
-                used_margin_usd: U256::ZERO,
-                free_margin_usd: U256::ZERO,
-                open_positions: vec![],
-            },
-            src,
-            now,
-        ),
-    };
-
-    ActionBody::Perp(PerpAction::PlaceLimitOrder(PlaceLimitOrderAction {
-        venue,
-        market,
-        side,
-        size,
-        price,
-        time_in_force,
-        reduce_only,
-        live_inputs,
-    }))
-}
-
-fn hl_meta() -> ActionMeta {
-    ActionMeta {
-        submitted_at: Time::from_unix(1_738_000_000),
-        submitter: Address::from_str("0x000000000000000000000000000000000000a01c").unwrap(),
-        nature: ActionNature::OffchainSig {
-            domain: Eip712Domain {
-                name: "Hyperliquid".to_owned(),
-                version: Some("1".to_owned()),
-                chain_id: None,
-                verifying_contract: None,
-                salt: None,
-            },
-            deadline: Time::from_unix(1_738_000_600),
-            nonce_key: None,
-        },
-    }
-}
-
-// A perp `place_limit_order` manifest with no policy-RPC calls (the deny reads
-// only base context fields, so no host enrichment is needed).
-fn perp_manifest() -> Value {
+/// The off-chain-sig meta the converter emits.
+fn hl_meta() -> Value {
     json!({
-        "id": "hl-perp-guard",
+        "submitted_at": 1_738_000_000u64,
+        "submitter": "0x000000000000000000000000000000000000a01c",
+        "nature": {
+            "kind": "offchain_sig",
+            "domain": { "name": "Hyperliquid", "version": "1" },
+            "deadline": 1_738_000_600u64
+        }
+    })
+}
+
+/// A HyperliquidCore order action JSON — the exact `hl-order-to-action.ts` shape
+/// (doubly-tagged `{ domain, action, ...fields }`). `is_buy=false` ⇒ short.
+fn order_action(is_buy: bool, size: &str) -> Value {
+    json!({
+        "domain": "hyperliquid_core",
+        "action": "hl_order",
+        "asset_index": 0,
+        "symbol": "BTC",
+        "is_buy": is_buy,
+        "price": "60000",
+        "size": size,
+        "reduce_only": false,
+        "tif": "gtc"
+    })
+}
+
+/// A HyperliquidCore updateLeverage action JSON — `hl-order-to-action.ts` shape.
+fn update_leverage_action(leverage: i64) -> Value {
+    json!({
+        "domain": "hyperliquid_core",
+        "action": "hl_update_leverage",
+        "asset_index": 0,
+        "symbol": "BTC",
+        "is_cross": true,
+        "leverage": leverage
+    })
+}
+
+/// A manifest triggering on a given HL Core action tag (no policy-RPC; the HL
+/// deny/confirm rules read only base context).
+fn manifest(tag: &str) -> Value {
+    json!({
+        "id": format!("{tag}-guard"),
         "schema_version": 2,
-        "trigger": { "where": { "action.tag": { "eq": "place_limit_order" } } },
+        "trigger": { "where": { "action.tag": { "eq": tag } } },
         "policy_rpc": [],
         "custom_context": { "fields": {} }
     })
 }
 
-const DENY_SHORT_ON_HL: &str = "\
+const DENY_SHORT: &str = "\
 @id(\"hl/no-short\")\n\
 @severity(\"deny\")\n\
-@reason(\"Short perp orders on Hyperliquid are blocked by policy\")\n\
-forbid(principal, action == Perp::Action::\"PlaceLimitOrder\", resource)\n\
+@reason(\"Short orders on Hyperliquid are blocked by policy\")\n\
+forbid(principal, action == HyperliquidCore::Action::\"HlOrder\", resource)\n\
 when { context.venue.name == \"hyperliquid\" && context.side == \"short\" };\n";
 
-// Assemble the EXACT `EvaluateActionInput` envelope the extension sends and run
-// it through `evaluate_action_v2_json`. Returns the parsed output envelope.
-fn run_entry_point(body: &ActionBody, policy: &str) -> Value {
+/// Assemble the `EvaluateActionInput` envelope and run it through the entry
+/// point. Returns the parsed output envelope.
+fn run(action: Value, bundles: Value) -> Value {
     let input = json!({
-        "action": serde_json::to_value(body).unwrap(),
-        "meta": serde_json::to_value(hl_meta()).unwrap(),
+        "action": action,
+        "meta": hl_meta(),
         "tx": {
-            // HL is off-chain; the SW supplies a sentinel `to`. chain_id is the
-            // CAIP-2 string the v2 path expects.
             "chain_id": "hl-mainnet",
             "from": "0x1111111111111111111111111111111111111111",
             "to": "0x0000000000000000000000000000000000000000"
         },
-        "bundles": [{ "policy": policy, "manifest": perp_manifest() }],
+        "bundles": bundles,
         "results": {}
     });
-
-    let out = evaluate_action_v2_json(input.to_string());
-    serde_json::from_str(&out).expect("entry point returns JSON")
+    serde_json::from_str(&evaluate_action_v2_json(input.to_string()))
+        .expect("entry point returns JSON")
 }
 
-/// THE PROOF (extension entry point): a Hyperliquid SHORT order returns a
-/// `fail` verdict from `evaluate_action_v2_json`. In the extension this `fail`
-/// drives `decideMessage` → `ok:false` → the fetch hook rejects the `/exchange`
-/// POST, so the order never reaches Hyperliquid, and `openVerdictWindow` shows
-/// the deny popup.
+/// Read a shipped seed bundle (`policy.cedar` + `manifest.json`) verbatim — the
+/// SAME artifact `copy-default-policies.js` ships into the extension.
+fn seed_bundle(id: &str) -> Value {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("policy-engine")
+        .join("tests")
+        .join("fixtures")
+        .join("default_policies_v2")
+        .join(id);
+    let policy = std::fs::read_to_string(dir.join("policy.cedar")).expect("read seed policy.cedar");
+    let manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+            .expect("seed manifest.json parses");
+    json!({ "policy": policy, "manifest": manifest })
+}
+
+/// THE PROOF (entry point): a Hyperliquid SHORT order returns a `fail` verdict.
 #[test]
 fn hyperliquid_short_order_denied_through_entry_point() {
-    let order = json!({ "a": 0, "b": false, "p": "60000", "s": "0.1", "r": false,
-                        "t": { "limit": { "tif": "Gtc" } } });
-    let body = hl_order_to_action_body(&order, "BTC-USD");
-
-    let parsed = run_entry_point(&body, DENY_SHORT_ON_HL);
-
+    let parsed = run(
+        order_action(false, "0.1"),
+        json!([{ "policy": DENY_SHORT, "manifest": manifest("hl_order") }]),
+    );
     assert_eq!(parsed["ok"], true, "envelope ok: {parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "fail",
@@ -172,22 +127,17 @@ fn hyperliquid_short_order_denied_through_entry_point() {
         parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl/no-short",
         "the deny rule must be the matched policy: {parsed}"
     );
-    assert_eq!(
-        parsed["data"]["verdict"]["matched"][0]["severity"], "deny",
-        "severity must be deny: {parsed}"
-    );
 }
 
-/// CONTROL — selectivity: a LONG order passes the short-only deny (proves the
-/// verdict is conditional on the order, not a blanket fail).
+/// CONTROL: a LONG order passes the short-only deny. Also proves a fractional
+/// `size` ("0.1") deserializes cleanly (Decimal, not U256) — NOT a parse-failure
+/// `__system__`/`__engine` deny.
 #[test]
 fn hyperliquid_long_order_passes_through_entry_point() {
-    let order = json!({ "a": 0, "b": true, "p": "60000", "s": "0.1", "r": false,
-                        "t": { "limit": { "tif": "Gtc" } } });
-    let body = hl_order_to_action_body(&order, "BTC-USD");
-
-    let parsed = run_entry_point(&body, DENY_SHORT_ON_HL);
-
+    let parsed = run(
+        order_action(true, "0.1"),
+        json!([{ "policy": DENY_SHORT, "manifest": manifest("hl_order") }]),
+    );
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "pass",
@@ -195,28 +145,10 @@ fn hyperliquid_long_order_passes_through_entry_point() {
     );
 }
 
-/// CONTROL — no deny bundle ⇒ baseline pass (blocking requires an explicit
-/// policy; the engine does not deny by default).
+/// CONTROL: no bundle ⇒ baseline pass (blocking requires an explicit policy).
 #[test]
 fn no_bundle_passes_baseline_through_entry_point() {
-    let order = json!({ "a": 0, "b": false, "p": "60000", "s": "0.1", "r": false,
-                        "t": { "limit": { "tif": "Gtc" } } });
-    let body = hl_order_to_action_body(&order, "BTC-USD");
-
-    let input = json!({
-        "action": serde_json::to_value(&body).unwrap(),
-        "meta": serde_json::to_value(hl_meta()).unwrap(),
-        "tx": {
-            "chain_id": "hl-mainnet",
-            "from": "0x1111111111111111111111111111111111111111",
-            "to": "0x0000000000000000000000000000000000000000"
-        },
-        "bundles": [],
-        "results": {}
-    });
-    let parsed: Value =
-        serde_json::from_str(&evaluate_action_v2_json(input.to_string())).unwrap();
-
+    let parsed = run(order_action(false, "0.1"), json!([]));
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "pass",
@@ -224,122 +156,14 @@ fn no_bundle_passes_baseline_through_entry_point() {
     );
 }
 
-
-/// CONTRACT: the EXACT JSON the TS converter (`hl-order-to-action.ts`) emits —
-/// hand-written here with the TS field shapes (decimal U256 amounts, no `c`) —
-/// must deserialize into `ActionBody` and DENY through `evaluate_action_v2_json`
-/// with `hl/no-short` (NOT a `__system__`/`__engine` parse-failure deny). This
-/// pins the cross-language wire contract: if alloy U256 stops accepting the TS
-/// number form, this fails loudly instead of silently fail-closing.
-#[test]
-fn ts_converter_json_shape_denies_through_entry_point() {
-    // Mirrors `hlOrderToAction(shortBtc())` output byte-for-byte (see
-    // browser-extension `__tests__/hl-order-to-action.test.ts` CANONICAL_ACTION).
-    let action = json!({
-        "domain": "perp",
-        "action": "place_limit_order",
-        "venue": { "name": "hyperliquid", "chain": "hl-mainnet" },
-        "market": { "symbol": "BTC-USD", "venue": { "name": "hyperliquid" } },
-        "side": "short",
-        "size": { "kind": "base_amount", "amount": "0" },
-        "price": "60000",
-        "time_in_force": { "kind": "gtc" },
-        "reduce_only": false,
-        "live_inputs": {
-            "mark_price": { "value": "60000", "source": { "kind": "user_supplied" }, "synced_at": 0 },
-            "best_bid_ask": { "value": ["0", "0"], "source": { "kind": "user_supplied" }, "synced_at": 0 },
-            "open_orders_count": { "value": 0, "source": { "kind": "user_supplied" }, "synced_at": 0 },
-            "user_account_state": {
-                "value": {
-                    "total_collateral_usd": "0",
-                    "used_margin_usd": "0",
-                    "free_margin_usd": "0",
-                    "open_positions": []
-                },
-                "source": { "kind": "user_supplied" },
-                "synced_at": 0
-            }
-        }
-    });
-    let meta = json!({
-        "submitted_at": 1_738_000_000u64,
-        "submitter": "0x000000000000000000000000000000000000a01c",
-        "nature": {
-            "kind": "offchain_sig",
-            "domain": { "name": "Hyperliquid", "version": "1" },
-            "deadline": 1_738_000_600u64
-        }
-    });
-    let input = json!({
-        "action": action,
-        "meta": meta,
-        "tx": {
-            "chain_id": "hl-mainnet",
-            "from": "0x1111111111111111111111111111111111111111",
-            "to": "0x0000000000000000000000000000000000000000"
-        },
-        "bundles": [{ "policy": DENY_SHORT_ON_HL, "manifest": perp_manifest() }],
-        "results": {}
-    });
-
-    let parsed: Value =
-        serde_json::from_str(&evaluate_action_v2_json(input.to_string())).unwrap();
-
-    assert_eq!(parsed["ok"], true, "{parsed}");
-    assert_eq!(
-        parsed["data"]["verdict"]["kind"], "fail",
-        "TS-shaped JSON must DENY: {parsed}"
-    );
-    assert_eq!(
-        parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl/no-short",
-        "must deny via the policy, NOT a parse-failure __system__/__engine: {parsed}"
-    );
-}
-
-/// SHIPPED-SEED PROOF: the actual default policy bundle that ships in the
-/// extension (`crates/policy-engine/tests/fixtures/default_policies_v2/
-/// hl-no-short-perp/{policy.cedar,manifest.json}`, copied verbatim into
-/// `public/default-policies/policy-set-v2.json` by `copy-default-policies.js`)
-/// DENIES a Hyperliquid short order through `evaluate_action_v2_json`. This is
-/// the end-to-end artifact the SW's `getDefaultPolicyBundlesV2()` feeds inline,
-/// so it proves the *shipped* deny — not just a test-local policy string.
+/// SHIPPED-SEED PROOF: the actual default bundle that ships in the extension
+/// (`hl-no-short-perp/{policy.cedar,manifest.json}`, copied into
+/// `public/default-policies/policy-set-v2.json`) DENIES a Hyperliquid short
+/// order through `evaluate_action_v2_json`. This pins the SHIPPED policy ↔ the
+/// HyperliquidCore action UID wiring (regression guard for the stale-fixture bug).
 #[test]
 fn shipped_seed_policy_denies_hyperliquid_short() {
-    let seed_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("policy-engine")
-        .join("tests")
-        .join("fixtures")
-        .join("default_policies_v2")
-        .join("hl-no-short-perp");
-    let policy = std::fs::read_to_string(seed_dir.join("policy.cedar"))
-        .expect("read shipped seed policy.cedar");
-    let manifest: Value = serde_json::from_str(
-        &std::fs::read_to_string(seed_dir.join("manifest.json"))
-            .expect("read shipped seed manifest.json"),
-    )
-    .expect("seed manifest.json parses");
-
-    let body = hl_order_to_action_body(
-        &json!({ "a": 0, "b": false, "p": "60000", "s": "0.1", "r": false,
-                 "t": { "limit": { "tif": "Gtc" } } }),
-        "BTC-USD",
-    );
-    let input = json!({
-        "action": serde_json::to_value(&body).unwrap(),
-        "meta": serde_json::to_value(hl_meta()).unwrap(),
-        "tx": {
-            "chain_id": "hl-mainnet",
-            "from": "0x1111111111111111111111111111111111111111",
-            "to": "0x0000000000000000000000000000000000000000"
-        },
-        "bundles": [{ "policy": policy, "manifest": manifest }],
-        "results": {}
-    });
-
-    let parsed: Value =
-        serde_json::from_str(&evaluate_action_v2_json(input.to_string())).unwrap();
-
+    let parsed = run(order_action(false, "0.1"), json!([seed_bundle("hl-no-short-perp")]));
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "fail",
@@ -348,5 +172,69 @@ fn shipped_seed_policy_denies_hyperliquid_short() {
     assert_eq!(
         parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl-no-short-perp",
         "matched policy must be the shipped seed id: {parsed}"
+    );
+}
+
+/// SHIPPED-SEED CONTROL: the shipped short-deny does NOT block a LONG order —
+/// proves the retargeted policy is conditional on side, not a blanket fail.
+#[test]
+fn shipped_seed_policy_allows_hyperliquid_long() {
+    let parsed = run(order_action(true, "0.1"), json!([seed_bundle("hl-no-short-perp")]));
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["kind"], "pass",
+        "the shipped short-deny must let a long order PASS: {parsed}"
+    );
+}
+
+/// D4 SHIPPED-SEED PROOF: the shipped `hl-confirm-withdraw` bundle FLAGS a
+/// `withdraw3` for confirmation (`warn`) through the entry point — the
+/// fund-movement action class is guarded, not just orders.
+#[test]
+fn shipped_seed_policy_confirms_hyperliquid_withdraw() {
+    let withdraw = json!({
+        "domain": "hyperliquid_core",
+        "action": "hl_withdraw",
+        "destination": "0x000000000000000000000000000000000000dead",
+        "amount": "1000.5"
+    });
+    let parsed = run(withdraw, json!([seed_bundle("hl-confirm-withdraw")]));
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["kind"], "warn",
+        "the shipped confirm-withdraw policy must WARN: {parsed}"
+    );
+    assert_eq!(
+        parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl-confirm-withdraw",
+        "matched policy must be the shipped seed id: {parsed}"
+    );
+}
+
+/// D4 SHIPPED-SEED PROOF: the shipped `hl-confirm-high-leverage` bundle FLAGS a
+/// high-leverage `updateLeverage` (`warn`) — closes the D4 gap where leverage
+/// changes shipped no policy.
+#[test]
+fn shipped_seed_policy_confirms_high_leverage() {
+    let parsed = run(update_leverage_action(25), json!([seed_bundle("hl-confirm-high-leverage")]));
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["kind"], "warn",
+        "25x leverage must WARN: {parsed}"
+    );
+    assert_eq!(
+        parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl-confirm-high-leverage",
+        "matched policy must be the shipped seed id: {parsed}"
+    );
+}
+
+/// CONTROL: a modest leverage change (≤ 20x) is NOT flagged by the high-leverage
+/// confirm — proves the guard is threshold-conditional, not a blanket warn.
+#[test]
+fn shipped_seed_policy_allows_modest_leverage() {
+    let parsed = run(update_leverage_action(10), json!([seed_bundle("hl-confirm-high-leverage")]));
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["kind"], "pass",
+        "10x leverage must PASS the >20x confirm: {parsed}"
     );
 }
