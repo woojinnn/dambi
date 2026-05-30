@@ -47,23 +47,31 @@ const mocks = vi.hoisted(() => {
     runtimeMessageListeners,
     windowRemovedListeners,
     ensureDefaultPoliciesInstalled: vi.fn(async () => undefined),
-    getActivePolicyRpcManifests: vi.fn(() => [{ id: "manifest-a" }]),
     pendingPut: vi.fn(async () => undefined),
     pendingDelete: vi.fn(async () => undefined),
     auditAppend: vi.fn(async () => undefined),
-    evaluateWithPolicyRpc: vi.fn(),
-    evaluateWithEnvelopes: vi.fn<
-      (...args: unknown[]) => Promise<unknown>
-    >(async () => ({ kind: "pass" })),
-    tryDeclarativeRoute: vi.fn<
+    // Phase 1 / P2 — v2 ActionBody verdict path. The v3 route defaults to a
+    // miss so every EXISTING test fails closed; the v2 plan/dispatch/evaluate
+    // mocks are only exercised by the dedicated v2-path cases that override
+    // the v3 route to a hit.
+    planActionRpcV2: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => [],
+    ),
+    evaluateActionV2: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => ({ kind: "pass" }),
+    ),
+    dispatchCallsV2: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => ({}),
+    ),
+    getDefaultPolicyBundlesV2: vi.fn<() => unknown[]>(() => [
+      { policy: "forbid(...);", manifest: { id: "high-slippage-warning", schema_version: 2 } },
+    ]),
+    tryDeclarativeRouteV3: vi.fn<
       (...args: unknown[]) => Promise<unknown>
     >(async () => ({
       kind: "miss",
-      reason: "no_selector",
+      reason: "bundle_not_installed",
     })),
-    routeTypedSignaturePayload: vi.fn<
-      (...args: unknown[]) => Promise<unknown>
-    >(async () => null),
     browser: {
       storage: {
         session: {
@@ -118,7 +126,6 @@ const mocks = vi.hoisted(() => {
 vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
 vi.mock("../policies-loader", () => ({
   ensureDefaultPoliciesInstalled: mocks.ensureDefaultPoliciesInstalled,
-  getActivePolicyRpcManifests: mocks.getActivePolicyRpcManifests,
 }));
 vi.mock("../storage", () => ({
   pendingPut: mocks.pendingPut,
@@ -127,10 +134,14 @@ vi.mock("../storage", () => ({
 }));
 vi.mock("../wasm-bridge", () => ({
   EngineError: mocks.MockEngineError,
-  evaluateWithEnvelopes: mocks.evaluateWithEnvelopes,
+  planActionRpcV2: mocks.planActionRpcV2,
+  evaluateActionV2: mocks.evaluateActionV2,
+}));
+vi.mock("../policies-loader-v2", () => ({
+  getDefaultPolicyBundlesV2: mocks.getDefaultPolicyBundlesV2,
 }));
 vi.mock("../policy-rpc", () => ({
-  evaluateWithPolicyRpc: mocks.evaluateWithPolicyRpc,
+  dispatchCallsV2: mocks.dispatchCallsV2,
   // Pass-through so the orchestrator's audit-log builder behaves like
   // the real `formatAuditMatched`. Mirrors the trivial D9-aware impl.
   formatAuditMatched: (verdict: { matched?: { policy_id: string; severity: string; reason?: string }[] }) =>
@@ -145,17 +156,12 @@ vi.mock("../policy-rpc", () => ({
       return base;
     }),
 }));
-// Phase 6 — orchestrator calls `tryDeclarativeRoute` on every transaction.
-// We stub it to a fast "no_selector" miss so tests that don't care about
-// the declarative path don't have to mock the WASM bridge + JIT fetcher.
+// Phase 4B / P3 — the orchestrator calls `tryDeclarativeRouteV3` on every
+// transaction; we stub it to a fast miss so tests that don't care about the
+// v3 decode path don't have to mock the WASM bridge + JIT fetcher. The v1
+// `tryDeclarativeRoute` export was removed in the Phase 1/P3 v1 cutover.
 vi.mock("../adapter-loader/declarative-route", () => ({
-  tryDeclarativeRoute: mocks.tryDeclarativeRoute,
-}));
-// Phase A.1 (Task 6) — the orchestrator now routes typed signatures through
-// `routeTypedSignaturePayload`. Mock it so the real sig-routing module (and
-// its WASM-bridge + registry-client transitive imports) never loads here.
-vi.mock("../sig-routing", () => ({
-  routeTypedSignaturePayload: mocks.routeTypedSignaturePayload,
+  tryDeclarativeRouteV3: mocks.tryDeclarativeRouteV3,
 }));
 
 import { decideMessage } from "../orchestrator";
@@ -177,6 +183,22 @@ function txMessage(requestId = "req-1"): Message {
   } as Message;
 }
 
+function typedSigMessage(requestId = "typed-1"): Message {
+  return {
+    requestId,
+    data: {
+      type: RequestType.TYPED_SIGNATURE,
+      chainId: 1,
+      hostname: "app.example",
+      address: OWNER,
+      typedData: {
+        primaryType: "Permit",
+        domain: { verifyingContract: ROUTER },
+      },
+    },
+  } as Message;
+}
+
 function untypedMessage(requestId = "sig-1"): Message {
   return {
     requestId,
@@ -188,32 +210,31 @@ function untypedMessage(requestId = "sig-1"): Message {
   };
 }
 
-function typedMessage(requestId = "typed-1"): Message {
-  return {
-    requestId,
-    data: {
-      type: RequestType.TYPED_SIGNATURE,
-      chainId: 1,
-      hostname: "app.uniswap.org",
-      address: OWNER,
-      typedData: {
-        domain: {
-          name: "Permit2",
-          chainId: 1,
-          verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
-        },
-        primaryType: "PermitSingle",
-        types: { PermitSingle: [{ name: "spender", type: "address" }] },
-        message: { spender: ROUTER },
-      },
-    },
-  } as Message;
-}
-
 function approve(requestId: string, ok: boolean): void {
   for (const listener of [...mocks.runtimeMessageListeners]) {
     listener({ type: "scopeball:verdict-decision", requestId, ok });
   }
+}
+
+/**
+ * Drive a request that is expected to fail closed (a warn verdict that opens
+ * the verdict window and AWAITS the user's choice). We must NOT `await
+ * decideMessage` before approving — that would deadlock and (because the
+ * per-actor lock is still held) cascade into later same-actor cases.
+ */
+async function decideAndApprove(
+  message: Message,
+  ok: boolean,
+): Promise<{ ok: boolean; verdict: { kind: string } }> {
+  const callsBefore = mocks.browser.windows.create.mock.calls.length;
+  const result = decideMessage(message, { onAwaitingUser: vi.fn() });
+  await vi.waitFor(() =>
+    expect(mocks.browser.windows.create.mock.calls.length).toBe(
+      callsBefore + 1,
+    ),
+  );
+  approve(message.requestId, ok);
+  return result;
 }
 
 describe("orchestrator", () => {
@@ -224,348 +245,278 @@ describe("orchestrator", () => {
     mocks.localStore.clear();
     mocks.runtimeMessageListeners.length = 0;
     mocks.windowRemovedListeners.length = 0;
-    mocks.evaluateWithPolicyRpc.mockResolvedValue({
-      verdict: { kind: "pass" },
-      audit: {
-        request_id: "stubbed-tx-1",
-        manifest_set_hash: "sha256:manifest",
-        schema_hash: "sha256:schema",
-        call_ids: [],
-        methods: [],
-      },
-    });
-    mocks.tryDeclarativeRoute.mockResolvedValue({
+    // v3 route default: miss → fail-closed path. The v2 plan/dispatch/evaluate
+    // mocks resolve to inert pass-shaped values; only the v2-path cases below
+    // override the v3 route to a hit.
+    mocks.tryDeclarativeRouteV3.mockResolvedValue({
       kind: "miss",
-      reason: "no_selector",
+      reason: "bundle_not_installed",
     });
-    mocks.evaluateWithEnvelopes.mockResolvedValue({ kind: "pass" });
-    mocks.routeTypedSignaturePayload.mockResolvedValue(null);
-  });
-
-  it("evaluates transactions through policy-rpc coordinator", async () => {
-    const result = await decideMessage(txMessage("stubbed-tx-1"));
-
-    expect(result.ok).toBe(true);
-    expect(result.verdict.kind).toBe("pass");
-    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledWith(
-      txMessage("stubbed-tx-1"),
-      { manifests: [{ id: "manifest-a" }] },
-    );
-    expect(mocks.pendingPut).toHaveBeenCalledOnce();
-    expect(mocks.pendingDelete).toHaveBeenCalledWith("stubbed-tx-1");
-    expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        policyRpc: expect.objectContaining({
-          manifest_set_hash: "sha256:manifest",
-          schema_hash: "sha256:schema",
-        }),
-      }),
-    );
-  });
-
-  // ── Phase A.1 (Task 6) — typed-sig v3 route wire ────────────────────
-  it("routes typed signatures through routeTypedSignaturePayload + logs declarative-v3-sig actions", async () => {
-    const fakeActions = [
-      { meta: { nature: { kind: "offchain_sig" } }, body: { domain: "permit" } },
-    ];
-    mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
-      actions: fakeActions,
-      decoderId: "uniswap/permit2/permitSingle@1.0.0",
-    });
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-
-    try {
-      const result = await decideMessage(typedMessage("typed-hit-1"));
-
-      expect(result.ok).toBe(true);
-      // The sig-router was handed the raw TypedSignaturePayload.
-      expect(mocks.routeTypedSignaturePayload).toHaveBeenCalledOnce();
-      const [sigArgs] = mocks.routeTypedSignaturePayload.mock.calls[0] as [
-        { payload: { type: string }; submittedAt?: number },
-      ];
-      expect(sigArgs.payload.type).toBe(RequestType.TYPED_SIGNATURE);
-      expect(typeof sigArgs.submittedAt).toBe("number");
-      // The actions[] JSON is surfaced to the SW DevTools console.
-      const sigLog = infoSpy.mock.calls.find(
-        (c) => c[0] === "[Scopeball] declarative-v3-sig",
-      );
-      expect(sigLog).toBeDefined();
-      expect(sigLog?.[1]).toMatchObject({
-        decoderId: "uniswap/permit2/permitSingle@1.0.0",
-        actionsCount: 1,
-        actions: fakeActions,
-        primaryType: "PermitSingle",
-      });
-      // The audit row carries the symmetric v3 meta (offchain_sig hit).
-      expect(mocks.auditAppend).toHaveBeenCalledWith(
-        expect.objectContaining({
-          declarativeV3: {
-            outcome: "hit",
-            nature: "offchain_sig",
-            decoder_id: "uniswap/permit2/permitSingle@1.0.0",
-            action_count: 1,
-          },
-        }),
-      );
-    } finally {
-      infoSpy.mockRestore();
-    }
-  });
-
-  it("records a no_manifest_matched miss when the typed-sig router returns null", async () => {
-    mocks.routeTypedSignaturePayload.mockResolvedValueOnce(null);
-
-    const result = await decideMessage(typedMessage("typed-miss-1"));
-
-    expect(result.ok).toBe(true);
-    expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        declarativeV3: {
-          outcome: "miss",
-          nature: "offchain_sig",
-          reason: "no_manifest_matched",
-        },
-      }),
-    );
-  });
-
-  it("fences a typed-sig router throw into a fault audit row", async () => {
-    mocks.routeTypedSignaturePayload.mockRejectedValueOnce(
-      new Error("decode blew up"),
-    );
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    try {
-      const result = await decideMessage(typedMessage("typed-fault-1"));
-
-      expect(result.ok).toBe(true);
-      // Static path still produces the final verdict — fault is observability only.
-      expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
-      expect(mocks.auditAppend).toHaveBeenCalledWith(
-        expect.objectContaining({
-          declarativeV3: {
-            outcome: "fault",
-            nature: "offchain_sig",
-            reason: "unexpected",
-          },
-        }),
-      );
-    } finally {
-      errSpy.mockRestore();
-    }
-  });
-
-  // Plan §M10 (2026-05-28) — v1 cutover. 본 test 7건은 v1 routing/Cedar 검증.
-  it.skip("records declarative-route hit metadata in the audit trail", async () => {
-    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
-      kind: "hit",
-      value: {
-        envelopes: [
-          { category: "dex", action: "swap", fields: { swapMode: "exact_in" } },
-        ],
-        decoderId: "declarative.uniswap/v2/swapExactTokensForTokens",
-        bundleId: "uniswap/v2/swapExactTokensForTokens@1.0.0",
-        source: "layer1",
+    mocks.planActionRpcV2.mockResolvedValue([]);
+    mocks.dispatchCallsV2.mockResolvedValue({});
+    mocks.evaluateActionV2.mockResolvedValue({ kind: "pass" });
+    mocks.getDefaultPolicyBundlesV2.mockReturnValue([
+      {
+        policy: "forbid(...);",
+        manifest: { id: "high-slippage-warning", schema_version: 2 },
       },
-    });
-
-    const result = await decideMessage(txMessage("stubbed-tx-1"));
-    expect(result.ok).toBe(true);
-    expect(mocks.tryDeclarativeRoute).toHaveBeenCalledOnce();
-    expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        declarative: expect.objectContaining({
-          outcome: "hit",
-          source: "layer1",
-          decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
-          bundle_id: "uniswap/v2/swapExactTokensForTokens@1.0.0",
-          envelope_count: 1,
-        }),
-      }),
-    );
+    ]);
   });
 
-  it.skip("records declarative-route miss in the audit trail", async () => {
-    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
-      kind: "miss",
-      reason: "no_publisher",
-    });
+  // ── Phase 1 / P2 — v2 ActionBody verdict path ───────────────────────
+  // When the v3 route HITS with a real (non-`Unknown`) ActionBody, the
+  // stateless v2 pipeline (planActionRpcV2 → dispatchCallsV2 →
+  // evaluateActionV2) drives the verdict (verdictSource="declarative-v2").
+  // A v3 miss/fault, an all-`Unknown` hit, no v2 bundle, or a plan/dispatch
+  // throw fails closed (verdictSource="fail_closed", warn + user-proceed).
 
-    const result = await decideMessage(txMessage("stubbed-tx-2"));
-    expect(result.ok).toBe(true);
-    expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        declarative: { outcome: "miss", reason: "no_publisher" },
-      }),
-    );
-  });
-
-  // ── Phase 7F — declarative verdict path ──────────────────────────────
-  // When the declarative router returns a hit with ≥1 envelope, the
-  // orchestrator now routes the verdict through `evaluate_with_envelopes_json`
-  // (mocked here as `evaluateWithEnvelopes`). For miss/fault/empty outcomes
-  // it falls back to the static `evaluateWithPolicyRpc` path. The audit
-  // log's `verdictSource` field captures which path won.
-
-  const hitOutcome = {
+  // One real swap Action: `{ meta, body }` where `body.domain !== "unknown"`.
+  const v3SwapAction = {
+    meta: {
+      submitted_at: { unix: 1_738_000_000 },
+      submitter: OWNER,
+      nature: { kind: "onchain_tx" },
+    },
+    body: { domain: "amm", swap: { recipient: OWNER } },
+  };
+  const v3HitOutcome = {
     kind: "hit" as const,
     value: {
-      envelopes: [
-        {
-          category: "dex",
-          action: "swap",
-          fields: { swapMode: "exact_in" },
-        },
-      ],
-      decoderId: "declarative.uniswap/v2/swapExactTokensForTokens",
-      bundleId: "uniswap/v2/swapExactTokensForTokens@1.0.0",
-      source: "layer1" as const,
+      actions: [v3SwapAction],
+      decoderId: "registry-v2.uniswap/v3/exactInputSingle",
     },
   };
 
-  it.skip("phase7F: declarative hit drives Cedar verdict (verdictSource=declarative)", async () => {
-    mocks.tryDeclarativeRoute.mockResolvedValueOnce(hitOutcome);
-    mocks.evaluateWithEnvelopes.mockResolvedValueOnce({ kind: "pass" });
-
-    const result = await decideMessage(txMessage("decl-hit-1"));
-
-    expect(result.ok).toBe(true);
-    expect(result.verdict.kind).toBe("pass");
-    // The declarative path runs evaluateWithEnvelopes…
-    expect(mocks.evaluateWithEnvelopes).toHaveBeenCalledOnce();
-    const [evalArgs] = mocks.evaluateWithEnvelopes.mock.calls[0] as [
-      Record<string, unknown>,
+  it("p2: v3 hit with a real ActionBody drives the v2 verdict (verdictSource=declarative-v2)", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    const planned = [
+      {
+        manifest_id: "large-swap-usd-warning",
+        call_id: "large-swap-usd-warning::total-input-usd",
+        method: "oracle.usd_value",
+        params: {},
+        outputs: [],
+        optional: false,
+      },
     ];
-    expect(evalArgs.envelopes).toEqual(hitOutcome.value.envelopes);
-    expect(evalArgs.chain_id).toBe(1);
-    expect(evalArgs.manifests).toEqual([{ id: "manifest-a" }]);
-    // …and the static path stays out of the way.
-    expect(mocks.evaluateWithPolicyRpc).not.toHaveBeenCalled();
-    // Audit log records the declarative source.
-    expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        verdictSource: "declarative",
-        declarative: expect.objectContaining({
-          outcome: "hit",
-          decoder_id: "declarative.uniswap/v2/swapExactTokensForTokens",
-          envelope_count: 1,
-        }),
-      }),
-    );
-  });
-
-  it.skip("phase7F: declarative miss falls back to static path (verdictSource=static)", async () => {
-    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
-      kind: "miss",
-      reason: "no_publisher",
+    mocks.planActionRpcV2.mockResolvedValueOnce(planned);
+    mocks.dispatchCallsV2.mockResolvedValueOnce({
+      "large-swap-usd-warning::total-input-usd": { usd: "3500.1200" },
+    });
+    // Warn is the realistic v2 verdict — BOTH shipped default v2 policies are
+    // `@severity("warn")`. The user must then approve via the verdict window.
+    mocks.evaluateActionV2.mockResolvedValueOnce({
+      kind: "warn",
+      matched: [
+        {
+          policy_id: "large-input",
+          reason: "large USD input",
+          severity: "warn",
+          origin: "action",
+        },
+      ],
     });
 
-    const result = await decideMessage(txMessage("decl-miss-1"));
+    const decided = await decideAndApprove(txMessage("v2-hit-1"), true);
 
-    expect(result.ok).toBe(true);
-    expect(mocks.evaluateWithEnvelopes).not.toHaveBeenCalled();
-    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    expect(decided.ok).toBe(true);
+    expect(decided.verdict.kind).toBe("warn");
+    // v2 pipeline drove the decision.
+    expect(mocks.planActionRpcV2).toHaveBeenCalledOnce();
+    expect(mocks.dispatchCallsV2).toHaveBeenCalledOnce();
+    expect(mocks.evaluateActionV2).toHaveBeenCalledOnce();
+    // The plan + evaluate calls split `action=a.body` / `meta=a.meta` and use
+    // the CAIP-2 chain id.
+    const planArgs = mocks.planActionRpcV2.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(planArgs.action).toEqual(v3SwapAction.body);
+    expect(planArgs.meta).toEqual(v3SwapAction.meta);
+    expect((planArgs.tx as { chain_id: string }).chain_id).toBe("eip155:1");
+    // evaluate receives the per-action results map verbatim + the bundles.
+    const evalArgs = mocks.evaluateActionV2.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(evalArgs.results).toEqual({
+      "large-swap-usd-warning::total-input-usd": { usd: "3500.1200" },
+    });
+    expect((evalArgs.bundles as unknown[]).length).toBe(1);
     expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        verdictSource: "static",
-        declarative: { outcome: "miss", reason: "no_publisher" },
-      }),
+      expect.objectContaining({ verdictSource: "declarative-v2" }),
     );
   });
 
-  it.skip("phase7F: declarative fault falls back to static path (verdictSource=static)", async () => {
-    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
-      kind: "fault",
-      reason: "map_failed",
-      cause: new Error("mapper rejected decoded call"),
+  it("p2: a v2 fail verdict is honoured, not treated as a fail-close", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    mocks.planActionRpcV2.mockResolvedValueOnce([]);
+    mocks.dispatchCallsV2.mockResolvedValueOnce({});
+    mocks.evaluateActionV2.mockResolvedValueOnce({
+      kind: "fail",
+      matched: [
+        {
+          policy_id: "__system__",
+          reason: "required policy-rpc result missing",
+          severity: "deny",
+          origin: "tx",
+        },
+      ],
     });
 
-    const result = await decideMessage(txMessage("decl-fault-1"));
+    const result = await decideMessage(txMessage("v2-fail-1"));
 
-    expect(result.ok).toBe(true);
-    expect(mocks.evaluateWithEnvelopes).not.toHaveBeenCalled();
-    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    // Fail verdicts surface as a non-ok decision via the v2 path.
+    expect(result.verdict.kind).toBe("fail");
+    expect(result.ok).toBe(false);
     expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        verdictSource: "static",
-        declarative: { outcome: "fault", reason: "map_failed" },
-      }),
+      expect.objectContaining({ verdictSource: "declarative-v2" }),
     );
   });
 
-  it.skip("phase7F: declarative hit with 0 envelopes falls back to static path", async () => {
-    mocks.tryDeclarativeRoute.mockResolvedValueOnce({
+  // ── Phase 1 / P3 — FAIL-CLOSED tail ──────────────────────────────────
+  // Every case the deleted v1 declarative-envelope + static path used to
+  // catch now emits the `__engine::no_decoder` warn verdict, which requires
+  // the user to explicitly proceed. The v2 plan/evaluate path never runs.
+
+  it("p3: a v3 hit with only an Unknown ActionBody fails closed", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
       kind: "hit",
       value: {
-        envelopes: [],
-        decoderId: "declarative.something/empty",
-        bundleId: "something/empty@1.0.0",
-        source: "layer1",
+        actions: [
+          {
+            meta: { submitter: OWNER },
+            body: { domain: "unknown", target: ROUTER, calldata: "0x" },
+          },
+        ],
+        decoderId: "",
       },
     });
 
-    const result = await decideMessage(txMessage("decl-empty-1"));
+    const result = await decideAndApprove(txMessage("p3-unknown-1"), true);
 
     expect(result.ok).toBe(true);
-    expect(mocks.evaluateWithEnvelopes).not.toHaveBeenCalled();
-    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    expect(result.verdict.kind).toBe("warn");
+    // Unknown body → v2 skipped entirely.
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
     expect(mocks.auditAppend).toHaveBeenCalledWith(
       expect.objectContaining({
-        verdictSource: "static",
-        declarative: expect.objectContaining({
-          outcome: "hit",
-          envelope_count: 0,
-        }),
+        verdictSource: "fail_closed",
+        matchedPolicies: [
+          expect.objectContaining({ id: "__engine::no_decoder" }),
+        ],
       }),
     );
   });
 
-  it.skip("phase7F: evaluateWithEnvelopes throw falls through to static path", async () => {
-    mocks.tryDeclarativeRoute.mockResolvedValueOnce(hitOutcome);
-    mocks.evaluateWithEnvelopes.mockRejectedValueOnce(
-      new mocks.MockEngineError(
-        "installed_manifest_hash_mismatch",
-        "stale manifests",
-      ),
-    );
-
-    const result = await decideMessage(txMessage("decl-eval-throw-1"));
+  it("p3: a v3 miss fails closed (verdictSource=fail_closed)", async () => {
+    // v3 route default (beforeEach) is a miss → fail-closed.
+    const result = await decideAndApprove(txMessage("p3-miss-1"), true);
 
     expect(result.ok).toBe(true);
-    expect(mocks.evaluateWithEnvelopes).toHaveBeenCalledOnce();
-    // Fall-through means the static path still runs and produces the
-    // final verdict.
-    expect(mocks.evaluateWithPolicyRpc).toHaveBeenCalledOnce();
+    expect(result.verdict.kind).toBe("warn");
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
     expect(mocks.auditAppend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        verdictSource: "static",
-      }),
+      expect.objectContaining({ verdictSource: "fail_closed" }),
     );
   });
 
-  it("does not call declarative-route for untyped signatures", async () => {
-    const result = decideMessage(untypedMessage("sig-skip"), {
-      onAwaitingUser: vi.fn(),
+  it("p3: a user-cancelled fail-close yields a non-ok decision", async () => {
+    const result = await decideAndApprove(txMessage("p3-cancel-1"), false);
+    expect(result.ok).toBe(false);
+    expect(result.verdict.kind).toBe("warn");
+  });
+
+  it("p3: a v3 fault fails closed (verdictSource=fail_closed)", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
+      kind: "fault",
+      reason: "engine_error",
+      cause: new mocks.MockEngineError("engine_error", "v3 decode blew up"),
     });
-    await vi.waitFor(() =>
-      expect(mocks.browser.windows.create).toHaveBeenCalledTimes(1),
+
+    const result = await decideAndApprove(txMessage("p3-fault-1"), true);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({ verdictSource: "fail_closed" }),
     );
-    approve("sig-skip", true);
-    await result;
-    expect(mocks.tryDeclarativeRoute).not.toHaveBeenCalled();
+  });
+
+  it("p3: a planActionRpcV2 throw fails closed", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    mocks.planActionRpcV2.mockRejectedValueOnce(
+      new mocks.MockEngineError("plan_failed", "cannot lower action"),
+    );
+
+    const result = await decideAndApprove(txMessage("p3-plan-throw-1"), true);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.planActionRpcV2).toHaveBeenCalledOnce();
+    // evaluate never ran; the lifecycle fell through to the fail-closed tail.
+    expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({ verdictSource: "fail_closed" }),
+    );
+  });
+
+  it("p3: a v3 hit but no v2 bundles loaded fails closed", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
+    mocks.getDefaultPolicyBundlesV2.mockReturnValueOnce([]);
+
+    const result = await decideAndApprove(txMessage("p3-nobundles-1"), true);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({ verdictSource: "fail_closed" }),
+    );
+  });
+
+  it("p3: a typed signature fails closed (no v3 route exists for it yet)", async () => {
+    // Typed sigs were the sole consumer of the deleted v1 static path; they
+    // must now fail closed (warn + user-proceed) until the SignAdapter lands.
+    const result = await decideAndApprove(typedSigMessage("p3-typed-1"), true);
+
+    expect(result.ok).toBe(true);
+    expect(result.verdict.kind).toBe("warn");
+    // The v3 route is only invoked for transactions; typed sigs skip it.
+    expect(mocks.tryDeclarativeRouteV3).not.toHaveBeenCalled();
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "fail_closed",
+        matchedPolicies: [
+          expect.objectContaining({ id: "__engine::no_decoder" }),
+        ],
+      }),
+    );
+  });
+
+  it("does not call the v3 route for untyped signatures", async () => {
+    const result = await decideAndApprove(untypedMessage("sig-skip"), true);
+    expect(result.ok).toBe(true);
+    expect(mocks.tryDeclarativeRouteV3).not.toHaveBeenCalled();
   });
 
   it("lets the user explicitly approve unsupported untyped signatures", async () => {
-    const result = decideMessage(untypedMessage(), { onAwaitingUser: vi.fn() });
-    await vi.waitFor(() =>
-      expect(mocks.browser.windows.create).toHaveBeenCalledTimes(1),
-    );
-
-    approve("sig-1", true);
-
-    await expect(result).resolves.toMatchObject({
+    const result = await decideAndApprove(untypedMessage(), true);
+    await expect(Promise.resolve(result)).resolves.toMatchObject({
       ok: true,
       verdict: { kind: "warn" },
     });
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "fail_closed",
+        matchedPolicies: [
+          expect.objectContaining({
+            id: "__engine::unsupported_untyped_signature",
+          }),
+        ],
+      }),
+    );
   });
 });

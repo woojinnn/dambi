@@ -1,11 +1,8 @@
 //! `#[wasm_bindgen]` v2 (ActionBody-model) policy-RPC exports.
 //!
-//! Additive counterparts to the v1 exports in [`crate::exports`]
-//! ([`plan_policy_rpc_json`](crate::exports::plan_policy_rpc_json) /
-//! [`evaluate_policy_rpc_json`](crate::exports::evaluate_policy_rpc_json)),
-//! built on the new [`ActionBody`] model instead of the legacy
-//! [`ActionEnvelope`](policy_engine::ActionEnvelope). The two phases mirror v1
-//! exactly:
+//! Built on the v3 `ActionBody` model (the legacy flat `ActionEnvelope`
+//! route/plan/evaluate exports were removed in the Phase 1 action
+//! restructure). The two phases are:
 //!
 //! 1. [`plan_action_rpc_v2_json`] — lower the action, plan the v2 policy-RPC
 //!    calls, return `{ planned: [...] }` for the host to dispatch.

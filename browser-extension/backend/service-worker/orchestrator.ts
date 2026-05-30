@@ -3,25 +3,25 @@ import {
   tryDeclarativeRouteV3,
   type DeclarativeRouteV3Outcome,
 } from "./adapter-loader/declarative-route";
-import { routeTypedSignaturePayload } from "./sig-routing";
-import {
-  ensureDefaultPoliciesInstalled,
-  getActivePolicyRpcManifests,
-} from "./policies-loader";
-import { getAllManifests } from "./manifests/store";
+import { ensureDefaultPoliciesInstalled } from "./policies-loader";
 import {
   auditAppend,
   pendingDelete,
   pendingPut,
   type PendingRequest,
 } from "./storage";
-import { EngineError } from "./wasm-bridge";
 import {
-  evaluateWithPolicyRpc,
+  EngineError,
+  evaluateActionV2,
+  planActionRpcV2,
+} from "./wasm-bridge";
+import {
+  dispatchCallsV2,
   formatAuditMatched,
   type PolicyRpcAuditMeta,
 } from "./policy-rpc";
-import type { VerdictDto } from "./wasm-bridge.types";
+import { getDefaultPolicyBundlesV2 } from "./policies-loader-v2";
+import type { MatchedPolicyDto, VerdictDto } from "./wasm-bridge.types";
 import {
   isTransaction,
   isTypedSignature,
@@ -70,9 +70,14 @@ interface DecisionOptions {
 }
 
 /**
- * Plan §M10 (2026-05-28) — v1 DeclarativeAuditMeta 제거. v3 audit meta 만
- * 유지 (observability-only). Verdict driving 은 static path. Cedar v3 schema
- * 적응은 별 plan.
+ * Phase 4B — v3 route audit meta. Observability-only at Phase 4B (the v3
+ * fn is a stub that always returns one `Unknown` action). Phase 4D fills
+ * in `decoder_id` once registry-v2 manifest lookup is wired.
+ *
+ * Kept separate from `DeclarativeAuditMeta` so the audit log can show
+ * both pipelines running in parallel during cutover — when Phase 5
+ * promotes v3 to verdict driver, this meta moves into the `verdict`
+ * branch and `DeclarativeAuditMeta` is retired.
  */
 export interface DeclarativeV3AuditMeta {
   outcome: DeclarativeRouteV3Outcome["kind"]; // "hit" | "miss" | "fault"
@@ -83,23 +88,29 @@ export interface DeclarativeV3AuditMeta {
 }
 
 /**
- * Phase 7F — which Cedar pipeline produced the final verdict.
+ * Phase 1 / P3 — which pipeline produced the final verdict.
  *
- * `"declarative"` ⇒ envelopes from the declarative router were fed to
- *   `evaluate_with_envelopes_json` (Phase 7A WASM entry).
- * `"static"` ⇒ verdict came from the legacy `evaluateWithPolicyRpc` path,
- *   either because the declarative path missed/faulted, the message is a
- *   typed signature, or the declarative path produced zero envelopes.
+ * `"declarative-v2"` ⇒ the v3 route hit with a real (non-`Unknown`)
+ *   `ActionBody`, and the verdict was driven by the stateless v2 pipeline
+ *   (`plan_action_rpc_v2_json` → host dispatch → `evaluate_action_v2_json`).
+ *   This is the ONLY real verdict driver for transactions after the v1
+ *   declarative-envelope + static paths were removed.
+ * `"fail_closed"` ⇒ no decoder produced an evaluable verdict, so the engine
+ *   fails closed with a warn-and-proceed verdict. Covers: a v3 route
+ *   miss/fault, a v3 hit whose bodies were all `Unknown`, zero v2 bundles
+ *   loaded, a v2 plan/dispatch throw, and — until the SignAdapter lands —
+ *   every typed signature (which has no v3 route today). Also used as the
+ *   hard-timeout fallback source and for the untyped-signature short-circuit.
  */
-export type VerdictSource = "declarative" | "static";
+export type VerdictSource = "declarative-v2" | "fail_closed";
 
 interface LifecycleResult {
   verdict: VerdictDto;
   verdictSource: VerdictSource;
   policyRpc?: PolicyRpcAuditMeta;
   /**
-   * Plan §M10 — v1 declarative-route 제거 후 v3 audit meta 만 유지.
-   * Observability-only (verdict 는 static path 가 생성).
+   * Phase 4B — v3 declarative route audit meta. Observability + (for the v2
+   * verdict path) the input the verdict is driven from.
    */
   declarativeV3?: DeclarativeV3AuditMeta;
 }
@@ -162,7 +173,7 @@ async function decideInner(
     const { result: lifecycle } = await withTimeout(
       runLifecycle(message),
       HARD_TIMEOUT_MS,
-      { verdict: buildTimeoutVerdict(), verdictSource: "static" as const },
+      { verdict: buildTimeoutVerdict(), verdictSource: "fail_closed" as const },
     );
     const { verdict } = lifecycle;
 
@@ -198,54 +209,51 @@ async function decideInner(
     );
     return { ok, verdict };
   } catch (err) {
-    // Plan §M10 (2026-05-28) — v1 manifest cutover 후 evaluateWithPolicyRpc
-    // 의 routing 이 항상 no_adapter throw → `route_failed` 는 정상 outcome
-    // (engineErrorVerdict 가 default pass 로 downgrade). silent — 사용자
-    // console 의 v1-time noise (`[Scopeball] decideMessage threw {kind:
-    // route_failed}`) 제거 통과 기준 §M10 #10. 다른 EngineError 는
-    // console.error 유지 (real fault detection).
-    const isRouteFailedKnown =
-      err instanceof EngineError && err.kind === "route_failed";
-    if (!isRouteFailedKnown) {
-      const errInfo =
-        err instanceof Error
-          ? {
-              name: err.name,
-              message: err.message,
-              kind:
-                err instanceof EngineError
-                  ? err.kind
-                  : (err as { kind?: string }).kind,
-              stack: err.stack,
-            }
-          : { raw: String(err) };
-      // Surface `to`/`chainId`/`selector` so unexpected error logs let us
-      // tell at a glance whether the cause was a new UR deployment,
-      // an off-chain settlement contract, or a different chain entirely.
-      const txCtx = isTransaction(message)
+    const errInfo =
+      err instanceof Error
         ? {
-            to: message.data.transaction.to,
-            chainId: message.data.chainId,
-            selector:
-              typeof message.data.transaction.data === "string"
-                ? message.data.transaction.data.slice(0, 10)
-                : undefined,
-            dataLen:
-              typeof message.data.transaction.data === "string"
-                ? message.data.transaction.data.length
-                : undefined,
-            data: message.data.transaction.data,
+            name: err.name,
+            message: err.message,
+            kind:
+              err instanceof EngineError
+                ? err.kind
+                : (err as { kind?: string }).kind,
+            stack: err.stack,
           }
-        : undefined;
-      console.error("[Scopeball] decideMessage threw", {
-        requestId: message.requestId,
-        hostname: message.data.hostname,
-        type: pending.type,
-        ...(txCtx ?? {}),
-        ...errInfo,
-        err,
-      });
-    }
+        : { raw: String(err) };
+    // route_failed is a known no-op outcome (we pass it through in
+    // engineErrorVerdict), so log at warn to avoid noisy red counters
+    // on chrome://extensions. Other errors stay at error.
+    const logAt =
+      err instanceof EngineError && err.kind === "route_failed"
+        ? console.warn
+        : console.error;
+    // Surface `to`/`chainId`/`selector` so `route_failed` logs let us
+    // tell at a glance whether the unknown router was a new UR deployment,
+    // an off-chain settlement contract, or a different chain entirely.
+    const txCtx = isTransaction(message)
+      ? {
+          to: message.data.transaction.to,
+          chainId: message.data.chainId,
+          selector:
+            typeof message.data.transaction.data === "string"
+              ? message.data.transaction.data.slice(0, 10)
+              : undefined,
+          dataLen:
+            typeof message.data.transaction.data === "string"
+              ? message.data.transaction.data.length
+              : undefined,
+          data: message.data.transaction.data,
+        }
+      : undefined;
+    logAt("[Scopeball] decideMessage threw", {
+      requestId: message.requestId,
+      hostname: message.data.hostname,
+      type: pending.type,
+      ...(txCtx ?? {}),
+      ...errInfo,
+      err,
+    });
     const verdict = engineErrorVerdict(err);
     await appendAudit(message, pending.type, verdict);
     // `engineErrorVerdict` may downgrade some failures (e.g. route_failed)
@@ -381,7 +389,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   if (isUntypedSignature(message)) {
     return {
       verdict: unsupportedUntypedSignatureVerdict(),
-      verdictSource: "static",
+      verdictSource: "fail_closed",
       // Phase 4B audit: record the v3 nature even when we short-circuit
       // so the audit log shows we *saw* a personal_sign / eth_sign tx.
       declarativeV3: {
@@ -392,23 +400,18 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     };
   }
 
-  // Plan §M10 — v1 declarative-route 호출 + console.info `[Scopeball]
-  // declarative-route` + Cedar verdict 분기 (declarativeHit 의존) 모두 제거
-  // (사용자 결정 2026-05-28). registry/ 디렉토리는 runtime 미참조 + console
-  // 에서 v1 marker 부재. v3 path 만 console.info observability 로 유지. Cedar
-  // verdict 는 v3 ActionBody schema 적응 별 plan. Verdict 는 static path
-  // (evaluateWithPolicyRpc) 가 모두 생성.
-
-  // Phase 4B — v3 route, observability-only. Calls the new WASM v3 entry
-  // alongside the v1 path so the audit log shows both running. The Phase 4B
-  // Rust stub always returns one `ActionBody::Unknown` — verdict driving is
-  // intentionally deferred to Phase 5+ once manifest decode (Phase 4D)
-  // lands. Failures here MUST never disrupt the v1 verdict pipeline; we
-  // fence the call and log faults into audit only.
+  // Phase 4B → Phase 1/P3 — v3 route. Calls the WASM v3 entry to decode the
+  // tx into the PDF-FSM `Action[]` tree. After the v1 declarative-envelope
+  // and static paths were removed this is the SOLE input the verdict is
+  // driven from (via the v2 pipeline below). Failures here must never throw
+  // out of the lifecycle — we fence the call and fail closed downstream.
   let declarativeV3Meta: DeclarativeV3AuditMeta | undefined;
+  // Hoisted so the Phase 1 / P2 v2 verdict branch below can read the v3
+  // route outcome (its `actions[]`) after the observability logging.
+  let v3Outcome: DeclarativeRouteV3Outcome | undefined;
   if (isTransaction(message)) {
     try {
-      const v3Outcome = await tryDeclarativeRouteV3({
+      v3Outcome = await tryDeclarativeRouteV3({
         chainId: message.data.chainId,
         from: message.data.transaction.from ?? "0x" + "0".repeat(40),
         to: message.data.transaction.to ?? "0x" + "0".repeat(40),
@@ -453,40 +456,6 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
                     : v3Outcome.cause,
               }),
       });
-      // Plan §M5/M8 (2026-05-28 사용자 e2e 확인) — DevTools 의 lazy object
-      // expansion 없이 actions[] 의 정확한 ActionBody JSON 을 string 으로
-      // 직접 출력. narrow scope "ActionEnvelope[] devtool console 에서
-      // 정확하게 나오는지 확인" 의 직접 검증용.
-      //
-      // 사용자 요청 (2026-05-28) — multicall children 을 한 덩어리로 묶은
-      // 단일 JSON 은 가독성 부족 → outer Action 의 meta 와 body 의 각
-      // multicall child 를 separate console line 으로 print. 단일 action
-      // (multicall 외) 은 그대로 한 line.
-      if (v3Outcome.kind === "hit") {
-        v3Outcome.value.actions.forEach((action, oi) => {
-          const body = (action as { body?: { domain?: string; actions?: unknown[] } }).body;
-          const meta = (action as { meta?: unknown }).meta;
-          if (body && body.domain === "multicall" && Array.isArray(body.actions)) {
-            // multicall: meta 1 line + children each
-            console.info(
-              `[Scopeball] declarative-route-v3 actions[${oi}].meta`,
-              JSON.stringify(meta, null, 2),
-            );
-            body.actions.forEach((child, ci) => {
-              console.info(
-                `[Scopeball] declarative-route-v3 actions[${oi}].body.actions[${ci}]`,
-                JSON.stringify(child, null, 2),
-              );
-            });
-          } else {
-            // 단일 action: meta + body 한 line
-            console.info(
-              `[Scopeball] declarative-route-v3 actions[${oi}]`,
-              JSON.stringify(action, null, 2),
-            );
-          }
-        });
-      }
     } catch (err) {
       console.warn("[Scopeball] declarative-route-v3 threw", {
         requestId: message.requestId,
@@ -498,96 +467,200 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         reason: "unexpected",
       };
     }
-  } else if (isTypedSignature(message)) {
-    // Phase A.1 (Task 6) — typed-sig path now routes the EIP-712 request
-    // through the manifest-driven `routeTypedSignaturePayload` (Task 5),
-    // mirroring the on-chain tx branch above: a non-null hit dumps the
-    // decoded `actions[]` JSON to the SW DevTools console and records a
-    // `hit` audit row; a null result is a transparent miss
-    // (`no_manifest_matched`); a throw is fenced into a `fault` row so a
-    // sig-router fault never disrupts the static verdict pipeline.
-    try {
-      const sigResult = await routeTypedSignaturePayload({
-        payload: message.data,
-        submittedAt: Math.floor(Date.now() / 1000),
-      });
-      if (sigResult) {
-        console.info("[Scopeball] declarative-v3-sig", {
-          requestId: message.requestId,
-          chainId: message.data.chainId,
-          primaryType: (message.data.typedData as { primaryType?: string })
-            ?.primaryType,
-          decoderId: sigResult.decoderId,
-          actionsCount: sigResult.actions.length,
-          actions: sigResult.actions,
-        });
-        declarativeV3Meta = {
-          outcome: "hit",
-          nature,
-          decoder_id: sigResult.decoderId,
-          action_count: sigResult.actions.length,
-        };
-      } else {
-        declarativeV3Meta = {
-          outcome: "miss",
-          nature,
-          reason: "no_manifest_matched",
-        };
-      }
-    } catch (err) {
-      console.error("[Scopeball] declarative-v3-sig fault", {
-        requestId: message.requestId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      declarativeV3Meta = {
-        outcome: "fault",
-        nature,
-        reason: "unexpected",
-      };
-    }
+  } else {
+    // Typed-sig path — Phase 4B does NOT yet route signatures through the
+    // v3 WASM entry (SignAdapter arrives in Phase 4C). Record a miss with
+    // the nature so the audit log still shows the v3 column populated.
+    declarativeV3Meta = {
+      outcome: "miss",
+      nature,
+      reason: "typed_sig_not_yet_routed",
+    };
   }
 
-  // Plan §M10 — Cedar verdict 분기 (declarativeHit 의존 + evaluateWithEnvelopes)
-  // 제거. v1 envelope schema 결합 상태 — v3 ActionBody → Cedar schema 매핑은
-  // 별 plan. static path (evaluateWithPolicyRpc) 가 모든 verdict 생성.
+  // Phase 1 / P2 — v2 (ActionBody-model) verdict path. When the v3 route HIT
+  // with one or more real (non-`Unknown`) `ActionBody` elements, the
+  // stateless v2 pipeline drives the verdict. This is the ONLY real verdict
+  // driver after the v1 declarative-envelope + static paths were removed.
+  // Fail-safe: `tryV2VerdictPath` returns `undefined` (NOT a Fail verdict —
+  // that is a real verdict we honour) when there is no real action, no v2
+  // bundle, or a plan/dispatch throw; the lifecycle then fails closed below
+  // so a flaky WASM/RPC call cannot waive a tx through.
+  if (v3Outcome && v3Outcome.kind === "hit" && isTransaction(message)) {
+    const v2 = await tryV2VerdictPath(message, v3Outcome.value.actions);
+    if (v2) {
+      console.info("[Scopeball] declarative-verdict", {
+        requestId: message.requestId,
+        verdictSource: "declarative-v2",
+        verdict: v2.kind,
+        decoderId: v3Outcome.value.decoderId,
+        matched:
+          v2.matched?.map((m) => ({
+            id: m.policy_id,
+            severity: m.severity,
+          })) ?? [],
+      });
+      return {
+        verdict: v2,
+        verdictSource: "declarative-v2",
+        ...(declarativeV3Meta ? { declarativeV3: declarativeV3Meta } : {}),
+      };
+    }
+    // tryV2VerdictPath returned undefined → no real action to evaluate, no v2
+    // bundle, or a plan/dispatch throw. Fall through to the fail-closed tail.
+  }
 
-  // Phase 7 codex carry-over H: at evaluate-time the orchestrator MUST
-  // use the same manifest set the WASM engine was last installed with.
-  // The post-Phase-6 source of truth is `manifests/store.ts` (the Map
-  // shape); `atomicInstall` and `hydrateManifests` both push that Map
-  // through `install_policies_json`. Forwarding the legacy
-  // `getActivePolicyRpcManifests()` Vec (built from the embedded
-  // `manifest`/`manifests` fields on default-policy JSONs) hashed
-  // differently from the Map values and surfaced as a silent
-  // `manifest_hash_mismatch` in WASM. We prefer the Map; if it's empty
-  // we fall back to the legacy Vec so SW boots before any user-driven
-  // install path runs still work end-to-end (default-policies-only).
-  const mapManifests = Object.values(await getAllManifests()) as unknown[];
-  const manifests =
-    mapManifests.length > 0 ? mapManifests : getActivePolicyRpcManifests();
-
-  const result = await evaluateWithPolicyRpc(message, { manifests });
+  // Phase 1 / P3 — FAIL-CLOSED tail. We reach here when no decoder produced
+  // an evaluable verdict:
+  //   - a transaction whose v3 route missed/faulted, whose decoded bodies
+  //     were all `Unknown`, had zero v2 bundles, or whose v2 plan/dispatch
+  //     threw (`tryV2VerdictPath` → undefined), OR
+  //   - a typed signature (`offchain_sig`) — no v3 route exists for it until
+  //     the SignAdapter (Phase 4C) lands, so it always lands here.
+  // Rather than waive the request through, we emit a warn verdict that the
+  // user must explicitly approve via the verdict window (mirrors the untyped
+  // signature short-circuit). This replaces the deleted v1 declarative-
+  // envelope + static `evaluateWithPolicyRpc` fallback.
   console.info("[Scopeball] declarative-verdict", {
     requestId: message.requestId,
-    verdictSource: "static",
-    verdict: result.verdict.kind,
-    matched:
-      result.verdict.matched?.map((m) => ({
-        id: m.policy_id,
-        severity: m.severity,
-      })) ?? [],
+    verdictSource: "fail_closed",
+    verdict: "warn",
+    nature,
   });
   return {
-    verdict: result.verdict,
-    verdictSource: "static",
-    policyRpc: result.audit,
+    verdict: noDecoderVerdict(),
+    verdictSource: "fail_closed",
     ...(declarativeV3Meta ? { declarativeV3: declarativeV3Meta } : {}),
   };
 }
 
 /**
- * Plan §M10 — v3 outcome → audit shape. v1 의 auditFromDeclarativeOutcome
- * 은 함께 제거 (caller 가 v1 routing 와 함께 cutover).
+ * Phase 1 / P2 — drive the verdict through the stateless v2 pipeline from the
+ * v3 route's `actions[]`.
+ *
+ * For EACH action element with a real (non-`Unknown`) `ActionBody`:
+ *   1. split `action = a.body`, `meta = a.meta` (the v3 `Action` shape is
+ *      `{ meta, body }`, `action/mod.rs`),
+ *   2. `planActionRpcV2({ manifests, action, meta, tx })` — `manifests` are the
+ *      SAME `ManifestV2` list as the bundles' (`evaluate_action_v2_json`
+ *      re-plans from `bundles[].manifest` and ignores any side list, so the
+ *      two MUST match or the planned `call_id`s diverge and required results
+ *      go missing),
+ *   3. dispatch the planned calls to 127.0.0.1:8787 via `dispatchCallsV2`,
+ *      yielding a fresh `{ call_id: value }` map PER action (the `call_id`
+ *      `manifest_id::spec_id` repeats across actions, so a shared map would
+ *      clobber),
+ *   4. `evaluateActionV2({ action, meta, tx, bundles, results })` → one
+ *      `VerdictDto`.
+ *
+ * The per-action verdicts are aggregated by deny-overrides (mirrors Rust
+ * `Verdict::aggregate`: fail > warn > pass, matched lists concatenated).
+ *
+ * Returns `undefined` (→ caller fails closed) when:
+ *   - no action element carries a real `ActionBody` (all `Unknown` / empty),
+ *   - there are zero v2 bundles loaded (nothing to evaluate against), or
+ *   - any `planActionRpcV2` / `dispatchCallsV2` call THROWS.
+ *
+ * A `Fail` / `__system__` `VerdictDto` is a REAL verdict and is returned, NOT
+ * treated as a fall-through (only throws fall through). `evaluateActionV2`
+ * itself never throws for policy/system faults (always `ok: true`, Fail
+ * inside).
+ */
+async function tryV2VerdictPath(
+  message: Message,
+  actions: Record<string, unknown>[],
+): Promise<VerdictDto | undefined> {
+  if (!isTransaction(message)) return undefined;
+
+  // Skip `Unknown` bodies — the 4B stub emits exactly one of these, so the
+  // path stays dormant until the registry-v2 decoder (Phase 4D) lands and
+  // begins emitting real `ActionBody` variants.
+  const realActions = actions.filter((a) => {
+    const body = (a as { body?: unknown }).body;
+    return (
+      typeof body === "object" &&
+      body !== null &&
+      (body as { domain?: unknown }).domain !== "unknown"
+    );
+  });
+  if (realActions.length === 0) return undefined;
+
+  const bundles = getDefaultPolicyBundlesV2();
+  if (bundles.length === 0) return undefined;
+  // The plan phase MUST see the identical manifest set the bundles carry —
+  // `evaluate_action_v2_json` re-plans from `bundles[].manifest`, so a
+  // divergent plan-manifest list would mis-key the planned `call_id`s.
+  const manifests = bundles.map((b) => b.manifest);
+
+  // CAIP-2 string: `message.data.chainId` is a NUMBER; v2 `tx.chain_id`
+  // expects `eip155:<n>` or the serde/trigger match fails.
+  const tx = {
+    chain_id: `eip155:${message.data.chainId}`,
+    from: message.data.transaction.from ?? "0x" + "0".repeat(40),
+    to: message.data.transaction.to ?? "0x" + "0".repeat(40),
+  } as const;
+  const policyRpcUrl = process.env.POLICY_RPC_URL ?? "http://127.0.0.1:8787";
+
+  const verdicts: VerdictDto[] = [];
+  for (const a of realActions) {
+    const action = (a as { body: unknown }).body;
+    const meta = (a as { meta?: unknown }).meta;
+    try {
+      // PLAN: lower the action + plan its v2 policy-RPC calls.
+      const planned = await planActionRpcV2({ manifests, action, meta, tx });
+      // DISPATCH: fresh per-action results map (shared map would clobber:
+      // `call_id` repeats across action elements).
+      const results = await dispatchCallsV2(planned, policyRpcUrl);
+      // EVALUATE: never throws for policy/system faults (always Fail inside).
+      const verdict = await evaluateActionV2({
+        action,
+        meta,
+        tx,
+        bundles,
+        results,
+      });
+      verdicts.push(verdict);
+    } catch (err) {
+      // A plan/dispatch throw is a fault, NOT a verdict — the caller fails
+      // closed (a flaky WASM/RPC call must not waive a tx through).
+      console.warn("[Scopeball] declarative-verdict-v2 threw", {
+        requestId: message.requestId,
+        chainId: message.data.chainId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      return undefined;
+    }
+  }
+
+  return aggregateV2Verdicts(verdicts);
+}
+
+/**
+ * Aggregate per-action [`VerdictDto`]s by deny-overrides — a faithful TS
+ * mirror of Rust `Verdict::aggregate` (`policy/verdict.rs`): concatenate every
+ * verdict's `matched` list, then `fail` if any verdict failed, else `warn` if
+ * any warned, else `pass`. An empty input aggregates to `pass`.
+ */
+function aggregateV2Verdicts(verdicts: VerdictDto[]): VerdictDto {
+  const matched: MatchedPolicyDto[] = [];
+  let anyFail = false;
+  let anyWarn = false;
+  for (const v of verdicts) {
+    if (v.kind === "fail") {
+      anyFail = true;
+      matched.push(...v.matched);
+    } else if (v.kind === "warn") {
+      anyWarn = true;
+      matched.push(...v.matched);
+    }
+  }
+  if (anyFail) return { kind: "fail", matched };
+  if (anyWarn) return { kind: "warn", matched };
+  return { kind: "pass" };
+}
+
+/**
+ * Phase 4B — map a v3 outcome into the audit shape.
  */
 function auditFromDeclarativeV3Outcome(
   outcome: DeclarativeRouteV3Outcome,
@@ -674,6 +747,31 @@ function unsupportedUntypedSignatureVerdict(): VerdictDto {
       {
         policy_id: "__engine::unsupported_untyped_signature",
         reason: "Untyped signatures cannot be fully evaluated yet",
+        severity: "warn",
+        origin: "engine_error",
+      },
+    ],
+  };
+}
+
+/**
+ * Phase 1 / P3 — FAIL-CLOSED verdict for a request no decoder could evaluate.
+ *
+ * Emitted by the `runLifecycle` tail when the v3 route missed/faulted, decoded
+ * only `Unknown` bodies, found no v2 bundles, or the v2 pipeline threw — and
+ * for every typed signature (no v3 route exists for it until the SignAdapter
+ * lands). `kind: "warn"` so `decideInner` opens the verdict window and requires
+ * the user to explicitly proceed (mirrors `unsupportedUntypedSignatureVerdict`),
+ * rather than silently waiving the request through as the deleted v1 static
+ * `evaluateWithPolicyRpc` fallback would have.
+ */
+function noDecoderVerdict(): VerdictDto {
+  return {
+    kind: "warn",
+    matched: [
+      {
+        policy_id: "__engine::no_decoder",
+        reason: "Transaction type not recognized by any installed decoder",
         severity: "warn",
         origin: "engine_error",
       },

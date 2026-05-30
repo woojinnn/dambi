@@ -1,9 +1,9 @@
 /**
  * `declarative-decode` unit tests — selector extraction.
  *
- * Calldata decoding moved into WASM (`declarative_route_request_v3_json`).
- * Post-B4 cleanup (commits 6aa3cc0 / b6f3ac9): v1 `buildRouteInput` +
- * `DeclarativeRouteRequestInput` removed.
+ * `decodeBundleCalldata` and all related helpers have been removed; calldata
+ * decoding now happens inside WASM via `declarative_route_request_v3_json`.
+ * This file retains only the `extractSelector` cases.
  */
 import { describe, expect, it } from "vitest";
 

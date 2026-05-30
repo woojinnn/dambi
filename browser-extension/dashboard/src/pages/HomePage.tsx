@@ -15,10 +15,7 @@ export function HomePage() {
             게이팅합니다.
           </p>
           <div className="hero-actions">
-            <Link to="/editor" className="btn btn-primary">
-              새 정책 작성
-            </Link>
-            <Link to="/policies" className="btn btn-secondary">
+            <Link to="/policies" className="btn btn-primary">
               내 정책 보기
             </Link>
           </div>
@@ -45,11 +42,6 @@ export function HomePage() {
       </section>
 
       <section className="surfaces">
-        <SurfaceCard
-          title="Editor"
-          subtitle="Builder · Code 모드로 정책 작성"
-          to="/editor"
-        />
         <SurfaceCard
           title="Library"
           subtitle="내가 만든 정책 활성화 · 삭제"

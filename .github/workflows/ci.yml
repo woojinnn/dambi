@@ -91,10 +91,6 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - working-directory: browser-extension/dashboard
-        name: Dashboard prepare wasm (policy-engine + policy-builder)
-        run: yarn prepare:wasm
-
       - working-directory: browser-extension
         run: yarn typecheck
 

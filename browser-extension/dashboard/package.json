@@ -5,7 +5,6 @@
   "type": "module",
   "description": "Policy management UI for the scopeball browser extension. Standalone Vite app, communicates with the extension SW through the SDK at ../sdk/extension-client.ts.",
   "scripts": {
-    "prepare:wasm": "bash ../../scripts/wasm-build-dashboard.sh",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

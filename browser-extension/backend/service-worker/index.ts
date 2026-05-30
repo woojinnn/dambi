@@ -16,6 +16,7 @@ import {
   ensureDefaultPoliciesInstalled,
   reinstallAllPolicies,
 } from "./policies-loader";
+import { loadDefaultPolicySetV2 } from "./policies-loader-v2";
 import { applyEnabledIds, getCatalog } from "./policy-selection";
 import { RequestType, type Message, type MessageResponse } from "@lib/types";
 
@@ -116,6 +117,18 @@ async function bootSequence(): Promise<void> {
     await hydrateManifests();
   } catch (err) {
     console.warn("[Scopeball] manifest hydration failed:", err);
+  }
+
+  // Phase 1 / P2: warm the in-memory default v2 policy set so the first
+  // decision doesn't pay the fetch. v2 evaluation is STATELESS — this is a
+  // pure asset fetch + module-level cache, with NO WASM state to push, so
+  // its ordering relative to the install stages above does not matter.
+  // Best-effort like the surrounding stages: a failure here logs and leaves
+  // the cache empty (the loader returns `[]`); it must never brick boot.
+  try {
+    await loadDefaultPolicySetV2();
+  } catch (err) {
+    console.warn("[Scopeball] v2 default policy load failed:", err);
   }
 }
 

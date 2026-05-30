@@ -2,20 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseVerdict, WasmDecodeError } from "../wasm-bridge.types";
 import {
   EngineError,
-  declarativeRouteTypedDataV3,
+  evaluateActionV2,
   installPolicies,
-  evaluatePolicyRpc,
-  planPolicyRpc,
-  routeRequest,
+  planActionRpcV2,
 } from "../wasm-bridge";
 
 const wasmMocks = vi.hoisted(() => ({
   init: vi.fn(async () => undefined),
   installPoliciesJson: vi.fn(),
-  evaluatePolicyRpcJson: vi.fn(),
-  planPolicyRpcJson: vi.fn(),
-  routeRequestJson: vi.fn(),
-  declarativeRouteTypedDataV3Json: vi.fn(),
+  planActionRpcV2Json: vi.fn(),
+  evaluateActionV2Json: vi.fn(),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -29,11 +25,8 @@ vi.mock("webextension-polyfill", () => ({
 vi.mock("../../wasm/policy_engine_wasm", () => ({
   default: wasmMocks.init,
   install_policies_json: wasmMocks.installPoliciesJson,
-  evaluate_policy_rpc_json: wasmMocks.evaluatePolicyRpcJson,
-  plan_policy_rpc_json: wasmMocks.planPolicyRpcJson,
-  route_request_json: wasmMocks.routeRequestJson,
-  declarative_route_typed_data_v3_json:
-    wasmMocks.declarativeRouteTypedDataV3Json,
+  plan_action_rpc_v2_json: wasmMocks.planActionRpcV2Json,
+  evaluate_action_v2_json: wasmMocks.evaluateActionV2Json,
 }));
 
 describe("wasm bridge parsers", () => {
@@ -116,169 +109,132 @@ describe("wasm bridge parsers", () => {
     ).rejects.toBeInstanceOf(EngineError);
   });
 
-  it("routeRequest passes through the WASM envelope list", async () => {
-    const envelopes = [
-      { category: "dex", action: "swap", fields: { mode: "exact_in" } },
-      { category: "misc", action: "permit", fields: { permitKind: "eip2612" } },
+  it("planActionRpcV2 unwraps data.planned from the WASM envelope", async () => {
+    const planned = [
+      {
+        manifest_id: "large-swap-usd-warning",
+        call_id: "large-swap-usd-warning::total-input-usd",
+        method: "oracle.usd_value",
+        params: { chain_id: "eip155:42161" },
+        outputs: [
+          { kind: "context", field: "totalInputUsd", type: "Decimal", from: "$.result.usd" },
+        ],
+        optional: false,
+      },
     ];
-    wasmMocks.routeRequestJson.mockReturnValue(
-      JSON.stringify({ ok: true, data: envelopes }),
-    );
-
-    const result = await routeRequest({
-      method: "eth_sendTransaction",
-      params: [],
-      chain_id: 1,
-    });
-
-    expect(result).toEqual(envelopes);
-    expect(wasmMocks.routeRequestJson).toHaveBeenCalledOnce();
-  });
-
-  it("routeRequest surfaces route_failed as an EngineError", async () => {
-    wasmMocks.routeRequestJson.mockReturnValue(
-      JSON.stringify({
-        ok: false,
-        error: { kind: "route_failed", message: "no adapter matched" },
-      }),
-    );
-
-    await expect(
-      routeRequest({ method: "eth_sendTransaction", params: [], chain_id: 1 }),
-    ).rejects.toBeInstanceOf(EngineError);
-  });
-
-  it("routeRequest rejects malformed envelopes (missing category)", async () => {
-    wasmMocks.routeRequestJson.mockReturnValue(
-      JSON.stringify({
-        ok: true,
-        data: [{ action: "swap", fields: {} }],
-      }),
-    );
-
-    await expect(
-      routeRequest({ method: "eth_sendTransaction", params: [], chain_id: 1 }),
-    ).rejects.toBeInstanceOf(EngineError);
-  });
-
-  it("planPolicyRpc unwraps the WASM plan envelope", async () => {
-    const plan = {
-      request_id: "eval-1",
-      root: {
-        chain_id: 1,
+    const input = {
+      manifests: [{ id: "large-swap-usd-warning", schema_version: 2 }],
+      action: { amm: { swap: {} } },
+      meta: { submitter: "0x1111111111111111111111111111111111111111" },
+      tx: {
+        chain_id: "eip155:42161",
         from: "0x1111111111111111111111111111111111111111",
         to: "0x2222222222222222222222222222222222222222",
-        value_wei: "0",
-        block_timestamp: 1_700_000_000,
       },
-      envelopes: [],
-      calls: [{ id: "call-1", method: "oracle.usd_value", params: {} }],
-      manifest_set_hash: "sha256:1",
-      schema_hash: "sha256:2",
-      diagnostics: [],
     };
-    const input = {
-      request_id: "eval-1",
-      raw_request: {
-        method: "eth_sendTransaction",
-        params: [],
-        chain_id: 1,
-      },
-      manifests: [],
-    };
-    wasmMocks.planPolicyRpcJson.mockReturnValue(
-      JSON.stringify({ ok: true, data: plan }),
+    wasmMocks.planActionRpcV2Json.mockReturnValue(
+      JSON.stringify({ ok: true, data: { planned } }),
     );
 
-    await expect(planPolicyRpc(input)).resolves.toEqual(plan);
-    expect(wasmMocks.planPolicyRpcJson).toHaveBeenCalledWith(
+    await expect(planActionRpcV2(input)).resolves.toEqual(planned);
+    expect(wasmMocks.planActionRpcV2Json).toHaveBeenCalledWith(
       JSON.stringify(input),
     );
   });
 
-  it("evaluatePolicyRpc unwraps and parses the WASM verdict", async () => {
-    const verdict = {
-      kind: "pass",
-    };
-    const input = {
-      plan: {
-        request_id: "eval-1",
-        root: {
-          chain_id: 1,
-          from: "0x1111111111111111111111111111111111111111",
-          to: "0x2222222222222222222222222222222222222222",
-          value_wei: "0",
-        },
-        envelopes: [],
-        calls: [],
-        manifest_set_hash: "sha256:1",
-        schema_hash: "sha256:2",
-        diagnostics: [],
-      },
-      rpc_response: { request_id: "eval-1", results: [] },
-      manifests: [],
-    };
-    wasmMocks.evaluatePolicyRpcJson.mockReturnValue(
-      JSON.stringify({ ok: true, data: verdict }),
-    );
-
-    await expect(evaluatePolicyRpc(input)).resolves.toEqual(verdict);
-    expect(wasmMocks.evaluatePolicyRpcJson).toHaveBeenCalledWith(
-      JSON.stringify(input),
-    );
-  });
-
-  // ── Phase A.1 (T5 review) — declarativeRouteTypedDataV3 non-throwing ──
-  const typedDataInput = {
-    chainId: 1,
-    verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
-    primaryType: "PermitSingle",
-    domainName: "Permit2",
-    message: {},
-    submitter: "0x1111111111111111111111111111111111111111",
-    submittedAt: 1_700_000_000,
-  };
-
-  it("declarativeRouteTypedDataV3 unwraps the ok envelope into { ok, data }", async () => {
-    const data = {
-      actions: [{ meta: {}, body: {} }],
-      decoder_id: "uniswap/permit2/permitSingle@1.0.0",
-    };
-    wasmMocks.declarativeRouteTypedDataV3Json.mockReturnValue(
-      JSON.stringify({ ok: true, data }),
-    );
-
-    await expect(declarativeRouteTypedDataV3(typedDataInput)).resolves.toEqual({
-      ok: true,
-      data,
-    });
-  });
-
-  it("declarativeRouteTypedDataV3 does NOT throw on a non-JSON WASM panic — returns { ok: false }", async () => {
-    // A WASM-layer fault (panic) returns a raw non-JSON string. The bridge
-    // must honor its non-throwing contract: surface `{ ok: false }` with a
-    // `parse_failed` kind so the SW sig-router treats it as a transparent
-    // miss instead of a thrown EngineError that escapes the orchestrator.
-    wasmMocks.declarativeRouteTypedDataV3Json.mockReturnValue("PANIC");
-
-    const result = await declarativeRouteTypedDataV3(typedDataInput);
-
-    expect(result.ok).toBe(false);
-    expect(result.data).toBeUndefined();
-    expect(result.error?.kind).toBe("parse_failed");
-  });
-
-  it("declarativeRouteTypedDataV3 surfaces an err envelope without throwing", async () => {
-    wasmMocks.declarativeRouteTypedDataV3Json.mockReturnValue(
+  it("planActionRpcV2 surfaces invalid_input_json as EngineError", async () => {
+    wasmMocks.planActionRpcV2Json.mockReturnValue(
       JSON.stringify({
         ok: false,
-        error: { kind: "no_declarative_v3_mapper", message: "no bundle" },
+        error: { kind: "invalid_input_json", message: "invalid input json: x" },
       }),
     );
 
-    await expect(declarativeRouteTypedDataV3(typedDataInput)).resolves.toEqual({
-      ok: false,
-      error: { kind: "no_declarative_v3_mapper", message: "no bundle" },
-    });
+    try {
+      await planActionRpcV2({
+        manifests: [],
+        action: { unknown: {} },
+        meta: {},
+        tx: {
+          chain_id: "eip155:1",
+          from: "0x1111111111111111111111111111111111111111",
+          to: "0x2222222222222222222222222222222222222222",
+        },
+      });
+      expect.fail("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(EngineError);
+      expect((err as EngineError).kind).toBe("invalid_input_json");
+    }
+  });
+
+  it("evaluateActionV2 unwraps and parses data.verdict (warn)", async () => {
+    const verdict = {
+      kind: "warn",
+      matched: [
+        {
+          policy_id: "large-input",
+          reason: "large USD input",
+          severity: "warn",
+          origin: "action",
+        },
+      ],
+    };
+    const input = {
+      action: { amm: { swap: {} } },
+      meta: { submitter: "0x1111111111111111111111111111111111111111" },
+      tx: {
+        chain_id: "eip155:42161",
+        from: "0x1111111111111111111111111111111111111111",
+        to: "0x2222222222222222222222222222222222222222",
+      },
+      bundles: [{ policy: "forbid(...);", manifest: { id: "x", schema_version: 2 } }],
+      results: { "large-swap-usd-warning::total-input-usd": { usd: "3500.1200" } },
+    };
+    wasmMocks.evaluateActionV2Json.mockReturnValue(
+      JSON.stringify({ ok: true, data: { verdict } }),
+    );
+
+    await expect(evaluateActionV2(input)).resolves.toEqual(verdict);
+    expect(wasmMocks.evaluateActionV2Json).toHaveBeenCalledWith(
+      JSON.stringify(input),
+    );
+  });
+
+  it("evaluateActionV2 returns a parsed Fail verdict for an engine fault (never ok:false)", async () => {
+    // The v2 evaluate export ALWAYS returns ok:true — a missing required RPC
+    // result surfaces as a fail-closed `__system__` Fail inside the envelope,
+    // NOT as an `ok:false` error. The wrapper parses it like any other verdict.
+    const verdict = {
+      kind: "fail",
+      matched: [
+        {
+          policy_id: "__system__",
+          reason: "required policy-rpc result missing",
+          severity: "deny",
+          // `system_fail_verdict` flows through `matched_to_dto`, which only
+          // emits "action"/"tx" — "engine_error" is reserved for the
+          // `__engine::*` path. Keep the mock faithful to the Rust.
+          origin: "tx",
+        },
+      ],
+    };
+    wasmMocks.evaluateActionV2Json.mockReturnValue(
+      JSON.stringify({ ok: true, data: { verdict } }),
+    );
+
+    await expect(
+      evaluateActionV2({
+        action: { amm: { swap: {} } },
+        meta: {},
+        tx: {
+          chain_id: "eip155:42161",
+          from: "0x1111111111111111111111111111111111111111",
+          to: "0x2222222222222222222222222222222222222222",
+        },
+        bundles: [{ policy: "forbid(...);", manifest: { id: "x", schema_version: 2 } }],
+        results: {},
+      }),
+    ).resolves.toEqual(verdict);
   });
 });

@@ -24,7 +24,6 @@ anyhow = "1"
 [dev-dependencies]
 abi-resolver.workspace = true
 mappers.workspace = true
-request-router.workspace = true
 walkdir = "2"
 
 # v3 ActionBody decode harness CLI. Explicit name keeps the hyphenated invocation

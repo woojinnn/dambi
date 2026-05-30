@@ -2,9 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use policy_engine::policy_rpc::{PolicyManifest, PolicyRpcCall, PolicyRpcResponse, RootInput};
+use policy_engine::policy_rpc::PolicyManifest;
 use policy_engine::schema::CustomFieldSource;
-use policy_engine::ActionEnvelope;
 
 #[derive(Debug, Serialize)]
 pub struct Envelope<T: Serialize> {
@@ -143,67 +142,6 @@ pub struct MatchedPolicyDto {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RawRequestDto {
-    pub method: String,
-    pub params: serde_json::Value,
-    pub chain_id: u64,
-    #[serde(default)]
-    pub block_timestamp: Option<u64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PlanPolicyRpcInputDto {
-    pub request_id: String,
-    pub raw_request: RawRequestDto,
-    #[serde(default)]
-    pub manifests: Vec<PolicyManifest>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PolicyRpcPlanDto {
-    pub request_id: String,
-    pub root: RootInput,
-    pub envelopes: Vec<ActionEnvelope>,
-    pub calls: Vec<PolicyRpcCall>,
-    pub manifest_set_hash: String,
-    pub schema_hash: String,
-    pub diagnostics: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct EvaluatePolicyRpcInputDto {
-    pub plan: PolicyRpcPlanDto,
-    pub rpc_response: PolicyRpcResponse,
-    #[serde(default)]
-    pub manifests: Vec<PolicyManifest>,
-}
-
-/// Input for `evaluate_with_envelopes_json`.
-///
-/// Bypasses the route → plan stages by accepting envelopes that the caller
-/// (e.g. the declarative pipeline in the orchestrator) has already produced.
-/// `manifests` must match the manifests installed via `install_policies_json`
-/// — the WASM enforces the same `manifest_set_hash` and `schema_hash`
-/// equality as `evaluate_policy_rpc_json`.
-///
-/// `rpc_response` carries `policy-rpc` results when manifests declare any
-/// `requires`; pass `{ "request_id": "...", "results": [] }` for pipelines
-/// that do not need RPC enrichment (e.g. permit-only policies).
-#[derive(Debug, Clone, Deserialize)]
-pub struct EvaluateWithEnvelopesInputDto {
-    pub envelopes: Vec<ActionEnvelope>,
-    pub from: String,
-    pub to: String,
-    pub value_wei: String,
-    pub chain_id: u64,
-    #[serde(default)]
-    pub block_timestamp: u64,
-    #[serde(default)]
-    pub manifests: Vec<PolicyManifest>,
-    pub rpc_response: PolicyRpcResponse,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct PreviewSchemaInputDto {
     #[serde(default)]
     pub manifests: Vec<PolicyManifest>,
@@ -231,9 +169,8 @@ pub struct DeclarativeInstallResultDto {
 /// Input for `declarative_route_request_v3_json`.
 ///
 /// This is the v3 (PDF FSM spec) route entry that emits the new hierarchical
-/// [`simulation_reducer::action::Action`] tree, in contrast to the legacy
-/// `declarative_route_request_json` which emits the flat
-/// [`policy_engine::ActionEnvelope`].
+/// `simulation_reducer::action::Action` tree (the legacy flat
+/// `ActionEnvelope` route was removed in the Phase 1 action restructure).
 ///
 /// The wire shape mirrors the SW orchestrator's [`decideMessage`] output:
 ///   * `chain_id`/`to`/`selector`/`calldata` — registry-v2 callkey + raw

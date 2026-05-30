@@ -2,17 +2,17 @@
 //!
 //! This crate hosts the pieces an end-to-end pipeline needs at runtime:
 //!
-//! - **`action`**: normalized [`ActionEnvelope`] schema types (the new pipeline input).
+//! - **`action`**: shared scalar newtypes (`Address`, `DecimalString`, …) plus
+//!   the v3 `ActionBody` bridge (`action::v3`).
 //! - **`core`**: shared domain types (`Address`, `Token`, `AmountSpec`,
 //!   `UsdValuation`, `TransactionRequest`, `SignatureRequest`) consumed by
 //!   adapters and Policy RPC integrations.
 //! - **`policy`**: `PolicyEngine` (Cedar wrapper) and the `PolicyRequest`
 //!   shape that lowering produces and the engine consumes.
-//! - **`lowering`**: [`policy_request_from_envelope`] — the bridge from
-//!   `ActionEnvelope` to `PolicyRequest`.
+//! - **`lowering_v2`**: [`lower_action`] — the bridge from the v3 `ActionBody`
+//!   to a `LoweredAction`.
 //! - **`prelude`**: the curated import surface
 //!   (`use policy_engine::prelude::*;`).
-//! - **`root`**: top-level [`RootRequest`] envelope describing the transport.
 //! - **`schema`**: bundled Cedar schema composition.
 
 #![deny(unsafe_code)]
@@ -40,24 +40,20 @@ pub mod action;
 pub mod cedar_json;
 pub mod context_keys;
 pub mod core;
-pub mod lowering;
 pub mod lowering_v2;
 pub mod policy;
 pub mod policy_rpc;
 pub mod prelude;
-pub mod root;
 pub mod schema;
 
 pub use action::{
-    Action, ActionEnvelope, Address as ActionAddress, AmountConstraint, AmountKind, AssetKind,
-    AssetRef, AssetRefWithAmountConstraint, Category, DecimalString, Hex, Validity, ValiditySource,
+    Address as ActionAddress, AmountConstraint, AmountKind, AssetKind, AssetRef,
+    AssetRefWithAmountConstraint, DecimalString, Hex, Validity, ValiditySource,
 };
 pub use core::{Address, AmountSpec, SignatureRequest, Token, TransactionRequest, UsdValuation};
-pub use lowering::policy_request_from_envelope;
 pub use lowering_v2::{lower_action, LoweredAction};
 pub use policy::{
     MatchedPolicy, PolicyEngine, PolicyEngineBuilder, PolicyError, PolicyRequest,
     PolicyRequestOrigin, Severity, Verdict,
 };
-pub use root::{ProtocolRef, RequestKind, RootRequest};
 pub use schema::PolicySchemaComposer;

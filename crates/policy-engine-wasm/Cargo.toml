@@ -19,13 +19,6 @@ wasm-opt = ["-Oz", "--strip-debug", "--enable-bulk-memory", "--enable-mutable-gl
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-# Curve real-tx coverage verification harness — disabled by default in v2
-# cutover (depends on Curve manifests, scheduled for Phase C). Declared here
-# so `#[cfg(feature = "curve-realtx")]` in `lib.rs` passes the strict clippy
-# `unexpected_cfgs` lint when the feature is not selected.
-curve-realtx = []
-
 [dependencies]
 alloy-primitives.workspace = true
 # `alloy-json-abi` provides the `Function::parse` + `.selector()` chain the
@@ -37,7 +30,6 @@ alloy-primitives.workspace = true
 alloy-json-abi.workspace = true
 abi-resolver.workspace = true
 policy-engine.workspace = true
-request-router.workspace = true
 mappers.workspace = true
 serde.workspace = true
 serde_json.workspace = true

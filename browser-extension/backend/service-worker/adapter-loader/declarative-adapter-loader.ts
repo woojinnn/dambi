@@ -1,13 +1,22 @@
 /**
- * Phase M3 — declarative adapter loader (v3-only).
+ * Declarative adapter loader — v3 bundle hydration (JIT).
  *
  * Spec: `ADAPTER_LOADER_ARCHITECTURE.md` §5.5 (TS bridge) and §7
- * (3-layer loading). The loader is the single mount point onto the WASM
- * engine for declarative v3 bundles.
+ * (3-layer loading). The loader is the single install point onto the WASM
+ * engine for v3 declarative bundles. The v3 path uses
+ * `declarative_install_v3_json` (writes to `DECLARATIVE_V3_STATE`):
  *
- * Plan §M10 + §B4 (2026-05-28) — v1 mount path (`mountDeclarativeBundle`,
- * `ensureSeedBundlesInstalled`, `SEED_BUNDLE_FILENAMES`) removed. v3 JIT
- * fetch via `installDeclarativeBundleV3` is now the only install path.
+ *   `installDeclarativeBundleV3({ chainId, to, selector })` — fetches the
+ *   matching v3 manifest from the registry, shape-validates it via
+ *   `parseBundleV3` (Phase 0 hand-written validator), then forwards the
+ *   *raw* JSON text to `declarativeInstallV3`. We deliberately do NOT
+ *   re-stringify the parsed bundle: the parser is shape-only and could drop
+ *   fields (or alter ordering) that the Rust deserializer depends on for
+ *   stable hashing later. Pass-through keeps bytes identical.
+ *
+ * Idempotency: the engine overwrites existing mappers on re-install, so the
+ * install is safe to call repeatedly; the in-SW + chrome.storage caches just
+ * avoid the redundant fetch + WASM round-trip.
  */
 
 import {
@@ -24,15 +33,6 @@ import {
   declarativeV3Cache,
   type DeclarativeV3CacheEntry,
 } from "./declarative-v3-cache";
-import {
-  byTypedData,
-  RegistryError,
-  type TypedDataMatchKey,
-} from "../registry/client";
-
-// ---------------------------------------------------------------------------
-// M3 — v3 bundle hydration (JIT)
-// ---------------------------------------------------------------------------
 
 /**
  * Cached v3 install results keyed by canonical callkey. The cache is in-SW
@@ -61,8 +61,9 @@ export interface DeclarativeRegistryV3Response {
 }
 
 /**
- * Stage classification for {@link InstallDeclarativeV3Error}. Surfaced for
- * dashboards / audit so per-stage faults are colour-codeable.
+ * Stage classification for {@link InstallDeclarativeV3Error}. Mirrors
+ * `DeclarativeAdapterLoadError.stage` so dashboards can colour-code v1 / v3
+ * faults uniformly.
  */
 export type InstallV3Stage =
   | "fetch"
@@ -143,7 +144,7 @@ function v3CallkeyUrl(
  *      same callkey was already hydrated in this SW lifetime.
  *   2. Fetch the callkey index entry. Non-2xx surfaces `null` (treated as a
  *      miss). 404 + 5xx both fall into this — the caller short-circuits
- *      to the Tier B static path.
+ *      to the v1 path / Tier B static.
  *   3. JSON parse + `matched === true` guard.
  *   4. `parseBundleV3` shape gate — rejects v1/v2 payloads and structurally
  *      broken v3 ones. Parse errors are thrown (not nulled) so an
@@ -158,7 +159,7 @@ function v3CallkeyUrl(
  * caller asked to treat as fatal).
  *
  * Error semantics — the SW orchestrator (M4) decides whether to treat a
- * thrown error as a v3 fault vs. transparent static fallback. M3 itself
+ * thrown error as a v3 fault vs. a transparent v1 fallback. M3 itself
  * only routes; it does not classify.
  */
 export async function installDeclarativeBundleV3(
@@ -287,8 +288,8 @@ export async function installDeclarativeBundleV3(
   }
   if (parsedBundle === null) {
     // Registry returned a non-v3 payload for a callkey the caller asked us
-    // to hydrate via the v3 path. Treat as a miss so the caller can fall
-    // back to the Tier B static path rather than throwing.
+    // to hydrate via the v3 path. Treat as a miss so the caller falls
+    // through to the static Tier B pipeline rather than throwing.
     return null;
   }
 
@@ -372,148 +373,6 @@ export async function installDeclarativeBundleV3(
 }
 
 const v3CachedBundleByCallKey = new Map<string, V3Bundle>();
-
-/**
- * Phase A.1 — cache key for a typed-data install. Prefixed `td:` so it never
- * collides with the `v3:` callkey entries that share `v3InstallCache` /
- * `v3InstalledBundleIds` (a callkey and a typed-data key could otherwise
- * stringify to the same `<n>__<addr>__<rest>` shape).
- *
- * T1 (commit `0f9270a`) — `witnessType` is part of the key. Two Permit2
- * `permitWitnessTransferFrom` witness manifests (e.g. ExclusiveDutchOrder vs
- * V2DutchOrder) share the `(chainId, Permit2, "PermitWitnessTransferFrom")`
- * triple; without `witnessType` here they would collide in the install cache
- * and only the first would ever install (the second hits the stale cache
- * entry and never fetches its own 4-segment index file). Absent `witnessType`
- * → the cache key is byte-identical to the pre-T1 3-tuple form (every
- * non-witness typed-data manifest keeps its exact key).
- */
-function v3TypedDataCacheKey(key: TypedDataMatchKey): string {
-  const witnessSuffix =
-    key.witnessType !== undefined ? `__${key.witnessType}` : "";
-  return `td:${key.chainId}__${key.verifyingContract.toLowerCase()}__${key.primaryType}${witnessSuffix}`;
-}
-
-/**
- * Result of {@link installDeclarativeBundleV3ByTypedData}. Mirrors the
- * orchestrator-facing contract of the callkey path but flattened to a
- * boolean + reason so the SW sig-router can map a miss to a transparent
- * `null` fall-through. `bundleId` is present iff `ok`.
- */
-export interface InstallDeclarativeV3ByTypedDataResult {
-  ok: boolean;
-  bundleId?: string;
-  reason?: string;
-}
-
-/**
- * Phase A.1 — hydrate + install the v3 bundle for an EIP-712 typed-data
- * triple `(chainId, verifyingContract, primaryType)` so a subsequent
- * `declarative_route_typed_data_v3_json` call finds it via the WASM
- * typed_data bridge the install populates.
- *
- * Mirrors {@link installDeclarativeBundleV3} but fetches via
- * {@link byTypedData} (the `by-typed-data/` index) instead of the callkey
- * index, and returns a flattened `{ ok, bundleId?, reason? }` so the sig
- * router can treat a miss as a `null` fall-through:
- *   - `byTypedData` 404 → `RegistryError("not_found")` (caught) →
- *     `{ ok: false, reason: "manifest_not_found" }`.
- *   - any other `RegistryError` (timeout / network / malformed) → caught →
- *     `{ ok: false, reason: <code> }`.
- *
- * Memory cache only (Layer-2 chrome.storage rehydrate is the callkey path's
- * concern — a typed-data install is cheap to re-fetch on SW cold start and
- * the install is idempotent on the WASM side). The cache reuses the shared
- * `v3InstallCache` under the `td:`-prefixed key so it can't collide with the
- * `v3:` callkey entries.
- */
-export async function installDeclarativeBundleV3ByTypedData(
-  key: TypedDataMatchKey,
-  options: { baseUrl?: string; fetchImpl?: typeof fetch } = {},
-): Promise<InstallDeclarativeV3ByTypedDataResult> {
-  const cacheKey = v3TypedDataCacheKey(key);
-  const cached = v3InstallCache.get(cacheKey);
-  if (cached) {
-    console.info(
-      "[Scopeball] installDeclarativeBundleV3ByTypedData cache-hit",
-      {
-        typedDataKey: cacheKey,
-        bundleId: cached.bundle_id,
-        decoderId: cached.decoder_id,
-      },
-    );
-    return { ok: true, bundleId: cached.bundle_id };
-  }
-
-  let entry: Awaited<ReturnType<typeof byTypedData>>;
-  try {
-    entry = await byTypedData(key, {
-      ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
-      ...(options.fetchImpl !== undefined
-        ? { fetchImpl: options.fetchImpl }
-        : {}),
-    });
-  } catch (err) {
-    if (err instanceof RegistryError) {
-      // 404 = no publisher for this triple. timeout / network / malformed
-      // also surface as a miss — the sig router falls through to `null`
-      // (Task 6 wires the orchestrator's observability-only audit row).
-      const reason = err.code === "not_found" ? "manifest_not_found" : err.code;
-      return { ok: false, reason };
-    }
-    throw err;
-  }
-
-  // Reuse the same v3 parse gate the callkey path uses — rejects v1/v2 or
-  // structurally broken v3 payloads. A malformed typed-data manifest is a
-  // miss (not a throw) so a single bad publisher can't brick the sig path.
-  let parsedBundle: V3Bundle | null;
-  try {
-    parsedBundle = parseBundleV3(entry.bundle);
-  } catch (err) {
-    if (err instanceof BundleParseError) {
-      console.warn(
-        "[Scopeball] installDeclarativeBundleV3ByTypedData parse failed",
-        { typedDataKey: cacheKey, message: err.message },
-      );
-      return { ok: false, reason: "parse_failed" };
-    }
-    throw err;
-  }
-  if (parsedBundle === null) {
-    return { ok: false, reason: "not_v3_bundle" };
-  }
-
-  const bundleJson = JSON.stringify(entry.bundle);
-  let installed: DeclarativeInstallResult;
-  try {
-    installed = await declarativeInstallV3(bundleJson);
-  } catch (err) {
-    console.warn(
-      "[Scopeball] installDeclarativeBundleV3ByTypedData install failed",
-      {
-        typedDataKey: cacheKey,
-        message: err instanceof Error ? err.message : err,
-      },
-    );
-    return { ok: false, reason: "install_failed" };
-  }
-
-  v3InstallCache.set(cacheKey, installed);
-  v3CachedBundleByCallKey.set(cacheKey, parsedBundle);
-  v3InstalledBundleIds.add(installed.bundle_id);
-
-  console.info(
-    "[Scopeball] installDeclarativeBundleV3ByTypedData fresh-install",
-    {
-      typedDataKey: cacheKey,
-      bundleId: installed.bundle_id,
-      decoderId: installed.decoder_id,
-    },
-  );
-
-  return { ok: true, bundleId: installed.bundle_id };
-}
 
 /**
  * Test helper — drops the v3 install cache so successive vitest cases run

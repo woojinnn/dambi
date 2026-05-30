@@ -88,11 +88,12 @@ describe("policies-loader (filtered install)", () => {
     ]);
   });
 
-  it("passes the Map-shape manifest store to WASM install and exposes the legacy Vec for fallback", async () => {
+  it("passes the Map-shape manifest store to WASM install", async () => {
     // Phase 7 codex carry-over H follow-up: install now hands WASM the
     // `rpc:manifests` Map (Object) so the engine composes the enriched
-    // schema. The legacy embedded-Vec list stays around as a fallback
-    // for the orchestrator when the Map is empty.
+    // schema. (The legacy embedded-Vec `getActivePolicyRpcManifests`
+    // fallback was removed in the Phase 1/P3 v1-cutover — the verdict path
+    // no longer reads installed Cedar state.)
     const manifestA = { id: "manifest-a", schema_version: 1 };
     const manifestB = { id: "manifest-b", schema_version: 1 };
     const swapManifest = { id: "user-swap", schema_version: 1 };
@@ -103,7 +104,7 @@ describe("policies-loader (filtered install)", () => {
       { id: "default::dex/b", text: B, manifest: manifestB },
     ]);
 
-    const { ensureDefaultPoliciesInstalled, getActivePolicyRpcManifests } =
+    const { ensureDefaultPoliciesInstalled } =
       await import("../policies-loader");
     await ensureDefaultPoliciesInstalled();
 
@@ -111,10 +112,6 @@ describe("policies-loader (filtered install)", () => {
     expect(mocks.installPolicies.mock.calls[0][0].manifests).toEqual({
       swap: swapManifest,
     });
-    // The legacy Vec accessor still mirrors the embedded `manifest`
-    // fields on the filtered policy set so the orchestrator's fallback
-    // (Map empty → Vec) keeps working.
-    expect(getActivePolicyRpcManifests()).toEqual([manifestA]);
   });
 
   it("uses an empty manifest map when storage has none, even if defaults embed manifests", async () => {
@@ -132,19 +129,13 @@ describe("policies-loader (filtered install)", () => {
       { id: "default::dex/b", text: B, manifests: [{ id: "manifest-d" }] },
     ]);
 
-    const { ensureDefaultPoliciesInstalled, getActivePolicyRpcManifests } =
+    const { ensureDefaultPoliciesInstalled } =
       await import("../policies-loader");
     await ensureDefaultPoliciesInstalled();
 
     // No `rpc:manifests` in storage → Map shape passes `{}`. The
     // engine's install path then composes an empty enriched schema.
     expect(mocks.installPolicies.mock.calls[0][0].manifests).toEqual({});
-    // Fallback Vec still aggregates from the filtered embedded set.
-    expect(getActivePolicyRpcManifests()).toEqual([
-      manifestA,
-      manifestB,
-      manifestC,
-    ]);
   });
 
   it("on SW boot with no enabled-ids, installs an empty policy_set", async () => {

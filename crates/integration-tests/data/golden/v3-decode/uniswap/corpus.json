@@ -166,7 +166,7 @@
         ]
       },
       "expect_error": "build_multicall_failed",
-      "_note": "UR V4 nested (currencyIn) \u2014 deferred"
+      "_note": "UR V4 nested action-stream \u2014 DEFERRED (2026-05-30). Two non-contained decoder gaps: (1) inner V4 SWAP_EXACT_IN/OUT (0x07/0x09) inputs_abi carries PathKey[] nested-tuple-array ((address,uint24,int24,address,bytes)[]) which decode_inputs_abi_tuple's Function::parse synthetic-signature path cannot parse -> whole inner action degrades to Null -> '$inputs.currencyIn' missing. Fix = decode via DynSolType::parse per top-level component instead of Function::parse (shared helper, all opcode-stream manifests need regression). (2) SWAP_*_SINGLE (0x06/0x08) needs pool_id=keccak256(PoolKey) injected in nested ctx via maybe_inject_v4_pool_id (declarative_exports.rs:1699), currently only wired for modifyLiquidities MINT. Both exceed contained-fix bar; baseline stays expect:error."
     },
     {
       "intent": "approve(address,address,uint160,uint48)",
@@ -276,7 +276,7 @@
         ]
       },
       "expect_error": "build_multicall_failed",
-      "_note": "UR V4 nested (pool_id) \u2014 deferred"
+      "_note": "UR V4 nested action-stream \u2014 DEFERRED (2026-05-30). Two non-contained decoder gaps: (1) inner V4 SWAP_EXACT_IN/OUT (0x07/0x09) inputs_abi carries PathKey[] nested-tuple-array ((address,uint24,int24,address,bytes)[]) which decode_inputs_abi_tuple's Function::parse synthetic-signature path cannot parse -> whole inner action degrades to Null -> '$inputs.currencyIn' missing. Fix = decode via DynSolType::parse per top-level component instead of Function::parse (shared helper, all opcode-stream manifests need regression). (2) SWAP_*_SINGLE (0x06/0x08) needs pool_id=keccak256(PoolKey) injected in nested ctx via maybe_inject_v4_pool_id (declarative_exports.rs:1699), currently only wired for modifyLiquidities MINT. Both exceed contained-fix bar; baseline stays expect:error."
     },
     {
       "intent": "swapExactTokensForTokens (L2 Arbitrum spot-check \u2014 per-chain V2 Router02 address)",
@@ -455,7 +455,7 @@
           }
         ]
       },
-      "_note": "HARD decoder gap. UR V4 nested action-stream fails at arg path pool_id/currencyIn (build_multicall_failed). Same root cause as committed corpus 0x36F4F2FF. This run: UR-current 47 FAIL, UR-older 23 FAIL, all V4-command executes."
+      "_note": "UR V4 nested action-stream \u2014 DEFERRED (2026-05-30). Two non-contained decoder gaps: (1) inner V4 SWAP_EXACT_IN/OUT (0x07/0x09) inputs_abi carries PathKey[] nested-tuple-array ((address,uint24,int24,address,bytes)[]) which decode_inputs_abi_tuple's Function::parse synthetic-signature path cannot parse -> whole inner action degrades to Null -> '$inputs.currencyIn' missing. Fix = decode via DynSolType::parse per top-level component instead of Function::parse (shared helper, all opcode-stream manifests need regression). (2) SWAP_*_SINGLE (0x06/0x08) needs pool_id=keccak256(PoolKey) injected in nested ctx via maybe_inject_v4_pool_id (declarative_exports.rs:1699), currently only wired for modifyLiquidities MINT. Both exceed contained-fix bar; baseline stays expect:error."
     }
   ]
 }

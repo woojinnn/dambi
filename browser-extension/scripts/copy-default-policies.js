@@ -2,10 +2,6 @@
 // Copy the engine's default policy set + composed schema into
 // extension/public/default-policies/ so the SW can fetch them at install
 // time. Plan 6 will replace this static set with marketplace bundles.
-//
-// Plan §B4 (2026-05-28) — declarative adapter seed bundles removed; v3
-// path uses JIT fetch via `installDeclarativeBundleV3`. Seed bundle copy
-// step no longer needed.
 
 const fs = require("fs");
 const path = require("path");
@@ -41,6 +37,55 @@ function listSchemaFiles() {
   }
 
   return files;
+}
+
+// Phase 1 / P2 — emit the default v2 policy set alongside the v1
+// `policy-set.json`. v2 is STATELESS: the SW holds these bundles in memory
+// and passes them INLINE to `evaluate_action_v2_json` per call (no install
+// step). The canonical source of truth is the Rust fixture dir
+// `crates/policy-engine/tests/fixtures/default_policies_v2/<id>/{manifest.json,
+// policy.cedar}`, proven consistent by `default_policies_v2.rs`. We enumerate
+// DIRECTORIES (not `.cedar` files), sort for byte-stable output, and ship the
+// policy text + manifest verbatim (no JS-side transform — validity is the
+// Rust fixture gate's job).
+function copyDefaultPoliciesV2() {
+  const v2Dir = path.join(
+    REPO_ROOT,
+    "crates",
+    "policy-engine",
+    "tests",
+    "fixtures",
+    "default_policies_v2",
+  );
+  const destPath = path.join(DEST, "policy-set-v2.json");
+
+  if (!fs.existsSync(v2Dir)) {
+    // Mirror the v1 `[]` fallback so a release build with the fixture
+    // pruned still produces a parseable (empty) asset and never bricks
+    // `prepare:defaults`.
+    fs.writeFileSync(destPath, "[]");
+    console.log(
+      `Wrote empty policy-set-v2.json (no default_policies_v2/ dir found)`,
+    );
+    return;
+  }
+
+  const ids = fs
+    .readdirSync(v2Dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort(); // deterministic order so the asset hashes stably across builds
+
+  const set = ids.map((id) => ({
+    id,
+    policy: fs.readFileSync(path.join(v2Dir, id, "policy.cedar"), "utf8"),
+    manifest: JSON.parse(
+      fs.readFileSync(path.join(v2Dir, id, "manifest.json"), "utf8"),
+    ),
+  }));
+
+  fs.writeFileSync(destPath, JSON.stringify(set, null, 2));
+  console.log(`Copied ${set.length} v2 policy bundles → ${DEST}`);
 }
 
 function main() {
@@ -84,6 +129,8 @@ function main() {
       `Wrote empty policy-set.json (no policy-rpc/examples/policies/ dir found)`,
     );
   }
+
+  copyDefaultPoliciesV2();
 }
 
 main();

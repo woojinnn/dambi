@@ -5,7 +5,6 @@ import { getAllManifests } from "./manifests/store";
 import { getEnabledIds } from "./policy-selection";
 import { installPolicies } from "./wasm-bridge";
 
-let activePolicyRpcManifests: unknown[] = [];
 let installed = false;
 let inflight: Promise<void> | null = null;
 
@@ -20,10 +19,6 @@ async function loadDefaultPolicySet(): Promise<PolicyEntry[]> {
   const setUrl = Browser.runtime.getURL("default-policies/policy-set.json");
   const policySetRaw = await (await fetch(setUrl)).text();
   return JSON.parse(policySetRaw) as PolicyEntry[];
-}
-
-export function getActivePolicyRpcManifests(): unknown[] {
-  return [...activePolicyRpcManifests];
 }
 
 /**
@@ -53,17 +48,6 @@ export async function loadCurrentEnabledPolicySet(): Promise<
   return union
     .filter((p) => enabledSet.has(p.id))
     .map(({ id, text }) => ({ id, text }));
-}
-
-function collectPolicyRpcManifests(
-  policies: readonly PolicyEntry[],
-): unknown[] {
-  const manifests: unknown[] = [];
-  for (const policy of policies) {
-    if (policy.manifest !== undefined) manifests.push(policy.manifest);
-    if (policy.manifests !== undefined) manifests.push(...policy.manifests);
-  }
-  return manifests;
 }
 
 /**
@@ -103,10 +87,6 @@ async function installFiltered(enabledIds: readonly string[]): Promise<void> {
     policy_set: filtered.map(({ id, text }) => ({ id, text })),
     manifests,
   });
-  // Keep the legacy Vec in sync as a fallback only — the orchestrator
-  // prefers `manifests/store.ts` and reads this Vec just when the Map
-  // is empty (no manifests installed yet).
-  activePolicyRpcManifests = collectPolicyRpcManifests(filtered);
   console.info("[Scopeball] policies installed", {
     requestedIds: [...enabledIds].sort(),
     installedIds: filtered.map((p) => p.id).sort(),
