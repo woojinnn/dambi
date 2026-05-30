@@ -17,5 +17,6 @@ pub mod airdrop;
 pub mod amm;
 pub mod launchpad;
 pub mod lending;
+pub mod permission;
 pub mod perp;
 pub mod token;

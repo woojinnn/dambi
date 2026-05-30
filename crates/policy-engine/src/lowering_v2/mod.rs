@@ -16,8 +16,9 @@
 //! - [`common`] — shared sub-lowerings (Cedar primitives, token refs/keys,
 //!   action meta / nature / EIP-712 domain).
 //! - one module per **domain** (`amm`, `token`, `lending`, `airdrop`,
-//!   `launchpad`, `perp`) + the two struct variants (`multicall`, `unknown`).
-//!   Each domain owns its directory and per-action leaf modules.
+//!   `launchpad`, `perp`, `permission`) + the two struct variants
+//!   (`multicall`, `unknown`). Each domain owns its directory and per-action
+//!   leaf modules.
 //!
 //! # Conventions
 //!
@@ -43,6 +44,7 @@ mod dispatch;
 mod launchpad;
 mod lending;
 mod multicall;
+mod permission;
 mod perp;
 mod token;
 mod unknown;

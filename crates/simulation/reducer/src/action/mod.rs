@@ -19,6 +19,7 @@ pub mod airdrop;
 pub mod amm;
 pub mod launchpad;
 pub mod lending;
+pub mod permission;
 pub mod perp;
 pub mod token;
 pub mod view;
@@ -27,6 +28,7 @@ pub use airdrop::AirdropAction;
 pub use amm::AmmAction;
 pub use launchpad::LaunchpadAction;
 pub use lending::LendingAction;
+pub use permission::PermissionAction;
 pub use perp::PerpAction;
 pub use token::TokenAction;
 pub use view::ActionView;
@@ -151,6 +153,8 @@ pub enum ActionBody {
     Launchpad(LaunchpadAction),
     /// Perp-domain action (open/close position, funding, ...).
     Perp(PerpAction),
+    /// Protocol permission-domain action (manager/operator/relayer grants).
+    Permission(PermissionAction),
 
     /// Batched multi-call (e.g. `Uniswap Universal Router`, `Aave`).
     Multicall {

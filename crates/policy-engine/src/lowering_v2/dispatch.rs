@@ -106,6 +106,7 @@ pub fn lower_action(
         ActionBody::Airdrop(a) => super::airdrop::lower(a, &ctx),
         ActionBody::Launchpad(a) => super::launchpad::lower(a, &ctx),
         ActionBody::Perp(a) => super::perp::lower(a, &ctx),
+        ActionBody::Permission(a) => super::permission::lower(a, &ctx),
         ActionBody::Multicall { .. } => super::multicall::lower(action, &ctx),
         ActionBody::Unknown { .. } => super::unknown::lower(action, &ctx),
     }

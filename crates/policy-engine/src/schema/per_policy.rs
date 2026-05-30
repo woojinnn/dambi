@@ -35,13 +35,14 @@ use super::{
     LENDING_DISABLE_COLLATERAL_SCHEMA, LENDING_ENABLE_COLLATERAL_SCHEMA, LENDING_LIQUIDATE_SCHEMA,
     LENDING_REPAY_SCHEMA, LENDING_SET_AUTHORIZATION_SCHEMA, LENDING_SET_EMODE_SCHEMA,
     LENDING_SUPPLY_SCHEMA, LENDING_SWAP_RATE_MODE_SCHEMA, LENDING_WITHDRAW_SCHEMA,
-    PERP_ADJUST_MARGIN_SCHEMA, PERP_CANCEL_ORDER_SCHEMA, PERP_CHANGE_LEVERAGE_SCHEMA,
-    PERP_CHANGE_MARGIN_MODE_SCHEMA, PERP_CLAIM_FUNDING_SCHEMA, PERP_CLOSE_POSITION_SCHEMA,
-    PERP_DECREASE_POSITION_SCHEMA, PERP_INCREASE_POSITION_SCHEMA, PERP_OPEN_POSITION_SCHEMA,
-    PERP_PLACE_LIMIT_ORDER_SCHEMA, PERP_PLACE_STOP_ORDER_SCHEMA, TOKEN_ERC20_APPROVE_SCHEMA,
-    TOKEN_ERC20_PERMIT_SCHEMA, TOKEN_ERC20_TRANSFER_SCHEMA, TOKEN_NFT_APPROVE_SCHEMA,
-    TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA, TOKEN_NFT_TRANSFER_SCHEMA, TOKEN_PERMIT2_APPROVE_SCHEMA,
-    TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA, TOKEN_REVOKE_APPROVAL_SCHEMA,
+    PERMISSION_PROTOCOL_AUTHORIZATION_SCHEMA, PERP_ADJUST_MARGIN_SCHEMA, PERP_CANCEL_ORDER_SCHEMA,
+    PERP_CHANGE_LEVERAGE_SCHEMA, PERP_CHANGE_MARGIN_MODE_SCHEMA, PERP_CLAIM_FUNDING_SCHEMA,
+    PERP_CLOSE_POSITION_SCHEMA, PERP_DECREASE_POSITION_SCHEMA, PERP_INCREASE_POSITION_SCHEMA,
+    PERP_OPEN_POSITION_SCHEMA, PERP_PLACE_LIMIT_ORDER_SCHEMA, PERP_PLACE_STOP_ORDER_SCHEMA,
+    TOKEN_ERC20_APPROVE_SCHEMA, TOKEN_ERC20_PERMIT_SCHEMA, TOKEN_ERC20_TRANSFER_SCHEMA,
+    TOKEN_NFT_APPROVE_SCHEMA, TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA, TOKEN_NFT_TRANSFER_SCHEMA,
+    TOKEN_PERMIT2_APPROVE_SCHEMA, TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA,
+    TOKEN_REVOKE_APPROVAL_SCHEMA,
 };
 
 /// One row of the action resolver: the `(domain, action_tag)` a trigger can
@@ -306,6 +307,13 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
         action_tag: Some("claim_funding"),
         schema_text: PERP_CLAIM_FUNDING_SCHEMA,
         pascal_stub: "ClaimFunding",
+    },
+    // permission
+    ActionEntry {
+        domain: "permission",
+        action_tag: Some("protocol_authorization"),
+        schema_text: PERMISSION_PROTOCOL_AUTHORIZATION_SCHEMA,
+        pascal_stub: "ProtocolAuthorization",
     },
     // token
     ActionEntry {
@@ -803,9 +811,9 @@ mod tests {
                 entry.pascal_stub,
             );
         }
-        // The table covers exactly the 47 shipped actions (multicall + unknown
+        // The table covers exactly the 48 shipped actions (multicall + unknown
         // included). Guards against a row being dropped or duplicated.
-        assert_eq!(RESOLVER_TABLE.len(), 47, "resolver table must have 47 rows");
+        assert_eq!(RESOLVER_TABLE.len(), 48, "resolver table must have 48 rows");
     }
 
     /// A custom_context field whose name collides with one of the matched

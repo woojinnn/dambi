@@ -5,7 +5,7 @@
 //!
 //! 1. **snake_case bare action name** — used internally by composer /
 //!    manifest_fragment paths. `REGISTERED_ACTIONS` is the Phase 1 action set
-//!    derived from `ActionBody`'s domain enums (45 entries).
+//!    derived from `ActionBody`'s domain enums.
 //!
 //! 2. **`<Namespace>::<PascalCaseAction>`** — the fully-qualified Cedar action
 //!    id under the namespace migration. Composed via [`namespace_action_id`].
@@ -69,9 +69,9 @@ pub fn namespace_context_type_id(domain: &str, action: &str) -> String {
     )
 }
 
-/// Phase 1 snake_case action set (45 entries) — produced by `ActionBody`'s
+/// Phase 1 snake_case action set — produced by `ActionBody`'s
 /// domain enums. Each maps to a `.cedarschema` file under
-/// `schema/policy-schema/actions/{token,amm,lending,airdrop,launchpad,perp}/`
+/// `schema/policy-schema/actions/{token,amm,lending,airdrop,launchpad,perp,permission}/`
 /// and to a Cedar action id `<Namespace>::<PascalCase>` (via
 /// [`namespace_action_id`]).
 pub const REGISTERED_ACTIONS: &[&str] = &[
@@ -119,6 +119,8 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "open_position",
     "place_limit_order",
     "place_stop_order",
+    // Permission (1)
+    "protocol_authorization",
     // Token (9) — `delegate` already listed above under Airdrop
     "erc20_approve",
     "erc20_permit",
@@ -180,7 +182,7 @@ mod tests {
     #[test]
     fn registry_size_matches_phase1() {
         // 2 Core + 2 Airdrop + 6 Amm + 12 Lending + 5 Launchpad + 11 Perp + 9 Token = 47.
-        assert_eq!(REGISTERED_ACTIONS.len(), 47);
+        assert_eq!(REGISTERED_ACTIONS.len(), 48);
     }
 
     #[test]

@@ -110,6 +110,11 @@ const PERP_PLACE_LIMIT_ORDER_SCHEMA: &str =
 const PERP_PLACE_STOP_ORDER_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/perp/place_stop_order.cedarschema");
 
+// permission (alphabetical)
+const PERMISSION_PROTOCOL_AUTHORIZATION_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/permission/protocol_authorization.cedarschema"
+);
+
 // token (alphabetical)
 const TOKEN_ERC20_APPROVE_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/token/erc20_approve.cedarschema");
@@ -174,6 +179,7 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     PERP_OPEN_POSITION_SCHEMA,
     PERP_PLACE_LIMIT_ORDER_SCHEMA,
     PERP_PLACE_STOP_ORDER_SCHEMA,
+    PERMISSION_PROTOCOL_AUTHORIZATION_SCHEMA,
     TOKEN_ERC20_APPROVE_SCHEMA,
     TOKEN_ERC20_PERMIT_SCHEMA,
     TOKEN_ERC20_TRANSFER_SCHEMA,
@@ -656,6 +662,7 @@ mod base_schema_tests {
             r#"Lending::Action::"Supply""#,
             r#"Launchpad::Action::"Commit""#,
             r#"Perp::Action::"OpenPosition""#,
+            r#"Permission::Action::"ProtocolAuthorization""#,
             r#"Token::Action::"Erc20Approve""#,
         ];
         // Cedar 4.10's Schema::actions() yields EntityUids whose Display form
@@ -721,6 +728,8 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     ("open_position", "OpenPositionContext"),
     ("place_limit_order", "PlaceLimitOrderContext"),
     ("place_stop_order", "PlaceStopOrderContext"),
+    // permission (alphabetical)
+    ("protocol_authorization", "ProtocolAuthorizationContext"),
     // token (alphabetical)
     ("erc20_approve", "Erc20ApproveContext"),
     ("erc20_permit", "Erc20PermitContext"),
