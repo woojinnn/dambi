@@ -292,7 +292,10 @@ mod tests {
             let v = $venue;
             let serde_tag = serde_name(&v);
             assert_eq!(v.name(), serde_tag, "accessor name() must equal serde tag");
-            assert_eq!(serde_tag, $expected, "expected literal must equal serde tag");
+            assert_eq!(
+                serde_tag, $expected,
+                "expected literal must equal serde tag"
+            );
         }};
     }
 
@@ -318,21 +321,24 @@ mod tests {
         let any = a("0x000000000000000000000000000000000000beef");
 
         // ---- AmmVenue: all 11 variants ----
-        assert_venue!(amm::AmmVenue::UniswapV2 {
+        assert_venue!(
+            amm::AmmVenue::UniswapV2 {
                 chain: eth.clone(),
                 pool: any,
                 factory: any,
             },
             "uniswap_v2",
         );
-        assert_venue!(amm::AmmVenue::UniswapV3 {
+        assert_venue!(
+            amm::AmmVenue::UniswapV3 {
                 chain: eth.clone(),
                 pool: any,
                 fee_tier_bp: 500,
             },
             "uniswap_v3",
         );
-        assert_venue!(amm::AmmVenue::UniswapV4 {
+        assert_venue!(
+            amm::AmmVenue::UniswapV4 {
                 chain: eth.clone(),
                 pool_id: "0x00".into(),
                 pool_manager: any,
@@ -340,13 +346,15 @@ mod tests {
             },
             "uniswap_v4",
         );
-        assert_venue!(amm::AmmVenue::SushiV2 {
+        assert_venue!(
+            amm::AmmVenue::SushiV2 {
                 chain: eth.clone(),
                 pool: any,
             },
             "sushi_v2",
         );
-        assert_venue!(amm::AmmVenue::CurveV1 {
+        assert_venue!(
+            amm::AmmVenue::CurveV1 {
                 chain: eth.clone(),
                 pool: any,
                 n_coins: 3,
@@ -354,13 +362,15 @@ mod tests {
             },
             "curve_v1",
         );
-        assert_venue!(amm::AmmVenue::CurveV2 {
+        assert_venue!(
+            amm::AmmVenue::CurveV2 {
                 chain: eth.clone(),
                 pool: any,
             },
             "curve_v2",
         );
-        assert_venue!(amm::AmmVenue::BalancerV2 {
+        assert_venue!(
+            amm::AmmVenue::BalancerV2 {
                 chain: eth.clone(),
                 vault: any,
                 pool_id: "0x00".into(),
@@ -368,27 +378,31 @@ mod tests {
             },
             "balancer_v2",
         );
-        assert_venue!(amm::AmmVenue::BalancerV3 {
+        assert_venue!(
+            amm::AmmVenue::BalancerV3 {
                 chain: eth.clone(),
                 pool_id: "0x00".into(),
                 pool_type: amm::BalancerPoolType::Stable,
             },
             "balancer_v3",
         );
-        assert_venue!(amm::AmmVenue::TraderJoeLB {
+        assert_venue!(
+            amm::AmmVenue::TraderJoeLB {
                 chain: eth.clone(),
                 pair: any,
                 bin_step: 10,
             },
             "trader_joe_l_b",
         );
-        assert_venue!(amm::AmmVenue::MaverickV2 {
+        assert_venue!(
+            amm::AmmVenue::MaverickV2 {
                 chain: eth.clone(),
                 pool: any,
             },
             "maverick_v2",
         );
-        assert_venue!(amm::AmmVenue::AggregatorRoute {
+        assert_venue!(
+            amm::AmmVenue::AggregatorRoute {
                 chain: eth.clone(),
                 router: any,
                 route_hash: "0x00".into(),
@@ -397,69 +411,80 @@ mod tests {
         );
 
         // ---- IntentVenue: all 4 variants ----
-        assert_venue!(amm::IntentVenue::UniswapX {
+        assert_venue!(
+            amm::IntentVenue::UniswapX {
                 chain: eth.clone(),
                 reactor: any,
             },
             "uniswap_x",
         );
-        assert_venue!(amm::IntentVenue::CowSwap {
+        assert_venue!(
+            amm::IntentVenue::CowSwap {
                 chain: eth.clone(),
                 settlement: any,
             },
             "cow_swap",
         );
-        assert_venue!(amm::IntentVenue::OneInchFusion { chain: eth.clone() },
+        assert_venue!(
+            amm::IntentVenue::OneInchFusion { chain: eth.clone() },
             "one_inch_fusion",
         );
         assert_venue!(amm::IntentVenue::Bebop { chain: eth.clone() }, "bebop");
 
         // ---- LendingVenue: all 8 variants ----
-        assert_venue!(lending::LendingVenue::AaveV3 {
+        assert_venue!(
+            lending::LendingVenue::AaveV3 {
                 chain: eth.clone(),
                 pool: any,
                 market_id: None,
             },
             "aave_v3",
         );
-        assert_venue!(lending::LendingVenue::AaveV2 {
+        assert_venue!(
+            lending::LendingVenue::AaveV2 {
                 chain: eth.clone(),
                 pool: any,
             },
             "aave_v2",
         );
-        assert_venue!(lending::LendingVenue::CompoundV3 {
+        assert_venue!(
+            lending::LendingVenue::CompoundV3 {
                 chain: eth.clone(),
                 comet: any,
                 base_asset: token_ref(),
             },
             "compound_v3",
         );
-        assert_venue!(lending::LendingVenue::CompoundV2 {
+        assert_venue!(
+            lending::LendingVenue::CompoundV2 {
                 chain: eth.clone(),
                 comptroller: any,
             },
             "compound_v2",
         );
-        assert_venue!(lending::LendingVenue::MorphoBlue {
+        assert_venue!(
+            lending::LendingVenue::MorphoBlue {
                 chain: eth.clone(),
                 market_id: "0x00".into(),
             },
             "morpho_blue",
         );
-        assert_venue!(lending::LendingVenue::MorphoOptimizer {
+        assert_venue!(
+            lending::LendingVenue::MorphoOptimizer {
                 chain: eth.clone(),
                 vault: any,
             },
             "morpho_optimizer",
         );
-        assert_venue!(lending::LendingVenue::Spark {
+        assert_venue!(
+            lending::LendingVenue::Spark {
                 chain: eth.clone(),
                 pool: any,
             },
             "spark",
         );
-        assert_venue!(lending::LendingVenue::Fluid {
+        assert_venue!(
+            lending::LendingVenue::Fluid {
                 chain: eth.clone(),
                 vault: any,
             },
@@ -467,7 +492,8 @@ mod tests {
         );
 
         // ---- PerpVenue: all 9 variants ----
-        assert_venue!(perp::PerpVenue::Hyperliquid { chain: eth.clone() },
+        assert_venue!(
+            perp::PerpVenue::Hyperliquid { chain: eth.clone() },
             "hyperliquid",
         );
         assert_venue!(perp::PerpVenue::GmxV2 { chain: eth.clone() }, "gmx_v2");
@@ -475,13 +501,16 @@ mod tests {
         assert_venue!(perp::PerpVenue::Vertex { chain: eth.clone() }, "vertex");
         assert_venue!(perp::PerpVenue::Aevo { chain: eth.clone() }, "aevo");
         assert_venue!(perp::PerpVenue::Drift { chain: eth.clone() }, "drift");
-        assert_venue!(perp::PerpVenue::JupiterPerps { chain: eth.clone() },
+        assert_venue!(
+            perp::PerpVenue::JupiterPerps { chain: eth.clone() },
             "jupiter_perps",
         );
-        assert_venue!(perp::PerpVenue::Synthetix { chain: eth.clone() },
+        assert_venue!(
+            perp::PerpVenue::Synthetix { chain: eth.clone() },
             "synthetix",
         );
-        assert_venue!(perp::PerpVenue::Generic {
+        assert_venue!(
+            perp::PerpVenue::Generic {
                 chain: eth.clone(),
                 contract: any,
             },
@@ -491,14 +520,14 @@ mod tests {
         // ---- Domain action tags via serde `["action"]` ----
         // Token (no venue) — covers the consecutive-capital gotchas.
         assert_action_tag(&ActionBody::Token(token_approve()));
-        assert_action_tag(&ActionBody::Token(token::TokenAction::NftSetApprovalForAll(
-            token::NftSetForAllAction {
+        assert_action_tag(&ActionBody::Token(
+            token::TokenAction::NftSetApprovalForAll(token::NftSetForAllAction {
                 chain: eth.clone(),
                 contract: any,
                 spender: any,
                 approved: true,
-            },
-        )));
+            }),
+        ));
 
         // Lending `SetEMode` — serde emits `set_e_mode`, NOT `set_emode`.
         let ds = simulation_state::live_field::DataSource::OnchainView {

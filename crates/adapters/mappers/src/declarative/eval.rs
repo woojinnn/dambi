@@ -759,10 +759,18 @@ mod tests {
         let json = decoded_value_to_json_typed(&value, "(uint48,int24,uint160,int128)");
         // uint48 ≤ 64 → JSON number.
         assert_eq!(json[0], serde_json::json!(1_738_001_800u64));
-        assert!(json[0].is_number(), "uint48 must be a JSON number, got {}", json[0]);
+        assert!(
+            json[0].is_number(),
+            "uint48 must be a JSON number, got {}",
+            json[0]
+        );
         // int24 ≤ 64 → JSON number (negative).
         assert_eq!(json[1], serde_json::json!(-12_345i64));
-        assert!(json[1].is_number(), "int24 must be a JSON number, got {}", json[1]);
+        assert!(
+            json[1].is_number(),
+            "int24 must be a JSON number, got {}",
+            json[1]
+        );
         // uint160 > 64 → decimal string.
         assert_eq!(json[2], serde_json::json!("1000"));
         // int128 > 64 → decimal string.
@@ -773,21 +781,27 @@ mod tests {
     fn typed_tuple_array_threads_element_component_widths() {
         // `(address,uint160,uint48,uint48)[]` — the Permit2 `PermitDetails[]`
         // shape: each element's uint48 fields must surface as JSON numbers.
-        let token =
-            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let token = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
         let element = DecodedValue::Tuple(vec![
             DecodedValue::Address(token),
-            DecodedValue::Uint(U256::from(1_000_u64)),     // uint160
+            DecodedValue::Uint(U256::from(1_000_u64)), // uint160
             DecodedValue::Uint(U256::from(1_738_001_800_u64)), // uint48
-            DecodedValue::Uint(U256::from(7_u64)),          // uint48 nonce
+            DecodedValue::Uint(U256::from(7_u64)),     // uint48 nonce
         ]);
         let value = DecodedValue::Array(vec![element]);
         let json = decoded_value_to_json_typed(&value, "(address,uint160,uint48,uint48)[]");
         let el = &json[0];
-        assert_eq!(el[0], serde_json::json!("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"));
+        assert_eq!(
+            el[0],
+            serde_json::json!("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+        );
         assert_eq!(el[1], serde_json::json!("1000")); // uint160 → string
         assert_eq!(el[2], serde_json::json!(1_738_001_800u64)); // uint48 → number
-        assert!(el[2].is_number(), "nested uint48 must be a number, got {}", el[2]);
+        assert!(
+            el[2].is_number(),
+            "nested uint48 must be a number, got {}",
+            el[2]
+        );
         assert_eq!(el[3], serde_json::json!(7u64)); // uint48 → number
     }
 
@@ -820,10 +834,7 @@ mod tests {
             serde_json::json!("-12345")
         );
         // No type context → decimal string (unchanged historic behaviour).
-        assert_eq!(
-            decoded_value_to_json(&small),
-            serde_json::json!("-12345")
-        );
+        assert_eq!(decoded_value_to_json(&small), serde_json::json!("-12345"));
     }
 
     #[test]

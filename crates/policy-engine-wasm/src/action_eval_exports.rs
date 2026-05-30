@@ -162,8 +162,8 @@ struct EvaluateActionOutput {
 pub fn plan_action_rpc_v2_json(input_json: String) -> String {
     let result = (|| -> Result<PlanActionOutput, EngineErrorDto> {
         check_input_size(&input_json, "plan_action_rpc_v2_json")?;
-        let input: PlanActionInput = serde_json::from_str(&input_json)
-            .map_err(|error| invalid_input(&error.to_string()))?;
+        let input: PlanActionInput =
+            serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
         let lowered = lower(&input.action, &input.meta, &input.tx)?;
         let planned = plan(&input.manifests, &input.action, &lowered, &input.tx)?;
         Ok(PlanActionOutput {
@@ -199,8 +199,8 @@ pub fn plan_action_rpc_v2_json(input_json: String) -> String {
 pub fn evaluate_action_v2_json(input_json: String) -> String {
     let verdict = (|| -> Result<Verdict, EngineErrorDto> {
         check_input_size(&input_json, "evaluate_action_v2_json")?;
-        let input: EvaluateActionInput = serde_json::from_str(&input_json)
-            .map_err(|error| invalid_input(&error.to_string()))?;
+        let input: EvaluateActionInput =
+            serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
 
         let lowered = lower(&input.action, &input.meta, &input.tx)?;
 
@@ -209,8 +209,7 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
         // the planned set below) to the exact manifests whose schemas/policies
         // are evaluated, so a bundle requiring an un-planned RPC call cannot
         // silently fail-open (v2 analogue of v1's manifest_set_hash tie).
-        let manifests: Vec<ManifestV2> =
-            input.bundles.iter().map(|b| b.manifest.clone()).collect();
+        let manifests: Vec<ManifestV2> = input.bundles.iter().map(|b| b.manifest.clone()).collect();
         let planned = plan(&manifests, &input.action, &lowered, &input.tx)?;
 
         // Replay the host's raw results into context.custom.* . A required
@@ -337,7 +336,10 @@ fn planned_to_dto(call: &PlannedCallV2) -> PlannedCallDto {
 }
 
 fn invalid_input(message: &str) -> EngineErrorDto {
-    EngineErrorDto::new("invalid_input_json", format!("invalid input json: {message}"))
+    EngineErrorDto::new(
+        "invalid_input_json",
+        format!("invalid input json: {message}"),
+    )
 }
 
 // ── verdict → DTO mapping (local mirror of `exports.rs`) ──────────────────
@@ -568,7 +570,10 @@ mod tests {
         assert_eq!(parsed["ok"], true, "{parsed}");
         let planned = parsed["data"]["planned"].as_array().expect("planned array");
         assert_eq!(planned.len(), 1, "{parsed}");
-        assert_eq!(planned[0]["call_id"], "large-swap-usd-warning::total-input-usd");
+        assert_eq!(
+            planned[0]["call_id"],
+            "large-swap-usd-warning::total-input-usd"
+        );
         assert_eq!(planned[0]["method"], "oracle.usd_value");
         assert_eq!(planned[0]["params"]["chain_id"], "eip155:42161");
     }
@@ -611,7 +616,10 @@ mod tests {
         );
         let eval_parsed: Value = serde_json::from_str(&eval_out).unwrap();
         assert_eq!(eval_parsed["ok"], true, "{eval_parsed}");
-        assert_eq!(eval_parsed["data"]["verdict"]["kind"], "warn", "{eval_parsed}");
+        assert_eq!(
+            eval_parsed["data"]["verdict"]["kind"], "warn",
+            "{eval_parsed}"
+        );
         assert_eq!(
             eval_parsed["data"]["verdict"]["matched"][0]["policy_id"], "large-input",
             "{eval_parsed}"

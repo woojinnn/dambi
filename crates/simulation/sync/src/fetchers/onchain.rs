@@ -137,10 +137,7 @@ impl OnchainViewFetcher {
             if &c.chain != chain {
                 return Err(SyncError::FetchFailed {
                     source_id: "onchain_fetcher".into(),
-                    reason: format!(
-                        "batch chain mismatch: expected {}, got {}",
-                        chain, c.chain
-                    ),
+                    reason: format!("batch chain mismatch: expected {}, got {}", chain, c.chain),
                 });
             }
         }

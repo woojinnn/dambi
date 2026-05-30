@@ -18,14 +18,14 @@ pub use manifest_v2::{
     CustomContext, ManifestV2, PolicyRpcCallSpec, Trigger, TriggerConstraint, TriggerField,
     TriggerScope, MANIFEST_V2_SCHEMA_VERSION,
 };
-pub use trigger::{evaluate as evaluate_trigger, TxView};
 pub use materialize::{
     apply_rpc_results, apply_rpc_results_with_indices, system_fail_verdict, SYSTEM_POLICY_ID,
 };
-pub use planning::{manifest_set_hash, plan_calls};
 pub use materialize_v2::materialize_v2;
+pub use planning::{manifest_set_hash, plan_calls};
 pub use planning_v2::{plan_policy_rpc_v2, PlannedCallV2};
 pub use selector::resolve_selector;
+pub use trigger::{evaluate as evaluate_trigger, TxView};
 
 #[cfg(test)]
 mod tests {
@@ -679,7 +679,6 @@ mod tests {
             })
         );
     }
-
 
     #[test]
     fn generated_schema_normalizes_decimal_alias() {

@@ -734,10 +734,6 @@ mod tests {
         assert_eq!(parsed.predicates[0].field, "totalInputUsd.value");
     }
 
-
-
-
-
     #[test]
     fn v0_input_auto_migrates_to_v1() {
         // Hand-rolled v0 shape: enrichment field addressed directly under
@@ -778,7 +774,6 @@ mod tests {
             "v0 → v1 migration must rewrite the comparison to context.custom.*, got:\n{reemitted}"
         );
     }
-
 
     #[test]
     fn multiple_predicates_roundtrip_in_order() {

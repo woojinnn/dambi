@@ -33,10 +33,38 @@ fn walk_claim(
     stats: &mut WalkStats,
 ) {
     let li = &c.live_inputs;
-    push_if_stale(stale, stats, &li.is_still_claimable, now, action_index, ActionSlot::AirdropClaimIsStillClaimable);
-    push_if_stale(stale, stats, &li.actual_amount, now, action_index, ActionSlot::AirdropClaimActualAmount);
-    push_if_stale(stale, stats, &li.claim_token, now, action_index, ActionSlot::AirdropClaimToken);
-    push_if_stale(stale, stats, &li.claim_window, now, action_index, ActionSlot::AirdropClaimWindow);
+    push_if_stale(
+        stale,
+        stats,
+        &li.is_still_claimable,
+        now,
+        action_index,
+        ActionSlot::AirdropClaimIsStillClaimable,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.actual_amount,
+        now,
+        action_index,
+        ActionSlot::AirdropClaimActualAmount,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.claim_token,
+        now,
+        action_index,
+        ActionSlot::AirdropClaimToken,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.claim_window,
+        now,
+        action_index,
+        ActionSlot::AirdropClaimWindow,
+    );
 }
 
 fn walk_delegate(
@@ -47,8 +75,22 @@ fn walk_delegate(
     stats: &mut WalkStats,
 ) {
     let li = &d.live_inputs;
-    push_if_stale(stale, stats, &li.current_delegate, now, action_index, ActionSlot::AirdropDelegateCurrentDelegate);
-    push_if_stale(stale, stats, &li.voting_power, now, action_index, ActionSlot::AirdropDelegateVotingPower);
+    push_if_stale(
+        stale,
+        stats,
+        &li.current_delegate,
+        now,
+        action_index,
+        ActionSlot::AirdropDelegateCurrentDelegate,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.voting_power,
+        now,
+        action_index,
+        ActionSlot::AirdropDelegateVotingPower,
+    );
 }
 
 pub(super) fn apply(aa: &mut AirdropAction, slot: &ActionSlot, value: Value, now: Time) {

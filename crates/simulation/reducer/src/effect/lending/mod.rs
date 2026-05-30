@@ -88,10 +88,9 @@ pub(super) mod position_id {
             LendingVenue::CompoundV3 { chain, comet, .. } => {
                 format!("compound_v3:{}:{comet:?}", chain.as_str())
             }
-            LendingVenue::CompoundV2 {
-                chain,
-                comptroller,
-            } => format!("compound_v2:{}:{comptroller:?}", chain.as_str()),
+            LendingVenue::CompoundV2 { chain, comptroller } => {
+                format!("compound_v2:{}:{comptroller:?}", chain.as_str())
+            }
             LendingVenue::MorphoBlue { chain, market_id } => {
                 format!("morpho_blue:{}:{market_id}", chain.as_str())
             }
@@ -141,11 +140,7 @@ pub(super) fn venue_chain(venue: &LendingVenue) -> ChainId {
 /// effective state — checks both committed `state.positions` and pending
 /// `delta.position_changes`. A queued `Close` removes the position from
 /// effective state.
-pub(super) fn position_exists(
-    state: &WalletState,
-    delta: &StateDelta,
-    pid: &PositionId,
-) -> bool {
+pub(super) fn position_exists(state: &WalletState, delta: &StateDelta, pid: &PositionId) -> bool {
     let in_state = state.positions.iter().any(|p| &p.id == pid);
     let mut exists = in_state;
     for change in &delta.position_changes {
@@ -161,11 +156,7 @@ pub(super) fn position_exists(
 /// Merge an asset deposit into a `LendingAccount`'s `collaterals` list —
 /// adds to the existing tuple if the asset is already present, otherwise
 /// pushes a fresh entry.
-pub(super) fn merge_collateral(
-    account: &mut LendingAccount,
-    asset: &TokenRef,
-    amount: U256,
-) {
+pub(super) fn merge_collateral(account: &mut LendingAccount, asset: &TokenRef, amount: U256) {
     if let Some(entry) = account.collaterals.iter_mut().find(|(t, _)| t == asset) {
         entry.1 = entry.1.saturating_add(amount);
     } else {
@@ -222,7 +213,9 @@ pub(super) fn merge_debt(
     {
         entry.1 = entry.1.saturating_add(amount);
     } else {
-        account.debts.push((asset.clone(), amount, rate_mode.clone()));
+        account
+            .debts
+            .push((asset.clone(), amount, rate_mode.clone()));
     }
 }
 
@@ -285,7 +278,10 @@ pub(super) fn build_price_tables(
         // use the account-level liquidation_threshold LiveField as the
         // common value, recovering the LiquidationThreshold field that the
         // derived HF helper expects in basis points (string Decimal).
-        lts.push((token.clone(), threshold_to_bp(&account.liquidation_threshold.value)));
+        lts.push((
+            token.clone(),
+            threshold_to_bp(&account.liquidation_threshold.value),
+        ));
     }
     for (token, _, _) in &account.debts {
         debt_prices.push((token.clone(), asset_price.clone()));

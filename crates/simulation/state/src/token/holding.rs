@@ -93,10 +93,9 @@ impl TokenHolding {
     /// Owned 인 경우 의미가 없으므로 None.
     pub fn available(&self) -> Option<U256> {
         match (&self.balance, &self.committed) {
-            (
-                Balance::Fungible { amount: bal },
-                Balance::Fungible { amount: cmt },
-            ) => Some(bal.saturating_sub(*cmt)),
+            (Balance::Fungible { amount: bal }, Balance::Fungible { amount: cmt }) => {
+                Some(bal.saturating_sub(*cmt))
+            }
             _ => None,
         }
     }

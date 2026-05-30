@@ -90,18 +90,14 @@ impl Scheduler {
                         report.total_fields_updated += rr.fields_updated;
                         report.total_fields_failed += rr.fields_failed;
                         if let Err(e) = self.store.save(&state).await {
-                            report
-                                .errors
-                                .push(format!("save {}: {}", wid.address, e));
+                            report.errors.push(format!("save {}: {}", wid.address, e));
                         }
                     }
                     Err(e) => report
                         .errors
                         .push(format!("refresh {}: {}", wid.address, e)),
                 },
-                Err(e) => report
-                    .errors
-                    .push(format!("load {}: {}", wid.address, e)),
+                Err(e) => report.errors.push(format!("load {}: {}", wid.address, e)),
             }
         }
         Ok(report)

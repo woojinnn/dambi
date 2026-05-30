@@ -251,8 +251,7 @@ mod tests {
 
     #[test]
     fn from_token_keys_helper() {
-        let usdc =
-            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let usdc = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
         let scope = ActionScope::from_token_keys([TokenKey::Erc20 {
             chain: ChainId::ethereum_mainnet(),
             address: usdc,

@@ -43,7 +43,10 @@ pub fn resolve_field(
             resolve_position_field(&pos.kind, field)
         }
 
-        FieldRef::PendingField { pending_id, field: _ } => {
+        FieldRef::PendingField {
+            pending_id,
+            field: _,
+        } => {
             // pending lifecycle 값 — 현재 단순히 status 문자열만.
             let pending = state.pending.iter().find(|p| &p.id == pending_id)?;
             Some(Value::String(format!("{:?}", pending.lifecycle.status)))
@@ -110,8 +113,7 @@ mod tests {
         use simulation_state::{
             Balance, BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKind,
         };
-        let usdc =
-            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let usdc = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
         let key = TokenKey::Erc20 {
             chain: ChainId::ethereum_mainnet(),
             address: usdc,

@@ -89,15 +89,15 @@ impl RegistryFetcher {
         }
 
         // Fetch.
-        let resp =
-            self.client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| SyncError::FetchFailed {
-                    source_id: "registry".into(),
-                    reason: format!("http: {}", e),
-                })?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| SyncError::FetchFailed {
+                source_id: "registry".into(),
+                reason: format!("http: {}", e),
+            })?;
 
         if !resp.status().is_success() {
             return Err(SyncError::FetchFailed {
@@ -162,8 +162,7 @@ mod tests {
 
     #[test]
     fn builds_token_url() {
-        let addr =
-            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let addr = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
         let url = build_url(
             "http://localhost:8080/",
             &RegistryResource::TokenMeta {

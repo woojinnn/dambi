@@ -33,7 +33,10 @@ pub struct AbiDecoder {
 
 impl Default for AbiDecoder {
     fn default() -> Self {
-        Self::new(AbiTypeRegistry::with_builtins(), MapperRegistry::with_builtins())
+        Self::new(
+            AbiTypeRegistry::with_builtins(),
+            MapperRegistry::with_builtins(),
+        )
     }
 }
 
@@ -63,9 +66,10 @@ impl AbiDecoder {
     ///
     /// 결과: 매퍼 있으면 typed struct JSON object, 없으면 raw array.
     pub fn decode(&self, decoder_id: &str, data: &[u8]) -> Result<Value, SyncError> {
-        let ty = self.types.get(decoder_id).ok_or_else(|| {
-            SyncError::UnknownDecoder(format!("abi_decoder: {}", decoder_id))
-        })?;
+        let ty = self
+            .types
+            .get(decoder_id)
+            .ok_or_else(|| SyncError::UnknownDecoder(format!("abi_decoder: {}", decoder_id)))?;
 
         let decoded = ty.abi_decode(data).map_err(|e| SyncError::FetchFailed {
             source_id: "abi_decoder".into(),

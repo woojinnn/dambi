@@ -39,10 +39,7 @@ pub(crate) fn lower(
     m.insert("nonce".into(), Value::Object(nonce));
     // `amountNano` / `amountUsd` / `custom` are host-populated — OMITTED here.
 
-    Ok(ctx.lowered(
-        r#"Token::Action::"Permit2SignAllowance""#,
-        Value::Object(m),
-    ))
+    Ok(ctx.lowered(r#"Token::Action::"Permit2SignAllowance""#, Value::Object(m)))
 }
 
 #[cfg(test)]
@@ -57,9 +54,7 @@ mod tests {
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::{Time, U256};
 
-    use super::super::test_support::{
-        live_nonce_pair, offchain_meta, sample_erc20_token, spender,
-    };
+    use super::super::test_support::{live_nonce_pair, offchain_meta, sample_erc20_token, spender};
 
     #[test]
     fn permit2_sign_allowance_lowering_conforms_to_schema() {

@@ -456,10 +456,9 @@ mod tests {
     fn transfer_nft_erc1155_emits_negative_balance_delta() {
         let key = erc1155_key(11);
         let mut state = empty_state();
-        state.tokens.insert(
-            key.clone(),
-            make_fungible_holding(key.clone(), 10),
-        );
+        state
+            .tokens
+            .insert(key.clone(), make_fungible_holding(key.clone(), 10));
         let mut delta = StateDelta::new();
         let recipient =
             Address::from_str("0x000000000000000000000000000000000000beef").unwrap_or_default();
@@ -481,10 +480,9 @@ mod tests {
     fn transfer_nft_erc1155_without_amount_errors() {
         let key = erc1155_key(11);
         let mut state = empty_state();
-        state.tokens.insert(
-            key.clone(),
-            make_fungible_holding(key.clone(), 10),
-        );
+        state
+            .tokens
+            .insert(key.clone(), make_fungible_holding(key.clone(), 10));
         let mut delta = StateDelta::new();
         let err = transfer_nft(
             &state,
@@ -502,7 +500,9 @@ mod tests {
     fn transfer_nft_erc721_emits_minus_one_balance_delta() {
         let key = erc721_key(42);
         let mut state = empty_state();
-        state.tokens.insert(key.clone(), make_owned_holding(key.clone()));
+        state
+            .tokens
+            .insert(key.clone(), make_owned_holding(key.clone()));
         let mut delta = StateDelta::new();
         let recipient =
             Address::from_str("0x000000000000000000000000000000000000beef").unwrap_or_default();

@@ -134,9 +134,9 @@ fn placeholder_type_lookup(rest: &str) -> Option<FallbackType> {
 /// Type-aware zero value for [`FallbackType`].
 fn zero_value_for(t: FallbackType) -> JsonValue {
     match t {
-        FallbackType::Address => JsonValue::String(
-            "0x0000000000000000000000000000000000000000".to_owned(),
-        ),
+        FallbackType::Address => {
+            JsonValue::String("0x0000000000000000000000000000000000000000".to_owned())
+        }
         FallbackType::U32 => JsonValue::Number(serde_json::Number::from(0u32)),
         FallbackType::U256 => JsonValue::String("0".to_owned()),
         FallbackType::Bytes32 => JsonValue::String(
@@ -387,7 +387,11 @@ fn resolve_placeholder(ctx: &V3MapContext<'_>, raw: &str) -> Result<JsonValue, V
         // 갱신 강제. 75b05d1 commit 의 Address zero hex 일괄 fallback 이
         // u32/bytes32 자리에서 serde mismatch 를 일으킨 부작용 fix.
         "resolved" | "derived" => {
-            let map = if root == "resolved" { &ctx.resolved } else { &ctx.derived };
+            let map = if root == "resolved" {
+                &ctx.resolved
+            } else {
+                &ctx.derived
+            };
             if let Some(v) = map.get(rest).cloned() {
                 Ok(v)
             } else if let Some(ty) = placeholder_type_lookup(rest) {
@@ -449,8 +453,8 @@ fn walk_json_path(root: &JsonValue, path: &str) -> Result<JsonValue, String> {
                     .filter(|abs| *abs <= arr.len() && *abs > 0)
                     .map(|abs| arr.len() - abs)
             };
-            let resolved = resolved
-                .ok_or_else(|| format!("index {idx} out of bounds (len={})", arr.len()))?;
+            let resolved =
+                resolved.ok_or_else(|| format!("index {idx} out of bounds (len={})", arr.len()))?;
             cursor = arr[resolved].clone();
         }
     }
@@ -621,8 +625,9 @@ enum LiveInputLayout {
 /// `deny_unknown_fields`-free variants.
 fn live_input_layout(domain: Option<&str>, action: Option<&str>) -> LiveInputLayout {
     match (domain, action) {
-        (Some("token"), Some("erc20_permit"))
-        | (Some("token"), Some("permit2_sign_allowance")) => LiveInputLayout::Inline,
+        (Some("token"), Some("erc20_permit")) | (Some("token"), Some("permit2_sign_allowance")) => {
+            LiveInputLayout::Inline
+        }
         _ => LiveInputLayout::Nested,
     }
 }
@@ -671,9 +676,12 @@ fn flatten_body(body: &JsonValue) -> Result<JsonMap<String, JsonValue>, V3BuildE
 
     // Per-domain newtype: descend into `obj.<domain>` to find `action` + the
     // payload object keyed by `<action>`.
-    let inner = obj.get(&domain).and_then(JsonValue::as_object).ok_or_else(|| {
-        V3BuildError::UnresolvedPlaceholder(format!("body.{domain} missing or not an object"))
-    })?;
+    let inner = obj
+        .get(&domain)
+        .and_then(JsonValue::as_object)
+        .ok_or_else(|| {
+            V3BuildError::UnresolvedPlaceholder(format!("body.{domain} missing or not an object"))
+        })?;
     let action_val = inner.get("action").ok_or_else(|| {
         V3BuildError::UnresolvedPlaceholder(format!("body.{domain}.action missing"))
     })?;
@@ -705,8 +713,14 @@ fn flatten_body(body: &JsonValue) -> Result<JsonMap<String, JsonValue>, V3BuildE
 /// used to look up the live_input default catalog. Either may be absent for
 /// cross-cutting variants (`multicall`, `unknown`).
 fn extract_tags(flat: &JsonMap<String, JsonValue>) -> (Option<String>, Option<String>) {
-    let domain = flat.get("domain").and_then(JsonValue::as_str).map(str::to_owned);
-    let action = flat.get("action").and_then(JsonValue::as_str).map(str::to_owned);
+    let domain = flat
+        .get("domain")
+        .and_then(JsonValue::as_str)
+        .map(str::to_owned);
+    let action = flat
+        .get("action")
+        .and_then(JsonValue::as_str)
+        .map(str::to_owned);
     (domain, action)
 }
 
@@ -974,18 +988,16 @@ pub fn build_multicall_from_opcode_stream(
                     });
                 }
                 UnknownOpcodePolicy::Warn => {
-                    eprintln!(
-                        "[action_builder] warn: unknown opcode 0x{opcode:02x} at index {i}"
-                    );
+                    eprintln!("[action_builder] warn: unknown opcode 0x{opcode:02x} at index {i}");
                     continue;
                 }
                 UnknownOpcodePolicy::Skip => continue,
             }
         };
 
-        let body_template = opcode_entry
-            .get("body")
-            .ok_or_else(|| V3BuildError::UnresolvedPlaceholder(format!("{opcode_key}.body missing")))?;
+        let body_template = opcode_entry.get("body").ok_or_else(|| {
+            V3BuildError::UnresolvedPlaceholder(format!("{opcode_key}.body missing"))
+        })?;
 
         let inputs_for_this = decoded_inputs_array.get(i);
         let child_ctx = V3MapContext {
@@ -1060,7 +1072,11 @@ pub fn build_array_emit(
             derived: ctx.derived.clone(),
             inputs: Some(element),
         };
-        actions.push(build_action_body(&child_ctx, per_item_body, per_item_live_inputs)?);
+        actions.push(build_action_body(
+            &child_ctx,
+            per_item_body,
+            per_item_live_inputs,
+        )?);
     }
 
     Ok(ActionBody::Multicall { actions })
@@ -1119,7 +1135,10 @@ mod tests {
         match action {
             ActionBody::Token(TokenAction::Erc20Approve(a)) => {
                 assert_eq!(a.amount, U256::from(1_000_000u64));
-                assert_eq!(a.spender, addr("0x00000000000000000000000000000000deadbeef"));
+                assert_eq!(
+                    a.spender,
+                    addr("0x00000000000000000000000000000000deadbeef")
+                );
             }
             other => panic!("expected Erc20Approve, got {other:?}"),
         }
@@ -1145,7 +1164,10 @@ mod tests {
             }
         });
         let action = build_action_body(&ctx, &body, None).unwrap();
-        assert!(matches!(action, ActionBody::Token(TokenAction::Erc20Transfer(_))));
+        assert!(matches!(
+            action,
+            ActionBody::Token(TokenAction::Erc20Transfer(_))
+        ));
     }
 
     // 3. ERC721 approve → ActionBody::Token(NftApprove)
@@ -1172,7 +1194,10 @@ mod tests {
             }
         });
         let action = build_action_body(&ctx, &body, None).unwrap();
-        assert!(matches!(action, ActionBody::Token(TokenAction::NftApprove(_))));
+        assert!(matches!(
+            action,
+            ActionBody::Token(TokenAction::NftApprove(_))
+        ));
     }
 
     // 4. ERC721 setApprovalForAll → ActionBody::Token(NftSetApprovalForAll)
@@ -1267,7 +1292,10 @@ mod tests {
             }
         });
         let action = build_action_body(&ctx, &body, None).unwrap();
-        assert!(matches!(action, ActionBody::Token(TokenAction::Permit2Approve(_))));
+        assert!(matches!(
+            action,
+            ActionBody::Token(TokenAction::Permit2Approve(_))
+        ));
     }
 
     // 7. Permit2 PermitSingle → ActionBody::Token(Permit2SignAllowance)
@@ -1443,7 +1471,10 @@ mod tests {
             "current_price": { "source": { "kind": "derived_from", "inputs": [{ "scope": "global", "name": "x" }], "calc_id": "y" }, "ttl_s": 12 }
         });
         let action = build_action_body(&ctx, &body, Some(&live_inputs)).unwrap();
-        assert!(matches!(action, ActionBody::Amm(AmmAction::AddLiquidity(_))));
+        assert!(matches!(
+            action,
+            ActionBody::Amm(AmmAction::AddLiquidity(_))
+        ));
     }
 
     // 10. V2 removeLiquidity → ActionBody::Amm(RemoveLiquidity)
@@ -1496,7 +1527,10 @@ mod tests {
             "fees_owed":  { "source": { "kind": "derived_from", "inputs": [{ "scope": "global", "name": "x" }], "calc_id": "y" }, "ttl_s": 12 }
         });
         let action = build_action_body(&ctx, &body, Some(&live_inputs)).unwrap();
-        assert!(matches!(action, ActionBody::Amm(AmmAction::RemoveLiquidity(_))));
+        assert!(matches!(
+            action,
+            ActionBody::Amm(AmmAction::RemoveLiquidity(_))
+        ));
     }
 
     // 11. UR execute V3_SWAP_EXACT_IN single opcode →

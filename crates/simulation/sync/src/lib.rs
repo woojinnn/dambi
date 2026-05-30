@@ -39,9 +39,9 @@ pub mod args_resolver;
 pub mod batcher;
 pub mod calc;
 pub mod config;
-pub mod manifest_v2;
 pub mod error;
 pub mod fetchers;
+pub mod manifest_v2;
 pub mod orchestrator;
 pub mod primitives_sync;
 pub mod resolver;
@@ -50,27 +50,29 @@ pub mod subscription;
 pub mod topo;
 pub mod walker;
 
-pub use action_scope::{ActionScope, walk_scope};
+pub use action_scope::{walk_scope, ActionScope};
 pub use action_walk::{apply_value_to_action, walk_action_stale};
 pub use args_resolver::resolve_args;
-pub use manifest_v2::{LiveInputSpec, LiveInputsSpec, ResolveContext, parse_live_inputs, resolve_placeholders};
-pub use batcher::{BatchKind, FetchBatch, batch_by_source};
+pub use batcher::{batch_by_source, BatchKind, FetchBatch};
 pub use calc::{CalcContext, CalcFn, CalcRegistry};
 pub use config::{
-    ChainlinkChainConfig, ChainlinkConfig, ChainlinkFeedConfig, HyperliquidConfig,
-    OraclesConfig, PythConfig, PythFeedConfig, RestAuthConfig, RestFeedConfig, RestOracleConfig,
-    SyncConfig, VenuesConfig,
+    ChainlinkChainConfig, ChainlinkConfig, ChainlinkFeedConfig, HyperliquidConfig, OraclesConfig,
+    PythConfig, PythFeedConfig, RestAuthConfig, RestFeedConfig, RestOracleConfig, SyncConfig,
+    VenuesConfig,
 };
 pub use error::{SyncError, SyncResult};
 pub use fetchers::abi_decoder::{AbiDecoder, AbiTypeRegistry};
-pub use fetchers::oracle::{PriceFetcher, RestJsonOracleFetcher, provider_key};
+pub use fetchers::oracle::{provider_key, PriceFetcher, RestJsonOracleFetcher};
 pub use fetchers::rpc::{
     BlockTag, EthCallRequest, ProviderName, RpcConfig, RpcProvider, RpcRouter,
 };
+pub use manifest_v2::{
+    parse_live_inputs, resolve_placeholders, LiveInputSpec, LiveInputsSpec, ResolveContext,
+};
 pub use orchestrator::{Orchestrator, RefreshReport};
 pub use primitives_sync::PrimitivesReport;
-pub use resolver::{GlobalValues, resolve_field, resolve_inputs};
+pub use resolver::{resolve_field, resolve_inputs, GlobalValues};
 pub use scheduler::{Scheduler, SchedulerConfig, TickReport, WalletStore};
 pub use subscription::{BlockSubscription, NewBlock, PollingBlockSubscription};
-pub use topo::{DepNode, topological_sort};
-pub use walker::{ActionSlot, FieldLocation, StaleField, WalkStats, walk_stale};
+pub use topo::{topological_sort, DepNode};
+pub use walker::{walk_stale, ActionSlot, FieldLocation, StaleField, WalkStats};

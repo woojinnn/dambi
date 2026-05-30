@@ -21,11 +21,11 @@ use crate::error::{DbError, DbResult};
 /// `LiveField<Price>` 의 SQL 표현 (5 컬럼 + JSON).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveFieldColumns {
-    pub value: String,          // Price 의 decimal string
-    pub synced_at: i64,         // unix sec
+    pub value: String,  // Price 의 decimal string
+    pub synced_at: i64, // unix sec
     pub ttl_sec: Option<i64>,
-    pub confidence_bp: Option<i64>,  // Confidence.deviation_bp
-    pub source_json: String,    // DataSource JSON
+    pub confidence_bp: Option<i64>, // Confidence.deviation_bp
+    pub source_json: String,        // DataSource JSON
 }
 
 pub fn encode_price_live_field(lf: &LiveField<Price>) -> DbResult<LiveFieldColumns> {
@@ -47,8 +47,8 @@ pub fn encode_price_live_field(lf: &LiveField<Price>) -> DbResult<LiveFieldColum
 
 pub fn decode_price_live_field(c: &LiveFieldColumns) -> DbResult<LiveField<Price>> {
     let source: DataSource = serde_json::from_str(&c.source_json)?;
-    let synced_at = u64::try_from(c.synced_at)
-        .map_err(|_| DbError::Invariant("synced_at negative".into()))?;
+    let synced_at =
+        u64::try_from(c.synced_at).map_err(|_| DbError::Invariant("synced_at negative".into()))?;
     let ttl = c
         .ttl_sec
         .map(|s| u64::try_from(s).map(Duration::from_secs))

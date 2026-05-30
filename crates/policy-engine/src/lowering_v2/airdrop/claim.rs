@@ -23,7 +23,10 @@ pub(crate) fn lower(
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("source".into(), lower_protocol_ref(&action.source));
-    m.insert("claimTarget".into(), lower_claim_target(&action.claim_target));
+    m.insert(
+        "claimTarget".into(),
+        lower_claim_target(&action.claim_target),
+    );
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
 
     // `proof` (Merkle inclusion proof) → Set<String> of sibling hashes;
@@ -132,7 +135,7 @@ mod tests {
     use simulation_state::token::{TokenKey, TokenRef};
     use simulation_state::LiveField;
 
-    use super::super::test_support::{assert_conforms, onchain_source, now, sample_token_ref};
+    use super::super::test_support::{assert_conforms, now, onchain_source, sample_token_ref};
 
     /// A Merkle-distributor claim with proof, claim window, on-chain meta.
     fn sample_claim() -> (ActionBody, simulation_reducer::action::ActionMeta) {
@@ -141,8 +144,7 @@ mod tests {
             source: ProtocolRef::new("optimism"),
             claim_target: ClaimTarget::MerkleDistributor {
                 chain: chain.clone(),
-                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed")
-                    .unwrap(),
+                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed").unwrap(),
                 index: 1234,
             },
             recipient: Address::from_str("0x000000000000000000000000000000000000a01c").unwrap(),
@@ -159,14 +161,20 @@ mod tests {
                 actual_amount: LiveField::new(U256::from(5_000_000u64), onchain_source(), now()),
                 claim_token: LiveField::new(sample_token_ref(&chain), onchain_source(), now()),
                 claim_window: LiveField::new(
-                    Some((Time::from_unix(1_738_000_000), Time::from_unix(1_739_000_000))),
+                    Some((
+                        Time::from_unix(1_738_000_000),
+                        Time::from_unix(1_739_000_000),
+                    )),
                     onchain_source(),
                     now(),
                 ),
             },
         });
 
-        (ActionBody::Airdrop(claim), super::super::test_support::onchain_meta())
+        (
+            ActionBody::Airdrop(claim),
+            super::super::test_support::onchain_meta(),
+        )
     }
 
     #[test]
@@ -184,8 +192,7 @@ mod tests {
             source: ProtocolRef::new("arbitrum_dao").with_version("v2"),
             claim_target: ClaimTarget::SignatureDistributor {
                 chain: chain.clone(),
-                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed")
-                    .unwrap(),
+                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed").unwrap(),
             },
             recipient: Address::from_str("0x000000000000000000000000000000000000a01c").unwrap(),
             proof: None,
@@ -226,8 +233,7 @@ mod tests {
             },
             claim_target: ClaimTarget::StakingClaim {
                 chain: chain.clone(),
-                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed")
-                    .unwrap(),
+                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed").unwrap(),
             },
             recipient: Address::from_str("0x000000000000000000000000000000000000a01c").unwrap(),
             proof: None,
@@ -237,7 +243,10 @@ mod tests {
                 actual_amount: LiveField::new(U256::from(42u64), onchain_source(), now()),
                 claim_token: LiveField::new(sample_token_ref(&chain), onchain_source(), now()),
                 claim_window: LiveField::new(
-                    Some((Time::from_unix(1_738_000_000), Time::from_unix(1_739_000_000))),
+                    Some((
+                        Time::from_unix(1_738_000_000),
+                        Time::from_unix(1_739_000_000),
+                    )),
                     onchain_source(),
                     now(),
                 ),
@@ -261,8 +270,7 @@ mod tests {
             source,
             claim_target: ClaimTarget::MerkleDistributor {
                 chain: chain.clone(),
-                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed")
-                    .unwrap(),
+                contract: Address::from_str("0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed").unwrap(),
                 index: 0,
             },
             recipient: Address::from_str("0x000000000000000000000000000000000000a01c").unwrap(),

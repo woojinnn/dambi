@@ -1,6 +1,6 @@
 //! `wallets` + `wallet_chains` 테이블 CRUD.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 
 use simulation_state::primitives::ChainId;
 
@@ -34,7 +34,12 @@ pub fn insert(tx: &Transaction<'_>, w: &WalletInsert) -> DbResult<i64> {
     tx.execute(
         "INSERT INTO wallets (address, label, is_owned, created_at) \
          VALUES (?1, ?2, ?3, ?4)",
-        params![w.address.to_lowercase(), w.label, i64::from(w.is_owned), w.created_at],
+        params![
+            w.address.to_lowercase(),
+            w.label,
+            i64::from(w.is_owned),
+            w.created_at
+        ],
     )?;
     let id = tx.last_insert_rowid();
 
@@ -156,9 +161,8 @@ pub fn list_active(tx: &Transaction<'_>) -> DbResult<Vec<Wallet>> {
 
 /// 한 wallet 의 추적 chain 들.
 pub fn list_chains(tx: &Transaction<'_>, wallet_id: i64) -> DbResult<Vec<ChainId>> {
-    let mut stmt = tx.prepare(
-        "SELECT chain FROM wallet_chains WHERE wallet_id = ?1 ORDER BY chain",
-    )?;
+    let mut stmt =
+        tx.prepare("SELECT chain FROM wallet_chains WHERE wallet_id = ?1 ORDER BY chain")?;
     let rows = stmt
         .query_map(params![wallet_id], |r| r.get::<_, String>(0))?
         .map(|r| r.map(ChainId::from))

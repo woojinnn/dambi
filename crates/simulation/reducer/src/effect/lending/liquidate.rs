@@ -45,7 +45,10 @@ impl Reducer for LiquidateAction {
         // Step 2 — cap the debt-to-cover at 50% of total debt (Aave V3
         // conservative cap; full liquidation only allowed for HF < 0.95).
         let total_debt_usd = U256::from_str_radix(
-            victim_state.total_debt_usd.to_string().trim_start_matches("0x"),
+            victim_state
+                .total_debt_usd
+                .to_string()
+                .trim_start_matches("0x"),
             10,
         )
         .ok();
@@ -63,7 +66,9 @@ impl Reducer for LiquidateAction {
         let bonus_denom = U256::from(10_000_u32);
         let debt_value_usd = self
             .debt_to_cover
-            .checked_mul(parse_price_to_u256(&self.live_inputs.debt_asset_price.value)?)
+            .checked_mul(parse_price_to_u256(
+                &self.live_inputs.debt_asset_price.value,
+            )?)
             .ok_or_else(|| ReducerError::Invariant("liquidate: debt value overflow".into()))?;
         let collat_value_usd = debt_value_usd
             .checked_mul(bonus_numer)
@@ -89,7 +94,9 @@ impl Reducer for LiquidateAction {
 }
 
 /// Parse a `Decimal` (String newtype) into `rust_decimal::Decimal`.
-fn parse_decimal(d: &simulation_state::primitives::Decimal) -> ReducerResult<rust_decimal::Decimal> {
+fn parse_decimal(
+    d: &simulation_state::primitives::Decimal,
+) -> ReducerResult<rust_decimal::Decimal> {
     use std::str::FromStr;
     rust_decimal::Decimal::from_str(d.as_str())
         .map_err(|e| ReducerError::Invariant(format!("liquidate: HF parse: {e}")))
@@ -99,9 +106,7 @@ fn parse_decimal(d: &simulation_state::primitives::Decimal) -> ReducerResult<rus
 /// 6 decimals). Best-effort: simple values like `"1"` / `"3000"` work
 /// exactly; fractional values are truncated to integer USD before
 /// scaling. Sufficient for the Phase 2 approximation.
-fn parse_price_to_u256(
-    price: &simulation_state::primitives::Decimal,
-) -> ReducerResult<U256> {
+fn parse_price_to_u256(price: &simulation_state::primitives::Decimal) -> ReducerResult<U256> {
     use std::str::FromStr;
     let parsed = rust_decimal::Decimal::from_str(price.as_str())
         .map_err(|e| ReducerError::Invariant(format!("liquidate: price parse: {e}")))?;
@@ -121,9 +126,7 @@ fn parse_price_to_u256(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::lending::{
-        LendingVenue, LiquidateLiveInputs, UserLendingState,
-    };
+    use crate::action::lending::{LendingVenue, LiquidateLiveInputs, UserLendingState};
     use simulation_state::delta::TokenChange;
     use simulation_state::eval_context::RequestKind;
     use simulation_state::live_field::{DataSource, LiveField};
@@ -180,8 +183,10 @@ mod tests {
 
     fn state_with(usdc: u128, weth: u128) -> WalletState {
         let mut s = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));
-        s.tokens.insert(usdc_ref().key, make_holding(&usdc_ref(), usdc));
-        s.tokens.insert(weth_ref().key, make_holding(&weth_ref(), weth));
+        s.tokens
+            .insert(usdc_ref().key, make_holding(&usdc_ref(), usdc));
+        s.tokens
+            .insert(weth_ref().key, make_holding(&weth_ref(), weth));
         s
     }
 

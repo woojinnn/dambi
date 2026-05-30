@@ -27,7 +27,10 @@ use crate::error::{ReducerError, ReducerResult};
 impl Reducer for DelegateBorrowAction {
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
         let _ = state;
-        if !matches!(self.venue, LendingVenue::AaveV2 { .. } | LendingVenue::AaveV3 { .. }) {
+        if !matches!(
+            self.venue,
+            LendingVenue::AaveV2 { .. } | LendingVenue::AaveV3 { .. }
+        ) {
             return Err(ReducerError::UnsupportedProtocol {
                 action: "delegate_borrow".into(),
                 protocol: super::venue_tag(&self.venue).into(),
@@ -107,10 +110,16 @@ mod tests {
     #[test]
     fn delegate_borrow_happy_path() {
         let state = WalletState::new(WalletId::new(user(), [ChainId::ethereum_mainnet()]));
-        let delta = action(1_000, aave_v3_venue()).apply(&state, &ctx()).unwrap();
+        let delta = action(1_000, aave_v3_venue())
+            .apply(&state, &ctx())
+            .unwrap();
         assert_eq!(delta.token_changes.len(), 1);
         match &delta.token_changes[0] {
-            TokenChange::ApprovalSet { key, spender, allowance } => {
+            TokenChange::ApprovalSet {
+                key,
+                spender,
+                allowance,
+            } => {
                 assert_eq!(*key, usdc_ref().key);
                 assert_eq!(*spender, delegatee());
                 assert_eq!(allowance.amount, U256::from(1_000u64));

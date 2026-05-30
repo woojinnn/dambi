@@ -121,7 +121,10 @@ mod tests {
 
     #[test]
     fn eq_match_and_miss() {
-        let t = trigger_of(&[(TriggerField::ActionTag, TriggerConstraint::Eq("swap".into()))]);
+        let t = trigger_of(&[(
+            TriggerField::ActionTag,
+            TriggerConstraint::Eq("swap".into()),
+        )]);
         assert!(evaluate(&t, &swap_v3(), &tx()));
         let t = trigger_of(&[(
             TriggerField::ActionTag,
@@ -177,7 +180,10 @@ mod tests {
     fn implicit_and_all_must_pass() {
         // domain==amm AND venue==uniswap_v2 on a v3 swap → false (venue misses).
         let t = trigger_of(&[
-            (TriggerField::ActionDomain, TriggerConstraint::Eq("amm".into())),
+            (
+                TriggerField::ActionDomain,
+                TriggerConstraint::Eq("amm".into()),
+            ),
             (
                 TriggerField::ActionVenue,
                 TriggerConstraint::Eq("uniswap_v2".into()),
@@ -186,7 +192,10 @@ mod tests {
         assert!(!evaluate(&t, &swap_v3(), &tx()));
         // domain==amm AND venue==uniswap_v3 → true.
         let t = trigger_of(&[
-            (TriggerField::ActionDomain, TriggerConstraint::Eq("amm".into())),
+            (
+                TriggerField::ActionDomain,
+                TriggerConstraint::Eq("amm".into()),
+            ),
             (
                 TriggerField::ActionVenue,
                 TriggerConstraint::Eq("uniswap_v3".into()),
@@ -202,7 +211,10 @@ mod tests {
             TriggerConstraint::Eq("eip155:1".into()),
         )]);
         assert!(evaluate(&t, &swap_v3(), &tx()));
-        let t = trigger_of(&[(TriggerField::TxFrom, TriggerConstraint::Eq("0xother".into()))]);
+        let t = trigger_of(&[(
+            TriggerField::TxFrom,
+            TriggerConstraint::Eq("0xother".into()),
+        )]);
         assert!(!evaluate(&t, &swap_v3(), &tx()));
     }
 }

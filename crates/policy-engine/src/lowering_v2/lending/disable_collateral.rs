@@ -34,9 +34,7 @@ mod tests {
     };
     use simulation_reducer::action::ActionBody;
 
-    use super::super::test_support::{
-        live, onchain_meta, reserve_state, user_state, venue, weth,
-    };
+    use super::super::test_support::{live, onchain_meta, reserve_state, user_state, venue, weth};
 
     /// A representative disable-collateral on WETH.
     #[test]

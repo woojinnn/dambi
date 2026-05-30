@@ -42,11 +42,9 @@ impl Pool {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    crate::error::DbError::Migration {
-                        step: format!("mkdir {}", parent.display()),
-                        reason: e.to_string(),
-                    }
+                std::fs::create_dir_all(parent).map_err(|e| crate::error::DbError::Migration {
+                    step: format!("mkdir {}", parent.display()),
+                    reason: e.to_string(),
                 })?;
             }
         }
@@ -77,20 +75,14 @@ impl Pool {
     }
 
     /// Read-only 접근 — closure 안에서만 Connection 사용 가능.
-    pub fn with_conn<R>(
-        &self,
-        f: impl FnOnce(&Connection) -> DbResult<R>,
-    ) -> DbResult<R> {
+    pub fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> DbResult<R>) -> DbResult<R> {
         let guard = self.conn.lock().expect("pool mutex poisoned");
         f(&guard)
     }
 
     /// `BEGIN IMMEDIATE` 트랜잭션 하나 잡고 closure 실행.
     /// closure 가 `Ok` 반환 → `COMMIT`, `Err` 반환 → `ROLLBACK`.
-    pub fn with_tx<R>(
-        &self,
-        f: impl FnOnce(&Transaction<'_>) -> DbResult<R>,
-    ) -> DbResult<R> {
+    pub fn with_tx<R>(&self, f: impl FnOnce(&Transaction<'_>) -> DbResult<R>) -> DbResult<R> {
         let mut guard = self.conn.lock().expect("pool mutex poisoned");
         let tx = guard.transaction()?;
         match f(&tx) {

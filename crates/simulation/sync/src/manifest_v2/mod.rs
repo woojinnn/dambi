@@ -22,5 +22,5 @@
 pub mod parser;
 pub mod resolver;
 
-pub use parser::{LiveInputsSpec, LiveInputSpec, parse_live_inputs};
-pub use resolver::{ResolveContext, resolve_placeholders};
+pub use parser::{parse_live_inputs, LiveInputSpec, LiveInputsSpec};
+pub use resolver::{resolve_placeholders, ResolveContext};

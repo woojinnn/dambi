@@ -16,7 +16,10 @@ use super::{lower_lending_venue, lower_reserve_state, lower_user_lending_state};
 /// Infallible today (returns `Ok`); the `Result` matches the per-action
 /// `lower` contract so callers stay uniform across the fan-out.
 #[allow(clippy::unnecessary_wraps)] // infallible; Result is the shared per-action contract
-pub(crate) fn lower(action: &SupplyAction, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
+pub(crate) fn lower(
+    action: &SupplyAction,
+    ctx: &LowerCtx<'_>,
+) -> Result<LoweredAction, LowerError> {
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_lending_venue(&action.venue));
@@ -66,7 +69,7 @@ mod tests {
     use simulation_state::primitives::{Decimal, U256};
 
     use super::super::test_support::{
-        live, onchain_meta, reserve_state, reserve_state_no_caps, user_state, usdc, venue,
+        live, onchain_meta, reserve_state, reserve_state_no_caps, usdc, user_state, venue,
         venue_aave_v2, venue_aave_v3_no_market, venue_compound_v2, venue_compound_v3, venue_fluid,
         venue_morpho_blue, venue_morpho_optimizer, venue_spark,
     };

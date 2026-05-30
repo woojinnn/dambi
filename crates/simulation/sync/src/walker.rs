@@ -345,8 +345,7 @@ mod tests {
     use std::str::FromStr;
 
     fn mk_usdc_holding(synced_at: u64) -> (TokenKey, TokenHolding) {
-        let usdc_addr =
-            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let usdc_addr = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
         let key = TokenKey::Erc20 {
             chain: ChainId::ethereum_mainnet(),
             address: usdc_addr,
@@ -394,8 +393,7 @@ mod tests {
         state.tokens.insert(k1, h1);
 
         // stale (synced 1000s 전, ttl 60s)
-        let usdt_addr =
-            Address::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap();
+        let usdt_addr = Address::from_str("0xdac17f958d2ee523a2206206994597c13d831ec7").unwrap();
         let k2 = TokenKey::Erc20 {
             chain: ChainId::ethereum_mainnet(),
             address: usdt_addr,

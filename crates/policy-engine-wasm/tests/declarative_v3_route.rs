@@ -4573,8 +4573,7 @@ fn t22_max_depth_exceeded_fails_loud() {
 const VAULT_MAINNET: &str = "0xba12222222228d8ba445958a75a0704d566bf2c8";
 // A realistic Balancer V2 weighted-pool id shape: 20-byte pool address ++
 // 2-byte specifier ++ 10-byte nonce. (Any bytes32 decodes; this is plausible.)
-const LBP_POOL_ID: &str =
-    "0xc45d42f801105e861e86658648e3678ad7aa70f900020000000000000000011e";
+const LBP_POOL_ID: &str = "0xc45d42f801105e861e86658648e3678ad7aa70f900020000000000000000011e";
 
 const B5_BALANCER_VAULT_SWAP_V3: &str = r#"{
   "type": "adapter_action",
@@ -4702,8 +4701,7 @@ fn route_balancer_swap(kind: u8, amount: u64, limit: u64) -> Value {
     let sender = "0x000000000000000000000000000000000000a01c"
         .parse::<AlloyAddress>()
         .unwrap();
-    let pool_id_bytes =
-        hex::decode(LBP_POOL_ID.trim_start_matches("0x")).expect("32-byte poolId");
+    let pool_id_bytes = hex::decode(LBP_POOL_ID.trim_start_matches("0x")).expect("32-byte poolId");
 
     // SingleSwap = (bytes32 poolId, uint8 kind, address assetIn, address
     // assetOut, uint256 amount, bytes userData). A tuple ARG (not the lone arg)
@@ -4774,7 +4772,10 @@ fn t21_balancer_vault_swap_given_in_exact_input() {
     // kind=0 → exact_input via the $match/$cases direction switch.
     assert_eq!(body["params"]["direction"]["kind"], "exact_input", "{body}");
     // amount_in = $args.singleSwap[4] (uint256 → alloy hex string). 1_000_000.
-    assert_eq!(body["params"]["direction"]["amount_in"], "0xf4240", "{body}");
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{body}"
+    );
     // min_amount_out = $args.limit. 950_000 == 0xe7ef0.
     assert_eq!(
         body["params"]["direction"]["min_amount_out"], "0xe7ef0",
@@ -4782,19 +4783,16 @@ fn t21_balancer_vault_swap_given_in_exact_input() {
     );
     // token_in = assetIn (USDC), token_out = assetOut (WETH).
     assert_eq!(
-        body["params"]["token_in"]["key"]["address"],
-        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        body["params"]["token_in"]["key"]["address"], "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
         "{body}"
     );
     assert_eq!(
-        body["params"]["token_out"]["key"]["address"],
-        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        body["params"]["token_out"]["key"]["address"], "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
         "{body}"
     );
     // recipient = $args.funds[2] (FundManagement.recipient).
     assert_eq!(
-        body["params"]["recipient"],
-        "0x000000000000000000000000000000000000bbbb",
+        body["params"]["recipient"], "0x000000000000000000000000000000000000bbbb",
         "{body}"
     );
     assert_eq!(body["params"]["slippage_bp"], 50, "{body}");
@@ -4832,7 +4830,10 @@ fn t22_balancer_vault_swap_given_out_exact_output() {
     // kind=1 → exact_output via the $match/$cases switch (the SAME manifest,
     // different discriminant arg → different direction shape). This is the
     // load-bearing proof the value-map switches the whole direction object.
-    assert_eq!(body["params"]["direction"]["kind"], "exact_output", "{body}");
+    assert_eq!(
+        body["params"]["direction"]["kind"], "exact_output",
+        "{body}"
+    );
     // amount_out = $args.singleSwap[4]. 2_000_000 == 0x1e8480.
     assert_eq!(
         body["params"]["direction"]["amount_out"], "0x1e8480",
@@ -4937,7 +4938,10 @@ fn b4_layerzero_claim() {
     assert_eq!(body["action"], "claim", "{parsed}");
     assert_eq!(body["source"]["name"], "layerzero", "{parsed}");
     // MerkleDistributor claim_target: chain = $chain, contract = $to (hub).
-    assert_eq!(body["claim_target"]["kind"], "merkle_distributor", "{parsed}");
+    assert_eq!(
+        body["claim_target"]["kind"], "merkle_distributor",
+        "{parsed}"
+    );
     assert_eq!(body["claim_target"]["chain"], "eip155:42161", "{parsed}");
     assert_eq!(body["claim_target"]["contract"], LZ_HUB, "{parsed}");
     // recipient = $args.to.
@@ -4997,7 +5001,10 @@ fn b4_layerzero_donate_and_claim() {
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "airdrop", "{parsed}");
     assert_eq!(body["action"], "claim", "{parsed}");
-    assert_eq!(body["claim_target"]["kind"], "merkle_distributor", "{parsed}");
+    assert_eq!(
+        body["claim_target"]["kind"], "merkle_distributor",
+        "{parsed}"
+    );
     assert_eq!(body["claim_target"]["contract"], LZ_HUB, "{parsed}");
     assert_eq!(body["recipient"], LZ_RECIPIENT, "{parsed}");
     assert_eq!(
@@ -5069,7 +5076,13 @@ fn b4_layerzero_withdraw_donation() {
             DynSolValue::Uint(AlloyU256::from(500_000_000_000_000u128), 256), // amount
         ],
     );
-    let input = route_input(LZ_ARBITRUM, LZ_HUB, "0x46d7ce37", calldata.clone(), LZ_SUBMITTER);
+    let input = route_input(
+        LZ_ARBITRUM,
+        LZ_HUB,
+        "0x46d7ce37",
+        calldata.clone(),
+        LZ_SUBMITTER,
+    );
     let parsed = route_ok(input);
 
     let body = &parsed["data"]["actions"][0]["body"];
@@ -5586,7 +5599,13 @@ fn b3_hl_bridge2_batched_deposit_with_permit() {
             hl_deposit_tuple(HL_USER_B, 250_000_000, 1_900_000_001),
         ])],
     );
-    let input = route_input(HL_ARBITRUM, HL_BRIDGE2, "0xb30b5bce", calldata, HL_SUBMITTER);
+    let input = route_input(
+        HL_ARBITRUM,
+        HL_BRIDGE2,
+        "0xb30b5bce",
+        calldata,
+        HL_SUBMITTER,
+    );
     let parsed = route_ok(input);
     assert_eq!(
         parsed["data"]["decoder_id"],
@@ -5601,10 +5620,16 @@ fn b3_hl_bridge2_batched_deposit_with_permit() {
     // element-0 — 100 USDC to the Bridge2 contract.
     assert_eq!(actions[0]["domain"], "token");
     assert_eq!(actions[0]["action"], "erc20_transfer");
-    assert_eq!(actions[0]["recipient"], HL_BRIDGE2, "recipient = $to (Bridge2)");
+    assert_eq!(
+        actions[0]["recipient"], HL_BRIDGE2,
+        "recipient = $to (Bridge2)"
+    );
     assert_eq!(actions[0]["amount"], "0x5f5e100", "{parsed}"); // 100_000_000
     assert_eq!(actions[0]["token"]["key"]["address"], HL_USDC, "{parsed}");
-    assert_eq!(actions[0]["token"]["key"]["chain"], "eip155:42161", "{parsed}");
+    assert_eq!(
+        actions[0]["token"]["key"]["chain"], "eip155:42161",
+        "{parsed}"
+    );
 
     // element-1 — DIFFERENT usd amount proves per-element $inputs.[1] binding.
     assert_eq!(actions[1]["action"], "erc20_transfer");
@@ -5619,12 +5644,21 @@ fn b3_hl_bridge2_batched_deposit_empty() {
 
     // Empty deposits array → empty Multicall (valid, ok:true).
     let calldata = encode_calldata("0xb30b5bce", &[DynSolValue::Array(vec![])]);
-    let input = route_input(HL_ARBITRUM, HL_BRIDGE2, "0xb30b5bce", calldata, HL_SUBMITTER);
+    let input = route_input(
+        HL_ARBITRUM,
+        HL_BRIDGE2,
+        "0xb30b5bce",
+        calldata,
+        HL_SUBMITTER,
+    );
     let parsed = route_ok(input);
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "multicall", "{parsed}");
     assert!(
-        body["actions"].as_array().expect("inner actions").is_empty(),
+        body["actions"]
+            .as_array()
+            .expect("inner actions")
+            .is_empty(),
         "{parsed}"
     );
 }
@@ -5664,8 +5698,7 @@ fn b3_hl_bridge2_usdc_permit() {
     let parsed: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(parsed["ok"], true, "route failed: {parsed}");
     assert_eq!(
-        parsed["data"]["decoder_id"],
-        "hyperliquid/bridge2/usdc-permit@1.0.0",
+        parsed["data"]["decoder_id"], "hyperliquid/bridge2/usdc-permit@1.0.0",
         "{parsed}"
     );
 
@@ -5731,9 +5764,18 @@ fn b3_hl_whype_withdraw() {
     // withdraw(wad) — the unwrapped amount is in calldata (0.5 WHYPE).
     let calldata = encode_calldata(
         "0x2e1a7d4d",
-        &[DynSolValue::Uint(AlloyU256::from(500_000_000_000_000_000_u64), 256)],
+        &[DynSolValue::Uint(
+            AlloyU256::from(500_000_000_000_000_000_u64),
+            256,
+        )],
     );
-    let input = route_input(HL_HYPEREVM, HL_WHYPE, "0x2e1a7d4d", calldata.clone(), HL_SUBMITTER);
+    let input = route_input(
+        HL_HYPEREVM,
+        HL_WHYPE,
+        "0x2e1a7d4d",
+        calldata.clone(),
+        HL_SUBMITTER,
+    );
     let parsed = route_ok(input);
 
     let body = &parsed["data"]["actions"][0]["body"];
@@ -6220,7 +6262,10 @@ fn assert_hl_best_effort_unknown(parsed: &Value, decoder_id: &str, chain_id: u64
 #[test]
 fn b3_hl_usd_send_routes_to_unknown() {
     let install = install_ok(HL_REST_USD_SEND);
-    assert_eq!(install["data"]["bundle_id"], "hyperliquid/rest/usd-send@1.0.0");
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "hyperliquid/rest/usd-send@1.0.0"
+    );
 
     // The decimal `amount` ("100.0") + L1 `destination` are deliberately NOT
     // mapped into a structured body — they are the data the Unknown bucket
@@ -6291,7 +6336,10 @@ fn b3_hl_approve_agent_routes_to_unknown() {
 #[test]
 fn b3_hl_spot_send_routes_to_unknown_testnet() {
     let install = install_ok(HL_REST_SPOT_SEND);
-    assert_eq!(install["data"]["bundle_id"], "hyperliquid/rest/spot-send@1.0.0");
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "hyperliquid/rest/spot-send@1.0.0"
+    );
 
     let message = json!({
         "hyperliquidChain": "Testnet",

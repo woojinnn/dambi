@@ -58,7 +58,7 @@ pub use position::{
 };
 pub use primitives::{
     Address, BasisPoints, BlockHeight, ChainId, Decimal, Duration, MarketRef, PoolRef, Price,
-    ProtocolRef, SignedI256, Spender, Time, U128, U256, VenueRef, Weight,
+    ProtocolRef, SignedI256, Spender, Time, VenueRef, Weight, U128, U256,
 };
 pub use token::{
     Balance, BaseCategory, FiatCurrency, LpShape, NoteKind, PegKind, PegTarget, RangeSpec,
@@ -158,8 +158,7 @@ mod smoke {
     fn registry_api_data_source_round_trip() {
         use std::str::FromStr;
 
-        let usdc_addr =
-            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let usdc_addr = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
 
         let source = DataSource::RegistryApi {
             endpoint: "http://localhost:8080".into(),

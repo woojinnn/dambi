@@ -21,10 +21,7 @@ use super::dispatch::{LowerCtx, LowerError, LoweredAction};
 /// Returns [`LowerError::Unsupported`] only on the unreachable non-`Unknown`
 /// arm (dispatch only routes `Unknown` bodies here); the `Result` matches the
 /// shared per-action `lower` contract.
-pub(crate) fn lower(
-    action: &ActionBody,
-    ctx: &LowerCtx<'_>,
-) -> Result<LoweredAction, LowerError> {
+pub(crate) fn lower(action: &ActionBody, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
     let ActionBody::Unknown {
         target,
         chain,
@@ -104,7 +101,8 @@ mod tests {
                 },
                 deadline: Time::from_unix(1_738_001_800),
                 nonce_key: Some(NonceKey::OrderHash {
-                    hash: "0xabc0000000000000000000000000000000000000000000000000000000000000".into(),
+                    hash: "0xabc0000000000000000000000000000000000000000000000000000000000000"
+                        .into(),
                 }),
             },
         };

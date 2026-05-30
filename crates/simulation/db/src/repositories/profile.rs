@@ -1,6 +1,6 @@
 //! `user_profile` 테이블 — DB 파일을 소유한 사용자 (singleton).
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 use serde_json::Value as JsonValue;
 
 use crate::error::{DbError, DbResult};
@@ -22,7 +22,13 @@ pub fn insert(tx: &Transaction<'_>, p: &UserProfile) -> DbResult<()> {
     let res = tx.execute(
         "INSERT INTO user_profile (id, user_id, email, display_name, settings_json, created_at) \
          VALUES (1, ?1, ?2, ?3, ?4, ?5)",
-        params![p.user_id, p.email, p.display_name, settings_str, p.created_at],
+        params![
+            p.user_id,
+            p.email,
+            p.display_name,
+            settings_str,
+            p.created_at
+        ],
     );
     match res {
         Ok(_) => Ok(()),
@@ -49,7 +55,13 @@ pub fn upsert(tx: &Transaction<'_>, p: &UserProfile) -> DbResult<()> {
            email = excluded.email, \
            display_name = excluded.display_name, \
            settings_json = excluded.settings_json",
-        params![p.user_id, p.email, p.display_name, settings_str, p.created_at],
+        params![
+            p.user_id,
+            p.email,
+            p.display_name,
+            settings_str,
+            p.created_at
+        ],
     )?;
     Ok(())
 }

@@ -51,7 +51,9 @@ pub(crate) fn lower(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::doc_markdown)]
 mod tests {
-    use simulation_reducer::action::perp::{ClaimFundingAction, ClaimFundingLiveInputs, PerpAction};
+    use simulation_reducer::action::perp::{
+        ClaimFundingAction, ClaimFundingLiveInputs, PerpAction,
+    };
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::U256;
 

@@ -16,13 +16,13 @@ use serde_json::Value;
 
 use simulation_state::{Confidence, LiveField, PositionKind, Price, Time, WalletState};
 
-use crate::batcher::{BatchKind, FetchBatch, batch_by_source};
+use crate::batcher::{batch_by_source, BatchKind, FetchBatch};
+use crate::calc::{CalcContext, CalcRegistry};
 use crate::error::SyncError;
 use crate::fetchers::onchain::OnchainCall;
-use crate::calc::{CalcContext, CalcRegistry};
 use crate::fetchers::oracle::{provider_key, PriceFetcher, RestJsonOracleFetcher};
 use crate::fetchers::{ChainlinkFetcher, HyperliquidFetcher, OnchainViewFetcher, RegistryFetcher};
-use crate::walker::{FieldLocation, WalkStats, walk_stale};
+use crate::walker::{walk_stale, FieldLocation, WalkStats};
 
 /// 한 wallet refresh 결과 요약 — 디버깅 / 메트릭용.
 #[derive(Debug, Default, Clone)]
@@ -138,8 +138,7 @@ impl Orchestrator {
         let mut price_fetchers: HashMap<String, Arc<dyn PriceFetcher>> = HashMap::new();
 
         // Chainlink (on-chain).
-        let chainlink =
-            ChainlinkFetcher::from_sync_config(router.clone(), &cfg.oracles.chainlink);
+        let chainlink = ChainlinkFetcher::from_sync_config(router.clone(), &cfg.oracles.chainlink);
         price_fetchers.insert("chainlink".into(), Arc::new(chainlink));
 
         // REST oracles — 각 [oracles.rest.<name>] 블록당 fetcher 하나.
@@ -230,7 +229,10 @@ impl Orchestrator {
         let batches = batch_by_source(stale);
         for batch in batches {
             report.batches_processed += 1;
-            match self.process_batch_for_action(batch, action, state, now).await {
+            match self
+                .process_batch_for_action(batch, action, state, now)
+                .await
+            {
                 Ok((ok, fail)) => {
                     report.fields_updated += ok;
                     report.fields_failed += fail;
@@ -298,7 +300,12 @@ impl Orchestrator {
                 for (item, outcome) in batch.items.into_iter().zip(outcomes.into_iter()) {
                     if outcome.success {
                         if let Some(value) = outcome.value {
-                            crate::action_walk::apply_value_to_action(action, &item.location, value, now);
+                            crate::action_walk::apply_value_to_action(
+                                action,
+                                &item.location,
+                                value,
+                                now,
+                            );
                             ok += 1;
                         } else {
                             fail += 1;
@@ -315,7 +322,12 @@ impl Orchestrator {
                 for item in batch.items {
                     match reg.fetch(&item.source).await {
                         Ok(v) => {
-                            crate::action_walk::apply_value_to_action(action, &item.location, v, now);
+                            crate::action_walk::apply_value_to_action(
+                                action,
+                                &item.location,
+                                v,
+                                now,
+                            );
                             ok += 1;
                         }
                         Err(_) => fail += 1,
@@ -324,13 +336,22 @@ impl Orchestrator {
             }
             BatchKind::Venue { endpoint } => {
                 let is_hl = endpoint.contains("hyperliquid");
-                let Some(hl) = (if is_hl { self.hyperliquid.as_ref() } else { None }) else {
+                let Some(hl) = (if is_hl {
+                    self.hyperliquid.as_ref()
+                } else {
+                    None
+                }) else {
                     return Ok((0, batch.items.len()));
                 };
                 for item in batch.items {
                     match hl.fetch(&item.source).await {
                         Ok(v) => {
-                            crate::action_walk::apply_value_to_action(action, &item.location, v, now);
+                            crate::action_walk::apply_value_to_action(
+                                action,
+                                &item.location,
+                                v,
+                                now,
+                            );
                             ok += 1;
                         }
                         Err(_) => fail += 1,
@@ -468,7 +489,11 @@ impl Orchestrator {
                 // 향후 GMX/dYdX 추가 시 endpoint 패턴 매칭으로 분기.
                 let is_hl = endpoint.contains("hyperliquid")
                     || endpoint == "https://api.hyperliquid.xyz/info";
-                let hl = if is_hl { self.hyperliquid.as_ref() } else { None };
+                let hl = if is_hl {
+                    self.hyperliquid.as_ref()
+                } else {
+                    None
+                };
                 let hl = match hl {
                     Some(h) => h,
                     None => return Ok((0, batch.items.len())),
@@ -699,10 +724,8 @@ priority = 1
                 .with_ttl(Duration::from_secs(60)),
         };
 
-        let mut state = WalletState::new(WalletId::new(
-            Address::ZERO,
-            [ChainId::ethereum_mainnet()],
-        ));
+        let mut state =
+            WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
         state.positions.push(Position {
             id: "aave_v3:main".into(),
             protocol: simulation_state::ProtocolRef::new("aave_v3"),

@@ -363,9 +363,6 @@ endpoint = "https://api.hyperliquid.xyz/info?key=${TEST_HL_KEY}"
             .chains
             .get(&ChainId::new("eip155:42161"))
             .unwrap();
-        assert_ne!(
-            eth.feeds["USDC/USD"].address,
-            arb.feeds["USDC/USD"].address
-        );
+        assert_ne!(eth.feeds["USDC/USD"].address, arb.feeds["USDC/USD"].address);
     }
 }

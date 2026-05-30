@@ -102,7 +102,10 @@ fn lower_range_spec(range: &RangeSpec) -> Value {
             m.insert("kind".into(), Value::String("tick".into()));
             m.insert("tickLower".into(), Value::from(i64::from(*lower)));
             m.insert("tickUpper".into(), Value::from(i64::from(*upper)));
-            m.insert("liquidity".into(), Value::String(u256_hex(U256::from(*liquidity))));
+            m.insert(
+                "liquidity".into(),
+                Value::String(u256_hex(U256::from(*liquidity))),
+            );
         }
         RangeSpec::Bin { active_id, .. } => {
             m.insert("kind".into(), Value::String("bin".into()));
@@ -173,11 +176,7 @@ mod tests {
             },
             live_inputs: AddLiquidityLiveInputs {
                 pool_state: LiveField::new(pool_state, onchain_source(), now()),
-                current_price: LiveField::new(
-                    Decimal::new("1234.5678"),
-                    onchain_source(),
-                    now(),
-                ),
+                current_price: LiveField::new(Decimal::new("1234.5678"), onchain_source(), now()),
             },
         });
 
@@ -302,8 +301,8 @@ mod tests {
 
     /// A ConcentratedMint with a `RangeSpec::Custom` range (Maverick / unknown)
     /// — exercises the `custom` range arm (protocol emitted; raw dropped).
-    fn sample_concentrated_mint_custom_range()
-        -> (ActionBody, simulation_reducer::action::ActionMeta) {
+    fn sample_concentrated_mint_custom_range(
+    ) -> (ActionBody, simulation_reducer::action::ActionMeta) {
         let chain = ChainId::ethereum_mainnet();
         let venue = AmmVenue::MaverickV2 {
             chain: chain.clone(),

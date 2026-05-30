@@ -163,7 +163,10 @@ const PERMIT2_PERMIT_SINGLE_V3: &str = r#"{
 #[test]
 fn typed_data_permit2_permit_single_nested_wrapped() {
     let install = install_ok(PERMIT2_PERMIT_SINGLE_V3);
-    assert_eq!(install["data"]["bundle_id"], "uniswap/permit2/permitSingle@2.0.0");
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "uniswap/permit2/permitSingle@2.0.0"
+    );
 
     // EIP-712 message — the PermitSingle tuple's content directly (NO outer
     // `permitSingle` wrapper; the wrap rule supplies that).
@@ -323,7 +326,10 @@ fn typed_data_erc2612_permit_flat_unwrapped() {
     let out = declarative_route_typed_data_v3_json(input);
     let parsed: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(parsed["ok"], true, "route failed: {parsed}");
-    assert_eq!(parsed["data"]["decoder_id"], "standard/erc20/permit@2.0.0", "{parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "standard/erc20/permit@2.0.0",
+        "{parsed}"
+    );
 
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "token", "{parsed}");
@@ -339,8 +345,7 @@ fn typed_data_erc2612_permit_flat_unwrapped() {
     assert_eq!(body["token"]["key"]["address"], dai, "{parsed}");
     // deadline came from message.deadline (EIP-2612 has no sigDeadline).
     assert_eq!(
-        parsed["data"]["actions"][0]["meta"]["nature"]["deadline"],
-        1_738_002_000_u64,
+        parsed["data"]["actions"][0]["meta"]["nature"]["deadline"], 1_738_002_000_u64,
         "{parsed}"
     );
 }
@@ -591,8 +596,14 @@ fn typed_data_uniswapx_exclusive_dutch_sign_intent_order() {
     assert_eq!(body["sell_amount"], "0xde0b6b3a7640000", "{parsed}");
     // live_inputs NESTED layout with catalog defaults applied
     // (expected_fill_price: Price="0", competing_orders: u32=0).
-    assert_eq!(body["live_inputs"]["expected_fill_price"]["value"], "0", "{parsed}");
-    assert_eq!(body["live_inputs"]["competing_orders"]["value"], 0, "{parsed}");
+    assert_eq!(
+        body["live_inputs"]["expected_fill_price"]["value"], "0",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["live_inputs"]["competing_orders"]["value"], 0,
+        "{parsed}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -744,14 +755,7 @@ fn typed_data_no_typed_data_block_misses() {
     // manifest carried no `match.typed_data`, so the typed-data bridge is
     // empty for it.
     let message = json!({ "spender": SPENDER, "amount": "1000" });
-    let input = typed_data_input(
-        1,
-        USDC_MAINNET,
-        "Approve",
-        "USD Coin",
-        message,
-        SIGNER,
-    );
+    let input = typed_data_input(1, USDC_MAINNET, "Approve", "USD Coin", message, SIGNER);
 
     let out = declarative_route_typed_data_v3_json(input);
     let parsed: Value = serde_json::from_str(&out).unwrap();
@@ -870,7 +874,10 @@ const USDT_MAINNET: &str = "0xdac17f958d2ee523a2206206994597c13d831ec7";
 #[test]
 fn typed_data_permit2_permit_batch_array_emit() {
     let install = install_ok(PERMIT2_PERMIT_BATCH_V3);
-    assert_eq!(install["data"]["bundle_id"], "uniswap/permit2/permitBatch@2.0.0");
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "uniswap/permit2/permitBatch@2.0.0"
+    );
 
     // EIP-712 message — the PermitBatch content directly. `details` is a
     // 2-element array; the wrap rule supplies the outer `permitBatch` key.
@@ -904,7 +911,11 @@ fn typed_data_permit2_permit_batch_array_emit() {
     );
 
     let actions = parsed["data"]["actions"].as_array().expect("actions array");
-    assert_eq!(actions.len(), 1, "expected exactly 1 outer action: {parsed}");
+    assert_eq!(
+        actions.len(),
+        1,
+        "expected exactly 1 outer action: {parsed}"
+    );
 
     // OffchainSig nature on the single outer Action.
     let meta = &actions[0]["meta"];
@@ -922,9 +933,12 @@ fn typed_data_permit2_permit_batch_array_emit() {
     // element-0 — token = USDC, amount = 1000.
     assert_eq!(inner[0]["domain"], "token", "{parsed}");
     assert_eq!(inner[0]["action"], "permit2_sign_allowance", "{parsed}");
-    assert_eq!(inner[0]["token"]["key"]["address"], USDC_MAINNET, "{parsed}");
+    assert_eq!(
+        inner[0]["token"]["key"]["address"], USDC_MAINNET,
+        "{parsed}"
+    );
     assert_eq!(inner[0]["amount"], "0x3e8", "{parsed}"); // 1000
-    // batch-level spender / sig_deadline resolved via $args in per-item body.
+                                                         // batch-level spender / sig_deadline resolved via $args in per-item body.
     assert_eq!(inner[0]["spender"], SPENDER, "{parsed}");
     assert_eq!(inner[0]["sig_deadline"], 1_738_002_000_u64, "{parsed}");
     assert_eq!(inner[0]["expires_at"], 1_738_001_800_u64, "{parsed}");
@@ -934,7 +948,10 @@ fn typed_data_permit2_permit_batch_array_emit() {
 
     // element-1 — DIFFERENT token + amount + expiration prove per-element bind.
     assert_eq!(inner[1]["action"], "permit2_sign_allowance", "{parsed}");
-    assert_eq!(inner[1]["token"]["key"]["address"], USDT_MAINNET, "{parsed}");
+    assert_eq!(
+        inner[1]["token"]["key"]["address"], USDT_MAINNET,
+        "{parsed}"
+    );
     assert_eq!(inner[1]["amount"], "0x7d0", "{parsed}"); // 2000
     assert_eq!(inner[1]["expires_at"], 1_738_001_900_u64, "{parsed}");
     // batch-level fields shared across all elements.
@@ -1103,7 +1120,10 @@ fn typed_data_permit2_permit_batch_on_disk_manifest() {
 
     // OffchainSig nature carrying the Permit2 domain + sigDeadline.
     let action0 = &parsed["data"]["actions"][0];
-    assert_eq!(action0["meta"]["nature"]["kind"], "offchain_sig", "{parsed}");
+    assert_eq!(
+        action0["meta"]["nature"]["kind"], "offchain_sig",
+        "{parsed}"
+    );
     assert_eq!(
         action0["meta"]["nature"]["domain"]["name"], "Permit2",
         "{parsed}"
@@ -1117,7 +1137,10 @@ fn typed_data_permit2_permit_batch_on_disk_manifest() {
 
     // element-0 — token = USDC, amount = 1000, per-element expiration.
     assert_eq!(inner[0]["action"], "permit2_sign_allowance", "{parsed}");
-    assert_eq!(inner[0]["token"]["key"]["address"], USDC_MAINNET, "{parsed}");
+    assert_eq!(
+        inner[0]["token"]["key"]["address"], USDC_MAINNET,
+        "{parsed}"
+    );
     assert_eq!(inner[0]["amount"], "0x3e8", "{parsed}"); // 1000
     assert_eq!(inner[0]["expires_at"], 1_738_001_800_u64, "{parsed}");
     // batch-level spender / sig_deadline shared via $args in per-item body.
@@ -1127,7 +1150,10 @@ fn typed_data_permit2_permit_batch_on_disk_manifest() {
     assert_eq!(inner[0]["nonce"]["value"], json!(["0x0", 0]), "{parsed}");
 
     // element-1 — DIFFERENT token + amount + expiration prove per-element bind.
-    assert_eq!(inner[1]["token"]["key"]["address"], USDT_MAINNET, "{parsed}");
+    assert_eq!(
+        inner[1]["token"]["key"]["address"], USDT_MAINNET,
+        "{parsed}"
+    );
     assert_eq!(inner[1]["amount"], "0x7d0", "{parsed}"); // 2000
     assert_eq!(inner[1]["expires_at"], 1_738_001_900_u64, "{parsed}");
     assert_eq!(inner[1]["spender"], SPENDER, "{parsed}");

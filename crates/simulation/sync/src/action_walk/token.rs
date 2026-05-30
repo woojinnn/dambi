@@ -36,7 +36,14 @@ fn walk_erc20_permit(
     stale: &mut Vec<StaleField>,
     stats: &mut WalkStats,
 ) {
-    push_if_stale(stale, stats, &p.nonce, now, action_index, ActionSlot::TokenErc20PermitNonce);
+    push_if_stale(
+        stale,
+        stats,
+        &p.nonce,
+        now,
+        action_index,
+        ActionSlot::TokenErc20PermitNonce,
+    );
 }
 
 fn walk_permit2_sign(
@@ -46,7 +53,14 @@ fn walk_permit2_sign(
     stale: &mut Vec<StaleField>,
     stats: &mut WalkStats,
 ) {
-    push_if_stale(stale, stats, &p.nonce, now, action_index, ActionSlot::TokenPermit2SignNonce);
+    push_if_stale(
+        stale,
+        stats,
+        &p.nonce,
+        now,
+        action_index,
+        ActionSlot::TokenPermit2SignNonce,
+    );
 }
 
 pub(super) fn apply(ta: &mut TokenAction, slot: &ActionSlot, value: Value, now: Time) {

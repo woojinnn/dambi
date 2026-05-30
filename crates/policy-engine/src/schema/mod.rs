@@ -53,12 +53,10 @@ const LENDING_BORROW_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/borrow.cedarschema");
 const LENDING_DELEGATE_BORROW_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/delegate_borrow.cedarschema");
-const LENDING_DISABLE_COLLATERAL_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/lending/disable_collateral.cedarschema"
-);
-const LENDING_ENABLE_COLLATERAL_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/lending/enable_collateral.cedarschema"
-);
+const LENDING_DISABLE_COLLATERAL_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/lending/disable_collateral.cedarschema");
+const LENDING_ENABLE_COLLATERAL_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/lending/enable_collateral.cedarschema");
 const LENDING_LIQUIDATE_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/liquidate.cedarschema");
 const LENDING_REPAY_SCHEMA: &str =
@@ -73,18 +71,16 @@ const LENDING_WITHDRAW_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/withdraw.cedarschema");
 
 // launchpad (alphabetical)
-const LAUNCHPAD_CLAIM_ALLOCATION_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/launchpad/claim_allocation.cedarschema"
-);
+const LAUNCHPAD_CLAIM_ALLOCATION_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/launchpad/claim_allocation.cedarschema");
 const LAUNCHPAD_CLAIM_VESTED_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/launchpad/claim_vested.cedarschema");
 const LAUNCHPAD_COMMIT_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/launchpad/commit.cedarschema");
 const LAUNCHPAD_REFUND_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/launchpad/refund.cedarschema");
-const LAUNCHPAD_WITHDRAW_COMMIT_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/launchpad/withdraw_commit.cedarschema"
-);
+const LAUNCHPAD_WITHDRAW_COMMIT_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/launchpad/withdraw_commit.cedarschema");
 
 // perp (alphabetical)
 const PERP_ADJUST_MARGIN_SCHEMA: &str =
@@ -412,7 +408,6 @@ fn split_top_level_and_namespaces(text: &str) -> (String, Vec<(String, String)>)
     (top_level, blocks)
 }
 
-
 /// Given a slice starting *immediately after* an open brace `{`, return the
 /// index of the matching close brace `}`, accounting for nested braces.
 fn find_matching_close_brace(text: &str) -> Option<usize> {
@@ -643,8 +638,8 @@ mod base_schema_tests {
         // expected to be absent — they live only in -old/ and are validated by
         // `extension_manifests_validate.rs`.
         let text = base_schema_text();
-        let (schema, _warnings) = cedar_policy::Schema::from_cedarschema_str(&text)
-            .expect("base schema parses");
+        let (schema, _warnings) =
+            cedar_policy::Schema::from_cedarschema_str(&text).expect("base schema parses");
 
         // Cedar 4.10 renders action EntityUids as `<Namespace>::Action::"<Name>"`.
         // Spot-check one action per namespace.

@@ -318,8 +318,7 @@ mod tests {
         //
         // 너무 까다로워서 round-trip 으로 검증하는 별도 테스트는 실제 chain call 의
         // 응답으로 검증 (integration). 여기는 빈 array 만 검증.
-        let empty_return =
-            "0000000000000000000000000000000000000000000000000000000000000020\
+        let empty_return = "0000000000000000000000000000000000000000000000000000000000000020\
              0000000000000000000000000000000000000000000000000000000000000000";
         let bytes = hex::decode(empty_return).unwrap();
         let results = decode_aggregate3_returndata(&bytes).unwrap();

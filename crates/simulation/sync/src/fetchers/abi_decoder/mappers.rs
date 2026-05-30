@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub type MapperFn = fn(&Value) -> Option<Value>;
 
@@ -53,7 +53,10 @@ impl MapperRegistry {
         let mut r = Self::new();
         r.register("aave_v3_user_account_data", map_aave_v3_user_account_data);
         r.register("aave_v3_reserve_data", map_aave_v3_reserve_data);
-        r.register("aave_v3_current_borrow_rate", map_aave_v3_current_borrow_rate);
+        r.register(
+            "aave_v3_current_borrow_rate",
+            map_aave_v3_current_borrow_rate,
+        );
         r
     }
 }
@@ -188,7 +191,11 @@ fn scale_string_by_decimals(value_str: &str, decimals: usize) -> String {
             format!("{}.{}", int_part, frac_part)
         }
     };
-    if neg { format!("-{}", result) } else { result }
+    if neg {
+        format!("-{}", result)
+    } else {
+        result
+    }
 }
 
 fn _bp_to_decimal_string(v: &Value) -> Value {
@@ -228,16 +235,19 @@ mod tests {
     #[test]
     fn aave_user_account_data_maps_to_struct_shape() {
         let arr = Value::Array(vec![
-            Value::String("1000000000000".into()),  // collat
-            Value::String("500000000000".into()),   // debt
-            Value::String("300000000000".into()),   // available
-            Value::String("8000".into()),           // liq_threshold
-            Value::String("7500".into()),           // ltv
-            Value::String("1500000000000000000000000000".into()),  // hf = 1.5 ray
+            Value::String("1000000000000".into()),                // collat
+            Value::String("500000000000".into()),                 // debt
+            Value::String("300000000000".into()),                 // available
+            Value::String("8000".into()),                         // liq_threshold
+            Value::String("7500".into()),                         // ltv
+            Value::String("1500000000000000000000000000".into()), // hf = 1.5 ray
         ]);
         let mapped = map_aave_v3_user_account_data(&arr).unwrap();
         let obj = mapped.as_object().unwrap();
-        assert_eq!(obj["total_collat_usd"], Value::String("1000000000000".into()));
+        assert_eq!(
+            obj["total_collat_usd"],
+            Value::String("1000000000000".into())
+        );
         assert_eq!(obj["health_factor"], Value::String("1.5".into()));
     }
 

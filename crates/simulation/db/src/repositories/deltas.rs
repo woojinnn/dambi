@@ -2,7 +2,7 @@
 //!
 //! INSERT 위주 (append-only); status 전이는 UPDATE 헬퍼로 명시.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 use serde_json::Value as JsonValue;
 
 use crate::error::DbResult;
@@ -138,12 +138,7 @@ pub fn insert(tx: &Transaction<'_>, d: &DeltaInsert) -> DbResult<i64> {
 }
 
 /// status 전이 — `predicted` → `pending`.
-pub fn mark_pending(
-    tx: &Transaction<'_>,
-    id: i64,
-    signed_at: i64,
-    tx_hash: &str,
-) -> DbResult<()> {
+pub fn mark_pending(tx: &Transaction<'_>, id: i64, signed_at: i64, tx_hash: &str) -> DbResult<()> {
     tx.execute(
         "UPDATE state_deltas SET status = 'pending', signed_at = ?2, tx_hash = ?3 \
          WHERE id = ?1 AND status = 'predicted'",
@@ -241,7 +236,9 @@ pub fn count_by_status(tx: &Transaction<'_>, wallet_id: i64) -> DbResult<Vec<(St
         "SELECT status, COUNT(*) FROM state_deltas WHERE wallet_id = ?1 GROUP BY status",
     )?;
     let rows = stmt
-        .query_map(params![wallet_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .query_map(params![wallet_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }

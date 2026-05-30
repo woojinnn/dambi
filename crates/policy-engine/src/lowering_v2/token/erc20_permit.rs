@@ -27,10 +27,7 @@ pub(crate) fn lower(
     // `deadline` is a unix-seconds Long (JSON number).
     m.insert("deadline".into(), Value::from(action.deadline.as_unix()));
     // `nonce` is a `LiveField<U256>`; inline its inner value as U256 hex.
-    m.insert(
-        "nonce".into(),
-        Value::String(u256_hex(action.nonce.value)),
-    );
+    m.insert("nonce".into(), Value::String(u256_hex(action.nonce.value)));
     // `amountNano` / `amountUsd` / `custom` are host-populated — OMITTED here.
 
     Ok(ctx.lowered(r#"Token::Action::"Erc20Permit""#, Value::Object(m)))
@@ -48,9 +45,7 @@ mod tests {
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::{Time, U256};
 
-    use super::super::test_support::{
-        live_u256, offchain_meta, sample_erc20_token, spender,
-    };
+    use super::super::test_support::{live_u256, offchain_meta, sample_erc20_token, spender};
 
     #[test]
     fn erc20_permit_lowering_conforms_to_schema() {

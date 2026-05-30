@@ -86,7 +86,7 @@ mod tests {
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::Address;
 
-    use super::super::test_support::{live, onchain_meta, user_state, usdc, venue, weth};
+    use super::super::test_support::{live, onchain_meta, usdc, user_state, venue, weth};
 
     /// A representative e-mode selection (category 1) with a price source and
     /// two eligible assets — exercises `priceSource` PRESENT, `categoryCode`

@@ -77,29 +77,23 @@ fn apply_call_outputs(
                 output.kind
             )));
         }
-        let materialized = match super::resolve_selector(
-            &output.from,
-            &empty,
-            &empty,
-            &empty,
-            payload,
-            &empty,
-        )
-        .and_then(|selected| materialize_value(&selected, &output.type_name))
-        {
-            Ok(value) => value,
-            Err(error) => {
-                // Mirror v1's per-output branch: branch on `optional`, not on
-                // the legacy `output.required` discriminator.
-                if call.optional {
-                    continue;
+        let materialized =
+            match super::resolve_selector(&output.from, &empty, &empty, &empty, payload, &empty)
+                .and_then(|selected| materialize_value(&selected, &output.type_name))
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    // Mirror v1's per-output branch: branch on `optional`, not on
+                    // the legacy `output.required` discriminator.
+                    if call.optional {
+                        continue;
+                    }
+                    return Err(PolicyRpcError::SystemFail {
+                        call_id: call.call_id.clone(),
+                        reason: error.to_string(),
+                    });
                 }
-                return Err(PolicyRpcError::SystemFail {
-                    call_id: call.call_id.clone(),
-                    reason: error.to_string(),
-                });
-            }
-        };
+            };
         insert_custom_field(context, &output.field, materialized)?;
     }
     Ok(())
@@ -159,9 +153,9 @@ fn materialize_value(value: &Value, type_name: &ProjectionType) -> Result<Value,
             .map(crate::cedar_json::decimal_json)
             .ok_or_else(|| PolicyRpcError::RpcResult("expected Decimal string".to_owned())),
         ProjectionType::SetString => {
-            let array = value
-                .as_array()
-                .ok_or_else(|| PolicyRpcError::RpcResult("expected Set<String> array".to_owned()))?;
+            let array = value.as_array().ok_or_else(|| {
+                PolicyRpcError::RpcResult("expected Set<String> array".to_owned())
+            })?;
             let mut out = Vec::with_capacity(array.len());
             for entry in array {
                 let entry = entry.as_str().ok_or_else(|| {
@@ -283,8 +277,16 @@ mod tests {
     fn duplicate_custom_field_across_calls_collides() {
         let mut context = json!({});
         let calls = vec![
-            planned("m::a", vec![projection("foo", "String", "$.result.foo")], false),
-            planned("m::b", vec![projection("foo", "String", "$.result.foo")], false),
+            planned(
+                "m::a",
+                vec![projection("foo", "String", "$.result.foo")],
+                false,
+            ),
+            planned(
+                "m::b",
+                vec![projection("foo", "String", "$.result.foo")],
+                false,
+            ),
         ];
         let mut results = BTreeMap::new();
         results.insert("m::a".to_owned(), json!({ "foo": "alpha" }));
@@ -292,7 +294,8 @@ mod tests {
 
         let err = materialize_v2(&mut context, &calls, &results).unwrap_err();
         assert!(
-            err.to_string().contains("would overwrite an existing context field"),
+            err.to_string()
+                .contains("would overwrite an existing context field"),
             "{err}"
         );
     }
@@ -470,7 +473,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(planned.len(), 1);
-        assert_eq!(planned[0].call_id, "large-swap-usd-warning::total-input-usd");
+        assert_eq!(
+            planned[0].call_id,
+            "large-swap-usd-warning::total-input-usd"
+        );
         let lowered_recipient = lowered.context["recipient"].clone();
         assert_eq!(planned[0].params["recipient"], lowered_recipient);
         assert_eq!(planned[0].params["chain_id"], json!("eip155:42161"));
@@ -478,10 +484,7 @@ mod tests {
         // 2. Materialize a simulated oracle result into context.custom.
         let mut context = lowered.context.clone();
         let mut results = BTreeMap::new();
-        results.insert(
-            planned[0].call_id.clone(),
-            json!({ "usd": "3500.1200" }),
-        );
+        results.insert(planned[0].call_id.clone(), json!({ "usd": "3500.1200" }));
         materialize_v2(&mut context, &planned, &results).unwrap();
         assert_eq!(
             context["custom"]["totalInputUsd"],
@@ -504,11 +507,9 @@ mod tests {
             forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
             when { context has custom && context.custom has totalInputUsd \
             && context.custom.totalInputUsd.greaterThan(decimal(\"1000.0000\")) };\n";
-        let engine = crate::policy::PolicyEngine::build_from_per_policy(&[(
-            policy.to_owned(),
-            schema_text,
-        )])
-        .unwrap();
+        let engine =
+            crate::policy::PolicyEngine::build_from_per_policy(&[(policy.to_owned(), schema_text)])
+                .unwrap();
         let verdict = engine
             .evaluate(
                 &lowered.principal,

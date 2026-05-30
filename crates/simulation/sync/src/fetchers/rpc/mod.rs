@@ -22,8 +22,8 @@ pub mod router;
 pub mod rpc_types;
 
 pub use config::{ProviderConfig, RpcConfig};
-pub use rpc_types::{BlockTag, EthCallRequest, ProviderName};
 pub use router::RpcRouter;
+pub use rpc_types::{BlockTag, EthCallRequest, ProviderName};
 
 /// 한 RPC provider 의 표준 인터페이스.
 ///

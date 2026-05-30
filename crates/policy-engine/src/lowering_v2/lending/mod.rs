@@ -89,8 +89,7 @@ pub(crate) fn lower_lending_venue(venue: &LendingVenue) -> Value {
             m.insert("marketIdStr".into(), Value::String(market_id.clone()));
         }
         // MorphoOptimizer and Fluid both expose only `{ chain, vault }`.
-        LendingVenue::MorphoOptimizer { chain, vault }
-        | LendingVenue::Fluid { chain, vault } => {
+        LendingVenue::MorphoOptimizer { chain, vault } | LendingVenue::Fluid { chain, vault } => {
             m.insert("chain".into(), Value::String(chain.to_string()));
             m.insert("vault".into(), Value::String(addr(vault)));
         }
@@ -231,16 +230,13 @@ mod tests {
 
         let morpho = lower_lending_venue(&LendingVenue::MorphoBlue {
             chain,
-            market_id: "0xabc0000000000000000000000000000000000000000000000000000000000000"
-                .into(),
+            market_id: "0xabc0000000000000000000000000000000000000000000000000000000000000".into(),
         });
         assert_eq!(morpho["name"], serde_json::json!("morpho_blue"));
         assert!(morpho.get("marketId").is_none());
         assert_eq!(
             morpho["marketIdStr"],
-            serde_json::json!(
-                "0xabc0000000000000000000000000000000000000000000000000000000000000"
-            )
+            serde_json::json!("0xabc0000000000000000000000000000000000000000000000000000000000000")
         );
     }
 
@@ -264,7 +260,10 @@ mod tests {
         });
         assert_eq!(venue["name"], serde_json::json!("compound_v3"));
         assert_eq!(venue["comet"], serde_json::json!(format!("{comet:#x}")));
-        assert_eq!(venue["baseAsset"]["key"]["standard"], serde_json::json!("erc20"));
+        assert_eq!(
+            venue["baseAsset"]["key"]["standard"],
+            serde_json::json!("erc20")
+        );
     }
 
     /// `rate_mode_str` matches the serde `snake_case` discriminants.
@@ -287,9 +286,7 @@ mod tests {
 pub(crate) mod test_support {
     use std::str::FromStr;
 
-    use simulation_reducer::action::lending::{
-        LendingVenue, ReserveState, UserLendingState,
-    };
+    use simulation_reducer::action::lending::{LendingVenue, ReserveState, UserLendingState};
     use simulation_reducer::action::{ActionBody, ActionMeta, ActionNature, Eip712Domain};
     use simulation_state::live_field::{DataSource, OracleProvider};
     use simulation_state::primitives::{Address, ChainId, Decimal, Time, U256};
@@ -385,8 +382,7 @@ pub(crate) mod test_support {
     pub(crate) fn venue_compound_v2() -> LendingVenue {
         LendingVenue::CompoundV2 {
             chain: ChainId::ethereum_mainnet(),
-            comptroller: Address::from_str("0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b")
-                .unwrap(),
+            comptroller: Address::from_str("0x3d9819210a31b4961b30ef54be2aed79b9c9cd3b").unwrap(),
         }
     }
 
@@ -394,8 +390,7 @@ pub(crate) mod test_support {
     pub(crate) fn venue_morpho_blue() -> LendingVenue {
         LendingVenue::MorphoBlue {
             chain: ChainId::ethereum_mainnet(),
-            market_id: "0xb323495f7e4148be5643a4ea4a8221eef163e4bccfdedc2a6f4696baacbc86cc"
-                .into(),
+            market_id: "0xb323495f7e4148be5643a4ea4a8221eef163e4bccfdedc2a6f4696baacbc86cc".into(),
         }
     }
 
@@ -535,8 +530,8 @@ pub(crate) mod test_support {
         .unwrap();
         let schema_text = crate::schema::compose_per_policy(&manifest).unwrap();
         let (schema, _w) = cedar_policy::Schema::from_cedarschema_str(&schema_text).unwrap();
-        let lowered = crate::lowering_v2::lower_action(body, meta, &TxMeta { from: FROM, to: TO })
-            .unwrap();
+        let lowered =
+            crate::lowering_v2::lower_action(body, meta, &TxMeta { from: FROM, to: TO }).unwrap();
         let uid: cedar_policy::EntityUid = lowered.action_uid.parse().unwrap();
         cedar_policy::Context::from_json_value(lowered.context.clone(), Some((&schema, &uid)))
             .unwrap_or_else(|e| panic!("{tag} context must conform: {e:?}"));

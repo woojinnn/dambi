@@ -26,7 +26,10 @@ pub(crate) fn lower(
     m.insert("venue".into(), lower_intent_venue(&action.venue));
     m.insert("sell".into(), lower_token_ref(&action.sell));
     m.insert("buy".into(), lower_token_ref(&action.buy));
-    m.insert("sellAmount".into(), Value::String(u256_hex(action.sell_amount)));
+    m.insert(
+        "sellAmount".into(),
+        Value::String(u256_hex(action.sell_amount)),
+    );
     // `sellAmountNano` / `sellAmountUsd` are host-populated 3-layer siblings —
     // always omitted here.
     m.insert("buyMin".into(), Value::String(u256_hex(action.buy_min)));
@@ -36,7 +39,10 @@ pub(crate) fn lower(
         Value::String(intent_order_kind(&action.order_kind).into()),
     );
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
-    m.insert("validUntil".into(), Value::from(action.valid_until.as_unix()));
+    m.insert(
+        "validUntil".into(),
+        Value::from(action.valid_until.as_unix()),
+    );
     // `expected_fill_price` is LiveField<Price>; Price is a decimal-string.
     m.insert(
         "expectedFillPrice".into(),
@@ -83,7 +89,10 @@ mod tests {
     /// A sign-intent order parameterized by `venue` + `order_kind`, offchain-sig
     /// meta. Lets every `IntentVenue` arm and every `IntentOrderKind` arm be
     /// driven through the strict conformance gate.
-    fn sample_sign_intent_with(venue: IntentVenue, order_kind: IntentOrderKind) -> (ActionBody, ActionMeta) {
+    fn sample_sign_intent_with(
+        venue: IntentVenue,
+        order_kind: IntentOrderKind,
+    ) -> (ActionBody, ActionMeta) {
         let chain = ChainId::ethereum_mainnet();
 
         let sign = AmmAction::SignIntentOrder(SignIntentOrderAction {

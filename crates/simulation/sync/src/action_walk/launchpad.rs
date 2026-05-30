@@ -39,10 +39,38 @@ fn walk_commit(
     stats: &mut WalkStats,
 ) {
     let li = &c.live_inputs;
-    push_if_stale(stale, stats, &li.sale_state, now, action_index, ActionSlot::LaunchpadCommitSaleState);
-    push_if_stale(stale, stats, &li.user_cap, now, action_index, ActionSlot::LaunchpadCommitUserCap);
-    push_if_stale(stale, stats, &li.user_committed, now, action_index, ActionSlot::LaunchpadCommitUserCommitted);
-    push_if_stale(stale, stats, &li.expected_token_price, now, action_index, ActionSlot::LaunchpadCommitExpectedTokenPrice);
+    push_if_stale(
+        stale,
+        stats,
+        &li.sale_state,
+        now,
+        action_index,
+        ActionSlot::LaunchpadCommitSaleState,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.user_cap,
+        now,
+        action_index,
+        ActionSlot::LaunchpadCommitUserCap,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.user_committed,
+        now,
+        action_index,
+        ActionSlot::LaunchpadCommitUserCommitted,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.expected_token_price,
+        now,
+        action_index,
+        ActionSlot::LaunchpadCommitExpectedTokenPrice,
+    );
 }
 
 fn walk_claim_alloc(
@@ -53,9 +81,30 @@ fn walk_claim_alloc(
     stats: &mut WalkStats,
 ) {
     let li = &c.live_inputs;
-    push_if_stale(stale, stats, &li.allocated, now, action_index, ActionSlot::LaunchpadClaimAllocationAllocated);
-    push_if_stale(stale, stats, &li.refund_due, now, action_index, ActionSlot::LaunchpadClaimAllocationRefundDue);
-    push_if_stale(stale, stats, &li.is_claimable, now, action_index, ActionSlot::LaunchpadClaimAllocationIsClaimable);
+    push_if_stale(
+        stale,
+        stats,
+        &li.allocated,
+        now,
+        action_index,
+        ActionSlot::LaunchpadClaimAllocationAllocated,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.refund_due,
+        now,
+        action_index,
+        ActionSlot::LaunchpadClaimAllocationRefundDue,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.is_claimable,
+        now,
+        action_index,
+        ActionSlot::LaunchpadClaimAllocationIsClaimable,
+    );
 }
 
 fn walk_claim_vested(
@@ -66,8 +115,22 @@ fn walk_claim_vested(
     stats: &mut WalkStats,
 ) {
     let li = &c.live_inputs;
-    push_if_stale(stale, stats, &li.claimable_now, now, action_index, ActionSlot::LaunchpadClaimVestedClaimableNow);
-    push_if_stale(stale, stats, &li.next_unlock, now, action_index, ActionSlot::LaunchpadClaimVestedNextUnlock);
+    push_if_stale(
+        stale,
+        stats,
+        &li.claimable_now,
+        now,
+        action_index,
+        ActionSlot::LaunchpadClaimVestedClaimableNow,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.next_unlock,
+        now,
+        action_index,
+        ActionSlot::LaunchpadClaimVestedNextUnlock,
+    );
 }
 
 fn walk_refund(
@@ -78,8 +141,22 @@ fn walk_refund(
     stats: &mut WalkStats,
 ) {
     let li = &r.live_inputs;
-    push_if_stale(stale, stats, &li.refund_amount, now, action_index, ActionSlot::LaunchpadRefundAmount);
-    push_if_stale(stale, stats, &li.refund_token, now, action_index, ActionSlot::LaunchpadRefundToken);
+    push_if_stale(
+        stale,
+        stats,
+        &li.refund_amount,
+        now,
+        action_index,
+        ActionSlot::LaunchpadRefundAmount,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.refund_token,
+        now,
+        action_index,
+        ActionSlot::LaunchpadRefundToken,
+    );
 }
 
 fn walk_withdraw(
@@ -90,8 +167,22 @@ fn walk_withdraw(
     stats: &mut WalkStats,
 ) {
     let li = &w.live_inputs;
-    push_if_stale(stale, stats, &li.withdrawable, now, action_index, ActionSlot::LaunchpadWithdrawCommitWithdrawable);
-    push_if_stale(stale, stats, &li.sale_state, now, action_index, ActionSlot::LaunchpadWithdrawCommitSaleState);
+    push_if_stale(
+        stale,
+        stats,
+        &li.withdrawable,
+        now,
+        action_index,
+        ActionSlot::LaunchpadWithdrawCommitWithdrawable,
+    );
+    push_if_stale(
+        stale,
+        stats,
+        &li.sale_state,
+        now,
+        action_index,
+        ActionSlot::LaunchpadWithdrawCommitSaleState,
+    );
 }
 
 pub(super) fn apply(la: &mut LaunchpadAction, slot: &ActionSlot, value: Value, now: Time) {
@@ -108,16 +199,24 @@ fn apply_commit(c: &mut CommitAction, slot: &ActionSlot, value: Value, now: Time
     let li = &mut c.live_inputs;
     match slot {
         ActionSlot::LaunchpadCommitSaleState => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.sale_state, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.sale_state, v, now);
+            }
         }
         ActionSlot::LaunchpadCommitUserCap => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.user_cap, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.user_cap, u, now);
+            }
         }
         ActionSlot::LaunchpadCommitUserCommitted => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.user_committed, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.user_committed, u, now);
+            }
         }
         ActionSlot::LaunchpadCommitExpectedTokenPrice => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.expected_token_price, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.expected_token_price, v, now);
+            }
         }
         _ => {}
     }
@@ -127,13 +226,19 @@ fn apply_claim_alloc(c: &mut ClaimAllocationAction, slot: &ActionSlot, value: Va
     let li = &mut c.live_inputs;
     match slot {
         ActionSlot::LaunchpadClaimAllocationAllocated => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.allocated, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.allocated, v, now);
+            }
         }
         ActionSlot::LaunchpadClaimAllocationRefundDue => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.refund_due, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.refund_due, u, now);
+            }
         }
         ActionSlot::LaunchpadClaimAllocationIsClaimable => {
-            if let Value::Bool(b) = value { set_field(&mut li.is_claimable, b, now); }
+            if let Value::Bool(b) = value {
+                set_field(&mut li.is_claimable, b, now);
+            }
         }
         _ => {}
     }
@@ -143,10 +248,14 @@ fn apply_claim_vested(c: &mut ClaimVestedAction, slot: &ActionSlot, value: Value
     let li = &mut c.live_inputs;
     match slot {
         ActionSlot::LaunchpadClaimVestedClaimableNow => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.claimable_now, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.claimable_now, u, now);
+            }
         }
         ActionSlot::LaunchpadClaimVestedNextUnlock => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.next_unlock, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.next_unlock, v, now);
+            }
         }
         _ => {}
     }
@@ -156,10 +265,14 @@ fn apply_refund(r: &mut RefundAction, slot: &ActionSlot, value: Value, now: Time
     let li = &mut r.live_inputs;
     match slot {
         ActionSlot::LaunchpadRefundAmount => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.refund_amount, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.refund_amount, u, now);
+            }
         }
         ActionSlot::LaunchpadRefundToken => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.refund_token, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.refund_token, v, now);
+            }
         }
         _ => {}
     }
@@ -169,10 +282,14 @@ fn apply_withdraw(w: &mut WithdrawCommitAction, slot: &ActionSlot, value: Value,
     let li = &mut w.live_inputs;
     match slot {
         ActionSlot::LaunchpadWithdrawCommitWithdrawable => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.withdrawable, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.withdrawable, u, now);
+            }
         }
         ActionSlot::LaunchpadWithdrawCommitSaleState => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.sale_state, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.sale_state, v, now);
+            }
         }
         _ => {}
     }

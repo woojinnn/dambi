@@ -22,10 +22,7 @@ pub(crate) fn lower(
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_intent_venue(&action.venue));
-    m.insert(
-        "orderHash".into(),
-        Value::String(action.order_hash.clone()),
-    );
+    m.insert("orderHash".into(), Value::String(action.order_hash.clone()));
     // `signature` (EIP-712 cancel sig, 0x-hex bytes) → String; omitted when
     // absent.
     if let Some(signature) = &action.signature {
@@ -62,8 +59,7 @@ mod tests {
 
         let cancel = AmmAction::CancelIntentOrder(CancelIntentOrderAction {
             venue,
-            order_hash: "0xabc0000000000000000000000000000000000000000000000000000000000000"
-                .into(),
+            order_hash: "0xabc0000000000000000000000000000000000000000000000000000000000000".into(),
             signature: Some("0xdeadbeef".into()),
         });
 
@@ -94,8 +90,7 @@ mod tests {
 
         let cancel = AmmAction::CancelIntentOrder(CancelIntentOrderAction {
             venue,
-            order_hash: "0xdef0000000000000000000000000000000000000000000000000000000000000"
-                .into(),
+            order_hash: "0xdef0000000000000000000000000000000000000000000000000000000000000".into(),
             signature: None,
         });
 
@@ -116,8 +111,7 @@ mod tests {
 
         let cancel = AmmAction::CancelIntentOrder(CancelIntentOrderAction {
             venue,
-            order_hash: "0xabc0000000000000000000000000000000000000000000000000000000000000"
-                .into(),
+            order_hash: "0xabc0000000000000000000000000000000000000000000000000000000000000".into(),
             signature: Some("0xfeedface".into()),
         });
 
@@ -149,8 +143,7 @@ mod tests {
 
         let cancel = AmmAction::CancelIntentOrder(CancelIntentOrderAction {
             venue,
-            order_hash: "0x1110000000000000000000000000000000000000000000000000000000000000"
-                .into(),
+            order_hash: "0x1110000000000000000000000000000000000000000000000000000000000000".into(),
             signature: None,
         });
 
@@ -191,7 +184,10 @@ mod tests {
             lowered.context["signature"],
             serde_json::json!("0xfeedface")
         );
-        assert_eq!(lowered.context["venue"]["name"], serde_json::json!("uniswap_x"));
+        assert_eq!(
+            lowered.context["venue"]["name"],
+            serde_json::json!("uniswap_x")
+        );
     }
 
     /// 1inch Fusion bare `{ chain }` arm + None(signature) branch (signature

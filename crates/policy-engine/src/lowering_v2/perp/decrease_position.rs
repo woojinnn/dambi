@@ -23,9 +23,15 @@ pub(crate) fn lower(
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_perp_venue(&action.venue));
-    m.insert("positionId".into(), Value::String(action.position_id.clone()));
+    m.insert(
+        "positionId".into(),
+        Value::String(action.position_id.clone()),
+    );
     m.insert("size".into(), lower_size_spec(&action.size));
-    m.insert("slippageBp".into(), Value::from(i64::from(action.slippage_bp)));
+    m.insert(
+        "slippageBp".into(),
+        Value::from(i64::from(action.slippage_bp)),
+    );
     // ClosePerpLiveInputs flattened.
     m.insert(
         "markPrice".into(),

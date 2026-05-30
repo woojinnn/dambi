@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 
-use alloy_primitives::{Address, U256, keccak256};
-use serde_json::{Value, json};
+use alloy_primitives::{keccak256, Address, U256};
+use serde_json::{json, Value};
 
 use crate::error::SyncError;
 
@@ -174,7 +174,10 @@ mod tests {
     #[test]
     fn selectors_match_known() {
         // balanceOf(address) = 0x70a08231
-        assert_eq!(function_selector("balanceOf(address)"), [0x70, 0xa0, 0x82, 0x31]);
+        assert_eq!(
+            function_selector("balanceOf(address)"),
+            [0x70, 0xa0, 0x82, 0x31]
+        );
         // allowance(address,address) = 0xdd62ed3e
         assert_eq!(
             function_selector("allowance(address,address)"),

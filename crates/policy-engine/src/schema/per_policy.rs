@@ -40,7 +40,8 @@ use super::{
     PERP_OPEN_POSITION_SCHEMA, PERP_PLACE_LIMIT_ORDER_SCHEMA, PERP_PLACE_STOP_ORDER_SCHEMA,
     TOKEN_ERC20_APPROVE_SCHEMA, TOKEN_ERC20_PERMIT_SCHEMA, TOKEN_ERC20_TRANSFER_SCHEMA,
     TOKEN_NFT_APPROVE_SCHEMA, TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA, TOKEN_NFT_TRANSFER_SCHEMA,
-    TOKEN_PERMIT2_APPROVE_SCHEMA, TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA, TOKEN_REVOKE_APPROVAL_SCHEMA,
+    TOKEN_PERMIT2_APPROVE_SCHEMA, TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA,
+    TOKEN_REVOKE_APPROVAL_SCHEMA,
 };
 
 /// One row of the action resolver: the `(domain, action_tag)` a trigger can
@@ -503,10 +504,7 @@ fn render_custom_body(
 /// block from its cedarschema text. The shipped action `.cedarschema` files are
 /// the single source of truth for an action's base context fields; the
 /// manifest-extensible `custom` slot is excluded.
-fn context_base_fields(
-    schema_text: &str,
-    pascal_stub: &str,
-) -> std::collections::BTreeSet<String> {
+fn context_base_fields(schema_text: &str, pascal_stub: &str) -> std::collections::BTreeSet<String> {
     let mut fields = std::collections::BTreeSet::new();
     let needle = format!("type {pascal_stub}Context = {{");
     let Some(start) = schema_text.find(&needle) else {
@@ -816,10 +814,7 @@ mod tests {
                     msg.contains("recipient"),
                     "error must name the colliding field: {msg}"
                 );
-                assert!(
-                    msg.contains("swap"),
-                    "error must name the action: {msg}"
-                );
+                assert!(msg.contains("swap"), "error must name the action: {msg}");
             }
             other => panic!("expected PolicyRpcError::Schema, got {other:?}"),
         }
@@ -843,9 +838,12 @@ mod tests {
             schema_version: 2,
             trigger: Trigger {
                 scope: TriggerScope::Inner,
-                where_: [(TriggerField::ActionTag, TriggerConstraint::Eq("swap".to_owned()))]
-                    .into_iter()
-                    .collect(),
+                where_: [(
+                    TriggerField::ActionTag,
+                    TriggerConstraint::Eq("swap".to_owned()),
+                )]
+                .into_iter()
+                .collect(),
             },
             policy_rpc: Vec::new(),
             custom_context: CustomContext {
@@ -958,9 +956,8 @@ mod tests {
         // 2. lint custom-field references against the manifest.
         lint_custom_field_refs(policy_cedar, &manifest).expect("refs declared");
         // 3. install: the policy strict-validates against its own schema.
-        let engine =
-            PolicyEngine::build_from_per_policy(&[(policy_cedar.to_owned(), schema)])
-                .expect("policy validates against its synthesized schema");
+        let engine = PolicyEngine::build_from_per_policy(&[(policy_cedar.to_owned(), schema)])
+            .expect("policy validates against its synthesized schema");
 
         // 4a. input over the threshold → warn-severity forbid fires.
         let over = json!({
@@ -975,7 +972,10 @@ mod tests {
                 &over,
             )
             .expect("evaluate over");
-        assert!(matches!(verdict, Verdict::Warn(_)), "expected Warn, got {verdict:?}");
+        assert!(
+            matches!(verdict, Verdict::Warn(_)),
+            "expected Warn, got {verdict:?}"
+        );
 
         // 4b. input under the threshold → baseline permit → pass.
         let under = json!({
@@ -990,6 +990,9 @@ mod tests {
                 &under,
             )
             .expect("evaluate under");
-        assert!(matches!(verdict, Verdict::Pass), "expected Pass, got {verdict:?}");
+        assert!(
+            matches!(verdict, Verdict::Pass),
+            "expected Pass, got {verdict:?}"
+        );
     }
 }

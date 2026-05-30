@@ -51,12 +51,11 @@ pub fn parse_live_inputs(manifest_subtree: &Value) -> Result<LiveInputsSpec, Syn
 
     let mut out = HashMap::with_capacity(obj.len());
     for (slot_name, slot_json) in obj {
-        let spec: LiveInputSpec = serde_json::from_value(slot_json.clone()).map_err(|e| {
-            SyncError::FetchFailed {
+        let spec: LiveInputSpec =
+            serde_json::from_value(slot_json.clone()).map_err(|e| SyncError::FetchFailed {
                 source_id: "manifest_v2".into(),
                 reason: format!("live_inputs[{}] parse: {}", slot_name, e),
-            }
-        })?;
+            })?;
         out.insert(slot_name.clone(), spec);
     }
     Ok(out)

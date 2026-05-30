@@ -26,9 +26,7 @@ use simulation_state::pending::{
     AssetCommitment, NonceKey, PendingKind, PendingLifecycle, PendingStatus, PendingTx,
 };
 use simulation_state::primitives::Spender;
-use simulation_state::{
-    DataSource, EvalContext, PendingChange, StateDelta, TokenKey, WalletState,
-};
+use simulation_state::{DataSource, EvalContext, PendingChange, StateDelta, TokenKey, WalletState};
 
 use crate::action::token::{
     Erc20ApproveAction, Erc20PermitAction, Erc20TransferAction, NftApproveAction,
@@ -58,12 +56,7 @@ fn pending_id_for_eip2612(token_addr_hex: &str, spender_hex: &str, nonce: &str) 
     format!("eip2612:{token_addr_hex}:{spender_hex}:{nonce}")
 }
 
-fn pending_id_for_permit2(
-    token_addr_hex: &str,
-    spender_hex: &str,
-    word: &str,
-    bit: u8,
-) -> String {
+fn pending_id_for_permit2(token_addr_hex: &str, spender_hex: &str, word: &str, bit: u8) -> String {
     format!("permit2:{token_addr_hex}:{spender_hex}:{word}:{bit}")
 }
 
@@ -452,7 +445,10 @@ mod tests {
 
     fn make_usdc_holding(amount: u128) -> TokenHolding {
         let key = usdc_ref().key;
-        let contract = key.contract().copied().unwrap_or_else(|| Address::from([0u8; 20]));
+        let contract = key
+            .contract()
+            .copied()
+            .unwrap_or_else(|| Address::from([0u8; 20]));
         TokenHolding {
             key,
             kind: TokenKind::Base {
@@ -476,7 +472,10 @@ mod tests {
     }
 
     fn make_nft_holding(key: TokenKey, balance: Balance) -> TokenHolding {
-        let contract = key.contract().copied().unwrap_or_else(|| Address::from([0u8; 20]));
+        let contract = key
+            .contract()
+            .copied()
+            .unwrap_or_else(|| Address::from([0u8; 20]));
         TokenHolding {
             key,
             kind: TokenKind::Unknown,
@@ -497,8 +496,7 @@ mod tests {
     }
 
     fn live_nonce_u256(value: U256) -> LiveField<U256> {
-        LiveField::new(value, DataSource::UserSupplied, now())
-            .with_ttl(Duration::from_secs(60))
+        LiveField::new(value, DataSource::UserSupplied, now()).with_ttl(Duration::from_secs(60))
     }
 
     fn live_nonce_pair(word: U256, bit: u8) -> LiveField<(U256, u8)> {
@@ -788,7 +786,9 @@ mod tests {
     fn nft_transfer_erc721_emits_minus_one_balance_delta() {
         let mut state = empty_state();
         let key = nft_key(7);
-        state.tokens.insert(key.clone(), make_nft_holding(key.clone(), Balance::Owned));
+        state
+            .tokens
+            .insert(key.clone(), make_nft_holding(key.clone(), Balance::Owned));
 
         let action = NftTransferAction {
             nft_key: key.clone(),
@@ -808,9 +808,10 @@ mod tests {
     fn nft_transfer_erc1155_emits_balance_delta_fungible() {
         let mut state = empty_state();
         let key = erc1155_key(11);
-        state
-            .tokens
-            .insert(key.clone(), make_nft_holding(key.clone(), Balance::fungible(U256::from(10u64))));
+        state.tokens.insert(
+            key.clone(),
+            make_nft_holding(key.clone(), Balance::fungible(U256::from(10u64))),
+        );
 
         let action = NftTransferAction {
             nft_key: key.clone(),
@@ -830,9 +831,10 @@ mod tests {
     fn nft_transfer_erc1155_without_amount_is_invariant() {
         let mut state = empty_state();
         let key = erc1155_key(11);
-        state
-            .tokens
-            .insert(key.clone(), make_nft_holding(key.clone(), Balance::fungible(U256::from(10u64))));
+        state.tokens.insert(
+            key.clone(),
+            make_nft_holding(key.clone(), Balance::fungible(U256::from(10u64))),
+        );
         let action = NftTransferAction {
             nft_key: key,
             amount: None,

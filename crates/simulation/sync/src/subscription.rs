@@ -163,10 +163,7 @@ priority = 1
 
     #[test]
     fn ws_placeholder_returns_unimplemented_error() {
-        let r = WsBlockSubscription::new(
-            "wss://example".into(),
-            ChainId::ethereum_mainnet(),
-        );
+        let r = WsBlockSubscription::new("wss://example".into(), ChainId::ethereum_mainnet());
         assert!(r.is_err());
     }
 }

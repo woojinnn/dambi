@@ -6,7 +6,7 @@ use serde_json::Value;
 use tsify_next::Tsify;
 
 use super::token_ref::TokenRef;
-use crate::primitives::{U128, U256, Weight};
+use crate::primitives::{Weight, U128, U256};
 
 /// LP share 가 fungible (ERC20) 인지 NFT (ERC721) 인지.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]

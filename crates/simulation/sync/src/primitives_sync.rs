@@ -82,7 +82,9 @@ impl Orchestrator {
                             report.native_balances_updated += 1;
                         }
                     }
-                    Err(e) => report.errors.push(format!("balance native {}: {}", chain, e)),
+                    Err(e) => report
+                        .errors
+                        .push(format!("balance native {}: {}", chain, e)),
                 }
             }
         }
@@ -134,7 +136,9 @@ impl Orchestrator {
                         }
                     }
                 }
-                Err(e) => report.errors.push(format!("erc20 multicall {}: {}", chain, e)),
+                Err(e) => report
+                    .errors
+                    .push(format!("erc20 multicall {}: {}", chain, e)),
             }
         }
 
@@ -156,8 +160,11 @@ impl Orchestrator {
         };
 
         // 갱신할 (chain, token, spender) 목록을 먼저 수집 (immutable borrow 끝낸 뒤 write).
-        let mut to_refresh: Vec<(simulation_state::ChainId, alloy_primitives::Address, alloy_primitives::Address)> =
-            Vec::new();
+        let mut to_refresh: Vec<(
+            simulation_state::ChainId,
+            alloy_primitives::Address,
+            alloy_primitives::Address,
+        )> = Vec::new();
         for ((chain, token), spenders) in &state.approvals.erc20 {
             for spender in spenders.keys() {
                 to_refresh.push((chain.clone(), *token, *spender));
@@ -214,7 +221,10 @@ priority = 1
         let orch = Orchestrator::new(crate::fetchers::OnchainViewFetcher::new(onchain_router));
         let mut state =
             WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
-        let report = orch.sync_primitives(&mut state, Time::from_unix(0)).await.unwrap();
+        let report = orch
+            .sync_primitives(&mut state, Time::from_unix(0))
+            .await
+            .unwrap();
         assert!(!report.errors.is_empty());
     }
 }

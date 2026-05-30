@@ -45,7 +45,8 @@ const MIGRATION_003: Migration = Migration {
 
 const MIGRATION_004: Migration = Migration {
     version: 4,
-    description: "pending_txs — offchain signature ledger (UniswapX intent / Permit2 / Safe pre-sign)",
+    description:
+        "pending_txs — offchain signature ledger (UniswapX intent / Permit2 / Safe pre-sign)",
     sql: include_str!("migrations/004_pending_txs.sql"),
 };
 
@@ -112,11 +113,9 @@ pub fn current_version(pool: &Pool) -> DbResult<Option<i64>> {
             return Ok(None);
         }
         let v: Option<i64> = c
-            .query_row(
-                "SELECT MAX(version) FROM _schema_migrations",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT MAX(version) FROM _schema_migrations", [], |r| {
+                r.get(0)
+            })
             .ok();
         Ok(v)
     })

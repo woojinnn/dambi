@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
 
 use crate::position::PerpSide;
-use crate::primitives::{Address, MarketRef, Price, Time, U256, VenueRef};
+use crate::primitives::{Address, MarketRef, Price, Time, VenueRef, U256};
 use crate::token::TokenRef;
 
 /// `UniswapX` / `CowSwap` / 1inch Fusion 등 오프체인 매칭 주문의 종류.

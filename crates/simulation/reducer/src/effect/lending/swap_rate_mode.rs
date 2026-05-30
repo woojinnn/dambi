@@ -29,7 +29,10 @@ use super::position_id;
 impl Reducer for SwapRateModeAction {
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
         let _ = ctx;
-        if !matches!(self.venue, LendingVenue::AaveV2 { .. } | LendingVenue::AaveV3 { .. }) {
+        if !matches!(
+            self.venue,
+            LendingVenue::AaveV2 { .. } | LendingVenue::AaveV3 { .. }
+        ) {
             return Err(ReducerError::UnsupportedProtocol {
                 action: "swap_rate_mode".into(),
                 protocol: super::venue_tag(&self.venue).into(),
@@ -144,11 +147,7 @@ mod tests {
                 debts: vec![(asset, U256::from(amount), mode)],
                 emode: None,
                 is_isolated: false,
-                health_factor: LiveField::new(
-                    Decimal::new("2.0"),
-                    DataSource::UserSupplied,
-                    now(),
-                ),
+                health_factor: LiveField::new(Decimal::new("2.0"), DataSource::UserSupplied, now()),
                 ltv: LiveField::new(Decimal::zero(), DataSource::UserSupplied, now()),
                 liquidation_threshold: LiveField::new(
                     Decimal::new("0.8250"),
@@ -203,7 +202,9 @@ mod tests {
         let state = state_with(usdc_ref(), 1_000, RateMode::Variable);
         // Already in Variable; cannot swap "to Variable" because there is no
         // Stable entry to swap from.
-        let err = action(RateMode::Variable).apply(&state, &ctx()).unwrap_err();
+        let err = action(RateMode::Variable)
+            .apply(&state, &ctx())
+            .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("no debt entry")));
     }
 

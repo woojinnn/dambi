@@ -416,7 +416,10 @@ fn increase_amount_yields_amount_kind() {
     let action = unwrap_lock_increase(&envelopes[0]);
 
     assert_eq!(action.kind, LockIncreaseKind::Amount);
-    assert_eq!(action.token_id.as_ref().map(ToString::to_string), Some("42".to_owned()));
+    assert_eq!(
+        action.token_id.as_ref().map(ToString::to_string),
+        Some("42".to_owned())
+    );
     let amount = action
         .additional_amount
         .as_ref()
@@ -449,7 +452,10 @@ fn increase_unlock_time_yields_unlock_time_kind() {
     let action = unwrap_lock_increase(&envelopes[0]);
 
     assert_eq!(action.kind, LockIncreaseKind::UnlockTime);
-    assert_eq!(action.token_id.as_ref().map(ToString::to_string), Some("42".to_owned()));
+    assert_eq!(
+        action.token_id.as_ref().map(ToString::to_string),
+        Some("42".to_owned())
+    );
     // The principal-addition field must be unset for the `unlock_time` kind.
     assert!(action.additional_amount.is_none());
     assert_eq!(

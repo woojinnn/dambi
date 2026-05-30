@@ -155,12 +155,13 @@ impl ChainlinkFetcher {
                 });
             }
         };
-        let feed = self.registry.lookup(&feed_id).ok_or_else(|| {
-            SyncError::FetchFailed {
+        let feed = self
+            .registry
+            .lookup(&feed_id)
+            .ok_or_else(|| SyncError::FetchFailed {
                 source_id: "chainlink".into(),
                 reason: format!("unknown feed_id: {}", feed_id),
-            }
-        })?;
+            })?;
 
         // latestRoundData() selector = first 4 bytes of keccak("latestRoundData()")
         let selector = function_selector("latestRoundData()");

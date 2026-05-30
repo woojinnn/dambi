@@ -1,17 +1,17 @@
 //! `token_holdings` CRUD.
 
 use alloy_primitives::Address;
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 
 use simulation_state::token::{TokenHolding, TokenKey};
 
-use crate::codec::{
-    decode_balance, decode_token_key, encode_balance, encode_token_key, token_hash, BalanceColumns,
-    TokenColumns,
-};
 use crate::codec::live_field::{
     datasource_from_json, datasource_to_json, decode_optional_price_live_field,
     encode_optional_price_live_field,
+};
+use crate::codec::{
+    decode_balance, decode_token_key, encode_balance, encode_token_key, token_hash, BalanceColumns,
+    TokenColumns,
 };
 use crate::error::{DbError, DbResult};
 
@@ -20,11 +20,7 @@ use simulation_state::token::TokenKind;
 /// (wallet_id, token_key) 의 holding 을 INSERT or REPLACE.
 ///
 /// 호출 전에 `tokens.upsert` 로 token catalog 가 보장되어야 함 (FK).
-pub fn upsert(
-    tx: &Transaction<'_>,
-    wallet_id: i64,
-    holding: &TokenHolding,
-) -> DbResult<()> {
+pub fn upsert(tx: &Transaction<'_>, wallet_id: i64, holding: &TokenHolding) -> DbResult<()> {
     let token_hash = token_hash(&holding.key);
     let balance = encode_balance(&holding.balance);
     let committed = encode_balance(&holding.committed);
@@ -64,7 +60,11 @@ pub fn upsert(
             committed.form,
             committed.amount,
             approved_to,
-            pv, ps, pt, pc, psrc,
+            pv,
+            ps,
+            pt,
+            pc,
+            psrc,
             last_synced_at,
             primitives_src,
         ],
@@ -79,10 +79,7 @@ pub fn upsert(
 /// 반환은 (token_hash, symbol_cache, decimals_cache, balance_cols, committed_cols,
 /// approved_to, price_cols, last_synced_at, primitives_source).
 #[allow(clippy::type_complexity)]
-pub fn raw_list_for_wallet(
-    tx: &Transaction<'_>,
-    wallet_id: i64,
-) -> DbResult<Vec<HoldingRowRaw>> {
+pub fn raw_list_for_wallet(tx: &Transaction<'_>, wallet_id: i64) -> DbResult<Vec<HoldingRowRaw>> {
     let mut stmt = tx.prepare(
         "SELECT h.token_hash, t.standard, t.chain, t.address, t.contract, t.token_id, \
                 t.symbol_cache, t.decimals_cache, \
@@ -210,9 +207,11 @@ impl HoldingRowRaw {
         let primitives_source = datasource_from_json(&self.primitives_source_json)?;
         let approved_to = self
             .approved_to
-            .map(|s| Address::parse_checksummed(&s, None)
-                .or_else(|_| s.parse::<Address>())
-                .map_err(|e| DbError::Invariant(format!("approved_to: {e}"))))
+            .map(|s| {
+                Address::parse_checksummed(&s, None)
+                    .or_else(|_| s.parse::<Address>())
+                    .map_err(|e| DbError::Invariant(format!("approved_to: {e}")))
+            })
             .transpose()?;
         let last_synced_at = u64::try_from(self.last_synced_at)
             .map_err(|_| DbError::Invariant("last_synced_at negative".into()))?;
@@ -221,7 +220,9 @@ impl HoldingRowRaw {
             key,
             kind,
             symbol: self.symbol_cache.unwrap_or_default(),
-            decimals: self.decimals_cache.map_or(0, |d| u8::try_from(d).unwrap_or(0)),
+            decimals: self
+                .decimals_cache
+                .map_or(0, |d| u8::try_from(d).unwrap_or(0)),
             balance,
             committed,
             approved_to,
@@ -280,9 +281,7 @@ mod tests {
             balance: Balance::Fungible {
                 amount: U256::from(2_500_000_000u64),
             },
-            committed: Balance::Fungible {
-                amount: U256::ZERO,
-            },
+            committed: Balance::Fungible { amount: U256::ZERO },
             approved_to: None,
             price_usd: Some(
                 LiveField::new(

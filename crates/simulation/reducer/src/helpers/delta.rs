@@ -95,11 +95,7 @@ fn mint_stub_holding(key: &TokenKey, kind_hint: TokenKind) -> TokenHolding {
 }
 
 /// Apply a `BalanceDelta` to the matching holding.
-fn apply_balance_delta(
-    next: &mut WalletState,
-    key: &TokenKey,
-    d: SignedI256,
-) -> ReducerResult<()> {
+fn apply_balance_delta(next: &mut WalletState, key: &TokenKey, d: SignedI256) -> ReducerResult<()> {
     let holding = next
         .tokens
         .get_mut(key)
@@ -245,25 +241,27 @@ fn apply_token_change(next: &mut WalletState, tc: &TokenChange) -> ReducerResult
 /// 2. `{ <field path>: <value>, ... }` — field-level merge via
 ///    `serde_json::Value` map. Each key replaces the corresponding top-level
 ///    field on the JSON-serialised position. Unknown keys cause `Invariant`.
-fn apply_position_patch(target: &mut simulation_state::position::Position, patch: &PositionPatch) -> ReducerResult<()> {
+fn apply_position_patch(
+    target: &mut simulation_state::position::Position,
+    patch: &PositionPatch,
+) -> ReducerResult<()> {
     let fields = &patch.fields;
 
     // Form 1: explicit "after".
     if let Some(after) = fields.get("after") {
-        let new_pos: simulation_state::position::Position =
-            serde_json::from_value(after.clone()).map_err(|e| {
-                ReducerError::Invariant(format!(
-                    "PositionPatch.after did not deserialise as Position: {e}"
-                ))
-            })?;
+        let new_pos: simulation_state::position::Position = serde_json::from_value(after.clone())
+            .map_err(|e| {
+            ReducerError::Invariant(format!(
+                "PositionPatch.after did not deserialise as Position: {e}"
+            ))
+        })?;
         *target = new_pos;
         return Ok(());
     }
 
     // Form 2: field-level merge. Round-trip via serde_json::Value.
-    let mut as_json = serde_json::to_value(&*target).map_err(|e| {
-        ReducerError::Invariant(format!("Position serialise failed: {e}"))
-    })?;
+    let mut as_json = serde_json::to_value(&*target)
+        .map_err(|e| ReducerError::Invariant(format!("Position serialise failed: {e}")))?;
     let target_obj = as_json.as_object_mut().ok_or_else(|| {
         ReducerError::Invariant("Position did not serialise as JSON object".into())
     })?;
@@ -275,9 +273,8 @@ fn apply_position_patch(target: &mut simulation_state::position::Position, patch
     for (k, v) in patch_obj {
         target_obj.insert(k.clone(), v.clone());
     }
-    *target = serde_json::from_value(as_json).map_err(|e| {
-        ReducerError::Invariant(format!("Position re-deserialise failed: {e}"))
-    })?;
+    *target = serde_json::from_value(as_json)
+        .map_err(|e| ReducerError::Invariant(format!("Position re-deserialise failed: {e}")))?;
     Ok(())
 }
 
@@ -362,7 +359,9 @@ fn apply_gas_paid(next: &mut WalletState, token: &TokenRef, amount: U256) -> Red
             "gas underflow on {key:?}: current {current}, gas {amount}"
         ))
     })?;
-    holding.balance = Balance::Fungible { amount: next_amount };
+    holding.balance = Balance::Fungible {
+        amount: next_amount,
+    };
     Ok(())
 }
 
@@ -469,13 +468,9 @@ mod tests {
     use simulation_state::approval::AllowanceSpec;
     use simulation_state::delta::{PositionChange, PositionPatch, TokenChange};
     use simulation_state::live_field::DataSource;
-    use simulation_state::position::{
-        AirdropClaim, ClaimStatus, Position, PositionKind,
-    };
+    use simulation_state::position::{AirdropClaim, ClaimStatus, Position, PositionKind};
     use simulation_state::primitives::{ChainId, ProtocolRef, Time};
-    use simulation_state::token::{
-        BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKind,
-    };
+    use simulation_state::token::{BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKind};
     use simulation_state::wallet::WalletId;
     use std::str::FromStr;
 
@@ -587,8 +582,7 @@ mod tests {
     fn apply_delta_approval_set_erc20() {
         let key = mainnet_usdc_key();
         let state = state_with(make_fungible_holding(key.clone(), 1_000));
-        let spender =
-            Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
+        let spender = Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
         let addr = *key.contract().unwrap();
         let mut delta = StateDelta::new();
         delta.token_changes.push(TokenChange::ApprovalSet {
@@ -610,19 +604,16 @@ mod tests {
     #[test]
     fn apply_delta_approval_revoke_erc20() {
         let key = mainnet_usdc_key();
-        let spender =
-            Address::from_str("0x2222222222222222222222222222222222222222").unwrap();
+        let spender = Address::from_str("0x2222222222222222222222222222222222222222").unwrap();
 
         // Pre-seed the wallet with an existing allowance so revoke has
         // something to remove.
         let mut state = state_with(make_fungible_holding(key.clone(), 1_000));
         let addr_key = (ChainId::ethereum_mainnet(), *key.contract().unwrap());
-        state
-            .approvals
-            .erc20
-            .entry(addr_key)
-            .or_default()
-            .insert(spender, AllowanceSpec::new(U256::from(100u64), Time::from_unix(0)));
+        state.approvals.erc20.entry(addr_key).or_default().insert(
+            spender,
+            AllowanceSpec::new(U256::from(100u64), Time::from_unix(0)),
+        );
 
         let mut delta = StateDelta::new();
         delta.token_changes.push(TokenChange::ApprovalRevoke {
@@ -835,7 +826,13 @@ mod tests {
             merged_applied.tokens.get(&key).unwrap().balance
         );
         assert_eq!(
-            stepwise.tokens.get(&key).unwrap().balance.as_fungible().unwrap(),
+            stepwise
+                .tokens
+                .get(&key)
+                .unwrap()
+                .balance
+                .as_fungible()
+                .unwrap(),
             U256::from(750u64)
         );
     }

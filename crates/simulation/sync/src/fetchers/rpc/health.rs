@@ -55,8 +55,7 @@ impl HealthTracker {
         let entry = self.states.entry(provider.to_string()).or_default();
         entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
         if entry.consecutive_failures >= threshold {
-            entry.unhealthy_until =
-                Some(Instant::now() + std::time::Duration::from_secs(cooldown));
+            entry.unhealthy_until = Some(Instant::now() + std::time::Duration::from_secs(cooldown));
         }
     }
 }

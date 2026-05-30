@@ -185,7 +185,10 @@ mod tests {
     fn registered_actions_unique() {
         let mut seen = std::collections::BTreeSet::new();
         for a in REGISTERED_ACTIONS {
-            assert!(seen.insert(*a), "duplicate action `{a}` in REGISTERED_ACTIONS");
+            assert!(
+                seen.insert(*a),
+                "duplicate action `{a}` in REGISTERED_ACTIONS"
+            );
         }
     }
 }

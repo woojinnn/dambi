@@ -58,8 +58,10 @@ fn known_safe_executors() -> &'static HashMap<&'static str, Vec<Address>> {
         // (deployment registry).
         m.insert(
             "one_inch_v6",
-            vec![Address::from_str("0x111111125421ca6dc452d289314280a0f8842a65")
-                .expect("hard-coded 1inch v6 router literal is valid")],
+            vec![
+                Address::from_str("0x111111125421ca6dc452d289314280a0f8842a65")
+                    .expect("hard-coded 1inch v6 router literal is valid"),
+            ],
         );
         m
     })
@@ -341,7 +343,9 @@ mod tests {
         let mut m = meta_1inch_v6(None, false);
         m.raw_calldata_hash = "0xdeadbeef".into();
         let err = verify_calldata_hash(&m).unwrap_err();
-        assert!(matches!(&err, ReducerError::Invariant(msg) if msg.contains("invalid raw_calldata_hash")));
+        assert!(
+            matches!(&err, ReducerError::Invariant(msg) if msg.contains("invalid raw_calldata_hash"))
+        );
     }
 
     /// Missing `0x` prefix rejected.
@@ -350,7 +354,9 @@ mod tests {
         let mut m = meta_1inch_v6(None, false);
         m.raw_calldata_hash = "00".repeat(32);
         let err = verify_calldata_hash(&m).unwrap_err();
-        assert!(matches!(&err, ReducerError::Invariant(msg) if msg.contains("invalid raw_calldata_hash")));
+        assert!(
+            matches!(&err, ReducerError::Invariant(msg) if msg.contains("invalid raw_calldata_hash"))
+        );
     }
 
     /// Non-hex character rejected (correct length, correct prefix).
@@ -367,7 +373,11 @@ mod tests {
     // apply_permit_bundle
     // -----------------------------------------------------------------------
 
-    fn make_holding(token: &TokenRef, balance: U256, symbol: &str) -> simulation_state::token::TokenHolding {
+    fn make_holding(
+        token: &TokenRef,
+        balance: U256,
+        symbol: &str,
+    ) -> simulation_state::token::TokenHolding {
         let contract = token
             .key
             .contract()
@@ -491,7 +501,10 @@ mod tests {
         assert_eq!(allowance.amount, U256::from(1_000u64));
         assert!(!allowance.is_unlimited);
         // 1-hour default TTL.
-        assert_eq!(allowance.last_set_at, now().saturating_add(PERMIT_BUNDLE_DEFAULT_TTL));
+        assert_eq!(
+            allowance.last_set_at,
+            now().saturating_add(PERMIT_BUNDLE_DEFAULT_TTL)
+        );
     }
 
     /// `executor.is_none()` falls back to the router address as the

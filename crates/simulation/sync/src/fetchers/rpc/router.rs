@@ -31,7 +31,10 @@ impl std::fmt::Debug for RpcRouter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RpcRouter")
             .field("chains", &self.by_chain.keys().collect::<Vec<_>>())
-            .field("multicall_chains", &self.multicall.keys().collect::<Vec<_>>())
+            .field(
+                "multicall_chains",
+                &self.multicall.keys().collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -84,10 +87,13 @@ impl RpcRouter {
         F: FnMut(Arc<dyn RpcProvider>) -> Fut,
         Fut: std::future::Future<Output = Result<T, SyncError>>,
     {
-        let providers = self.by_chain.get(chain).ok_or_else(|| SyncError::FetchFailed {
-            source_id: "router".into(),
-            reason: format!("no providers for chain {}", chain),
-        })?;
+        let providers = self
+            .by_chain
+            .get(chain)
+            .ok_or_else(|| SyncError::FetchFailed {
+                source_id: "router".into(),
+                reason: format!("no providers for chain {}", chain),
+            })?;
 
         let mut last_err: Option<SyncError> = None;
         for provider in providers {
@@ -132,8 +138,11 @@ impl RpcRouter {
         addr: Address,
         block: BlockTag,
     ) -> Result<U256, SyncError> {
-        self.try_all(chain, move |p| async move { p.eth_balance(addr, block).await })
-            .await
+        self.try_all(
+            chain,
+            move |p| async move { p.eth_balance(addr, block).await },
+        )
+        .await
     }
 
     pub async fn eth_block_number(&self, chain: &ChainId) -> Result<u64, SyncError> {

@@ -79,9 +79,7 @@ pub(super) fn compute_d(balances: &[U256], a: u32) -> ReducerResult<U256> {
     let n_u32 = u32::try_from(balances.len())
         .map_err(|_| ReducerError::Invariant("curve_v1 D: too many coins".into()))?;
     if n_u32 == 0 {
-        return Err(ReducerError::Invariant(
-            "curve_v1 D: empty balances".into(),
-        ));
+        return Err(ReducerError::Invariant("curve_v1 D: empty balances".into()));
     }
     let n = U256::from(n_u32);
 
@@ -116,9 +114,7 @@ pub(super) fn compute_d(balances: &[U256], a: u32) -> ReducerResult<U256> {
         let mut d_p = d;
         for x in balances {
             if x.is_zero() {
-                return Err(ReducerError::Invariant(
-                    "curve_v1 D: zero balance".into(),
-                ));
+                return Err(ReducerError::Invariant("curve_v1 D: zero balance".into()));
             }
             let denom = x
                 .checked_mul(n)
@@ -238,9 +234,7 @@ pub(super) fn compute_y(
         }
         let x_k = if k == i { new_x_i } else { *b_k };
         if x_k.is_zero() {
-            return Err(ReducerError::Invariant(
-                "curve_v1 y: zero x_k".into(),
-            ));
+            return Err(ReducerError::Invariant("curve_v1 y: zero x_k".into()));
         }
         s_prime = s_prime
             .checked_add(x_k)
@@ -404,7 +398,11 @@ mod tests {
         .unwrap();
         // 1 wei tolerance for Newton convergence + the on-chain `-1` rounding.
         let target = U256::from(1_000u64);
-        let diff = if out > target { out - target } else { target - out };
+        let diff = if out > target {
+            out - target
+        } else {
+            target - out
+        };
         assert!(diff <= U256::from(2u64), "out = {out}, expected ≈ 1_000");
     }
 
@@ -426,7 +424,10 @@ mod tests {
         )
         .unwrap();
         // ~ 1_000 - 0.3% = 997. Allow a small (≤ 2 wei) Newton slack.
-        assert!(out <= U256::from(998u64) && out >= U256::from(996u64), "out = {out}");
+        assert!(
+            out <= U256::from(998u64) && out >= U256::from(996u64),
+            "out = {out}"
+        );
     }
 
     /// Zero `amount_in` short-circuits to zero out.

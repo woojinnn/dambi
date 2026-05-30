@@ -219,9 +219,14 @@ mod tests {
                 // reserve_out missing
             }),
         };
-        let err =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(1u64))
-                .unwrap_err();
+        let err = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(1u64),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("reserve_out")));
     }
 
@@ -232,8 +237,7 @@ mod tests {
             mode: "mode_static".into(),
             raw: json!({}),
         };
-        let out =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::ZERO).unwrap();
+        let out = quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::ZERO).unwrap();
         assert_eq!(out, U256::ZERO);
     }
 
@@ -245,9 +249,14 @@ mod tests {
             reserve_out: U256::from(1u64),
             fee_bp: 0,
         };
-        let err =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(1u64))
-                .unwrap_err();
+        let err = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(1u64),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("Maverick")));
     }
 

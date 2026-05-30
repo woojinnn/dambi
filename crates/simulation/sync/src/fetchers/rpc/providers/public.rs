@@ -6,7 +6,7 @@
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use simulation_state::ChainId;
 

@@ -12,7 +12,7 @@ pub mod nonce;
 
 pub use commitment::AssetCommitment;
 pub use kind::{OrderKind, PendingKind, PerpOrderKind};
-pub use nonce::{B256, NonceKey, TxHash};
+pub use nonce::{NonceKey, TxHash, B256};
 
 use crate::delta::StateDelta;
 use crate::live_field::DataSource;

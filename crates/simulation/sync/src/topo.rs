@@ -67,10 +67,7 @@ pub fn topological_sort(nodes: Vec<DepNode>) -> Result<Vec<String>, SyncError> {
 
     if sorted.len() != all_ids.len() {
         return Err(SyncError::CyclicDeps(
-            sorted
-                .last()
-                .cloned()
-                .unwrap_or_else(|| "<unknown>".into()),
+            sorted.last().cloned().unwrap_or_else(|| "<unknown>".into()),
         ));
     }
     Ok(sorted)

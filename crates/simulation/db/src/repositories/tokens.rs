@@ -3,7 +3,7 @@
 //! 같은 USDC 를 여러 wallet 이 들고 있어도 tokens row 는 1개. `token_hash` 가
 //! PK 이므로 [`upsert`] 가 멱등.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 
 use simulation_state::token::TokenKey;
 
@@ -69,12 +69,12 @@ pub fn get(tx: &Transaction<'_>, token_hash: [u8; 16]) -> DbResult<Option<TokenR
                 r.get::<_, i64>(7)?,
             ))
         });
-    let (standard, chain, address, contract, token_id, symbol, decimals, first_seen_at) =
-        match row {
-            Ok(t) => t,
-            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
+    let (standard, chain, address, contract, token_id, symbol, decimals, first_seen_at) = match row
+    {
+        Ok(t) => t,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
 
     let cols = crate::codec::TokenColumns {
         token_hash,

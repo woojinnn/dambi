@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
 
 use crate::live_field::LiveField;
-use crate::primitives::{Decimal, MarketRef, Price, SignedI256, U256, VenueRef};
+use crate::primitives::{Decimal, MarketRef, Price, SignedI256, VenueRef, U256};
 use crate::token::TokenRef;
 
 /// 포지션 방향.
