@@ -139,6 +139,48 @@ impl Reducer for RemoveLiquidityAction {
                 }
             }
 
+            // ---------- Pooled burn, single coin (Curve NG) ----------
+            RemoveLiquidityParams::PooledBurnOneCoin {
+                lp_token,
+                lp_amount,
+                token_out,
+                min_out,
+                recipient: _,
+            } => {
+                require_pooled_venue(&self.venue, "remove_liquidity")?;
+                helpers::balance::debit(state, &mut delta, &lp_token.key, *lp_amount)?;
+                // Single underlying coin credited at the signed floor (actual
+                // out >= min_out, so the floor is the conservative under-estimate).
+                helpers::balance::credit(state, &mut delta, &token_out.key, *min_out)?;
+                for (token_ref, amount) in &self.live_inputs.fees_owed.value {
+                    if *amount != U256::ZERO {
+                        helpers::balance::credit(state, &mut delta, &token_ref.key, *amount)?;
+                    }
+                }
+            }
+
+            // ---------- Pooled burn, imbalanced (Curve NG) ----------
+            RemoveLiquidityParams::PooledBurnImbalance {
+                lp_token,
+                max_lp_burn,
+                amounts_out,
+                recipient: _,
+            } => {
+                require_pooled_venue(&self.venue, "remove_liquidity")?;
+                // The user signed an LP CAP; the actual burn is <= max_lp_burn.
+                // Debiting the cap is the conservative over-estimate of LP
+                // outflow (mirrors PooledBurn trusting the signed lp_amount).
+                helpers::balance::debit(state, &mut delta, &lp_token.key, *max_lp_burn)?;
+                for (token_ref, amount) in amounts_out {
+                    helpers::balance::credit(state, &mut delta, &token_ref.key, *amount)?;
+                }
+                for (token_ref, amount) in &self.live_inputs.fees_owed.value {
+                    if *amount != U256::ZERO {
+                        helpers::balance::credit(state, &mut delta, &token_ref.key, *amount)?;
+                    }
+                }
+            }
+
             // ---------- Concentrated decrease (V3 / V4 partial) ----------
             RemoveLiquidityParams::ConcentratedDecrease {
                 nft_key,
@@ -306,6 +348,17 @@ mod tests {
         }
     }
 
+    fn curve_venue() -> AmmVenue {
+        // Curve NG pool == LP token, so `lp_ref` (the v2_pool_addr-keyed token)
+        // doubles as both pool and LP here.
+        AmmVenue::CurveV1 {
+            chain: ChainId::ethereum_mainnet(),
+            pool: v2_pool_addr(),
+            n_coins: 2,
+            is_meta: false,
+        }
+    }
+
     fn empty_pool_state() -> PoolState {
         PoolState::XyConstant {
             reserve_in: U256::ZERO,
@@ -467,6 +520,82 @@ mod tests {
                 assert_eq!(protocol, "uniswap_v3");
             }
             other => panic!("expected UnsupportedProtocol, got {other:?}"),
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // PooledBurnOneCoin / PooledBurnImbalance (Curve NG)
+    // ----------------------------------------------------------------------
+
+    /// `PooledBurnOneCoin` debits LP and credits the single `token_out` at the
+    /// signed floor. Empty `fees_owed` → exactly 2 changes.
+    #[test]
+    fn pooled_burn_one_coin_debits_lp_credits_single_coin() {
+        let state = state_with_lp_and_pair();
+        let action = RemoveLiquidityAction {
+            venue: curve_venue(),
+            params: RemoveLiquidityParams::PooledBurnOneCoin {
+                lp_token: lp_ref(),
+                lp_amount: U256::from(100u64),
+                token_out: usdc_ref(),
+                min_out: U256::from(500u64),
+                recipient: user(),
+            },
+            live_inputs: make_live_inputs(vec![]),
+        };
+        let delta = action.apply(&state, &ctx()).unwrap();
+        assert_eq!(delta.token_changes.len(), 2);
+        match &delta.token_changes[0] {
+            TokenChange::BalanceDelta { key, delta: d } => {
+                assert_eq!(*key, lp_ref().key);
+                assert!(d.is_negative());
+                assert_eq!(d.unsigned_abs().to_string(), "100");
+            }
+            other => panic!("expected LP debit, got {other:?}"),
+        }
+        match &delta.token_changes[1] {
+            TokenChange::BalanceDelta { key, delta: d } => {
+                assert_eq!(*key, usdc_ref().key);
+                assert_eq!(*d, SignedI256::try_from(500i64).unwrap());
+            }
+            other => panic!("expected single-coin credit, got {other:?}"),
+        }
+    }
+
+    /// `PooledBurnImbalance` debits the LP CAP (`max_lp_burn`, conservative
+    /// over-estimate) and credits each `amounts_out`. → 1 + 2 = 3 changes.
+    #[test]
+    fn pooled_burn_imbalance_debits_max_lp_credits_each_coin() {
+        let state = state_with_lp_and_pair();
+        let action = RemoveLiquidityAction {
+            venue: curve_venue(),
+            params: RemoveLiquidityParams::PooledBurnImbalance {
+                lp_token: lp_ref(),
+                max_lp_burn: U256::from(200u64),
+                amounts_out: vec![
+                    (usdc_ref(), U256::from(300u64)),
+                    (weth_ref(), U256::from(400u64)),
+                ],
+                recipient: user(),
+            },
+            live_inputs: make_live_inputs(vec![]),
+        };
+        let delta = action.apply(&state, &ctx()).unwrap();
+        assert_eq!(delta.token_changes.len(), 3);
+        match &delta.token_changes[0] {
+            TokenChange::BalanceDelta { key, delta: d } => {
+                assert_eq!(*key, lp_ref().key);
+                assert!(d.is_negative());
+                assert_eq!(d.unsigned_abs().to_string(), "200");
+            }
+            other => panic!("expected LP cap debit, got {other:?}"),
+        }
+        match &delta.token_changes[1] {
+            TokenChange::BalanceDelta { key, delta: d } => {
+                assert_eq!(*key, usdc_ref().key);
+                assert_eq!(*d, SignedI256::try_from(300i64).unwrap());
+            }
+            other => panic!("expected USDC credit, got {other:?}"),
         }
     }
 
