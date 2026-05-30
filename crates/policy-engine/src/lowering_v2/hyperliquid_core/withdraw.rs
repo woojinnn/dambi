@@ -40,7 +40,7 @@ mod tests {
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::{Address, Decimal};
 
-    use super::super::perp::test_support::{assert_conforms, offchain_meta};
+    use crate::lowering_v2::perp::test_support::{assert_conforms, offchain_meta};
 
     #[test]
     fn withdraw_lowering_conforms_to_schema() {
