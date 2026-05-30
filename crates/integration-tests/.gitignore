@@ -1,0 +1,4 @@
+# Local secrets for the v3 decode harness (Etherscan API key, etc.).
+# The real .env is NEVER committed — only .env.sample (the placeholder template) is.
+.env
+!.env.sample

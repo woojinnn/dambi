@@ -91,7 +91,10 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- replay \
 실제 사용자 Tx 를 explorer 에서 받아 corpus 로 변환한다.
 
 ```bash
-export ETHERSCAN_API_KEY=<your-key>     # BYO — 팀원 각자 발급 (https://etherscan.io/myapikey)
+# 키 설정 — .env 에 보관(커밋 안 됨). 최초 1회: 샘플 복사 후 키 채우기.
+cp crates/integration-tests/.env.sample crates/integration-tests/.env   # 그리고 ETHERSCAN_API_KEY 채우기
+set -a; source crates/integration-tests/.env; set +a                    # 셸에 로드
+# (키 발급: https://etherscan.io/myapikey — v2 는 키 1개로 전 체인)
 
 # (권장) 주소별 최근 Tx 목록 — txlist 는 value 를 10진수로 준다.
 curl -s "https://api.etherscan.io/v2/api?chainid=1&module=account&action=txlist\
