@@ -80,7 +80,8 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- \
 **Tier B 로 재분류 (declarative 불가 — defer, `expect:error` baseline 유지):**
 - `balancer` joinPool/exitPool/batchSwap — `assets[]`/`amounts[]` 가 **동적 길이 배열**(tuple 내부). single_emit field-path 는 정적 인덱스만 → array 전략/Tier B 필요. (단순 swap 만 declarative 로 커버됨.)
 - `aave` L2Pool packed-args (withdraw/repay/setCollateral `bytes32`) — reserve **index**(주소 아님) + bit-field 패킹 → bit-slice 전략/onchain reserve→address 필요. Arbitrum 31%.
-- `uniswap` UR V4 nested action-stream(pool_id/currencyIn) + Permit2 embedded named-tuple(permitSingle.details.token) — opcode_stream/eval. 최고가치 hard.
+- `uniswap` Permit2 named-tuple (permitSingle.details.token / direct permit 0x2b67b570 + UR-embedded) — **정밀 root-cause(2026-05-30):** manifest 의 dotted path `$args.permitSingle.details.token` 는 eval.rs 가 미지원(`$.args.x.y` 불가, eval.rs:469-471). chained-numeric `$args.permitSingle[0][0]` 로 바꾸면 path 는 resolve 되나, 그 다음 nested-tuple element coercion 버그로 막힘 — abi_fragment 가 bare `"type":"tuple"`+`components` 라 nested 접근 시 per-component abi type 이 유실되어 uint48(expiration) 가 JSON **string** 으로 나옴 → `expires_at` u64 역직렬화 실패(`build_action_body_failed: invalid type string, expected u64`, eval.rs:65-68 documented limitation). **Fix = eval.rs 가 nested tuple `[i][j]` 접근 시 component 타입을 threading 해 uint≤64 를 number 로 coerce.** (manifest-only 불가 확인 — 시도 후 revert, baseline 유지.)
+- `uniswap` UR V4 nested action-stream(pool_id/currencyIn, 0x3593564c) — opcode_stream/action_builder. 최고가치 hard.
 - `uniswapx` reactor execute((bytes,bytes)) — SignedOrder inner-bytes 를 reactor family 별 재디코드 → Tier B.
 - `aave` flashLoan/flashLoanSimple — declarative 가능하나 `flash_loan` lending action 스키마 추가 선행 필요. 샘플 트래픽 0.
 - `layerzero` ClaimContract overload 3종 — declarative 가능하나 시그니처 미확정(4byte 부재, Sourcify 확인 필요). ~11 tx.
