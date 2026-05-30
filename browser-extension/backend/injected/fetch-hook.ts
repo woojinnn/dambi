@@ -127,16 +127,45 @@ function install(): void {
             : "GET")
         ).toUpperCase();
         const venue = matchVenue(url);
-        if (venue && method === "POST" && init?.body != null) {
-          const allowed = await evaluateBody(url, venue, init.body);
-          recordVerdict(url, venue, allowed);
-          if (!allowed) {
-            throw new Error("Scopeball: venue order blocked by policy");
+        if (venue && method === "POST") {
+          // The body can ride on `init.body` OR on a `Request` first arg
+          // (`fetch(new Request(url, { body }))`). Read both so a Request-shaped
+          // call cannot smuggle an order past the guard.
+          const body =
+            init?.body != null
+              ? init.body
+              : input instanceof Request
+                ? await input.clone().text()
+                : null;
+          if (body != null) {
+            const allowed = await evaluateBody(url, venue, body);
+            recordVerdict(url, venue, allowed);
+            if (!allowed) {
+              throw new Error("Scopeball: venue order blocked by policy");
+            }
           }
         }
       } catch (err) {
         if (err instanceof Error && err.message.startsWith("Scopeball:")) {
           throw err; // the block — must propagate
+        }
+        // Fail-CLOSED (D6): a venue-order POST whose evaluation FAULTED (bridge
+        // down, parse throw, SW unreachable, …) must NOT slip through. Only a
+        // *venue* request reaches here as a match; block it. Non-venue traffic
+        // does not match and proceeds untouched.
+        const [input] = args;
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : (input as Request)?.url ?? "";
+        if (matchVenue(url)) {
+          console.error(
+            "[Scopeball] fetch-hook fault on a venue request — blocking (fail-closed)",
+            err,
+          );
+          throw new Error("Scopeball: venue order blocked (fail-closed)");
         }
         console.warn("[Scopeball] fetch-hook non-fatal error", err);
       }
@@ -202,10 +231,13 @@ function install(): void {
         try {
           allowed = await evaluateBody(url, venue, body);
         } catch (err) {
-          // Fail-OPEN only on a hook fault (not a deny) so a bug here cannot
-          // brick every XHR; a real deny sets allowed=false below.
-          console.warn("[Scopeball] xhr-hook non-fatal error", err);
-          allowed = true;
+          // Fail-CLOSED (D6): a fault while evaluating a venue order (bridge
+          // down, parse throw, SW unreachable, …) must BLOCK, not waive the
+          // order through. This is a venue-order POST (guarded above), so a
+          // failed verdict path defaults to deny — matching the fetch path and
+          // the SW lifecycle's deny-closed contract.
+          console.error("[Scopeball] xhr-hook fault — blocking (fail-closed)", err);
+          allowed = false;
         }
         recordVerdict(url, venue, allowed);
         if (allowed) {
