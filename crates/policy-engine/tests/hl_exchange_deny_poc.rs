@@ -178,12 +178,14 @@ fn hyperliquid_withdraw_is_flagged_for_confirmation() {
 #[test]
 fn hyperliquid_high_leverage_is_flagged_but_modest_passes() {
     let lev = |x: u32| {
-        ActionBody::HyperliquidCore(HyperliquidCoreAction::UpdateLeverage(HlUpdateLeverageAction {
-            asset_index: 0,
-            symbol: Some("BTC".to_owned()),
-            is_cross: true,
-            leverage: x,
-        }))
+        ActionBody::HyperliquidCore(HyperliquidCoreAction::UpdateLeverage(
+            HlUpdateLeverageAction {
+                asset_index: 0,
+                symbol: Some("BTC".to_owned()),
+                is_cross: true,
+                leverage: x,
+            },
+        ))
     };
     assert!(
         matches!(

@@ -163,7 +163,10 @@ fn no_bundle_passes_baseline_through_entry_point() {
 /// HyperliquidCore action UID wiring (regression guard for the stale-fixture bug).
 #[test]
 fn shipped_seed_policy_denies_hyperliquid_short() {
-    let parsed = run(order_action(false, "0.1"), json!([seed_bundle("hl-no-short-perp")]));
+    let parsed = run(
+        order_action(false, "0.1"),
+        json!([seed_bundle("hl-no-short-perp")]),
+    );
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "fail",
@@ -179,7 +182,10 @@ fn shipped_seed_policy_denies_hyperliquid_short() {
 /// proves the retargeted policy is conditional on side, not a blanket fail.
 #[test]
 fn shipped_seed_policy_allows_hyperliquid_long() {
-    let parsed = run(order_action(true, "0.1"), json!([seed_bundle("hl-no-short-perp")]));
+    let parsed = run(
+        order_action(true, "0.1"),
+        json!([seed_bundle("hl-no-short-perp")]),
+    );
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "pass",
@@ -215,7 +221,10 @@ fn shipped_seed_policy_confirms_hyperliquid_withdraw() {
 /// changes shipped no policy.
 #[test]
 fn shipped_seed_policy_confirms_high_leverage() {
-    let parsed = run(update_leverage_action(25), json!([seed_bundle("hl-confirm-high-leverage")]));
+    let parsed = run(
+        update_leverage_action(25),
+        json!([seed_bundle("hl-confirm-high-leverage")]),
+    );
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "warn",
@@ -231,7 +240,10 @@ fn shipped_seed_policy_confirms_high_leverage() {
 /// confirm — proves the guard is threshold-conditional, not a blanket warn.
 #[test]
 fn shipped_seed_policy_allows_modest_leverage() {
-    let parsed = run(update_leverage_action(10), json!([seed_bundle("hl-confirm-high-leverage")]));
+    let parsed = run(
+        update_leverage_action(10),
+        json!([seed_bundle("hl-confirm-high-leverage")]),
+    );
     assert_eq!(parsed["ok"], true, "{parsed}");
     assert_eq!(
         parsed["data"]["verdict"]["kind"], "pass",

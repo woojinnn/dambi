@@ -203,7 +203,10 @@ mod tests {
     #[test]
     fn fractional_size_round_trips() {
         let json = serde_json::to_string(&order()).unwrap();
-        assert!(json.contains("\"0.1\""), "fractional size preserved: {json}");
+        assert!(
+            json.contains("\"0.1\""),
+            "fractional size preserved: {json}"
+        );
         let back: HyperliquidCoreAction = serde_json::from_str(&json).unwrap();
         assert_eq!(back, order());
     }

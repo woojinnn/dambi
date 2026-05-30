@@ -184,9 +184,9 @@ mod tests {
 
     #[test]
     fn registry_size_matches_phase1() {
-        // 2 Core + 2 Airdrop + 6 Amm + 12 Lending + 5 Launchpad + 11 Perp + 9 Token
-        // + 5 HyperliquidCore = 52.
-        assert_eq!(REGISTERED_ACTIONS.len(), 52);
+        // 2 Core + 2 Airdrop + 6 Amm + 10 Lending + 5 Launchpad + 11 Perp + 9 Token
+        // + 5 HyperliquidCore = 50.
+        assert_eq!(REGISTERED_ACTIONS.len(), 50);
     }
 
     #[test]
