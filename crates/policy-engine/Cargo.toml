@@ -25,3 +25,4 @@ simulation-state.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
+serde_json.workspace = true

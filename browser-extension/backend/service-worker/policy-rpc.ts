@@ -1,16 +1,11 @@
 import { tryHandleLocally } from "./local-method-handlers";
-import { evaluatePolicyRpc, planPolicyRpc } from "./wasm-bridge";
 import type {
+  PlannedCallV2Dto,
   PolicyRpcCallDto,
   PolicyRpcPlanDto,
   PolicyRpcResponseDto,
   VerdictDto,
 } from "./wasm-bridge.types";
-import {
-  isTransaction,
-  isTypedSignature,
-  type Message,
-} from "@lib/types";
 
 // ── Phase 5A — `scopeball.evaluate_v3` JSON-RPC 2.0 client ────────────────
 //
@@ -297,137 +292,104 @@ export interface PolicyRpcAuditMeta {
   methods: string[];
 }
 
-interface EvaluateWithPolicyRpcOptions {
-  policyRpcUrl?: string;
-  manifests?: readonly unknown[];
-}
-
-export async function evaluateWithPolicyRpc(
-  message: Message,
-  options: EvaluateWithPolicyRpcOptions = {},
-): Promise<{ verdict: VerdictDto; audit: PolicyRpcAuditMeta }> {
-  const manifests = [...(options.manifests ?? [])];
-  const plan = await planPolicyRpc({
-    request_id: message.requestId,
-    raw_request: rawRequestFromMessage(message),
-    manifests,
-  });
-  const rpcResponse = await dispatchCalls(
-    plan,
-    options.policyRpcUrl ?? defaultPolicyRpcUrl(),
-  );
-  const verdict = await evaluatePolicyRpc({
-    plan,
-    rpc_response: rpcResponse,
-    manifests,
-  });
-
-  return {
-    verdict,
-    audit: {
-      request_id: plan.request_id,
-      manifest_set_hash: plan.manifest_set_hash,
-      schema_hash: plan.schema_hash,
-      call_ids: plan.calls.map((call) => call.id),
-      methods: plan.calls.map((call) => call.method),
-    },
-  };
-}
-
-function rawRequestFromMessage(message: Message): {
-  method: string;
-  params: unknown;
-  chain_id: number;
-  block_timestamp: number;
-} {
-  const block_timestamp = Math.floor(Date.now() / 1000);
-  if (isTransaction(message)) {
-    return {
-      method: "eth_sendTransaction",
-      params: [message.data.transaction],
-      chain_id: message.data.chainId,
-      block_timestamp,
-    };
-  }
-  if (isTypedSignature(message)) {
-    return {
-      method: "eth_signTypedData_v4",
-      params: [message.data.address, message.data.typedData],
-      chain_id: message.data.chainId,
-      block_timestamp,
-    };
-  }
-  throw new Error("unsupported message type for policy-rpc");
-}
-
 /**
- * Split the plan's calls into ones we can answer in-process (pure-math
- * derivations from the action envelope, e.g. `token.normalize_to_nano`)
- * and ones that need the remote enrichment server (oracles, chain RPC,
- * portfolio lookup). Local handlers run before the HTTP round-trip so a
- * fully-local plan never touches the network — keeping policies usable
- * even when the policy-rpc daemon isn't reachable.
+ * Phase 1 / P2 — v2 (ActionBody-model) policy-RPC dispatch.
  *
- * Order is preserved by call id: the WASM materializer correlates results
- * to plan entries via `id`, so concatenating the two batches is safe
- * regardless of which calls were diverted.
+ * Synthesises a [`PolicyRpcCallDto`] per planned call (`id = call.call_id`),
+ * answers pure-math methods in-process via {@link tryHandleLocally}, POSTs the
+ * remainder through the {@link postPolicyRpc} round-trip (127.0.0.1:8787
+ * `/v1/rpc`), and folds the results into a `{ call_id: <value> }` map.
+ *
+ * Fold rule (fail-CLOSED):
+ *   - `ok: true`  → `map[call_id] = result` (the UNWRAPPED `$.result`
+ *     payload — exactly what `evaluate_action_v2_json.results` expects).
+ *   - `ok: false`, unreachable daemon, missing/dropped call → OMITTED.
+ *
+ * We do NOT synthesise `rpc_unreachable` error stubs. v2 fails CLOSED: an
+ * omitted REQUIRED (`optional === false`) call makes `materialize_v2` raise
+ * `SystemFail`, which `evaluate_action_v2_json` turns into a `__system__`
+ * fail-closed verdict. A down daemon therefore denies a required-RPC swap
+ * rather than waving it through — the conservative posture for the v2 cutover.
+ *
+ * Returns an empty map when `planned` is empty (the no-call baseline).
  */
-async function dispatchCalls(
-  plan: PolicyRpcPlanDto,
+export async function dispatchCallsV2(
+  planned: readonly PlannedCallV2Dto[],
   policyRpcUrl: string,
-): Promise<PolicyRpcResponseDto> {
-  if (plan.calls.length === 0) {
-    return { request_id: plan.request_id, results: [] };
-  }
+): Promise<Record<string, unknown>> {
+  const results: Record<string, unknown> = {};
+  if (planned.length === 0) return results;
 
-  const localResults: unknown[] = [];
+  // Map every planned v2 call onto the v1 wire DTO keyed by `call_id`, so
+  // both the local handlers and the remote server correlate by the same id
+  // the WASM materializer reads `results` under.
+  const calls: PolicyRpcCallDto[] = planned.map((call) => ({
+    id: call.call_id,
+    method: call.method,
+    params: call.params,
+  }));
+
   const remoteCalls: PolicyRpcCallDto[] = [];
-  for (const call of plan.calls) {
+  for (const call of calls) {
     const local = tryHandleLocally(call);
     if (local) {
-      localResults.push(local);
+      // Keep only successful local results; drop failures (no error stub).
+      if (local.ok) results[local.id] = local.result;
     } else {
       remoteCalls.push(call);
     }
   }
 
   if (remoteCalls.length === 0) {
-    console.debug("[Scopeball] policy-rpc (all local)", {
-      requestId: plan.request_id,
-      localCount: localResults.length,
+    console.debug("[Scopeball] policy-rpc-v2 (all local)", {
+      plannedCount: planned.length,
+      resolvedCount: Object.keys(results).length,
     });
-    return { request_id: plan.request_id, results: localResults };
+    return results;
   }
 
-  const remotePlan: PolicyRpcPlanDto = { ...plan, calls: remoteCalls };
-  // Fail-open on transport failure: when the policy-rpc daemon is down,
-  // synthesise empty error results for each remote call instead of
-  // throwing. Manifests mark their calls `optional: true`, so the engine
-  // already handles missing enrichment by leaving the corresponding
-  // context fields undefined and letting `context has X` guards short-
-  // circuit. Throwing here would convert "no enrichment server" into
-  // `__engine::unexpected` deny on every transaction.
+  // Reuse the v1 transport. `postPolicyRpc` wants a `PolicyRpcPlanDto`; only
+  // `request_id` + `calls` are read on the wire, so synthesise a minimal one.
+  const requestId = `action-v2:${remoteCalls[0]?.id ?? "calls"}`;
+  const remotePlan: PolicyRpcPlanDto = {
+    request_id: requestId,
+    root: { chain_id: 0, from: "", to: "", value_wei: "0" },
+    envelopes: [],
+    calls: remoteCalls,
+    manifest_set_hash: "",
+    schema_hash: "",
+    diagnostics: [],
+  };
+
   let remoteResponse: PolicyRpcResponseDto;
   try {
     remoteResponse = await postPolicyRpc(policyRpcUrl, remotePlan);
   } catch (err) {
+    // Fail CLOSED: do NOT synthesise error stubs. Omitting the calls means a
+    // required one trips `SystemFail` → `__system__` deny inside WASM.
     console.warn(
-      "[Scopeball] policy-rpc unreachable, treating remote calls as missing",
-      { requestId: plan.request_id, callCount: remoteCalls.length, err },
+      "[Scopeball] policy-rpc-v2 unreachable, omitting remote calls (fail-closed)",
+      { requestId, callCount: remoteCalls.length, err },
     );
-    remoteResponse = {
-      request_id: plan.request_id,
-      results: remoteCalls.map((call) => ({
-        id: call.id,
-        ok: false,
-        error: { code: "rpc_unreachable", message: String(err) },
-      })),
-    };
+    return results;
   }
-  return {
-    request_id: plan.request_id,
-    results: [...localResults, ...remoteResponse.results],
-  };
+
+  // Fold the envelope results: `ok: true` → unwrapped `result`; everything
+  // else is omitted so a downstream required call fails closed.
+  for (const entry of remoteResponse.results) {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      typeof (entry as { id?: unknown }).id !== "string"
+    ) {
+      continue;
+    }
+    const rec = entry as { id: string; ok?: unknown; result?: unknown };
+    if (rec.ok === true) {
+      results[rec.id] = rec.result;
+    }
+  }
+  return results;
 }
 
 async function postPolicyRpc(
@@ -469,10 +431,6 @@ async function postPolicyRpc(
     });
     throw err;
   }
-}
-
-function defaultPolicyRpcUrl(): string {
-  return process.env.POLICY_RPC_URL ?? "http://127.0.0.1:8787";
 }
 
 /**

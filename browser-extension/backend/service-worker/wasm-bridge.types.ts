@@ -55,6 +55,76 @@ export interface EvaluatePolicyRpcInputDto {
   readonly manifests: readonly unknown[];
 }
 
+// ── v2 (ActionBody-model) policy-RPC DTOs ──────────────────────────────────
+// Mirror `crates/policy-engine-wasm/src/action_eval_exports.rs`. The v2 model
+// is stateless: manifests + bundles arrive inline per call. `chain_id` here is
+// a CAIP-2 STRING (e.g. `"eip155:1"`), NOT a number — distinct from the v1
+// `PolicyRpcRootDto.chain_id`.
+
+/**
+ * Tx-level routing fields for the v2 exports. Mirrors the Rust `TxInput`
+ * (`action_eval_exports.rs`). `chain_id` is the CAIP-2 string.
+ */
+export interface ActionTxInputDto {
+  readonly chain_id: string;
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * Input to `plan_action_rpc_v2_json`. Mirrors the Rust `PlanActionInput`.
+ *
+ * `action` is the snake_case-tagged `ActionBody` (e.g. `{ amm: {...} }`) and
+ * `meta` is the `ActionMeta`; both are kept opaque here (the bridge does not
+ * model the variant schema — downstream decode produces them).
+ */
+export interface PlanActionRpcV2InputDto {
+  readonly manifests: readonly unknown[];
+  readonly action: unknown;
+  readonly meta: unknown;
+  readonly tx: ActionTxInputDto;
+}
+
+/**
+ * One planned v2 policy-RPC call. Serializable mirror of the Rust
+ * `PlannedCallDto`. `call_id` is `<manifest_id>::<spec_id>`; `outputs` are the
+ * opaque projection rules rooted at `$.result`.
+ */
+export interface PlannedCallV2Dto {
+  readonly manifest_id: string;
+  readonly call_id: string;
+  readonly method: string;
+  readonly params: unknown;
+  readonly outputs: readonly unknown[];
+  readonly optional: boolean;
+}
+
+/**
+ * One installed bundle for `evaluate_action_v2_json`. Mirrors the Rust
+ * `BundleInput` — `{ policy, manifest }`, NO `id` field. `manifest` is kept
+ * opaque (validated inside WASM against `ManifestV2`).
+ */
+export interface ActionBundleInputDto {
+  readonly policy: string;
+  readonly manifest: unknown;
+}
+
+/**
+ * Input to `evaluate_action_v2_json`. Mirrors the Rust `EvaluateActionInput`.
+ *
+ * `results` is the host's raw results keyed by `call_id` — each value is the
+ * UNWRAPPED `$.result` payload (NOT the `{ id, ok, result }` envelope). The
+ * planned set that drives the SystemFail gate derives from `bundles[].manifest`
+ * inside WASM; there is deliberately no top-level `manifests` field.
+ */
+export interface EvaluateActionV2InputDto {
+  readonly action: unknown;
+  readonly meta: unknown;
+  readonly tx: ActionTxInputDto;
+  readonly bundles: readonly ActionBundleInputDto[];
+  readonly results: Readonly<Record<string, unknown>>;
+}
+
 export interface PassVerdictDto {
   readonly kind: "pass";
   readonly matched?: undefined;

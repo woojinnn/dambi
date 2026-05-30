@@ -12,12 +12,7 @@ members = [
     "crates/policy-engine-wasm",
     "crates/integration-tests",
     "crates/adapters/abi-resolver",
-    "crates/adapters/sign-resolver",
-    "crates/adapters/request-router",
-    "adapter-debug-dashboard",
     "crates/adapters/mappers",
-    "crates/policy-builder",
-    "crates/policy-builder-wasm",
     "crates/simulation/state",
     "crates/simulation/reducer",
     "crates/simulation/db",
@@ -51,10 +46,7 @@ thiserror = "2"
 # Internal crates referenced by path.
 policy-engine = { path = "crates/policy-engine", version = "0.1.0" }
 abi-resolver = { path = "crates/adapters/abi-resolver", version = "0.1.0" }
-sign-resolver = { path = "crates/adapters/sign-resolver", version = "0.1.0" }
 mappers = { path = "crates/adapters/mappers", version = "0.1.0" }
-request-router = { path = "crates/adapters/request-router", version = "0.1.0" }
-policy-builder = { path = "crates/policy-builder", version = "0.1.0" }
 simulation-state = { path = "crates/simulation/state", version = "0.1.0" }
 simulation-reducer = { path = "crates/simulation/reducer", version = "0.1.0" }
 simulation-db = { path = "crates/simulation/db", version = "0.1.0" }

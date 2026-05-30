@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import type { AuditEntry, VerdictKind } from "@scopeball/sdk";
 import { useExtension } from "../sdk-context";
 import "./AuditPage.css";
@@ -16,7 +15,6 @@ const SINCE_OPTIONS: Array<{ value: number; label: string }> = [
 
 export function AuditPage() {
   const { client, managed, status } = useExtension();
-  const navigate = useNavigate();
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,14 +62,6 @@ export function AuditPage() {
     for (const m of managed ?? []) map.set(m.id, true);
     return map;
   }, [managed]);
-
-  const openInEditor = (policyId: string) => {
-    const target = (managed ?? []).find((p) => p.id === policyId);
-    if (!target) return;
-    navigate("/editor", {
-      state: { id: target.id, text: target.text },
-    });
-  };
 
   if (status.kind === "error") {
     return (
@@ -164,7 +154,6 @@ export function AuditPage() {
               key={entry.requestId}
               entry={entry}
               managedById={managedById}
-              onOpenPolicy={openInEditor}
             />
           ))}
         </ul>
@@ -176,11 +165,9 @@ export function AuditPage() {
 function AuditCard({
   entry,
   managedById,
-  onOpenPolicy,
 }: {
   entry: AuditEntry;
   managedById: Map<string, true>;
-  onOpenPolicy: (id: string) => void;
 }) {
   return (
     <li className={`audit-card card kind-${entry.verdict}`}>
@@ -208,10 +195,7 @@ function AuditCard({
               <li
                 key={`${m.id}-${idx}`}
                 className={"audit-policy" + (owned ? " is-owned" : "")}
-                onClick={owned ? () => onOpenPolicy(m.id) : undefined}
-                role={owned ? "button" : undefined}
-                tabIndex={owned ? 0 : undefined}
-                title={owned ? "Editor에서 열기" : "이 정책은 대시보드 외부에서 관리"}
+                title={owned ? "이 대시보드에서 관리하는 정책" : "이 정책은 대시보드 외부에서 관리"}
               >
                 <div className="audit-policy-head">
                   <span className="audit-policy-id">{m.id}</span>

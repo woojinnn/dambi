@@ -4,7 +4,6 @@ import {
   handleDashboardRequest,
   isDashboardRequest,
 } from "./dashboard/api";
-import { ensureSeedBundlesInstalled } from "./adapter-loader/declarative-adapter-loader";
 import {
   handleManifestRequest,
   isManifestRequest,
@@ -17,6 +16,7 @@ import {
   ensureDefaultPoliciesInstalled,
   reinstallAllPolicies,
 } from "./policies-loader";
+import { loadDefaultPolicySetV2 } from "./policies-loader-v2";
 import { applyEnabledIds, getCatalog } from "./policy-selection";
 import { RequestType, type Message, type MessageResponse } from "@lib/types";
 
@@ -93,18 +93,6 @@ async function bootSequence(): Promise<void> {
     console.warn("[Scopeball] cold-start prewarm failed:", err);
   }
 
-  // Phase 7 adapter-loader seed: install declarative adapter bundles
-  // (shipped with the extension) into the WASM engine. Sequenced after
-  // `ensureDefaultPoliciesInstalled` because both call into the same
-  // WASM module — sequencing keeps the init() singleton's first caller
-  // from racing the second. Failures here don't abort manifest hydration
-  // — the decideMessage path retries.
-  try {
-    await ensureSeedBundlesInstalled();
-  } catch (err) {
-    console.warn("[Scopeball] seed bundle install failed:", err);
-  }
-
   // Phase 6 / Task 6.3: hydrate the manifest-driven schema on SW boot.
   //
   // Two paths share the same atomic-install plumbing:
@@ -119,6 +107,18 @@ async function bootSequence(): Promise<void> {
     await hydrateManifests();
   } catch (err) {
     console.warn("[Scopeball] manifest hydration failed:", err);
+  }
+
+  // Phase 1 / P2: warm the in-memory default v2 policy set so the first
+  // decision doesn't pay the fetch. v2 evaluation is STATELESS — this is a
+  // pure asset fetch + module-level cache, with NO WASM state to push, so
+  // its ordering relative to the install stages above does not matter.
+  // Best-effort like the surrounding stages: a failure here logs and leaves
+  // the cache empty (the loader returns `[]`); it must never brick boot.
+  try {
+    await loadDefaultPolicySetV2();
+  } catch (err) {
+    console.warn("[Scopeball] v2 default policy load failed:", err);
   }
 }
 

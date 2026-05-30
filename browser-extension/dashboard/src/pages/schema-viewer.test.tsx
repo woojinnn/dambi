@@ -12,16 +12,14 @@
 // (snake_case `schema_text`/`schema_hash`, camelCase `customContexts`/
 // `schemaHash`, snake_case inner fields on CustomFieldSource).
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type {
   EnrichedSchemaOutput,
   ExtensionClient,
-  PreviewManifestOutput,
 } from "@scopeball/sdk";
 import { SchemaViewer } from "./schema-viewer";
-import { PREVIEW_HANDOFF_KEY } from "./manifest-editor";
 import { TestSdkProvider } from "../testing/test-sdk-provider";
 
 function mkEnriched(): EnrichedSchemaOutput {
@@ -145,165 +143,5 @@ describe("SchemaViewer", () => {
     // The selected rail entry is `swap`.
     const railSwap = screen.getByRole("link", { name: /^swap$/i });
     expect(railSwap.className).toMatch(/selected|active/);
-  });
-});
-
-// Fix P (D14): when arriving from `/manifests/<action>` via Preview the
-// viewer must compute a draft-vs-installed diff in three buckets:
-//   - **added**: field in preview, not in installed
-//   - **removed**: field in installed, not in preview
-//   - **changed**: field in both but with a different `cedar_type`
-// Each bucket renders a coloured badge (+/−/~) on the affected row.
-describe("SchemaViewer draft preview diff overlay (Fix P, D14)", () => {
-  beforeEach(() => {
-    try {
-      sessionStorage.clear();
-    } catch {
-      /* happy-dom safety */
-    }
-  });
-
-  function installedWithOldAndChanged(): EnrichedSchemaOutput {
-    return {
-      schema_text:
-        "type SwapContext = {\n  custom?: SwapCustomContext,\n};\n" +
-        "type SwapCustomContext = {\n  totalInputUsd: UsdValuation,\n  legacyRiskBps: Long,\n};\n",
-      schema_hash: "sha256:installed",
-      added_fields: [],
-      customContexts: {
-        swap: [
-          // `totalInputUsd` will be UNCHANGED (same type in preview).
-          {
-            field: "totalInputUsd",
-            cedar_type: "UsdValuation",
-            source_method: "oracle.usd_value",
-            source_requirement_id: "req-a",
-            source_from: "$.result",
-            requirement_optional: false,
-          },
-          // `legacyRiskBps` is present here but NOT in preview ⇒ REMOVED.
-          {
-            field: "legacyRiskBps",
-            cedar_type: "Long",
-            source_method: "scorer.legacy",
-            source_requirement_id: "req-legacy",
-            source_from: "$.result.bps",
-            requirement_optional: false,
-          },
-          // `tokenRiskScore` is `Long` here but `String` in preview ⇒ CHANGED.
-          {
-            field: "tokenRiskScore",
-            cedar_type: "Long",
-            source_method: "scorer.risk",
-            source_requirement_id: "req-risk",
-            source_from: "$.result.score",
-            requirement_optional: false,
-          },
-        ],
-      },
-      schemaHash: "sha256:installed",
-    };
-  }
-
-  function previewWithChangesAndAdditions(): PreviewManifestOutput {
-    return {
-      customTypes: [
-        {
-          name: "swap",
-          fields: [
-            // Same field+type as installed — neither added nor changed.
-            {
-              field: "totalInputUsd",
-              cedar_type: "UsdValuation",
-              source_method: "oracle.usd_value",
-              source_requirement_id: "req-a",
-              source_from: "$.result",
-              requirement_optional: false,
-            },
-            // New field — not in installed ⇒ ADDED.
-            {
-              field: "totalMinOutputUsd",
-              cedar_type: "UsdValuation",
-              source_method: "oracle.usd_value",
-              source_requirement_id: "req-b",
-              source_from: "$.result",
-              requirement_optional: false,
-            },
-            // Same name as installed but different cedar_type ⇒ CHANGED.
-            {
-              field: "tokenRiskScore",
-              cedar_type: "String",
-              source_method: "scorer.risk",
-              source_requirement_id: "req-risk",
-              source_from: "$.result.score",
-              requirement_optional: false,
-            },
-          ],
-        },
-      ],
-      enrichedSchemaText:
-        "type SwapContext = {\n  custom?: SwapCustomContext,\n};\n" +
-        "type SwapCustomContext = {\n" +
-        "  totalInputUsd: UsdValuation,\n" +
-        "  totalMinOutputUsd: UsdValuation,\n" +
-        "  tokenRiskScore: String,\n" +
-        "};\n",
-      diff: { added: [], removed: [], changed: [] },
-      schemaHash: "sha256:draft",
-    };
-  }
-
-  it("renders +/-/~ badges for added, removed, and changed custom fields", async () => {
-    const client = {
-      getEnrichedSchema: vi.fn(async () => installedWithOldAndChanged()),
-    } as unknown as ExtensionClient;
-
-    sessionStorage.setItem(
-      PREVIEW_HANDOFF_KEY,
-      JSON.stringify({
-        action: "swap",
-        output: previewWithChangesAndAdditions(),
-        savedAtMs: Date.now(),
-      }),
-    );
-
-    render(
-      <MemoryRouter initialEntries={["/schema?action=swap&fromPreview=true"]}>
-        <TestSdkProvider client={client}>
-          <Routes>
-            <Route path="/schema" element={<SchemaViewer />} />
-          </Routes>
-        </TestSdkProvider>
-      </MemoryRouter>,
-    );
-
-    // The draft pill confirms we're in preview mode.
-    await screen.findByTestId("schema-viewer-draft-pill");
-
-    // ADDED — `totalMinOutputUsd` should appear with a `+` badge.
-    const addedRow = (await screen.findByText("totalMinOutputUsd")).closest(
-      "[data-testid='custom-field-row']",
-    ) as HTMLElement | null;
-    expect(addedRow).toBeTruthy();
-    expect(addedRow!.getAttribute("data-diff")).toBe("added");
-    expect(addedRow!.textContent).toMatch(/\+/);
-
-    // REMOVED — `legacyRiskBps` is in the installed set but not in
-    // preview; we surface it with a `-` badge in the same custom
-    // section so the user sees what's going away.
-    const removedRow = screen.queryByText("legacyRiskBps")?.closest(
-      "[data-testid='custom-field-row']",
-    ) as HTMLElement | null;
-    expect(removedRow).toBeTruthy();
-    expect(removedRow!.getAttribute("data-diff")).toBe("removed");
-    expect(removedRow!.textContent).toMatch(/[-−]/);
-
-    // CHANGED — `tokenRiskScore` exists in both but with different type.
-    const changedRow = (await screen.findByText("tokenRiskScore")).closest(
-      "[data-testid='custom-field-row']",
-    ) as HTMLElement | null;
-    expect(changedRow).toBeTruthy();
-    expect(changedRow!.getAttribute("data-diff")).toBe("changed");
-    expect(changedRow!.textContent).toMatch(/~/);
   });
 });
