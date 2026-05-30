@@ -58,9 +58,12 @@ pub(super) fn p2p_supply_rate(reserve: &ReserveState) -> ReducerResult<Decimal> 
         POOL_OPTIMAL_BP,
     )
     .map_err(|msg| ReducerError::Invariant(format!("morpho_optimizer pool rate: {msg}")))?;
-    let pool_supply =
-        shared::supply_apr_from_borrow(&pool_borrow, reserve.utilization_bp, reserve.reserve_factor_bp)
-            .map_err(|msg| ReducerError::Invariant(format!("morpho_optimizer pool supply: {msg}")))?;
+    let pool_supply = shared::supply_apr_from_borrow(
+        &pool_borrow,
+        reserve.utilization_bp,
+        reserve.reserve_factor_bp,
+    )
+    .map_err(|msg| ReducerError::Invariant(format!("morpho_optimizer pool supply: {msg}")))?;
     let p2p_mid = midpoint_decimal(&pool_supply, &pool_borrow)?;
     // Blend toward pool_supply as utilization rises (more position sits in
     // pool fallback).
@@ -79,9 +82,12 @@ pub(super) fn p2p_borrow_rate(reserve: &ReserveState) -> ReducerResult<Decimal> 
         POOL_OPTIMAL_BP,
     )
     .map_err(|msg| ReducerError::Invariant(format!("morpho_optimizer pool rate: {msg}")))?;
-    let pool_supply =
-        shared::supply_apr_from_borrow(&pool_borrow, reserve.utilization_bp, reserve.reserve_factor_bp)
-            .map_err(|msg| ReducerError::Invariant(format!("morpho_optimizer pool supply: {msg}")))?;
+    let pool_supply = shared::supply_apr_from_borrow(
+        &pool_borrow,
+        reserve.utilization_bp,
+        reserve.reserve_factor_bp,
+    )
+    .map_err(|msg| ReducerError::Invariant(format!("morpho_optimizer pool supply: {msg}")))?;
     let p2p_mid = midpoint_decimal(&pool_supply, &pool_borrow)?;
     let borrow_match_bp = 10_000 - reserve.utilization_bp.min(10_000);
     blend_decimal(&p2p_mid, &pool_borrow, borrow_match_bp)
@@ -136,11 +142,7 @@ fn blend_decimal(a: &Decimal, b: &Decimal, weight_bp: u32) -> ReducerResult<Deci
 mod tests {
     use super::*;
 
-    fn reserve_with(
-        total_supply: u128,
-        total_borrow: u128,
-        utilization_bp: u32,
-    ) -> ReserveState {
+    fn reserve_with(total_supply: u128, total_borrow: u128, utilization_bp: u32) -> ReserveState {
         ReserveState {
             total_supply: U256::from(total_supply),
             total_borrow: U256::from(total_borrow),

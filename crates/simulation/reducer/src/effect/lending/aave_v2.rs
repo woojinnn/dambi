@@ -79,11 +79,7 @@ const AAVE_V2_OPTIMAL_UTILIZATION_BP: u32 = 8_000;
 mod tests {
     use super::*;
 
-    fn reserve_with(
-        total_supply: u128,
-        total_borrow: u128,
-        utilization_bp: u32,
-    ) -> ReserveState {
+    fn reserve_with(total_supply: u128, total_borrow: u128, utilization_bp: u32) -> ReserveState {
         ReserveState {
             total_supply: U256::from(total_supply),
             total_borrow: U256::from(total_borrow),

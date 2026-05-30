@@ -83,12 +83,22 @@ mod tests {
             weights: vec![50, 50],
             fee_bp: 0,
         };
-        let v3_out =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(100u64))
-                .unwrap();
-        let v2_out =
-            balancer_v2::quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(100u64))
-                .unwrap();
+        let v3_out = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(100u64),
+        )
+        .unwrap();
+        let v2_out = balancer_v2::quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(100u64),
+        )
+        .unwrap();
         assert_eq!(v3_out, v2_out);
         assert_eq!(v3_out, U256::from(90u64));
     }

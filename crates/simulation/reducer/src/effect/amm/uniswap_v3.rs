@@ -169,9 +169,7 @@ pub(super) fn concentrated_swap_math(
                 ))
             })?;
             let out_num = l.checked_mul(sp_drop).ok_or_else(|| {
-                ReducerError::Invariant(format!(
-                    "{protocol_tag} quote: L*(sp-sp_next) overflow"
-                ))
+                ReducerError::Invariant(format!("{protocol_tag} quote: L*(sp-sp_next) overflow"))
             })?;
             // `q96` is non-zero, division is safe.
             Ok(out_num / q96)
@@ -318,14 +316,7 @@ mod tests {
         let state = empty_state();
         let swap = dummy_swap();
         let pool_state = pool(1_000_000, q96_val());
-        let out = quote_swap_hop(
-            &state,
-            &ctx(),
-            &swap,
-            &pool_state,
-            U256::from(1_000u64),
-        )
-        .unwrap();
+        let out = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1_000u64)).unwrap();
         // L*a/(L+a) = 1e9 / 1_001_000 = 999 (integer floor).
         assert_eq!(out, U256::from(999u64));
     }
@@ -337,14 +328,8 @@ mod tests {
         let state = empty_state();
         let swap = dummy_swap();
         let pool_state = pool(1_000_000, q96_val());
-        let out = quote_swap_hop(
-            &state,
-            &ctx(),
-            &swap,
-            &pool_state,
-            U256::from(100_000u64),
-        )
-        .unwrap();
+        let out =
+            quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(100_000u64)).unwrap();
         assert_eq!(out, U256::from(90_909u64));
     }
 
@@ -370,9 +355,10 @@ mod tests {
         let state = empty_state();
         let swap = dummy_swap();
         let pool_state = pool(0, q96_val());
-        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64))
-            .unwrap_err();
-        assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("zero active liquidity")));
+        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64)).unwrap_err();
+        assert!(
+            matches!(err, ReducerError::Invariant(msg) if msg.contains("zero active liquidity"))
+        );
     }
 
     // ----------------------------------------------------------------------
@@ -384,8 +370,7 @@ mod tests {
         let state = empty_state();
         let swap = dummy_swap();
         let pool_state = pool(1_000_000, U256::ZERO);
-        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64))
-            .unwrap_err();
+        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64)).unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("zero sqrt_price_x96")));
     }
 
@@ -402,8 +387,7 @@ mod tests {
             reserve_out: U256::from(10_000u64),
             fee_bp: 30,
         };
-        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64))
-            .unwrap_err();
+        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64)).unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("Concentrated")));
     }
 
@@ -446,8 +430,7 @@ mod tests {
         let swap = dummy_swap();
         let sp_x96 = q96_val().checked_mul(U256::from(2u64)).unwrap();
         let pool_state = pool(1_000_000, sp_x96);
-        let out =
-            quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(100u64)).unwrap();
+        let out = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(100u64)).unwrap();
         // 4 * 1_000_000 * 100 / (1_000_000 + 200) = 4e8 / 1_000_200 = 399
         assert_eq!(out, U256::from(399u64));
     }

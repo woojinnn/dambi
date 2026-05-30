@@ -7,14 +7,16 @@
 use alloy_primitives::{Address, U256};
 use std::str::FromStr;
 
-use simulation_db::repositories::{deltas, holdings, profile, tokens, wallets};
 use simulation_db::repositories::deltas::{DeltaInsert, DeltaSource, DeltaStatus};
 use simulation_db::repositories::profile::UserProfile;
 use simulation_db::repositories::wallets::WalletInsert;
+use simulation_db::repositories::{deltas, holdings, profile, tokens, wallets};
 use simulation_db::{run_migrations, Pool};
 use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
 use simulation_state::primitives::{ChainId, Duration, Price, Time};
-use simulation_state::token::{Balance, BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKey, TokenKind};
+use simulation_state::token::{
+    Balance, BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKey, TokenKind,
+};
 
 fn usdc() -> TokenKey {
     TokenKey::Erc20 {
@@ -35,9 +37,7 @@ fn build_holding() -> TokenHolding {
         balance: Balance::Fungible {
             amount: U256::from(2_500_000_000u64), // 2500 USDC
         },
-        committed: Balance::Fungible {
-            amount: U256::ZERO,
-        },
+        committed: Balance::Fungible { amount: U256::ZERO },
         approved_to: None,
         price_usd: Some(
             LiveField::new(
@@ -181,7 +181,10 @@ fn full_user_journey_in_memory() {
         assert!(rows[0].realized_delta_json.is_some());
 
         let counts = deltas::count_by_status(tx, wallet_id)?;
-        let confirmed = counts.iter().find(|(s, _)| s == "confirmed").map(|(_, n)| *n);
+        let confirmed = counts
+            .iter()
+            .find(|(s, _)| s == "confirmed")
+            .map(|(_, n)| *n);
         assert_eq!(confirmed, Some(1));
         Ok(())
     })

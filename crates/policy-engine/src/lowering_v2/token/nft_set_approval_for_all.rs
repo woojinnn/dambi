@@ -27,10 +27,7 @@ pub(crate) fn lower(
     m.insert("approved".into(), Value::Bool(action.approved));
     // `custom` is host-populated — OMITTED here.
 
-    Ok(ctx.lowered(
-        r#"Token::Action::"NftSetApprovalForAll""#,
-        Value::Object(m),
-    ))
+    Ok(ctx.lowered(r#"Token::Action::"NftSetApprovalForAll""#, Value::Object(m)))
 }
 
 #[cfg(test)]

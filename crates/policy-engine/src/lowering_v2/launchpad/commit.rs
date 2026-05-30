@@ -16,7 +16,10 @@ use super::{lower_protocol_ref, lower_sale_state};
 /// Infallible today (returns `Ok`); the `Result` matches the per-action `lower`
 /// contract so callers stay uniform across the fan-out.
 #[allow(clippy::unnecessary_wraps)] // infallible; Result is the shared per-action contract
-pub(crate) fn lower(action: &CommitAction, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
+pub(crate) fn lower(
+    action: &CommitAction,
+    ctx: &LowerCtx<'_>,
+) -> Result<LoweredAction, LowerError> {
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("platform".into(), lower_protocol_ref(&action.platform));
@@ -40,7 +43,10 @@ pub(crate) fn lower(action: &CommitAction, ctx: &LowerCtx<'_>) -> Result<Lowered
     // `expected_token_price` is `LiveField<Option<Price>>`; inline its inner
     // Option and emit the Decimal-as-string only when present.
     if let Some(price) = &action.live_inputs.expected_token_price.value {
-        m.insert("expectedTokenPrice".into(), Value::String(price.to_string()));
+        m.insert(
+            "expectedTokenPrice".into(),
+            Value::String(price.to_string()),
+        );
     }
     // `custom` is OMITTED — filled later by enrichment.
 

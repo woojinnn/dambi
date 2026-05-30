@@ -20,6 +20,7 @@ pub struct AllowanceSpec {
 
 impl AllowanceSpec {
     /// Creates an allowance for the given amount, marking it unlimited when the amount equals `U256::MAX`.
+    #[must_use]
     pub fn new(amount: U256, last_set_at: Time) -> Self {
         Self {
             amount,
@@ -29,7 +30,8 @@ impl AllowanceSpec {
     }
 
     /// Creates an explicitly unlimited allowance set to `U256::MAX`.
-    pub fn unlimited(last_set_at: Time) -> Self {
+    #[must_use]
+    pub const fn unlimited(last_set_at: Time) -> Self {
         Self {
             amount: U256::MAX,
             is_unlimited: true,

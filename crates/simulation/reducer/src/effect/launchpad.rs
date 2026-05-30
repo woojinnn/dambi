@@ -60,9 +60,7 @@ use simulation_state::position::{
     VestingSchedule,
 };
 use simulation_state::primitives::{Address, Time, U256};
-use simulation_state::{
-    DataSource, EvalContext, PositionChange, StateDelta, WalletState,
-};
+use simulation_state::{DataSource, EvalContext, PositionChange, StateDelta, WalletState};
 
 use crate::action::launchpad::{
     ClaimAllocationAction, ClaimVestedAction, CommitAction, LaunchpadAction, RefundAction,
@@ -92,11 +90,7 @@ impl Reducer for LaunchpadAction {
 /// `(platform.name, sale_id, recipient_hex)` so the same caller invoking
 /// `Commit` / `ClaimAllocation` / `Refund` against the same sale always
 /// converges to a single position.
-fn launchpad_position_id(
-    platform_name: &str,
-    sale_id: &str,
-    recipient: Address,
-) -> String {
+fn launchpad_position_id(platform_name: &str, sale_id: &str, recipient: Address) -> String {
     format!("launchpad:{platform_name}:{sale_id}:{recipient:#x}")
 }
 
@@ -180,12 +174,15 @@ impl Reducer for CommitAction {
 
         // ---- 3. Hard cap check (if present) ----------------------------
         if let Some(hard) = sale.hard_cap {
-            let new_total = sale.total_committed.checked_add(self.amount).ok_or_else(
-                || ReducerError::Invariant(format!(
-                    "launchpad commit overflow on sale {} total_committed",
-                    self.sale_id
-                )),
-            )?;
+            let new_total = sale
+                .total_committed
+                .checked_add(self.amount)
+                .ok_or_else(|| {
+                    ReducerError::Invariant(format!(
+                        "launchpad commit overflow on sale {} total_committed",
+                        self.sale_id
+                    ))
+                })?;
             if new_total > hard {
                 return Err(ReducerError::Invariant(format!(
                     "launchpad commit on sale {} exceeds hard cap ({} > {})",
@@ -211,12 +208,11 @@ impl Reducer for CommitAction {
                 )));
             };
             // Coalesce paid amounts on the same pay_token; otherwise push.
-            if let Some(entry) =
-                alloc.paid.iter_mut().find(|(t, _)| t == &self.pay_token)
-            {
-                entry.1 = entry.1.checked_add(self.amount).ok_or_else(|| {
-                    ReducerError::Invariant("paid sum overflow".into())
-                })?;
+            if let Some(entry) = alloc.paid.iter_mut().find(|(t, _)| t == &self.pay_token) {
+                entry.1 = entry
+                    .1
+                    .checked_add(self.amount)
+                    .ok_or_else(|| ReducerError::Invariant("paid sum overflow".into()))?;
             } else {
                 alloc.paid.push(new_paid_entry);
             }
@@ -285,9 +281,8 @@ impl Reducer for ClaimAllocationAction {
         // Optional refund (oversubscription). The refund token is the
         // pay_token recorded on the position; we look that up below.
         let id = launchpad_position_id(&self.platform.name, &self.sale_id, self.recipient);
-        let existing = effective_launchpad_position(state, &delta, &id).ok_or_else(|| {
-            ReducerError::PositionNotFound(id.clone())
-        })?;
+        let existing = effective_launchpad_position(state, &delta, &id)
+            .ok_or_else(|| ReducerError::PositionNotFound(id.clone()))?;
         let mut new_position = existing.clone();
 
         let PositionKind::LaunchpadAllocation(ref mut alloc) = new_position.kind else {
@@ -300,15 +295,11 @@ impl Reducer for ClaimAllocationAction {
         // refund channel — sales with multiple pay_tokens are not yet
         // supported by `RefundLiveInputs`).
         if !refund_due.is_zero() {
-            let pay_token = alloc
-                .paid
-                .first()
-                .map(|(t, _)| t.clone())
-                .ok_or_else(|| {
-                    ReducerError::Invariant(format!(
-                        "ClaimAllocation refund on {id} but no paid entries"
-                    ))
-                })?;
+            let pay_token = alloc.paid.first().map(|(t, _)| t.clone()).ok_or_else(|| {
+                ReducerError::Invariant(format!(
+                    "ClaimAllocation refund on {id} but no paid entries"
+                ))
+            })?;
             helpers::balance::credit(state, &mut delta, &pay_token.key, refund_due)?;
         }
 
@@ -422,9 +413,7 @@ impl Reducer for RefundAction {
         // `ClaimAllocationAction.live_inputs.refund_due` instead.)
         let id = launchpad_position_id(&self.platform.name, &self.sale_id, self.recipient);
         if effective_launchpad_position(state, &delta, &id).is_some() {
-            delta
-                .position_changes
-                .push(PositionChange::Close { id });
+            delta.position_changes.push(PositionChange::Close { id });
         }
         let _ = ctx;
         Ok(delta)
@@ -466,11 +455,7 @@ impl Reducer for WithdrawCommitAction {
         // refunds to the original committer). We derive the position id
         // from `state.wallet_id.address` — the wallet that originally
         // submitted the `Commit`.
-        let id = launchpad_position_id(
-            &self.platform.name,
-            &self.sale_id,
-            state.wallet_id.address,
-        );
+        let id = launchpad_position_id(&self.platform.name, &self.sale_id, state.wallet_id.address);
         let empty = StateDelta::new();
         let existing = effective_launchpad_position(state, &empty, &id)
             .ok_or_else(|| ReducerError::PositionNotFound(id.clone()))?;
@@ -485,27 +470,25 @@ impl Reducer for WithdrawCommitAction {
         // expose a single pay_token per sale; we mirror that by using the
         // first paid entry (which is also the canonical refund channel
         // recorded on `LaunchpadAllocation.paid`).
-        let pay_token = alloc
-            .paid
-            .first()
-            .map(|(t, _)| t.clone())
-            .ok_or_else(|| {
-                ReducerError::Invariant(format!(
-                    "WithdrawCommit on {id} but position has no paid entries"
-                ))
-            })?;
+        let pay_token = alloc.paid.first().map(|(t, _)| t.clone()).ok_or_else(|| {
+            ReducerError::Invariant(format!(
+                "WithdrawCommit on {id} but position has no paid entries"
+            ))
+        })?;
 
         let mut delta = StateDelta::new();
         helpers::balance::credit(state, &mut delta, &pay_token.key, requested)?;
 
         // Update or close depending on the remaining balance.
-        let total_paid: U256 = alloc.paid.iter().map(|(_, a)| *a).fold(U256::ZERO, |acc, x| {
-            acc.checked_add(x).unwrap_or(U256::ZERO)
-        });
+        let total_paid: U256 = alloc
+            .paid
+            .iter()
+            .map(|(_, a)| *a)
+            .fold(U256::ZERO, |acc, x| {
+                acc.checked_add(x).unwrap_or(U256::ZERO)
+            });
         if requested >= total_paid {
-            delta
-                .position_changes
-                .push(PositionChange::Close { id });
+            delta.position_changes.push(PositionChange::Close { id });
         } else {
             // Reduce paid amounts proportionally — for the single pay_token
             // case (the only supported one today) this is just a
@@ -545,7 +528,9 @@ mod tests {
     use simulation_state::eval_context::RequestKind;
     use simulation_state::live_field::DataSource;
     use simulation_state::position::VestCurve;
-    use simulation_state::primitives::{Address, ChainId, Duration, Price, ProtocolRef, Time, U256};
+    use simulation_state::primitives::{
+        Address, ChainId, Duration, Price, ProtocolRef, Time, U256,
+    };
     use simulation_state::token::{
         Balance, BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKey, TokenKind, TokenRef,
     };
@@ -626,13 +611,11 @@ mod tests {
     }
 
     fn live_bool(b: bool) -> LiveField<bool> {
-        LiveField::new(b, DataSource::UserSupplied, now())
-            .with_ttl(Duration::from_secs(60))
+        LiveField::new(b, DataSource::UserSupplied, now()).with_ttl(Duration::from_secs(60))
     }
 
     fn live_token(t: TokenRef) -> LiveField<TokenRef> {
-        LiveField::new(t, DataSource::UserSupplied, now())
-            .with_ttl(Duration::from_secs(60))
+        LiveField::new(t, DataSource::UserSupplied, now()).with_ttl(Duration::from_secs(60))
     }
 
     fn live_allocation(t: TokenRef, amt: u128) -> LiveField<(TokenRef, U256)> {
@@ -665,8 +648,7 @@ mod tests {
     }
 
     fn live_sale_state(s: SaleState) -> LiveField<SaleState> {
-        LiveField::new(s, DataSource::UserSupplied, now())
-            .with_ttl(Duration::from_secs(60))
+        LiveField::new(s, DataSource::UserSupplied, now()).with_ttl(Duration::from_secs(60))
     }
 
     fn live_opt_price() -> LiveField<Option<Price>> {
@@ -768,9 +750,11 @@ mod tests {
         let d2 = a2.apply(&state, &ctx()).unwrap();
         // The second commit emits an Update (existing position is augmented).
         let position_id = launchpad_position_id("coinlist", "sale-1", user());
-        let found_update = d2.position_changes.iter().any(|c| matches!(c,
-            PositionChange::Update { id, .. } if id == &position_id
-        ));
+        let found_update = d2.position_changes.iter().any(|c| {
+            matches!(c,
+                PositionChange::Update { id, .. } if id == &position_id
+            )
+        });
         assert!(found_update, "expected an Update on second commit");
     }
 

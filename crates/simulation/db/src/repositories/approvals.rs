@@ -1,9 +1,9 @@
 //! `approvals_erc20` / `approvals_set_for_all` / `approvals_permit2` CRUD.
 //!
 //! 세 종류가 같이 살지만 데이터 모양이 다 다르므로 3개 sub-module 로 분리.
-//! 각각 (wallet_id, chain, contract, [spender|operator]) 복합키 sparse 테이블.
+//! 각각 (`wallet_id`, chain, contract, [spender|operator]) 복합키 sparse 테이블.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 
 use crate::error::DbResult;
 
@@ -29,7 +29,7 @@ pub struct Erc20ApprovalRow {
 
 pub mod erc20 {
     use super::Erc20ApprovalRow;
-    use rusqlite::{Transaction, params};
+    use rusqlite::{params, Transaction};
 
     use crate::error::DbResult;
 
@@ -65,12 +65,20 @@ pub mod erc20 {
         let n = tx.execute(
             "DELETE FROM approvals_erc20 WHERE wallet_id = ?1 AND chain = ?2 \
              AND token_address = ?3 AND spender = ?4",
-            params![wallet_id, chain.to_lowercase(), token.to_lowercase(), spender.to_lowercase()],
+            params![
+                wallet_id,
+                chain.to_lowercase(),
+                token.to_lowercase(),
+                spender.to_lowercase()
+            ],
         )?;
         Ok(n > 0)
     }
 
-    pub fn list_for_wallet(tx: &Transaction<'_>, wallet_id: i64) -> DbResult<Vec<Erc20ApprovalRow>> {
+    pub fn list_for_wallet(
+        tx: &Transaction<'_>,
+        wallet_id: i64,
+    ) -> DbResult<Vec<Erc20ApprovalRow>> {
         let mut stmt = tx.prepare(
             "SELECT wallet_id, chain, token_address, spender, amount, is_unlimited, last_set_at \
              FROM approvals_erc20 WHERE wallet_id = ?1 \
@@ -108,7 +116,7 @@ pub struct SetForAllRow {
 
 pub mod set_for_all {
     use super::SetForAllRow;
-    use rusqlite::{Transaction, params};
+    use rusqlite::{params, Transaction};
 
     use crate::error::DbResult;
 
@@ -187,7 +195,7 @@ pub struct Permit2Row {
 
 pub mod permit2 {
     use super::Permit2Row;
-    use rusqlite::{Transaction, params};
+    use rusqlite::{params, Transaction};
 
     use crate::error::DbResult;
 
@@ -223,7 +231,12 @@ pub mod permit2 {
         let n = tx.execute(
             "DELETE FROM approvals_permit2 WHERE wallet_id = ?1 AND chain = ?2 \
              AND token_address = ?3 AND spender = ?4",
-            params![wallet_id, chain.to_lowercase(), token.to_lowercase(), spender.to_lowercase()],
+            params![
+                wallet_id,
+                chain.to_lowercase(),
+                token.to_lowercase(),
+                spender.to_lowercase()
+            ],
         )?;
         Ok(n > 0)
     }
@@ -392,24 +405,47 @@ mod tests {
         let pool = fresh_pool();
         pool.with_tx(|tx| {
             let w = ins_wallet(tx, "0xowner");
-            erc20::upsert(tx, &Erc20ApprovalRow {
-                wallet_id: w, chain: "eip155:1".into(), token_address: "0xT".into(),
-                spender: "0xS".into(), amount: "1".into(), is_unlimited: false, last_set_at: 1,
-            })?;
-            set_for_all::upsert(tx, &SetForAllRow {
-                wallet_id: w, chain: "eip155:1".into(), collection: "0xC".into(),
-                operator: "0xO".into(), set_at: Some(1),
-            })?;
-            permit2::upsert(tx, &Permit2Row {
-                wallet_id: w, chain: "eip155:1".into(), token_address: "0xT".into(),
-                spender: "0xS".into(), amount: "2".into(), expiration: 100, nonce: 0,
-            })?;
+            erc20::upsert(
+                tx,
+                &Erc20ApprovalRow {
+                    wallet_id: w,
+                    chain: "eip155:1".into(),
+                    token_address: "0xT".into(),
+                    spender: "0xS".into(),
+                    amount: "1".into(),
+                    is_unlimited: false,
+                    last_set_at: 1,
+                },
+            )?;
+            set_for_all::upsert(
+                tx,
+                &SetForAllRow {
+                    wallet_id: w,
+                    chain: "eip155:1".into(),
+                    collection: "0xC".into(),
+                    operator: "0xO".into(),
+                    set_at: Some(1),
+                },
+            )?;
+            permit2::upsert(
+                tx,
+                &Permit2Row {
+                    wallet_id: w,
+                    chain: "eip155:1".into(),
+                    token_address: "0xT".into(),
+                    spender: "0xS".into(),
+                    amount: "2".into(),
+                    expiration: 100,
+                    nonce: 0,
+                },
+            )?;
 
             let (e, s, p) = list_all_for_wallet(tx, w)?;
             assert_eq!(e.len(), 1);
             assert_eq!(s.len(), 1);
             assert_eq!(p.len(), 1);
             Ok(())
-        }).unwrap();
+        })
+        .unwrap();
     }
 }

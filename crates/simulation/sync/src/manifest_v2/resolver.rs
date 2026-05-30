@@ -25,6 +25,7 @@ pub struct ResolveContext {
 }
 
 impl ResolveContext {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -89,7 +90,9 @@ fn resolve_string(s: &str, ctx: &ResolveContext) -> Result<Value, SyncError> {
     // 단일 placeholder 만 처리 — "$chain", "$inputs.amountIn" 등.
     // 복합 문자열 ("prefix_$X_suffix") 은 지원 X (V2 spec 도 단일 사용).
     if s == "$chain" {
-        return ctx.chain.as_ref()
+        return ctx
+            .chain
+            .as_ref()
             .map(|c| Value::String(c.clone()))
             .ok_or_else(|| SyncError::FetchFailed {
                 source_id: "manifest_v2".into(),
@@ -108,20 +111,23 @@ fn resolve_string(s: &str, ctx: &ResolveContext) -> Result<Value, SyncError> {
                 _ => {
                     return Err(SyncError::FetchFailed {
                         source_id: "manifest_v2".into(),
-                        reason: format!("unknown scope: ${}", scope),
+                        reason: format!("unknown scope: ${scope}"),
                     });
                 }
             };
-            return map.get(field).cloned().ok_or_else(|| SyncError::FetchFailed {
-                source_id: "manifest_v2".into(),
-                reason: format!("${}.{} not in ResolveContext", scope, field),
-            });
+            return map
+                .get(field)
+                .cloned()
+                .ok_or_else(|| SyncError::FetchFailed {
+                    source_id: "manifest_v2".into(),
+                    reason: format!("${scope}.{field} not in ResolveContext"),
+                });
         }
     }
 
     Err(SyncError::FetchFailed {
         source_id: "manifest_v2".into(),
-        reason: format!("unrecognized placeholder: {}", s),
+        reason: format!("unrecognized placeholder: {s}"),
     })
 }
 
@@ -176,15 +182,15 @@ mod tests {
         let ctx = ResolveContext::new();
         let v = Value::String("$nonexistent.field".into());
         let err = resolve_placeholders(&v, &ctx).unwrap_err();
-        assert!(format!("{}", err).contains("unknown scope"));
+        assert!(format!("{err}").contains("unknown scope"));
     }
 
     #[test]
     fn missing_value_errors() {
-        let ctx = ResolveContext::new();  // chain 없음
+        let ctx = ResolveContext::new(); // chain 없음
         let v = Value::String("$chain".into());
         let err = resolve_placeholders(&v, &ctx).unwrap_err();
-        assert!(format!("{}", err).contains("$chain referenced"));
+        assert!(format!("{err}").contains("$chain referenced"));
     }
 
     #[test]

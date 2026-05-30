@@ -102,7 +102,9 @@ pub fn open_position(
             position.id
         )));
     }
-    delta.position_changes.push(PositionChange::Open { position });
+    delta
+        .position_changes
+        .push(PositionChange::Open { position });
     Ok(())
 }
 
@@ -211,12 +213,12 @@ pub fn close_position(
 mod tests {
     use super::*;
     use simulation_state::live_field::{DataSource, LiveField};
+    use simulation_state::position::{AirdropClaim, PositionKind};
     use simulation_state::position::{
         ClaimStatus, LendingAccount, MarginMode, PerpPosition, PerpSide,
     };
-    use simulation_state::position::{AirdropClaim, PositionKind};
     use simulation_state::primitives::{
-        Address, ChainId, Decimal, MarketRef, Price, ProtocolRef, SignedI256, Time, U256, VenueRef,
+        Address, ChainId, Decimal, MarketRef, Price, ProtocolRef, SignedI256, Time, VenueRef, U256,
     };
     use simulation_state::token::{TokenKey, TokenRef};
     use simulation_state::wallet::WalletId;
@@ -440,8 +442,8 @@ mod tests {
         let state = wallet();
         let mut delta = StateDelta::new();
 
-        let err = upsert_lending_account(&state, &mut delta, &"ghost".to_string(), |_| {})
-            .unwrap_err();
+        let err =
+            upsert_lending_account(&state, &mut delta, &"ghost".to_string(), |_| {}).unwrap_err();
         assert!(matches!(err, ReducerError::PositionNotFound(ref id) if id == "ghost"));
         assert!(delta.position_changes.is_empty());
     }

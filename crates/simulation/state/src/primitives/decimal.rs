@@ -25,11 +25,13 @@ impl Decimal {
     }
 
     /// Returns the `Decimal` representing zero (`"0"`).
+    #[must_use]
     pub fn zero() -> Self {
         Self("0".into())
     }
 
     /// Borrows the underlying decimal string.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

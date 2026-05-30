@@ -6,12 +6,12 @@ use tsify_next::Tsify;
 
 use super::{address::Address, chain::ChainId, decimal::Weight};
 
-/// Protocol identifier. `name` follows the DefiLlama convention (e.g.
-/// "aave_v3", "uniswap_v3", "hyperliquid").
+/// Protocol identifier. `name` follows the `DefiLlama` convention (e.g.
+/// "`aave_v3`", "`uniswap_v3`", "hyperliquid").
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct ProtocolRef {
-    /// Protocol name in DefiLlama convention (e.g. "aave_v3", "uniswap_v3").
+    /// Protocol name in `DefiLlama` convention (e.g. "`aave_v3`", "`uniswap_v3`").
     pub name: String,
     /// Optional protocol version (e.g. "v3"); `None` when not versioned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,6 +47,7 @@ impl ProtocolRef {
     }
 
     /// Returns this ref with the deployment chain set (builder style).
+    #[must_use]
     pub fn with_chain(mut self, c: ChainId) -> Self {
         self.chain = Some(c);
         self
@@ -79,7 +80,7 @@ pub struct PoolRef {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct VenueRef {
-    /// Venue name (e.g. "hyperliquid", "gmx_v2", "dydx_v4", "uniswap_x").
+    /// Venue name (e.g. "hyperliquid", "`gmx_v2`", "`dydx_v4`", "`uniswap_x`").
     pub name: String,
     /// Chain the venue is on; `None` for off-chain venues.
     #[serde(default, skip_serializing_if = "Option::is_none")]

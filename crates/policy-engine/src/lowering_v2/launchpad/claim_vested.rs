@@ -22,7 +22,10 @@ pub(crate) fn lower(
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     // `position_id` is a `PositionId` (= String) opaque identifier.
-    m.insert("positionId".into(), Value::String(action.position_id.clone()));
+    m.insert(
+        "positionId".into(),
+        Value::String(action.position_id.clone()),
+    );
     if let Some(amount) = action.amount {
         m.insert("amount".into(), Value::String(u256_hex(amount)));
     }

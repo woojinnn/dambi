@@ -157,10 +157,7 @@ const fn validate_claim_target(action: &ClaimAirdropAction) -> ReducerResult<()>
 /// protocol with the receiving wallet address gives a stable identifier
 /// across replays of the same claim.
 fn airdrop_position_id(action: &ClaimAirdropAction) -> String {
-    format!(
-        "airdrop:{}:{:#x}",
-        action.source.name, action.recipient
-    )
+    format!("airdrop:{}:{:#x}", action.source.name, action.recipient)
 }
 
 impl Reducer for DelegateGovernanceAction {
@@ -235,8 +232,7 @@ mod tests {
         TokenRef {
             key: TokenKey::Erc20 {
                 chain: ChainId::ethereum_mainnet(),
-                address: Address::from_str("0x4200000000000000000000000000000000000042")
-                    .unwrap(),
+                address: Address::from_str("0x4200000000000000000000000000000000000042").unwrap(),
             },
         }
     }
@@ -296,8 +292,7 @@ mod tests {
     }
 
     fn live_window(window: Option<(Time, Time)>) -> LiveField<Option<(Time, Time)>> {
-        LiveField::new(window, DataSource::UserSupplied, now())
-            .with_ttl(Duration::from_secs(60))
+        LiveField::new(window, DataSource::UserSupplied, now()).with_ttl(Duration::from_secs(60))
     }
 
     fn merkle_action_with_proof() -> ClaimAirdropAction {
@@ -469,8 +464,7 @@ mod tests {
     // ---------- DelegateGovernanceAction ----------
 
     fn live_addr_opt() -> LiveField<Option<Address>> {
-        LiveField::new(None, DataSource::UserSupplied, now())
-            .with_ttl(Duration::from_secs(60))
+        LiveField::new(None, DataSource::UserSupplied, now()).with_ttl(Duration::from_secs(60))
     }
 
     fn live_voting_power(v: u128) -> LiveField<U256> {

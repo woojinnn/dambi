@@ -43,7 +43,10 @@ pub(crate) fn lower(
         "marginMode".into(),
         Value::String(margin_mode(&action.margin_mode).into()),
     );
-    m.insert("slippageBp".into(), Value::from(i64::from(action.slippage_bp)));
+    m.insert(
+        "slippageBp".into(),
+        Value::from(i64::from(action.slippage_bp)),
+    );
     m.insert("reduceOnly".into(), Value::Bool(action.reduce_only));
     // OpenPerpLiveInputs flattened.
     m.insert(
@@ -108,7 +111,8 @@ mod tests {
 
     use super::super::test_support::{
         assert_conforms, live, onchain_meta, sample_account_state, sample_account_state_empty,
-        sample_market, sample_size, sample_size_base, sample_size_quote, sample_token, sample_venue,
+        sample_market, sample_size, sample_size_base, sample_size_quote, sample_token,
+        sample_venue,
     };
 
     /// Build an `OpenPosition` body exercising the requested `side`, `size`,

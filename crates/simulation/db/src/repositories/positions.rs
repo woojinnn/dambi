@@ -3,7 +3,7 @@
 //! Phase 2.4 는 모든 variant 를 generic JSON 으로 저장. (per-kind 평탄화는
 //! Phase 후속 — 그 시점에 정책 쿼리 가 어떤 컬럼을 자주 보는지 가늠 가능.)
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 use serde_json::Value as JsonValue;
 
 use crate::error::DbResult;
@@ -112,11 +112,12 @@ pub fn list_for_wallet(tx: &Transaction<'_>, wallet_id: i64) -> DbResult<Vec<Pos
 
 /// count by kind — UI summary.
 pub fn count_by_kind(tx: &Transaction<'_>, wallet_id: i64) -> DbResult<Vec<(String, i64)>> {
-    let mut stmt = tx.prepare(
-        "SELECT kind, COUNT(*) FROM positions WHERE wallet_id = ?1 GROUP BY kind",
-    )?;
+    let mut stmt =
+        tx.prepare("SELECT kind, COUNT(*) FROM positions WHERE wallet_id = ?1 GROUP BY kind")?;
     let rows = stmt
-        .query_map(params![wallet_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .query_map(params![wallet_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -217,7 +218,7 @@ mod tests {
                 primitives_source: json!({}),
             };
             let id1 = upsert(tx, &p1)?;
-            let mut p2 = p1.clone();
+            let mut p2 = p1;
             p2.summary = Some("second".into());
             p2.data = json!({"v":2});
             let id2 = upsert(tx, &p2)?;

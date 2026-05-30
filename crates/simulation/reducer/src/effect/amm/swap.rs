@@ -35,8 +35,8 @@ use crate::error::{ReducerError, ReducerResult};
 use crate::helpers;
 
 use super::{
-    aggregator, balancer_v2, balancer_v3, curve_v1, curve_v2, maverick_v2, sushi_v2,
-    trader_joe_lb, uniswap_v2, uniswap_v3, uniswap_v4,
+    aggregator, balancer_v2, balancer_v3, curve_v1, curve_v2, maverick_v2, sushi_v2, trader_joe_lb,
+    uniswap_v2, uniswap_v3, uniswap_v4,
 };
 
 impl Reducer for SwapAction {
@@ -340,7 +340,12 @@ mod tests {
         venue: AmmVenue,
         pool_state: PoolState,
     ) -> SwapAction {
-        let route = single_hop_route(token_in.clone(), token_out.clone(), venue.clone(), pool_state);
+        let route = single_hop_route(
+            token_in.clone(),
+            token_out.clone(),
+            venue.clone(),
+            pool_state,
+        );
         SwapAction {
             venue,
             params: SwapParams {
@@ -752,10 +757,8 @@ mod tests {
         let state = state_with_pair(U256::from(1_000_000u64), U256::ZERO);
         let v4 = AmmVenue::UniswapV4 {
             chain: ChainId::ethereum_mainnet(),
-            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001"
-                .into(),
-            pool_manager: Address::from_str("0x000000000004444c5dc75cb358380d2e3de08a90")
-                .unwrap(),
+            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001".into(),
+            pool_manager: Address::from_str("0x000000000004444c5dc75cb358380d2e3de08a90").unwrap(),
             hooks: Address::ZERO,
         };
         let q96 = U256::from(1u64) << 96;
@@ -809,10 +812,8 @@ mod tests {
         let state = state_with_pair(U256::from(1_000_000u64), U256::ZERO);
         let v4_with_hooks = AmmVenue::UniswapV4 {
             chain: ChainId::ethereum_mainnet(),
-            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001"
-                .into(),
-            pool_manager: Address::from_str("0x000000000004444c5dc75cb358380d2e3de08a90")
-                .unwrap(),
+            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001".into(),
+            pool_manager: Address::from_str("0x000000000004444c5dc75cb358380d2e3de08a90").unwrap(),
             // Non-zero hooks address — deliberate, must trigger the
             // unsupported-protocol short-circuit regardless of pool state.
             hooks: Address::from([0x42u8; 20]),
@@ -1013,11 +1014,7 @@ mod tests {
         }
     }
 
-    fn aggregator_swap_action(
-        amount_in: U256,
-        min_out: U256,
-        meta: AggregatorMeta,
-    ) -> SwapAction {
+    fn aggregator_swap_action(amount_in: U256, min_out: U256, meta: AggregatorMeta) -> SwapAction {
         let route = SwapRoute {
             paths: vec![RoutePath {
                 share_bp: 10_000,

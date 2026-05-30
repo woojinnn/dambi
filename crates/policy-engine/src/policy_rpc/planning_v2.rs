@@ -238,6 +238,9 @@ mod tests {
             }]
         }));
         let calls = plan_policy_rpc_v2(&[optional], &swap_view(), &json!({}), &tx()).unwrap();
-        assert!(calls.is_empty(), "optional call with missing selector is skipped");
+        assert!(
+            calls.is_empty(),
+            "optional call with missing selector is skipped"
+        );
     }
 }

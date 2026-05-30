@@ -1,4 +1,4 @@
-//! PositionChange — the Open/Update/Close delta applied to a single position.
+//! `PositionChange` — the Open/Update/Close delta applied to a single position.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,7 +11,7 @@ use crate::position::{Position, PositionId};
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct PositionPatch {
     /// Map of changed field path to its new value.
-    /// e.g. { "health_factor.value": "0.762", "collaterals[+]": [USDC, 1000] }
+    /// e.g. { "`health_factor.value"`: "0.762", "collaterals[+]": [USDC, 1000] }
     #[tsify(type = "unknown")]
     pub fields: Value,
 }

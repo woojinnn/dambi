@@ -1,8 +1,8 @@
 //! AMM 도메인 walk + apply.
 //!
-//! Wired: Swap (4), AddLiquidity (2), RemoveLiquidity (2), CollectFees (1),
-//!        SignIntentOrder (2). 총 11 slots.
-//! CancelIntentOrder 는 live_inputs 없음.
+//! Wired: Swap (4), `AddLiquidity` (2), `RemoveLiquidity` (2), `CollectFees` (1),
+//!        `SignIntentOrder` (2). 총 11 slots.
+//! `CancelIntentOrder` 는 `live_inputs` 없음.
 
 use serde_json::Value;
 
@@ -36,32 +36,126 @@ pub(super) fn walk(
 fn walk_swap(s: &SwapAction, ix: usize, now: Time, st: &mut Vec<StaleField>, sx: &mut WalkStats) {
     let li = &s.live_inputs;
     push_if_stale(st, sx, &li.route, now, ix, ActionSlot::AmmSwapRoute);
-    push_if_stale(st, sx, &li.expected_amount_out, now, ix, ActionSlot::AmmSwapExpectedAmountOut);
-    push_if_stale(st, sx, &li.price_impact_bp, now, ix, ActionSlot::AmmSwapPriceImpactBp);
-    push_if_stale(st, sx, &li.gas_estimate, now, ix, ActionSlot::AmmSwapGasEstimate);
+    push_if_stale(
+        st,
+        sx,
+        &li.expected_amount_out,
+        now,
+        ix,
+        ActionSlot::AmmSwapExpectedAmountOut,
+    );
+    push_if_stale(
+        st,
+        sx,
+        &li.price_impact_bp,
+        now,
+        ix,
+        ActionSlot::AmmSwapPriceImpactBp,
+    );
+    push_if_stale(
+        st,
+        sx,
+        &li.gas_estimate,
+        now,
+        ix,
+        ActionSlot::AmmSwapGasEstimate,
+    );
 }
 
-fn walk_add(a: &AddLiquidityAction, ix: usize, now: Time, st: &mut Vec<StaleField>, sx: &mut WalkStats) {
+fn walk_add(
+    a: &AddLiquidityAction,
+    ix: usize,
+    now: Time,
+    st: &mut Vec<StaleField>,
+    sx: &mut WalkStats,
+) {
     let li = &a.live_inputs;
-    push_if_stale(st, sx, &li.pool_state, now, ix, ActionSlot::AmmAddLiquidityPoolState);
-    push_if_stale(st, sx, &li.current_price, now, ix, ActionSlot::AmmAddLiquidityCurrentPrice);
+    push_if_stale(
+        st,
+        sx,
+        &li.pool_state,
+        now,
+        ix,
+        ActionSlot::AmmAddLiquidityPoolState,
+    );
+    push_if_stale(
+        st,
+        sx,
+        &li.current_price,
+        now,
+        ix,
+        ActionSlot::AmmAddLiquidityCurrentPrice,
+    );
 }
 
-fn walk_remove(r: &RemoveLiquidityAction, ix: usize, now: Time, st: &mut Vec<StaleField>, sx: &mut WalkStats) {
+fn walk_remove(
+    r: &RemoveLiquidityAction,
+    ix: usize,
+    now: Time,
+    st: &mut Vec<StaleField>,
+    sx: &mut WalkStats,
+) {
     let li = &r.live_inputs;
-    push_if_stale(st, sx, &li.pool_state, now, ix, ActionSlot::AmmRemoveLiquidityPoolState);
-    push_if_stale(st, sx, &li.fees_owed, now, ix, ActionSlot::AmmRemoveLiquidityFeesOwed);
+    push_if_stale(
+        st,
+        sx,
+        &li.pool_state,
+        now,
+        ix,
+        ActionSlot::AmmRemoveLiquidityPoolState,
+    );
+    push_if_stale(
+        st,
+        sx,
+        &li.fees_owed,
+        now,
+        ix,
+        ActionSlot::AmmRemoveLiquidityFeesOwed,
+    );
 }
 
-fn walk_collect(c: &CollectFeesAction, ix: usize, now: Time, st: &mut Vec<StaleField>, sx: &mut WalkStats) {
+fn walk_collect(
+    c: &CollectFeesAction,
+    ix: usize,
+    now: Time,
+    st: &mut Vec<StaleField>,
+    sx: &mut WalkStats,
+) {
     let li = &c.live_inputs;
-    push_if_stale(st, sx, &li.fees_owed, now, ix, ActionSlot::AmmCollectFeesOwed);
+    push_if_stale(
+        st,
+        sx,
+        &li.fees_owed,
+        now,
+        ix,
+        ActionSlot::AmmCollectFeesOwed,
+    );
 }
 
-fn walk_sign_intent(s: &SignIntentOrderAction, ix: usize, now: Time, st: &mut Vec<StaleField>, sx: &mut WalkStats) {
+fn walk_sign_intent(
+    s: &SignIntentOrderAction,
+    ix: usize,
+    now: Time,
+    st: &mut Vec<StaleField>,
+    sx: &mut WalkStats,
+) {
     let li = &s.live_inputs;
-    push_if_stale(st, sx, &li.expected_fill_price, now, ix, ActionSlot::AmmSignIntentExpectedFillPrice);
-    push_if_stale(st, sx, &li.competing_orders, now, ix, ActionSlot::AmmSignIntentCompetingOrders);
+    push_if_stale(
+        st,
+        sx,
+        &li.expected_fill_price,
+        now,
+        ix,
+        ActionSlot::AmmSignIntentExpectedFillPrice,
+    );
+    push_if_stale(
+        st,
+        sx,
+        &li.competing_orders,
+        now,
+        ix,
+        ActionSlot::AmmSignIntentCompetingOrders,
+    );
 }
 
 pub(super) fn apply(aa: &mut AmmAction, slot: &ActionSlot, value: Value, now: Time) {
@@ -79,16 +173,24 @@ fn apply_swap(s: &mut SwapAction, slot: &ActionSlot, value: Value, now: Time) {
     let li = &mut s.live_inputs;
     match slot {
         ActionSlot::AmmSwapRoute => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.route, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.route, v, now);
+            }
         }
         ActionSlot::AmmSwapExpectedAmountOut => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.expected_amount_out, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.expected_amount_out, u, now);
+            }
         }
         ActionSlot::AmmSwapPriceImpactBp => {
-            if let Some(n) = value.as_u64() { set_field(&mut li.price_impact_bp, n as u32, now); }
+            if let Some(n) = value.as_u64() {
+                set_field(&mut li.price_impact_bp, n as u32, now);
+            }
         }
         ActionSlot::AmmSwapGasEstimate => {
-            if let Some(u) = value_to_u256(&value) { set_field(&mut li.gas_estimate, u, now); }
+            if let Some(u) = value_to_u256(&value) {
+                set_field(&mut li.gas_estimate, u, now);
+            }
         }
         _ => {}
     }
@@ -98,10 +200,14 @@ fn apply_add(a: &mut AddLiquidityAction, slot: &ActionSlot, value: Value, now: T
     let li = &mut a.live_inputs;
     match slot {
         ActionSlot::AmmAddLiquidityPoolState => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.pool_state, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.pool_state, v, now);
+            }
         }
         ActionSlot::AmmAddLiquidityCurrentPrice => {
-            if let Some(d) = value_to_decimal(&value) { set_field(&mut li.current_price, d, now); }
+            if let Some(d) = value_to_decimal(&value) {
+                set_field(&mut li.current_price, d, now);
+            }
         }
         _ => {}
     }
@@ -111,10 +217,14 @@ fn apply_remove(r: &mut RemoveLiquidityAction, slot: &ActionSlot, value: Value, 
     let li = &mut r.live_inputs;
     match slot {
         ActionSlot::AmmRemoveLiquidityPoolState => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.pool_state, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.pool_state, v, now);
+            }
         }
         ActionSlot::AmmRemoveLiquidityFeesOwed => {
-            if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.fees_owed, v, now); }
+            if let Ok(v) = serde_json::from_value(value) {
+                set_field(&mut li.fees_owed, v, now);
+            }
         }
         _ => {}
     }
@@ -122,8 +232,10 @@ fn apply_remove(r: &mut RemoveLiquidityAction, slot: &ActionSlot, value: Value, 
 
 fn apply_collect(c: &mut CollectFeesAction, slot: &ActionSlot, value: Value, now: Time) {
     let li = &mut c.live_inputs;
-    if let ActionSlot::AmmCollectFeesOwed = slot {
-        if let Ok(v) = serde_json::from_value(value) { set_field(&mut li.fees_owed, v, now); }
+    if matches!(slot, ActionSlot::AmmCollectFeesOwed) {
+        if let Ok(v) = serde_json::from_value(value) {
+            set_field(&mut li.fees_owed, v, now);
+        }
     }
 }
 
@@ -131,10 +243,14 @@ fn apply_sign_intent(s: &mut SignIntentOrderAction, slot: &ActionSlot, value: Va
     let li = &mut s.live_inputs;
     match slot {
         ActionSlot::AmmSignIntentExpectedFillPrice => {
-            if let Some(d) = value_to_decimal(&value) { set_field(&mut li.expected_fill_price, d, now); }
+            if let Some(d) = value_to_decimal(&value) {
+                set_field(&mut li.expected_fill_price, d, now);
+            }
         }
         ActionSlot::AmmSignIntentCompetingOrders => {
-            if let Some(n) = value.as_u64() { set_field(&mut li.competing_orders, n as u32, now); }
+            if let Some(n) = value.as_u64() {
+                set_field(&mut li.competing_orders, n as u32, now);
+            }
         }
         _ => {}
     }

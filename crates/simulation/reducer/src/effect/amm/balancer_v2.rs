@@ -135,12 +135,12 @@ fn quote_weighted(
     let numer_inner = amount_in_after_fee.checked_mul(w_in).ok_or_else(|| {
         ReducerError::Invariant("balancer_v2 weighted: numer_inner overflow".into())
     })?;
-    let numerator = bal_out
-        .checked_mul(numer_inner)
-        .ok_or_else(|| ReducerError::Invariant("balancer_v2 weighted: numerator overflow".into()))?;
-    let denom_a = bal_in.checked_mul(w_out).ok_or_else(|| {
-        ReducerError::Invariant("balancer_v2 weighted: denom_a overflow".into())
+    let numerator = bal_out.checked_mul(numer_inner).ok_or_else(|| {
+        ReducerError::Invariant("balancer_v2 weighted: numerator overflow".into())
     })?;
+    let denom_a = bal_in
+        .checked_mul(w_out)
+        .ok_or_else(|| ReducerError::Invariant("balancer_v2 weighted: denom_a overflow".into()))?;
     let denominator = denom_a.checked_add(numer_inner).ok_or_else(|| {
         ReducerError::Invariant("balancer_v2 weighted: denominator overflow".into())
     })?;
@@ -293,7 +293,11 @@ mod tests {
         )
         .unwrap();
         let target = U256::from(1_000u64);
-        let diff = if out > target { out - target } else { target - out };
+        let diff = if out > target {
+            out - target
+        } else {
+            target - out
+        };
         assert!(diff <= U256::from(2u64), "out = {out}, expected ≈ 1_000");
     }
 
@@ -329,8 +333,7 @@ mod tests {
             weights: vec![50, 50],
             fee_bp: 0,
         };
-        let out =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::ZERO).unwrap();
+        let out = quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::ZERO).unwrap();
         assert_eq!(out, U256::ZERO);
     }
 
@@ -342,9 +345,14 @@ mod tests {
             reserve_out: U256::from(1u64),
             fee_bp: 0,
         };
-        let err =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(1u64))
-                .unwrap_err();
+        let err = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(1u64),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("Weighted")));
     }
 
@@ -356,9 +364,14 @@ mod tests {
             weights: vec![50, 50],
             fee_bp: 0,
         };
-        let err =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(1u64))
-                .unwrap_err();
+        let err = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(1u64),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("length mismatch")));
     }
 

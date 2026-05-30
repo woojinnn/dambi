@@ -16,21 +16,25 @@ impl ChainId {
     }
 
     /// Returns the underlying CAIP-2 identifier as a string slice.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Returns the `ChainId` for Ethereum mainnet ("eip155:1").
+    #[must_use]
     pub fn ethereum_mainnet() -> Self {
         Self("eip155:1".into())
     }
 
     /// Returns the `ChainId` for Arbitrum One ("eip155:42161").
+    #[must_use]
     pub fn arbitrum() -> Self {
         Self("eip155:42161".into())
     }
 
     /// Returns the `ChainId` for Base ("eip155:8453").
+    #[must_use]
     pub fn base() -> Self {
         Self("eip155:8453".into())
     }

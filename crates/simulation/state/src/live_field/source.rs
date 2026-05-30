@@ -18,7 +18,7 @@ pub enum OracleProvider {
     Pyth,
     /// Chainlink oracle.
     Chainlink,
-    /// RedStone oracle.
+    /// `RedStone` oracle.
     RedStone,
     /// Any other provider, preserved by name only.
     Other(String),
@@ -166,7 +166,7 @@ pub enum FieldRef {
         /// Which pending field is referenced.
         field: PendingFieldName,
     },
-    /// A global value independent of any wallet/position, e.g. gas_price, eth_usd.
+    /// A global value independent of any wallet/position, e.g. `gas_price`, `eth_usd`.
     Global {
         /// Name of the global value.
         name: String,

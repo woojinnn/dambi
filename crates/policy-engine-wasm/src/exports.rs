@@ -6,16 +6,17 @@ use crate::dto::{
     PreviewCustomSchemaInputDto, PreviewCustomSchemaOutputDto, PreviewInstalledSchemaOutputDto,
     PreviewSchemaInputDto,
 };
+use policy_engine::policy::PolicyEngine;
 use policy_engine::policy::PolicyEngineBuilder;
 use policy_engine::policy_rpc::manifest_set_hash;
 use policy_engine::schema::{
     compose_enriched, schema_hash, AddedContextField, CustomFieldSource, EnrichedSchema,
     PolicySchemaComposer,
 };
-use policy_engine::policy::PolicyEngine;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 
+#[allow(dead_code)]
 pub struct EngineState {
     pub policies: PolicyEngine,
     pub manifest_set_hash: String,

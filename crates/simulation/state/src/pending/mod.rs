@@ -9,7 +9,7 @@ pub mod nonce;
 
 pub use commitment::AssetCommitment;
 pub use kind::{OrderKind, PendingKind, PerpOrderKind};
-pub use nonce::{B256, NonceKey, TxHash};
+pub use nonce::{NonceKey, TxHash, B256};
 
 use crate::delta::StateDelta;
 use crate::live_field::DataSource;
@@ -59,7 +59,8 @@ pub struct PendingLifecycle {
 
 impl PendingLifecycle {
     /// Whether the status counts toward committed totals (active or partially filled).
-    pub fn is_active_or_partial(&self) -> bool {
+    #[must_use]
+    pub const fn is_active_or_partial(&self) -> bool {
         matches!(
             self.status,
             PendingStatus::Active | PendingStatus::PartiallyFilled

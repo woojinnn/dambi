@@ -1,4 +1,4 @@
-//! ApprovalSet — wallet-level approval collections split by scope. spec §4.4.
+//! `ApprovalSet` — wallet-level approval collections split by scope. spec §4.4.
 //!
 //! Only ERC721 *per-token* `approve(tokenId, spender)` is nested under
 //! `TokenHolding.approved_to` (it is 1:1 with that holding, so this is natural).
@@ -48,24 +48,27 @@ pub struct ApprovalSet {
 
 impl ApprovalSet {
     /// Creates an empty `ApprovalSet` with no recorded approvals.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Looks up the ERC20 allowance for `spender` on the `(chain, token)` contract, if any.
+    #[must_use]
     pub fn allowance(&self, key: &ContractAddrKey, spender: &Spender) -> Option<&AllowanceSpec> {
         self.erc20.get(key).and_then(|m| m.get(spender))
     }
 
     /// Returns whether `spender` holds set-for-all approval on the `(chain, contract)` collection.
+    #[must_use]
     pub fn has_set_for_all(&self, key: &ContractAddrKey, spender: &Spender) -> bool {
         self.set_for_all
             .get(key)
-            .map(|s| s.contains(spender))
-            .unwrap_or(false)
+            .is_some_and(|s| s.contains(spender))
     }
 
     /// Looks up the Permit2 allowance for the `(chain, token, spender)` triple, if any.
+    #[must_use]
     pub fn permit2_of(&self, key: &SpenderKey) -> Option<&Permit2Allowance> {
         self.permit2.get(key)
     }

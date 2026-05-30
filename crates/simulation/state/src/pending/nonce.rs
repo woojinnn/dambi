@@ -1,14 +1,14 @@
-//! NonceKey — identifier used to detect nonce collisions between pending actions.
+//! `NonceKey` — identifier used to detect nonce collisions between pending actions.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
 
 use crate::primitives::{Address, U256};
 
-/// 32-byte hash (TxHash, OrderHash). hex string "0x..".
+/// 32-byte hash (`TxHash`, `OrderHash`). hex string "0x..".
 pub type B256 = String;
 
-/// TxHash.
+/// `TxHash`.
 pub type TxHash = B256;
 
 /// Unique key identifying a nonce across the different nonce schemes a pending action can use.

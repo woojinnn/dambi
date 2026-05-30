@@ -3,12 +3,12 @@
 //! 하이브리드 전략:
 //! * `value` (Price = Decimal string) — TEXT 컬럼
 //! * `synced_at` — INTEGER unix sec
-//! * `ttl_sec` — INTEGER (LiveField.ttl.as_secs())
-//! * `confidence_bp` — INTEGER (Confidence.deviation_bp; is_stale 은 sync 가 매번
+//! * `ttl_sec` — INTEGER (`LiveField.ttl.as_secs()`)
+//! * `confidence_bp` — INTEGER (`Confidence.deviation_bp`; `is_stale` 은 sync 가 매번
 //!   recompute 하므로 영속화 X)
-//! * `source` — DataSource 전체 JSON
+//! * `source` — `DataSource` 전체 JSON
 //!
-//! → "stale price 검색" 쿼리는 평탄 컬럼 WHERE 절로 가능, 새 DataSource variant
+//! → "stale price 검색" 쿼리는 평탄 컬럼 WHERE 절로 가능, 새 `DataSource` variant
 //! 추가는 JSON 파싱에 흡수 (migration 0).
 
 use serde_json::Value;
@@ -21,11 +21,11 @@ use crate::error::{DbError, DbResult};
 /// `LiveField<Price>` 의 SQL 표현 (5 컬럼 + JSON).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveFieldColumns {
-    pub value: String,          // Price 의 decimal string
-    pub synced_at: i64,         // unix sec
+    pub value: String,  // Price 의 decimal string
+    pub synced_at: i64, // unix sec
     pub ttl_sec: Option<i64>,
-    pub confidence_bp: Option<i64>,  // Confidence.deviation_bp
-    pub source_json: String,    // DataSource JSON
+    pub confidence_bp: Option<i64>, // Confidence.deviation_bp
+    pub source_json: String,        // DataSource JSON
 }
 
 pub fn encode_price_live_field(lf: &LiveField<Price>) -> DbResult<LiveFieldColumns> {
@@ -47,8 +47,8 @@ pub fn encode_price_live_field(lf: &LiveField<Price>) -> DbResult<LiveFieldColum
 
 pub fn decode_price_live_field(c: &LiveFieldColumns) -> DbResult<LiveField<Price>> {
     let source: DataSource = serde_json::from_str(&c.source_json)?;
-    let synced_at = u64::try_from(c.synced_at)
-        .map_err(|_| DbError::Invariant("synced_at negative".into()))?;
+    let synced_at =
+        u64::try_from(c.synced_at).map_err(|_| DbError::Invariant("synced_at negative".into()))?;
     let ttl = c
         .ttl_sec
         .map(|s| u64::try_from(s).map(Duration::from_secs))
@@ -75,7 +75,7 @@ pub fn decode_price_live_field(c: &LiveFieldColumns) -> DbResult<LiveField<Price
     })
 }
 
-/// LiveField 전체가 NULL 인 경우 (`price_usd` 컬럼이 None) 를 위한 보조.
+/// `LiveField` 전체가 NULL 인 경우 (`price_usd` 컬럼이 None) 를 위한 보조.
 ///
 /// SQL 의 5 컬럼이 모두 NULL → `Option<LiveField<Price>>` = None.
 /// 하나라도 채워져있으면 → 모두 채워져있어야 함 (invariant).
@@ -104,16 +104,19 @@ pub fn decode_optional_price_live_field(
     }
 }
 
+/// 5-튜플 — value / synced_at / ttl_sec / confidence_bp / source_json.
+pub type OptionalLiveFieldCols = (
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+);
+
 /// `Option<LiveField<Price>>` → 컬럼 값 5쌍 (모두 None 이거나, 모두 채워짐).
 pub fn encode_optional_price_live_field(
     lf: Option<&LiveField<Price>>,
-) -> DbResult<(
-    Option<String>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-)> {
+) -> DbResult<OptionalLiveFieldCols> {
     match lf {
         None => Ok((None, None, None, None, None)),
         Some(lf) => {

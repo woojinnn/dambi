@@ -74,8 +74,7 @@ mod tests {
     use simulation_state::primitives::ChainId;
 
     use super::super::test_support::{
-        nft_contract, onchain_meta, sample_erc1155_key, sample_erc20_token, sample_nft_key,
-        spender,
+        nft_contract, onchain_meta, sample_erc1155_key, sample_erc20_token, sample_nft_key, spender,
     };
 
     /// Build a `revoke_approval` body for the given scope and gate it.

@@ -139,7 +139,9 @@ mod tests {
                 call_id: "swap-usd-guard::oracle".into(),
                 method: "oracle.usd_value".into(),
                 params: serde_json::json!({ "token": "USDC", "amount": "0x3b9aca00" }),
-                outputs: vec![serde_json::json!({ "from": "$.result.usd", "into": "totalInputUsd" })],
+                outputs: vec![
+                    serde_json::json!({ "from": "$.result.usd", "into": "totalInputUsd" }),
+                ],
                 optional: false,
             }],
         }
@@ -178,10 +180,22 @@ mod tests {
         }
 
         let pv = serde_json::to_value(sample_response()).unwrap();
-        assert!(pv.get("policyRequest").is_some(), "response missing `policyRequest`");
-        assert!(pv.get("diagnostics").is_some(), "response missing `diagnostics`");
+        assert!(
+            pv.get("policyRequest").is_some(),
+            "response missing `policyRequest`"
+        );
+        assert!(
+            pv.get("diagnostics").is_some(),
+            "response missing `diagnostics`"
+        );
         let pr = &pv["policyRequest"];
-        for k in ["actions", "state_before", "deltas", "state_after", "results"] {
+        for k in [
+            "actions",
+            "state_before",
+            "deltas",
+            "state_after",
+            "results",
+        ] {
             assert!(pr.get(k).is_some(), "policyRequest missing `{k}`");
         }
     }

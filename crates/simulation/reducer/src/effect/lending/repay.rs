@@ -89,8 +89,8 @@ mod tests {
         Address, ChainId, Decimal, MarketRef, ProtocolRef, Time, VenueRef,
     };
     use simulation_state::token::{
-        Balance, BaseCategory, FiatCurrency, PegTarget, RateMode, TokenHolding, TokenKey, TokenKind,
-        TokenRef,
+        Balance, BaseCategory, FiatCurrency, PegTarget, RateMode, TokenHolding, TokenKey,
+        TokenKind, TokenRef,
     };
     use simulation_state::wallet::WalletId;
     use std::str::FromStr;
@@ -155,11 +155,7 @@ mod tests {
                 debts: vec![(usdc_ref(), U256::from(debt), RateMode::Variable)],
                 emode: None,
                 is_isolated: false,
-                health_factor: LiveField::new(
-                    Decimal::new("2.0"),
-                    DataSource::UserSupplied,
-                    now(),
-                ),
+                health_factor: LiveField::new(Decimal::new("2.0"), DataSource::UserSupplied, now()),
                 ltv: LiveField::new(Decimal::new("0.5"), DataSource::UserSupplied, now()),
                 liquidation_threshold: LiveField::new(
                     Decimal::new("0.8250"),
@@ -204,7 +200,11 @@ mod tests {
             on_behalf_of: None,
             use_a_tokens: false,
             live_inputs: RepayLiveInputs {
-                reserve_state: LiveField::new(reserve_with(paused), DataSource::UserSupplied, now()),
+                reserve_state: LiveField::new(
+                    reserve_with(paused),
+                    DataSource::UserSupplied,
+                    now(),
+                ),
                 current_debt: LiveField::new(
                     U256::from(current_debt),
                     DataSource::UserSupplied,

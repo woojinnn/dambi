@@ -344,7 +344,8 @@ mod tests {
                 },
                 deadline: Time::from_unix(1_738_001_800),
                 nonce_key: Some(NonceKey::OrderHash {
-                    hash: "0xabc0000000000000000000000000000000000000000000000000000000000000".into(),
+                    hash: "0xabc0000000000000000000000000000000000000000000000000000000000000"
+                        .into(),
                 }),
             },
         };
@@ -423,7 +424,11 @@ mod tests {
                 &lowered.context,
             )
             .unwrap();
-        assert_eq!(verdict, crate::policy::Verdict::Pass, "slippage 50 must pass");
+        assert_eq!(
+            verdict,
+            crate::policy::Verdict::Pass,
+            "slippage 50 must pass"
+        );
 
         // slippage 150 → Warn.
         let (body, meta) = sample_swap_action(150);
@@ -591,8 +596,7 @@ mod tests {
     fn swap_venue_uniswap_v4_conforms() {
         assert_venue_conforms(AmmVenue::UniswapV4 {
             chain: eth(),
-            pool_id: "0xabc0000000000000000000000000000000000000000000000000000000000000"
-                .into(),
+            pool_id: "0xabc0000000000000000000000000000000000000000000000000000000000000".into(),
             pool_manager: sample_addr(),
             hooks: Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
         });
@@ -633,8 +637,7 @@ mod tests {
         assert_venue_conforms(AmmVenue::BalancerV2 {
             chain: eth(),
             vault: Address::from_str("0xba12222222228d8ba445958a75a0704d566bf2c8").unwrap(),
-            pool_id: "0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014"
-                .into(),
+            pool_id: "0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014".into(),
             pool_type: BalancerPoolType::Weighted,
         });
     }
@@ -644,8 +647,7 @@ mod tests {
     fn swap_venue_balancer_v3_conforms() {
         assert_venue_conforms(AmmVenue::BalancerV3 {
             chain: eth(),
-            pool_id: "0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014"
-                .into(),
+            pool_id: "0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014".into(),
             pool_type: BalancerPoolType::Stable,
         });
     }
@@ -675,8 +677,7 @@ mod tests {
         assert_venue_conforms(AmmVenue::AggregatorRoute {
             chain: eth(),
             router: sample_addr(),
-            route_hash: "0xabc0000000000000000000000000000000000000000000000000000000000000"
-                .into(),
+            route_hash: "0xabc0000000000000000000000000000000000000000000000000000000000000".into(),
         });
     }
 
@@ -721,7 +722,10 @@ mod tests {
             (BalancerPoolType::Stable, "stable"),
             (BalancerPoolType::ComposableStable, "composable_stable"),
             (BalancerPoolType::MetaStable, "meta_stable"),
-            (BalancerPoolType::LiquidityBootstrapping, "liquidity_bootstrapping"),
+            (
+                BalancerPoolType::LiquidityBootstrapping,
+                "liquidity_bootstrapping",
+            ),
             (BalancerPoolType::Linear, "linear"),
         ] {
             let label = format!("{pt:?}");

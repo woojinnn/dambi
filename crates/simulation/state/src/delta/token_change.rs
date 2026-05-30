@@ -1,4 +1,4 @@
-//! TokenChange — a single change line describing one mutation to one token.
+//! `TokenChange` — a single change line describing one mutation to one token.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
@@ -18,7 +18,7 @@ pub enum ApprovalScope {
     SetForAll,
     /// Permit2 allowance.
     Permit2,
-    /// ERC721 per-token (tokens[k].approved_to).
+    /// ERC721 per-token (`tokens[k].approved_to`).
     Erc721Token,
 }
 

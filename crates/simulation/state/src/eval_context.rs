@@ -1,6 +1,6 @@
-//! EvalContext — metadata describing a single evaluation call.
+//! `EvalContext` — metadata describing a single evaluation call.
 //!
-//! Not state, not an action, not a LiveField: it is the contextual information
+//! Not state, not an action, not a `LiveField`: it is the contextual information
 //! the caller passes to the reducer for this one evaluation.
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use crate::primitives::{ChainId, Time};
 pub enum RequestKind {
     /// A standard on-chain transaction.
     Transaction,
-    /// An off-chain message signature (e.g. EIP-712 / personal_sign).
+    /// An off-chain message signature (e.g. EIP-712 / `personal_sign`).
     Signature,
     /// An ERC-4337 user operation.
     UserOperation,
@@ -51,7 +51,8 @@ pub struct EvalContext {
 impl EvalContext {
     /// Creates a new `EvalContext` for the given chain, time, and request kind,
     /// defaulting `envelope_index` to 0 and `simulation` to [`SimulationMode::Preview`].
-    pub fn new(chain: ChainId, now: Time, request_kind: RequestKind) -> Self {
+    #[must_use]
+    pub const fn new(chain: ChainId, now: Time, request_kind: RequestKind) -> Self {
         Self {
             chain,
             now,
@@ -62,13 +63,15 @@ impl EvalContext {
     }
 
     /// Returns this context with `envelope_index` set to `i`.
-    pub fn with_envelope_index(mut self, i: usize) -> Self {
+    #[must_use]
+    pub const fn with_envelope_index(mut self, i: usize) -> Self {
         self.envelope_index = i;
         self
     }
 
     /// Returns this context with the simulation mode set to `mode`.
-    pub fn with_simulation(mut self, mode: SimulationMode) -> Self {
+    #[must_use]
+    pub const fn with_simulation(mut self, mode: SimulationMode) -> Self {
         self.simulation = mode;
         self
     }

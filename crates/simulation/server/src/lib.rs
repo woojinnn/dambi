@@ -25,6 +25,11 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
+#![allow(rustdoc::broken_intra_doc_links)]
+#![allow(rustdoc::private_intra_doc_links)]
+#![allow(rustdoc::redundant_explicit_links)]
+#![allow(unknown_lints)]
+#![allow(clippy::duration_suboptimal_units)]
 
 pub mod app;
 pub mod dto;

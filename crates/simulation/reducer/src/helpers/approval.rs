@@ -342,8 +342,15 @@ mod tests {
                 chain: ChainId::ethereum_mainnet(),
             },
         };
-        let err = set_erc20_allowance(&state, &mut delta, now(), &native, spender(), U256::from(1u8))
-            .unwrap_err();
+        let err = set_erc20_allowance(
+            &state,
+            &mut delta,
+            now(),
+            &native,
+            spender(),
+            U256::from(1u8),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(_)));
         assert!(delta.token_changes.is_empty());
     }
