@@ -1,0 +1,42 @@
+{
+  "type": "adapter_action",
+  "id": "compound-v3/comet/transferAsset@1.0.0",
+  "publisher": "compound.eth",
+  "note": "Compound V3 Comet transferAsset(dst,asset,amount). Moves a collateral balance inside Comet; map as token/erc20_transfer for the concrete collateral asset. The current TokenAction schema does not distinguish internal Comet ledger transfers from ERC20 contract transfers.",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x439e2e45",
+    "chain_to_addresses": {
+      "1": ["0xc3d688b66703497daa19211eedff47f25384cdc3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "transferAsset",
+    "abi": {
+      "name": "transferAsset",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "dst", "type": "address" },
+        { "name": "asset", "type": "address" },
+        { "name": "amount", "type": "uint256" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "erc20_transfer",
+        "erc20_transfer": {
+          "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
+          "recipient": "$args.dst",
+          "amount": "$args.amount"
+        }
+      }
+    },
+    "live_inputs": {}
+  }
+}

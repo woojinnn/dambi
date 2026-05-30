@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 mod borrow;
+mod buy_collateral;
 mod delegate_borrow;
 mod liquidate;
 mod repay;
@@ -45,6 +46,7 @@ impl Reducer for LendingAction {
             Self::Supply(a) => a.apply(state, ctx),
             Self::Withdraw(a) => a.apply(state, ctx),
             Self::Borrow(a) => a.apply(state, ctx),
+            Self::BuyCollateral(a) => a.apply(state, ctx),
             Self::Repay(a) => a.apply(state, ctx),
             Self::SwapRateMode(a) => a.apply(state, ctx),
             Self::SetEMode(a) => a.apply(state, ctx),

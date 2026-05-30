@@ -1,0 +1,42 @@
+{
+  "type": "adapter_action",
+  "id": "compound-v3/comet/approveThis@1.0.0",
+  "publisher": "compound.eth",
+  "note": "Compound V3 Comet approveThis(manager,asset,amount). Governor-only, but it is an approve-pattern permission primitive over assets held by Comet, so the surface red-flag rule keeps it COVER. Map as token/erc20_approve for the concrete asset and manager.",
+  "schema_version": "3",
+  "match": {
+    "selector": "0xad14777c",
+    "chain_to_addresses": {
+      "1": ["0xc3d688b66703497daa19211eedff47f25384cdc3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "approveThis",
+    "abi": {
+      "name": "approveThis",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "manager", "type": "address" },
+        { "name": "asset", "type": "address" },
+        { "name": "amount", "type": "uint256" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "erc20_approve",
+        "erc20_approve": {
+          "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
+          "spender": "$args.manager",
+          "amount": "$args.amount"
+        }
+      }
+    },
+    "live_inputs": {}
+  }
+}

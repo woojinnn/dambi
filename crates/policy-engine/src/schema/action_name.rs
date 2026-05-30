@@ -88,8 +88,9 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "remove_liquidity",
     "sign_intent_order",
     "swap",
-    // Lending (11)
+    // Lending (12)
     "borrow",
+    "buy_collateral",
     "delegate_borrow",
     "disable_collateral",
     "enable_collateral",
@@ -178,8 +179,8 @@ mod tests {
 
     #[test]
     fn registry_size_matches_phase1() {
-        // 2 Core + 2 Airdrop + 6 Amm + 10 Lending + 5 Launchpad + 11 Perp + 9 Token = 45.
-        assert_eq!(REGISTERED_ACTIONS.len(), 46);
+        // 2 Core + 2 Airdrop + 6 Amm + 12 Lending + 5 Launchpad + 11 Perp + 9 Token = 47.
+        assert_eq!(REGISTERED_ACTIONS.len(), 47);
     }
 
     #[test]

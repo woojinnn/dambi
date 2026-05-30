@@ -1,0 +1,50 @@
+{
+  "type": "adapter_action",
+  "id": "compound-v3/comet/buyCollateral@1.0.0",
+  "publisher": "compound.eth",
+  "note": "Compound V3 Comet buyCollateral(asset,minAmount,baseAmount,recipient). This is a lending reserve sale, not a generic AMM route, so it maps to the dedicated Lending::BuyCollateral action.",
+  "schema_version": "3",
+  "match": {
+    "selector": "0xe4e6e779",
+    "chain_to_addresses": {
+      "1": ["0xc3d688b66703497daa19211eedff47f25384cdc3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "buyCollateral",
+    "abi": {
+      "name": "buyCollateral",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "asset", "type": "address" },
+        { "name": "minAmount", "type": "uint256" },
+        { "name": "baseAmount", "type": "uint256" },
+        { "name": "recipient", "type": "address" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "action": "buy_collateral",
+        "buy_collateral": {
+          "venue": {
+            "name": "compound_v3",
+            "chain": "$chain",
+            "comet": "$to",
+            "base_asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } }
+          },
+          "collateral_asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.asset" } },
+          "base_asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+          "min_collateral_amount": "$args.minAmount",
+          "base_amount": "$args.baseAmount",
+          "recipient": "$args.recipient"
+        }
+      }
+    }
+  }
+}

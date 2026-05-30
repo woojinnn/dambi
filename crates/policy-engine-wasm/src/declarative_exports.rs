@@ -246,7 +246,7 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                     to: to.to_ascii_lowercase(),
                     selector: selector.clone(),
                 };
-                state.bridge.insert(key, bundle_id.clone());
+                state.bridge.entry(key).or_insert_with(|| bundle_id.clone());
             }
             if let Some((ref vc, ref pt, ref wt)) = typed_data_route {
                 for (chain_id, _to) in bundle_match.entries() {
@@ -256,7 +256,10 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                         primary_type: pt.clone(),
                         witness_type: wt.clone(),
                     };
-                    state.typed_data_bridge.insert(key, bundle_id.clone());
+                    state
+                        .typed_data_bridge
+                        .entry(key)
+                        .or_insert_with(|| bundle_id.clone());
                 }
             }
             state.bundles.insert(bundle_id.clone(), bundle_value);

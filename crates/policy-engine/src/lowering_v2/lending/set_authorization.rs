@@ -23,6 +23,9 @@ pub(crate) fn lower(
     m.insert("meta".into(), ctx.meta());
     m.insert("chain".into(), Value::String(action.chain.to_string()));
     m.insert("protocol".into(), Value::String(addr(&action.protocol)));
+    if let Some(authorizer) = &action.authorizer {
+        m.insert("authorizer".into(), Value::String(addr(authorizer)));
+    }
     m.insert("authorized".into(), Value::String(addr(&action.authorized)));
     m.insert("isAuthorized".into(), Value::Bool(action.is_authorized));
     // `custom` is OMITTED here — it is filled later by enrichment.
@@ -49,6 +52,7 @@ mod tests {
         ActionBody::Lending(LendingAction::SetAuthorization(SetAuthorizationAction {
             chain: ChainId::ethereum_mainnet(),
             protocol: morpho(),
+            authorizer: None,
             authorized: other(),
             is_authorized,
         }))

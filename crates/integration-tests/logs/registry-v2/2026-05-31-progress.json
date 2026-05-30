@@ -1,0 +1,98 @@
+{
+  "date": "2026-05-31",
+  "branch": "work/registry-v2",
+  "scope": "Scenario A/B/C/D kickoff across registryV2-known protocols. The goal is incremental coverage: complete Action-compatible items first, explicitly defer bridge/REST/perp or missing-ActionBody shapes instead of forcing them into wrong actions.",
+  "scenario_a_smoke": {
+    "status": "pass",
+    "evidence": [
+      "cargo test -p policy-engine-integration-tests --test v3_decode_harness -- --nocapture: 10 passed, 0 failed",
+      "cargo run -p policy-engine-integration-tests --bin v3-harness -- coverage: callkeys=489 typed_data_keys=44 unique_bundles=115 install_failures=0",
+      "cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus: corpus 132/132 matched",
+      "cd registryV2 && npm run check:surface: PASS with 6 gated contracts"
+    ]
+  },
+  "scenario_b_new_protocol_onboarding": {
+    "protocol": "compound-v3",
+    "contract": "Comet cUSDCv3 mainnet",
+    "status": "implemented with caveat",
+    "completed": [
+      "surface/compound-v3/comet-usdc-mainnet.{abi,coverage}.json gates 20 external mutating selectors: 15 COVER, 5 EXCLUDE, signed_struct Authorization COVER",
+      "added missing Comet manifests for allow, allowBySig, approve, approveThis, buyCollateral, transfer, transferFrom, transferAsset, transferAssetFrom, and Authorization typed-data",
+      "added LendingAction::BuyCollateral and optional SetAuthorization.authorizer so Comet permission paths are not downgraded to Unknown",
+      "field-level golden tests pin allow, allowBySig, and Authorization permission fields",
+      "hand-encoded corpus covers every Comet COVER selector plus Authorization typed-data"
+    ],
+    "caveat": "No ETHERSCAN_API_KEY was present in this checkout, so the Compound corpus is hand-encoded from verified ABI shape rather than imported real Etherscan txlist. The surface snapshot itself is committed and check:surface enforces triage completeness."
+  },
+  "scenario_c_decode_gap_loop": {
+    "protocol": "uniswap",
+    "status": "started",
+    "fresh_runs": {
+      "synthetic_fuzz_5000_json": "crates/integration-tests/logs/_synthetic/2026-05-31-synthetic.json",
+      "synthetic_totals": {
+        "total": 2410000,
+        "pass": 2183381,
+        "soft": 226619,
+        "fail": 0,
+        "panicked": 0,
+        "skipped": 8
+      },
+      "uniswap_synthetic": {
+        "total": 580000,
+        "pass": 483662,
+        "soft": 96338,
+        "fail": 0,
+        "panicked": 0
+      },
+      "coverage": "callkeys=489 typed_data_keys=44 unique_bundles=115 install_failures=0",
+      "corpus": "132/132 matched"
+    },
+    "classification": [
+      "No hard FAIL/panic from the fresh synthetic run.",
+      "Remaining Uniswap real-traffic gaps already pinned as expect:error in data/golden/v3-decode/uniswap/corpus.json include UR V4 nested action-stream and V4 PositionManager/PoolManager cases.",
+      "Those remaining gaps need decoder/Tier-B work (nested V4 command stream, PoolKey/pool_id derivation, or new AMM variants), not a safe manifest-only patch."
+    ]
+  },
+  "scenario_d_surface_gate": {
+    "protocol": "uniswap",
+    "contract": "Permit2 canonical singleton",
+    "status": "implemented",
+    "completed": [
+      "added Sourcify verified ABI snapshots and coverage files for Permit2 on chains 1, 10, 42161, and 8453",
+      "added missing uniswap/permit2/invalidateNonces manifest as token.revoke_approval with permit2_lockdown scope",
+      "fixed check-surface-completeness so dual calldata+typed-data manifests count as on-chain manifests when their selector matches the ABI function selector",
+      "added field-level golden test for invalidateNonces token/spender revoke scope"
+    ],
+    "surface_gate": "PASS; gated contracts increased from 2 to 6; remaining ungated WARN count decreased from 62 to 58"
+  },
+  "skipped_or_deferred_action_mapping": [
+    {
+      "protocol_or_function": "Hyperliquid Core / REST JSON actions",
+      "reason": "Not an EVM calldata ActionBody route. Orders/cancels/usdSend/withdraw/approveAgent are HTTP JSON or typed off-chain protocol actions; they need the browser-extension safety layer or a dedicated Hyperliquid action model, not simulation/reducer calldata shapes."
+    },
+    {
+      "protocol_or_function": "LayerZero OFT send / bridge paths",
+      "reason": "Bridge semantics are not represented by the current ActionBody domains. Existing manifest preserves calldata/value as Unknown; no further surface-gate expansion was forced."
+    },
+    {
+      "protocol_or_function": "LayerZero ClaimContract historical overloads",
+      "reason": "Fresh Sourcify ABI for the current ClaimLocal implementation differs from existing historical/proxy-era manifests and corpus labels. Needs proxy/history reconciliation before a trustworthy surface snapshot."
+    },
+    {
+      "protocol_or_function": "Balancer Vault joinPool / exitPool / batchSwap",
+      "reason": "Dynamic array/tuple strategy gap. Current single_emit field paths cannot express the variable assets/amounts semantics without Tier-B strategy work."
+    },
+    {
+      "protocol_or_function": "Aave V3 flashLoan / L2 packed Pool args",
+      "reason": "FlashLoan needs a dedicated lending flash-loan action and multi-asset mapping; L2 Pool packed bytes32 args require bit-slice/reserve-index decoding. Existing simple lending verbs remain covered by manifests."
+    },
+    {
+      "protocol_or_function": "Permit2 PermitTransferFrom typed-data",
+      "reason": "Generic Permit2 signature-transfer authorizes a spender to transfer token amount without carrying recipient in the signed body. It needs a distinct ActionBody model; on-chain relayer execution is explicitly EXCLUDE in Permit2 surface coverage."
+    },
+    {
+      "protocol_or_function": "Uniswap Universal Router V4 nested action-stream",
+      "reason": "Needs decoder/Tier-B support for V4_SWAP nested command streams and PoolKey-derived pool_id/currency fields. Existing corpus keeps expect:error until that decoder work lands."
+    }
+  ]
+}

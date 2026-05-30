@@ -13,6 +13,7 @@ use super::common::token::lower_token_ref;
 use super::dispatch::{LowerCtx, LowerError, LoweredAction};
 
 mod borrow;
+mod buy_collateral;
 mod delegate_borrow;
 mod disable_collateral;
 mod enable_collateral;
@@ -38,6 +39,7 @@ pub(crate) fn lower(
         LendingAction::Supply(a) => supply::lower(a, ctx),
         LendingAction::Withdraw(a) => withdraw::lower(a, ctx),
         LendingAction::Borrow(a) => borrow::lower(a, ctx),
+        LendingAction::BuyCollateral(a) => buy_collateral::lower(a, ctx),
         LendingAction::Repay(a) => repay::lower(a, ctx),
         LendingAction::SwapRateMode(a) => swap_rate_mode::lower(a, ctx),
         LendingAction::SetEMode(a) => set_e_mode::lower(a, ctx),

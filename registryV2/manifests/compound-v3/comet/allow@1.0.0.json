@@ -1,0 +1,41 @@
+{
+  "type": "adapter_action",
+  "id": "compound-v3/comet/allow@1.0.0",
+  "publisher": "compound.eth",
+  "note": "Compound V3 Comet allow(manager,isAllowed). Grants or revokes manager authority to withdraw/transfer from the sender across the Comet account.",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x110496e5",
+    "chain_to_addresses": {
+      "1": ["0xc3d688b66703497daa19211eedff47f25384cdc3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "allow",
+    "abi": {
+      "name": "allow",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "manager", "type": "address" },
+        { "name": "isAllowed", "type": "bool" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "lending",
+      "lending": {
+        "action": "set_authorization",
+        "set_authorization": {
+          "chain": "$chain",
+          "protocol": "$to",
+          "authorized": "$args.manager",
+          "is_authorized": "$args.isAllowed"
+        }
+      }
+    }
+  }
+}

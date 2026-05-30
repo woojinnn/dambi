@@ -1,0 +1,43 @@
+{
+  "type": "adapter_action",
+  "id": "compound-v3/comet/transfer@1.0.0",
+  "publisher": "compound.eth",
+  "note": "Compound V3 Comet transfer(dst,amount). Comet implements ERC20-like transfer over the base balance; map as a token transfer of the market base asset rather than the generic cToken standard manifest so the Comet-specific surface gate owns this selector.",
+  "schema_version": "3",
+  "match": {
+    "selector": "0xa9059cbb",
+    "chain_to_addresses": {
+      "1": ["0xc3d688b66703497daa19211eedff47f25384cdc3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "transfer",
+    "abi": {
+      "name": "transfer",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "dst", "type": "address" },
+        { "name": "amount", "type": "uint256" }
+      ],
+      "outputs": [
+        { "name": "", "type": "bool" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "erc20_transfer",
+        "erc20_transfer": {
+          "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+          "recipient": "$args.dst",
+          "amount": "$args.amount"
+        }
+      }
+    },
+    "live_inputs": {}
+  }
+}

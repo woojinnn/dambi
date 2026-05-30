@@ -183,6 +183,27 @@ fn find_bool_field(v: &serde_json::Value, field: &str) -> Option<bool> {
     }
 }
 
+/// Recursively find the first object containing `"<field>": "<expected>"`.
+fn find_object_with_string_field<'a>(
+    v: &'a serde_json::Value,
+    field: &str,
+    expected: &str,
+) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if m.get(field).and_then(serde_json::Value::as_str) == Some(expected) {
+                return Some(m);
+            }
+            m.values()
+                .find_map(|x| find_object_with_string_field(x, field, expected))
+        }
+        serde_json::Value::Array(a) => a
+            .iter()
+            .find_map(|x| find_object_with_string_field(x, field, expected)),
+        _ => None,
+    }
+}
+
 /// Field-level golden for Morpho `setAuthorization` (Tier 3
 /// `LendingAction::SetAuthorization`).
 ///
@@ -217,4 +238,154 @@ fn morpho_set_authorization_decodes_operator_and_flag() {
         Some(true),
         "grant flag (is_authorized) mis-decoded"
     );
+}
+
+/// Field-level golden for Permit2 `invalidateNonces`.
+///
+/// `invalidateNonces(token,spender,newNonce)` is an ordered nonce revocation for
+/// a Permit2 allowance pair. The current ActionBody does not carry the nonce
+/// floor, but it must still surface the token+spender permission being revoked.
+#[test]
+fn permit2_invalidate_nonces_decodes_revoke_scope() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    const TO: &str = "0x000000000022d473030f116ddee9f6b43ac78ba3";
+    const TOKEN: &str = "2222222222222222222222222222222222222222";
+    const SPENDER: &str = "3333333333333333333333333333333333333333";
+    const CALLDATA: &str = concat!(
+        "0x65d9723c",
+        "000000000000000000000000",
+        "2222222222222222222222222222222222222222",
+        "000000000000000000000000",
+        "3333333333333333333333333333333333333333",
+        "0000000000000000000000000000000000000000000000000000000000000007"
+    );
+
+    let env = harness::route::route_calldata(1, TO, "0x65d9723c", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let scope = find_object_with_string_field(&env, "kind", "permit2_lockdown")
+        .expect("revoke_approval carries permit2_lockdown scope");
+    let expected_spender = format!("0x{SPENDER}");
+    assert_eq!(
+        scope.get("spender").and_then(serde_json::Value::as_str),
+        Some(expected_spender.as_str()),
+        "spender mis-decoded"
+    );
+    let token = scope
+        .get("token")
+        .and_then(|v| find_string_field(v, "address"))
+        .expect("permit2 revoke scope carries token address");
+    assert_eq!(token, format!("0x{TOKEN}"), "token mis-decoded");
+}
+
+/// Field-level golden for Compound V3 Comet `allow`.
+///
+/// Comet `allow(manager,isAllowed)` is account-wide manager authorization, so it
+/// must decode to `LendingAction::SetAuthorization`, not a generic ERC20
+/// approval. Pinning the manager + grant flag prevents the red-flag permission
+/// primitive from silently becoming an opaque or token-only action.
+#[test]
+fn compound_v3_allow_decodes_manager_and_flag() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    const TO: &str = "0xc3d688b66703497daa19211eedff47f25384cdc3";
+    const MANAGER: &str = "1111111111111111111111111111111111111111";
+    const CALLDATA: &str = concat!(
+        "0x110496e5",
+        "000000000000000000000000",
+        "1111111111111111111111111111111111111111",
+        "0000000000000000000000000000000000000000000000000000000000000001"
+    );
+
+    let env = harness::route::route_calldata(1, TO, "0x110496e5", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let authorized =
+        find_string_field(&env, "authorized").expect("set_authorization carries authorized");
+    assert_eq!(authorized, format!("0x{MANAGER}"));
+    assert_eq!(find_bool_field(&env, "is_authorized"), Some(true));
+}
+
+/// Field-level golden for Compound V3 Comet `allowBySig`.
+///
+/// The relayed calldata contains both the signatory (`owner`) and manager. The
+/// ActionBody extension keeps `authorizer` optional so direct calls can omit it,
+/// but signature relay paths must preserve it for policy display/evaluation.
+#[test]
+fn compound_v3_allow_by_sig_decodes_authorizer_manager_and_flag() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    const TO: &str = "0xc3d688b66703497daa19211eedff47f25384cdc3";
+    const OWNER: &str = "2222222222222222222222222222222222222222";
+    const MANAGER: &str = "3333333333333333333333333333333333333333";
+    const CALLDATA: &str = concat!(
+        "0xbb24d994",
+        "000000000000000000000000",
+        "2222222222222222222222222222222222222222",
+        "000000000000000000000000",
+        "3333333333333333333333333333333333333333",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000007",
+        "00000000000000000000000000000000000000000000000000000002540be3ff",
+        "000000000000000000000000000000000000000000000000000000000000001b",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+    );
+
+    let env = harness::route::route_calldata(1, TO, "0xbb24d994", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    assert_eq!(
+        find_string_field(&env, "authorizer"),
+        Some(format!("0x{OWNER}"))
+    );
+    assert_eq!(
+        find_string_field(&env, "authorized"),
+        Some(format!("0x{MANAGER}"))
+    );
+    assert_eq!(find_bool_field(&env, "is_authorized"), Some(false));
+}
+
+/// Field-level golden for Compound V3 Comet off-chain `Authorization`.
+#[test]
+fn compound_v3_authorization_typed_data_decodes_permission_fields() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    const TO: &str = "0xc3d688b66703497daa19211eedff47f25384cdc3";
+    const OWNER: &str = "0x4444444444444444444444444444444444444444";
+    const MANAGER: &str = "0x5555555555555555555555555555555555555555";
+    let message = serde_json::json!({
+        "owner": OWNER,
+        "manager": MANAGER,
+        "isAllowed": true,
+        "nonce": "9",
+        "expiry": "9999999999"
+    });
+
+    let env = harness::route::route_typed_data(
+        1,
+        TO,
+        "Authorization",
+        None,
+        Some("Compound USDC"),
+        &message,
+    );
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "typed-data route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "authorizer"), Some(OWNER.into()));
+    assert_eq!(find_string_field(&env, "authorized"), Some(MANAGER.into()));
+    assert_eq!(find_bool_field(&env, "is_authorized"), Some(true));
 }

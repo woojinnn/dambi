@@ -1,0 +1,44 @@
+{
+  "type": "adapter_action",
+  "id": "compound-v3/comet/transferFrom@1.0.0",
+  "publisher": "compound.eth",
+  "note": "Compound V3 Comet transferFrom(src,dst,amount). The permission check is Comet hasPermission(src,msg.sender); the transfer itself moves base balance, so map to token/erc20_transfer of the base asset. The current TokenAction schema does not carry the source account.",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x23b872dd",
+    "chain_to_addresses": {
+      "1": ["0xc3d688b66703497daa19211eedff47f25384cdc3"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "transferFrom",
+    "abi": {
+      "name": "transferFrom",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "src", "type": "address" },
+        { "name": "dst", "type": "address" },
+        { "name": "amount", "type": "uint256" }
+      ],
+      "outputs": [
+        { "name": "", "type": "bool" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "erc20_transfer",
+        "erc20_transfer": {
+          "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+          "recipient": "$args.dst",
+          "amount": "$args.amount"
+        }
+      }
+    },
+    "live_inputs": {}
+  }
+}

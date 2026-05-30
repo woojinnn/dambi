@@ -2,7 +2,7 @@
 //!
 //! Wired: Supply, Withdraw, Borrow, Repay, SwapRateMode, SetEMode,
 //!        EnableCollateral, DisableCollateral, Liquidate.
-//! DelegateBorrow 는 live_inputs 없음 → no-op.
+//! DelegateBorrow / SetAuthorization / BuyCollateral have no live_inputs → no-op.
 
 use serde_json::Value;
 
@@ -38,6 +38,7 @@ pub(super) fn walk(
         LendingAction::Liquidate(l) => walk_liquidate(l, action_index, now, stale, stats),
         LendingAction::DelegateBorrow(_) => {} // no live_inputs
         LendingAction::SetAuthorization(_) => {} // no live_inputs
+        LendingAction::BuyCollateral(_) => {}  // no live_inputs
     }
 }
 
@@ -339,6 +340,7 @@ pub(super) fn apply(la: &mut LendingAction, slot: &ActionSlot, value: Value, now
         LendingAction::Liquidate(l) => apply_liquidate(l, slot, value, now),
         LendingAction::DelegateBorrow(_) => {}
         LendingAction::SetAuthorization(_) => {}
+        LendingAction::BuyCollateral(_) => {}
     }
 }
 

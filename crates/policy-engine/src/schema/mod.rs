@@ -51,6 +51,8 @@ const AMM_SWAP_SCHEMA: &str =
 // lending (alphabetical)
 const LENDING_BORROW_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/borrow.cedarschema");
+const LENDING_BUY_COLLATERAL_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/lending/buy_collateral.cedarschema");
 const LENDING_DELEGATE_BORROW_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/delegate_borrow.cedarschema");
 const LENDING_DISABLE_COLLATERAL_SCHEMA: &str =

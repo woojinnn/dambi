@@ -7,6 +7,7 @@ use simulation_state::primitives::{Address, ChainId, Decimal, U256};
 use simulation_state::token::TokenRef;
 
 pub mod borrow;
+pub mod buy_collateral;
 pub mod delegate_borrow;
 pub mod liquidate;
 pub mod repay;
@@ -18,6 +19,7 @@ pub mod swap_rate_mode;
 pub mod withdraw;
 
 pub use self::borrow::*;
+pub use self::buy_collateral::*;
 pub use self::delegate_borrow::*;
 pub use self::liquidate::*;
 pub use self::repay::*;
@@ -39,6 +41,8 @@ pub enum LendingAction {
     Withdraw(WithdrawAction),
     /// Borrow an asset against existing collateral.
     Borrow(BorrowAction),
+    /// Buy collateral being sold from protocol reserves.
+    BuyCollateral(BuyCollateralAction),
     /// Repay an outstanding debt position.
     Repay(RepayAction),
     /// `Aave`-specific — switch between `Variable` and `Stable` borrow rate modes.
@@ -69,6 +73,7 @@ impl LendingAction {
             Self::Supply(_) => "supply",
             Self::Withdraw(_) => "withdraw",
             Self::Borrow(_) => "borrow",
+            Self::BuyCollateral(_) => "buy_collateral",
             Self::Repay(_) => "repay",
             Self::SwapRateMode(_) => "swap_rate_mode",
             Self::SetEMode(_) => "set_e_mode",
@@ -87,6 +92,7 @@ impl LendingAction {
             Self::Supply(a) => Some(a.venue.name()),
             Self::Withdraw(a) => Some(a.venue.name()),
             Self::Borrow(a) => Some(a.venue.name()),
+            Self::BuyCollateral(a) => Some(a.venue.name()),
             Self::Repay(a) => Some(a.venue.name()),
             Self::SwapRateMode(a) => Some(a.venue.name()),
             Self::SetEMode(a) => Some(a.venue.name()),
