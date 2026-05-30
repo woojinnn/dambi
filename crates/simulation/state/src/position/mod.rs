@@ -18,7 +18,7 @@ pub use vesting::{VestCurve, VestSchedule, VestingSchedule};
 use crate::live_field::DataSource;
 use crate::primitives::{ChainId, ProtocolRef, Time};
 
-/// PositionId — a stable id assigned by the protocol, or a string we generate.
+/// `PositionId` — a stable id assigned by the protocol, or a string we generate.
 pub type PositionId = String;
 
 /// A single protocol-tracked position (a non-token right/state) held by an account.

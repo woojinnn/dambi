@@ -41,9 +41,7 @@ mod tests {
     use simulation_reducer::action::ActionBody;
     use simulation_state::token::TokenKey;
 
-    use super::super::test_support::{
-        onchain_meta, sample_erc1155_key, sample_nft_key, spender,
-    };
+    use super::super::test_support::{onchain_meta, sample_erc1155_key, sample_nft_key, spender};
 
     /// Gate an `NftApprove` carrying the given `nftKey`.
     fn assert_approve_conforms(nft_key: TokenKey) {

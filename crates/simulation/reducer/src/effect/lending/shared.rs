@@ -77,14 +77,10 @@ pub(super) fn two_slope_borrow_apr(
     optimal_bp: u32,
 ) -> Result<Decimal, String> {
     if utilization_bp > 10_000 {
-        return Err(format!(
-            "utilization {utilization_bp} bp > 10000 (>100 %)"
-        ));
+        return Err(format!("utilization {utilization_bp} bp > 10000 (>100 %)"));
     }
     if optimal_bp == 0 || optimal_bp >= 10_000 {
-        return Err(format!(
-            "optimal {optimal_bp} bp out of (0, 10000) range"
-        ));
+        return Err(format!("optimal {optimal_bp} bp out of (0, 10000) range"));
     }
 
     let rate_bp: u64 = if utilization_bp <= optimal_bp {
@@ -93,9 +89,7 @@ pub(super) fn two_slope_borrow_apr(
     } else {
         let excess = u64::from(utilization_bp - optimal_bp);
         let span = u64::from(10_000 - optimal_bp);
-        u64::from(base_rate_bp)
-            + u64::from(slope1_bp)
-            + (u64::from(slope2_bp) * excess) / span
+        u64::from(base_rate_bp) + u64::from(slope1_bp) + (u64::from(slope2_bp) * excess) / span
     };
 
     Ok(bp_to_decimal(rate_bp))
@@ -113,14 +107,10 @@ pub(super) fn supply_apr_from_borrow(
     reserve_factor_bp: u32,
 ) -> Result<Decimal, String> {
     if utilization_bp > 10_000 {
-        return Err(format!(
-            "utilization {utilization_bp} bp > 10000"
-        ));
+        return Err(format!("utilization {utilization_bp} bp > 10000"));
     }
     if reserve_factor_bp > 10_000 {
-        return Err(format!(
-            "reserve_factor {reserve_factor_bp} bp > 10000"
-        ));
+        return Err(format!("reserve_factor {reserve_factor_bp} bp > 10000"));
     }
     let borrow_dec = parse_decimal(borrow_apr)?;
     let util_factor = bp_to_rust_decimal(utilization_bp);

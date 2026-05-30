@@ -23,12 +23,18 @@ pub(crate) fn lower(
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_perp_venue(&action.venue));
-    m.insert("positionId".into(), Value::String(action.position_id.clone()));
+    m.insert(
+        "positionId".into(),
+        Value::String(action.position_id.clone()),
+    );
     // `size` is `None` for a full close — OMITTED when absent.
     if let Some(size) = &action.size {
         m.insert("size".into(), lower_size_spec(size));
     }
-    m.insert("slippageBp".into(), Value::from(i64::from(action.slippage_bp)));
+    m.insert(
+        "slippageBp".into(),
+        Value::from(i64::from(action.slippage_bp)),
+    );
     // ClosePerpLiveInputs flattened.
     m.insert(
         "markPrice".into(),

@@ -1,4 +1,4 @@
-//! AirdropClaim — airdrop claim entitlement.
+//! `AirdropClaim` — airdrop claim entitlement.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;

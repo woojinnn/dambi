@@ -95,25 +95,29 @@ pub fn evaluate_policy_request_json(
     user_policies_json: String,
 ) -> String {
     let result = (|| -> Result<PolicyRequestVerdictDto, EngineErrorDto> {
-        check_input_size(&policy_request_json, "evaluate_policy_request_json/policy_request")?;
-        check_input_size(&user_policies_json, "evaluate_policy_request_json/user_policies")?;
+        check_input_size(
+            &policy_request_json,
+            "evaluate_policy_request_json/policy_request",
+        )?;
+        check_input_size(
+            &user_policies_json,
+            "evaluate_policy_request_json/user_policies",
+        )?;
         // Parse-but-ignore — we still want bad JSON to surface as
         // `invalid_input_json` (same kind the Phase 6 evaluator will
         // emit) instead of silently returning Allow.
-        let _: serde_json::Value =
-            serde_json::from_str(&policy_request_json).map_err(|error| {
-                EngineErrorDto::new(
-                    "invalid_input_json",
-                    format!("invalid policy_request json: {error}"),
-                )
-            })?;
-        let _: serde_json::Value =
-            serde_json::from_str(&user_policies_json).map_err(|error| {
-                EngineErrorDto::new(
-                    "invalid_input_json",
-                    format!("invalid user_policies json: {error}"),
-                )
-            })?;
+        let _: serde_json::Value = serde_json::from_str(&policy_request_json).map_err(|error| {
+            EngineErrorDto::new(
+                "invalid_input_json",
+                format!("invalid policy_request json: {error}"),
+            )
+        })?;
+        let _: serde_json::Value = serde_json::from_str(&user_policies_json).map_err(|error| {
+            EngineErrorDto::new(
+                "invalid_input_json",
+                format!("invalid user_policies json: {error}"),
+            )
+        })?;
         Ok(PolicyRequestVerdictDto::allow_stub())
     })();
 

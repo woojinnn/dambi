@@ -26,7 +26,9 @@ use crate::apply::Reducer;
 use crate::error::{ReducerError, ReducerResult};
 use crate::helpers;
 
-use super::{aave_v2, aave_v3, compound_v2, compound_v3, fluid, morpho_optimizer, position_id, spark};
+use super::{
+    aave_v2, aave_v3, compound_v2, compound_v3, fluid, morpho_optimizer, position_id, spark,
+};
 
 impl Reducer for SupplyAction {
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
@@ -77,9 +79,7 @@ impl Reducer for SupplyAction {
             LendingVenue::MorphoOptimizer { .. } => {
                 morpho_optimizer::asset_to_optimizer_shares(reserve, self.amount)?
             }
-            LendingVenue::Fluid { .. } => {
-                fluid::asset_to_fluid_shares(reserve, self.amount)?
-            }
+            LendingVenue::Fluid { .. } => fluid::asset_to_fluid_shares(reserve, self.amount)?,
             LendingVenue::MorphoBlue { .. } => {
                 // Morpho Blue shares need (total_assets, total_shares) which
                 // `ReserveState` does not yet expose — defer until the sync
@@ -142,7 +142,14 @@ fn new_lending_account(action: &SupplyAction, ctx: &EvalContext) -> Position {
         health_factor: derived_live_field(Decimal::new("999999999"), ctx),
         ltv: derived_live_field(Decimal::zero(), ctx),
         liquidation_threshold: derived_live_field(
-            Decimal::new(format!("0.{:04}", action.live_inputs.reserve_state.value.liquidation_threshold_bp)),
+            Decimal::new(format!(
+                "0.{:04}",
+                action
+                    .live_inputs
+                    .reserve_state
+                    .value
+                    .liquidation_threshold_bp
+            )),
             ctx,
         ),
     };
@@ -177,13 +184,13 @@ mod tests {
     use crate::action::lending::{ReserveState, SupplyLiveInputs, UserLendingState};
     use simulation_state::delta::TokenChange;
     use simulation_state::eval_context::RequestKind;
-    use simulation_state::PositionChange;
     use simulation_state::live_field::{DataSource, LiveField};
     use simulation_state::primitives::{Address, ChainId, Price, Time, U256};
     use simulation_state::token::{
         Balance, BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKey, TokenKind, TokenRef,
     };
     use simulation_state::wallet::WalletId;
+    use simulation_state::PositionChange;
     use std::str::FromStr;
 
     fn now() -> Time {
@@ -360,6 +367,8 @@ mod tests {
             market_id: "0xdeadbeef".into(),
         };
         let err = action.apply(&state, &ctx()).unwrap_err();
-        assert!(matches!(err, ReducerError::UnsupportedProtocol { ref protocol, .. } if protocol == "morpho_blue"));
+        assert!(
+            matches!(err, ReducerError::UnsupportedProtocol { ref protocol, .. } if protocol == "morpho_blue")
+        );
     }
 }

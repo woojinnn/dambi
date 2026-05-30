@@ -53,7 +53,9 @@ mod tests {
     use simulation_state::primitives::{Address, ChainId, U256};
     use simulation_state::LiveField;
 
-    use super::super::test_support::{assert_conforms, now, onchain_meta, onchain_source, sample_token_ref};
+    use super::super::test_support::{
+        assert_conforms, now, onchain_meta, onchain_source, sample_token_ref,
+    };
 
     /// A delegate with a current delegate set + voting power, on-chain meta.
     fn sample_delegate() -> (ActionBody, simulation_reducer::action::ActionMeta) {
@@ -63,9 +65,7 @@ mod tests {
             delegatee: Address::from_str("0x000000000000000000000000000000000000b0b0").unwrap(),
             live_inputs: DelegateLiveInputs {
                 current_delegate: LiveField::new(
-                    Some(
-                        Address::from_str("0x000000000000000000000000000000000000c0c0").unwrap(),
-                    ),
+                    Some(Address::from_str("0x000000000000000000000000000000000000c0c0").unwrap()),
                     onchain_source(),
                     now(),
                 ),

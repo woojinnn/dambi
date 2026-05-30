@@ -107,7 +107,9 @@ mod tests {
     use simulation_state::eval_context::RequestKind;
     use simulation_state::live_field::{DataSource, LiveField};
     use simulation_state::position::{LendingAccount, Position, PositionKind};
-    use simulation_state::primitives::{Address, ChainId, Decimal, MarketRef, ProtocolRef, Time, VenueRef};
+    use simulation_state::primitives::{
+        Address, ChainId, Decimal, MarketRef, ProtocolRef, Time, VenueRef,
+    };
     use simulation_state::token::{
         Balance, BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKey, TokenKind, TokenRef,
     };
@@ -222,7 +224,11 @@ mod tests {
             amount,
             recipient: user(),
             live_inputs: WithdrawLiveInputs {
-                reserve_state: LiveField::new(reserve_with(paused), DataSource::UserSupplied, now()),
+                reserve_state: LiveField::new(
+                    reserve_with(paused),
+                    DataSource::UserSupplied,
+                    now(),
+                ),
                 available_to_withdraw: LiveField::new(
                     U256::from(available),
                     DataSource::UserSupplied,

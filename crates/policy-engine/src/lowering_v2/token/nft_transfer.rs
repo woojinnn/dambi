@@ -47,9 +47,7 @@ mod tests {
     use simulation_state::primitives::U256;
     use simulation_state::token::TokenKey;
 
-    use super::super::test_support::{
-        onchain_meta, recipient, sample_erc1155_key, sample_nft_key,
-    };
+    use super::super::test_support::{onchain_meta, recipient, sample_erc1155_key, sample_nft_key};
 
     /// Gate an `NftTransfer` with the given key + optional amount.
     fn assert_transfer_conforms(nft_key: TokenKey, amount: Option<U256>) {

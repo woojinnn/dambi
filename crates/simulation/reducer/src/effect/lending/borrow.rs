@@ -120,18 +120,15 @@ impl Reducer for BorrowAction {
 /// (`999999999`) also passes since it represents zero debt.
 fn hf_is_safe(hf: &Decimal) -> ReducerResult<bool> {
     use std::str::FromStr;
-    let parsed = rust_decimal::Decimal::from_str(hf.as_str()).map_err(|e| {
-        ReducerError::Invariant(format!("borrow: HF Decimal parse failed: {e}"))
-    })?;
+    let parsed = rust_decimal::Decimal::from_str(hf.as_str())
+        .map_err(|e| ReducerError::Invariant(format!("borrow: HF Decimal parse failed: {e}")))?;
     Ok(parsed >= rust_decimal::Decimal::from(1u32))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::lending::{
-        BorrowLiveInputs, LendingVenue, ReserveState, UserLendingState,
-    };
+    use crate::action::lending::{BorrowLiveInputs, LendingVenue, ReserveState, UserLendingState};
     use simulation_state::delta::TokenChange;
     use simulation_state::eval_context::RequestKind;
     use simulation_state::live_field::{DataSource, LiveField};
@@ -230,11 +227,7 @@ mod tests {
         s
     }
 
-    fn reserve_with(
-        paused: bool,
-        frozen: bool,
-        borrow_cap: Option<U256>,
-    ) -> ReserveState {
+    fn reserve_with(paused: bool, frozen: bool, borrow_cap: Option<U256>) -> ReserveState {
         ReserveState {
             total_supply: U256::from(1_000_000u64),
             total_borrow: U256::from(500_000u64),
@@ -280,7 +273,11 @@ mod tests {
                     DataSource::UserSupplied,
                     now(),
                 ),
-                asset_price_usd: LiveField::new(Price::from(price), DataSource::UserSupplied, now()),
+                asset_price_usd: LiveField::new(
+                    Price::from(price),
+                    DataSource::UserSupplied,
+                    now(),
+                ),
                 current_borrow_rate: LiveField::new(
                     Decimal::new("0.04"),
                     DataSource::UserSupplied,

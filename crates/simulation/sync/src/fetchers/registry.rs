@@ -43,6 +43,7 @@ impl Default for RegistryFetcher {
 }
 
 impl RegistryFetcher {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::builder()
@@ -54,12 +55,13 @@ impl RegistryFetcher {
         }
     }
 
-    pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
+    #[must_use]
+    pub const fn with_cache_ttl(mut self, ttl: Duration) -> Self {
         self.cache_ttl = ttl;
         self
     }
 
-    /// 한 RegistryApi DataSource 를 처리.
+    /// 한 `RegistryApi` `DataSource` 를 처리.
     pub async fn fetch(&self, source: &DataSource) -> Result<Value, SyncError> {
         let (endpoint, resource, version) = match source {
             DataSource::RegistryApi {
@@ -89,15 +91,15 @@ impl RegistryFetcher {
         }
 
         // Fetch.
-        let resp =
-            self.client
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| SyncError::FetchFailed {
-                    source_id: "registry".into(),
-                    reason: format!("http: {}", e),
-                })?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| SyncError::FetchFailed {
+                source_id: "registry".into(),
+                reason: format!("http: {e}"),
+            })?;
 
         if !resp.status().is_success() {
             return Err(SyncError::FetchFailed {
@@ -108,7 +110,7 @@ impl RegistryFetcher {
 
         let value: Value = resp.json().await.map_err(|e| SyncError::FetchFailed {
             source_id: "registry".into(),
-            reason: format!("json decode: {}", e),
+            reason: format!("json decode: {e}"),
         })?;
 
         // Cache.
@@ -140,16 +142,16 @@ fn build_url(endpoint: &str, resource: &RegistryResource, version: Option<&str>)
     let v = version.unwrap_or("v1");
     match resource {
         RegistryResource::TokenMeta { chain, address } => {
-            format!("{}/{}/token/{}/{:#x}", base, v, chain, address)
+            format!("{base}/{v}/token/{chain}/{address:#x}")
         }
         RegistryResource::ProtocolMap { chain, address } => {
-            format!("{}/{}/protocol/{}/{:#x}", base, v, chain, address)
+            format!("{base}/{v}/protocol/{chain}/{address:#x}")
         }
         RegistryResource::PoolMeta { chain, pool_addr } => {
-            format!("{}/{}/pool/{}/{:#x}", base, v, chain, pool_addr)
+            format!("{base}/{v}/pool/{chain}/{pool_addr:#x}")
         }
         RegistryResource::DecoderRegistry => {
-            format!("{}/{}/decoder", base, v)
+            format!("{base}/{v}/decoder")
         }
     }
 }
@@ -162,8 +164,7 @@ mod tests {
 
     #[test]
     fn builds_token_url() {
-        let addr =
-            Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
+        let addr = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
         let url = build_url(
             "http://localhost:8080/",
             &RegistryResource::TokenMeta {

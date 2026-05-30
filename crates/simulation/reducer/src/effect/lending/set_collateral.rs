@@ -63,7 +63,8 @@ pub(super) fn apply(
                 // it on), seed an entry with a zero amount so policies can
                 // detect the now-collateral state.
                 if !la.collaterals.iter().any(|(t, _)| t == &asset) {
-                    la.collaterals.push((asset.clone(), simulation_state::primitives::U256::ZERO));
+                    la.collaterals
+                        .push((asset.clone(), simulation_state::primitives::U256::ZERO));
                 }
             } else {
                 // Disable: drop the entry. (Aave's actual disable does not
@@ -81,7 +82,9 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::action::lending::{LendingVenue, ReserveState, SetCollateralLiveInputs, UserLendingState};
+    use crate::action::lending::{
+        LendingVenue, ReserveState, SetCollateralLiveInputs, UserLendingState,
+    };
     use simulation_state::eval_context::RequestKind;
     use simulation_state::live_field::{DataSource, LiveField};
     use simulation_state::position::{LendingAccount, Position, PositionKind};

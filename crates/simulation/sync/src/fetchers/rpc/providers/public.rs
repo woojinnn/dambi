@@ -6,7 +6,7 @@
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use simulation_state::ChainId;
 
@@ -55,21 +55,21 @@ impl PublicRpcProvider {
             .await
             .map_err(|e| SyncError::FetchFailed {
                 source_id: self.name.clone(),
-                reason: format!("http: {}", e),
+                reason: format!("http: {e}"),
             })?;
 
         let status = resp.status();
         if !status.is_success() {
             return Err(SyncError::FetchFailed {
                 source_id: self.name.clone(),
-                reason: format!("http status: {}", status),
+                reason: format!("http status: {status}"),
             });
         }
 
         let envelope: JsonRpcResponse<T> =
             resp.json().await.map_err(|e| SyncError::FetchFailed {
                 source_id: self.name.clone(),
-                reason: format!("json decode: {}", e),
+                reason: format!("json decode: {e}"),
             })?;
 
         if let Some(err) = envelope.error {
@@ -108,10 +108,10 @@ impl RpcProvider for PublicRpcProvider {
             Value::String(format!("0x{}", hex::encode(&req.data))),
         );
         if let Some(from) = req.from {
-            tx.insert("from".into(), Value::String(format!("{:#x}", from)));
+            tx.insert("from".into(), Value::String(format!("{from:#x}")));
         }
         if let Some(value) = req.value {
-            tx.insert("value".into(), Value::String(format!("{:#x}", value)));
+            tx.insert("value".into(), Value::String(format!("{value:#x}")));
         }
 
         let hex_string: String = self
@@ -135,7 +135,7 @@ impl RpcProvider for PublicRpcProvider {
         let n = u64::from_str_radix(hex_string.trim_start_matches("0x"), 16).map_err(|e| {
             SyncError::FetchFailed {
                 source_id: self.name.clone(),
-                reason: format!("blockNumber parse: {}", e),
+                reason: format!("blockNumber parse: {e}"),
             }
         })?;
         Ok(n)
@@ -181,28 +181,25 @@ impl RpcProvider for PublicRpcProvider {
             });
         }
         let result_val = resp_value.get("result");
-        let Some(result_val) = result_val else { return Ok(None) };
+        let Some(result_val) = result_val else {
+            return Ok(None);
+        };
         if result_val.is_null() {
             return Ok(None);
         }
-        let r: RawReceipt = serde_json::from_value(result_val.clone()).map_err(|e| {
-            SyncError::FetchFailed {
+        let r: RawReceipt =
+            serde_json::from_value(result_val.clone()).map_err(|e| SyncError::FetchFailed {
                 source_id: self.name.clone(),
                 reason: format!("receipt parse: {e}"),
-            }
-        })?;
+            })?;
         let status_hex = r.status.unwrap_or_else(|| "0x0".to_string());
         let status = status_hex == "0x1" || status_hex == "0x01";
-        let block_number = u64::from_str_radix(
-            r.block_number.trim_start_matches("0x"),
-            16,
-        )
-        .map_err(|e| SyncError::FetchFailed {
-            source_id: self.name.clone(),
-            reason: format!("receipt blockNumber: {e}"),
-        })?;
-        let gas_used = u64::from_str_radix(r.gas_used.trim_start_matches("0x"), 16)
-            .unwrap_or(0);
+        let block_number = u64::from_str_radix(r.block_number.trim_start_matches("0x"), 16)
+            .map_err(|e| SyncError::FetchFailed {
+                source_id: self.name.clone(),
+                reason: format!("receipt blockNumber: {e}"),
+            })?;
+        let gas_used = u64::from_str_radix(r.gas_used.trim_start_matches("0x"), 16).unwrap_or(0);
         Ok(Some(super::super::TxReceipt {
             status,
             block_number,
@@ -259,7 +256,7 @@ fn decode_hex_bytes(s: &str, source: &str) -> Result<Vec<u8>, SyncError> {
     let stripped = s.trim_start_matches("0x");
     hex::decode(stripped).map_err(|e| SyncError::FetchFailed {
         source_id: source.into(),
-        reason: format!("hex decode: {}", e),
+        reason: format!("hex decode: {e}"),
     })
 }
 
@@ -267,6 +264,6 @@ fn decode_hex_u256(s: &str, source: &str) -> Result<U256, SyncError> {
     let stripped = s.trim_start_matches("0x");
     U256::from_str_radix(stripped, 16).map_err(|e| SyncError::FetchFailed {
         source_id: source.into(),
-        reason: format!("u256 parse: {}", e),
+        reason: format!("u256 parse: {e}"),
     })
 }

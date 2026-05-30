@@ -1,4 +1,4 @@
-//! TokenRef — a lightweight identifier pointing to another token from within a TokenKind.
+//! `TokenRef` — a lightweight identifier pointing to another token from within a `TokenKind`.
 //!
 //! The actual holding lives in the external `tokens` map, so a kind only carries
 //! the key (e.g. `aUSDC.kind = YieldReceipt { underlying: TokenRef(USDC.key) }`).
@@ -19,7 +19,8 @@ pub struct TokenRef {
 
 impl TokenRef {
     /// Creates a `TokenRef` referencing the token identified by `key`.
-    pub fn new(key: TokenKey) -> Self {
+    #[must_use]
+    pub const fn new(key: TokenKey) -> Self {
         Self { key }
     }
 }

@@ -1,4 +1,4 @@
-//! AssetCommitment — how a single pending action ties up an asset.
+//! `AssetCommitment` — how a single pending action ties up an asset.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
@@ -11,7 +11,7 @@ use crate::token::TokenRef;
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AssetCommitment {
-    /// Cap-style — a venue/spender may pull up to `max_out` (UniswapX, permit).
+    /// Cap-style — a venue/spender may pull up to `max_out` (`UniswapX`, permit).
     SpendCap {
         /// Token whose spend is capped.
         token: TokenRef,
@@ -47,9 +47,10 @@ pub enum AssetCommitment {
 
 impl AssetCommitment {
     /// Returns this commitment's contribution to the committed total for `key`; spec §6.1.
-    /// - SpendCap / PermitCap → added to the committed total
-    /// - HardLock → already reflected in the balance, not added
+    /// - `SpendCap` / `PermitCap` → added to the committed total
+    /// - `HardLock` → already reflected in the balance, not added
     /// - None → 0
+    #[must_use]
     pub fn cap_for(&self, key: &crate::token::TokenKey) -> U256 {
         match self {
             Self::SpendCap { token, max_out } if &token.key == key => *max_out,

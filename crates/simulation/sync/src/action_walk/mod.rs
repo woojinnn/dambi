@@ -28,8 +28,9 @@ pub mod token;
 
 // ─────────────────────── walk 진입점 ───────────────────────
 
-/// `action` 안의 stale LiveField 들 수집. 단일 액션이면 action_index=0,
+/// `action` 안의 stale `LiveField` 들 수집. 단일 액션이면 `action_index=0`,
 /// `Multicall` 자식들은 0..N 순서로 부여.
+#[must_use]
 pub fn walk_action_stale(action: &Action, now: Time) -> (Vec<StaleField>, WalkStats) {
     let mut stale = Vec::new();
     let mut stats = WalkStats::default();
@@ -62,7 +63,7 @@ fn walk_body(
 
 // ─────────────────────── apply 진입점 ───────────────────────
 
-/// fetched `value` 를 Action 의 해당 LiveField 슬롯에 in-place 로 적용.
+/// fetched `value` 를 Action 의 해당 `LiveField` 슬롯에 in-place 로 적용.
 /// `slot` variant 별 dispatch. 알 수 없는 슬롯이거나 값 형식 mismatch 면 no-op.
 pub fn apply_value_to_action(
     action: &mut Action,

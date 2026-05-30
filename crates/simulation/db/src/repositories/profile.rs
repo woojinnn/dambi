@@ -1,6 +1,6 @@
 //! `user_profile` 테이블 — DB 파일을 소유한 사용자 (singleton).
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 use serde_json::Value as JsonValue;
 
 use crate::error::{DbError, DbResult};
@@ -16,13 +16,19 @@ pub struct UserProfile {
     pub created_at: i64,
 }
 
-/// 새 user_profile 을 INSERT. 이미 있으면 [`DbError::Invariant`].
+/// 새 `user_profile` 을 INSERT. 이미 있으면 [`DbError::Invariant`].
 pub fn insert(tx: &Transaction<'_>, p: &UserProfile) -> DbResult<()> {
     let settings_str = serde_json::to_string(&p.settings)?;
     let res = tx.execute(
         "INSERT INTO user_profile (id, user_id, email, display_name, settings_json, created_at) \
          VALUES (1, ?1, ?2, ?3, ?4, ?5)",
-        params![p.user_id, p.email, p.display_name, settings_str, p.created_at],
+        params![
+            p.user_id,
+            p.email,
+            p.display_name,
+            settings_str,
+            p.created_at
+        ],
     );
     match res {
         Ok(_) => Ok(()),
@@ -38,7 +44,7 @@ pub fn insert(tx: &Transaction<'_>, p: &UserProfile) -> DbResult<()> {
     }
 }
 
-/// user_profile 이 있으면 UPDATE, 없으면 INSERT.
+/// `user_profile` 이 있으면 UPDATE, 없으면 INSERT.
 pub fn upsert(tx: &Transaction<'_>, p: &UserProfile) -> DbResult<()> {
     let settings_str = serde_json::to_string(&p.settings)?;
     tx.execute(
@@ -49,12 +55,18 @@ pub fn upsert(tx: &Transaction<'_>, p: &UserProfile) -> DbResult<()> {
            email = excluded.email, \
            display_name = excluded.display_name, \
            settings_json = excluded.settings_json",
-        params![p.user_id, p.email, p.display_name, settings_str, p.created_at],
+        params![
+            p.user_id,
+            p.email,
+            p.display_name,
+            settings_str,
+            p.created_at
+        ],
     )?;
     Ok(())
 }
 
-/// 단일 user_profile row 를 가져옴. 없으면 None.
+/// 단일 `user_profile` row 를 가져옴. 없으면 None.
 pub fn get(tx: &Transaction<'_>) -> DbResult<Option<UserProfile>> {
     let mut stmt = tx.prepare(
         "SELECT user_id, email, display_name, settings_json, created_at \

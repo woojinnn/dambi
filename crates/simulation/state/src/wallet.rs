@@ -14,6 +14,7 @@ use crate::primitives::{Address, BlockHeight, ChainId};
 use crate::token::{TokenHolding, TokenKey};
 
 /// Wallet identity: an account address plus the set of tracked chains.
+///
 /// On EVM the address is shared across chains, so a single `Address` suffices.
 /// Adding non-EVM chains (e.g. Solana) would require a federated identity — future work.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
@@ -70,6 +71,7 @@ pub struct WalletState {
 
 impl WalletState {
     /// Creates an empty `WalletState` for the given wallet identity.
+    #[must_use]
     pub fn new(wallet_id: WalletId) -> Self {
         Self {
             wallet_id,
@@ -83,8 +85,11 @@ impl WalletState {
 
     /// Policy-view helper: spendable balance of a token (balance - committed).
     /// Returns `None` for holdings without a spendable amount, e.g. owned NFTs.
+    #[must_use]
     pub fn available_balance(&self, key: &TokenKey) -> Option<crate::primitives::U256> {
-        self.tokens.get(key).and_then(|h| h.available())
+        self.tokens
+            .get(key)
+            .and_then(super::token::holding::TokenHolding::available)
     }
 
     /// Flatly walks every approval granted to a single spender (for cross-chain policy).

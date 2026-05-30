@@ -40,10 +40,7 @@ use crate::error::{ReducerError, ReducerResult};
 /// failure — the string should have been validated at construction time.
 fn parse_decimal(d: &Decimal) -> ReducerResult<RustDecimal> {
     RustDecimal::from_str(d.as_str()).map_err(|e| {
-        ReducerError::Invariant(format!(
-            "invalid Decimal string {:?}: {e}",
-            d.as_str()
-        ))
+        ReducerError::Invariant(format!("invalid Decimal string {:?}: {e}", d.as_str()))
     })
 }
 
@@ -56,11 +53,8 @@ fn u256_to_decimal(amount: U256) -> ReducerResult<RustDecimal> {
     // intermediate string representation to avoid silent truncation when the
     // value exceeds i128.
     let s = amount.to_string();
-    RustDecimal::from_str(&s).map_err(|e| {
-        ReducerError::Invariant(format!(
-            "U256 {s} exceeds rust_decimal range: {e}"
-        ))
-    })
+    RustDecimal::from_str(&s)
+        .map_err(|e| ReducerError::Invariant(format!("U256 {s} exceeds rust_decimal range: {e}")))
 }
 
 /// Render a `rust_decimal::Decimal` back into the `simulation_state::Decimal`
@@ -72,19 +66,11 @@ fn decimal_to_state(d: RustDecimal) -> Decimal {
 /// Look up a price for `token` in a `&[(TokenRef, Decimal)]` slice. Returns
 /// `Invariant` if the price is missing — callers must pre-populate every
 /// referenced token.
-fn lookup_price(
-    token: &TokenRef,
-    table: &[(TokenRef, Decimal)],
-) -> ReducerResult<RustDecimal> {
+fn lookup_price(token: &TokenRef, table: &[(TokenRef, Decimal)]) -> ReducerResult<RustDecimal> {
     table
         .iter()
         .find(|(t, _)| t == token)
-        .ok_or_else(|| {
-            ReducerError::Invariant(format!(
-                "missing price for token {:?}",
-                token.key
-            ))
-        })
+        .ok_or_else(|| ReducerError::Invariant(format!("missing price for token {:?}", token.key)))
         .and_then(|(_, p)| parse_decimal(p))
 }
 
@@ -262,11 +248,8 @@ pub fn recompute_perp_pnl(
     // accepts an optional leading sign, matching `rust_decimal`'s string
     // form for negatives.
     let s = pnl_int.to_string();
-    SignedI256::from_dec_str(&s).map_err(|e| {
-        ReducerError::Invariant(format!(
-            "PnL {s} overflows SignedI256: {e}"
-        ))
-    })
+    SignedI256::from_dec_str(&s)
+        .map_err(|e| ReducerError::Invariant(format!("PnL {s} overflows SignedI256: {e}")))
 }
 
 /// Recompute `PerpPosition::liq_price` from collateral, size, and
@@ -292,10 +275,7 @@ pub fn recompute_perp_pnl(
 /// Returns `Invariant` if `entry_price` fails to parse, if collateral /
 /// `size_base` exceed `rust_decimal` range, or if any internal arithmetic
 /// produces a non-finite intermediate.
-pub fn recompute_liq_price(
-    position: &PerpPosition,
-    _now: Time,
-) -> ReducerResult<Option<Price>> {
+pub fn recompute_liq_price(position: &PerpPosition, _now: Time) -> ReducerResult<Option<Price>> {
     if position.size_base == U256::ZERO {
         return Ok(None);
     }
@@ -394,7 +374,11 @@ mod tests {
         let usdc = usdc_ref();
         let account = mock_account(
             vec![(usdc.clone(), U256::from(2_400_000_000_u64))],
-            vec![(usdc.clone(), U256::from(800_000_000_u64), RateMode::Variable)],
+            vec![(
+                usdc.clone(),
+                U256::from(800_000_000_u64),
+                RateMode::Variable,
+            )],
         );
         let collat_prices = vec![(usdc.clone(), Decimal::new("1"))];
         let debt_prices = vec![(usdc.clone(), Decimal::new("1"))];
@@ -419,8 +403,7 @@ mod tests {
         let prices = vec![(usdc.clone(), Decimal::new("1"))];
         let lt = vec![(usdc, 8_000)];
 
-        let hf = recompute_health_factor(&account, &prices, &[], &lt, Time::from_unix(0))
-            .unwrap();
+        let hf = recompute_health_factor(&account, &prices, &[], &lt, Time::from_unix(0)).unwrap();
         assert_eq!(hf.as_str(), HF_INFINITY);
     }
 
@@ -475,7 +458,11 @@ mod tests {
         let usdc = usdc_ref();
         let account = mock_account(
             vec![(usdc.clone(), U256::from(2_400_000_000_u64))],
-            vec![(usdc.clone(), U256::from(800_000_000_u64), RateMode::Variable)],
+            vec![(
+                usdc.clone(),
+                U256::from(800_000_000_u64),
+                RateMode::Variable,
+            )],
         );
         let prices = vec![(usdc, Decimal::new("1"))];
 

@@ -18,7 +18,7 @@ use super::providers::PublicRpcProvider;
 use super::{BlockTag, EthCallRequest, RpcProvider};
 use crate::error::SyncError;
 
-/// 한 RpcRouter 는 여러 chain × 여러 provider 를 모두 관할.
+/// 한 `RpcRouter` 는 여러 chain × 여러 provider 를 모두 관할.
 pub struct RpcRouter {
     /// chain → priority 순 provider 목록.
     by_chain: BTreeMap<ChainId, Vec<Arc<dyn RpcProvider>>>,
@@ -31,7 +31,11 @@ impl std::fmt::Debug for RpcRouter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RpcRouter")
             .field("chains", &self.by_chain.keys().collect::<Vec<_>>())
-            .field("multicall_chains", &self.multicall.keys().collect::<Vec<_>>())
+            .field(
+                "multicall_chains",
+                &self.multicall.keys().collect::<Vec<_>>(),
+            )
+            .field("health", &"<HealthTracker>")
             .finish()
     }
 }
@@ -64,6 +68,7 @@ impl RpcRouter {
         })
     }
 
+    #[must_use]
     pub fn multicall_addr(&self, chain: &ChainId) -> Option<Address> {
         self.multicall.get(chain).copied()
     }
@@ -84,10 +89,13 @@ impl RpcRouter {
         F: FnMut(Arc<dyn RpcProvider>) -> Fut,
         Fut: std::future::Future<Output = Result<T, SyncError>>,
     {
-        let providers = self.by_chain.get(chain).ok_or_else(|| SyncError::FetchFailed {
-            source_id: "router".into(),
-            reason: format!("no providers for chain {}", chain),
-        })?;
+        let providers = self
+            .by_chain
+            .get(chain)
+            .ok_or_else(|| SyncError::FetchFailed {
+                source_id: "router".into(),
+                reason: format!("no providers for chain {chain}"),
+            })?;
 
         let mut last_err: Option<SyncError> = None;
         for provider in providers {
@@ -108,7 +116,7 @@ impl RpcRouter {
         }
         Err(last_err.unwrap_or_else(|| SyncError::FetchFailed {
             source_id: "router".into(),
-            reason: format!("all providers failed for chain {}", chain),
+            reason: format!("all providers failed for chain {chain}"),
         }))
     }
 
@@ -132,8 +140,11 @@ impl RpcRouter {
         addr: Address,
         block: BlockTag,
     ) -> Result<U256, SyncError> {
-        self.try_all(chain, move |p| async move { p.eth_balance(addr, block).await })
-            .await
+        self.try_all(
+            chain,
+            move |p| async move { p.eth_balance(addr, block).await },
+        )
+        .await
     }
 
     pub async fn eth_block_number(&self, chain: &ChainId) -> Result<u64, SyncError> {
@@ -185,7 +196,7 @@ fn instantiate_provider(
         // "quicknode" => Ok(Arc::new(QuickNodeProvider::new(...))),
         other => Err(SyncError::FetchFailed {
             source_id: "router".into(),
-            reason: format!("unknown provider kind: {}", other),
+            reason: format!("unknown provider kind: {other}"),
         }),
     }
 }
@@ -228,7 +239,7 @@ priority = 1
 "#;
         let cfg = RpcConfig::load_str(toml_text).unwrap();
         let err = RpcRouter::from_config(cfg).unwrap_err();
-        let msg = format!("{}", err);
+        let msg = format!("{err}");
         assert!(msg.contains("unknown provider kind"));
     }
 }

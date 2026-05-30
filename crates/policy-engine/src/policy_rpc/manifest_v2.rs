@@ -239,7 +239,11 @@ mod tests {
         assert_eq!(manifest.policy_rpc.len(), 1);
         assert_eq!(manifest.policy_rpc[0].method, "oracle.usd_value");
         assert_eq!(
-            manifest.custom_context.fields.get("totalInputUsd").map(String::as_str),
+            manifest
+                .custom_context
+                .fields
+                .get("totalInputUsd")
+                .map(String::as_str),
             Some("decimal")
         );
         manifest.validate().expect("valid manifest");

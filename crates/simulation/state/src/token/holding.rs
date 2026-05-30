@@ -1,4 +1,4 @@
-//! TokenHolding — the held balance state for a single fungibility unit.
+//! `TokenHolding` — the held balance state for a single fungibility unit.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
@@ -33,12 +33,14 @@ impl Balance {
     }
 
     /// Builds a `Fungible` balance with a zero amount.
-    pub fn zero_fungible() -> Self {
+    #[must_use]
+    pub const fn zero_fungible() -> Self {
         Self::Fungible { amount: U256::ZERO }
     }
 
     /// Returns the fungible amount, or `None` for an `Owned` (ERC721) balance.
-    pub fn as_fungible(&self) -> Option<U256> {
+    #[must_use]
+    pub const fn as_fungible(&self) -> Option<U256> {
         match self {
             Self::Fungible { amount } => Some(*amount),
             Self::Owned => None,
@@ -46,6 +48,7 @@ impl Balance {
     }
 
     /// Returns `true` when the fungible amount is zero; always `false` for `Owned`.
+    #[must_use]
     pub fn is_zero(&self) -> bool {
         match self {
             Self::Fungible { amount } => amount.is_zero(),
@@ -93,12 +96,12 @@ pub struct TokenHolding {
 impl TokenHolding {
     /// Policy-view helper — the spendable balance, i.e. `balance` minus
     /// `committed`. Returns `None` for `Owned`, where the notion is meaningless.
-    pub fn available(&self) -> Option<U256> {
+    #[must_use]
+    pub const fn available(&self) -> Option<U256> {
         match (&self.balance, &self.committed) {
-            (
-                Balance::Fungible { amount: bal },
-                Balance::Fungible { amount: cmt },
-            ) => Some(bal.saturating_sub(*cmt)),
+            (Balance::Fungible { amount: bal }, Balance::Fungible { amount: cmt }) => {
+                Some(bal.saturating_sub(*cmt))
+            }
             _ => None,
         }
     }

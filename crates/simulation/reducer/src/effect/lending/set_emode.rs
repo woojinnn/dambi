@@ -28,7 +28,10 @@ use super::position_id;
 impl Reducer for SetEModeAction {
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
         let _ = ctx;
-        if !matches!(self.venue, LendingVenue::AaveV3 { .. } | LendingVenue::Spark { .. }) {
+        if !matches!(
+            self.venue,
+            LendingVenue::AaveV3 { .. } | LendingVenue::Spark { .. }
+        ) {
             return Err(ReducerError::UnsupportedProtocol {
                 action: "set_emode".into(),
                 protocol: super::venue_tag(&self.venue).into(),
@@ -226,7 +229,9 @@ mod tests {
         let err = action(1, vec![usdc_ref()])
             .apply(&state, &ctx())
             .unwrap_err();
-        assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("not in target category")));
+        assert!(
+            matches!(err, ReducerError::Invariant(msg) if msg.contains("not in target category"))
+        );
     }
 
     /// Non-Aave venue rejects e-mode toggling.

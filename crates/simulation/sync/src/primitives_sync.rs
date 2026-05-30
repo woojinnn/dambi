@@ -1,10 +1,10 @@
-//! Primitives sync — LiveField 가 아닌 "사실" 필드들의 RPC 갱신.
+//! Primitives sync — `LiveField` 가 아닌 "사실" 필드들의 RPC 갱신.
 //!
-//! `TokenHolding.balance`, `approvals_erc20`, `block_heights` 는 LiveField 가
+//! `TokenHolding.balance`, `approvals_erc20`, `block_heights` 는 `LiveField` 가
 //! 아니라 plain 필드라 walker 가 못 잡는다. 이들은 별도 경로로 sync 한다:
 //!
-//! - block_heights : eth_blockNumber (chain 별)
-//! - native balance: eth_getBalance (chain 별, Native holding)
+//! - `block_heights` : `eth_blockNumber` (chain 별)
+//! - native balance: `eth_getBalance` (chain 별, Native holding)
 //! - ERC20 balance : balanceOf(owner) (Multicall3 로 chain 별 묶음)
 //! - approvals     : allowance(owner, spender) (이미 알고있는 entry 만 refresh)
 //!
@@ -31,7 +31,7 @@ pub struct PrimitivesReport {
 }
 
 impl Orchestrator {
-    /// LiveField 가 아닌 primitive 필드들을 RPC 로 갱신.
+    /// `LiveField` 가 아닌 primitive 필드들을 RPC 로 갱신.
     pub async fn sync_primitives(
         &self,
         state: &mut WalletState,
@@ -64,7 +64,7 @@ impl Orchestrator {
                     );
                     report.block_heights_updated += 1;
                 }
-                Err(e) => report.errors.push(format!("blockNumber {}: {}", chain, e)),
+                Err(e) => report.errors.push(format!("blockNumber {chain}: {e}")),
             }
         }
 
@@ -82,7 +82,7 @@ impl Orchestrator {
                             report.native_balances_updated += 1;
                         }
                     }
-                    Err(e) => report.errors.push(format!("balance native {}: {}", chain, e)),
+                    Err(e) => report.errors.push(format!("balance native {chain}: {e}")),
                 }
             }
         }
@@ -134,7 +134,7 @@ impl Orchestrator {
                         }
                     }
                 }
-                Err(e) => report.errors.push(format!("erc20 multicall {}: {}", chain, e)),
+                Err(e) => report.errors.push(format!("erc20 multicall {chain}: {e}")),
             }
         }
 
@@ -156,8 +156,11 @@ impl Orchestrator {
         };
 
         // 갱신할 (chain, token, spender) 목록을 먼저 수집 (immutable borrow 끝낸 뒤 write).
-        let mut to_refresh: Vec<(simulation_state::ChainId, alloy_primitives::Address, alloy_primitives::Address)> =
-            Vec::new();
+        let mut to_refresh: Vec<(
+            simulation_state::ChainId,
+            alloy_primitives::Address,
+            alloy_primitives::Address,
+        )> = Vec::new();
         for ((chain, token), spenders) in &state.approvals.erc20 {
             for spender in spenders.keys() {
                 to_refresh.push((chain.clone(), *token, *spender));
@@ -214,7 +217,10 @@ priority = 1
         let orch = Orchestrator::new(crate::fetchers::OnchainViewFetcher::new(onchain_router));
         let mut state =
             WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
-        let report = orch.sync_primitives(&mut state, Time::from_unix(0)).await.unwrap();
+        let report = orch
+            .sync_primitives(&mut state, Time::from_unix(0))
+            .await
+            .unwrap();
         assert!(!report.errors.is_empty());
     }
 }

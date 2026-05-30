@@ -19,4 +19,8 @@
 //!     types.rs          - Bundle JSON struct/enum (serde)
 //! ```
 
+#![allow(rustdoc::broken_intra_doc_links)]
+#![allow(rustdoc::private_intra_doc_links)]
+#![allow(rustdoc::redundant_explicit_links)]
+
 pub mod declarative;

@@ -1,12 +1,12 @@
 //! Orchestrator — walker + batcher + fetchers 를 묶어 한 `WalletState` 를 신선화.
 //!
 //! 일반 흐름:
-//! 1. [`walk_stale`] 로 stale LiveField 수집
+//! 1. [`walk_stale`] 로 stale `LiveField` 수집
 //! 2. [`batch_by_source`] 로 source 별 묶음
 //! 3. 각 batch 를 해당 fetcher 로 dispatch
-//! 4. 결과 (`Value`) 를 다시 state 의 LiveField 에 write back
+//! 4. 결과 (`Value`) 를 다시 state 의 `LiveField` 에 write back
 //!
-//! Phase 4 에선 OnchainView 만 wired up. 나머지 (Oracle/Venue/Registry/Derived) 는
+//! Phase 4 에선 `OnchainView` 만 wired up. 나머지 (Oracle/Venue/Registry/Derived) 는
 //! 후속 phase 에서 차례로.
 
 use std::collections::HashMap;
@@ -16,13 +16,13 @@ use serde_json::Value;
 
 use simulation_state::{Confidence, LiveField, PositionKind, Price, Time, WalletState};
 
-use crate::batcher::{BatchKind, FetchBatch, batch_by_source};
+use crate::batcher::{batch_by_source, BatchKind, FetchBatch};
+use crate::calc::{CalcContext, CalcRegistry};
 use crate::error::SyncError;
 use crate::fetchers::onchain::OnchainCall;
-use crate::calc::{CalcContext, CalcRegistry};
 use crate::fetchers::oracle::{provider_key, PriceFetcher, RestJsonOracleFetcher};
 use crate::fetchers::{ChainlinkFetcher, HyperliquidFetcher, OnchainViewFetcher, RegistryFetcher};
-use crate::walker::{FieldLocation, WalkStats, walk_stale};
+use crate::walker::{walk_stale, FieldLocation, WalkStats};
 
 /// 한 wallet refresh 결과 요약 — 디버깅 / 메트릭용.
 #[derive(Debug, Default, Clone)]
@@ -36,7 +36,7 @@ pub struct RefreshReport {
 
 pub struct Orchestrator {
     onchain: OnchainViewFetcher,
-    /// provider_key → fetcher. `provider_key` 는
+    /// `provider_key` → fetcher. `provider_key` 는
     /// [`crate::fetchers::oracle::provider_key`] 로 정규화된 문자열.
     /// 예: `"chainlink"`, `"coingecko"`, `"pyth"`, `"redstone"`, ...
     ///
@@ -45,14 +45,15 @@ pub struct Orchestrator {
     registry: Option<RegistryFetcher>,
     hyperliquid: Option<HyperliquidFetcher>,
     calc: CalcRegistry,
-    /// Global LiveField 값 (gas_price, eth_usd 등). DerivedFrom 의 Global FieldRef
+    /// Global `LiveField` 값 (`gas_price`, `eth_usd` 등). `DerivedFrom` 의 Global `FieldRef`
     /// resolve 에 사용. scheduler/sync 가 주기적으로 갱신.
     globals: crate::resolver::GlobalValues,
-    /// primitives sync (balance/block_height/approval) 용 직접 router 접근.
+    /// primitives sync (`balance/block_height/approval`) 용 직접 router 접근.
     router: Option<Arc<crate::RpcRouter>>,
 }
 
 impl Orchestrator {
+    #[must_use]
     pub fn new(onchain: OnchainViewFetcher) -> Self {
         Self {
             onchain,
@@ -65,7 +66,7 @@ impl Orchestrator {
         }
     }
 
-    /// Global LiveField 값 갱신 (gas_price, eth_usd 등).
+    /// Global `LiveField` 값 갱신 (`gas_price`, `eth_usd` 등).
     pub fn set_global(&mut self, name: impl Into<String>, value: serde_json::Value) {
         self.globals.insert(name.into(), value);
     }
@@ -76,11 +77,12 @@ impl Orchestrator {
     }
 
     /// 외부에서 (예: receipt watcher) 직접 RPC 호출이 필요할 때.
+    #[must_use]
     pub fn router_arc(&self) -> Option<Arc<crate::RpcRouter>> {
         self.router.clone()
     }
 
-    /// 임의 provider name 에 PriceFetcher 등록. dispatch 시 [`provider_key`] 가
+    /// 임의 provider name 에 `PriceFetcher` 등록. dispatch 시 [`provider_key`] 가
     /// 반환하는 문자열과 일치해야 매칭됨.
     pub fn with_price_fetcher(
         mut self,
@@ -92,20 +94,24 @@ impl Orchestrator {
     }
 
     /// Chainlink fetcher 를 "chainlink" 키로 등록.
+    #[must_use]
     pub fn with_chainlink(self, chainlink: ChainlinkFetcher) -> Self {
         self.with_price_fetcher("chainlink", Arc::new(chainlink))
     }
 
+    #[must_use]
     pub fn with_registry(mut self, registry: RegistryFetcher) -> Self {
         self.registry = Some(registry);
         self
     }
 
+    #[must_use]
     pub fn with_hyperliquid(mut self, hl: HyperliquidFetcher) -> Self {
         self.hyperliquid = Some(hl);
         self
     }
 
+    #[must_use]
     pub fn with_calc(mut self, calc: CalcRegistry) -> Self {
         self.calc = calc;
         self
@@ -113,6 +119,7 @@ impl Orchestrator {
 
     /// router 만으로 minimal 구성 — Chainlink registry 와 Hyperliquid endpoint 는
     /// 기본값. 실 운영에서는 [`Self::from_sync_config`] 사용 권장.
+    #[must_use]
     pub fn from_rpc_router(router: Arc<crate::RpcRouter>) -> Self {
         let onchain = OnchainViewFetcher::new(router.clone());
         let chainlink = ChainlinkFetcher::new(router.clone());
@@ -143,8 +150,7 @@ impl Orchestrator {
         let mut price_fetchers: HashMap<String, Arc<dyn PriceFetcher>> = HashMap::new();
 
         // Chainlink (on-chain).
-        let chainlink =
-            ChainlinkFetcher::from_sync_config(router.clone(), &cfg.oracles.chainlink);
+        let chainlink = ChainlinkFetcher::from_sync_config(router.clone(), &cfg.oracles.chainlink);
         price_fetchers.insert("chainlink".into(), Arc::new(chainlink));
 
         // REST oracles — 각 [oracles.rest.<name>] 블록당 fetcher 하나.
@@ -169,7 +175,7 @@ impl Orchestrator {
         })
     }
 
-    /// 주어진 OracleFeed source 에 매핑되는 PriceFetcher 를 반환.
+    /// 주어진 `OracleFeed` source 에 매핑되는 `PriceFetcher` 를 반환.
     fn price_fetcher_for(
         &self,
         source: &simulation_state::DataSource,
@@ -182,7 +188,7 @@ impl Orchestrator {
         }
     }
 
-    /// `state` 안의 모든 stale LiveField 를 `now` 기준으로 갱신.
+    /// `state` 안의 모든 stale `LiveField` 를 `now` 기준으로 갱신.
     pub async fn refresh(
         &self,
         state: &mut WalletState,
@@ -206,14 +212,14 @@ impl Orchestrator {
                     report.fields_failed += fail;
                 }
                 Err(e) => {
-                    report.errors.push(format!("{}", e));
+                    report.errors.push(format!("{e}"));
                 }
             }
         }
         Ok(report)
     }
 
-    /// `action` 안의 모든 stale LiveField 를 갱신. wallet refresh 와 같은 인프라
+    /// `action` 안의 모든 stale `LiveField` 를 갱신. wallet refresh 와 같은 인프라
     /// (walker → batcher → fetcher) 를 재사용하되 walker 와 apply 만 Action 측.
     ///
     /// `state` 는 read-only context — fetcher 가 wallet 정보 (address 등) 가 필요할 때 참고.
@@ -235,13 +241,16 @@ impl Orchestrator {
         let batches = batch_by_source(stale);
         for batch in batches {
             report.batches_processed += 1;
-            match self.process_batch_for_action(batch, action, state, now).await {
+            match self
+                .process_batch_for_action(batch, action, state, now)
+                .await
+            {
                 Ok((ok, fail)) => {
                     report.fields_updated += ok;
                     report.fields_failed += fail;
                 }
                 Err(e) => {
-                    report.errors.push(format!("{}", e));
+                    report.errors.push(format!("{e}"));
                 }
             }
         }
@@ -252,7 +261,7 @@ impl Orchestrator {
         &self,
         batch: FetchBatch,
         action: &mut simulation_reducer::action::Action,
-        _state: &WalletState,
+        state: &WalletState,
         now: Time,
     ) -> Result<(usize, usize), SyncError> {
         // 같은 fetcher 들을 호출하되, 결과를 apply_value_to_action 으로 적용.
@@ -289,7 +298,7 @@ impl Orchestrator {
                     .map(|item| {
                         let args = match &item.location {
                             crate::walker::FieldLocation::Action { slot, .. } => {
-                                crate::args_resolver::resolve_args(slot, action, _state)
+                                crate::args_resolver::resolve_args(slot, action, state)
                             }
                             _ => Vec::new(),
                         };
@@ -303,7 +312,12 @@ impl Orchestrator {
                 for (item, outcome) in batch.items.into_iter().zip(outcomes.into_iter()) {
                     if outcome.success {
                         if let Some(value) = outcome.value {
-                            crate::action_walk::apply_value_to_action(action, &item.location, value, now);
+                            crate::action_walk::apply_value_to_action(
+                                action,
+                                &item.location,
+                                value,
+                                now,
+                            );
                             ok += 1;
                         } else {
                             fail += 1;
@@ -320,7 +334,12 @@ impl Orchestrator {
                 for item in batch.items {
                     match reg.fetch(&item.source).await {
                         Ok(v) => {
-                            crate::action_walk::apply_value_to_action(action, &item.location, v, now);
+                            crate::action_walk::apply_value_to_action(
+                                action,
+                                &item.location,
+                                v,
+                                now,
+                            );
                             ok += 1;
                         }
                         Err(_) => fail += 1,
@@ -329,13 +348,22 @@ impl Orchestrator {
             }
             BatchKind::Venue { endpoint } => {
                 let is_hl = endpoint.contains("hyperliquid");
-                let Some(hl) = (if is_hl { self.hyperliquid.as_ref() } else { None }) else {
+                let Some(hl) = (if is_hl {
+                    self.hyperliquid.as_ref()
+                } else {
+                    None
+                }) else {
                     return Ok((0, batch.items.len()));
                 };
                 for item in batch.items {
                     match hl.fetch(&item.source).await {
                         Ok(v) => {
-                            crate::action_walk::apply_value_to_action(action, &item.location, v, now);
+                            crate::action_walk::apply_value_to_action(
+                                action,
+                                &item.location,
+                                v,
+                                now,
+                            );
                             ok += 1;
                         }
                         Err(_) => fail += 1,
@@ -473,7 +501,11 @@ impl Orchestrator {
                 // 향후 GMX/dYdX 추가 시 endpoint 패턴 매칭으로 분기.
                 let is_hl = endpoint.contains("hyperliquid")
                     || endpoint == "https://api.hyperliquid.xyz/info";
-                let hl = if is_hl { self.hyperliquid.as_ref() } else { None };
+                let hl = if is_hl {
+                    self.hyperliquid.as_ref()
+                } else {
+                    None
+                };
                 let hl = match hl {
                     Some(h) => h,
                     None => return Ok((0, batch.items.len())),
@@ -497,7 +529,7 @@ impl Orchestrator {
     }
 }
 
-/// 갱신된 `value` 를 state 의 해당 LiveField.value/synced_at 으로 반영.
+/// 갱신된 `value` 를 state 의 해당 `LiveField.value/synced_at` 으로 반영.
 ///
 /// 실패해도 상위에서 errors 에 누적할 뿐. state 자체는 일관성 유지.
 fn apply_value(state: &mut WalletState, loc: &FieldLocation, value: Value, now: Time) {
@@ -639,7 +671,7 @@ priority = 1
         assert_eq!(report.batches_processed, 0);
     }
 
-    /// DerivedFrom HF 가 Global FieldRef inputs 로부터 실제 계산되는지 end-to-end.
+    /// `DerivedFrom` HF 가 Global `FieldRef` inputs 로부터 실제 계산되는지 end-to-end.
     /// RPC 호출 없음 — Derived batch 만 처리.
     #[tokio::test]
     async fn derived_hf_computes_from_globals() {
@@ -704,10 +736,8 @@ priority = 1
                 .with_ttl(Duration::from_secs(60)),
         };
 
-        let mut state = WalletState::new(WalletId::new(
-            Address::ZERO,
-            [ChainId::ethereum_mainnet()],
-        ));
+        let mut state =
+            WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
         state.positions.push(Position {
             id: "aave_v3:main".into(),
             protocol: simulation_state::ProtocolRef::new("aave_v3"),

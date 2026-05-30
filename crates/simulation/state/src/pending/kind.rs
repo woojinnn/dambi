@@ -1,18 +1,18 @@
-//! PendingKind — the four shapes of signature-only / unsettled pending entries.
+//! `PendingKind` — the four shapes of signature-only / unsettled pending entries.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
 
 use crate::position::PerpSide;
-use crate::primitives::{Address, MarketRef, Price, Time, U256, VenueRef};
+use crate::primitives::{Address, MarketRef, Price, Time, VenueRef, U256};
 use crate::token::TokenRef;
 
-/// Kind of off-chain-matched order (UniswapX / CowSwap / 1inch Fusion, etc.).
+/// Kind of off-chain-matched order (`UniswapX` / `CowSwap` / 1inch Fusion, etc.).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderKind {
-    /// Dutch auction order whose price decays over time (e.g. UniswapX).
+    /// Dutch auction order whose price decays over time (e.g. `UniswapX`).
     Dutch,
     /// Standard limit order filled at or better than a fixed price.
     Limit,
@@ -40,7 +40,7 @@ pub enum PerpOrderKind {
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PendingKind {
-    /// Off-chain-matched limit order (UniswapX, CowSwap, 1inch Fusion, Bebop, OKX RFQ, etc.).
+    /// Off-chain-matched limit order (`UniswapX`, `CowSwap`, 1inch Fusion, Bebop, OKX RFQ, etc.).
     OffchainLimitOrder {
         /// Venue the order was submitted to.
         venue: VenueRef,

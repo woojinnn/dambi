@@ -210,7 +210,7 @@ pub(crate) mod test_support {
     use simulation_reducer::action::{ActionBody, ActionMeta, ActionNature, Eip712Domain};
     use simulation_state::live_field::{DataSource, OracleProvider};
     use simulation_state::primitives::{
-        Address, ChainId, Decimal, MarketRef, Price, SignedI256, Time, U256, VenueRef,
+        Address, ChainId, Decimal, MarketRef, Price, SignedI256, Time, VenueRef, U256,
     };
     use simulation_state::token::{TokenKey, TokenRef};
     use simulation_state::{LiveField, NonceKey};
@@ -246,14 +246,54 @@ pub(crate) mod test_support {
     pub(crate) fn all_venues() -> Vec<(&'static str, PerpVenue)> {
         let chain = ChainId::arbitrum();
         vec![
-            ("hyperliquid", PerpVenue::Hyperliquid { chain: chain.clone() }),
-            ("gmx_v2", PerpVenue::GmxV2 { chain: chain.clone() }),
-            ("dy_dx_v4", PerpVenue::DyDxV4 { chain: chain.clone() }),
-            ("vertex", PerpVenue::Vertex { chain: chain.clone() }),
-            ("aevo", PerpVenue::Aevo { chain: chain.clone() }),
-            ("drift", PerpVenue::Drift { chain: chain.clone() }),
-            ("jupiter_perps", PerpVenue::JupiterPerps { chain: chain.clone() }),
-            ("synthetix", PerpVenue::Synthetix { chain: chain.clone() }),
+            (
+                "hyperliquid",
+                PerpVenue::Hyperliquid {
+                    chain: chain.clone(),
+                },
+            ),
+            (
+                "gmx_v2",
+                PerpVenue::GmxV2 {
+                    chain: chain.clone(),
+                },
+            ),
+            (
+                "dy_dx_v4",
+                PerpVenue::DyDxV4 {
+                    chain: chain.clone(),
+                },
+            ),
+            (
+                "vertex",
+                PerpVenue::Vertex {
+                    chain: chain.clone(),
+                },
+            ),
+            (
+                "aevo",
+                PerpVenue::Aevo {
+                    chain: chain.clone(),
+                },
+            ),
+            (
+                "drift",
+                PerpVenue::Drift {
+                    chain: chain.clone(),
+                },
+            ),
+            (
+                "jupiter_perps",
+                PerpVenue::JupiterPerps {
+                    chain: chain.clone(),
+                },
+            ),
+            (
+                "synthetix",
+                PerpVenue::Synthetix {
+                    chain: chain.clone(),
+                },
+            ),
             (
                 "generic",
                 PerpVenue::Generic {
@@ -415,10 +455,9 @@ pub(crate) mod test_support {
         .unwrap();
         let schema_text = crate::schema::compose_per_policy(&manifest).unwrap();
         let (schema, _w) = cedar_policy::Schema::from_cedarschema_str(&schema_text).unwrap();
-        let lowered =
-            lower_action(body, meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        let lowered = lower_action(body, meta, &TxMeta { from: FROM, to: TO }).unwrap();
         let uid: cedar_policy::EntityUid = lowered.action_uid.parse().unwrap();
-        cedar_policy::Context::from_json_value(lowered.context.clone(), Some((&schema, &uid)))
+        cedar_policy::Context::from_json_value(lowered.context, Some((&schema, &uid)))
             .unwrap_or_else(|e| panic!("{tag} context must conform: {e:?}"));
     }
 }

@@ -1,7 +1,7 @@
-//! VestingSchedule — generic vesting (options, team grants, OTC unlocks, etc.)
-//! plus the shared VestSchedule type.
+//! `VestingSchedule` — generic vesting (options, team grants, OTC unlocks, etc.)
+//! plus the shared `VestSchedule` type.
 //!
-//! LaunchpadAllocation also reuses VestSchedule.
+//! `LaunchpadAllocation` also reuses `VestSchedule`.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;

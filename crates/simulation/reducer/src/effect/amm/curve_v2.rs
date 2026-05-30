@@ -138,9 +138,7 @@ pub(super) fn quote_swap_hop(
         .checked_add(amount_in)
         .ok_or_else(|| ReducerError::Invariant("curve_v2: denominator overflow".into()))?;
     if denominator.is_zero() {
-        return Err(ReducerError::Invariant(
-            "curve_v2: zero denominator".into(),
-        ));
+        return Err(ReducerError::Invariant("curve_v2: zero denominator".into()));
     }
     // dy_scaled = xp1 * amount_in / (xp0 + amount_in)  — output in xp space
     let dy_scaled = numerator / denominator;
@@ -261,8 +259,7 @@ mod tests {
             a_gamma: U256::ZERO,
             fee_bp: 0,
         };
-        let out =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::ZERO).unwrap();
+        let out = quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::ZERO).unwrap();
         assert_eq!(out, U256::ZERO);
     }
 
@@ -280,9 +277,14 @@ mod tests {
             a_gamma: U256::ZERO,
             fee_bp: 0,
         };
-        let err =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(1u64))
-                .unwrap_err();
+        let err = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(1u64),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("2 coins")));
     }
 
@@ -296,9 +298,14 @@ mod tests {
             a_gamma: U256::ZERO,
             fee_bp: 0,
         };
-        let err =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(1u64))
-                .unwrap_err();
+        let err = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(1u64),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("price_scale")));
     }
 
@@ -310,9 +317,14 @@ mod tests {
             reserve_out: U256::from(1u64),
             fee_bp: 0,
         };
-        let err =
-            quote_swap_hop(&empty_state(), &ctx(), &dummy_swap(), &pool, U256::from(1u64))
-                .unwrap_err();
+        let err = quote_swap_hop(
+            &empty_state(),
+            &ctx(),
+            &dummy_swap(),
+            &pool,
+            U256::from(1u64),
+        )
+        .unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("Cryptoswap")));
     }
 

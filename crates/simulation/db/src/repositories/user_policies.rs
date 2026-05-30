@@ -1,6 +1,6 @@
 //! `user_policies` CRUD — 사용자 Cedar 정책 저장소.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 
 use crate::error::DbResult;
 
@@ -129,8 +129,26 @@ mod tests {
     fn enable_disable_filters_list_enabled() {
         let pool = fresh_pool();
         pool.with_tx(|tx| {
-            let id1 = insert(tx, &UserPolicyInsert { name: "a".into(), description: None, cedar_text: "permit(principal, action, resource);".into(), severity: "info".into() }, 1)?;
-            let _id2 = insert(tx, &UserPolicyInsert { name: "b".into(), description: None, cedar_text: "permit(principal, action, resource);".into(), severity: "info".into() }, 2)?;
+            let id1 = insert(
+                tx,
+                &UserPolicyInsert {
+                    name: "a".into(),
+                    description: None,
+                    cedar_text: "permit(principal, action, resource);".into(),
+                    severity: "info".into(),
+                },
+                1,
+            )?;
+            let _id2 = insert(
+                tx,
+                &UserPolicyInsert {
+                    name: "b".into(),
+                    description: None,
+                    cedar_text: "permit(principal, action, resource);".into(),
+                    severity: "info".into(),
+                },
+                2,
+            )?;
             set_enabled(tx, id1, false, 100)?;
             let all = list_all(tx)?;
             assert_eq!(all.len(), 2);

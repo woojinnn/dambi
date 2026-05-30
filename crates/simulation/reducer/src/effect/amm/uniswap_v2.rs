@@ -61,17 +61,17 @@ pub(super) fn quote_swap_hop(
             let amount_in_with_fee = amount_in.checked_mul(fee_multiplier).ok_or_else(|| {
                 ReducerError::Invariant("uniswap_v2 amount_in_with_fee overflow".into())
             })?;
-            let numerator = reserve_out.checked_mul(amount_in_with_fee).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v2 numerator overflow".into())
-            })?;
+            let numerator = reserve_out
+                .checked_mul(amount_in_with_fee)
+                .ok_or_else(|| ReducerError::Invariant("uniswap_v2 numerator overflow".into()))?;
             let denom_base = reserve_in
                 .checked_mul(U256::from(10_000u32))
                 .ok_or_else(|| {
                     ReducerError::Invariant("uniswap_v2 denominator base overflow".into())
                 })?;
-            let denominator = denom_base.checked_add(amount_in_with_fee).ok_or_else(|| {
-                ReducerError::Invariant("uniswap_v2 denominator overflow".into())
-            })?;
+            let denominator = denom_base
+                .checked_add(amount_in_with_fee)
+                .ok_or_else(|| ReducerError::Invariant("uniswap_v2 denominator overflow".into()))?;
             if denominator.is_zero() {
                 return Err(ReducerError::Invariant(
                     "uniswap_v2 zero denominator (empty pool)".into(),
@@ -233,8 +233,7 @@ mod tests {
             reserve_out: U256::from(1_000u64),
             fee_bp: 10_000,
         };
-        let err =
-            quote_swap_hop(&state, &ctx, &swap, &pool_state, U256::from(10u64)).unwrap_err();
+        let err = quote_swap_hop(&state, &ctx, &swap, &pool_state, U256::from(10u64)).unwrap_err();
         assert!(matches!(err, ReducerError::Invariant(msg) if msg.contains("fee_bp")));
     }
 
@@ -281,10 +280,8 @@ mod tests {
             reserve_out: U256::from(1_000_000u64),
             fee_bp: 30,
         };
-        let small =
-            quote_swap_hop(&state, &ctx, &swap, &pool_state, U256::from(1_000u64)).unwrap();
-        let large =
-            quote_swap_hop(&state, &ctx, &swap, &pool_state, U256::from(2_000u64)).unwrap();
+        let small = quote_swap_hop(&state, &ctx, &swap, &pool_state, U256::from(1_000u64)).unwrap();
+        let large = quote_swap_hop(&state, &ctx, &swap, &pool_state, U256::from(2_000u64)).unwrap();
         assert!(large > small);
     }
 }

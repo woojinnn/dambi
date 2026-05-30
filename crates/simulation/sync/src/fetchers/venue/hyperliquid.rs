@@ -1,18 +1,18 @@
 //! Hyperliquid REST fetcher — mark price, funding rate, open orders.
 //!
-//! API: https://api.hyperliquid.xyz/info  (POST JSON body)
+//! API: <https://api.hyperliquid.xyz/info>  (POST JSON body)
 //!
-//! `DataSource::VenueApi { endpoint, parser_id, .. }` 의 parser_id 로 메서드 식별:
+//! `DataSource::VenueApi { endpoint, parser_id, .. }` 의 `parser_id` 로 메서드 식별:
 //! - `hl_all_mids`         → 전체 mark price (key=coin symbol, val=price string)
 //! - `hl_funding`          → 각 perp 의 funding rate
 //! - `hl_open_orders`      → 한 유저의 미체결 주문 lifecycle 추적
 //!
-//! body 는 endpoint URL 옆에 별도로 들고와야 하지만, parser_id 가 같으면 body 구조도
+//! body 는 endpoint URL 옆에 별도로 들고와야 하지만, `parser_id` 가 같으면 body 구조도
 //! 같다는 가정 하에 간단한 매핑 테이블로 처리.
 
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use simulation_state::DataSource;
 
@@ -38,10 +38,12 @@ impl Default for HyperliquidFetcher {
 
 impl HyperliquidFetcher {
     /// 기본 endpoint (`HL_API_BASE`) 로 초기화.
+    #[must_use]
     pub fn new() -> Self {
         Self::with_base_url(HL_API_BASE.to_string())
     }
 
+    #[must_use]
     pub fn with_base_url(base_url: String) -> Self {
         Self {
             client: reqwest::Client::builder()
@@ -53,6 +55,7 @@ impl HyperliquidFetcher {
     }
 
     /// `scopeball-sync.toml` 의 `[venues.hyperliquid]` 섹션에서 endpoint 주입.
+    #[must_use]
     pub fn from_sync_config(cfg: &HyperliquidConfig) -> Self {
         Self::with_base_url(cfg.endpoint.clone())
     }
@@ -90,13 +93,13 @@ impl HyperliquidFetcher {
             other => {
                 return Err(SyncError::FetchFailed {
                     source_id: "hyperliquid".into(),
-                    reason: format!("unknown parser_id: {}", other),
+                    reason: format!("unknown parser_id: {other}"),
                 });
             }
         };
 
         let url = if endpoint.is_empty() {
-            format!("{}/info", HL_API_BASE)
+            format!("{HL_API_BASE}/info")
         } else {
             endpoint
         };
@@ -109,7 +112,7 @@ impl HyperliquidFetcher {
             .await
             .map_err(|e| SyncError::FetchFailed {
                 source_id: "hyperliquid".into(),
-                reason: format!("http: {}", e),
+                reason: format!("http: {e}"),
             })?;
 
         if !resp.status().is_success() {
@@ -121,7 +124,7 @@ impl HyperliquidFetcher {
 
         let value: Value = resp.json().await.map_err(|e| SyncError::FetchFailed {
             source_id: "hyperliquid".into(),
-            reason: format!("json: {}", e),
+            reason: format!("json: {e}"),
         })?;
         Ok(value)
     }

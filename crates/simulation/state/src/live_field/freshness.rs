@@ -17,7 +17,8 @@ pub struct Confidence {
 
 impl Confidence {
     /// Returns a fully fresh `Confidence` with zero deviation and not stale.
-    pub fn fresh() -> Self {
+    #[must_use]
+    pub const fn fresh() -> Self {
         Self {
             deviation_bp: 0,
             is_stale: false,

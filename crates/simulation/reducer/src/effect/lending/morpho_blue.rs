@@ -166,6 +166,8 @@ mod tests {
             is_paused: false,
         };
         let err = current_borrow_rate(&dummy).unwrap_err();
-        assert!(matches!(err, ReducerError::UnsupportedProtocol { ref protocol, .. } if protocol == "morpho_blue"));
+        assert!(
+            matches!(err, ReducerError::UnsupportedProtocol { ref protocol, .. } if protocol == "morpho_blue")
+        );
     }
 }

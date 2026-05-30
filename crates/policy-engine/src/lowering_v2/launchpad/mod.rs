@@ -206,7 +206,10 @@ pub(crate) mod test_support {
             total_committed: U256::from(1_000_000_000u64),
             hard_cap: Some(U256::from(5_000_000_000u64)),
             soft_cap: Some(U256::from(500_000_000u64)),
-            sale_window: (Time::from_unix(1_738_000_000), Time::from_unix(1_738_600_000)),
+            sale_window: (
+                Time::from_unix(1_738_000_000),
+                Time::from_unix(1_738_600_000),
+            ),
             vest_schedule: Some(VestSchedule {
                 start: Time::from_unix(1_739_000_000),
                 cliff: Some(Time::from_unix(1_739_500_000)),
@@ -231,7 +234,10 @@ pub(crate) mod test_support {
             total_committed: U256::ZERO,
             hard_cap: None,
             soft_cap: None,
-            sale_window: (Time::from_unix(1_738_000_000), Time::from_unix(1_738_600_000)),
+            sale_window: (
+                Time::from_unix(1_738_000_000),
+                Time::from_unix(1_738_600_000),
+            ),
             vest_schedule: None,
         }
     }
@@ -245,7 +251,10 @@ pub(crate) mod test_support {
             total_committed: U256::from(1_000_000_000u64),
             hard_cap: Some(U256::from(5_000_000_000u64)),
             soft_cap: None,
-            sale_window: (Time::from_unix(1_738_000_000), Time::from_unix(1_738_600_000)),
+            sale_window: (
+                Time::from_unix(1_738_000_000),
+                Time::from_unix(1_738_600_000),
+            ),
             vest_schedule: Some(VestSchedule {
                 start: Time::from_unix(1_739_000_000),
                 cliff: None,
@@ -265,7 +274,10 @@ pub(crate) mod test_support {
             total_committed: U256::from(1_000_000_000u64),
             hard_cap: None,
             soft_cap: Some(U256::from(500_000_000u64)),
-            sale_window: (Time::from_unix(1_738_000_000), Time::from_unix(1_738_600_000)),
+            sale_window: (
+                Time::from_unix(1_738_000_000),
+                Time::from_unix(1_738_600_000),
+            ),
             vest_schedule: Some(VestSchedule {
                 start: Time::from_unix(1_739_000_000),
                 cliff: Some(Time::from_unix(1_739_500_000)),
@@ -287,11 +299,7 @@ pub(crate) mod test_support {
                 chain: ChainId::ethereum_mainnet(),
                 nonce: 7,
                 gas_limit: U256::from(150_000u64),
-                gas_price: LiveField::new(
-                    U256::from(20_000_000_000u64),
-                    src(),
-                    now(),
-                ),
+                gas_price: LiveField::new(U256::from(20_000_000_000u64), src(), now()),
                 value: U256::ZERO,
             },
         }
@@ -311,7 +319,7 @@ pub(crate) mod test_support {
         let (schema, _w) = cedar_policy::Schema::from_cedarschema_str(&schema_text).unwrap();
         let lowered = lower_action(body, meta, &TxMeta { from: FROM, to: TO }).unwrap();
         let uid: cedar_policy::EntityUid = lowered.action_uid.parse().unwrap();
-        cedar_policy::Context::from_json_value(lowered.context.clone(), Some((&schema, &uid)))
+        cedar_policy::Context::from_json_value(lowered.context, Some((&schema, &uid)))
             .unwrap_or_else(|e| panic!("{tag} context must conform: {e:?}"));
     }
 }

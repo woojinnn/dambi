@@ -1,4 +1,4 @@
-//! Action 의 OnchainView LiveField 들이 필요로 하는 ABI 인자를 동적으로 인코딩.
+//! Action 의 `OnchainView` `LiveField` 들이 필요로 하는 ABI 인자를 동적으로 인코딩.
 //!
 //! 배경:
 //! `DataSource::OnchainView { contract, function, decoder_id }` 자체에는 args 가
@@ -23,6 +23,7 @@ use crate::fetchers::decoder::encode_address;
 use crate::walker::ActionSlot;
 
 /// 한 slot 이 필요로 하는 ABI 인자를 인코딩. 인자 없는 함수면 빈 벡터.
+#[must_use]
 pub fn resolve_args(slot: &ActionSlot, action: &Action, _state: &WalletState) -> Vec<u8> {
     match slot {
         // ─── Aave Borrow ───
@@ -59,10 +60,12 @@ pub fn resolve_args(slot: &ActionSlot, action: &Action, _state: &WalletState) ->
 }
 
 /// `LendingVenue` 의 pool 주소 추출 (Aave/Compound/Morpho/...).
-fn lending_venue_pool_address(
+const fn lending_venue_pool_address(
     venue: &simulation_reducer::action::lending::LendingVenue,
 ) -> Option<simulation_state::Address> {
-    use simulation_reducer::action::lending::LendingVenue::*;
+    use simulation_reducer::action::lending::LendingVenue::{
+        AaveV2, AaveV3, CompoundV2, CompoundV3, Fluid, MorphoBlue, MorphoOptimizer, Spark,
+    };
     match venue {
         AaveV3 { pool, .. } | AaveV2 { pool, .. } | Spark { pool, .. } => Some(*pool),
         CompoundV3 { comet, .. } => Some(*comet),
@@ -73,8 +76,8 @@ fn lending_venue_pool_address(
     }
 }
 
-/// TokenRef → 그 토큰의 ERC20 address. Native/NFT 면 None.
-fn token_ref_to_address(
+/// `TokenRef` → 그 토큰의 ERC20 address. Native/NFT 면 None.
+const fn token_ref_to_address(
     token_ref: &simulation_state::TokenRef,
 ) -> Option<simulation_state::Address> {
     use simulation_state::TokenKey;
@@ -94,23 +97,31 @@ mod tests {
     };
     use simulation_reducer::action::{ActionBody, ActionMeta, ActionNature};
     use simulation_state::{
-        Address, ChainId, DataSource, Decimal, LiveField, RateMode, Time, TokenKey, TokenRef, U256,
-        WalletId,
+        Address, ChainId, DataSource, Decimal, LiveField, RateMode, Time, TokenKey, TokenRef,
+        WalletId, U256,
     };
     use std::str::FromStr;
 
     fn empty_reserve() -> ReserveState {
         ReserveState {
-            total_supply: U256::ZERO, total_borrow: U256::ZERO, utilization_bp: 0,
-            supply_cap: None, borrow_cap: None,
-            ltv_bp: 0, liquidation_threshold_bp: 0, liquidation_bonus_bp: 0,
-            reserve_factor_bp: 0, is_frozen: false, is_paused: false,
+            total_supply: U256::ZERO,
+            total_borrow: U256::ZERO,
+            utilization_bp: 0,
+            supply_cap: None,
+            borrow_cap: None,
+            ltv_bp: 0,
+            liquidation_threshold_bp: 0,
+            liquidation_bonus_bp: 0,
+            reserve_factor_bp: 0,
+            is_frozen: false,
+            is_paused: false,
         }
     }
     fn empty_user() -> UserLendingState {
         UserLendingState {
             health_factor: Decimal::from("0"),
-            total_collat_usd: U256::ZERO, total_debt_usd: U256::ZERO,
+            total_collat_usd: U256::ZERO,
+            total_debt_usd: U256::ZERO,
             available_borrow_usd: U256::ZERO,
         }
     }
@@ -118,28 +129,49 @@ mod tests {
     fn mk_borrow_action(pool: Address, asset: Address, submitter: Address) -> Action {
         let chain = ChainId::ethereum_mainnet();
         let src = DataSource::OnchainView {
-            chain: chain.clone(), contract: pool,
-            function: "x".into(), decoder_id: "x".into(),
+            chain: chain.clone(),
+            contract: pool,
+            function: "x".into(),
+            decoder_id: "x".into(),
         };
         Action {
             meta: ActionMeta {
-                submitted_at: Time::from_unix(0), submitter,
+                submitted_at: Time::from_unix(0),
+                submitter,
                 nature: ActionNature::OnchainTx {
-                    chain: chain.clone(), nonce: 0,
+                    chain: chain.clone(),
+                    nonce: 0,
                     gas_limit: U256::from(200_000u64),
-                    gas_price: LiveField::new(U256::ZERO, DataSource::UserSupplied, Time::from_unix(0)),
+                    gas_price: LiveField::new(
+                        U256::ZERO,
+                        DataSource::UserSupplied,
+                        Time::from_unix(0),
+                    ),
                     value: U256::ZERO,
                 },
             },
             body: ActionBody::Lending(LendingAction::Borrow(BorrowAction {
-                venue: LendingVenue::AaveV3 { chain: chain.clone(), pool, market_id: None },
-                asset: TokenRef { key: TokenKey::Erc20 { chain, address: asset } },
+                venue: LendingVenue::AaveV3 {
+                    chain: chain.clone(),
+                    pool,
+                    market_id: None,
+                },
+                asset: TokenRef {
+                    key: TokenKey::Erc20 {
+                        chain,
+                        address: asset,
+                    },
+                },
                 amount: U256::from(500u64),
                 rate_mode: RateMode::Variable,
                 on_behalf_of: None,
                 live_inputs: BorrowLiveInputs {
                     reserve_state: LiveField::new(empty_reserve(), src.clone(), Time::from_unix(0)),
-                    user_state_before: LiveField::new(empty_user(), src.clone(), Time::from_unix(0)),
+                    user_state_before: LiveField::new(
+                        empty_user(),
+                        src.clone(),
+                        Time::from_unix(0),
+                    ),
                     asset_price_usd: LiveField::new(
                         Decimal::from("0"),
                         DataSource::OracleFeed {
@@ -148,7 +180,11 @@ mod tests {
                         },
                         Time::from_unix(0),
                     ),
-                    current_borrow_rate: LiveField::new(Decimal::from("0"), src.clone(), Time::from_unix(0)),
+                    current_borrow_rate: LiveField::new(
+                        Decimal::from("0"),
+                        src.clone(),
+                        Time::from_unix(0),
+                    ),
                     available_liquidity: LiveField::new(U256::ZERO, src, Time::from_unix(0)),
                 },
             })),
@@ -166,7 +202,11 @@ mod tests {
         let submitter = Address::from_str("0xd8da6bf26964af9d7eed9e03e53415d37aa96045").unwrap();
         let action = mk_borrow_action(pool, asset, submitter);
 
-        let args = resolve_args(&ActionSlot::LendingBorrowAvailableLiquidity, &action, &dummy_state());
+        let args = resolve_args(
+            &ActionSlot::LendingBorrowAvailableLiquidity,
+            &action,
+            &dummy_state(),
+        );
 
         assert_eq!(args.len(), 32);
         // 마지막 20 bytes = pool address
@@ -193,7 +233,11 @@ mod tests {
         let submitter = Address::ZERO;
         let action = mk_borrow_action(pool, asset, submitter);
 
-        let args = resolve_args(&ActionSlot::LendingBorrowReserveState, &action, &dummy_state());
+        let args = resolve_args(
+            &ActionSlot::LendingBorrowReserveState,
+            &action,
+            &dummy_state(),
+        );
 
         assert_eq!(args.len(), 32);
         assert_eq!(&args[12..], asset.as_slice());
@@ -204,7 +248,11 @@ mod tests {
         let pool = Address::ZERO;
         let asset = Address::ZERO;
         let action = mk_borrow_action(pool, asset, Address::ZERO);
-        let args = resolve_args(&ActionSlot::LendingBorrowAssetPriceUsd, &action, &dummy_state());
+        let args = resolve_args(
+            &ActionSlot::LendingBorrowAssetPriceUsd,
+            &action,
+            &dummy_state(),
+        );
         assert!(args.is_empty());
     }
 }

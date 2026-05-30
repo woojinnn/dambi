@@ -22,10 +22,7 @@ use super::dispatch::{LowerCtx, LowerError, LoweredAction};
 /// Returns [`LowerError::Unsupported`] only on the unreachable non-`Multicall`
 /// arm (dispatch only routes `Multicall` bodies here); the `Result` matches
 /// the shared per-action `lower` contract.
-pub(crate) fn lower(
-    action: &ActionBody,
-    ctx: &LowerCtx<'_>,
-) -> Result<LoweredAction, LowerError> {
+pub(crate) fn lower(action: &ActionBody, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
     let ActionBody::Multicall { actions } = action else {
         return Err(LowerError::Unsupported("multicall".to_owned()));
     };
@@ -121,11 +118,13 @@ mod tests {
                 address: Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap(),
             },
         };
-        ActionBody::Token(token::TokenAction::Erc20Approve(token::Erc20ApproveAction {
-            token,
-            spender: Address::from_str("0x00000000000000000000000000000000deadbeef").unwrap(),
-            amount: U256::from(1_000_000_000u64),
-        }))
+        ActionBody::Token(token::TokenAction::Erc20Approve(
+            token::Erc20ApproveAction {
+                token,
+                spender: Address::from_str("0x00000000000000000000000000000000deadbeef").unwrap(),
+                amount: U256::from(1_000_000_000u64),
+            },
+        ))
     }
 
     /// An `Unknown` child — exercises ONE of the two `None` action-tag fallback
@@ -240,7 +239,10 @@ mod tests {
 
         assert_eq!(ctx["childCount"], Value::from(0));
         assert_eq!(
-            ctx["children"].as_array().expect("children is an array").len(),
+            ctx["children"]
+                .as_array()
+                .expect("children is an array")
+                .len(),
             0,
         );
     }

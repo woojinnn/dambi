@@ -16,7 +16,10 @@ use super::{lower_lending_venue, lower_reserve_state, lower_user_lending_state, 
 /// Infallible today (returns `Ok`); the `Result` matches the per-action
 /// `lower` contract so callers stay uniform across the fan-out.
 #[allow(clippy::unnecessary_wraps)] // infallible; Result is the shared per-action contract
-pub(crate) fn lower(action: &BorrowAction, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
+pub(crate) fn lower(
+    action: &BorrowAction,
+    ctx: &LowerCtx<'_>,
+) -> Result<LoweredAction, LowerError> {
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_lending_venue(&action.venue));
@@ -63,16 +66,12 @@ pub(crate) fn lower(action: &BorrowAction, ctx: &LowerCtx<'_>) -> Result<Lowered
     clippy::doc_markdown
 )]
 mod tests {
-    use simulation_reducer::action::lending::{
-        BorrowAction, BorrowLiveInputs, LendingAction,
-    };
+    use simulation_reducer::action::lending::{BorrowAction, BorrowLiveInputs, LendingAction};
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::{Address, Decimal, U256};
     use simulation_state::token::RateMode;
 
-    use super::super::test_support::{
-        live, onchain_meta, reserve_state, user_state, usdc, venue,
-    };
+    use super::super::test_support::{live, onchain_meta, reserve_state, usdc, user_state, venue};
 
     /// Build a `Borrow` body with a chosen `rate_mode` and `on_behalf_of`,
     /// holding the rest fixed. Lets each test exercise exactly one

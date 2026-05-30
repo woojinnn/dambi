@@ -1,4 +1,4 @@
-//! TokenKey — identifier for a fungibility unit.
+//! `TokenKey` — identifier for a fungibility unit.
 //!
 //! All units within the same ERC20 contract are fungible, so the key is
 //! determined by `(chain, address)` alone. For ERC721 / ERC1155, tokens in the
@@ -33,7 +33,7 @@ pub enum TokenKey {
         address: Address,
     },
 
-    /// ERC721 — the (contract, token_id) pair is unique.
+    /// ERC721 — the (contract, `token_id`) pair is unique.
     /// E.g. Uniswap V3/V4 LP NFTs, Sudoswap pool LP.
     Erc721 {
         /// Chain hosting the ERC721 contract.
@@ -46,7 +46,7 @@ pub enum TokenKey {
         token_id: TokenId,
     },
 
-    /// ERC1155 — units with the same token_id are fungible, different ids are distinct.
+    /// ERC1155 — units with the same `token_id` are fungible, different ids are distinct.
     /// E.g. game items, Trader Joe LB bin tokens.
     Erc1155 {
         /// Chain hosting the ERC1155 contract.
@@ -62,7 +62,8 @@ pub enum TokenKey {
 
 impl TokenKey {
     /// Returns the chain this token key belongs to.
-    pub fn chain(&self) -> &ChainId {
+    #[must_use]
+    pub const fn chain(&self) -> &ChainId {
         match self {
             Self::Native { chain }
             | Self::Erc20 { chain, .. }
@@ -72,7 +73,8 @@ impl TokenKey {
     }
 
     /// Returns the contract address for ERC20/721/1155; `None` for `Native`.
-    pub fn contract(&self) -> Option<&Address> {
+    #[must_use]
+    pub const fn contract(&self) -> Option<&Address> {
         match self {
             Self::Native { .. } => None,
             Self::Erc20 { address, .. } => Some(address),
@@ -81,7 +83,8 @@ impl TokenKey {
     }
 
     /// Returns the token id for ERC721/1155; `None` for `Native`/`Erc20`.
-    pub fn token_id(&self) -> Option<&TokenId> {
+    #[must_use]
+    pub const fn token_id(&self) -> Option<&TokenId> {
         match self {
             Self::Erc721 { token_id, .. } | Self::Erc1155 { token_id, .. } => Some(token_id),
             _ => None,
@@ -89,12 +92,14 @@ impl TokenKey {
     }
 
     /// Returns `true` if this key denotes the chain's native asset.
-    pub fn is_native(&self) -> bool {
+    #[must_use]
+    pub const fn is_native(&self) -> bool {
         matches!(self, Self::Native { .. })
     }
 
     /// Returns `true` if this key denotes an ERC721 NFT.
-    pub fn is_nft(&self) -> bool {
+    #[must_use]
+    pub const fn is_nft(&self) -> bool {
         matches!(self, Self::Erc721 { .. })
     }
 }

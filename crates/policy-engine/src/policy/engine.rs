@@ -226,9 +226,11 @@ impl PolicyEngine {
         // validated against its own schema at install).
         let entities = Entities::from_json_value(entities_json.clone(), self.schema.as_ref())
             .map_err(|e| PolicyError::Entities(e.to_string()))?;
-        let context =
-            Context::from_json_value(context_json.clone(), self.schema.as_ref().map(|s| (s, &action)))
-                .map_err(|e| PolicyError::Context(e.to_string()))?;
+        let context = Context::from_json_value(
+            context_json.clone(),
+            self.schema.as_ref().map(|s| (s, &action)),
+        )
+        .map_err(|e| PolicyError::Context(e.to_string()))?;
 
         let request = Request::new(principal, action, resource, context, self.schema.as_ref())
             .map_err(|e| PolicyError::Request(e.to_string()))?;

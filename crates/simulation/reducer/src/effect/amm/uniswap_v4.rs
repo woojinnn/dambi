@@ -112,8 +112,7 @@ mod tests {
     fn v4_venue_no_hooks() -> AmmVenue {
         AmmVenue::UniswapV4 {
             chain: ChainId::ethereum_mainnet(),
-            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001"
-                .into(),
+            pool_id: "0x0000000000000000000000000000000000000000000000000000000000000001".into(),
             pool_manager: Address::from([2u8; 20]),
             hooks: Address::ZERO,
         }
@@ -174,14 +173,7 @@ mod tests {
         let state = empty_state();
         let swap = dummy_swap();
         let pool_state = pool(1_000_000, q96_val());
-        let out = quote_swap_hop(
-            &state,
-            &ctx(),
-            &swap,
-            &pool_state,
-            U256::from(1_000u64),
-        )
-        .unwrap();
+        let out = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1_000u64)).unwrap();
         assert_eq!(out, U256::from(999u64));
     }
 
@@ -194,8 +186,7 @@ mod tests {
         let state = empty_state();
         let swap = dummy_swap();
         let pool_state = pool(0, q96_val());
-        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64))
-            .unwrap_err();
+        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64)).unwrap_err();
         let ReducerError::Invariant(msg) = err else {
             panic!("expected Invariant, got something else");
         };
@@ -216,8 +207,7 @@ mod tests {
             reserve_out: U256::from(10_000u64),
             fee_bp: 30,
         };
-        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64))
-            .unwrap_err();
+        let err = quote_swap_hop(&state, &ctx(), &swap, &pool_state, U256::from(1u64)).unwrap_err();
         let ReducerError::Invariant(msg) = err else {
             panic!("expected Invariant");
         };

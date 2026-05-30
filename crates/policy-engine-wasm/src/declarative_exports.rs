@@ -139,16 +139,22 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
             .get("id")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| {
-                EngineErrorDto::new("missing_id", "bundle.id missing or not a string".to_string())
+                EngineErrorDto::new(
+                    "missing_id",
+                    "bundle.id missing or not a string".to_string(),
+                )
             })?
             .to_owned();
 
-        let match_value = bundle_value
-            .get("match")
-            .ok_or_else(|| EngineErrorDto::new("invalid_match", "bundle.match missing".to_string()))?;
+        let match_value = bundle_value.get("match").ok_or_else(|| {
+            EngineErrorDto::new("invalid_match", "bundle.match missing".to_string())
+        })?;
         let bundle_match: BundleMatch =
             serde_json::from_value(match_value.clone()).map_err(|error| {
-                EngineErrorDto::new("invalid_match", format!("bundle.match parse failed: {error}"))
+                EngineErrorDto::new(
+                    "invalid_match",
+                    format!("bundle.match parse failed: {error}"),
+                )
             })?;
 
         let selector = bundle_match.selector.to_ascii_lowercase();
@@ -199,8 +205,8 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
 pub fn declarative_route_request_v3_json(input_json: String) -> String {
     let result = (|| -> Result<DeclarativeRouteRequestV3ResultDto, EngineErrorDto> {
         check_input_size(&input_json, "declarative_route_request_v3_json")?;
-        let input: DeclarativeRouteRequestV3InputDto = serde_json::from_str(&input_json)
-            .map_err(|error| {
+        let input: DeclarativeRouteRequestV3InputDto =
+            serde_json::from_str(&input_json).map_err(|error| {
                 EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
             })?;
 
@@ -346,7 +352,9 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                         )
                     })?;
                 let mask = parse_hex_u8(
-                    emit.get("mask").and_then(serde_json::Value::as_str).unwrap_or("0xff"),
+                    emit.get("mask")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("0xff"),
                     "emit.mask",
                 )?;
                 let allow_revert_bit = parse_hex_u8(
@@ -375,10 +383,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                     commands_str.strip_prefix("0x").unwrap_or(commands_str),
                 )
                 .map_err(|error| {
-                    EngineErrorDto::new(
-                        "invalid_commands",
-                        format!("commands not hex: {error}"),
-                    )
+                    EngineErrorDto::new("invalid_commands", format!("commands not hex: {error}"))
                 })?;
 
                 let inputs_array = args_json
@@ -400,20 +405,16 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                 let mut decoded_inputs_array = Vec::with_capacity(inputs_array.len());
                 for (i, input_hex) in inputs_array.iter().enumerate() {
                     let input_hex_str = input_hex.as_str().ok_or_else(|| {
-                        EngineErrorDto::new(
-                            "invalid_inputs",
-                            format!("inputs[{i}] not string"),
-                        )
+                        EngineErrorDto::new("invalid_inputs", format!("inputs[{i}] not string"))
                     })?;
-                    let input_bytes = hex::decode(
-                        input_hex_str.strip_prefix("0x").unwrap_or(input_hex_str),
-                    )
-                    .map_err(|error| {
-                        EngineErrorDto::new(
-                            "invalid_inputs_hex",
-                            format!("inputs[{i}]: {error}"),
-                        )
-                    })?;
+                    let input_bytes =
+                        hex::decode(input_hex_str.strip_prefix("0x").unwrap_or(input_hex_str))
+                            .map_err(|error| {
+                                EngineErrorDto::new(
+                                    "invalid_inputs_hex",
+                                    format!("inputs[{i}]: {error}"),
+                                )
+                            })?;
 
                     let opcode_byte = *commands_bytes.get(i).ok_or_else(|| {
                         EngineErrorDto::new(
@@ -442,9 +443,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                     allow_revert_bit,
                     unknown_policy,
                 )
-                .map_err(|error| {
-                    EngineErrorDto::new("build_multicall_failed", error.to_string())
-                })?
+                .map_err(|error| EngineErrorDto::new("build_multicall_failed", error.to_string()))?
             }
             other => {
                 return Err(EngineErrorDto::new(
@@ -533,8 +532,8 @@ fn decode_inputs_abi_tuple(
     use alloy_json_abi::Function;
 
     let synthetic = format!("step{inputs_abi}");
-    let function = Function::parse(&synthetic)
-        .map_err(|error| format!("parse {inputs_abi:?}: {error}"))?;
+    let function =
+        Function::parse(&synthetic).map_err(|error| format!("parse {inputs_abi:?}: {error}"))?;
     let selector = function.selector().0;
 
     let mut prefixed = Vec::with_capacity(4 + input_bytes.len());
@@ -584,7 +583,10 @@ mod tests {
         let out = declarative_route_request_v3_json(v3_route_input().to_string());
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["ok"], false, "{parsed}");
-        assert_eq!(parsed["error"]["kind"], "no_declarative_v3_mapper", "{parsed}");
+        assert_eq!(
+            parsed["error"]["kind"], "no_declarative_v3_mapper",
+            "{parsed}"
+        );
     }
 
     #[test]
@@ -627,7 +629,10 @@ mod tests {
         let out = declarative_route_request_v3_json(input.to_string());
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["ok"], false, "{parsed}");
-        assert_eq!(parsed["error"]["kind"], "no_declarative_v3_mapper", "{parsed}");
+        assert_eq!(
+            parsed["error"]["kind"], "no_declarative_v3_mapper",
+            "{parsed}"
+        );
     }
 
     #[test]

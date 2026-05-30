@@ -34,9 +34,7 @@ mod tests {
     };
     use simulation_reducer::action::ActionBody;
 
-    use super::super::test_support::{
-        live, onchain_meta, reserve_state, user_state, usdc, venue,
-    };
+    use super::super::test_support::{live, onchain_meta, reserve_state, usdc, user_state, venue};
 
     /// A representative enable-collateral on USDC.
     #[test]

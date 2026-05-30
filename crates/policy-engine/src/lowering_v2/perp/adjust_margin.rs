@@ -24,7 +24,10 @@ pub(crate) fn lower(
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_perp_venue(&action.venue));
-    m.insert("positionId".into(), Value::String(action.position_id.clone()));
+    m.insert(
+        "positionId".into(),
+        Value::String(action.position_id.clone()),
+    );
     // `delta` is a signed SignedI256: positive = deposit, negative = withdraw.
     m.insert("delta".into(), Value::String(action.delta.to_string()));
     // AdjustMarginLiveInputs flattened.
@@ -52,7 +55,10 @@ fn lower_perp_position_live(pos: &PerpPositionLive) -> Value {
         "notionalUsd".into(),
         Value::String(u256_hex(pos.notional_usd)),
     );
-    m.insert("entryPrice".into(), Value::String(pos.entry_price.0.clone()));
+    m.insert(
+        "entryPrice".into(),
+        Value::String(pos.entry_price.0.clone()),
+    );
     m.insert("markPrice".into(), Value::String(pos.mark_price.0.clone()));
     if let Some(liq_price) = &pos.liq_price {
         m.insert("liqPrice".into(), Value::String(liq_price.0.clone()));
@@ -67,7 +73,9 @@ fn lower_perp_position_live(pos: &PerpPositionLive) -> Value {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::doc_markdown)]
 mod tests {
-    use simulation_reducer::action::perp::{AdjustMarginAction, AdjustMarginLiveInputs, PerpAction};
+    use simulation_reducer::action::perp::{
+        AdjustMarginAction, AdjustMarginLiveInputs, PerpAction,
+    };
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::{SignedI256, U256};
 

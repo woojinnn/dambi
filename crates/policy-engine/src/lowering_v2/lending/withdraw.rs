@@ -52,14 +52,12 @@ pub(crate) fn lower(
     clippy::doc_markdown
 )]
 mod tests {
-    use simulation_reducer::action::lending::{
-        LendingAction, WithdrawAction, WithdrawLiveInputs,
-    };
+    use simulation_reducer::action::lending::{LendingAction, WithdrawAction, WithdrawLiveInputs};
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::U256;
 
     use super::super::test_support::{
-        live, onchain_meta, reserve_state, user, user_state, usdc, venue,
+        live, onchain_meta, reserve_state, usdc, user, user_state, venue,
     };
 
     /// A representative max-withdraw (`U256::MAX`) of USDC from Aave V3.

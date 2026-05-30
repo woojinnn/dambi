@@ -1,9 +1,9 @@
 //! `pending_txs` CRUD — offchain signature ledger.
 //!
-//! state_deltas.status='pending' (mempool 의 onchain tx) 과 다름: 여기는 서명만
+//! `state_deltas.status`='pending' (mempool 의 onchain tx) 과 다름: 여기는 서명만
 //! 했고 매처/리졸버/다른 서명자를 기다리는 의도.
 
-use rusqlite::{Transaction, params};
+use rusqlite::{params, Transaction};
 use serde_json::Value as JsonValue;
 
 use crate::error::DbResult;
@@ -58,11 +58,7 @@ pub fn insert(tx: &Transaction<'_>, p: &PendingTxInsert) -> DbResult<i64> {
 }
 
 /// status 전이: awaiting → matched (onchain 으로 실현된 후).
-pub fn mark_matched(
-    tx: &Transaction<'_>,
-    id: i64,
-    matched_tx_hash: &str,
-) -> DbResult<()> {
+pub fn mark_matched(tx: &Transaction<'_>, id: i64, matched_tx_hash: &str) -> DbResult<()> {
     tx.execute(
         "UPDATE pending_txs SET status='matched', matched_tx_hash=?2 \
          WHERE id=?1 AND status='awaiting'",

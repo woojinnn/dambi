@@ -1,4 +1,4 @@
-//! PendingChange — the Add/Update/Remove operations applied to a single pending tx.
+//! `PendingChange` — the Add/Update/Remove operations applied to a single pending tx.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;

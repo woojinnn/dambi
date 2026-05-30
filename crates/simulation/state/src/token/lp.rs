@@ -6,7 +6,7 @@ use serde_json::Value;
 use tsify_next::Tsify;
 
 use super::token_ref::TokenRef;
-use crate::primitives::{U128, U256, Weight};
+use crate::primitives::{Weight, U128, U256};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]

@@ -90,18 +90,14 @@ impl Scheduler {
                         report.total_fields_updated += rr.fields_updated;
                         report.total_fields_failed += rr.fields_failed;
                         if let Err(e) = self.store.save(&state).await {
-                            report
-                                .errors
-                                .push(format!("save {}: {}", wid.address, e));
+                            report.errors.push(format!("save {}: {}", wid.address, e));
                         }
                     }
                     Err(e) => report
                         .errors
                         .push(format!("refresh {}: {}", wid.address, e)),
                 },
-                Err(e) => report
-                    .errors
-                    .push(format!("load {}: {}", wid.address, e)),
+                Err(e) => report.errors.push(format!("load {}: {}", wid.address, e)),
             }
         }
         Ok(report)
@@ -112,7 +108,7 @@ impl Scheduler {
         let mut stop_rx = self.stop.subscribe();
         loop {
             tokio::select! {
-                _ = tokio::time::sleep(self.config.tick_interval) => {
+                () = tokio::time::sleep(self.config.tick_interval) => {
                     let _ = self.tick_once().await; // 에러는 tick report 에 누적, 로그 X
                 }
                 changed = stop_rx.changed() => {
@@ -124,6 +120,7 @@ impl Scheduler {
         }
     }
 
+    #[must_use]
     pub fn stop_handle(&self) -> watch::Sender<bool> {
         self.stop.clone()
     }

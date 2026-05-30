@@ -42,7 +42,7 @@ pub struct LiveField<T> {
 impl<T> LiveField<T> {
     /// Builds a `LiveField` from a value, its source, and a sync timestamp,
     /// leaving `ttl` and `confidence` unset.
-    pub fn new(value: T, source: DataSource, synced_at: Time) -> Self {
+    pub const fn new(value: T, source: DataSource, synced_at: Time) -> Self {
         Self {
             value,
             source,
@@ -53,26 +53,26 @@ impl<T> LiveField<T> {
     }
 
     /// Returns the field with its recommended refresh interval (`ttl`) set.
-    pub fn with_ttl(mut self, ttl: Duration) -> Self {
+    pub const fn with_ttl(mut self, ttl: Duration) -> Self {
         self.ttl = Some(ttl);
         self
     }
 
     /// Returns the field with its `confidence` metadata attached.
-    pub fn with_confidence(mut self, c: Confidence) -> Self {
+    pub const fn with_confidence(mut self, c: Confidence) -> Self {
         self.confidence = Some(c);
         self
     }
 
     /// Whether the value was synced within `window` of `now` (by age in seconds).
-    pub fn fresh_within(&self, now: Time, window: Duration) -> bool {
+    pub const fn fresh_within(&self, now: Time, window: Duration) -> bool {
         let age = now.since(self.synced_at);
         age.as_secs() <= window.as_secs()
     }
 
     /// Whether the value is stale: judged against `ttl` if set, otherwise against
     /// the `confidence` staleness flag, defaulting to fresh when neither is present.
-    pub fn is_stale(&self, now: Time) -> bool {
+    pub const fn is_stale(&self, now: Time) -> bool {
         if let Some(ttl) = self.ttl {
             now.since(self.synced_at).as_secs() > ttl.as_secs()
         } else if let Some(c) = &self.confidence {

@@ -1,4 +1,4 @@
-//! TokenKind — semantic classification (10 variants). spec §4.3.
+//! `TokenKind` — semantic classification (10 variants). spec §4.3.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;

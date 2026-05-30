@@ -61,9 +61,7 @@ mod tests {
     use simulation_state::primitives::{Address, U256};
     use simulation_state::token::RateMode;
 
-    use super::super::test_support::{
-        live, onchain_meta, reserve_state, user_state, usdc, venue,
-    };
+    use super::super::test_support::{live, onchain_meta, reserve_state, usdc, user_state, venue};
 
     /// Build a `Repay` body with a chosen `rate_mode`, `on_behalf_of`, and
     /// `use_a_tokens`, holding the rest fixed.

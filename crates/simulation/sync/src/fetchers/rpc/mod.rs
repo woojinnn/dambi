@@ -5,7 +5,7 @@
 //! * [`RpcRouter`]         — 여러 provider 의 failover wrapper
 //! * [`config`]            — TOML 로 endpoint 정의
 //! * [`providers`]         — 구체 구현 (publicnode, alchemy, infura ...)
-//! * [`multicall`]         — Multicall3 wrapper (배치 eth_call)
+//! * [`multicall`]         — Multicall3 wrapper (배치 `eth_call`)
 
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
@@ -22,8 +22,8 @@ pub mod router;
 pub mod rpc_types;
 
 pub use config::{ProviderConfig, RpcConfig};
-pub use rpc_types::{BlockTag, EthCallRequest, ProviderName};
 pub use router::RpcRouter;
+pub use rpc_types::{BlockTag, EthCallRequest, ProviderName};
 
 /// 한 RPC provider 의 표준 인터페이스.
 ///
@@ -52,7 +52,7 @@ pub trait RpcProvider: Send + Sync {
     /// `eth_gasPrice` — 현재 gas price.
     async fn eth_gas_price(&self) -> Result<U256, SyncError>;
 
-    /// `eth_getTransactionReceipt` — tx_hash → receipt (없으면 `None` = 멤풀).
+    /// `eth_getTransactionReceipt` — `tx_hash` → receipt (없으면 `None` = 멤풀).
     async fn eth_get_transaction_receipt(
         &self,
         tx_hash: &str,
