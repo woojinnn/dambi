@@ -62,11 +62,7 @@ impl CoinGeckoClient {
     /// `GET /coins/{platform}/contract/{address}` — token metadata.
     /// Returns `None` for chains CoinGecko doesn't index, addresses
     /// CoinGecko doesn't know, or transient HTTP errors.
-    pub async fn fetch_metadata(
-        &self,
-        chain: &ChainId,
-        address: Address,
-    ) -> Option<TokenMetadata> {
+    pub async fn fetch_metadata(&self, chain: &ChainId, address: Address) -> Option<TokenMetadata> {
         let platform = caip2_to_coingecko_platform(chain)?;
         let addr_lower = format!("{address:#x}");
         let url = format!("{CG_API_BASE}/coins/{platform}/contract/{addr_lower}");
@@ -151,12 +147,12 @@ struct CgDescription {
 
 impl CgCoinResponse {
     fn into_metadata(self) -> TokenMetadata {
-        let logo_url = self.image.large.or(self.image.small).filter(|s| !s.is_empty());
-        let website_url = self
-            .links
-            .homepage
-            .into_iter()
-            .find(|s| !s.is_empty());
+        let logo_url = self
+            .image
+            .large
+            .or(self.image.small)
+            .filter(|s| !s.is_empty());
+        let website_url = self.links.homepage.into_iter().find(|s| !s.is_empty());
         // Description can be quite long — truncate at 600 chars so the
         // JSON response stays compact. UI re-fetches details on demand.
         let description = self.description.en.filter(|s| !s.is_empty()).map(|s| {

@@ -63,11 +63,7 @@ pub trait WalletStore: Send + Sync {
     /// authoritative chain/venue snapshot has been written. Returns the
     /// number of reports moved to a terminal state. Stores without report
     /// persistence keep the default no-op implementation.
-    async fn reconcile_reports(
-        &self,
-        _id: &WalletId,
-        _now: Time,
-    ) -> Result<usize, StoreError> {
+    async fn reconcile_reports(&self, _id: &WalletId, _now: Time) -> Result<usize, StoreError> {
         Ok(0)
     }
 }

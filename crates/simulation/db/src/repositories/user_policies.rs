@@ -68,12 +68,7 @@ impl UserPolicyPatch {
     }
 }
 
-pub fn update(
-    tx: &Transaction<'_>,
-    id: i64,
-    patch: &UserPolicyPatch,
-    now: i64,
-) -> DbResult<bool> {
+pub fn update(tx: &Transaction<'_>, id: i64, patch: &UserPolicyPatch, now: i64) -> DbResult<bool> {
     if patch.is_empty() {
         return Ok(false);
     }

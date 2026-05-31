@@ -19,7 +19,9 @@ use simulation_state::primitives::{Address, BlockHeight, ChainId};
 use simulation_state::token::{TokenHolding, TokenKey};
 use simulation_state::{WalletId, WalletState, WalletStore};
 
-use simulation_db::repositories::{deltas, tokens as tokens_repo, user_policies, wallets as wallets_repo};
+use simulation_db::repositories::{
+    deltas, tokens as tokens_repo, user_policies, wallets as wallets_repo,
+};
 
 use crate::app::AppState;
 use crate::auth::AuthUser;

@@ -17,7 +17,6 @@ use simulation_state::{
     WalletState, WalletStore,
 };
 
-
 /// SQLite-backed wallet state store for scheduler/server production wiring.
 #[derive(Clone, Debug)]
 pub struct SqliteWalletStore {
