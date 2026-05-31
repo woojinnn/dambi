@@ -17,9 +17,11 @@ use simulation_state::{LiveField, NonceKey};
 
 pub mod airdrop;
 pub mod amm;
+pub mod hyperliquid_core;
 pub mod launchpad;
 pub mod lending;
 pub mod liquid_staking;
+pub mod order_intent;
 pub mod permission;
 pub mod perp;
 pub mod staking;
@@ -28,9 +30,11 @@ pub mod view;
 
 pub use airdrop::AirdropAction;
 pub use amm::AmmAction;
+pub use hyperliquid_core::HyperliquidCoreAction;
 pub use launchpad::LaunchpadAction;
 pub use lending::LendingAction;
 pub use liquid_staking::LiquidStakingAction;
+pub use order_intent::OrderIntent;
 pub use permission::PermissionAction;
 pub use perp::PerpAction;
 pub use staking::StakingAction;
@@ -163,6 +167,9 @@ pub enum ActionBody {
     Permission(PermissionAction),
     /// Staking / vote-escrow-domain action (veCRV lock, claim rewards, gauge vote, ...).
     Staking(StakingAction),
+    /// Hyperliquid CORE action (off-chain L1 order / leverage / fund movement),
+    /// intercepted from a `/exchange` POST rather than `window.ethereum`.
+    HyperliquidCore(HyperliquidCoreAction),
 
     /// Batched multi-call (e.g. `Uniswap Universal Router`, `Aave`).
     Multicall {
