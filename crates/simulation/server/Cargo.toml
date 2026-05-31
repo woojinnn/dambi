@@ -11,9 +11,12 @@ publish = false
 # policy-engine dependency: the extension owns Cedar evaluation.
 simulation-state.workspace = true
 simulation-reducer.workspace = true
-# Wallet-state persistence boundary: the service reaches the DB ONLY through
-# `simulation_sync::WalletStore`, never the `simulation-db` crate directly.
+# Sync orchestrator is wired in later (TODO: live-input refresh in handler).
 simulation-sync.workspace = true
+# SQLite-backed `WalletStore` implementation that production wiring uses.
+# The handler stays db-agnostic (operates on `&dyn WalletStore`); this dep
+# exists only so `main.rs` can construct the concrete store.
+simulation-db.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
@@ -24,3 +27,23 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { workspace = true }
 async-trait.workspace = true
+thiserror.workspace = true
+
+# SSE: bridge tokio::broadcast → axum Sse via tokio_stream + futures helpers.
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+
+# Auth: JWT signing/verification (HS256). Stateless tokens, no Redis.
+jsonwebtoken = "9"
+# OAuth callback fetches Google's token endpoint and userinfo.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# URL-encoding query params for the Google authorize redirect.
+urlencoding = "2"
+# Decoding the base64-url payload of Google's id_token.
+base64 = "0.22"
+# Time math for token expiry.
+time = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }

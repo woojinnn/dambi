@@ -13,7 +13,8 @@ use std::fmt;
 use simulation_reducer::apply;
 use simulation_reducer::error::ReducerError;
 use simulation_reducer::helpers::delta::apply_delta;
-use simulation_sync::{SyncError, WalletStore};
+use simulation_state::store::StoreError;
+use simulation_state::WalletStore;
 
 use crate::dto::{Diagnostic, EvaluateRequest, EvaluateResponse, PolicyRequest};
 
@@ -27,7 +28,7 @@ pub enum HandlerError {
     /// A reducer rejected an action (invalid for the current state).
     Reducer(ReducerError),
     /// The wallet store failed to load or save state.
-    Store(SyncError),
+    Store(StoreError),
 }
 
 impl fmt::Display for HandlerError {
@@ -54,8 +55,8 @@ impl From<ReducerError> for HandlerError {
     }
 }
 
-impl From<SyncError> for HandlerError {
-    fn from(e: SyncError) -> Self {
+impl From<StoreError> for HandlerError {
+    fn from(e: StoreError) -> Self {
         Self::Store(e)
     }
 }

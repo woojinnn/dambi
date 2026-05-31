@@ -139,7 +139,10 @@ pub use manifest_v2::{
 pub use orchestrator::{Orchestrator, RefreshReport};
 pub use primitives_sync::PrimitivesReport;
 pub use resolver::{resolve_field, resolve_inputs, GlobalValues};
-pub use scheduler::{Scheduler, SchedulerConfig, TickReport, WalletStore};
+pub use scheduler::{Scheduler, SchedulerConfig, TickReport};
+// Re-export from simulation-state for callers that previously imported the
+// trait from `simulation-sync` (which is where it used to live).
+pub use simulation_state::{StoreError, WalletStore};
 pub use subscription::{BlockSubscription, NewBlock, PollingBlockSubscription};
 pub use topo::{topological_sort, DepNode};
 pub use walker::{walk_stale, ActionSlot, FieldLocation, StaleField, WalkStats};

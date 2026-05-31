@@ -56,7 +56,9 @@ const MIGRATION_005: Migration = Migration {
     sql: include_str!("migrations/005_user_policies.sql"),
 };
 
-const ALL_MIGRATIONS: &[Migration] = &[
+/// User-DB schema (one DB file per wallet user). Holds wallet state,
+/// holdings, approvals, etc. — but NOT the global users table.
+const USER_DB_MIGRATIONS: &[Migration] = &[
     MIGRATION_001,
     MIGRATION_002,
     MIGRATION_003,
@@ -64,14 +66,37 @@ const ALL_MIGRATIONS: &[Migration] = &[
     MIGRATION_005,
 ];
 
-/// 모든 migration 을 멱등하게 적용. 이미 적용된 버전은 skip.
+/// Global-DB schema (single file shared across users, holds the email →
+/// user_id mapping). Disjoint from `USER_DB_MIGRATIONS` so neither DB
+/// pollutes the other with irrelevant tables.
+const MIGRATION_006_USERS: Migration = Migration {
+    version: 6,
+    description: "global users table — email/user_id mapping (Phase 4.2)",
+    sql: include_str!("migrations/006_users.sql"),
+};
+
+const GLOBAL_DB_MIGRATIONS: &[Migration] = &[MIGRATION_006_USERS];
+
+/// Apply every user-DB migration. Idempotent — versions already in
+/// `_schema_migrations` are skipped.
+///
+/// Use [`run_global`] for the global users DB.
 pub fn run(pool: &Pool) -> DbResult<()> {
+    apply_set(pool, USER_DB_MIGRATIONS)
+}
+
+/// Apply every global-DB migration (the users table and any future
+/// cross-user schema).
+pub fn run_global(pool: &Pool) -> DbResult<()> {
+    apply_set(pool, GLOBAL_DB_MIGRATIONS)
+}
+
+fn apply_set(pool: &Pool, migrations: &[Migration]) -> DbResult<()> {
     pool.with_conn(|c| {
         c.execute_batch(SCHEMA_MIGRATIONS_TABLE)?;
         Ok(())
     })?;
-
-    for m in ALL_MIGRATIONS {
+    for m in migrations {
         apply_one(pool, m)?;
     }
     Ok(())

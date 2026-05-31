@@ -10,8 +10,8 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use simulation_state::{WalletId, WalletState};
-use simulation_sync::{SyncError, WalletStore};
+use simulation_state::store::StoreError;
+use simulation_state::{WalletId, WalletState, WalletStore};
 
 /// A process-local [`WalletStore`] backed by a `Mutex<HashMap<..>>`.
 ///
@@ -49,7 +49,7 @@ impl InMemoryWalletStore {
 
 #[async_trait]
 impl WalletStore for InMemoryWalletStore {
-    async fn list_wallets(&self) -> Result<Vec<WalletId>, SyncError> {
+    async fn list_wallets(&self) -> Result<Vec<WalletId>, StoreError> {
         Ok(self
             .wallets
             .lock()
@@ -63,7 +63,7 @@ impl WalletStore for InMemoryWalletStore {
     /// empty [`WalletState::new`] for that id. This "first-seen" behavior lets a
     /// brand-new wallet simulate against empty state rather than erroring; the
     /// caller persists the result via [`WalletStore::save`].
-    async fn load(&self, id: &WalletId) -> Result<WalletState, SyncError> {
+    async fn load(&self, id: &WalletId) -> Result<WalletState, StoreError> {
         Ok(self
             .wallets
             .lock()
@@ -73,7 +73,7 @@ impl WalletStore for InMemoryWalletStore {
             .unwrap_or_else(|| WalletState::new(id.clone())))
     }
 
-    async fn save(&self, state: &WalletState) -> Result<(), SyncError> {
+    async fn save(&self, state: &WalletState) -> Result<(), StoreError> {
         self.wallets
             .lock()
             .expect("InMemoryWalletStore mutex poisoned")
