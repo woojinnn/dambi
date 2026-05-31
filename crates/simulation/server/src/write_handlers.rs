@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 
 use simulation_state::live_field::{DataSource, LiveField, OracleProvider};
 use simulation_state::primitives::{Address, ChainId, Duration, Price, Time};
-use simulation_state::token::{Balance, TokenHolding, TokenKind};
+use simulation_state::token::{Balance, TokenHolding, TokenKey, TokenKind};
 use simulation_state::{WalletId, WalletState, WalletStore};
-use simulation_sync::{discovery, DiscoveredToken, Orchestrator};
+use simulation_sync::{discovery, CoinGeckoClient, DiscoveredToken, Orchestrator};
 
 use crate::app::AppState;
 use crate::auth::AuthUser;
@@ -202,7 +202,38 @@ async fn seed_holdings(
             count += 1;
         }
     }
+
+    // Best-effort CoinGecko metadata backfill. Capped by `MAX_METADATA_LOOKUPS`
+    // so a wallet with 100+ tokens doesn't burn 100 sequential HTTP calls
+    // synchronously — the orchestrator can fill the rest on next sync.
+    backfill_metadata(state_out, &app.coingecko).await;
     Ok(count)
+}
+
+/// Hit CoinGecko for every token in the seeded state that lacks
+/// metadata. Caps at `MAX_METADATA_LOOKUPS` calls per request so the
+/// caller doesn't wait too long on free-tier rate limits (~30 req/min).
+async fn backfill_metadata(state: &mut WalletState, cg: &CoinGeckoClient) {
+    const MAX_METADATA_LOOKUPS: usize = 12;
+
+    let needs: Vec<(TokenKey, ChainId, Address)> = state
+        .tokens
+        .iter()
+        .filter(|(_, h)| h.metadata.is_none())
+        .filter_map(|(key, _)| match key {
+            TokenKey::Erc20 { chain, address } => Some((key.clone(), chain.clone(), *address)),
+            _ => None,
+        })
+        .take(MAX_METADATA_LOOKUPS)
+        .collect();
+
+    for (key, chain, address) in needs {
+        if let Some(md) = cg.fetch_metadata(&chain, address).await {
+            if let Some(h) = state.tokens.get_mut(&key) {
+                h.metadata = Some(md);
+            }
+        }
+    }
 }
 
 /// Convert a `DiscoveredToken` into a `TokenHolding` ready to land in
@@ -216,7 +247,6 @@ async fn seed_holdings(
 ///     next refresh and fills in a real price. Unknown symbols get
 ///     `None` (the orchestrator skips them).
 fn discovered_to_holding(tok: DiscoveredToken, chain: &ChainId) -> TokenHolding {
-    use simulation_state::token::TokenKey;
     let primitives_source = match &tok.key {
         TokenKey::Native { .. } => DataSource::OnchainView {
             chain: chain.clone(),
@@ -252,6 +282,8 @@ fn discovered_to_holding(tok: DiscoveredToken, chain: &ChainId) -> TokenHolding 
         committed: Balance::zero_fungible(),
         approved_to: None,
         price_usd,
+        metadata: None,
+        value_usd: None,
         last_synced_at: Time::from_unix(unix_now_u64()),
         primitives_source,
     }
@@ -269,6 +301,111 @@ fn chainlink_feed_for(symbol: &str) -> Option<&'static str> {
         "USDT" => Some("USDT/USD"),
         "DAI" => Some("DAI/USD"),
         _ => None,
+    }
+}
+
+/// `PATCH /wallets/:address` body.
+#[allow(clippy::option_option)]
+#[derive(Debug, Deserialize)]
+pub struct PatchWalletReq {
+    /// Display label. `None` (omitted) leaves the field untouched;
+    /// explicit `null` clears it.
+    #[serde(default, deserialize_with = "serde_helpers::deserialize_present")]
+    pub label: Option<Option<String>>,
+    /// Owned vs watch-only.
+    #[serde(default)]
+    pub is_owned: Option<bool>,
+}
+
+mod serde_helpers {
+    use serde::{Deserialize, Deserializer};
+
+    /// Distinguishes `{}` (field omitted → Option::None) from `{"label":
+    /// null}` (field present-but-null → Option::Some(None)). PATCH
+    /// semantics need that distinction.
+    #[allow(clippy::option_option)]
+    pub fn deserialize_present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Option::<T>::deserialize(d).map(Some)
+    }
+}
+
+/// `PATCH /wallets/:address` — update mutable display fields (label,
+/// is_owned). Body is a partial JSON object; absent fields stay put.
+pub async fn patch_wallet(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(address): Path<String>,
+    Json(req): Json<PatchWalletReq>,
+) -> Response {
+    let addr = match Address::from_str(&address) {
+        Ok(a) => a,
+        Err(e) => return bad_request(&format!("invalid address `{address}`: {e}")),
+    };
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => return internal(&format!("open user store: {e}")),
+    };
+    let pool = store.pool().clone();
+    let addr_str = format!("{addr:#x}");
+    let label = req.label;
+    let is_owned = req.is_owned;
+    let result = tokio::task::spawn_blocking(move || {
+        pool.with_tx(|tx| {
+            use simulation_db::repositories::wallets as wallets_repo;
+            let Some(w) = wallets_repo::get_by_address(tx, &addr_str)? else {
+                return Ok(None);
+            };
+            wallets_repo::update(tx, w.id, label.as_ref().map(|o| o.as_deref()), is_owned)?;
+            Ok(Some(()))
+        })
+    })
+    .await;
+    match result {
+        Ok(Ok(Some(()))) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(None)) => not_found("wallet not tracked for this user"),
+        Ok(Err(e)) => internal(&format!("patch_wallet: {e}")),
+        Err(e) => internal(&format!("join: {e}")),
+    }
+}
+
+/// `DELETE /wallets/:address` — archive the wallet (soft delete).
+/// Subsequent `GET /wallets` won't list it; the holdings rows stay so a
+/// future un-archive could restore the snapshot.
+pub async fn delete_wallet(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(address): Path<String>,
+) -> Response {
+    let addr = match Address::from_str(&address) {
+        Ok(a) => a,
+        Err(e) => return bad_request(&format!("invalid address `{address}`: {e}")),
+    };
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => return internal(&format!("open user store: {e}")),
+    };
+    let pool = store.pool().clone();
+    let addr_str = format!("{addr:#x}");
+    let now = unix_now();
+    let result = tokio::task::spawn_blocking(move || {
+        pool.with_tx(|tx| {
+            use simulation_db::repositories::wallets as wallets_repo;
+            let Some(w) = wallets_repo::get_by_address(tx, &addr_str)? else {
+                return Ok(false);
+            };
+            wallets_repo::archive(tx, w.id, now)
+        })
+    })
+    .await;
+    match result {
+        Ok(Ok(true)) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(false)) => not_found("wallet not tracked or already archived"),
+        Ok(Err(e)) => internal(&format!("delete_wallet: {e}")),
+        Err(e) => internal(&format!("join: {e}")),
     }
 }
 
@@ -317,6 +454,153 @@ pub async fn sync_wallet(
         }),
     );
     StatusCode::NO_CONTENT.into_response()
+}
+
+// ---------- /policies CRUD ----------
+
+/// `POST /policies` body — install a new Cedar policy.
+#[derive(Debug, Deserialize)]
+pub struct CreatePolicyReq {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub cedar_text: String,
+    /// "deny" | "warn" | "info" — matches the DB CHECK contract.
+    pub severity: String,
+}
+
+/// `POST /policies` response — newly assigned id + creation time.
+#[derive(Debug, Serialize)]
+pub struct CreatePolicyResp {
+    pub id: i64,
+    pub created_at: i64,
+}
+
+/// `POST /policies` — install a new Cedar policy. Returns the auto-id
+/// the dashboard should use for follow-up PATCH / DELETE calls.
+pub async fn create_policy(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<CreatePolicyReq>,
+) -> Response {
+    if req.name.trim().is_empty() {
+        return bad_request("name must not be empty");
+    }
+    if req.cedar_text.trim().is_empty() {
+        return bad_request("cedar_text must not be empty");
+    }
+    if !matches!(req.severity.as_str(), "deny" | "warn" | "info") {
+        return bad_request("severity must be one of: deny | warn | info");
+    }
+
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => return internal(&format!("open user store: {e}")),
+    };
+    let pool = store.pool().clone();
+    let now = unix_now();
+    let insert = simulation_db::repositories::user_policies::UserPolicyInsert {
+        name: req.name,
+        description: req.description,
+        cedar_text: req.cedar_text,
+        severity: req.severity,
+    };
+    let result = tokio::task::spawn_blocking(move || {
+        pool.with_tx(|tx| simulation_db::repositories::user_policies::insert(tx, &insert, now))
+    })
+    .await;
+    match result {
+        Ok(Ok(id)) => Json(CreatePolicyResp {
+            id,
+            created_at: now,
+        })
+        .into_response(),
+        Ok(Err(e)) => internal(&format!("create_policy: {e}")),
+        Err(e) => internal(&format!("join: {e}")),
+    }
+}
+
+/// `PATCH /policies/:id` body — partial policy update.
+#[allow(clippy::option_option)]
+#[derive(Debug, Deserialize)]
+pub struct PatchPolicyReq {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "serde_helpers::deserialize_present")]
+    pub description: Option<Option<String>>,
+    #[serde(default)]
+    pub cedar_text: Option<String>,
+    #[serde(default)]
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+/// `PATCH /policies/:id` — update any subset of mutable fields.
+pub async fn patch_policy(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<i64>,
+    Json(req): Json<PatchPolicyReq>,
+) -> Response {
+    if let Some(sev) = &req.severity {
+        if !matches!(sev.as_str(), "deny" | "warn" | "info") {
+            return bad_request("severity must be one of: deny | warn | info");
+        }
+    }
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => return internal(&format!("open user store: {e}")),
+    };
+    let pool = store.pool().clone();
+    let now = unix_now();
+    let patch = simulation_db::repositories::user_policies::UserPolicyPatch {
+        name: req.name,
+        description: req.description,
+        cedar_text: req.cedar_text,
+        severity: req.severity,
+        enabled: req.enabled,
+    };
+    let result = tokio::task::spawn_blocking(move || {
+        pool.with_tx(|tx| {
+            use simulation_db::repositories::user_policies;
+            if user_policies::get(tx, id)?.is_none() {
+                return Ok(None);
+            }
+            user_policies::update(tx, id, &patch, now)?;
+            Ok(Some(()))
+        })
+    })
+    .await;
+    match result {
+        Ok(Ok(Some(()))) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(None)) => not_found("policy not found"),
+        Ok(Err(e)) => internal(&format!("patch_policy: {e}")),
+        Err(e) => internal(&format!("join: {e}")),
+    }
+}
+
+/// `DELETE /policies/:id` — drop a policy row.
+pub async fn delete_policy(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<i64>,
+) -> Response {
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => return internal(&format!("open user store: {e}")),
+    };
+    let pool = store.pool().clone();
+    let result = tokio::task::spawn_blocking(move || {
+        pool.with_tx(|tx| simulation_db::repositories::user_policies::delete(tx, id))
+    })
+    .await;
+    match result {
+        Ok(Ok(true)) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(false)) => not_found("policy not found"),
+        Ok(Err(e)) => internal(&format!("delete_policy: {e}")),
+        Err(e) => internal(&format!("join: {e}")),
+    }
 }
 
 // ---------- internals ----------

@@ -56,6 +56,7 @@ pub fn load_wallet_state(tx: &Transaction<'_>, id: &WalletId) -> DbResult<Wallet
         positions: Vec::new(),
         pending: Vec::new(),
         block_heights,
+        portfolio_value_usd: None,
     })
 }
 
@@ -135,7 +136,16 @@ fn save_tokens(
             Some(holding.symbol.as_str())
         };
         let decimals = (holding.decimals != 0).then_some(holding.decimals);
-        repositories::tokens::upsert(tx, key, symbol, decimals, now)?;
+        let token_hash = repositories::tokens::upsert(tx, key, symbol, decimals, now)?;
+        if let Some(md) = holding.metadata.as_ref() {
+            let update = repositories::tokens::TokenMetadataUpdate {
+                logo_url: md.logo_url.clone(),
+                website_url: md.website_url.clone(),
+                description: md.description.clone(),
+                coingecko_id: md.coingecko_id.clone(),
+            };
+            repositories::tokens::update_metadata(tx, token_hash, &update, now)?;
+        }
         repositories::holdings::upsert(tx, wallet_pk, holding)?;
     }
     Ok(())

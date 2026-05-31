@@ -56,6 +56,12 @@ const MIGRATION_005: Migration = Migration {
     sql: include_str!("migrations/005_user_policies.sql"),
 };
 
+const MIGRATION_007: Migration = Migration {
+    version: 7,
+    description: "tokens metadata — logo / website / description / coingecko id (Phase 10)",
+    sql: include_str!("migrations/007_token_metadata.sql"),
+};
+
 /// User-DB schema (one DB file per wallet user). Holds wallet state,
 /// holdings, approvals, etc. — but NOT the global users table.
 const USER_DB_MIGRATIONS: &[Migration] = &[
@@ -64,6 +70,7 @@ const USER_DB_MIGRATIONS: &[Migration] = &[
     MIGRATION_003,
     MIGRATION_004,
     MIGRATION_005,
+    MIGRATION_007,
 ];
 
 /// Global-DB schema (single file shared across users, holds the email →
@@ -167,8 +174,7 @@ mod tests {
         let pool = Pool::open_in_memory();
         assert_eq!(current_version(&pool).unwrap(), None);
         run(&pool).unwrap();
-        // Phase 2: 002 까지 적용.
-        assert_eq!(current_version(&pool).unwrap(), Some(5));
+        assert_eq!(current_version(&pool).unwrap(), Some(7));
     }
 
     #[test]
@@ -177,14 +183,14 @@ mod tests {
         run(&pool).unwrap();
         run(&pool).unwrap(); // 두 번째 호출도 OK
         run(&pool).unwrap(); // 세 번째도
-        assert_eq!(current_version(&pool).unwrap(), Some(5));
+        assert_eq!(current_version(&pool).unwrap(), Some(7));
 
         // _schema_migrations 에는 적용된 버전 수 만큼만 row.
         pool.with_conn(|c| {
             let n: i64 = c
                 .query_row("SELECT COUNT(*) FROM _schema_migrations", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(n, 5);
+            assert_eq!(n, 6);
             Ok(())
         })
         .unwrap();

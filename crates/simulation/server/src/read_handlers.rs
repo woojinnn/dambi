@@ -19,7 +19,7 @@ use simulation_state::primitives::{Address, BlockHeight, ChainId};
 use simulation_state::token::{TokenHolding, TokenKey};
 use simulation_state::{WalletId, WalletState, WalletStore};
 
-use simulation_db::repositories::{deltas, user_policies, wallets as wallets_repo};
+use simulation_db::repositories::{deltas, tokens as tokens_repo, user_policies, wallets as wallets_repo};
 
 use crate::app::AppState;
 use crate::auth::AuthUser;
@@ -40,25 +40,34 @@ pub async fn list_wallets(
 }
 
 /// `GET /wallets/:address/state` — the whole [`WalletState`].
+///
+/// Computed view fields (per-token `value_usd`, top-level
+/// `portfolio_value_usd`) are populated here so the dashboard / UI can
+/// render dollar values without re-computing balance × price.
 pub async fn get_state(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Path(address): Path<String>,
 ) -> Response {
     match load_state(&state.multi_user, &user.user_id, &address).await {
-        Ok(s) => Json(s).into_response(),
+        Ok(mut s) => {
+            s.populate_computed_values();
+            Json(s).into_response()
+        }
         Err(e) => e,
     }
 }
 
-/// `GET /wallets/:address/holdings` — token holdings as an array.
+/// `GET /wallets/:address/holdings` — token holdings as an array. Each
+/// row includes the computed `value_usd`.
 pub async fn get_holdings(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Path(address): Path<String>,
 ) -> Response {
     match load_state(&state.multi_user, &user.user_id, &address).await {
-        Ok(s) => {
+        Ok(mut s) => {
+            s.populate_computed_values();
             #[derive(Serialize)]
             struct HoldingItem {
                 key: TokenKey,
@@ -289,6 +298,77 @@ struct PolicyRow {
     enabled: bool,
     created_at: i64,
     updated_at: i64,
+}
+
+// ---------- /tokens (catalog) ----------
+
+#[derive(Serialize)]
+struct TokenCatalogRow {
+    token_hash: String,
+    key: TokenKey,
+    symbol: Option<String>,
+    decimals: Option<u8>,
+    first_seen_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logo_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    website_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coingecko_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata_synced_at: Option<i64>,
+}
+
+/// `GET /tokens` — every token row in the user's catalog. Includes
+/// CoinGecko-sourced metadata (logo / website / description) when
+/// available.
+pub async fn list_tokens(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+) -> Response {
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => return open_store_error(&e.to_string()),
+    };
+    let pool = store.pool().clone();
+    let result = tokio::task::spawn_blocking(move || {
+        pool.with_tx(|tx| {
+            tokens_repo::list_all(tx).map(|rows| {
+                rows.into_iter()
+                    .map(|r| TokenCatalogRow {
+                        token_hash: hex_token_hash(&r.token_hash),
+                        key: r.key,
+                        symbol: r.symbol,
+                        decimals: r.decimals,
+                        first_seen_at: r.first_seen_at,
+                        logo_url: r.logo_url,
+                        website_url: r.website_url,
+                        description: r.description,
+                        coingecko_id: r.coingecko_id,
+                        metadata_synced_at: r.metadata_synced_at,
+                    })
+                    .collect::<Vec<_>>()
+            })
+        })
+    })
+    .await;
+    match result {
+        Ok(Ok(rows)) => Json(rows).into_response(),
+        Ok(Err(e)) => internal_str(&format!("list_tokens: {e}")),
+        Err(e) => internal_str(&format!("join: {e}")),
+    }
+}
+
+fn hex_token_hash(h: &[u8; 16]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(2 + 32);
+    out.push_str("0x");
+    for b in h {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }
 
 /// `GET /policies` — every Cedar policy installed in the user's

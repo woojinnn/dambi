@@ -21,6 +21,7 @@ import { ActivityPage } from "./pages/ActivityPage";
 import { MePage } from "./pages/MePage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 import { PoliciesPage } from "./pages/PoliciesPage";
+import { TokensPage } from "./pages/TokensPage";
 
 // Standalone Vite app at localhost:5174 — BrowserRouter only.
 // Extension-bundling is a future concern (M-5, deferred).
@@ -46,6 +47,7 @@ const router = createBrowserRouter([
           { path: "wallets/:address", element: <WalletDetailPage /> },
           { path: "transactions", element: <TransactionsPage /> },
           { path: "policies", element: <PoliciesPage /> },
+          { path: "tokens", element: <TokensPage /> },
           { path: "activity", element: <ActivityPage /> },
           { path: "me", element: <MePage /> },
         ],

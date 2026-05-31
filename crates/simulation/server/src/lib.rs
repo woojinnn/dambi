@@ -45,6 +45,7 @@
 
 pub mod app;
 pub mod auth;
+pub mod docs;
 pub mod dto;
 pub mod events;
 pub mod handler;

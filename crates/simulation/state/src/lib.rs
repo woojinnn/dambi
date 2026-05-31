@@ -134,6 +134,8 @@ mod smoke {
                 )
                 .with_ttl(Duration::from_secs(60)),
             ),
+            metadata: None,
+            value_usd: None,
             last_synced_at: Time::from_unix(1_738_000_000),
             primitives_source: DataSource::OnchainView {
                 chain: ChainId::ethereum_mainnet(),

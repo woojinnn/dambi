@@ -10,6 +10,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { useAuth } from "./hooks/useAuth";
+import { SERVER_BASE_URL } from "./server-api";
 
 export function ServerLayout() {
   const { user, logout } = useAuth();
@@ -38,10 +39,20 @@ export function ServerLayout() {
           <NavBtn to="/server/wallets" label="Wallets" />
           <NavBtn to="/server/transactions" label="Transactions" />
           <NavBtn to="/server/policies" label="Policies" />
+          <NavBtn to="/server/tokens" label="Tokens" />
           <NavBtn to="/server/activity" label="Activity" />
           <NavBtn to="/server/me" label="Me" />
         </nav>
         <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13 }}>
+          <a
+            href={`${SERVER_BASE_URL}/docs`}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 12, color: "#0066cc", textDecoration: "none" }}
+            title="OpenAPI / Swagger UI"
+          >
+            API docs ↗
+          </a>
           <span style={{ opacity: 0.7 }}>{user?.email}</span>
           <button onClick={onSignOut} style={signOutStyle}>
             Sign out

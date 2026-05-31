@@ -19,7 +19,7 @@ use tower_http::cors::CorsLayer;
 use std::sync::Arc;
 
 use simulation_db::{GlobalDb, MultiUserStore};
-use simulation_sync::{EtherscanClient, Orchestrator};
+use simulation_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 use crate::auth::{require_auth, AuthUser};
 use crate::dto::EvaluateRequest;
@@ -45,6 +45,11 @@ pub struct AppState {
     /// isn't set. `POST /wallets` uses it (when present) to discover
     /// every ERC-20 a wallet holds; absent it falls back to native-only.
     pub etherscan: Option<EtherscanClient>,
+    /// CoinGecko metadata client — always present (free tier works
+    /// keyless). `POST /wallets` calls it after discovery to backfill
+    /// logo / website / description on newly-seen tokens. Lookups are
+    /// best-effort; CoinGecko outages don't block wallet adds.
+    pub coingecko: CoinGeckoClient,
 }
 
 impl std::fmt::Debug for AppState {
@@ -59,6 +64,7 @@ impl std::fmt::Debug for AppState {
                 "etherscan",
                 &self.etherscan.as_ref().map(|_| "<EtherscanClient>"),
             )
+            .field("coingecko", &"<CoinGeckoClient>")
             .finish()
     }
 }
@@ -119,6 +125,11 @@ pub fn build_router(state: AppState) -> Router {
             "/wallets",
             get(read_handlers::list_wallets).post(write_handlers::add_wallet),
         )
+        .route(
+            "/wallets/:address",
+            axum::routing::patch(write_handlers::patch_wallet)
+                .delete(write_handlers::delete_wallet),
+        )
         .route("/wallets/:address/sync", post(write_handlers::sync_wallet))
         .route("/wallets/:address/state", get(read_handlers::get_state))
         .route(
@@ -134,12 +145,23 @@ pub fn build_router(state: AppState) -> Router {
             get(read_handlers::get_block_heights),
         )
         .route("/transactions", get(read_handlers::list_transactions))
-        .route("/policies", get(read_handlers::list_policies))
+        .route("/tokens", get(read_handlers::list_tokens))
+        .route(
+            "/policies",
+            get(read_handlers::list_policies).post(write_handlers::create_policy),
+        )
+        .route(
+            "/policies/:id",
+            axum::routing::patch(write_handlers::patch_policy)
+                .delete(write_handlers::delete_policy),
+        )
         .route("/events/stream", get(crate::events::sse_stream))
         .layer(from_fn(require_auth));
 
     let public = Router::new()
         .route("/health", get(health_handler))
+        .route("/docs", get(crate::docs::docs_html))
+        .route("/openapi.yaml", get(crate::docs::openapi_yaml))
         .route("/auth/google", get(crate::auth::start_google_login))
         .route("/auth/google/callback", get(crate::auth::google_callback));
 

@@ -30,11 +30,23 @@ export {
   getWalletHoldings,
   getWalletApprovals,
   getWalletBlockHeights,
+  patchWallet,
+  deleteWallet,
   type WalletId,
   type BlockHeight,
   type WalletStateView,
 } from "./wallets";
 
-export { listPolicies, type InstalledPolicy } from "./policies";
+export {
+  listPolicies,
+  createPolicy,
+  patchPolicy,
+  deletePolicy,
+  type InstalledPolicy,
+  type CreatePolicyBody,
+  type PatchPolicyBody,
+} from "./policies";
 
 export { listTransactions, type TxRow } from "./transactions";
+
+export { listTokens, type TokenCatalogRow } from "./tokens";

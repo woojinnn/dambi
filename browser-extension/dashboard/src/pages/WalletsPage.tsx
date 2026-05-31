@@ -7,7 +7,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { listWallets, request, type WalletId } from "../server-api";
+import { deleteWallet, listWallets, request, type WalletId } from "../server-api";
 
 interface AddWalletResp {
   wallet_id: WalletId;
@@ -70,6 +70,19 @@ export function WalletsPage() {
     setBusy(`sync:${address}`);
     try {
       await request<void>(`/wallets/${address}/sync`, { method: "POST" });
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onArchive = async (address: string) => {
+    if (!confirm(`Archive wallet ${address}? (soft delete — DB rows stay)`)) return;
+    setBusy(`archive:${address}`);
+    try {
+      await deleteWallet(address);
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -173,6 +186,13 @@ export function WalletsPage() {
                 <Link to={`/server/wallets/${w.address}`} style={smallBtnLink}>
                   Detail
                 </Link>
+                <button
+                  onClick={() => onArchive(w.address)}
+                  disabled={busy === `archive:${w.address}`}
+                  style={{ ...smallBtn, color: "crimson" }}
+                >
+                  {busy === `archive:${w.address}` ? "…" : "Archive"}
+                </button>
               </li>
             ))}
           </ul>

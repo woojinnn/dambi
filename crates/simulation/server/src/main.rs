@@ -22,7 +22,7 @@ use tracing_subscriber::EnvFilter;
 use simulation_db::{GlobalDb, MultiUserStore};
 use simulation_server::app::{build_router, AppState};
 use simulation_server::events::EventBus;
-use simulation_sync::{EtherscanClient, Orchestrator, SyncConfig};
+use simulation_sync::{CoinGeckoClient, EtherscanClient, Orchestrator, SyncConfig};
 
 /// Default bind address. Port `8788` deliberately differs from the legacy
 /// Node.js policy-rpc host (`8787`) so the two can run side-by-side during
@@ -89,12 +89,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    let coingecko = CoinGeckoClient::from_env();
+    tracing::info!("CoinGecko token metadata client ready");
+
     let state = AppState {
         multi_user,
         global_db,
         event_bus: EventBus::new(),
         orchestrator,
         etherscan,
+        coingecko,
     };
     let router = build_router(state);
 

@@ -62,3 +62,16 @@ export async function getWalletBlockHeights(
     `/wallets/${address}/block-heights`,
   );
 }
+
+/** `PATCH /wallets/:addr` — partial update. `label: null` clears. */
+export async function patchWallet(
+  address: string,
+  patch: { label?: string | null; is_owned?: boolean },
+): Promise<void> {
+  await request<void>(`/wallets/${address}`, { method: "PATCH", body: patch });
+}
+
+/** `DELETE /wallets/:addr` — soft delete (archive). */
+export async function deleteWallet(address: string): Promise<void> {
+  await request<void>(`/wallets/${address}`, { method: "DELETE" });
+}
