@@ -74,7 +74,7 @@ fn apply_multicall(
     let mut accumulated = StateDelta::default();
     let mut current = state.clone();
     for (i, body) in actions.iter().enumerate() {
-        let sub_ctx = ctx.clone().with_envelope_index(i);
+        let sub_ctx = ctx.clone().with_action_index(i);
         let sub_delta = body.apply(&current, &sub_ctx)?;
         current = crate::helpers::delta::apply_delta(&current, &sub_delta)?;
         accumulated = crate::helpers::delta::merge_delta(accumulated, sub_delta)?;

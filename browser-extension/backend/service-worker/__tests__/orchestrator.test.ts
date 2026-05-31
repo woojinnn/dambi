@@ -379,7 +379,7 @@ describe("orchestrator", () => {
   });
 
   // ── Phase 1 / P3 — FAIL-CLOSED tail ──────────────────────────────────
-  // Every case the deleted v1 declarative-envelope + static path used to
+  // Every case the deleted legacy declarative/static path used to
   // catch now emits the `__engine::no_decoder` warn verdict, which requires
   // the user to explicitly proceed. The v2 plan/evaluate path never runs.
 

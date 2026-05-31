@@ -2,13 +2,11 @@
 //! [`LoweredAction`] (`Wallet` / `<Namespace>::Action::"…"` / `Protocol` +
 //! cedarschema action-context JSON).
 //!
-//! This is the ADDITIVE counterpart to the legacy [`crate::lowering`] pipeline
-//! (which consumes the old `ActionEnvelope`). It targets the new action model
-//! directly and produces a context object that conforms to the per-action
-//! cedarschema types under `schema/policy-schema/actions/`. The two pipelines
-//! run side by side; this module never touches the legacy one.
+//! This is the active lowering path for the ActionBody architecture. It targets
+//! the new action model directly and produces a context object that conforms to
+//! the per-action cedarschema types under `schema/policy-schema/actions/`.
 //!
-//! # Layout (mirrors [`crate::lowering`])
+//! # Layout
 //!
 //! - [`dispatch`] — the `LoweredAction` / `TxMeta` / `LowerError` contract,
 //!   the `LowerCtx`, and `lower_action`, which matches an `ActionBody` on its

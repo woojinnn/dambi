@@ -1,7 +1,7 @@
 //! The core simulation handler — load canonical state → simulate prediction.
 //!
 //! Given an [`EvaluateRequest`], this loads the wallet's `state_before` via the
-//! [`WalletStore`] boundary, folds each request `envelope` through
+//! [`WalletStore`] boundary, folds each request action through
 //! [`simulation_reducer::apply`] + `apply_delta` to produce one delta per
 //! action and a final predicted `state_after`, and returns the
 //! [`EvaluateResponse`] the extension's Cedar layer consumes.
@@ -68,9 +68,9 @@ impl From<SyncError> for HandlerError {
     }
 }
 
-/// Simulates the request's action envelopes over the wallet's canonical state.
+/// Simulates the request's actions over the wallet's canonical state.
 ///
-/// Loads `state_before` from `store`, applies each envelope in order through
+/// Loads `state_before` from `store`, applies each action in order through
 /// the reducer (one [`simulation_state::StateDelta`] per action), folds those
 /// deltas into an in-memory predicted `state_after`, and returns the
 /// [`EvaluateResponse`].
@@ -97,14 +97,14 @@ pub async fn evaluate(
     // `InMemoryWalletStore`.
     let state_before = store.load(&req.wallet_id).await?;
 
-    // Running state, folded forward one envelope at a time.
+    // Running state, folded forward one action at a time.
     let mut state = state_before.clone();
-    let mut deltas = Vec::with_capacity(req.envelopes.len());
+    let mut deltas = Vec::with_capacity(req.actions.len());
 
-    for (i, action) in req.envelopes.iter().enumerate() {
+    for (i, action) in req.actions.iter().enumerate() {
         // The reducer is pure: it reads only `(state, action, ctx)`. The
-        // per-envelope index lets the reducer disambiguate intra-batch effects.
-        let ctx = req.eval_context.clone().with_envelope_index(i);
+        // per-action index lets the reducer disambiguate intra-batch effects.
+        let ctx = req.eval_context.clone().with_action_index(i);
 
         // TODO(prep): live-input refresh. Once the sync orchestrator + RPC
         // config are wired, run
@@ -129,15 +129,15 @@ pub async fn evaluate(
     // failures are not yet surfaced as diagnostics.
     let results = BTreeMap::new();
 
-    let note = if req.envelopes.is_empty() {
-        "simulated 0 envelopes (state echoed)".to_owned()
+    let note = if req.actions.is_empty() {
+        "simulated 0 actions (state echoed)".to_owned()
     } else {
-        format!("simulated {} envelope(s)", req.envelopes.len())
+        format!("simulated {} action(s)", req.actions.len())
     };
 
     Ok(EvaluateResponse {
         policy_request: PolicyRequest {
-            actions: req.envelopes,
+            actions: req.actions,
             state_before,
             deltas,
             state_after: state,
@@ -251,10 +251,10 @@ mod tests {
         state
     }
 
-    fn empty_envelope_request() -> EvaluateRequest {
+    fn empty_action_request() -> EvaluateRequest {
         EvaluateRequest {
             wallet_id: sample_wallet_id(),
-            envelopes: Vec::new(),
+            actions: Vec::new(),
             eval_context: simulation_state::EvalContext::new(
                 ChainId::ethereum_mainnet(),
                 Time::from_unix(1_700_000_000),
@@ -293,21 +293,21 @@ mod tests {
         }
     }
 
-    fn request_with_envelope(action: Action) -> EvaluateRequest {
-        let mut req = empty_envelope_request();
-        req.envelopes.push(action);
+    fn request_with_action(action: Action) -> EvaluateRequest {
+        let mut req = empty_action_request();
+        req.actions.push(action);
         req
     }
 
-    /// load → echo plumbing: a seeded wallet with empty `envelopes` returns its
+    /// load → echo plumbing: a seeded wallet with empty `actions` returns its
     /// state unchanged, with no deltas and no results.
     #[tokio::test]
-    async fn empty_envelopes_echo_seeded_state() {
+    async fn empty_actions_echo_seeded_state() {
         let store = InMemoryWalletStore::new();
         let seeded = non_trivial_state();
         store.seed(seeded.clone());
 
-        let resp = evaluate(&store, empty_envelope_request()).await.unwrap();
+        let resp = evaluate(&store, empty_action_request()).await.unwrap();
 
         assert_eq!(resp.policy_request.state_before, seeded);
         assert_eq!(resp.policy_request.state_after, seeded);
@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(loaded, WalletState::new(id.clone()));
 
         // And the handler echoes that empty state for an empty request.
-        let resp = evaluate(&store, empty_envelope_request()).await.unwrap();
+        let resp = evaluate(&store, empty_action_request()).await.unwrap();
         assert_eq!(resp.policy_request.state_before, WalletState::new(id));
         assert!(resp.policy_request.deltas.is_empty());
     }
@@ -344,7 +344,7 @@ mod tests {
         let seeded = non_trivial_state();
         store.seed(seeded.clone());
 
-        let resp = evaluate(&store, request_with_envelope(hyperliquid_order_action()))
+        let resp = evaluate(&store, request_with_action(hyperliquid_order_action()))
             .await
             .unwrap();
 
