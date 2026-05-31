@@ -21,6 +21,10 @@ repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
    완료·검증 후에도 base/worktree 머지는 사용자가 명시적으로 요청할 때만 진행.
  · **각 phase(P0/P1/P2/P3/P4, 또는 더 잘게 컨트랙트·함수군별)가 끝나면 explicit-stage 커밋**
    (git add <파일>, git add -A 금지; 메시지 말미 Co-Authored-By). 중간 유실 방지 + 회귀 지점.
+ · **한 큐로 진행** — 브랜치·외부 데이터 lane 이 준비되면 P0→P4 를 phase 경계 확인 요청 없이 이어서 수행.
+   phase 커밋은 체크포인트일 뿐 멈춤 지점이 아니다. 커밋 후 곧바로 다음 phase 로 진행.
+   멈춤은 merge/push/destructive action, Etherscan/Dune/auth 부재, 1차출처로도 안 풀리는 스코프 모호성,
+   같은 blocker 3회 이상 반복처럼 사용자 입력 없이는 진행 불가능할 때만.
  · P2 real-tx 시작 전 외부 데이터 lane 연결 확인:
    Etherscan API/MCP(`ETHERSCAN_API_KEY`, `https://mcp.etherscan.io/mcp`) +
    Dune MCP/API(`https://api.dune.com/mcp/v1`). 키는 로컬 설정만, repo commit 금지.

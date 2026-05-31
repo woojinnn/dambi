@@ -285,6 +285,8 @@ Start every protocol onboarding in a dedicated branch inside the requested workt
 
 Commit at the end of each phase, or each smaller reviewable contract/function batch when a phase is large. Use explicit staging only (`git add <file>`), never blanket `git add -A`. Sub-agents and Claude Code produce candidate results; the main session owns verification and commits.
 
+Run the onboarding in one continuous pass once branch setup and external data lanes are ready. Phase commits are checkpoints, not permission prompts; after a phase commit, continue into the next phase. Stop only for actions requiring explicit user approval, missing external authentication/data access, scope ambiguity that first-party sources cannot resolve, or a repeated hard blocker.
+
 Do not merge the onboarding branch back into the base worktree automatically after the framework is complete. Merge only when the user explicitly requests it.
 
 ### Agent Orchestration
