@@ -363,6 +363,24 @@
       "remaining ungated WARN count decreased from 48 to 47; uniswap decreased from 21 to 20"
     ]
   },
+  "uniswap_universal_router_v1_mainnet_surface_gate": {
+    "protocol": "uniswap",
+    "contract": "Universal Router v1 original mainnet",
+    "status": "implemented",
+    "completed": [
+      "added surface/uniswap/universal-router-v1-mainnet.{abi,coverage}.json from Sourcify full_match metadata and official Uniswap universal-router source provenance",
+      "triaged 4 external-mutating selectors: collectRewards(bytes), execute(bytes,bytes[]), and execute(bytes,bytes[],uint256) are COVER; uniswapV3SwapCallback is EXCLUDE as an infra callback",
+      "extended uniswap/universal-router/collectRewards@1.0.0 to the original v1 mainnet deployment after the surface gate RED step caught the missing manifest"
+    ],
+    "evidence": [
+      "RED check: npm run check:surface failed with I2 cover selector 0x709a1cc2 (collectRewards) has NO manifest at 1/0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b",
+      "npm run build: 973 callkeys + 78 typed-data entries across 172 manifests",
+      "npm run check:surface: PASS with 52 gated contracts; UniversalRouter original v1 deployment 4 surface / 3 cover / 1 exclude / 3 on-chain manifests",
+      "cargo test -p policy-engine-integration-tests --test v3_decode_harness -- --nocapture: 25 passed; corpus 225/225 matched; synthetic fuzz fail=0 panicked=0",
+      "cargo test --workspace: 0 failed",
+      "remaining ungated WARN count decreased from 47 to 46; uniswap decreased from 20 to 19"
+    ]
+  },
   "skipped_or_deferred_action_mapping": [
     {
       "protocol_or_function": "Hyperliquid Core / REST JSON actions",
