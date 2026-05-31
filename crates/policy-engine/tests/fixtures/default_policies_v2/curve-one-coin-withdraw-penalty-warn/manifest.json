@@ -1,0 +1,25 @@
+{
+  "id": "curve-one-coin-withdraw-penalty-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "remove_liquidity" } } },
+  "policy_rpc": [
+    {
+      "id": "one-coin-penalty",
+      "method": "curve.one_coin_penalty",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "oneCoinPenalty",
+          "type": "Decimal",
+          "from": "$.result.penalty"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "oneCoinPenalty": "decimal" } }
+}

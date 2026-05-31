@@ -1,0 +1,26 @@
+{
+  "id": "perp-funding-adverse-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "open_position" } } },
+  "policy_rpc": [
+    {
+      "id": "funding-adverse",
+      "method": "perp.funding_adverse_rate",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "fundingAdverseRate",
+          "type": "Decimal",
+          "from": "$.result.adverseRate"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "fundingAdverseRate": "decimal" } }
+}

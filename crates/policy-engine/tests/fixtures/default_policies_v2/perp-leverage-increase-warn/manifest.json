@@ -1,0 +1,27 @@
+{
+  "id": "perp-leverage-increase-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "change_leverage" } } },
+  "policy_rpc": [
+    {
+      "id": "leverage-increase",
+      "method": "perp.leverage_increase",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "market": "$.action.market",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "leverageIncrease",
+          "type": "Bool",
+          "from": "$.result.leverageIncrease"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "leverageIncrease": "Bool" } }
+}

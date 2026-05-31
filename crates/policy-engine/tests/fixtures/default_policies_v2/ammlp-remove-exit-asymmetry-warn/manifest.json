@@ -1,0 +1,26 @@
+{
+  "id": "ammlp-remove-exit-asymmetry-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "remove_liquidity" } } },
+  "policy_rpc": [
+    {
+      "id": "exit-asymmetry",
+      "method": "lp.exit_asymmetry",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "exitAsymmetric",
+          "type": "Bool",
+          "from": "$.result.asymmetric"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "exitAsymmetric": "Bool" } }
+}

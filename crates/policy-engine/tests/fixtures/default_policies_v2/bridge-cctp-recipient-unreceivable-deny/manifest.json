@@ -1,0 +1,26 @@
+{
+  "id": "bridge-cctp-recipient-unreceivable-deny",
+  "schema_version": 2,
+  "trigger": { "where": { "action.domain": { "eq": "unknown" } } },
+  "policy_rpc": [
+    {
+      "id": "cctp-recipient",
+      "method": "bridge.cctp_recipient_unreceivable",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "target": "$.action.target",
+        "calldata": "$.action.calldata"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "cctpRecipientUnreceivable",
+          "type": "Bool",
+          "from": "$.result.unreceivable"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "cctpRecipientUnreceivable": "Bool" } }
+}

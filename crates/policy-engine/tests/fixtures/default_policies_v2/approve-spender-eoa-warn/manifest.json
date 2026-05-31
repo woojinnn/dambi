@@ -1,0 +1,25 @@
+{
+  "id": "approve-spender-eoa-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "erc20_approve" } } },
+  "policy_rpc": [
+    {
+      "id": "spender-is-eoa",
+      "method": "external.spender_is_eoa",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "address": "$.action.spender"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "spenderIsEoa",
+          "type": "Bool",
+          "from": "$.result.isEoa"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "spenderIsEoa": "Bool" } }
+}

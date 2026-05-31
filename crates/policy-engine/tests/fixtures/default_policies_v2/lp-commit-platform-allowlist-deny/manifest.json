@@ -1,0 +1,5 @@
+{
+  "id": "lp-commit-platform-allowlist-deny",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "commit" } } }
+}

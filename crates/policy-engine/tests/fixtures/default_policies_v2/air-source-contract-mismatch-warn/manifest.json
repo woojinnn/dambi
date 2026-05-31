@@ -1,0 +1,26 @@
+{
+  "id": "air-source-contract-mismatch-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "claim" } } },
+  "policy_rpc": [
+    {
+      "id": "source-held-state",
+      "method": "claim.source_held_state",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "sourceContractMatches",
+          "type": "Bool",
+          "from": "$.result.sourceMatches"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "sourceContractMatches": "Bool" } }
+}

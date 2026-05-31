@@ -1,0 +1,26 @@
+{
+  "id": "bridge-relayer-fee-band-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.domain": { "eq": "unknown" } } },
+  "policy_rpc": [
+    {
+      "id": "relayer-fee",
+      "method": "bridge.relayer_fee_bp",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "target": "$.action.target",
+        "calldata": "$.action.calldata"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "relayerFeeBp",
+          "type": "Long",
+          "from": "$.result.relayerFeeBp"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "relayerFeeBp": "Long" } }
+}

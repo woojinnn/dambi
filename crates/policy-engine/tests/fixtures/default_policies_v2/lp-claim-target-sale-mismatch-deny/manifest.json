@@ -1,0 +1,26 @@
+{
+  "id": "lp-claim-target-sale-mismatch-deny",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "claim_allocation" } } },
+  "policy_rpc": [
+    {
+      "id": "sale-match",
+      "method": "launchpad.sale_match",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "targetMatchesSale",
+          "type": "Bool",
+          "from": "$.result.targetMatchesSale"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "targetMatchesSale": "Bool" } }
+}

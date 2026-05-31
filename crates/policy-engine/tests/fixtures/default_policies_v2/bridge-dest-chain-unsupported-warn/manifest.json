@@ -1,0 +1,26 @@
+{
+  "id": "bridge-dest-chain-unsupported-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.domain": { "eq": "unknown" } } },
+  "policy_rpc": [
+    {
+      "id": "dest-chain-supported",
+      "method": "bridge.dest_chain_supported",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "target": "$.action.target",
+        "calldata": "$.action.calldata"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "destChainSupported",
+          "type": "Bool",
+          "from": "$.result.supported"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "destChainSupported": "Bool" } }
+}

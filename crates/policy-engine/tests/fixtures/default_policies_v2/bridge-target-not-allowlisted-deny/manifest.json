@@ -1,0 +1,5 @@
+{
+  "id": "bridge-target-not-allowlisted-deny",
+  "schema_version": 2,
+  "trigger": { "where": { "action.domain": { "eq": "unknown" } } }
+}

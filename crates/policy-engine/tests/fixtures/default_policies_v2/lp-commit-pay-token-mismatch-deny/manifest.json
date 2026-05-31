@@ -1,0 +1,25 @@
+{
+  "id": "lp-commit-pay-token-mismatch-deny",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "commit" } } },
+  "policy_rpc": [
+    {
+      "id": "pay-token-match",
+      "method": "launchpad.pay_token_match",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "payTokenMatchesSale",
+          "type": "Bool",
+          "from": "$.result.payTokenMatchesSale"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "payTokenMatchesSale": "Bool" } }
+}

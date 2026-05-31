@@ -1,0 +1,31 @@
+{
+  "id": "nft-low-offer-accept-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.domain": { "eq": "unknown" } } },
+  "policy_rpc": [
+    {
+      "id": "offer-vs-floor",
+      "method": "external.nft_floor",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "calldata": "$.action.calldata",
+        "target": "$.action.target"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "offerVsFloor",
+          "type": "Decimal",
+          "from": "$.result.orderVsFloor"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "offerVsFloor": "decimal"
+    }
+  }
+}

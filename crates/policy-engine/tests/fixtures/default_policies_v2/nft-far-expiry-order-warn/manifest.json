@@ -1,0 +1,5 @@
+{
+  "id": "nft-far-expiry-order-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.domain": { "eq": "unknown" } } }
+}

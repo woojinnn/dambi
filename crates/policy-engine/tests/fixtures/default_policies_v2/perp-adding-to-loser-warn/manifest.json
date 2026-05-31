@@ -1,0 +1,26 @@
+{
+  "id": "perp-adding-to-loser-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "increase_position" } } },
+  "policy_rpc": [
+    {
+      "id": "position-state",
+      "method": "perp.position_state",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "market": "$.action.positionId"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "positionUnrealizedPnlPct",
+          "type": "Decimal",
+          "from": "$.result.unrealizedPnlPct"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "positionUnrealizedPnlPct": "decimal" } }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "gas-cost-ratio-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "swap" } } },
+  "policy_rpc": [
+    {
+      "id": "gas-cost-ratio",
+      "method": "valuation.gas_cost_ratio",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "gas_estimate": "$.action.gasEstimate",
+        "value_asset": "$.action.tokenIn",
+        "value_amount": "$.action.direction.amountIn"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "gasCostRatioOfValue",
+          "type": "Decimal",
+          "from": "$.result.ratio"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "gasCostRatioOfValue": "decimal" } }
+}

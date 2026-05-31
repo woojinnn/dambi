@@ -1,0 +1,25 @@
+{
+  "id": "signature-chain-mismatch-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "erc20_permit" } } },
+  "policy_rpc": [
+    {
+      "id": "chain-mismatch",
+      "method": "signature.chain_mismatch",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "domain_chain_id": "$.action.meta.nature.domain.chainId"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "chainMismatch",
+          "type": "Bool",
+          "from": "$.result.mismatch"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "chainMismatch": "Bool" } }
+}
