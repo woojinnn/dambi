@@ -232,6 +232,26 @@
       "cargo test --workspace: 0 failed"
     ]
   },
+  "morpho_blue_base_surface_gate": {
+    "protocol": "morpho",
+    "contract": "Morpho Blue Base singleton",
+    "status": "implemented",
+    "completed": [
+      "added surface/morpho/morpho-blue-base.{abi,coverage}.json using the official Morpho addresses page and BaseScan verified source provenance",
+      "triaged 17 external-mutating selectors: supply, withdraw, borrow, repay, supplyCollateral, withdrawCollateral, and setAuthorization are COVER; relayer/keeper/infra/governance selectors are EXCLUDE",
+      "expanded the 8 Morpho Blue manifests to include chain 8453 for the same canonical singleton address",
+      "added Base by-callkey and typed-data index entries for all covered Morpho Blue actions plus Authorization",
+      "added hand corpus fixtures for Base supply calldata and Base Authorization EIP-712 typed-data"
+    ],
+    "evidence": [
+      "npm run build: 959 callkeys + 78 typed-data entries across 168 manifests",
+      "npm run check:surface: PASS with 45 gated contracts; Morpho Base 17 surface / 7 cover / 10 exclude / 7 on-chain manifests / 1 signed-struct",
+      "cargo run -p policy-engine-integration-tests --bin v3-harness -- coverage: callkeys=959 typed_data_keys=78 unique_bundles=168 install_failures=0",
+      "cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus: 222/222 matched",
+      "cargo test -p policy-engine-integration-tests --test v3_decode_harness -- --nocapture: 25 passed",
+      "cargo test --workspace: 0 failed"
+    ]
+  },
   "scenario_c_decode_gap_loop": {
     "protocol": "uniswap",
     "status": "started",

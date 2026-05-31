@@ -2,7 +2,7 @@
   "matched": true,
   "bundle_id": "morpho/morpho-blue/authorization-sign@1.0.0",
   "manifest_path": "manifests/morpho/morpho-blue/authorization-sign@1.0.0.json",
-  "bundle_sha256": "0xe53f94cd79bffd82a10fd25e50ab7c8f270565e166f1755a1259b7a53cf3d782",
+  "bundle_sha256": "0xf22c798ce4ca6b1f011b00769a40b75723de1fc32d0b66f03f19c3f004aee0d5",
   "bundle": {
     "type": "adapter_action",
     "id": "morpho/morpho-blue/authorization-sign@1.0.0",
@@ -13,6 +13,9 @@
       "selector": "0x00000001",
       "chain_to_addresses": {
         "1": [
+          "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb"
+        ],
+        "8453": [
           "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb"
         ]
       },
