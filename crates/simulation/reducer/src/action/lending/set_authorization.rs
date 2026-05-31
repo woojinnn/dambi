@@ -25,6 +25,12 @@ pub struct SetAuthorizationAction {
     /// (e.g. the Morpho Blue singleton).
     #[tsify(type = "string")]
     pub protocol: Address,
+    /// Account granting/revoking permission, when it is explicit in calldata or
+    /// EIP-712. Direct calls usually omit this because the submitter is the
+    /// authorizer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[tsify(optional, type = "string")]
+    pub authorizer: Option<Address>,
     /// Address being granted / revoked full control of the submitter's positions.
     #[tsify(type = "string")]
     pub authorized: Address,

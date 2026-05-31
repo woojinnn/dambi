@@ -226,6 +226,13 @@ function collectManifestSurface(): {
     const verifying: string | undefined = isTypedData
       ? String(m.typed_data.verifying_contract ?? "").toLowerCase()
       : undefined;
+    const abi = obj?.abi_fragment?.abi;
+    const hasConcreteOnchainSelector =
+      SELECTOR_RE.test(selector) &&
+      abi &&
+      typeof abi === "object" &&
+      abi.type === "function" &&
+      toFunctionSelector(abi).toLowerCase() === selector;
 
     for (const [chainStr, addrs] of Object.entries(c2a)) {
       const chainId = Number(chainStr);
@@ -243,7 +250,8 @@ function collectManifestSurface(): {
             v.signedTypes.set(primaryType, arr);
             if (!protocolByKey.has(key)) protocolByKey.set(key, protocolOf(path));
           }
-        } else {
+        }
+        if (!isTypedData || hasConcreteOnchainSelector) {
           const key = ckey(chainId, addr);
           const v = get(key);
           const arr = v.onchainSelectors.get(selector) ?? [];

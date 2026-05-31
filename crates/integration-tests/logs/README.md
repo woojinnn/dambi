@@ -66,6 +66,9 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- \
 | hyperliquid | `hyperliquid/2026-05-30-etherscan.json` | 160 | 5+ | 2 (infra, out-of-scope) | 0 |
 | layerzero | `layerzero/2026-05-30-etherscan.json` | ~640 | * | ZRO ERC20(no token file) + claim overloads | 0 |
 | uniswapx | `uniswapx/2026-05-30-etherscan.json` | 160 | 0 | 3 (reactor execute → Tier B) | 0 |
+| registry-v2 | `registry-v2/2026-05-31-progress.json` | mixed | mixed | Scenario B/C/D kickoff + skipped ActionBody list | 0 fresh hard |
+
+**최신 synthetic sweep:** `_synthetic/2026-05-31-synthetic.json` — 2,410,000 probes, 2,183,381 pass, 226,619 soft, **0 fail / 0 panic**. `soft`는 synthesis/model-limit 분류이며, fresh hard decoder regression은 없었다.
 
 새 로그를 추가하면 이 표 한 줄을 갱신한다.
 

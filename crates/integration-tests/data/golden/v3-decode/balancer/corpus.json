@@ -1,5 +1,5 @@
 {
-  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Probe-verified same day: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0 (the ONLY covered fn). All other Vault fns are UNCOVERED -> soft no_declarative_v3_mapper, pinned here as expect=error to lock the gap; flip to expect=pass + expect_domain when the corresponding manifest lands. Uncovered fns + how to add: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback); exitPool 0x8bdb3913 & joinPool 0xb95cac28 (declarative single_emit - request tuple has positionally-paired assets[]/amounts[]); setRelayerApproval 0xfa6e671d (declarative single_emit - 3 scalar args, domain approval/token). Zero hard decoder failures in the entire 300-tx sample.",
+  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0. Remaining uncovered Vault fns are soft no_declarative_v3_mapper, pinned here as expect=error to lock the gap; flip to expect=pass + expect_domain when the corresponding manifest lands. Remaining fns + how to add: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback); exitPool 0x8bdb3913 & joinPool 0xb95cac28 (need dynamic array zip + userData enum-tag decode for faithful LP action). Zero hard decoder failures in the original 300-tx sample.",
   "transactions": [
     {
       "intent": "swap",
@@ -195,7 +195,7 @@
     },
     {
       "intent": "setRelayerApproval",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0xbc7bafd8f61b8720141288251739a87c803590feb41ae6056014268939379b31",
       "chain_id": 1,
       "rpc": {
@@ -207,11 +207,11 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "permission"
     },
     {
       "intent": "setRelayerApproval",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0x5a6256b75d28f606df2a6fa33dfa20ba4348c9f89dd4f9d6175b29397a4038e3",
       "chain_id": 42161,
       "rpc": {
@@ -223,7 +223,7 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "permission"
     }
   ]
 }

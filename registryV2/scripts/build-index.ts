@@ -836,6 +836,12 @@ async function main(): Promise<void> {
           };
           const fname = callkeyFilename(chainId, to, resolved.match.selector);
           const outPath = join(INDEX_BY_CALLKEY_DIR, fname);
+          if ("chain_to_addresses_source" in bundle.match && safeExists(outPath)) {
+            console.error(
+              `[build-index] WARN ${manifestPath}: sourced manifest skipped duplicate callkey ${fname}; keeping concrete protocol manifest`,
+            );
+            continue;
+          }
           writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
           totalCallkeys++;
         }

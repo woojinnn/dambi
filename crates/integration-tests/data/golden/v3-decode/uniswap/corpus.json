@@ -62,6 +62,54 @@
       }
     },
     {
+      "intent": "removeLiquidityWithPermit hand",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "source": "hand-encoded from Uniswap V2 Router02 verified ABI; selector surfaced by v2-router-02-mainnet coverage",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x7A250D5630B4CF539739DF2C5DACB4C659F2488D",
+            "value": "0",
+            "data": "0x2195995c000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000000000000000000000000000016345785d8a000000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000773594000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000001b11111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "removeLiquidityETHWithPermit hand",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "source": "hand-encoded from Uniswap V2 Router02 verified ABI; selector surfaced by v2-router-02-mainnet coverage",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x7A250D5630B4CF539739DF2C5DACB4C659F2488D",
+            "value": "0",
+            "data": "0xded9382a000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000016345785d8a0000000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000773594000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c33333333333333333333333333333333333333333333333333333333333333334444444444444444444444444444444444444444444444444444444444444444"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "removeLiquidityETHWithPermitSupportingFeeOnTransferTokens hand",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "source": "hand-encoded from Uniswap V2 Router02 verified ABI; selector surfaced by v2-router-02-mainnet coverage",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x7A250D5630B4CF539739DF2C5DACB4C659F2488D",
+            "value": "0",
+            "data": "0x5b0d5984000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000016345785d8a0000000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000773594000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000001b55555555555555555555555555555555555555555555555555555555555555556666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ]
+      }
+    },
+    {
       "intent": "mint",
       "expect": "pass",
       "tx_hash": "0x9294175BB1EAD1310D6906D7399704ECFC2736B057A86BB9E655A8E222EDA48B",
@@ -153,7 +201,7 @@
     },
     {
       "intent": "execute(bytes,bytes[],uint256) \u2014 UR v2 (0x66a9)",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0x36F4F2FF72F6CD63538C1EDD6BC37D185D66985EAD6B965FB3B61906883A3E34",
       "chain_id": 1,
       "rpc": {
@@ -165,8 +213,7 @@
           }
         ]
       },
-      "expect_error": "build_multicall_failed",
-      "_note": "UR V4 nested action-stream \u2014 DEFERRED (2026-05-30). Two non-contained decoder gaps: (1) inner V4 SWAP_EXACT_IN/OUT (0x07/0x09) inputs_abi carries PathKey[] nested-tuple-array ((address,uint24,int24,address,bytes)[]) which decode_inputs_abi_tuple's Function::parse synthetic-signature path cannot parse -> whole inner action degrades to Null -> '$inputs.currencyIn' missing. Fix = decode via DynSolType::parse per top-level component instead of Function::parse (shared helper, all opcode-stream manifests need regression). (2) SWAP_*_SINGLE (0x06/0x08) needs pool_id=keccak256(PoolKey) injected in nested ctx via maybe_inject_v4_pool_id (declarative_exports.rs:1699), currently only wired for modifyLiquidities MINT. Both exceed contained-fix bar; baseline stays expect:error."
+      "_note": "Fixed 2026-05-31: UR V4 nested decode handles V4Router single-struct params, ABI alternatives, PoolKey pool_id/hooks, and UR Permit2 tuple paths."
     },
     {
       "intent": "approve(address,address,uint160,uint48)",
@@ -247,6 +294,22 @@
       }
     },
     {
+      "intent": "Permit2.invalidateUnorderedNonces(uint256,uint256) hand",
+      "expect": "pass",
+      "expect_domain": "token",
+      "chain_id": 1,
+      "source": "hand-encoded from Permit2 surface ABI; bitmap nonce revocation",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+            "value": "0",
+            "data": "0x3ff9dcb10000000000000000000000000000000000000000000000000000000000000007000000000000000000000000000000000000000000000000000000000000000a"
+          }
+        ]
+      }
+    },
+    {
       "intent": "swapExactTokensForTokens (L2 Base spot-check \u2014 per-chain V2 Router02 address)",
       "expect": "pass",
       "tx_hash": "0xB35A641D0A6306D85DF98B20F98F5E8D4813DD8ACDFE5769ABCD65BDFFDECEB1",
@@ -263,7 +326,7 @@
     },
     {
       "intent": "execute(bytes,bytes[],uint256) (L2 Base spot-check \u2014 per-chain UR address)",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0xEB9775B65004640A77EE0792C4FE4E7A40E768D667350F68598046457A129431",
       "chain_id": 8453,
       "rpc": {
@@ -275,8 +338,7 @@
           }
         ]
       },
-      "expect_error": "build_multicall_failed",
-      "_note": "UR V4 nested action-stream \u2014 DEFERRED (2026-05-30). Two non-contained decoder gaps: (1) inner V4 SWAP_EXACT_IN/OUT (0x07/0x09) inputs_abi carries PathKey[] nested-tuple-array ((address,uint24,int24,address,bytes)[]) which decode_inputs_abi_tuple's Function::parse synthetic-signature path cannot parse -> whole inner action degrades to Null -> '$inputs.currencyIn' missing. Fix = decode via DynSolType::parse per top-level component instead of Function::parse (shared helper, all opcode-stream manifests need regression). (2) SWAP_*_SINGLE (0x06/0x08) needs pool_id=keccak256(PoolKey) injected in nested ctx via maybe_inject_v4_pool_id (declarative_exports.rs:1699), currently only wired for modifyLiquidities MINT. Both exceed contained-fix bar; baseline stays expect:error."
+      "_note": "Fixed 2026-05-31: UR V4 nested decode handles V4Router single-struct params, ABI alternatives, PoolKey pool_id/hooks, and UR Permit2 tuple paths."
     },
     {
       "intent": "swapExactTokensForTokens (L2 Arbitrum spot-check \u2014 per-chain V2 Router02 address)",
@@ -442,8 +504,7 @@
     },
     {
       "intent": "UniversalRouter.execute(bytes,bytes[],uint256) V4-nested [0x3593564c] (mainnet, command contains 0x10/0x11/0x21)",
-      "expect": "error",
-      "expect_error": "build_multicall_failed",
+      "expect": "pass",
       "tx_hash": "0x321da6717285564809cbf73e652c731470a2c8b74a6c606ea277db140989fd17",
       "chain_id": 1,
       "rpc": {
@@ -455,7 +516,7 @@
           }
         ]
       },
-      "_note": "UR V4 nested action-stream \u2014 DEFERRED (2026-05-30). Two non-contained decoder gaps: (1) inner V4 SWAP_EXACT_IN/OUT (0x07/0x09) inputs_abi carries PathKey[] nested-tuple-array ((address,uint24,int24,address,bytes)[]) which decode_inputs_abi_tuple's Function::parse synthetic-signature path cannot parse -> whole inner action degrades to Null -> '$inputs.currencyIn' missing. Fix = decode via DynSolType::parse per top-level component instead of Function::parse (shared helper, all opcode-stream manifests need regression). (2) SWAP_*_SINGLE (0x06/0x08) needs pool_id=keccak256(PoolKey) injected in nested ctx via maybe_inject_v4_pool_id (declarative_exports.rs:1699), currently only wired for modifyLiquidities MINT. Both exceed contained-fix bar; baseline stays expect:error."
+      "_note": "Fixed 2026-05-31: UR V4 nested decode handles V4Router single-struct params, ABI alternatives, PoolKey pool_id/hooks, and UR Permit2 tuple paths."
     }
   ]
 }

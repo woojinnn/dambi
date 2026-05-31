@@ -874,6 +874,169 @@ fn t6_array_emit_non_array_source_errors() {
 // the correct action tag, the load-bearing `$args` fields, and a representative
 // defaulted `live_inputs` value).
 
+const AAVE_V3_VARIABLE_DEBT_USDC_APPROVE_DELEGATION: &str = include_str!(
+    "../../../registryV2/manifests/aave/v3/variable-debt-usdc-approve-delegation@1.0.0.json"
+);
+const AAVE_V3_VARIABLE_DEBT_USDC_DELEGATION_WITH_SIG: &str = include_str!(
+    "../../../registryV2/manifests/aave/v3/variable-debt-usdc-delegation-with-sig@1.0.0.json"
+);
+
+#[test]
+fn t6_aave_variable_debt_usdc_approve_delegation() {
+    let install = install_ok(AAVE_V3_VARIABLE_DEBT_USDC_APPROVE_DELEGATION);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "aave/v3/variableDebtUSDC/approveDelegation@1.0.0"
+    );
+
+    let calldata = encode_calldata(
+        "0xc04a8a10",
+        &[
+            DynSolValue::Address(
+                "0x000000000000000000000000000000000000d1e9"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            DynSolValue::Uint(AlloyU256::from(2_500_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x72e95b8931767c79ba4eee721354d6e99a61d004",
+        "0xc04a8a10",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "lending", "{parsed}");
+    assert_eq!(body["action"], "delegate_borrow", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aave_v3", "{parsed}");
+    assert_eq!(
+        body["venue"]["pool"], "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["asset"]["key"]["address"], "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["delegatee"], "0x000000000000000000000000000000000000d1e9",
+        "{parsed}"
+    );
+    assert_eq!(body["amount"], "0x2625a0", "{parsed}");
+    assert_eq!(body["rate_mode"], "variable", "{parsed}");
+}
+
+#[test]
+fn t6_aave_variable_debt_usdc_delegation_with_sig_calldata() {
+    let install = install_ok(AAVE_V3_VARIABLE_DEBT_USDC_DELEGATION_WITH_SIG);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "aave/v3/variableDebtUSDC/delegationWithSig@1.0.0"
+    );
+
+    let calldata = encode_calldata(
+        "0x0b52d558",
+        &[
+            DynSolValue::Address(
+                "0x000000000000000000000000000000000000b0b0"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            DynSolValue::Address(
+                "0x000000000000000000000000000000000000d1e9"
+                    .parse::<AlloyAddress>()
+                    .unwrap(),
+            ),
+            DynSolValue::Uint(AlloyU256::from(2_500_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(2_000_000_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(27u64), 8),
+            DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0x11), 32),
+            DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0x22), 32),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x72e95b8931767c79ba4eee721354d6e99a61d004",
+        "0x0b52d558",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "lending", "{parsed}");
+    assert_eq!(body["action"], "delegate_borrow", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aave_v3", "{parsed}");
+    assert_eq!(
+        body["asset"]["key"]["address"], "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["delegatee"], "0x000000000000000000000000000000000000d1e9",
+        "{parsed}"
+    );
+    assert_eq!(body["amount"], "0x2625a0", "{parsed}");
+    assert_eq!(body["rate_mode"], "variable", "{parsed}");
+}
+
+#[test]
+fn t6_aave_variable_debt_usdc_delegation_with_sig_typed_data() {
+    install_ok(AAVE_V3_VARIABLE_DEBT_USDC_DELEGATION_WITH_SIG);
+
+    let input = json!({
+        "chain_id": 1,
+        "verifying_contract": "0x72e95b8931767c79ba4eee721354d6e99a61d004",
+        "primary_type": "DelegationWithSig",
+        "domain_name": "Aave Ethereum Variable Debt USDC",
+        "message": {
+            "delegatee": "0x000000000000000000000000000000000000d1e9",
+            "value": "2500000",
+            "nonce": "7",
+            "deadline": "2000000000"
+        },
+        "submitter": "0x000000000000000000000000000000000000b0b0",
+        "submitted_at": 1_700_000_000_u64
+    })
+    .to_string();
+
+    let out = declarative_route_typed_data_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "typed-data route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "aave/v3/variableDebtUSDC/delegationWithSig@1.0.0",
+        "{parsed}"
+    );
+
+    let action = &parsed["data"]["actions"][0];
+    assert_eq!(action["meta"]["nature"]["kind"], "offchain_sig", "{parsed}");
+    assert_eq!(
+        action["meta"]["nature"]["domain"]["name"], "Aave Ethereum Variable Debt USDC",
+        "{parsed}"
+    );
+    assert_eq!(
+        action["meta"]["nature"]["deadline"], 2_000_000_000_u64,
+        "{parsed}"
+    );
+
+    let body = &action["body"];
+    assert_eq!(body["domain"], "lending", "{parsed}");
+    assert_eq!(body["action"], "delegate_borrow", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aave_v3", "{parsed}");
+    assert_eq!(
+        body["asset"]["key"]["address"], "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["delegatee"], "0x000000000000000000000000000000000000d1e9",
+        "{parsed}"
+    );
+    assert_eq!(body["amount"], "0x2625a0", "{parsed}");
+    assert_eq!(body["rate_mode"], "variable", "{parsed}");
+}
+
 // ---------------------------------------------------------------------------
 // t7 — Aave V3 liquidationCall → LendingAction::Liquidate
 // ---------------------------------------------------------------------------
@@ -1935,10 +2098,9 @@ fn t15_aave_set_user_use_reserve_as_collateral_action_value_map() {
 // THREE source-grounded mapping facts (distinct from the on-chain Pool calls):
 //   1. The leading `address` param is IGNORED by the contract — every body uses
 //      the immutable `POOL` state var, NOT the calldata arg. `venue.pool` (and
-//      the live_input `source.contract`) therefore bind `$resolved.pool` (a
-//      registered Address placeholder; Sync fills the real per-chain Pool, so it
-//      resolves to the zero-address placeholder on this narrow-scope route path)
-//      — NOT `$args.pool` (the ignored dummy) and NOT `$to` (the WTG, not the
+//      the live_input `source.contract`) therefore bind `$resolved.pool`, which
+//      route_request pre-populates from the known gateway target + chain. It is
+//      NOT `$args.pool` (the ignored dummy) and NOT `$to` (the WTG, not the
 //      Pool).
 //   2. The asset is ALWAYS WETH — `$resolved.weth` (also zero-address placeholder
 //      here). There is no asset arg.
@@ -1954,15 +2116,11 @@ fn t15_aave_set_user_use_reserve_as_collateral_action_value_map() {
 // `live_input_default` skeletons.
 
 const WTG_MAINNET: &str = "0xd01607c3c5ecaba394d8be377a08590149325722";
-const ADDR_ZERO: &str = "0x0000000000000000000000000000000000000000";
-// `$resolved.weth` IS pre-populated by the route handler (declarative_exports
-// `route_request` chain→WETH map) — mainnet 1 → canonical WETH9. So the WETH
-// asset substitutes the REAL address on the route path (NOT a zero
-// placeholder). `$resolved.pool`, by contrast, is NOT pre-populated (the Sync
-// orchestrator fills it later) → it falls through to the Address-typed zero
-// placeholder. These two assertions together prove the watch-point resolution:
-// asset = real WETH, venue.pool = $resolved.pool (zero until Sync wires it).
+// `$resolved.weth` and `$resolved.pool` are both pre-populated by the route
+// handler for this gateway path. The pool comes from the verified gateway
+// deployment, not from the ignored calldata address.
 const WETH_MAINNET: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+const AAVE_POOL_MAINNET: &str = "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2";
 
 // ---------------------------------------------------------------------------
 // t16 — WTG depositETH → LendingAction::Supply (amount = $tx.value)
@@ -2057,9 +2215,7 @@ fn t16_aave_deposit_eth() {
     assert_eq!(body["domain"], "lending");
     assert_eq!(body["action"], "supply");
     assert_eq!(body["venue"]["name"], "aave_v3");
-    // pool/asset bind `$resolved.{pool,weth}` → zero-address placeholder on the
-    // route path (Sync orchestrator not wired here).
-    assert_eq!(body["venue"]["pool"], ADDR_ZERO);
+    assert_eq!(body["venue"]["pool"], AAVE_POOL_MAINNET);
     assert_eq!(body["asset"]["key"]["address"], WETH_MAINNET);
     // amount = $tx.value (1 ETH). U256 round-trips as a hex string via alloy.
     assert_eq!(body["amount"], "0xde0b6b3a7640000"); // 1e18
@@ -2163,7 +2319,7 @@ fn t17_aave_withdraw_eth() {
     assert_eq!(body["domain"], "lending");
     assert_eq!(body["action"], "withdraw");
     assert_eq!(body["venue"]["name"], "aave_v3");
-    assert_eq!(body["venue"]["pool"], ADDR_ZERO);
+    assert_eq!(body["venue"]["pool"], AAVE_POOL_MAINNET);
     assert_eq!(body["asset"]["key"]["address"], WETH_MAINNET);
     // amount: U256 round-trips as a hex string via alloy.
     assert_eq!(body["amount"], "0x7a120"); // 500_000
@@ -2260,7 +2416,7 @@ fn t18_aave_borrow_eth() {
     assert_eq!(body["domain"], "lending");
     assert_eq!(body["action"], "borrow");
     assert_eq!(body["venue"]["name"], "aave_v3");
-    assert_eq!(body["venue"]["pool"], ADDR_ZERO);
+    assert_eq!(body["venue"]["pool"], AAVE_POOL_MAINNET);
     assert_eq!(body["asset"]["key"]["address"], WETH_MAINNET);
     // amount: U256 round-trips as a hex string via alloy.
     assert_eq!(body["amount"], "0x2dc6c0"); // 3_000_000
@@ -2370,7 +2526,7 @@ fn t19_aave_repay_eth() {
     assert_eq!(body["domain"], "lending");
     assert_eq!(body["action"], "repay");
     assert_eq!(body["venue"]["name"], "aave_v3");
-    assert_eq!(body["venue"]["pool"], ADDR_ZERO);
+    assert_eq!(body["venue"]["pool"], AAVE_POOL_MAINNET);
     assert_eq!(body["asset"]["key"]["address"], WETH_MAINNET);
     // amount comes from the calldata arg, NOT $tx.value.
     assert_eq!(body["amount"], "0x1312d0"); // 1_250_000
@@ -4127,20 +4283,20 @@ fn t2_uniswapx_priority_sign_intent_order() {
 }
 
 // ---------------------------------------------------------------------------
-// T2.5 — cancel: Permit2 invalidateUnorderedNonces CALLDATA → cancel_intent_order
+// T2.5 — Permit2 invalidateUnorderedNonces CALLDATA → revoke_approval
 // ---------------------------------------------------------------------------
 //
 // Cancellation is an on-chain Permit2 `invalidateUnorderedNonces(uint256,uint256)`
-// call (selector 0x3ff9dcb1), NOT a typed-data signature. Permit2-nonce-word
-// granular (not per-order): venue.reactor = $to (Permit2, venue-agnostic
-// placeholder), order_hash = $args.wordPos (the invalidated nonce word, not a
-// real 32-byte order hash). Calldata path → named `$args.wordPos` access.
+// call (selector 0x3ff9dcb1), NOT a typed-data signature. This is Permit2
+// nonce-word granular, not per-order, so the token-domain revoke scope carries
+// the bitmap coordinates directly.
 
-const T2_CANCEL_V3: &str =
-    include_str!("../../../registryV2/manifests/uniswapx/cancel-order/cancel@1.0.0.json");
+const T2_CANCEL_V3: &str = include_str!(
+    "../../../registryV2/manifests/uniswap/permit2/invalidateUnorderedNonces@1.0.0.json"
+);
 
 #[test]
-fn t2_uniswapx_cancel_invalidate_unordered_nonces() {
+fn t2_permit2_invalidate_unordered_nonces() {
     install_ok(T2_CANCEL_V3);
 
     // invalidateUnorderedNonces(uint256 wordPos, uint256 mask).
@@ -4154,22 +4310,17 @@ fn t2_uniswapx_cancel_invalidate_unordered_nonces() {
     let input = route_input(1, PERMIT2_VC, "0x3ff9dcb1", calldata, T1_SIGNER);
     let parsed = route_ok(input);
     assert_eq!(
-        parsed["data"]["decoder_id"], "uniswapx/cancel-order/cancel@1.0.0",
+        parsed["data"]["decoder_id"], "uniswap/permit2/invalidateUnorderedNonces@1.0.0",
         "{parsed}"
     );
 
     let body = &parsed["data"]["actions"][0]["body"];
-    assert_eq!(body["domain"], "amm", "{parsed}");
-    assert_eq!(body["action"], "cancel_intent_order", "{parsed}");
-    assert_eq!(body["venue"]["name"], "uniswap_x", "{parsed}");
-    // reactor = $to (Permit2, lowercased).
-    assert_eq!(body["venue"]["reactor"], PERMIT2_VC, "{parsed}");
-    assert_eq!(body["venue"]["chain"], "eip155:1", "{parsed}");
-    // order_hash = $args.wordPos. CancelIntentOrderAction.order_hash is a
-    // String; a uint256 arg renders as a DECIMAL string ("7"), not hex.
-    assert_eq!(body["order_hash"], "7", "{parsed}");
-    // signature omitted (None) → absent from the body.
-    assert!(body.get("signature").is_none(), "{parsed}");
+    assert_eq!(body["domain"], "token", "{parsed}");
+    assert_eq!(body["action"], "revoke_approval", "{parsed}");
+    assert_eq!(body["scope"]["kind"], "permit2_unordered_nonce", "{parsed}");
+    assert_eq!(body["scope"]["chain"], "eip155:1", "{parsed}");
+    assert_eq!(body["scope"]["word_pos"], "0x7", "{parsed}");
+    assert_eq!(body["scope"]["mask"], "0xa", "{parsed}");
 }
 
 // ---------------------------------------------------------------------------
@@ -6187,19 +6338,14 @@ fn b3_corewriter_bad_version_default_unknown() {
 // STRING ("100.0", not U256); `token`/`destination` are L1 STRING identifiers
 // (not EVM address / U256).
 //
-// MAPPING DECISION (frozen): the 8-domain ActionBody cannot faithfully hold a
-// decimal-string amount + L1-string token/destination, so a `token.erc20_transfer`
-// mapping would be a MISLABEL (amount→0, token→0x0 = DATA LOSS). All 12 route to
-// best-effort `ActionBody::Unknown` instead — `target=0x0` sentinel (off-chain
-// sign has no contract target), `chain=$chain`, `calldata="0x"` (sigs have no
-// calldata), `value="0"`. The WIN is ROUTING (the user signing a HyperLiquid
-// op gets "recognized: <op> signature" instead of `no_adapter`); the STRUCTURED
-// representation (destination/amount/token) requires a NEW off-chain-exchange
-// ActionBody variant = DEFERRED schema enhancement (the key b3 limitation, OUT
-// OF SCOPE). These tests pin the on-disk manifests (`include_str!`) and route a
-// representative payload for a few primaryTypes covering the field variety
-// (string destination + decimal amount / validator address + uint64 wei + bool /
-// agent address / spot `token`).
+// MAPPING DECISION: transfer/delegation payloads whose semantics are
+// HyperLiquid L1 strings / decimal strings still route to best-effort
+// `ActionBody::Unknown`; mapping those into token transfers would be a MISLABEL.
+// Permission primitives with plain EVM addresses (`ApproveAgent`,
+// `ApproveBuilderFee`) map to Permission::ProtocolAuthorization so policy can
+// distinguish them from opaque L1 money movement. These tests pin the on-disk
+// manifests (`include_str!`) and route representative payloads covering both
+// paths.
 
 const HL_REST_USD_SEND: &str =
     include_str!("../../../registryV2/manifests/hyperliquid/rest/usd-send@1.0.0.json");
@@ -6209,6 +6355,8 @@ const HL_REST_TOKEN_DELEGATE: &str =
     include_str!("../../../registryV2/manifests/hyperliquid/rest/token-delegate@1.0.0.json");
 const HL_REST_APPROVE_AGENT: &str =
     include_str!("../../../registryV2/manifests/hyperliquid/rest/approve-agent@1.0.0.json");
+const HL_REST_APPROVE_BUILDER_FEE: &str =
+    include_str!("../../../registryV2/manifests/hyperliquid/rest/approve-builder-fee@1.0.0.json");
 
 const HL_VC_ZERO: &str = "0x0000000000000000000000000000000000000000";
 const HL_DOMAIN: &str = "HyperliquidSignTransaction";
@@ -6306,12 +6454,12 @@ fn b3_hl_token_delegate_routes_to_unknown() {
     assert_hl_best_effort_unknown(&parsed, "hyperliquid/rest/token-delegate@1.0.0", HL_MAINNET);
 }
 
-// b3.approveAgent — agentAddress:address. D9: SDK hard-codes the TESTNET
-// signatureChainId 0x66eee (421614) for ApproveAgent; mainnet 42161 is assumed
-// valid and listed too — this test routes on 42161 to prove the mainnet entry
-// is installed and resolves.
+// b3.approveAgent — agentAddress:address maps to protocol permission. D9: SDK
+// hard-codes the TESTNET signatureChainId 0x66eee (421614) for ApproveAgent;
+// mainnet 42161 is assumed valid and listed too — this test routes on 42161 to
+// prove the mainnet entry is installed and resolves.
 #[test]
-fn b3_hl_approve_agent_routes_to_unknown() {
+fn b3_hl_approve_agent_routes_to_permission() {
     let install = install_ok(HL_REST_APPROVE_AGENT);
     assert_eq!(
         install["data"]["bundle_id"],
@@ -6328,7 +6476,86 @@ fn b3_hl_approve_agent_routes_to_unknown() {
 
     let out = declarative_route_typed_data_v3_json(input);
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    assert_hl_best_effort_unknown(&parsed, "hyperliquid/rest/approve-agent@1.0.0", HL_MAINNET);
+    assert_eq!(parsed["ok"], true, "route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "hyperliquid/rest/approve-agent@1.0.0",
+        "{parsed}"
+    );
+
+    let action = &parsed["data"]["actions"][0];
+    assert_eq!(action["meta"]["nature"]["kind"], "offchain_sig", "{parsed}");
+    assert_eq!(
+        action["meta"]["nature"]["domain"]["name"], HL_DOMAIN,
+        "{parsed}"
+    );
+
+    let body = &action["body"];
+    assert_eq!(body["domain"], "permission", "{parsed}");
+    assert_eq!(body["action"], "protocol_authorization", "{parsed}");
+    assert_eq!(body["chain"], format!("eip155:{HL_MAINNET}"), "{parsed}");
+    assert_eq!(body["protocol"], HL_VC_ZERO, "{parsed}");
+    assert_eq!(body["protocol_name"], "hyperliquid", "{parsed}");
+    assert_eq!(body["permission"], "agent", "{parsed}");
+    assert_eq!(body["permission_label"], "my-api-agent", "{parsed}");
+    assert_eq!(body["authorizer"], HL_SIGNER, "{parsed}");
+    assert_eq!(
+        body["authorized"], "0x00000000000000000000000000000000a9e47a9e",
+        "{parsed}"
+    );
+    assert_eq!(body["is_authorized"], true, "{parsed}");
+}
+
+// b3.approveBuilderFee — builder:address + maxFeeRate:string maps to protocol
+// permission with the protocol-native limit retained as a string.
+#[test]
+fn b3_hl_approve_builder_fee_routes_to_permission() {
+    let install = install_ok(HL_REST_APPROVE_BUILDER_FEE);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "hyperliquid/rest/approve-builder-fee@1.0.0"
+    );
+
+    let message = json!({
+        "hyperliquidChain": "Mainnet",
+        "maxFeeRate": "0.001%",
+        "builder": "0x00000000000000000000000000000000b171d3c0",
+        "nonce": 1_700_000_000_u64
+    });
+    let input = hl_typed_data_input(
+        HL_MAINNET,
+        "HyperliquidTransaction:ApproveBuilderFee",
+        message,
+    );
+
+    let out = declarative_route_typed_data_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "hyperliquid/rest/approve-builder-fee@1.0.0",
+        "{parsed}"
+    );
+
+    let action = &parsed["data"]["actions"][0];
+    assert_eq!(action["meta"]["nature"]["kind"], "offchain_sig", "{parsed}");
+    assert_eq!(
+        action["meta"]["nature"]["domain"]["name"], HL_DOMAIN,
+        "{parsed}"
+    );
+
+    let body = &action["body"];
+    assert_eq!(body["domain"], "permission", "{parsed}");
+    assert_eq!(body["action"], "protocol_authorization", "{parsed}");
+    assert_eq!(body["chain"], format!("eip155:{HL_MAINNET}"), "{parsed}");
+    assert_eq!(body["protocol"], HL_VC_ZERO, "{parsed}");
+    assert_eq!(body["protocol_name"], "hyperliquid", "{parsed}");
+    assert_eq!(body["permission"], "builder_fee", "{parsed}");
+    assert_eq!(body["permission_limit"], "0.001%", "{parsed}");
+    assert_eq!(body["authorizer"], HL_SIGNER, "{parsed}");
+    assert_eq!(
+        body["authorized"], "0x00000000000000000000000000000000b171d3c0",
+        "{parsed}"
+    );
+    assert_eq!(body["is_authorized"], true, "{parsed}");
 }
 
 // b3.spotSend — adds an L1 `token` string. Also exercises the TESTNET chain

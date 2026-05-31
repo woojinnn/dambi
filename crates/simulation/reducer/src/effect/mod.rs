@@ -18,5 +18,6 @@ pub mod amm;
 pub mod launchpad;
 pub mod lending;
 pub mod liquid_staking;
+pub mod permission;
 pub mod perp;
 pub mod token;

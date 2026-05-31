@@ -1,5 +1,5 @@
 {
-  "_comment": "Aave V3 real-tx corpus. Source: Etherscan v2 txlist 2026-05-30, free key (only chain 1 + 42161 accessible). chain1 Pool 0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2 + chain1 WrappedTokenGatewayV3 0xd01607c3c5ecaba394d8be377a08590149325722 + chain42161 Pool 0x794a61358d6845594f94dc1db02a252b5b4814ad. Covered verbose-ABI selectors expect pass/lending. L2Pool packed-args (bytes32 CalldataLogic) selectors expect error/no_declarative_v3_mapper \u2014 manifest gap; asset is uint16 reserve-index not address, needs onchain getReserveAddressById + bit-field strategy.",
+  "_comment": "Aave V3 real-tx corpus. Source: Etherscan v2 txlist 2026-05-30, free key (only chain 1 + 42161 accessible). chain1 Pool 0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2 + chain1 WrappedTokenGatewayV3 0xd01607c3c5ecaba394d8be377a08590149325722 + chain42161 Pool 0x794a61358d6845594f94dc1db02a252b5b4814ad. Covered verbose-ABI selectors expect pass/lending. L2Pool packed-args (bytes32 CalldataLogic) selectors expect error/no_declarative_v3_mapper - manifest gap; asset is uint16 reserve-index not address, needs onchain getReserveAddressById + bit-field strategy. Hand fixtures cover Sourcify-verified WrappedTokenGateway withdrawETHWithPermit and official Aave v3-core debt-token credit-delegation signature paths not observed in the sampled txlist.",
   "transactions": [
     {
       "intent": "setUserEMode",
@@ -557,6 +557,450 @@
             "to": "0x794a61358d6845594f94dc1db02a252b5b4814ad",
             "value": "0",
             "data": "0x69328dec000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000059ae811b43db8a889123658fba6913c8f4e0868"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "withdrawETHWithPermit-hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified WrappedTokenGateway ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xd01607c3c5ecaba394d8be377a08590149325722",
+            "value": "0",
+            "data": "0xd4c40b6c00000000000000000000000087870bca3f3fd6335c3f4ce8392d69350b4fa4e2000000000000000000000000000000000000000000000000000000000000000500000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000007000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtUSDC.delegationWithSig calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from official Aave v3-core ICreditDelegationToken ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x72e95b8931767c79ba4eee721354d6e99a61d004",
+            "value": "0",
+            "data": "0x0b52d558000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a00000000000000000000000000000000000000000000000000000000077359400000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000110000000000000000000000000000000000000000000000000000000000000022"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtUSDC.renounceDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x72e95b8931767c79ba4eee721354d6e99a61d004",
+            "value": "0",
+            "data": "0x91fb372d000000000000000000000000000000000000000000000000000000000000b0b0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtUSDC DelegationWithSig typed-data hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand EIP-712 fixture from official Aave DebtTokenBase DelegationWithSig typehash",
+      "typed_data": {
+        "verifying_contract": "0x72e95b8931767c79ba4eee721354d6e99a61d004",
+        "primary_type": "DelegationWithSig",
+        "domain_name": "Aave Ethereum Variable Debt USDC",
+        "message": {
+          "delegatee": "0x000000000000000000000000000000000000d1e9",
+          "value": "2500000",
+          "nonce": "7",
+          "deadline": "2000000000"
+        }
+      }
+    },
+    {
+      "intent": "variableDebtDAI.approveDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xcf8d0c70c850859266f5c338b38f9d663181c314",
+            "value": "0",
+            "data": "0xc04a8a10000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtDAI.delegationWithSig calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xcf8d0c70c850859266f5c338b38f9d663181c314",
+            "value": "0",
+            "data": "0x0b52d558000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a00000000000000000000000000000000000000000000000000000000077359400000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000110000000000000000000000000000000000000000000000000000000000000022"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtDAI.renounceDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xcf8d0c70c850859266f5c338b38f9d663181c314",
+            "value": "0",
+            "data": "0x91fb372d000000000000000000000000000000000000000000000000000000000000b0b0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtDAI DelegationWithSig typed-data hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand EIP-712 fixture from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "typed_data": {
+        "verifying_contract": "0xcf8d0c70c850859266f5c338b38f9d663181c314",
+        "primary_type": "DelegationWithSig",
+        "domain_name": "Aave Ethereum Variable Debt DAI",
+        "message": {
+          "delegatee": "0x000000000000000000000000000000000000d1e9",
+          "value": "2500000",
+          "nonce": "7",
+          "deadline": "2000000000"
+        }
+      }
+    },
+    {
+      "intent": "variableDebtUSDT.approveDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x6df1c1e379bc5a00a7b4c6e67a203333772f45a8",
+            "value": "0",
+            "data": "0xc04a8a10000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtUSDT.delegationWithSig calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x6df1c1e379bc5a00a7b4c6e67a203333772f45a8",
+            "value": "0",
+            "data": "0x0b52d558000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a00000000000000000000000000000000000000000000000000000000077359400000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000110000000000000000000000000000000000000000000000000000000000000022"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtUSDT.renounceDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x6df1c1e379bc5a00a7b4c6e67a203333772f45a8",
+            "value": "0",
+            "data": "0x91fb372d000000000000000000000000000000000000000000000000000000000000b0b0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtUSDT DelegationWithSig typed-data hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand EIP-712 fixture from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "typed_data": {
+        "verifying_contract": "0x6df1c1e379bc5a00a7b4c6e67a203333772f45a8",
+        "primary_type": "DelegationWithSig",
+        "domain_name": "Aave Ethereum Variable Debt USDT",
+        "message": {
+          "delegatee": "0x000000000000000000000000000000000000d1e9",
+          "value": "2500000",
+          "nonce": "7",
+          "deadline": "2000000000"
+        }
+      }
+    },
+    {
+      "intent": "variableDebtWBTC.approveDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x40aabef1aa8f0eec637e0e7d92fbffb2f26a8b7b",
+            "value": "0",
+            "data": "0xc04a8a10000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtWBTC.delegationWithSig calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x40aabef1aa8f0eec637e0e7d92fbffb2f26a8b7b",
+            "value": "0",
+            "data": "0x0b52d558000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a00000000000000000000000000000000000000000000000000000000077359400000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000110000000000000000000000000000000000000000000000000000000000000022"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtWBTC.renounceDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x40aabef1aa8f0eec637e0e7d92fbffb2f26a8b7b",
+            "value": "0",
+            "data": "0x91fb372d000000000000000000000000000000000000000000000000000000000000b0b0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtWBTC DelegationWithSig typed-data hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand EIP-712 fixture from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "typed_data": {
+        "verifying_contract": "0x40aabef1aa8f0eec637e0e7d92fbffb2f26a8b7b",
+        "primary_type": "DelegationWithSig",
+        "domain_name": "Aave Ethereum Variable Debt WBTC",
+        "message": {
+          "delegatee": "0x000000000000000000000000000000000000d1e9",
+          "value": "2500000",
+          "nonce": "7",
+          "deadline": "2000000000"
+        }
+      }
+    },
+    {
+      "intent": "variableDebtLINK.approveDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x4228f8895c7dda20227f6a5c6751b8ebf19a6ba8",
+            "value": "0",
+            "data": "0xc04a8a10000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtLINK.delegationWithSig calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x4228f8895c7dda20227f6a5c6751b8ebf19a6ba8",
+            "value": "0",
+            "data": "0x0b52d558000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a00000000000000000000000000000000000000000000000000000000077359400000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000110000000000000000000000000000000000000000000000000000000000000022"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtLINK.renounceDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x4228f8895c7dda20227f6a5c6751b8ebf19a6ba8",
+            "value": "0",
+            "data": "0x91fb372d000000000000000000000000000000000000000000000000000000000000b0b0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtLINK DelegationWithSig typed-data hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand EIP-712 fixture from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "typed_data": {
+        "verifying_contract": "0x4228f8895c7dda20227f6a5c6751b8ebf19a6ba8",
+        "primary_type": "DelegationWithSig",
+        "domain_name": "Aave Ethereum Variable Debt LINK",
+        "message": {
+          "delegatee": "0x000000000000000000000000000000000000d1e9",
+          "value": "2500000",
+          "nonce": "7",
+          "deadline": "2000000000"
+        }
+      }
+    },
+    {
+      "intent": "variableDebtwstETH.approveDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xc96113eed8cab59cd8a66813bcb0ceb29f06d2e4",
+            "value": "0",
+            "data": "0xc04a8a10000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtwstETH.delegationWithSig calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xc96113eed8cab59cd8a66813bcb0ceb29f06d2e4",
+            "value": "0",
+            "data": "0x0b52d558000000000000000000000000000000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000d1e900000000000000000000000000000000000000000000000000000000002625a00000000000000000000000000000000000000000000000000000000077359400000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000110000000000000000000000000000000000000000000000000000000000000022"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtwstETH.renounceDelegation calldata hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand-encoded from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xc96113eed8cab59cd8a66813bcb0ceb29f06d2e4",
+            "value": "0",
+            "data": "0x91fb372d000000000000000000000000000000000000000000000000000000000000b0b0"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "variableDebtwstETH DelegationWithSig typed-data hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 1,
+      "source": "hand EIP-712 fixture from Sourcify verified Aave VariableDebtTokenInstance ABI",
+      "typed_data": {
+        "verifying_contract": "0xc96113eed8cab59cd8a66813bcb0ceb29f06d2e4",
+        "primary_type": "DelegationWithSig",
+        "domain_name": "Aave Ethereum Variable Debt wstETH",
+        "message": {
+          "delegatee": "0x000000000000000000000000000000000000d1e9",
+          "value": "2500000",
+          "nonce": "7",
+          "deadline": "2000000000"
+        }
+      }
+    },
+    {
+      "intent": "depositETH Optimism Gateway hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 10,
+      "source": "hand-encoded from Sourcify verified Aave V3 WrappedTokenGateway ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x5f2508cae9923b02316254026cd43d7902866725",
+            "value": "1000000000000000",
+            "data": "0x474cf53d000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "depositETH Base Gateway hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 8453,
+      "source": "hand-encoded from Sourcify verified Aave V3 WrappedTokenGateway ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xa0d9c1e9e48ca30c8d8c3b5d69ff5dc1f6dffc24",
+            "value": "2000000000000000",
+            "data": "0x474cf53d000000000000000000000000a238dd80c259a72e81d7e4664a9801593f98d1c500000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "depositETH Arbitrum Gateway hand",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "chain_id": 42161,
+      "source": "hand-encoded from Sourcify verified Aave V3 WrappedTokenGateway ABI",
+      "rpc": {
+        "params": [
+          {
+            "to": "0x5283beced7adf6d003225c13896e536f2d4264ff",
+            "value": "3000000000000000",
+            "data": "0x474cf53d000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000000"
           }
         ]
       }

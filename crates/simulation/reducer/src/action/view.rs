@@ -20,7 +20,7 @@ impl ActionBody {
     /// the `serde` discriminants the corresponding JSON would carry, so a policy
     /// trigger can match them against raw field values without re-serializing.
     #[must_use]
-    pub const fn view(&self) -> ActionView<'_> {
+    pub fn view(&self) -> ActionView<'_> {
         match self {
             Self::Token(a) => ActionView {
                 domain: "token",
@@ -57,6 +57,11 @@ impl ActionBody {
                 action_tag: Some(a.action_tag()),
                 venue_name: a.venue_name(),
             },
+            Self::Permission(a) => ActionView {
+                domain: "permission",
+                action_tag: Some(a.action_tag()),
+                venue_name: a.venue_name(),
+            },
             Self::Multicall { .. } => ActionView {
                 domain: "multicall",
                 action_tag: None,
@@ -75,7 +80,7 @@ impl ActionBody {
 #[allow(clippy::too_many_lines)]
 mod tests {
     use super::*;
-    use crate::action::{amm, lending, perp, token, AirdropAction, LaunchpadAction};
+    use crate::action::{amm, lending, permission, perp, token, AirdropAction, LaunchpadAction};
 
     use simulation_state::primitives::{Address, ChainId, U256};
     use simulation_state::token::TokenKey;
@@ -550,6 +555,7 @@ mod tests {
                     market_id: None,
                 },
                 category_id: 1,
+                on_behalf_of: None,
                 live_inputs: lending::SetEModeLiveInputs {
                     category_config: simulation_state::LiveField::new(
                         lending::EModeConfig {
@@ -584,6 +590,26 @@ mod tests {
             "serde must emit set_e_mode (underscore before E and M)"
         );
         assert_action_tag(&set_emode);
+
+        let permission =
+            ActionBody::Permission(permission::PermissionAction::ProtocolAuthorization(
+                permission::ProtocolAuthorizationAction {
+                    chain: ChainId::ethereum_mainnet(),
+                    protocol: any,
+                    protocol_name: "balancer_v2".into(),
+                    permission: permission::ProtocolPermissionKind::Relayer,
+                    permission_label: None,
+                    permission_limit: None,
+                    authorizer: Some(any),
+                    authorized: any,
+                    is_authorized: true,
+                },
+            ));
+        let permission_view = permission.view();
+        assert_eq!(permission_view.domain, "permission");
+        assert_eq!(permission_view.action_tag, Some("protocol_authorization"));
+        assert_eq!(permission_view.venue_name, Some("balancer_v2"));
+        assert_action_tag(&permission);
 
         // Airdrop / Launchpad tags are single-boundary; the accessor is trivially
         // correct, but reference the methods so the imports stay honest.

@@ -13,6 +13,9 @@ namespace Lending {
     chain: String,
     // Protocol contract whose positions are delegated (e.g. Morpho singleton).
     protocol: String,
+    // Account granting/revoking permission, when explicitly present in calldata
+    // or EIP-712. Direct calls usually omit this because principal is authorizer.
+    authorizer?: String,
     // Address being granted / revoked full control of the submitter's positions.
     authorized: String,
     // true = grant authorization, false = revoke.

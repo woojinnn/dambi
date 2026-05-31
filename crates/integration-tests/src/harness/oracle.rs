@@ -6,7 +6,7 @@
 //! * **L2 TypedRoundTrip** *(strongest)* — `data.actions` re-deserializes into
 //!   the real `Vec<simulation_reducer::action::Action>`. A failure here is a
 //!   serde-shape regression even when the envelope said `ok:true`.
-//! * **L3 Domain** — every emitted `body.domain` is one of the 8 valid domains.
+//! * **L3 Domain** — every emitted `body.domain` is one of the valid domains.
 //!   `unknown` is **valid** (it is the correct output for HyperLiquid off-chain
 //!   ops / native transfers) — counted as a metric, never failed.
 //! * **L4 ErrorClass** — for `ok:false`, soft errors (`no_declarative_v3_mapper`
@@ -18,8 +18,8 @@
 use serde_json::Value;
 use simulation_reducer::action::Action;
 
-/// The 9 valid `ActionBody` domains (serde `domain` tags).
-pub const VALID_DOMAINS: [&str; 9] = [
+/// The 10 valid `ActionBody` domains (serde `domain` tags).
+pub const VALID_DOMAINS: [&str; 10] = [
     "token",
     "amm",
     "lending",
@@ -27,6 +27,7 @@ pub const VALID_DOMAINS: [&str; 9] = [
     "launchpad",
     "liquid_staking",
     "perp",
+    "permission",
     "multicall",
     "unknown",
 ];
