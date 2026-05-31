@@ -25,13 +25,15 @@ pub(super) fn apply_outflow(
     state: &WalletState,
     ctx: &EvalContext,
 ) -> ReducerResult<StateDelta> {
+    // A negative outflow is a malformed intent; reject it (fail-closed) and
+    // normalize so both branches store a canonical amount.
+    let amount = common::decimal_nonneg(amount)?;
+
     let mut delta = StateDelta::new();
 
     if let Some(base) = common::find_hl_account(state) {
-        // Compute absolute results up front so an underflow errors before we
-        // emit any change.
-        let new_usdc = common::decimal_sub_nonneg(&base.perp_usdc, amount)?;
-        let new_outflow = common::decimal_add(&base.pending_outflow, amount)?;
+        let new_usdc = common::decimal_sub_nonneg(&base.perp_usdc, &amount)?;
+        let new_outflow = common::decimal_add(&base.pending_outflow, &amount)?;
         let id = common::HL_ACCOUNT_ID.to_owned();
         helpers::position::upsert_hl_account(state, &mut delta, &id, |pos| {
             if let PositionKind::HyperliquidAccount(a) = &mut pos.kind {
@@ -42,7 +44,7 @@ pub(super) fn apply_outflow(
     } else {
         let acct = HlAccount {
             perp_usdc: Decimal::new("0"),
-            pending_outflow: amount.clone(),
+            pending_outflow: amount,
             ..HlAccount::default()
         };
         helpers::position::open_position(state, &mut delta, common::hl_position(acct, ctx.now))?;
@@ -81,7 +83,7 @@ mod tests {
             amount: Decimal::new(amount),
         }
     }
-    fn state_with_usdc(bal: &str) -> WalletState {
+    fn state_with(bal: &str, pending: &str) -> WalletState {
         let mut s = empty_state();
         s.positions.push(Position {
             id: HL_ACCOUNT_ID.to_owned(),
@@ -89,7 +91,7 @@ mod tests {
             chain: None,
             kind: PositionKind::HyperliquidAccount(HlAccount {
                 perp_usdc: Decimal::new(bal),
-                pending_outflow: Decimal::new("0"),
+                pending_outflow: Decimal::new(pending),
                 ..HlAccount::default()
             }),
             primitives_synced_at: Time::from_unix(1),
@@ -125,12 +127,12 @@ mod tests {
 
     #[test]
     fn withdraw_on_existing_base_decrements_usdc_and_adds_outflow() {
-        let delta = apply(&act("400"), &state_with_usdc("1000"), &ctx()).unwrap();
+        let delta = apply(&act("400"), &state_with("1000", "0"), &ctx()).unwrap();
         assert!(matches!(
             delta.position_changes[0],
             PositionChange::Update { .. }
         ));
-        let next = crate::helpers::delta::apply_delta(&state_with_usdc("1000"), &delta).unwrap();
+        let next = crate::helpers::delta::apply_delta(&state_with("1000", "0"), &delta).unwrap();
         let a = hl_of(&next);
         assert_eq!(a.perp_usdc, Decimal::new("600"));
         assert_eq!(a.pending_outflow, Decimal::new("400"));
@@ -138,7 +140,30 @@ mod tests {
 
     #[test]
     fn withdraw_exceeding_base_is_invariant_error() {
-        let err = apply(&act("2000"), &state_with_usdc("1000"), &ctx()).unwrap_err();
+        let err = apply(&act("2000"), &state_with("1000", "0"), &ctx()).unwrap_err();
+        assert!(matches!(err, crate::error::ReducerError::Invariant(_)));
+    }
+
+    #[test]
+    fn withdraw_accumulates_into_existing_outflow() {
+        // base already has 100 pending; withdrawing 400 → 500 cumulative.
+        let delta = apply(&act("400"), &state_with("1000", "100"), &ctx()).unwrap();
+        let next = crate::helpers::delta::apply_delta(&state_with("1000", "100"), &delta).unwrap();
+        let a = hl_of(&next);
+        assert_eq!(a.perp_usdc, Decimal::new("600"));
+        assert_eq!(a.pending_outflow, Decimal::new("500")); // 100 + 400, not replaced
+    }
+
+    #[test]
+    fn withdraw_full_balance_succeeds() {
+        let delta = apply(&act("1000"), &state_with("1000", "0"), &ctx()).unwrap();
+        let next = crate::helpers::delta::apply_delta(&state_with("1000", "0"), &delta).unwrap();
+        assert_eq!(hl_of(&next).perp_usdc, Decimal::new("0")); // exact-zero boundary OK
+    }
+
+    #[test]
+    fn withdraw_negative_amount_is_invariant_error() {
+        let err = apply(&act("-500"), &state_with("1000", "0"), &ctx()).unwrap_err();
         assert!(matches!(err, crate::error::ReducerError::Invariant(_)));
     }
 }

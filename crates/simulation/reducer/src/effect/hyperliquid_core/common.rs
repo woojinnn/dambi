@@ -58,6 +58,21 @@ pub(super) fn decimal_sub_nonneg(lhs: &Decimal, rhs: &Decimal) -> ReducerResult<
     Ok(Decimal::new(out.normalize().to_string()))
 }
 
+/// Parse a state-side decimal and require it be non-negative, returning the
+/// normalized value. Errors `Invariant` on parse failure or a negative value.
+/// Used to validate outflow amounts (a negative withdrawal/transfer is a fault;
+/// the reducer records only clean effects — fail-closed).
+pub(super) fn decimal_nonneg(d: &Decimal) -> ReducerResult<Decimal> {
+    let v = RustDecimal::from_str(d.as_str())
+        .map_err(|e| ReducerError::Invariant(format!("HL decimal parse {:?}: {e}", d.as_str())))?;
+    if v.is_sign_negative() {
+        return Err(ReducerError::Invariant(format!(
+            "HL amount must be non-negative, got {d}"
+        )));
+    }
+    Ok(Decimal::new(v.normalize().to_string()))
+}
+
 /// `lhs + rhs` on two state-side decimals via `rust_decimal`.
 /// Errors on parse failure of either operand.
 pub(super) fn decimal_add(lhs: &Decimal, rhs: &Decimal) -> ReducerResult<Decimal> {
@@ -94,5 +109,21 @@ mod tests {
             decimal_add(&Decimal::new("100"), &Decimal::new("0.25")).unwrap(),
             Decimal::new("100.25")
         );
+    }
+
+    #[test]
+    fn decimal_nonneg_normalizes_and_rejects_negative() {
+        assert_eq!(
+            decimal_nonneg(&Decimal::new("100.50")).unwrap(),
+            Decimal::new("100.5")
+        );
+        assert_eq!(
+            decimal_nonneg(&Decimal::new("0")).unwrap(),
+            Decimal::new("0")
+        );
+        assert!(matches!(
+            decimal_nonneg(&Decimal::new("-5")).unwrap_err(),
+            ReducerError::Invariant(_)
+        ));
     }
 }
