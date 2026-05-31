@@ -125,6 +125,17 @@ mod tests {
         ));
         let next = crate::helpers::delta::apply_delta(&state_with_agents(1), &delta).unwrap();
         let a = hl_of(&next);
-        assert_eq!(a.agents.len(), 2);
+        assert_eq!(a.agents.len(), 2); // appended, not replaced
+                                       // the newly-approved agent is present...
+        assert!(a
+            .agents
+            .iter()
+            .any(|g| g.agent_address == Address::from([0x33; 20])
+                && g.agent_name.as_deref() == Some("bot")));
+        // ...and the pre-existing agent survived the merge.
+        assert!(a
+            .agents
+            .iter()
+            .any(|g| g.agent_address == Address::from([0x00; 20]) && g.agent_name.is_none()));
     }
 }
