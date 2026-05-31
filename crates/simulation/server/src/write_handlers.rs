@@ -171,22 +171,27 @@ async fn seed_holdings(
             Err(e) => return Err(format!("native {chain}: {e}")),
         }
 
-        // 2. ERC-20 via Etherscan (optional).
-        if let Some(es) = app.etherscan.as_ref() {
-            match es.list_erc20_balances(chain, id.address).await {
-                Ok(rows) => {
-                    for tok in rows {
-                        if tok.balance.is_zero() {
-                            continue;
-                        }
-                        state_out
-                            .tokens
-                            .insert(tok.key.clone(), discovered_to_holding(tok, chain));
-                        count += 1;
-                    }
-                }
-                Err(e) => return Err(format!("etherscan {chain}: {e}")),
+        // 2. ERC-20 — prefer Etherscan (comprehensive) when a key is
+        //    configured; fall back to the hardcoded top-N catalog via
+        //    Multicall so users without a key still see major
+        //    stablecoins + WETH/WBTC/UNI/LINK/etc.
+        let erc20s = if let Some(es) = app.etherscan.as_ref() {
+            es.list_erc20_balances(chain, id.address)
+                .await
+                .map_err(|e| format!("etherscan {chain}: {e}"))?
+        } else {
+            discovery::discover_top_tokens(&router, chain, id.address)
+                .await
+                .map_err(|e| format!("top-tokens {chain}: {e}"))?
+        };
+        for tok in erc20s {
+            if tok.balance.is_zero() {
+                continue;
             }
+            state_out
+                .tokens
+                .insert(tok.key.clone(), discovered_to_holding(tok, chain));
+            count += 1;
         }
     }
     Ok(count)

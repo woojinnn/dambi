@@ -128,7 +128,7 @@ pub use config::{
     PythConfig, PythFeedConfig, RestAuthConfig, RestFeedConfig, RestOracleConfig, SyncConfig,
     VenuesConfig,
 };
-pub use discovery::{fetch_native_balance, DiscoveredToken, EtherscanClient};
+pub use discovery::{discover_top_tokens, fetch_native_balance, DiscoveredToken, EtherscanClient};
 pub use error::{SyncError, SyncResult};
 pub use fetchers::abi_decoder::{AbiDecoder, AbiTypeRegistry};
 pub use fetchers::oracle::{provider_key, PriceFetcher, RestJsonOracleFetcher};

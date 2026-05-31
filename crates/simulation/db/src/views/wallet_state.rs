@@ -129,7 +129,11 @@ fn save_tokens(
         // Pass symbol + decimals into the catalog so subsequent loads
         // surface them in `TokenHolding`. Without this the catalog row
         // stays NULL and the round-trip loses the metadata.
-        let symbol = (!holding.symbol.is_empty()).then(|| holding.symbol.as_str());
+        let symbol = if holding.symbol.is_empty() {
+            None
+        } else {
+            Some(holding.symbol.as_str())
+        };
         let decimals = (holding.decimals != 0).then_some(holding.decimals);
         repositories::tokens::upsert(tx, key, symbol, decimals, now)?;
         repositories::holdings::upsert(tx, wallet_pk, holding)?;
