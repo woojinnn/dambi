@@ -133,7 +133,8 @@ WHERE   "to" = 0x7a250d5630b4cf539739df2c5dacb4c659f2488d        -- UniswapV2Rou
 LIMIT   50
 ```
 
-- Dune MCP 가 붙어 있으면 `mcp__dune__createAndExecuteQuery` → `mcp__dune__getExecutionResults` 로 실행하고 결과 JSON 을 파일로 저장. 아니면 Dune UI 의 "Export → JSON".
+- Dune MCP 가 붙어 있으면 `mcp__dune__createAndExecuteQuery`(`performance:"free"`) → `mcp__dune__getExecutionResults` 로 실행하고 결과 JSON 을 파일로 저장. 아니면 Dune UI 의 "Export → JSON".
+- **비용·할당** (community 2,500 credit/월; `mcp__dune__getUsage` 확인): 실측 pruned 쿼리(위처럼 **`block_time` 파티션 WHERE** + free 엔진) = **~0.007 credit/execution** → pinpoint 은 사실상 무제한. **단 partition 필터 빼면 풀스캔 → 수백 credit 즉사**. 프로토콜당 ~수 credit, tripwire 25. **소스별 하한·조건은 `PROTOCOL_ONBOARDING_AND_TESTING.md §5d`** (Dune = Base/OP·cross-chain·decoded 조건부, bulk 는 Etherscan).
 - 변환:
 
 ```bash

@@ -543,8 +543,12 @@ target/debug/v3-harness corpus --root /tmp/v3probe        # 격리 probe
 - **제약:** ① 주소당 한 쿼리 window 가 최대 10,000 record → 더 깊이는 `startblock/endblock` block-range 페이지네이션. ② free tier rate ~5 req/s(무시 가능), 100,000 calls/day(과잉). ③ **free tier 가 Base(8453)/Optimism(10) 등 거부**("Free API access is not supported for this chain") → 그 체인은 Dune/유료. ④ recency bias(sort=desc).
 - proxy `eth_getTransactionByHash` 는 value 가 16진 → corpus 는 10진 필요. **txlist 권장.**
 
-#### Dune (핀포인트 보완)
-selector 필터(`WHERE ...`)·decoded 테이블·cross-chain·빈도 통계용. credit 기반(계정 ~2500/월; `getUsage` 로 확인). bulk 는 Etherscan, Dune 은 고트래픽 selector 깊이/희귀 shape.
+#### Dune (핀포인트 보완 — 조건부)
+selector 필터(`WHERE ...`)·decoded 테이블·cross-chain·빈도 통계용. credit 기반(community plan **2,500 credit/월**; `getUsage`(또는 MCP `mcp__dune__getUsage`)로 확인 — billing period 월간, **일일 캡 아님**).
+- **실측 비용 (2026-05-31, `community_fluid_engine_v2`)**: pruned pinpoint 쿼리(`block_time ≥ now()-interval '1' day` + `to=` 필터, LIMIT 50, **`performance:"free"`**) = **0.007 credit/execution** (응답 `result_preview.resultMetadata.executionCostCredits` + usage delta 2중 확인). → 2,500 / 0.007 ≈ **~35만 쿼리/월** = **credit 은 pinpoint 의 binding constraint 아님**.
+- **★ 비용 = datapoints *scanned***: 0.007 은 (a) free 엔진 + (b) **파티션 컬럼(`block_time`/`block_date`/`block_number`)에 WHERE → partition pruning** 덕. **partition 필터를 빼면 풀스캔 → 한 쿼리가 수백~수천 credit** 태워 월 예산 즉사(`LIMIT` 있어도 스캔 후 자름). **항상 partition WHERE + 좁은 window + free 엔진.**
+- **프로토콜당 할당**: ration 불필요 — 수십 pruned 쿼리 = ~0.1~2 credit/protocol. **tripwire ~25 credit/protocol**(초과 = partition 필터 누락 풀스캔 의심 → 즉시 점검). 2,500 의 대부분은 *실수 방어 buffer*.
+- **lane**: bulk 볼륨은 Etherscan(credit 무관). Dune 은 **free-Etherscan 미지원 체인(Base 8453 / OP 10)** · cross-chain join · decoded 테이블 · selector 빈도 통계 — 여기서만 Dune 이 유일(§5d C).
 
 #### Stratify (무작정 N 늘리지 말 것)
 버그는 **(selector × arg-shape) 커버**에서 나온다. 10,000 random 이면 selector 20종 프로토콜의 shape 를 거의 포화시킨다. 같은 N 이라도 **selector 전수 + block-range 분산**이 recency-only 보다 낫다. **포화 지표**: "1,000건당 새 distinct shape 수" → 0 에 수렴하면 stop(더 돌리면 compute 낭비). raw 영속화 금지 — **실패 + dedup 대표만** corpus 로.
@@ -591,10 +595,19 @@ N tx (selector 20종):
 정답 = 0 + 20 + 30 = 50  (N=1k 이든 10k 이든 동일)
 ```
 
-### 5d. Scale 정책
-- 기본 **10,000 tx/protocol**, stratified.
-- compute/fetch/authoring 다 N 에 거의 무관 → 올려도 됨. 단 **shape 포화 지표 0 되면 stop**.
-- 영속화 = 실패 + dedup 대표만. bulk raw 안 쌓음.
+### 5d. Scale 정책 + 소스별 하한 (coverage floor)
+
+**★ 하한은 "tx 수" 가 아니라 "selector × shape 커버리지" 다** (oracle ∝ selector, §2). 아래 floor 를 채우되 **shape 포화 지표(1,000건당 새 distinct shape → 0)** 면 tx 수 못 채워도 stop. 영속화 = 실패 + dedup 대표만(raw 덤프 금지).
+
+| 소스 | 하한 (lower bound) | stop 조건 | 디테일 |
+|---|---|---|---|
+| **A 합성** | 모든 COVER callkey 가 machine fuzz(4 전략) + callkey별 `EDGE_ITERS=4` boundary 자동 주입; **permission·value-bearing selector 마다 hand-edge ≥1** (infinite-approval / zero-amount / empty / truncated calldata) | callkey별 shape 포화 | A-1 ABI-aware seeded(`fnv(callkey)^seed^iter`, 재현) + A-2 `_edge-cases/corpus.json` 손수(§5b A-2 README) |
+| **B Etherscan** (bulk 주력) | free-지원 체인(mainnet 등): **모든 COVER selector 가 real-tx decoded sample ≥1** (저트래픽/부재면 corpus `_note` 로 "low-traffic/absent" 명기) · 기본 target **10,000 tx/protocol** stratified | shape 포화 **또는** 10k 도달 | txlist 10k/call·adapter-blind·**selector 전수 + block-range 분산**(recency-only 지양) |
+| **C Dune** (조건부) | **필수 조건**: 프로토콜이 free-Etherscan 미지원 체인(Base/OP)에 배포 **또는** cross-chain/decoded-stats 필요 → 그 chain/selector 의 real-tx ≥1. **그 외엔 optional**(skip 가능, Etherscan 으로 충분) | 해당 chain/selector real-tx 확보 | pruned 쿼리(partition WHERE+좁은 window+free 엔진, 0.007/q·§5b) — 프로토콜당 ~수 credit |
+
+- **B vs C 분담**: 볼륨·기본 10k 는 **B**(무료, credit 무관). **C** 는 B 가 *못 하는 갭*(Base/OP·cross-chain·decoded)만 — credit 은 충분하나 partition 규율 필수(§5b).
+- compute/fetch/authoring 다 N 에 거의 무관 → 위 floor 넘겨 올려도 되나, **shape 포화면 marginal 가치 0**(더 돌리면 compute/credit 낭비).
+- **정직한 한계**: 위 floor 는 *covered* selector 기준. research(P0)가 못 찾은 selector/컨트랙트는 floor 대상에도 안 들어옴 → 그건 §3 I0/I1 gate 의 몫(테스트 floor 로는 못 잡음).
 
 ### 5e. Verdict 버킷 + 로그
 
