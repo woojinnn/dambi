@@ -454,6 +454,132 @@
       },
       "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.pct" },
       "origin": "bundled"
+    },
+    "valuation.tx_total_usd": {
+      "name": "valuation.tx_total_usd",
+      "status": "planned",
+      "description": "Total USD outflow of the whole transaction (incl. multicall children): sum of net negative balance deltas × price_value. State₂ via reducer. Drives GEN-05.",
+      "readKind": "reducer",
+      "server": "sim-server",
+      "stateDependency": ["reducer StateDelta.token_changes (BalanceDelta)", "token_holdings.price_value"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from" },
+        "action": { "type": "Action", "required": true, "defaultSelector": "$.action", "description": "Tx/multicall applied via reducer to sum net outflow." }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.usd" },
+      "origin": "bundled"
+    },
+    "valuation.gas_cost_usd": {
+      "name": "valuation.gas_cost_usd",
+      "status": "planned",
+      "description": "Gas cost in USD = gasEstimate (action field) × native token price_value. Drives GEN-07/08.",
+      "readKind": "derived",
+      "server": "sim-server",
+      "stateDependency": ["token_holdings.price_value (native token)"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "gas_estimate": { "type": "String", "required": true, "defaultSelector": "$.action.gasEstimate" }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.usd" },
+      "origin": "bundled"
+    },
+    "approval.set_for_all_state": {
+      "name": "approval.set_for_all_state",
+      "status": "planned",
+      "description": "Whether (collection, operator) already holds a set-for-all grant in wallet state. Boost for GEN-02 (the core allowlist check is a Cedar set literal).",
+      "readKind": "direct",
+      "server": "sim-server",
+      "stateDependency": ["approvals_set_for_all"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from" },
+        "collection": { "type": "String", "required": true, "defaultSelector": "$.action.contract" },
+        "operator": { "type": "String", "required": true, "defaultSelector": "$.action.spender" }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.alreadyGranted" },
+      "origin": "bundled"
+    },
+    "perp.position_state": {
+      "name": "perp.position_state",
+      "status": "planned",
+      "description": "EXISTING perp position's side / effective leverage / unrealized-pnl % from wallet state (NOT carried in the action's live_inputs). Drives PERP-08 (crosses zero), PERP-09 (adding to a loser), PERP-11 (leverage up).",
+      "readKind": "direct",
+      "server": "sim-server",
+      "stateDependency": ["positions(perp).data_json.side", "positions(perp).data_json.leverage", "positions(perp).data_json.unrealized_pnl"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from" },
+        "market": { "type": "String", "required": true, "defaultSelector": "$.action.market", "description": "Perp market identifying the existing position." }
+      },
+      "returns": { "kind": "record", "fields": {
+        "side": { "type": "String", "from": "$.result.side" },
+        "leverage": { "type": "decimal", "from": "$.result.leverage" },
+        "unrealizedPnlPct": { "type": "decimal", "from": "$.result.unrealizedPnlPct" }
+      } },
+      "origin": "bundled"
+    },
+    "perp.liq_distance_bp": {
+      "name": "perp.liq_distance_bp",
+      "status": "planned",
+      "description": "Distance (bp) from the liquidation price to the mark price AFTER opening the position (State₂). Reducer computes the resulting liq_price. Drives PERP-02.",
+      "readKind": "reducer",
+      "server": "sim-server",
+      "stateDependency": ["positions(perp) + reducer", "action.live_inputs.markPrice"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from" },
+        "action": { "type": "Action", "required": true, "defaultSelector": "$.action" }
+      },
+      "returns": { "kind": "scalar", "type": "Long", "from": "$.result.liqDistanceBp" },
+      "origin": "bundled"
+    },
+    "claim.source_held_state": {
+      "name": "claim.source_held_state",
+      "status": "planned",
+      "description": "Whether the airdrop claim's source contract matches a known-eligible claim in wallet state, and whether the claimed token is ALREADY held (gasless-permit-on-held-token scam). Drives AIR-02/03.",
+      "readKind": "direct",
+      "server": "sim-server",
+      "stateDependency": ["positions(airdrop_claim).source", "token_holdings (held set)"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from" },
+        "action": { "type": "Action", "required": true, "defaultSelector": "$.action", "description": "Claim action: source contract + claimed token." }
+      },
+      "returns": { "kind": "record", "fields": {
+        "sourceMatches": { "type": "Bool", "from": "$.result.sourceMatches" },
+        "tokenAlreadyHeld": { "type": "Bool", "from": "$.result.tokenAlreadyHeld" }
+      } },
+      "origin": "bundled"
+    },
+    "launchpad.sale_match": {
+      "name": "launchpad.sale_match",
+      "status": "planned",
+      "description": "Whether the claim/commit target matches the original sale contract recorded in wallet state (LaunchpadAllocation.sale_id). Drives LP-01.",
+      "readKind": "direct",
+      "server": "sim-server",
+      "stateDependency": ["positions(launchpad_allocation).sale_id"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from" },
+        "action": { "type": "Action", "required": true, "defaultSelector": "$.action" }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.targetMatchesSale" },
+      "origin": "bundled"
+    },
+    "token.peg_ratio": {
+      "name": "token.peg_ratio",
+      "status": "planned",
+      "description": "Ratio of an LST/stable token's market price_value to its declared peg (TokenKind.peg_to). < 1 signals depeg. Drives STK-01, UNI-13.",
+      "readKind": "derived",
+      "server": "sim-server",
+      "stateDependency": ["token_holdings.kind.peg_to", "token_holdings.price_value"],
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "asset": { "type": "AssetRef", "required": true, "defaultSelector": "$.action.token" }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.pegRatio" },
+      "origin": "bundled"
     }
   }
 }
