@@ -185,8 +185,8 @@ raw Tx { chain, to, selector, calldata, value }
 
 #### ActionBody 카탈로그 (현재 — `simulation/reducer/src/action/`, serde `tag="domain"`)
 
-최상위 8 variant (`action/mod.rs:141`):
-`Token` · `Amm` · `Lending` · `Airdrop` · `Launchpad` · `Perp` · `Multicall { actions: Vec<ActionBody> }` · `Unknown { target, chain, calldata, value }`
+최상위 9 variant (`action/mod.rs`):
+`Token` · `Amm` · `Lending` · `Airdrop` · `Launchpad` · `Perp` · `LiquidStaking` · `Multicall { actions: Vec<ActionBody> }` · `Unknown { target, chain, calldata, value }`
 
 각 domain 의 action (`tag="action"`, snake_case). **작성 전 해당 `<domain>/mod.rs` 를 직접 읽어 현재 variant/필드 재확인**(스키마는 늘 확장된다):
 
@@ -198,6 +198,7 @@ raw Tx { chain, to, selector, calldata, value }
 | **airdrop** | `airdrop/mod.rs` | claim, delegate |
 | **launchpad** | `launchpad/mod.rs` | commit, claim_allocation, claim_vested, refund, withdraw_commit |
 | **perp** | `perp/mod.rs` | open_position, close_position, increase_position, decrease_position, adjust_margin, change_leverage, change_margin_mode, place_limit_order, place_stop_order, cancel_order, claim_funding |
+| **liquid_staking** | `liquid_staking/mod.rs` | stake, wrap, unwrap, request_withdrawal, claim_withdrawal, transfer_shares |
 
 각 action 의 필드 예 (`token/erc20_approve.rs`):
 ```rust
@@ -207,6 +208,7 @@ pub struct Erc20ApproveAction { pub token: TokenRef, pub spender: Address, pub a
 - `AmmVenue`: UniswapV2/V3/V4, SushiV2, CurveV1/V2, BalancerV2/V3, TraderJoeLB, MaverickV2, AggregatorRoute …
 - `LendingVenue`: AaveV3/V2, CompoundV3/V2, MorphoBlue, MorphoOptimizer, Spark, Fluid …
 - `PerpVenue`: Hyperliquid, GmxV2, DyDxV4, Vertex, Aevo, Drift, JupiterPerps, Synthetix, Generic …
+- `StakingVenue`: Lido (liquid_staking) …
 
 > 새 프로토콜이 기존 domain 에 맞지만 venue 가 없으면 → **venue enum 에 variant 추가**(Tier 3, 가벼운 편). 예: 새 lending 프로토콜 → `LendingVenue` 에 추가.
 

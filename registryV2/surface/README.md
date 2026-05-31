@@ -116,6 +116,15 @@ this — they're one address.)
    build a manifest) or `exclude` (with a reason: governance / keeper / infra /
    relayer). Permission primitives (`authorize|approve|permit|delegate|setOperator|
    setApprovalForAll`) are **never** exclude — they are the analyzer's purpose.
+   **Exception — generic ERC-20/721 standard funcs.** A contract that is itself a
+   standard token (Curve pool-as-LP, Lido stETH/wstETH, unstETH NFT) exposes
+   `approve`/`permit`/`transfer`/`setApprovalForAll` that the `tokens:erc20` /
+   `erc721` **standard adapter already analyzes** via auto-enumerate (out of gate
+   scope, see §Scope). Those are `exclude` with reason "standard ERC-20/721 —
+   erc20/erc721 standard adapter" (NOT cover — a `cover` would fail I2 since the
+   auto-enumerate manifest is not a per-`(chain,address)` manifest). The "never
+   exclude" rule targets **protocol-specific** grants no standard adapter covers
+   (`setAuthorization`, credit `delegate`, operator maps).
    Add off-chain EIP-712 messages under `signed_structs`.
 4. **Gate** — `npm run check:surface`. Fix every `✗` until it PASSes. Build the
    `cover` manifests; the gate then proves nothing was dropped.

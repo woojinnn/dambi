@@ -190,6 +190,8 @@ ActionBody::OffchainExchange(a) => super::offchain_exchange::lower(a, &ctx),   /
 // lowering_v2/offchain_exchange/mod.rs 신규 + lowering_v2/mod.rs 에 mod
 ```
 
+**Ⓒ′ 디코드 하니스 도메인 등록** (⚠️ compile-forced 아님 — silent gap) · `crates/integration-tests/src/harness/oracle.rs` 의 `VALID_DOMAINS` 배열 + 그 길이 `[&str; N]` 에 새 domain 의 serde tag 문자열을 추가한다. 빠뜨리면 **컴파일은 통과**하나 v3 decode 하니스가 새 domain 을 invalid 로 판정해 L3 domain-validity 에서 fail (`oracle.rs`). reducer/policy-engine 와 **다른 crate** 라 exhaustive-match 안전망이 안 잡는다 — Lido `liquid_staking` 온보딩 실측(2026-05-31).
+
 **Ⓓ 그다음** 각 sub-action 마다 축 2 의 ③~⑦ (effect leaf / lowering leaf / cedarschema + loader 등록 / conformance / manifest). 새 domain 은 `lowering_v2/<domain>/mod.rs` 에 자체 `test_support` 모듈(sample builder + `assert_conforms`)을 신설한다 (token/perp 패턴 복제).
 
 **Cedar namespace**: 새 `namespace OffchainExchange { ... }` 블록을 action 파일들에 선언. `schema/mod.rs` 의 `merge_namespace_blocks` 가 namespace 단위로 병합하므로 별도 core 변경 불필요 (단 ⑤ 의 loader 등록은 action 파일별 필수).
