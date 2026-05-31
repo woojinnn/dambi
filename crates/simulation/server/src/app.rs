@@ -17,6 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
 
 use std::sync::Arc;
 
@@ -192,6 +193,7 @@ pub fn build_router(state: AppState) -> Router {
 
     public
         .merge(protected)
+        .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive().allow_private_network(true))
         .with_state(state)
 }
