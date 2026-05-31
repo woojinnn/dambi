@@ -15,6 +15,7 @@
 
 pub mod action_builder;
 pub mod args_json;
+pub mod builtin_fn;
 pub mod types;
 
 pub use args_json::{args_to_json, decoded_value_to_json};

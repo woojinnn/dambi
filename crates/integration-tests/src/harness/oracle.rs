@@ -99,6 +99,14 @@ fn is_shape_artifact(kind: &str, msg: &str) -> bool {
         // random out-of-enum discriminant (e.g. interestRateMode=999). Real
         // discriminants are exercised by the corpus; tolerate here.
         || msg.contains("value-map: no case")
+        // `$fn` executors over a synthetic input: random calldata yields an
+        // all-zero Curve route or an out-of-enum swap_type. Real routes are
+        // exercised by the corpus/golden (which assert the resolved token); a
+        // STRUCTURAL $fn bug (unknown fn / bad arg wiring) errors on EVERY input
+        // incl. the golden, so it is NOT masked by these data-only patterns.
+        || msg.contains("empty route (no non-zero pool slot)")
+        || msg.contains("unknown swap_type")
+        || msg.contains("missing swap_params")
     )
 }
 
