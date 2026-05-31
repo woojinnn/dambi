@@ -15,6 +15,7 @@
 > - **`README.md`** — 하니스 runbook (CLI · 3 입력소스 · Log→Gap→Develop 루프). P2~P4 운용.
 > - **`ACTIONBODY_EXTENSION_GUIDE.md`** — Tier 3 ActionBody Rust/Cedar 확장 (새 domain/action/live_field). §4a·§4d 에서 진입.
 > - **`registryV2/surface/README.md`** — surface gate(I0/I1) ops + `_deployments.json` 포맷. **gate 데이터 옆에 둠**(co-located, script 가 참조) — 위치만 예외.
+> - **`ONBOARDING_PROMPT.md`** — 새 세션 kickoff 프롬프트(복붙용; 워크플로·게이트·가드레일 embed). `<PROTOCOL>` 만 바꿔 새 세션에 입력.
 >
 > **♻️ 재진입(idempotent)**: 이 플로우는 **이미 온보딩된 프로토콜을 input 으로 넣어도 동일하게** 돈다 — greenfield 전제 아님. P0 에서 현 `surface/_deployments`·`coverage`·manifest 와 **1차 출처를 다시 diff** → 틀린 곳 수정·빠진 곳 보충, P2 에서 현 corpus 회귀 + 신규 gap 추가. "처음 온보딩" 과 "기존 재검증·보강" 이 같은 커맨드·게이트(§7 check:surface/manifest + corpus)로 수렴한다(§6 루프가 그 엔진).
 
@@ -130,6 +131,15 @@ raw Tx { chain, to, selector, calldata, value }
 **P1 ↔ P2 는 루프다.** 처음엔 TEST 가 "무엇을 작성할지"(discovery), 나중엔 "정확한가"(accuracy). 작은/단순 프로토콜은 ABI 만 보고 P1 부터 시작해도 되고, 크고 복잡한 프로토콜(UR류, batch)은 P2 를 먼저 한 번 돌려 실제 selector/shape 를 보면 rework 가 준다(선택).
 
 **P1 직후 자가검증 — `npm run check:manifest` (emit.body shape build 강제).** manifest 의 `emit.body` 는 Tier 3 `ActionBody` struct 와 **정확히** 일치해야 한다(필드명·variant·venue/param shape·필수 `live_inputs`). 그런데 build-index 는 pass-through라 이 일치를 검사하지 않아서, 예전엔 틀린 shape 를 **decode 테스트가 실패해야** 비로소 알았다(예: `build_action_body_failed: missing field live_inputs`) — 프레임워크가 "한 큐"로 안 돌고 author 가 decode-error 를 보고서야 shape 를 역추정. 이제는 author 직후 `npm run check:manifest`(= build-index → `v3-harness validate`) **한 번**이면, production 디코더로 type-valid 입력을 합성·라우팅해 `emit.body` 가 안 맞는 manifest 를 **bundle id + 정확한 필드 오류 + repro 커맨드**와 함께 exit 1 로 잡는다. 특정 프로토콜만 빠르게: `cargo run --bin v3-harness -- validate --filter <protocol>`. input-의존 아티팩트(`value-map: no case`, array OOB)는 oracle-soft 라 `$args.i` fuzz 가 coin index 범위를 벗어나도 false-positive 안 난다. **이게 §3 의 `check:surface`(research 전수성)와 같은 패턴 — authoring 정확성을 agent 의 trust 에서 build-enforced invariant 로 승격**(틀린 shape = "안 보임"이 아니라 build 실패). 한계: 현재 `single_emit` 전략 한정 — `array_emit`/`opcode_stream`/`typed_data` 는 `fuzz`/`corpus` 가 커버.
+
+### 2.1 작업 워크플로 (worktree · phase 커밋 · sub-agent)
+
+온보딩은 양이 크고 다단계다. 아래 운영 규약을 따른다:
+
+1. **새 worktree + 브랜치에서 작업.** `git worktree add -b feat/<protocol>-onboarding ../<dir> <base>` 로 **격리된 worktree + 브랜치**에서 진행 — 타 작업/머지와 비충돌. 완료·검증 후 base 로 머지(FF 가능하면 FF). base 가 다른 worktree 에 점유/dirty 면 그 worktree 는 비접촉.
+2. **phase 끝나면 커밋.** P0/P1/P2/P3/P4 각 phase(또는 더 잘게 — 컨트랙트별·함수군별)가 끝날 때마다 **explicit-stage 커밋**(`git add <파일>`, `git add -A` 금지). 중간 유실 방지 + reviewable history + 회귀 지점. 메시지 말미 `Co-Authored-By`.
+3. **sub-agent 적극 활용.** 한 세션에 다 담기엔 양이 크다 → **fan-out 가능한 작업은 sub-agent 로 분할**: P0 컨트랙트별 research/discovery, P1 함수(selector)별 manifest 작성(authoring ∝ selector, §2), P2 소스별(Etherscan/Dune) corpus pull+convert, surface snapshot per-contract. 메인 세션은 **종합·검증·게이트·커밋**을 맡는다.
+4. **sub-agent 프롬프트는 self-contained·디테일하게.** sub-agent 는 **이 세션의 컨텍스트가 없다** → 프롬프트에 (a) repo·branch·cwd·worktree 경로 (b) 읽을 인스트럭션 문서 (c) 정확한 대상 파일·심볼·좌표 + **미러할 기존 선례**(예: "`lending::supply` 전 경로 복제") (d) 정확한 산출물·통과할 게이트 (e) 가드레일(explicit-stage·1차출처·무관 churn 금지)을 **전부 embed**. 면밀할수록 rework 가 준다(fresh-PC self-contained 원칙과 동형).
 
 ---
 
