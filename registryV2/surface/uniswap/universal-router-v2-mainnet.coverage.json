@@ -1,0 +1,30 @@
+{
+  "contract": "UniversalRouter",
+  "chainId": 1,
+  "address": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+  "snapshot": "universal-router-v2-mainnet.abi.json",
+  "note": "Surface-completeness triage for Uniswap Universal Router v2 mainnet. User-facing execute entrypoints are COVER; AMM callbacks are infra-only and EXCLUDE.",
+  "functions": {
+    "0x24856bc3": {
+      "name": "execute",
+      "decision": "cover",
+      "reason": "user AMM/action command stream without deadline; decoded by opcode_stream_dispatch manifest"
+    },
+    "0x3593564c": {
+      "name": "execute",
+      "decision": "cover",
+      "reason": "user AMM/action command stream with deadline; decoded by opcode_stream_dispatch manifest"
+    },
+    "0xfa461e33": {
+      "name": "uniswapV3SwapCallback",
+      "decision": "exclude",
+      "reason": "infra callback invoked by pools during swaps; not a pre-sign user entrypoint"
+    },
+    "0x91dd7346": {
+      "name": "unlockCallback",
+      "decision": "exclude",
+      "reason": "infra callback invoked by the V4 PoolManager unlock flow; not a pre-sign user entrypoint"
+    }
+  },
+  "signed_structs": {}
+}

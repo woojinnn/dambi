@@ -332,6 +332,20 @@
       "cargo test -p policy-engine-integration-tests --test v3_decode_harness -- --nocapture: 25 passed; corpus 225/225 matched; synthetic fuzz fail=0 panicked=0"
     ]
   },
+  "uniswap_universal_router_v2_mainnet_surface_gate": {
+    "protocol": "uniswap",
+    "contract": "Universal Router v2 mainnet",
+    "status": "implemented",
+    "completed": [
+      "added surface/uniswap/universal-router-v2-mainnet.{abi,coverage}.json from the local Sourcify verified ABI cache and official Uniswap universal-router source provenance",
+      "triaged 4 external-mutating selectors: execute(bytes,bytes[]) and execute(bytes,bytes[],uint256) are COVER; uniswapV3SwapCallback and unlockCallback are EXCLUDE as infra callbacks",
+      "kept existing uniswap/universal-router v2 manifests unchanged; both covered execute selectors already decode through opcode_stream_dispatch"
+    ],
+    "evidence": [
+      "npm run check:surface: PASS with 50 gated contracts; UniversalRouter mainnet 4 surface / 2 cover / 2 exclude / 2 on-chain manifests",
+      "remaining ungated WARN count decreased from 49 to 48; uniswap decreased from 22 to 21"
+    ]
+  },
   "skipped_or_deferred_action_mapping": [
     {
       "protocol_or_function": "Hyperliquid Core / REST JSON actions",
