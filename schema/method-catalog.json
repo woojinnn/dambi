@@ -3,6 +3,9 @@
     "approval.allowance": {
       "name": "approval.allowance",
       "description": "Inspect a token allowance: surfaces raw value, unlimited-allowance flag, and coverage of a requested amount.",
+      "readKind": "direct",
+      "server": "sim-server",
+      "stateDependency": ["approvals_erc20.amount", "approvals_erc20.is_unlimited"],
       "params": {
         "allowance": {
           "type": "String",
@@ -25,6 +28,9 @@
     "approval.cover_inputs": {
       "name": "approval.cover_inputs",
       "description": "Whether the token allowance covers the requested input amount.",
+      "readKind": "derived",
+      "server": "sim-server",
+      "stateDependency": ["approvals_erc20.amount"],
       "params": {
         "allowances_cover_inputs": {
           "type": "Bool",
@@ -52,6 +58,9 @@
     "clock.now": {
       "name": "clock.now",
       "description": "Current Unix timestamp (seconds) from the daemon's clock.",
+      "readKind": "external",
+      "server": "local",
+      "stateDependency": "none (host wall clock, not wallet state)",
       "params": {},
       "returns": { "kind": "scalar", "type": "Long", "from": "$.result.nowTs" },
       "origin": "bundled"
@@ -59,6 +68,9 @@
     "oracle.effective_rate_bps": {
       "name": "oracle.effective_rate_bps",
       "description": "Effective rate of a swap vs the oracle's mid-market price, expressed in basis points (negative = unfavourable).",
+      "readKind": "external",
+      "server": "external",
+      "stateDependency": "external price feed (oracle mid-market); no wallet-state read",
       "params": {
         "chain_id": {
           "type": "Long",
@@ -92,6 +104,9 @@
     "oracle.usd_value": {
       "name": "oracle.usd_value",
       "description": "Convert a token amount to its USD valuation via a price oracle.",
+      "readKind": "external",
+      "server": "external",
+      "stateDependency": "external price feed (coingecko/chainlink); under ADR-009 this resolves to the DIRECT read of token_holdings.price_value (LiveField) instead of a live oracle call",
       "params": {
         "chain_id": {
           "type": "Long",
@@ -125,6 +140,9 @@
     "portfolio.balance": {
       "name": "portfolio.balance",
       "description": "Wallet balance of a specific token.",
+      "readKind": "direct",
+      "server": "sim-server",
+      "stateDependency": ["token_holdings.balance_amount"],
       "params": {
         "chain_id": {
           "type": "Long",
@@ -148,6 +166,9 @@
     "portfolio.input_fraction_bps": {
       "name": "portfolio.input_fraction_bps",
       "description": "Fraction of the wallet's portfolio (denominated in the input asset) the transaction is spending, in basis points.",
+      "readKind": "derived",
+      "server": "sim-server",
+      "stateDependency": ["token_holdings.balance_amount"],
       "params": {
         "chain_id": {
           "type": "Long",
@@ -176,6 +197,9 @@
     "scopeball.evaluate_v3": {
       "name": "scopeball.evaluate_v3",
       "description": "Phase 5D mock — echo (envelopes, eval_context, wallet_id) back as policyRequest.actions with empty state_before / deltas / state_after. Real implementation arrives in Phase 6 (reducer + state sync).",
+      "readKind": "reducer",
+      "server": "sim-server",
+      "stateDependency": "whole-wallet state (holdings/approvals/positions) folded through the reducer to produce State₂ (mock today; Phase 6 wires the real reducer)",
       "params": {
         "wallet_id": {
           "type": "String",
@@ -199,6 +223,9 @@
     "stat_window.snapshot": {
       "name": "stat_window.snapshot",
       "description": "Rolling-window snapshot of recent on-chain activity for the wallet.",
+      "readKind": "external",
+      "server": "external",
+      "stateDependency": "cross-request activity history ([H]); not in the state DB today (only state_deltas is partial)",
       "params": {
         "owner": {
           "type": "String",
@@ -212,6 +239,9 @@
     "stat_window.swap_stats": {
       "name": "stat_window.swap_stats",
       "description": "Per-action stats over a sliding 24h window (volume + count).",
+      "readKind": "external",
+      "server": "external",
+      "stateDependency": "cross-request swap history over a 24h window ([H]); not in the state DB today",
       "params": {
         "owner": {
           "type": "String",
@@ -226,6 +256,112 @@
         }
       },
       "returns": { "kind": "record", "type": "WindowStats" },
+      "origin": "bundled"
+    }
+  },
+  "planned": {
+    "valuation.asset_usd": {
+      "name": "valuation.asset_usd",
+      "status": "planned",
+      "description": "USD valuation of a single asset position: token amount × DB price. Replaces the live oracle.usd_value call with a DIRECT read of the refrigerated LiveField (ADR-009).",
+      "readKind": "derived",
+      "server": "sim-server",
+      "stateDependency": ["token_holdings.price_value", "token_holdings.balance_amount"],
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "asset": {
+          "type": "AssetRef",
+          "required": true,
+          "defaultSelector": "$.action.inputToken.asset"
+        },
+        "amount": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.inputToken.amount.value"
+        }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.usd" },
+      "origin": "bundled"
+    },
+    "position.health_factor_after": {
+      "name": "position.health_factor_after",
+      "status": "planned",
+      "description": "Health factor of a lending position AFTER virtually applying the proposed borrow/withdraw (State₂). Reducer recomputes from refrigerated collaterals/debts/liquidation_threshold + price. Drives AAVE-01 (T3).",
+      "readKind": "reducer",
+      "server": "sim-server",
+      "stateDependency": ["positions(lending).data_json.collaterals", "positions(lending).data_json.debts", "positions(lending).data_json.liquidation_threshold", "token_holdings.price_value"],
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "owner": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.root.from"
+        },
+        "venue": {
+          "type": "String",
+          "required": true,
+          "description": "Lending protocol/venue identifying the position."
+        }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.healthFactor" },
+      "origin": "bundled"
+    },
+    "perp.notional_to_collateral": {
+      "name": "perp.notional_to_collateral",
+      "status": "planned",
+      "description": "Ratio of perp position notional to total collateral USD. Folds collateral legs (each × price) into a denominator; new-order notional may be included via the reducer. Drives PERP-03 (T3).",
+      "readKind": "fold",
+      "server": "sim-server",
+      "stateDependency": ["positions(perp).data_json.notional_usd", "positions(perp).data_json.collateral", "token_holdings.price_value"],
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "owner": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.root.from"
+        },
+        "market": {
+          "type": "String",
+          "required": true,
+          "description": "Perp market identifier (e.g. \"ETH-PERP\")."
+        }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.ratio" },
+      "origin": "bundled"
+    },
+    "portfolio.group_pct": {
+      "name": "portfolio.group_pct",
+      "status": "planned",
+      "experimental": true,
+      "description": "Whole-wallet fold: percentage of total portfolio USD held in a token/category group AFTER the proposed action (State₂). PortfolioAggregate — gated on ADR-010 (T2). Output flattens per-group scalars into context fields.",
+      "readKind": "fold",
+      "server": "sim-server",
+      "stateDependency": ["token_holdings.balance_amount", "token_holdings.price_value", "positions.data_json"],
+      "params": {
+        "owner": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.root.from"
+        },
+        "group": {
+          "type": "String",
+          "required": true,
+          "description": "Grouping key — token symbol, BaseCategory, or peg_to.Fiat. Axis decided by ADR-010."
+        }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.pctAfter" },
       "origin": "bundled"
     }
   }

@@ -23,6 +23,9 @@ const MAX_UINT256 =
 export const clockNowCatalog: MethodCatalogEntry = {
   name: "clock.now",
   description: "Current Unix timestamp (seconds) from the daemon's clock.",
+  readKind: "external",
+  server: "local",
+  stateDependency: "none (host wall clock, not wallet state)",
   params: {},
   returns: { kind: "scalar", type: "Long", from: "$.result.nowTs" },
   origin: "bundled",
@@ -32,6 +35,9 @@ export const approvalAllowanceCatalog: MethodCatalogEntry = {
   name: "approval.allowance",
   description:
     "Inspect a token allowance: surfaces raw value, unlimited-allowance flag, and coverage of a requested amount.",
+  readKind: "direct",
+  server: "sim-server",
+  stateDependency: ["approvals_erc20.amount", "approvals_erc20.is_unlimited"],
   params: {
     allowance: {
       type: "String",
@@ -55,6 +61,9 @@ export const approvalAllowanceCatalog: MethodCatalogEntry = {
 export const approvalCoverInputsCatalog: MethodCatalogEntry = {
   name: "approval.cover_inputs",
   description: "Whether the token allowance covers the requested input amount.",
+  readKind: "derived",
+  server: "sim-server",
+  stateDependency: ["approvals_erc20.amount"],
   params: {
     allowances_cover_inputs: {
       type: "Bool",
@@ -80,6 +89,9 @@ export const oracleEffectiveRateBpsCatalog: MethodCatalogEntry = {
   name: "oracle.effective_rate_bps",
   description:
     "Effective rate of a swap vs the oracle's mid-market price, expressed in basis points (negative = unfavourable).",
+  readKind: "external",
+  server: "external",
+  stateDependency: "external price feed (oracle mid-market); no wallet-state read",
   params: {
     chain_id: {
       type: "Long",
@@ -114,6 +126,9 @@ export const oracleEffectiveRateBpsCatalog: MethodCatalogEntry = {
 export const portfolioBalanceCatalog: MethodCatalogEntry = {
   name: "portfolio.balance",
   description: "Wallet balance of a specific token.",
+  readKind: "direct",
+  server: "sim-server",
+  stateDependency: ["token_holdings.balance_amount"],
   params: {
     chain_id: {
       type: "Long",
@@ -139,6 +154,9 @@ export const portfolioInputFractionBpsCatalog: MethodCatalogEntry = {
   name: "portfolio.input_fraction_bps",
   description:
     "Fraction of the wallet's portfolio (denominated in the input asset) the transaction is spending, in basis points.",
+  readKind: "derived",
+  server: "sim-server",
+  stateDependency: ["token_holdings.balance_amount"],
   params: {
     chain_id: {
       type: "Long",
@@ -168,6 +186,10 @@ export const portfolioInputFractionBpsCatalog: MethodCatalogEntry = {
 export const statWindowSnapshotCatalog: MethodCatalogEntry = {
   name: "stat_window.snapshot",
   description: "Rolling-window snapshot of recent on-chain activity for the wallet.",
+  readKind: "external",
+  server: "external",
+  stateDependency:
+    "cross-request activity history ([H]); not in the state DB today (only state_deltas is partial)",
   params: {
     owner: {
       type: "String",
@@ -182,6 +204,10 @@ export const statWindowSnapshotCatalog: MethodCatalogEntry = {
 export const statWindowSwapStatsCatalog: MethodCatalogEntry = {
   name: "stat_window.swap_stats",
   description: "Per-action stats over a sliding 24h window (volume + count).",
+  readKind: "external",
+  server: "external",
+  stateDependency:
+    "cross-request swap history over a 24h window ([H]); not in the state DB today",
   params: {
     owner: {
       type: "String",

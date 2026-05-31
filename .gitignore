@@ -40,4 +40,6 @@ browser-extension/public/wasm/
 # Markdown docs, research + audit notes — only README.md stays tracked.
 *.md
 !README.md
+# Catalog standards-alignment doc — tracked alongside its JSON sibling.
+!schema/method-catalog.README.md
 /docs/

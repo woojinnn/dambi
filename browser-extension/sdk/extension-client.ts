@@ -250,9 +250,25 @@ export type MethodReturnSpec =
   | { kind: "record"; type: CatalogRecordType }
   | { kind: "scalar"; type: CatalogScalarType; from: string };
 
+/**
+ * Read-kind taxonomy (see `team/cedar-manifest/02-db-read-contract.md`):
+ * what a fact computes — `direct` state read, `derived` action×state,
+ * `reducer` State₂, whole-wallet `fold`, or an `external` feed.
+ */
+export type ReadKind = "direct" | "derived" | "reducer" | "fold" | "external";
+
+/** Where a fact is served — refines `origin`. */
+export type CatalogServer = "sim-server" | "local" | "external";
+
 export interface MethodCatalogEntry {
   name: string;
   description?: string;
+  /** Read-kind taxonomy tag. Optional/additive. */
+  readKind?: ReadKind;
+  /** Where the fact is served. Optional/additive. */
+  server?: CatalogServer;
+  /** State the fact reads — table.column name(s) or a prose note. */
+  stateDependency?: string | readonly string[];
   params: Record<string, MethodParamSpec>;
   returns: MethodReturnSpec;
   /**

@@ -28,11 +28,32 @@ describe("MethodCatalog bundled JSON ↔ daemon catalog", () => {
     }).catalog();
 
     const raw = readFileSync(BUNDLED_PATH, "utf8");
-    const bundled = JSON.parse(raw) as MethodCatalog;
+    const bundled = JSON.parse(raw) as MethodCatalog & {
+      planned?: Record<string, unknown>;
+    };
 
     // Compare structurally so JSON whitespace/key-order doesn't trip
-    // us up — we care about semantic equality.
-    expect(normalize(liveCatalog)).toEqual(normalize(bundled));
+    // us up — we care about semantic equality. Only the served
+    // `methods` map must track the live registry; the sibling
+    // `planned` section documents facts the daemon doesn't serve yet
+    // (T1 placeholders), so it's intentionally NOT compared here.
+    expect(normalize({ methods: liveCatalog.methods })).toEqual(
+      normalize({ methods: bundled.methods }),
+    );
+  });
+
+  it("planned placeholders are documented but NOT served by the registry", () => {
+    const raw = readFileSync(BUNDLED_PATH, "utf8");
+    const bundled = JSON.parse(raw) as MethodCatalog & {
+      planned?: Record<string, { status?: string }>;
+    };
+    const served = new Set(Object.keys(bundled.methods));
+    for (const [name, entry] of Object.entries(bundled.planned ?? {})) {
+      // Each planned entry is clearly marked and must not collide with
+      // a served method name.
+      expect(entry.status).toBe("planned");
+      expect(served.has(name)).toBe(false);
+    }
   });
 
   it("daemon catalog enumerates every method the registry dispatches", () => {

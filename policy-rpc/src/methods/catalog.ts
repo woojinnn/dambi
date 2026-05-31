@@ -101,11 +101,51 @@ export type MethodReturn =
       from: string;
     };
 
+/**
+ * Read-kind taxonomy (see `team/cedar-manifest/02-db-read-contract.md`).
+ * Declares the SEMANTICS of what a fact computes so a manifest reader
+ * knows whether it's a plain current-state read, an action×state
+ * arithmetic, a post-reducer State₂, a whole-wallet fold, or an
+ * outside feed — without reading the implementation.
+ *  - `direct`   — a state column/JSON value read verbatim (State₁).
+ *  - `derived`  — action params × state, computed without the reducer.
+ *  - `reducer`  — value of State₂ after virtually applying the action.
+ *  - `fold`     — aggregate over many wallet rows (whole-wallet sum).
+ *  - `external` — a feed outside the wallet state DB (oracle, history).
+ */
+export type ReadKind = "direct" | "derived" | "reducer" | "fold" | "external";
+
+/**
+ * Where a fact is served, refining the coarse `origin` tag:
+ *  - `sim-server` — the simulation server's fact host (reads the DB).
+ *  - `local`      — computed in-process from action calldata / host
+ *                   clock; no external dependency.
+ *  - `external`   — an outside feed. Per ADR-009 policy-rpc is being
+ *                   retired, so oracle/history methods carry this tag.
+ */
+export type CatalogServer = "sim-server" | "local" | "external";
+
 export interface MethodCatalogEntry {
   /** Method name, e.g. `"oracle.usd_value"`. */
   name: string;
-  /** One-liner shown in the method-picker dropdown. */
+  /**
+   * One-liner shown in the method-picker dropdown AND the human
+   * `semantics` line — what the fact means in plain language.
+   */
   description?: string;
+  /**
+   * Read-kind taxonomy tag. Additive/optional for backward compat —
+   * absent on older catalogs and on plugin/sidecar entries.
+   */
+  readKind?: ReadKind;
+  /** Where this fact is served. Refines `origin`. Optional/additive. */
+  server?: CatalogServer;
+  /**
+   * Short name(s) of the state this fact reads — e.g.
+   * `["approvals_erc20.is_unlimited"]`, or a prose note for
+   * calldata-only / external facts. Optional/additive.
+   */
+  stateDependency?: string | readonly string[];
   /**
    * Parameters in declaration order. Insertion order is preserved by
    * the UI so the most-frequently-edited params (e.g. the `asset`
