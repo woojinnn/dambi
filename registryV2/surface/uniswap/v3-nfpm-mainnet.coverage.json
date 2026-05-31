@@ -1,0 +1,120 @@
+{
+  "contract": "NonfungiblePositionManager",
+  "chainId": 1,
+  "address": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+  "snapshot": "v3-nfpm-mainnet.abi.json",
+  "note": "Surface-completeness triage for Uniswap V3 NonfungiblePositionManager mainnet. Permission primitives and user liquidity/fund movement paths are COVER. Pool creation and pool mint callback are EXCLUDE because they do not model a direct wallet fund/permission risk in ScopeBall's pre-sign ActionBody layer.",
+  "functions": {
+    "0x095ea7b3": {
+      "name": "approve",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: ERC721 single-position approval"
+    },
+    "0x42966c68": {
+      "name": "burn",
+      "decision": "cover",
+      "reason": "user AMM action: burn a cleared V3 position NFT"
+    },
+    "0xfc6f7865": {
+      "name": "collect",
+      "decision": "cover",
+      "reason": "user AMM action: collect fees owed to a V3 position"
+    },
+    "0x13ead562": {
+      "name": "createAndInitializePoolIfNecessary",
+      "decision": "exclude",
+      "reason": "protocol infra: creates/initializes a pool; no direct wallet fund movement or permission grant"
+    },
+    "0x0c49ccbe": {
+      "name": "decreaseLiquidity",
+      "decision": "cover",
+      "reason": "user AMM action: remove concentrated V3 liquidity from a position"
+    },
+    "0x219f5d17": {
+      "name": "increaseLiquidity",
+      "decision": "cover",
+      "reason": "user AMM action: add concentrated V3 liquidity to a position"
+    },
+    "0x88316456": {
+      "name": "mint",
+      "decision": "cover",
+      "reason": "user AMM action: mint a new concentrated V3 liquidity position"
+    },
+    "0xac9650d8": {
+      "name": "multicall",
+      "decision": "cover",
+      "reason": "user batched NFPM action: recursively decodes child calls"
+    },
+    "0x7ac2ff7b": {
+      "name": "permit",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: ERC721 permit approval by signature"
+    },
+    "0x12210e8a": {
+      "name": "refundETH",
+      "decision": "cover",
+      "reason": "user fund movement: refund native ETH held by the periphery contract"
+    },
+    "0x42842e0e": {
+      "name": "safeTransferFrom",
+      "decision": "cover",
+      "reason": "user NFT movement: transfer an ERC721 V3 position"
+    },
+    "0xb88d4fde": {
+      "name": "safeTransferFrom",
+      "decision": "cover",
+      "reason": "user NFT movement: transfer an ERC721 V3 position with data"
+    },
+    "0xf3995c67": {
+      "name": "selfPermit",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: submit an ERC20 permit authorizing NFPM as spender"
+    },
+    "0x4659a494": {
+      "name": "selfPermitAllowed",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: submit a DAI-style unlimited ERC20 permit authorizing NFPM as spender"
+    },
+    "0xa4a78f0c": {
+      "name": "selfPermitAllowedIfNecessary",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: conditionally submit a DAI-style unlimited ERC20 permit authorizing NFPM as spender"
+    },
+    "0xc2e3140a": {
+      "name": "selfPermitIfNecessary",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: conditionally submit an ERC20 permit authorizing NFPM as spender"
+    },
+    "0xa22cb465": {
+      "name": "setApprovalForAll",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: ERC721 operator approval for all V3 positions"
+    },
+    "0xdf2ab5bb": {
+      "name": "sweepToken",
+      "decision": "cover",
+      "reason": "user fund movement: sweep ERC20 tokens held by the periphery contract"
+    },
+    "0x23b872dd": {
+      "name": "transferFrom",
+      "decision": "cover",
+      "reason": "user NFT movement: transfer an ERC721 V3 position"
+    },
+    "0xd3487997": {
+      "name": "uniswapV3MintCallback",
+      "decision": "exclude",
+      "reason": "callback invoked by a V3 pool during mint; not a direct pre-sign user wallet entrypoint"
+    },
+    "0x49404b7c": {
+      "name": "unwrapWETH9",
+      "decision": "cover",
+      "reason": "user fund movement: unwrap WETH held by the periphery contract and send native ETH to recipient"
+    }
+  },
+  "signed_structs": {
+    "Permit": {
+      "decision": "cover",
+      "reason": "off-chain ERC721 permit signature for a V3 position NFT"
+    }
+  }
+}

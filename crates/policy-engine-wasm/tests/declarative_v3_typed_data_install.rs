@@ -57,9 +57,13 @@ fn typed_data_input(
 }
 
 const PERMIT2: &str = "0x000000000022d473030f116ddee9f6b43ac78ba3";
+const NFPM_MAINNET: &str = "0xc36442b4a4522e871399cd717abdd847ab11fe88";
 const USDC_MAINNET: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const SPENDER: &str = "0x00000000000000000000000000000000deadbeef";
 const SIGNER: &str = "0x000000000000000000000000000000000000aaaa";
+
+const UNISWAP_V3_NFPM_PERMIT_V3: &str =
+    include_str!("../../../registryV2/manifests/uniswap/v3-nfpm/permit@1.0.0.json");
 
 // ---------------------------------------------------------------------------
 // #1 — Permit2 PermitSingle (nested → wrapped)
@@ -348,6 +352,55 @@ fn typed_data_erc2612_permit_flat_unwrapped() {
         parsed["data"]["actions"][0]["meta"]["nature"]["deadline"], 1_738_002_000_u64,
         "{parsed}"
     );
+}
+
+#[test]
+fn typed_data_uniswap_v3_nfpm_permit_routes_to_nft_approve() {
+    let install = install_ok(UNISWAP_V3_NFPM_PERMIT_V3);
+    assert_eq!(install["data"]["bundle_id"], "uniswap/v3-nfpm/permit@1.0.0");
+
+    let message = json!({
+        "spender": SPENDER,
+        "tokenId": "424242",
+        "nonce": "0",
+        "deadline": 1_738_002_000_u64
+    });
+    let input = typed_data_input(
+        1,
+        NFPM_MAINNET,
+        "Permit",
+        "Uniswap V3 Positions NFT-V1",
+        message,
+        SIGNER,
+    );
+
+    let out = declarative_route_typed_data_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "uniswap/v3-nfpm/permit@1.0.0",
+        "{parsed}"
+    );
+
+    let action = &parsed["data"]["actions"][0];
+    assert_eq!(action["meta"]["nature"]["kind"], "offchain_sig", "{parsed}");
+    assert_eq!(
+        action["meta"]["nature"]["domain"]["name"], "Uniswap V3 Positions NFT-V1",
+        "{parsed}"
+    );
+    assert_eq!(
+        action["meta"]["nature"]["deadline"], 1_738_002_000_u64,
+        "{parsed}"
+    );
+
+    let body = &action["body"];
+    assert_eq!(body["domain"], "token", "{parsed}");
+    assert_eq!(body["action"], "nft_approve", "{parsed}");
+    assert_eq!(body["spender"], SPENDER, "{parsed}");
+    assert_eq!(body["nft_key"]["standard"], "erc721", "{parsed}");
+    assert_eq!(body["nft_key"]["chain"], "eip155:1", "{parsed}");
+    assert_eq!(body["nft_key"]["contract"], NFPM_MAINNET, "{parsed}");
+    assert_eq!(body["nft_key"]["token_id"], "0x67932", "{parsed}");
 }
 
 // ---------------------------------------------------------------------------

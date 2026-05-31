@@ -1,0 +1,97 @@
+{
+  "matched": true,
+  "bundle_id": "uniswap/v3-nfpm/selfPermitAllowed@1.0.0",
+  "manifest_path": "manifests/uniswap/v3-nfpm/selfPermitAllowed@1.0.0.json",
+  "bundle_sha256": "0x853d3b15d203fe603bc49b26c1f36e90295029be08b6345d52a3cff816b92d6d",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "uniswap/v3-nfpm/selfPermitAllowed@1.0.0",
+    "publisher": "uniswap.eth",
+    "schema_version": "3",
+    "note": "Uniswap V3 selfPermitAllowed(token,nonce,expiry,v,r,s). This is the DAI-style permitAllowed path and grants the NFPM contract unlimited allowance until expiry.",
+    "match": {
+      "selector": "0x4659a494",
+      "chain_to_addresses": {
+        "1": [
+          "0xc36442b4a4522e871399cd717abdd847ab11fe88"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "selfPermitAllowed",
+      "abi": {
+        "name": "selfPermitAllowed",
+        "type": "function",
+        "stateMutability": "payable",
+        "inputs": [
+          {
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256"
+          },
+          {
+            "name": "expiry",
+            "type": "uint256"
+          },
+          {
+            "name": "v",
+            "type": "uint8"
+          },
+          {
+            "name": "r",
+            "type": "bytes32"
+          },
+          {
+            "name": "s",
+            "type": "bytes32"
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "token",
+        "token": {
+          "action": "erc20_permit",
+          "erc20_permit": {
+            "token": {
+              "key": {
+                "standard": "erc20",
+                "chain": "$chain",
+                "address": "$args.token"
+              }
+            },
+            "spender": "$to",
+            "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+            "deadline": "$args.expiry"
+          }
+        }
+      },
+      "live_inputs": {
+        "nonce": {
+          "source": {
+            "kind": "onchain_view",
+            "chain": "$chain",
+            "contract": "$args.token",
+            "function": "nonces(address)",
+            "decoder_id": "erc20_permit_nonce"
+          },
+          "ttl_s": 12
+        }
+      }
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "type": "adapter_action",
+  "id": "uniswap/v3-nfpm/sweepToken@1.0.0",
+  "publisher": "uniswap.eth",
+  "schema_version": "3",
+  "note": "NFPM sweepToken(token,amountMinimum,recipient) sweeps tokens held by the periphery contract. amountMinimum is a lower bound, not an exact transfer amount, so preserve as Unknown until ActionBody has a min-amount sweep/transfer shape.",
+  "match": {
+    "selector": "0xdf2ab5bb",
+    "chain_to_addresses": {
+      "1": ["0xc36442b4a4522e871399cd717abdd847ab11fe88"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "sweepToken",
+    "abi": {
+      "name": "sweepToken",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        { "name": "token", "type": "address" },
+        { "name": "amountMinimum", "type": "uint256" },
+        { "name": "recipient", "type": "address" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "unknown",
+      "unknown": {
+        "target": "$to",
+        "chain": "$chain",
+        "calldata": "$calldata",
+        "value": "$tx.value"
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

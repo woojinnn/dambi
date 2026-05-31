@@ -1,0 +1,58 @@
+{
+  "matched": true,
+  "bundle_id": "uniswap/v3-nfpm/unwrapWETH9@1.0.0",
+  "manifest_path": "manifests/uniswap/v3-nfpm/unwrapWETH9@1.0.0.json",
+  "bundle_sha256": "0xecd9746e03d04f2dc23beaef51bc08363d9ec5207b952c6d4ed81e06783afdca",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "uniswap/v3-nfpm/unwrapWETH9@1.0.0",
+    "publisher": "uniswap.eth",
+    "schema_version": "3",
+    "note": "NFPM unwrapWETH9(amountMinimum,recipient) unwraps WETH held by the periphery contract and sends native ETH. amountMinimum is a lower bound, so preserve as Unknown until ActionBody has a native unwrap/min-amount transfer shape.",
+    "match": {
+      "selector": "0x49404b7c",
+      "chain_to_addresses": {
+        "1": [
+          "0xc36442b4a4522e871399cd717abdd847ab11fe88"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "unwrapWETH9",
+      "abi": {
+        "name": "unwrapWETH9",
+        "type": "function",
+        "stateMutability": "payable",
+        "inputs": [
+          {
+            "name": "amountMinimum",
+            "type": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address"
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "unknown",
+        "unknown": {
+          "target": "$to",
+          "chain": "$chain",
+          "calldata": "$calldata",
+          "value": "$tx.value"
+        }
+      }
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

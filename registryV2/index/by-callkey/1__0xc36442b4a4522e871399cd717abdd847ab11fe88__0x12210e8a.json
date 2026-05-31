@@ -1,0 +1,49 @@
+{
+  "matched": true,
+  "bundle_id": "uniswap/v3-nfpm/refundETH@1.0.0",
+  "manifest_path": "manifests/uniswap/v3-nfpm/refundETH@1.0.0.json",
+  "bundle_sha256": "0x9654eee50bca0b3662175f96efcc4bccf57c96f7cedaaf82e58cbbbf545aece3",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "uniswap/v3-nfpm/refundETH@1.0.0",
+    "publisher": "uniswap.eth",
+    "schema_version": "3",
+    "note": "NFPM refundETH() returns leftover native ETH from the periphery contract to msg.sender. Current ActionBody has no native-token transfer with unknown amount, so preserve the call as Unknown instead of misrepresenting the amount.",
+    "match": {
+      "selector": "0x12210e8a",
+      "chain_to_addresses": {
+        "1": [
+          "0xc36442b4a4522e871399cd717abdd847ab11fe88"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "refundETH",
+      "abi": {
+        "name": "refundETH",
+        "type": "function",
+        "stateMutability": "payable",
+        "inputs": [],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "unknown",
+        "unknown": {
+          "target": "$to",
+          "chain": "$chain",
+          "calldata": "$calldata",
+          "value": "$tx.value"
+        }
+      }
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

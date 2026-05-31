@@ -1,0 +1,97 @@
+{
+  "matched": true,
+  "bundle_id": "uniswap/v3-nfpm/selfPermitIfNecessary@1.0.0",
+  "manifest_path": "manifests/uniswap/v3-nfpm/selfPermitIfNecessary@1.0.0.json",
+  "bundle_sha256": "0x0437a6a877ce8d4760a7221488ddba12653ff5e669e473ca0ca0211c28705cac",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "uniswap/v3-nfpm/selfPermitIfNecessary@1.0.0",
+    "publisher": "uniswap.eth",
+    "schema_version": "3",
+    "note": "Uniswap V3 selfPermitIfNecessary(token,value,deadline,v,r,s). Same permission semantics as selfPermit; the contract conditionally consumes the permit only if the current allowance is below value.",
+    "match": {
+      "selector": "0xc2e3140a",
+      "chain_to_addresses": {
+        "1": [
+          "0xc36442b4a4522e871399cd717abdd847ab11fe88"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "selfPermitIfNecessary",
+      "abi": {
+        "name": "selfPermitIfNecessary",
+        "type": "function",
+        "stateMutability": "payable",
+        "inputs": [
+          {
+            "name": "token",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          },
+          {
+            "name": "v",
+            "type": "uint8"
+          },
+          {
+            "name": "r",
+            "type": "bytes32"
+          },
+          {
+            "name": "s",
+            "type": "bytes32"
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "token",
+        "token": {
+          "action": "erc20_permit",
+          "erc20_permit": {
+            "token": {
+              "key": {
+                "standard": "erc20",
+                "chain": "$chain",
+                "address": "$args.token"
+              }
+            },
+            "spender": "$to",
+            "amount": "$args.value",
+            "deadline": "$args.deadline"
+          }
+        }
+      },
+      "live_inputs": {
+        "nonce": {
+          "source": {
+            "kind": "onchain_view",
+            "chain": "$chain",
+            "contract": "$args.token",
+            "function": "nonces(address)",
+            "decoder_id": "erc20_permit_nonce"
+          },
+          "ttl_s": 12
+        }
+      }
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

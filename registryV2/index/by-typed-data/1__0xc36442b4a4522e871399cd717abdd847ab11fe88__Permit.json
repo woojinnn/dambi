@@ -1,0 +1,108 @@
+{
+  "matched": true,
+  "bundle_id": "uniswap/v3-nfpm/permit@1.0.0",
+  "manifest_path": "manifests/uniswap/v3-nfpm/permit@1.0.0.json",
+  "bundle_sha256": "0x303088201405965673cdc2c46a4cc7d8fb596ebe6d54fe6b533e0e27a28b931a",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "uniswap/v3-nfpm/permit@1.0.0",
+    "publisher": "uniswap.eth",
+    "schema_version": "3",
+    "note": "Uniswap V3 NonfungiblePositionManager ERC721 permit. Official v3-periphery ERC721Permit defines Permit(address spender,uint256 tokenId,uint256 nonce,uint256 deadline) and NFPM constructs the EIP-712 domain with name 'Uniswap V3 Positions NFT-V1' and version '1'. The ActionBody maps this to nft_approve so policies can catch the permission grant for a single V3 position NFT; deadline/nonce remain decoded but are not represented by the current nft_approve schema.",
+    "match": {
+      "selector": "0x7ac2ff7b",
+      "chain_to_addresses": {
+        "1": [
+          "0xc36442b4a4522e871399cd717abdd847ab11fe88"
+        ]
+      },
+      "typed_data": {
+        "domain_name": "Uniswap V3 Positions NFT-V1",
+        "verifying_contract": "0xc36442b4a4522e871399cd717abdd847ab11fe88",
+        "primary_type": "Permit",
+        "types": {
+          "Permit": [
+            {
+              "name": "spender",
+              "type": "address"
+            },
+            {
+              "name": "tokenId",
+              "type": "uint256"
+            },
+            {
+              "name": "nonce",
+              "type": "uint256"
+            },
+            {
+              "name": "deadline",
+              "type": "uint256"
+            }
+          ]
+        }
+      }
+    },
+    "abi_fragment": {
+      "function_name": "permit",
+      "abi": {
+        "name": "permit",
+        "type": "function",
+        "stateMutability": "payable",
+        "inputs": [
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "tokenId",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          },
+          {
+            "name": "v",
+            "type": "uint8"
+          },
+          {
+            "name": "r",
+            "type": "bytes32"
+          },
+          {
+            "name": "s",
+            "type": "bytes32"
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "token",
+        "token": {
+          "action": "nft_approve",
+          "nft_approve": {
+            "nft_key": {
+              "standard": "erc721",
+              "chain": "$chain",
+              "contract": "$to",
+              "token_id": "$args.tokenId"
+            },
+            "spender": "$args.spender"
+          }
+        }
+      },
+      "live_inputs": {}
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}
