@@ -10,7 +10,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { useAuth } from "./hooks/useAuth";
-import { SERVER_BASE_URL } from "./server-api";
+import { SERVER_BASE_URL, getStoredToken } from "./server-api";
 
 export function ServerLayout() {
   const { user, logout } = useAuth();
@@ -20,6 +20,14 @@ export function ServerLayout() {
     logout();
     navigate("/login", { replace: true });
   };
+
+  // Pass the JWT via URL fragment so Swagger UI can pre-fill the
+  // Authorize button — saves a manual copy-paste before "Try it out".
+  const docsUrl = (() => {
+    const t = getStoredToken();
+    const base = `${SERVER_BASE_URL}/docs`;
+    return t ? `${base}#token=${encodeURIComponent(t)}` : base;
+  })();
 
   return (
     <div style={{ minHeight: "100vh", background: "#f7f7f8" }}>
@@ -45,11 +53,11 @@ export function ServerLayout() {
         </nav>
         <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13 }}>
           <a
-            href={`${SERVER_BASE_URL}/docs`}
+            href={docsUrl}
             target="_blank"
             rel="noreferrer"
             style={{ fontSize: 12, color: "#0066cc", textDecoration: "none" }}
-            title="OpenAPI / Swagger UI"
+            title="OpenAPI / Swagger UI (with auto-auth)"
           >
             API docs ↗
           </a>

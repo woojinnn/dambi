@@ -28,7 +28,25 @@ const SWAGGER_HTML: &str = r##"<!doctype html>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
   <script>
+    // Pick up a JWT passed as a URL fragment (#token=...). Hash beats
+    // query because tokens in query strings end up in access logs.
+    function readTokenFromHash() {
+      const h = window.location.hash || "";
+      const m = h.match(/(?:^|[#&])token=([^&]+)/);
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    // Falls back to localStorage (same-origin only — won't see the
+    // dashboard's token, but lets a user paste once and have it stick).
+    function readTokenFromStorage() {
+      try { return window.localStorage.getItem("scopeball_docs_jwt"); }
+      catch { return null; }
+    }
+    function persistToken(t) {
+      try { window.localStorage.setItem("scopeball_docs_jwt", t); }
+      catch { /* private mode */ }
+    }
     window.onload = () => {
+      const token = readTokenFromHash() || readTokenFromStorage();
       window.ui = SwaggerUIBundle({
         url: "/openapi.yaml",
         dom_id: "#swagger-ui",
@@ -39,6 +57,17 @@ const SWAGGER_HTML: &str = r##"<!doctype html>
           SwaggerUIStandalonePreset,
         ],
         layout: "BaseLayout",
+        onComplete: () => {
+          if (token) {
+            window.ui.preauthorizeApiKey("bearerAuth", token);
+            persistToken(token);
+            // Clear the hash so the token doesn't sit in the URL bar /
+            // browser history.
+            if (window.location.hash.includes("token=")) {
+              history.replaceState(null, "", window.location.pathname);
+            }
+          }
+        },
       });
     };
   </script>
