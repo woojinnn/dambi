@@ -1,0 +1,102 @@
+{
+  "type": "adapter_action",
+  "id": "balancer/v2/vault-join-pool@1.0.0",
+  "publisher": "balancer.eth",
+  "schema_version": "3",
+  "_note": "Balancer V2 Vault.joinPool(bytes32,address,address,JoinPoolRequest). Source: balancer/balancer-v2-monorepo pkg/interfaces/contracts/vault/IVault.sol. JoinPoolRequest assets[] and maxAmountsIn[] are parallel arrays; the V3 builder zips assets[] with the exact amounts decoded from userData when available. Weighted/Stable JoinKind userData source: balancer/balancer-v2-monorepo pool user-data helpers.",
+  "match": {
+    "selector": "0xb95cac28",
+    "chain_to_addresses": {
+      "1":     ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
+      "42161": ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
+      "43114": ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
+      "10":    ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
+      "137":   ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
+      "56":    ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "joinPool",
+    "abi": {
+      "name": "joinPool",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        { "name": "poolId", "type": "bytes32" },
+        { "name": "sender", "type": "address" },
+        { "name": "recipient", "type": "address" },
+        {
+          "name": "request",
+          "type": "tuple",
+          "components": [
+            { "name": "assets", "type": "address[]" },
+            { "name": "maxAmountsIn", "type": "uint256[]" },
+            { "name": "userData", "type": "bytes" },
+            { "name": "fromInternalBalance", "type": "bool" }
+          ]
+        }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "amm",
+      "amm": {
+        "action": "add_liquidity",
+        "add_liquidity": {
+          "venue": {
+            "name": "balancer_v2",
+            "chain": "$chain",
+            "vault": "$to",
+            "pool_id": "$args.poolId",
+            "pool_type": "weighted"
+          },
+          "params": {
+            "kind": "pooled",
+            "tokens": {
+              "$zip": ["$args.request[0]", "$derived.balancer_v2_join_amounts_in"],
+              "$template": [
+                { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.[0]" } },
+                "$inputs.[1]"
+              ]
+            },
+            "min_lp_out": "$derived.balancer_v2_min_lp_out",
+            "recipient": "$args.recipient"
+          },
+          "live_inputs": {
+            "pool_state": {
+              "_note": "host:registry pool metadata keyed by pool address derived from poolId[0:20].",
+              "source": {
+                "kind": "registry_api",
+                "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app",
+                "resource": {
+                  "kind": "pool_meta",
+                  "chain": "$chain",
+                  "pool_addr": "$derived.balancer_v2_pool_address"
+                },
+                "version": "2"
+              },
+              "ttl_s": 86400
+            },
+            "current_price": {
+              "source": {
+                "kind": "derived_from",
+                "inputs": [],
+                "calc_id": "balancer_v2_join_price"
+              },
+              "ttl_s": 12
+            }
+          }
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": ["registry:pool_meta"],
+    "extension": ">=0.1.0"
+  }
+}

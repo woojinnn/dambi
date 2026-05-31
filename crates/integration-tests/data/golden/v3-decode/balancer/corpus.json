@@ -1,5 +1,5 @@
 {
-  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0. Remaining uncovered Vault fns are soft no_declarative_v3_mapper, pinned here as expect=error to lock the gap; flip to expect=pass + expect_domain when the corresponding manifest lands. Remaining fns + how to add: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback); exitPool 0x8bdb3913 & joinPool 0xb95cac28 (need dynamic array zip + userData enum-tag decode for faithful LP action). Zero hard decoder failures in the original 300-tx sample.",
+  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0; exitPool (0x8bdb3913) -> pass/amm via balancer/v2/vault-exit-pool@1.0.0; joinPool (0xb95cac28) -> pass/amm via balancer/v2/vault-join-pool@1.0.0. Remaining uncovered Vault fn pinned as expect=error: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback). Zero hard decoder failures in the original 300-tx sample.",
   "transactions": [
     {
       "intent": "swap",
@@ -115,7 +115,7 @@
     },
     {
       "intent": "exitPool",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0x047ef5bf2ae2bdd195518ace2c1641a9de80a5a4c596246641b0da5610f1e333",
       "chain_id": 42161,
       "rpc": {
@@ -127,11 +127,11 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "exitPool",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0x32d18099307a177b5b1f74dc260929cc6e9ca27be15ce920d19d0fbaeadd34e4",
       "chain_id": 42161,
       "rpc": {
@@ -143,11 +143,11 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "exitPool",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0xa28f62721e53ae24b2a8c9aff4a5e495b141c06c208d08f0e048c5d85476f002",
       "chain_id": 1,
       "rpc": {
@@ -159,11 +159,11 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "joinPool",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0xa3c3f55e3287cb58c3553fdd799518ad4a0d2fb1f9e07b299c9a71d7ac4bf28a",
       "chain_id": 1,
       "rpc": {
@@ -175,11 +175,11 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "joinPool",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0x00439b0fbf1680f8ab7d0a92a48722062e70aa487b5e77c0084996374ad149ec",
       "chain_id": 42161,
       "rpc": {
@@ -191,7 +191,7 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "setRelayerApproval",

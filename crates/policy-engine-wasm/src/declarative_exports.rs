@@ -546,6 +546,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             &args_json,
             &mut derived,
         );
+        maybe_inject_balancer_v2_pool_args(&key.selector, &args_json, &mut derived);
 
         let ctx = V3MapContext {
             chain: chain.clone(),
@@ -2357,6 +2358,173 @@ fn aave_l2_expand_uint128_max(amount: alloy_primitives::U256) -> alloy_primitive
     } else {
         amount
     }
+}
+
+fn maybe_inject_balancer_v2_pool_args(
+    selector: &str,
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    match selector {
+        "0xb95cac28" => inject_balancer_v2_join_args(args_json, derived),
+        "0x8bdb3913" => inject_balancer_v2_exit_args(args_json, derived),
+        _ => {}
+    }
+}
+
+fn inject_balancer_v2_pool_address(
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    let Some(pool_id) = args_json.get("poolId").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    let Some(hex) = pool_id.strip_prefix("0x") else {
+        return;
+    };
+    if hex.len() < 40 {
+        return;
+    }
+    derived.insert(
+        "balancer_v2_pool_address".to_owned(),
+        serde_json::Value::String(format!("0x{}", &hex[..40])),
+    );
+}
+
+fn inject_balancer_v2_join_args(
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    inject_balancer_v2_pool_address(args_json, derived);
+    let fallback_amounts = balancer_request_amounts(args_json, 1);
+    let parsed = args_json
+        .get("request")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|request| request.get(2))
+        .and_then(serde_json::Value::as_str)
+        .and_then(|user_data| {
+            parse_balancer_v2_join_user_data(user_data, fallback_amounts.clone())
+        });
+    let (amounts_in, min_lp_out) =
+        parsed.unwrap_or((fallback_amounts, alloy_primitives::U256::ZERO));
+    derived.insert(
+        "balancer_v2_join_amounts_in".to_owned(),
+        serde_json::Value::Array(amounts_in),
+    );
+    derived.insert(
+        "balancer_v2_min_lp_out".to_owned(),
+        serde_json::Value::String(min_lp_out.to_string()),
+    );
+}
+
+fn inject_balancer_v2_exit_args(
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    inject_balancer_v2_pool_address(args_json, derived);
+    let lp_amount = args_json
+        .get("request")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|request| request.get(2))
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_balancer_v2_exit_user_data)
+        .unwrap_or(alloy_primitives::U256::ZERO);
+    derived.insert(
+        "balancer_v2_exit_lp_amount".to_owned(),
+        serde_json::Value::String(lp_amount.to_string()),
+    );
+}
+
+fn balancer_request_amounts(args_json: &serde_json::Value, index: usize) -> Vec<serde_json::Value> {
+    args_json
+        .get("request")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|request| request.get(index))
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn parse_balancer_v2_join_user_data(
+    raw: &str,
+    fallback_amounts: Vec<serde_json::Value>,
+) -> Option<(Vec<serde_json::Value>, alloy_primitives::U256)> {
+    let bytes = balancer_user_data_bytes(raw)?;
+    let kind: u64 = balancer_word_u256(&bytes, 0)?.try_into().ok()?;
+    match kind {
+        // INIT: (kind, uint256[] amountsIn). No min-BPT floor in userData.
+        0 => Some((
+            balancer_u256_array_json(&bytes, balancer_word_usize(&bytes, 1)?)?,
+            alloy_primitives::U256::ZERO,
+        )),
+        // EXACT_TOKENS_IN_FOR_BPT_OUT: (kind, amountsIn[], minBPTAmountOut).
+        1 => Some((
+            balancer_u256_array_json(&bytes, balancer_word_usize(&bytes, 1)?)?,
+            balancer_word_u256(&bytes, 2)?,
+        )),
+        // TOKEN_IN_FOR_EXACT_BPT_OUT / ALL_TOKENS_IN_FOR_EXACT_BPT_OUT: the
+        // request's maxAmountsIn[] is the available policy bound.
+        2 | 3 => Some((fallback_amounts, balancer_word_u256(&bytes, 1)?)),
+        _ => None,
+    }
+}
+
+fn parse_balancer_v2_exit_user_data(raw: &str) -> Option<alloy_primitives::U256> {
+    let bytes = balancer_user_data_bytes(raw)?;
+    let kind: u64 = balancer_word_u256(&bytes, 0)?.try_into().ok()?;
+    match kind {
+        // EXACT_BPT_IN_FOR_ONE_TOKEN_OUT.
+        0 => balancer_word_u256(&bytes, 1),
+        // Weighted kind=1: EXACT_BPT_IN_FOR_TOKENS_OUT (kind, bptAmountIn).
+        // Stable kind=1: BPT_IN_FOR_EXACT_TOKENS_OUT (kind, amountsOut[], maxBPTAmountIn).
+        1 if bytes.len() == 64 => balancer_word_u256(&bytes, 1),
+        1 => balancer_word_u256(&bytes, 2),
+        // Weighted kind=2: BPT_IN_FOR_EXACT_TOKENS_OUT; Stable kind=2:
+        // EXACT_BPT_IN_FOR_ALL_TOKENS_OUT.
+        2 if bytes.len() == 64 => balancer_word_u256(&bytes, 1),
+        2 => balancer_word_u256(&bytes, 2),
+        // Recovery-mode exits are encoded as (255, bptAmountIn) in the pool
+        // utility layer; preserve the burned BPT amount when present.
+        255 if bytes.len() == 64 => balancer_word_u256(&bytes, 1),
+        _ => None,
+    }
+}
+
+fn balancer_user_data_bytes(raw: &str) -> Option<Vec<u8>> {
+    let hex = raw.strip_prefix("0x")?;
+    if hex.len() % 64 != 0 {
+        return None;
+    }
+    hex::decode(hex).ok()
+}
+
+fn balancer_word_u256(bytes: &[u8], word_index: usize) -> Option<alloy_primitives::U256> {
+    let start = word_index.checked_mul(32)?;
+    let end = start.checked_add(32)?;
+    if end > bytes.len() {
+        return None;
+    }
+    Some(alloy_primitives::U256::from_be_slice(&bytes[start..end]))
+}
+
+fn balancer_word_usize(bytes: &[u8], word_index: usize) -> Option<usize> {
+    let word = balancer_word_u256(bytes, word_index)?;
+    word.try_into().ok()
+}
+
+fn balancer_u256_array_json(bytes: &[u8], offset: usize) -> Option<Vec<serde_json::Value>> {
+    if offset % 32 != 0 {
+        return None;
+    }
+    let base = offset / 32;
+    let len = balancer_word_usize(bytes, base)?;
+    let mut out = Vec::with_capacity(len);
+    for idx in 0..len {
+        out.push(serde_json::Value::String(
+            balancer_word_u256(bytes, base + 1 + idx)?.to_string(),
+        ));
+    }
+    Some(out)
 }
 
 /// `multicall_recurse` (Cat D) — flatten a self-`multicall(bytes[])` into one

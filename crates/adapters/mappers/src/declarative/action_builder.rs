@@ -91,6 +91,11 @@ pub enum V3BuildError {
     /// canonical key form (anything other than String / Number / Bool).
     #[error("value-map malformed: {0}")]
     ValueMapMalformed(String),
+    /// A parallel-array zip object is structurally invalid: missing
+    /// `$template`, `$zip` is not exactly two arrays, or a source is not an
+    /// array.
+    #[error("zip malformed: {0}")]
+    ZipMalformed(String),
 }
 
 /// Fallback type for unresolved `$resolved.<k>` / `$derived.<k>` placeholders.
@@ -119,6 +124,7 @@ fn placeholder_type_lookup(rest: &str) -> Option<FallbackType> {
         | "factory"
         | "pool"
         | "pool_manager"
+        | "balancer_v2_pool_address"
         | "v3_path_first_token"
         | "v3_path_last_token"
         | "v4_token_in"
@@ -133,6 +139,8 @@ fn placeholder_type_lookup(rest: &str) -> Option<FallbackType> {
         "fee_tier_bp" | "slippage_bp" | "aave_l2_rate_mode" => Some(U32),
         "v4_amount_in"
         | "v4_amount_out_min"
+        | "balancer_v2_min_lp_out"
+        | "balancer_v2_exit_lp_amount"
         | "min_lp_out"
         | "aave_l2_amount"
         | "aave_l2_debt_to_cover" => Some(U256),
@@ -239,6 +247,22 @@ pub struct V3MapContext<'a> {
 /// themselves embed placeholders or nested structures (field-level AND
 /// action-tag-level switches compose).
 ///
+/// ## Parallel-array zip (`$zip` / `$template`)
+///
+/// A JSON object with reserved key `"$zip"` turns two parallel arrays into an
+/// output array by applying `"$template"` once per pair. During each iteration,
+/// `$inputs.[0]` is bound to the left element and `$inputs.[1]` to the right
+/// element. Like ordinary zip operations, mismatched arrays are truncated to
+/// the shorter side so ABI-valid but contract-invalid calldata does not become
+/// a hard decoder failure. This covers ABI shapes such as Balancer
+/// `request.assets[]` + `request.amounts[]` that need to become
+/// `Vec<(TokenRef, U256)>` for `ActionBody`.
+///
+/// ```jsonc
+/// { "$zip": ["$args.assets", "$args.amounts"],
+///   "$template": [ { "key": { "address": "$inputs.[0]" } }, "$inputs.[1]" ] }
+/// ```
+///
 /// # Errors
 ///
 /// Returns [`V3BuildError::UnresolvedPlaceholder`] when a `$resolved.x` /
@@ -265,6 +289,9 @@ pub fn substitute_placeholders(
             if map.contains_key("$match") {
                 return resolve_value_map(ctx, map);
             }
+            if map.contains_key("$zip") {
+                return resolve_zip_map(ctx, map);
+            }
             let mut out = JsonMap::with_capacity(map.len());
             for (k, v) in map {
                 out.insert(k.clone(), substitute_placeholders(ctx, v)?);
@@ -274,6 +301,62 @@ pub fn substitute_placeholders(
         // Strings without `$`, numbers, bools, nulls pass through.
         other => Ok(other.clone()),
     }
+}
+
+/// Resolve a parallel-array zip object `{ $zip: [left, right], $template }`.
+fn resolve_zip_map(
+    ctx: &V3MapContext<'_>,
+    map: &JsonMap<String, JsonValue>,
+) -> Result<JsonValue, V3BuildError> {
+    for k in map.keys() {
+        if !matches!(k.as_str(), "$zip" | "$template") {
+            return Err(V3BuildError::ZipMalformed(format!(
+                "unexpected key '{k}' in zip-map (allowed: $zip, $template)"
+            )));
+        }
+    }
+
+    let zip = map
+        .get("$zip")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| V3BuildError::ZipMalformed("$zip missing or not an array".into()))?;
+    if zip.len() != 2 {
+        return Err(V3BuildError::ZipMalformed(format!(
+            "$zip must contain exactly two array sources, got {}",
+            zip.len()
+        )));
+    }
+
+    let left = substitute_placeholders(ctx, &zip[0])?;
+    let right = substitute_placeholders(ctx, &zip[1])?;
+    let left_arr = left
+        .as_array()
+        .ok_or_else(|| V3BuildError::ZipMalformed("left source is not an array".into()))?;
+    let right_arr = right
+        .as_array()
+        .ok_or_else(|| V3BuildError::ZipMalformed("right source is not an array".into()))?;
+    let template = map
+        .get("$template")
+        .ok_or_else(|| V3BuildError::ZipMalformed("$template missing".into()))?;
+    let mut out = Vec::with_capacity(left_arr.len().min(right_arr.len()));
+    for (left, right) in left_arr.iter().zip(right_arr) {
+        let inputs = JsonValue::Array(vec![left.clone(), right.clone()]);
+        let child = V3MapContext {
+            chain: ctx.chain.clone(),
+            tx_to: ctx.tx_to,
+            tx_from: ctx.tx_from,
+            value: ctx.value,
+            submitted_at: ctx.submitted_at,
+            args_json: ctx.args_json,
+            raw_calldata: ctx.raw_calldata,
+            resolved: ctx.resolved.clone(),
+            derived: ctx.derived.clone(),
+            inputs: Some(&inputs),
+        };
+        out.push(substitute_placeholders(&child, template)?);
+    }
+
+    Ok(JsonValue::Array(out))
 }
 
 /// Resolve a discriminant value-map object `{ $match, $cases, $default? }`.
@@ -1954,5 +2037,73 @@ mod tests {
         });
         let err = substitute_placeholders(&ctx, &template).unwrap_err();
         assert!(matches!(err, V3BuildError::ValueMapMalformed(_)));
+    }
+
+    #[test]
+    fn zip_pairs_parallel_arrays_with_inputs_binding() {
+        let args = json!({
+            "assets": [
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            ],
+            "amounts": ["100", "200"]
+        });
+        let ctx = mk_ctx(&args);
+        let template = json!({
+            "$zip": ["$args.assets", "$args.amounts"],
+            "$template": [
+                { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.[0]" } },
+                "$inputs.[1]"
+            ]
+        });
+
+        let out = substitute_placeholders(&ctx, &template).unwrap();
+        assert_eq!(
+            out,
+            json!([
+                [
+                    {
+                        "key": {
+                            "standard": "erc20",
+                            "chain": "eip155:1",
+                            "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                        }
+                    },
+                    "100"
+                ],
+                [
+                    {
+                        "key": {
+                            "standard": "erc20",
+                            "chain": "eip155:1",
+                            "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+                        }
+                    },
+                    "200"
+                ]
+            ])
+        );
+    }
+
+    #[test]
+    fn zip_truncates_mismatched_arrays() {
+        let args = json!({
+            "assets": ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"],
+            "amounts": ["100", "200"]
+        });
+        let ctx = mk_ctx(&args);
+        let template = json!({
+            "$zip": ["$args.assets", "$args.amounts"],
+            "$template": ["$inputs.[0]", "$inputs.[1]"]
+        });
+
+        let out = substitute_placeholders(&ctx, &template).unwrap();
+        assert_eq!(
+            out,
+            json!([[
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "100"
+            ]])
+        );
     }
 }

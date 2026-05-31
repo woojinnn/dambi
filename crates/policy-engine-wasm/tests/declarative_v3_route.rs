@@ -5427,6 +5427,305 @@ fn t22_balancer_vault_swap_given_out_exact_output() {
     );
 }
 
+const B5_BALANCER_VAULT_JOIN_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "balancer/v2/vault-join-pool@1.0.0",
+  "publisher": "balancer.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0xb95cac28",
+    "chain_to_addresses": { "1": ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"] }
+  },
+  "abi_fragment": {
+    "function_name": "joinPool",
+    "abi": {
+      "name": "joinPool",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        { "name": "poolId", "type": "bytes32" },
+        { "name": "sender", "type": "address" },
+        { "name": "recipient", "type": "address" },
+        {
+          "name": "request",
+          "type": "tuple",
+          "components": [
+            { "name": "assets", "type": "address[]" },
+            { "name": "maxAmountsIn", "type": "uint256[]" },
+            { "name": "userData", "type": "bytes" },
+            { "name": "fromInternalBalance", "type": "bool" }
+          ]
+        }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "amm",
+      "amm": {
+        "action": "add_liquidity",
+        "add_liquidity": {
+          "venue": {
+            "name": "balancer_v2",
+            "chain": "$chain",
+            "vault": "$to",
+            "pool_id": "$args.poolId",
+            "pool_type": "weighted"
+          },
+          "params": {
+            "kind": "pooled",
+            "tokens": {
+              "$zip": ["$args.request[0]", "$derived.balancer_v2_join_amounts_in"],
+              "$template": [
+                { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.[0]" } },
+                "$inputs.[1]"
+              ]
+            },
+            "min_lp_out": "$derived.balancer_v2_min_lp_out",
+            "recipient": "$args.recipient"
+          },
+          "live_inputs": {
+            "pool_state": {
+              "source": { "kind": "registry_api", "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app", "resource": { "kind": "pool_meta", "chain": "$chain", "pool_addr": "$derived.balancer_v2_pool_address" }, "version": "2" },
+              "ttl_s": 86400
+            },
+            "current_price": {
+              "source": { "kind": "derived_from", "inputs": [], "calc_id": "balancer_v2_join_price" },
+              "ttl_s": 12
+            }
+          }
+        }
+      }
+    }
+  }
+}"#;
+
+const B5_BALANCER_VAULT_EXIT_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "balancer/v2/vault-exit-pool@1.0.0",
+  "publisher": "balancer.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x8bdb3913",
+    "chain_to_addresses": { "1": ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"] }
+  },
+  "abi_fragment": {
+    "function_name": "exitPool",
+    "abi": {
+      "name": "exitPool",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "poolId", "type": "bytes32" },
+        { "name": "sender", "type": "address" },
+        { "name": "recipient", "type": "address" },
+        {
+          "name": "request",
+          "type": "tuple",
+          "components": [
+            { "name": "assets", "type": "address[]" },
+            { "name": "minAmountsOut", "type": "uint256[]" },
+            { "name": "userData", "type": "bytes" },
+            { "name": "toInternalBalance", "type": "bool" }
+          ]
+        }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "amm",
+      "amm": {
+        "action": "remove_liquidity",
+        "remove_liquidity": {
+          "venue": {
+            "name": "balancer_v2",
+            "chain": "$chain",
+            "vault": "$to",
+            "pool_id": "$args.poolId",
+            "pool_type": "weighted"
+          },
+          "params": {
+            "kind": "pooled_burn",
+            "lp_token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$derived.balancer_v2_pool_address" } },
+            "lp_amount": "$derived.balancer_v2_exit_lp_amount",
+            "min_out": {
+              "$zip": ["$args.request[0]", "$args.request[1]"],
+              "$template": [
+                { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.[0]" } },
+                "$inputs.[1]"
+              ]
+            },
+            "recipient": "$args.recipient"
+          },
+          "live_inputs": {
+            "pool_state": {
+              "source": { "kind": "registry_api", "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app", "resource": { "kind": "pool_meta", "chain": "$chain", "pool_addr": "$derived.balancer_v2_pool_address" }, "version": "2" },
+              "ttl_s": 86400
+            },
+            "fees_owed": {
+              "source": { "kind": "derived_from", "inputs": [], "calc_id": "balancer_v2_exit_fees" },
+              "ttl_s": 12
+            }
+          }
+        }
+      }
+    }
+  }
+}"#;
+
+fn balancer_pool_id_bytes() -> alloy_primitives::B256 {
+    let raw = hex::decode(LBP_POOL_ID.trim_start_matches("0x")).expect("32-byte poolId");
+    alloy_primitives::B256::from_slice(&raw)
+}
+
+fn balancer_join_user_data_exact_tokens() -> Vec<u8> {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        DynSolValue::Array(vec![
+            DynSolValue::Uint(AlloyU256::from(100u64), 256),
+            DynSolValue::Uint(AlloyU256::from(200u64), 256),
+        ]),
+        DynSolValue::Uint(AlloyU256::from(999u64), 256),
+    ])
+    .abi_encode_params()
+}
+
+fn balancer_exit_user_data_exact_bpt_in() -> Vec<u8> {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        DynSolValue::Uint(AlloyU256::from(777u64), 256),
+    ])
+    .abi_encode_params()
+}
+
+#[test]
+fn t23_balancer_vault_join_pool_exact_tokens_routes_to_add_liquidity() {
+    install_ok(B5_BALANCER_VAULT_JOIN_V3);
+
+    let usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let weth = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let sender = "0x000000000000000000000000000000000000a01c"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let recipient = "0x000000000000000000000000000000000000bbbb"
+        .parse::<AlloyAddress>()
+        .unwrap();
+
+    let request = DynSolValue::Tuple(vec![
+        DynSolValue::Array(vec![DynSolValue::Address(usdc), DynSolValue::Address(weth)]),
+        DynSolValue::Array(vec![
+            DynSolValue::Uint(AlloyU256::from(110u64), 256),
+            DynSolValue::Uint(AlloyU256::from(220u64), 256),
+        ]),
+        DynSolValue::Bytes(balancer_join_user_data_exact_tokens()),
+        DynSolValue::Bool(false),
+    ]);
+    let calldata = encode_calldata(
+        "0xb95cac28",
+        &[
+            DynSolValue::FixedBytes(balancer_pool_id_bytes(), 32),
+            DynSolValue::Address(sender),
+            DynSolValue::Address(recipient),
+            request,
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        VAULT_MAINNET,
+        "0xb95cac28",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v2/vault-join-pool@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "add_liquidity", "{parsed}");
+    assert_eq!(body["venue"]["name"], "balancer_v2", "{parsed}");
+    assert_eq!(body["venue"]["pool_id"], LBP_POOL_ID, "{parsed}");
+    assert_eq!(body["params"]["kind"], "pooled", "{parsed}");
+    assert_eq!(body["params"]["min_lp_out"], "0x3e7", "{parsed}");
+    assert_eq!(body["params"]["tokens"][0][1], "0x64", "{parsed}");
+    assert_eq!(body["params"]["tokens"][1][1], "0xc8", "{parsed}");
+    assert_eq!(
+        body["params"]["recipient"], "0x000000000000000000000000000000000000bbbb",
+        "{parsed}"
+    );
+}
+
+#[test]
+fn t24_balancer_vault_exit_pool_exact_bpt_routes_to_remove_liquidity() {
+    install_ok(B5_BALANCER_VAULT_EXIT_V3);
+
+    let usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let weth = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let sender = "0x000000000000000000000000000000000000a01c"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let recipient = "0x000000000000000000000000000000000000bbbb"
+        .parse::<AlloyAddress>()
+        .unwrap();
+
+    let request = DynSolValue::Tuple(vec![
+        DynSolValue::Array(vec![DynSolValue::Address(usdc), DynSolValue::Address(weth)]),
+        DynSolValue::Array(vec![
+            DynSolValue::Uint(AlloyU256::from(10u64), 256),
+            DynSolValue::Uint(AlloyU256::from(20u64), 256),
+        ]),
+        DynSolValue::Bytes(balancer_exit_user_data_exact_bpt_in()),
+        DynSolValue::Bool(false),
+    ]);
+    let calldata = encode_calldata(
+        "0x8bdb3913",
+        &[
+            DynSolValue::FixedBytes(balancer_pool_id_bytes(), 32),
+            DynSolValue::Address(sender),
+            DynSolValue::Address(recipient),
+            request,
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        VAULT_MAINNET,
+        "0x8bdb3913",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v2/vault-exit-pool@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "remove_liquidity", "{parsed}");
+    assert_eq!(body["venue"]["name"], "balancer_v2", "{parsed}");
+    assert_eq!(body["params"]["kind"], "pooled_burn", "{parsed}");
+    assert_eq!(
+        body["params"]["lp_token"]["key"]["address"], "0xc45d42f801105e861e86658648e3678ad7aa70f9",
+        "{parsed}"
+    );
+    assert_eq!(body["params"]["lp_amount"], "0x309", "{parsed}");
+    assert_eq!(body["params"]["min_out"][0][1], "0xa", "{parsed}");
+    assert_eq!(body["params"]["min_out"][1][1], "0x14", "{parsed}");
+}
+
 // ===========================================================================
 // b4 — LayerZero ZRO airdrop / OFT cover
 // ===========================================================================

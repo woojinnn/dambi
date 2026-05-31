@@ -1,0 +1,161 @@
+{
+  "matched": true,
+  "bundle_id": "balancer/v2/vault-exit-pool@1.0.0",
+  "manifest_path": "manifests/balancer/v2/vault-exit-pool@1.0.0.json",
+  "bundle_sha256": "0x54a20702decba37104947f5a5c70177c06a9cea135cd0cde15f148ca04fe6fe1",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "balancer/v2/vault-exit-pool@1.0.0",
+    "publisher": "balancer.eth",
+    "schema_version": "3",
+    "_note": "Balancer V2 Vault.exitPool(bytes32,address,address,ExitPoolRequest). Source: balancer/balancer-v2-monorepo pkg/interfaces/contracts/vault/IVault.sol. ExitPoolRequest assets[] and minAmountsOut[] are parallel arrays. The LP token is the pool address embedded in poolId[0:20]; userData supplies the BPT amount or max BPT amount depending on ExitKind.",
+    "match": {
+      "selector": "0x8bdb3913",
+      "chain_to_addresses": {
+        "1": [
+          "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        ],
+        "10": [
+          "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        ],
+        "56": [
+          "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        ],
+        "137": [
+          "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        ],
+        "42161": [
+          "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        ],
+        "43114": [
+          "0xBA12222222228d8Ba445958a75a0704d566BF2C8"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "exitPool",
+      "abi": {
+        "name": "exitPool",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "name": "poolId",
+            "type": "bytes32"
+          },
+          {
+            "name": "sender",
+            "type": "address"
+          },
+          {
+            "name": "recipient",
+            "type": "address"
+          },
+          {
+            "name": "request",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "assets",
+                "type": "address[]"
+              },
+              {
+                "name": "minAmountsOut",
+                "type": "uint256[]"
+              },
+              {
+                "name": "userData",
+                "type": "bytes"
+              },
+              {
+                "name": "toInternalBalance",
+                "type": "bool"
+              }
+            ]
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "amm",
+        "amm": {
+          "action": "remove_liquidity",
+          "remove_liquidity": {
+            "venue": {
+              "name": "balancer_v2",
+              "chain": "$chain",
+              "vault": "$to",
+              "pool_id": "$args.poolId",
+              "pool_type": "weighted"
+            },
+            "params": {
+              "kind": "pooled_burn",
+              "lp_token": {
+                "key": {
+                  "standard": "erc20",
+                  "chain": "$chain",
+                  "address": "$derived.balancer_v2_pool_address"
+                }
+              },
+              "lp_amount": "$derived.balancer_v2_exit_lp_amount",
+              "min_out": {
+                "$zip": [
+                  "$args.request[0]",
+                  "$args.request[1]"
+                ],
+                "$template": [
+                  {
+                    "key": {
+                      "standard": "erc20",
+                      "chain": "$chain",
+                      "address": "$inputs.[0]"
+                    }
+                  },
+                  "$inputs.[1]"
+                ]
+              },
+              "recipient": "$args.recipient"
+            },
+            "live_inputs": {
+              "pool_state": {
+                "_note": "host:registry pool metadata keyed by pool address derived from poolId[0:20].",
+                "source": {
+                  "kind": "registry_api",
+                  "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app",
+                  "resource": {
+                    "kind": "pool_meta",
+                    "chain": "$chain",
+                    "pool_addr": "$derived.balancer_v2_pool_address"
+                  },
+                  "version": "2"
+                },
+                "ttl_s": 86400
+              },
+              "fees_owed": {
+                "source": {
+                  "kind": "derived_from",
+                  "inputs": [],
+                  "calc_id": "balancer_v2_exit_fees"
+                },
+                "ttl_s": 12
+              }
+            }
+          }
+        }
+      }
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [
+        "registry:pool_meta"
+      ],
+      "extension": ">=0.1.0"
+    }
+  }
+}
