@@ -1026,8 +1026,46 @@ priority = 1
                     };
                     tokio::spawn(async move {
                         let req = read_request_json(&mut stream).await;
-                        let body = match req["type"].as_str().unwrap_or_default() {
-                            "clearinghouseState" => json!({
+                        let dex = req.get("dex").and_then(Value::as_str);
+                        let body = match (req["type"].as_str().unwrap_or_default(), dex) {
+                            ("clearinghouseState", Some("xyz")) => json!({
+                                "marginSummary": {
+                                    "accountValue": "1077.754757",
+                                    "totalNtlPos": "5257.5954",
+                                    "totalRawUsd": "-4179.840643",
+                                    "totalMarginUsed": "1077.754757"
+                                },
+                                "crossMarginSummary": {
+                                    "accountValue": "1077.754757",
+                                    "totalNtlPos": "5257.5954",
+                                    "totalRawUsd": "-4179.840643",
+                                    "totalMarginUsed": "1077.754757"
+                                },
+                                "crossMaintenanceMarginUsed": "0",
+                                "withdrawable": "0",
+                                "assetPositions": [{
+                                    "type": "oneWay",
+                                    "position": {
+                                        "coin": "xyz:SPCX",
+                                        "szi": "25.77",
+                                        "leverage": { "type": "isolated", "value": 5, "rawUsd": "-4179.840643" },
+                                        "entryPx": "202.74",
+                                        "positionValue": "5257.5954",
+                                        "unrealizedPnl": "32.9856",
+                                        "returnOnEquity": "0.033",
+                                        "liquidationPx": "180.2199216574",
+                                        "marginUsed": "1077.754757",
+                                        "maxLeverage": 5,
+                                        "cumFunding": {
+                                            "allTime": "0.003908",
+                                            "sinceOpen": "0.003908",
+                                            "sinceChange": "0.003908"
+                                        }
+                                    }
+                                }],
+                                "time": 1710000000123u64
+                            }),
+                            ("clearinghouseState", None) => json!({
                                 "marginSummary": {
                                     "accountValue": "1000",
                                     "totalNtlPos": "6000",
@@ -1064,7 +1102,8 @@ priority = 1
                                 }],
                                 "time": 1710000000123u64
                             }),
-                            "frontendOpenOrders" => json!([{
+                            ("frontendOpenOrders", Some("xyz")) => json!([]),
+                            ("frontendOpenOrders", None) => json!([{
                                 "timestamp": 1710000000124u64,
                                 "coin": "ETH",
                                 "side": "B",
@@ -1077,19 +1116,26 @@ priority = 1
                                 "tif": "Gtc",
                                 "reduceOnly": false
                             }]),
-                            "extraAgents" => json!([{
+                            ("extraAgents", None) => json!([{
                                 "name": "bot",
                                 "address": "0x1111111111111111111111111111111111111111",
                                 "validUntil": 1710000000999u64
                             }]),
-                            "meta" => json!({
+                            ("meta", Some("xyz")) => json!({
+                                "universe": [
+                                    { "name": "xyz:SPCX", "maxLeverage": 5, "szDecimals": 2 }
+                                ],
+                                "collateralToken": 0
+                            }),
+                            ("meta", None) => json!({
                                 "universe": [
                                     { "name": "BTC", "maxLeverage": 50, "szDecimals": 5 },
                                     { "name": "ETH", "maxLeverage": 25, "szDecimals": 4 }
                                 ],
                                 "collateralToken": 0
                             }),
-                            other => panic!("unexpected info request: {other}"),
+                            ("perpDexs", None) => json!([{ "name": "xyz", "fullName": "XYZ" }]),
+                            (other, dex) => panic!("unexpected info request: {other}/{dex:?}"),
                         };
                         write_json(&mut stream, body).await;
                     });
@@ -1157,8 +1203,9 @@ priority = 1
             .unwrap();
         assert_eq!(account.perp_usdc, Some(Decimal::new("800")));
         assert_eq!(account.pending_outflow, Decimal::new("0"));
-        assert_eq!(account.positions.len(), 1);
+        assert_eq!(account.positions.len(), 2);
         assert_eq!(account.positions[0].symbol.as_deref(), Some("BTC"));
+        assert_eq!(account.positions[1].symbol.as_deref(), Some("xyz:SPCX"));
         assert_eq!(account.open_orders.len(), 1);
         assert_eq!(account.open_orders[0].symbol.as_deref(), Some("ETH"));
         assert_eq!(account.open_orders[0].oid, Some(42));
