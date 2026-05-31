@@ -118,6 +118,9 @@ const PERMISSION_PROTOCOL_AUTHORIZATION_SCHEMA: &str = include_str!(
 // token (alphabetical)
 const TOKEN_ERC20_APPROVE_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/token/erc20_approve.cedarschema");
+const TOKEN_ERC20_ADJUST_ALLOWANCE_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/token/erc20_adjust_allowance.cedarschema"
+);
 const TOKEN_ERC20_PERMIT_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/token/erc20_permit.cedarschema");
 const TOKEN_ERC20_TRANSFER_SCHEMA: &str =
@@ -180,6 +183,7 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     PERP_PLACE_LIMIT_ORDER_SCHEMA,
     PERP_PLACE_STOP_ORDER_SCHEMA,
     PERMISSION_PROTOCOL_AUTHORIZATION_SCHEMA,
+    TOKEN_ERC20_ADJUST_ALLOWANCE_SCHEMA,
     TOKEN_ERC20_APPROVE_SCHEMA,
     TOKEN_ERC20_PERMIT_SCHEMA,
     TOKEN_ERC20_TRANSFER_SCHEMA,
@@ -663,6 +667,7 @@ mod base_schema_tests {
             r#"Launchpad::Action::"Commit""#,
             r#"Perp::Action::"OpenPosition""#,
             r#"Permission::Action::"ProtocolAuthorization""#,
+            r#"Token::Action::"Erc20AdjustAllowance""#,
             r#"Token::Action::"Erc20Approve""#,
         ];
         // Cedar 4.10's Schema::actions() yields EntityUids whose Display form
@@ -731,6 +736,7 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     // permission (alphabetical)
     ("protocol_authorization", "ProtocolAuthorizationContext"),
     // token (alphabetical)
+    ("erc20_adjust_allowance", "Erc20AdjustAllowanceContext"),
     ("erc20_approve", "Erc20ApproveContext"),
     ("erc20_permit", "Erc20PermitContext"),
     ("erc20_transfer", "Erc20TransferContext"),

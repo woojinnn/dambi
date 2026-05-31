@@ -1,0 +1,182 @@
+{
+  "contract": "USDC",
+  "chainId": 1,
+  "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  "snapshot": "usdc-mainnet.abi.json",
+  "note": "USDC proxy surface triage against the Sourcify verified implementation ABI. Permission/fund-move primitives are COVER. Admin, minter, blacklist, pause, rescue, ownership, and initializer paths are EXCLUDE because they are privileged token-operator flows rather than ordinary pre-sign user wallet protection primitives.",
+  "functions": {
+    "0x095ea7b3": {
+      "name": "approve",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: sets ERC20 allowance"
+    },
+    "0xf9f92be4": {
+      "name": "blacklist",
+      "decision": "exclude",
+      "reason": "blacklister/admin token-control flow"
+    },
+    "0x42966c68": {
+      "name": "burn",
+      "decision": "exclude",
+      "reason": "minter-only token supply operation, not an ordinary user wallet approval/transfer primitive"
+    },
+    "0x5a049a70": {
+      "name": "cancelAuthorization",
+      "decision": "cover",
+      "reason": "EIP-3009 authorization nonce revocation; user-signed authorization lifecycle primitive"
+    },
+    "0xb7b72899": {
+      "name": "cancelAuthorization",
+      "decision": "cover",
+      "reason": "EIP-3009 compact-signature authorization nonce revocation"
+    },
+    "0x4e44d956": {
+      "name": "configureMinter",
+      "decision": "exclude",
+      "reason": "master-minter/admin token-supply configuration"
+    },
+    "0xa457c2d7": {
+      "name": "decreaseAllowance",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: decreases ERC20 allowance by delta"
+    },
+    "0x39509351": {
+      "name": "increaseAllowance",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: increases ERC20 allowance by delta"
+    },
+    "0x3357162b": {
+      "name": "initialize",
+      "decision": "exclude",
+      "reason": "initializer/admin deployment path"
+    },
+    "0xd608ea64": {
+      "name": "initializeV2",
+      "decision": "exclude",
+      "reason": "initializer/admin upgrade path"
+    },
+    "0x2fc81e09": {
+      "name": "initializeV2_1",
+      "decision": "exclude",
+      "reason": "initializer/admin upgrade path"
+    },
+    "0x430239b4": {
+      "name": "initializeV2_2",
+      "decision": "exclude",
+      "reason": "initializer/admin upgrade path"
+    },
+    "0x40c10f19": {
+      "name": "mint",
+      "decision": "exclude",
+      "reason": "minter-only token supply operation"
+    },
+    "0x8456cb59": {
+      "name": "pause",
+      "decision": "exclude",
+      "reason": "pauser/admin token-control flow"
+    },
+    "0x9fd5a6cf": {
+      "name": "permit",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: compact-signature EIP-2612 permit execution"
+    },
+    "0xd505accf": {
+      "name": "permit",
+      "decision": "cover",
+      "reason": "PERMISSION DELEGATION primitive: EIP-2612 permit execution and typed-data signing"
+    },
+    "0x88b7ab63": {
+      "name": "receiveWithAuthorization",
+      "decision": "cover",
+      "reason": "EIP-3009 compact-signature fund movement authorization"
+    },
+    "0xef55bec6": {
+      "name": "receiveWithAuthorization",
+      "decision": "cover",
+      "reason": "EIP-3009 fund movement authorization and typed-data signing"
+    },
+    "0x3092afd5": {
+      "name": "removeMinter",
+      "decision": "exclude",
+      "reason": "master-minter/admin token-supply configuration"
+    },
+    "0xb2118a8d": {
+      "name": "rescueERC20",
+      "decision": "exclude",
+      "reason": "rescuer/admin token recovery flow"
+    },
+    "0xa9059cbb": {
+      "name": "transfer",
+      "decision": "cover",
+      "reason": "USER FUND MOVEMENT primitive"
+    },
+    "0x23b872dd": {
+      "name": "transferFrom",
+      "decision": "cover",
+      "reason": "USER FUND MOVEMENT using existing allowance"
+    },
+    "0xf2fde38b": {
+      "name": "transferOwnership",
+      "decision": "exclude",
+      "reason": "owner/admin governance flow"
+    },
+    "0xcf092995": {
+      "name": "transferWithAuthorization",
+      "decision": "cover",
+      "reason": "EIP-3009 compact-signature fund movement authorization"
+    },
+    "0xe3ee160e": {
+      "name": "transferWithAuthorization",
+      "decision": "cover",
+      "reason": "EIP-3009 fund movement authorization and typed-data signing"
+    },
+    "0x1a895266": {
+      "name": "unBlacklist",
+      "decision": "exclude",
+      "reason": "blacklister/admin token-control flow"
+    },
+    "0x3f4ba83a": {
+      "name": "unpause",
+      "decision": "exclude",
+      "reason": "pauser/admin token-control flow"
+    },
+    "0xad38bf22": {
+      "name": "updateBlacklister",
+      "decision": "exclude",
+      "reason": "owner/admin role-management flow"
+    },
+    "0xaa20e1e4": {
+      "name": "updateMasterMinter",
+      "decision": "exclude",
+      "reason": "owner/admin role-management flow"
+    },
+    "0x554bab3c": {
+      "name": "updatePauser",
+      "decision": "exclude",
+      "reason": "owner/admin role-management flow"
+    },
+    "0x2ab60045": {
+      "name": "updateRescuer",
+      "decision": "exclude",
+      "reason": "owner/admin role-management flow"
+    }
+  },
+  "signed_structs": {
+    "Permit": {
+      "decision": "cover",
+      "reason": "off-chain EIP-2612 allowance signature"
+    },
+    "TransferWithAuthorization": {
+      "decision": "cover",
+      "reason": "off-chain EIP-3009 transfer authorization signature"
+    },
+    "ReceiveWithAuthorization": {
+      "decision": "cover",
+      "reason": "off-chain EIP-3009 receive authorization signature"
+    },
+    "CancelAuthorization": {
+      "decision": "cover",
+      "reason": "off-chain EIP-3009 authorization nonce cancellation signature"
+    }
+  }
+}

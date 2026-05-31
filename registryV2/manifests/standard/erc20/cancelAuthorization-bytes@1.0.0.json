@@ -1,0 +1,57 @@
+{
+  "type": "adapter_action",
+  "id": "standard/erc20/cancelAuthorization-bytes@1.0.0",
+  "publisher": "circle.com",
+  "schema_version": "3",
+  "note": "USDC EIP-3009 compact-signature cancelAuthorization(address,bytes32,bytes). This cancels a signed authorization nonce and maps to token/revoke_approval with scope.kind=eip3009_authorization.",
+  "match": {
+    "selector": "0xb7b72899",
+    "chain_to_addresses": {
+      "1": ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "cancelAuthorization",
+    "abi": {
+      "name": "cancelAuthorization",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "authorizer", "type": "address" },
+        { "name": "nonce", "type": "bytes32" },
+        { "name": "signature", "type": "bytes" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "revoke_approval",
+        "revoke_approval": {
+          "scope": {
+            "kind": "eip3009_authorization",
+            "token": {
+              "key": {
+                "standard": "erc20",
+                "chain": "$chain",
+                "address": "$tx.to"
+              }
+            },
+            "authorizer": "$args.authorizer",
+            "nonce": "$args.nonce"
+          }
+        }
+      }
+    },
+    "live_inputs": {}
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
 
+/// `ERC20` `increaseAllowance` / `decreaseAllowance` action.
+pub mod erc20_adjust_allowance;
 /// `ERC20` `approve` action.
 pub mod erc20_approve;
 /// `ERC20` `EIP-2612` `permit` action.
@@ -23,6 +25,7 @@ pub mod permit2_sign;
 /// Revoke-approval action and its scope enum.
 pub mod revoke;
 
+pub use self::erc20_adjust_allowance::*;
 pub use self::erc20_approve::*;
 pub use self::erc20_permit::*;
 pub use self::erc20_transfer::*;
@@ -40,6 +43,8 @@ pub use self::revoke::*;
 pub enum TokenAction {
     /// `ERC20` `approve(spender, amount)`.
     Erc20Approve(Erc20ApproveAction),
+    /// `ERC20` `increaseAllowance(spender, addedValue)` / `decreaseAllowance(spender, subtractedValue)`.
+    Erc20AdjustAllowance(Erc20AdjustAllowanceAction),
     /// `ERC20` `EIP-2612` `permit` — gasless allowance via signature.
     Erc20Permit(Erc20PermitAction),
     /// `Uniswap` `Permit2` on-chain `approve` call.
@@ -67,6 +72,7 @@ impl TokenAction {
     pub const fn action_tag(&self) -> &'static str {
         match self {
             Self::Erc20Approve(_) => "erc20_approve",
+            Self::Erc20AdjustAllowance(_) => "erc20_adjust_allowance",
             Self::Erc20Permit(_) => "erc20_permit",
             Self::Permit2Approve(_) => "permit2_approve",
             Self::Permit2SignAllowance(_) => "permit2_sign_allowance",

@@ -60,4 +60,14 @@ pub enum RevokeScope {
         #[tsify(type = "string")]
         mask: U256,
     },
+    /// Revoke an EIP-3009 token authorization nonce (`cancelAuthorization`).
+    Eip3009Authorization {
+        /// Token whose authorization nonce is being cancelled.
+        token: TokenRef,
+        /// Account that originally signed the authorization.
+        #[tsify(type = "string")]
+        authorizer: Address,
+        /// EIP-3009 authorization nonce (`bytes32`, hex encoded).
+        nonce: String,
+    },
 }

@@ -1,0 +1,75 @@
+{
+  "matched": true,
+  "bundle_id": "standard/erc20/increaseAllowance@1.0.0",
+  "manifest_path": "manifests/standard/erc20/increaseAllowance@1.0.0.json",
+  "bundle_sha256": "0x6231d81b582663d48b849a2f6e7209f0f6f39d0663357c0fef9beffc35c81eb7",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "standard/erc20/increaseAllowance@1.0.0",
+    "publisher": "circle.com",
+    "schema_version": "3",
+    "note": "USDC mainnet increaseAllowance(address,uint256). Source: Sourcify verified implementation metadata for 0x43506849d7c04f9138d1a2050bbf3a0c054402dd behind proxy 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48. This is a delta, not an absolute approve amount, so it maps to token/erc20_adjust_allowance.",
+    "match": {
+      "selector": "0x39509351",
+      "chain_to_addresses": {
+        "1": [
+          "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "increaseAllowance",
+      "abi": {
+        "name": "increaseAllowance",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "addedValue",
+            "type": "uint256"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "token",
+        "token": {
+          "action": "erc20_adjust_allowance",
+          "erc20_adjust_allowance": {
+            "token": {
+              "key": {
+                "standard": "erc20",
+                "chain": "$chain",
+                "address": "$tx.to"
+              }
+            },
+            "spender": "$args.spender",
+            "amount_delta": "$args.addedValue",
+            "direction": "increase"
+          }
+        }
+      },
+      "live_inputs": {}
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

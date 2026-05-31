@@ -1,0 +1,89 @@
+{
+  "matched": true,
+  "bundle_id": "standard/erc20/transferWithAuthorization-bytes@1.0.0",
+  "manifest_path": "manifests/standard/erc20/transferWithAuthorization-bytes@1.0.0.json",
+  "bundle_sha256": "0x3f46bd3787f25fb8375b443e72b18970419e2450f5c14f56c08a690ccf460cd5",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "standard/erc20/transferWithAuthorization-bytes@1.0.0",
+    "publisher": "circle.com",
+    "schema_version": "3",
+    "note": "USDC EIP-3009 compact-signature transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,bytes). Typed-data signing is covered by transferWithAuthorization@1.0.0; this covers calldata execution.",
+    "match": {
+      "selector": "0xcf092995",
+      "chain_to_addresses": {
+        "1": [
+          "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "transferWithAuthorization",
+      "abi": {
+        "name": "transferWithAuthorization",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "validAfter",
+            "type": "uint256"
+          },
+          {
+            "name": "validBefore",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "bytes32"
+          },
+          {
+            "name": "signature",
+            "type": "bytes"
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "token",
+        "token": {
+          "action": "erc20_transfer",
+          "erc20_transfer": {
+            "token": {
+              "key": {
+                "standard": "erc20",
+                "chain": "$chain",
+                "address": "$tx.to"
+              }
+            },
+            "recipient": "$args.to",
+            "amount": "$args.value"
+          }
+        }
+      },
+      "live_inputs": {}
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

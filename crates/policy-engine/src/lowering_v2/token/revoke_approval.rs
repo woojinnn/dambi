@@ -70,6 +70,16 @@ fn lower_revoke_scope(scope: &RevokeScope) -> Value {
             m.insert("wordPos".into(), Value::String(u256_hex(*word_pos)));
             m.insert("mask".into(), Value::String(u256_hex(*mask)));
         }
+        RevokeScope::Eip3009Authorization {
+            token,
+            authorizer,
+            nonce,
+        } => {
+            m.insert("kind".into(), Value::String("eip3009_authorization".into()));
+            m.insert("token".into(), lower_token_ref(token));
+            m.insert("authorizer".into(), Value::String(addr(authorizer)));
+            m.insert("nonce".into(), Value::String(nonce.clone()));
+        }
     }
     Value::Object(m)
 }
@@ -147,6 +157,17 @@ mod tests {
             chain: ChainId::ethereum_mainnet(),
             word_pos: U256::from(42u64),
             mask: U256::from(0xffu64),
+        });
+    }
+
+    /// `kind = "eip3009_authorization"` carries the token, authorization
+    /// signer, and bytes32 nonce cancelled by USDC-style EIP-3009.
+    #[test]
+    fn revoke_approval_eip3009_authorization_kind_conforms() {
+        assert_scope_conforms(RevokeScope::Eip3009Authorization {
+            token: sample_erc20_token(),
+            authorizer: spender(),
+            nonce: "0x1234000000000000000000000000000000000000000000000000000000000000".into(),
         });
     }
 }

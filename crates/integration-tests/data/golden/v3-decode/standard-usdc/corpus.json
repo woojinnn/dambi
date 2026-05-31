@@ -1,0 +1,54 @@
+{
+  "_comment": "Hand fixtures for USDC mainnet permission and EIP-3009 authorization surface. ABI source: registryV2/surface/standard/usdc-mainnet.abi.json.",
+  "transactions": [
+    {
+      "intent": "USDC increaseAllowance(spender, addedValue)",
+      "expect": "pass",
+      "expect_domain": "token",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "value": "0",
+            "data": "0x3950935100000000000000000000000000000000000000000000000000000000deadbeef000000000000000000000000000000000000000000000000000000000016e360"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "USDC cancelAuthorization(authorizer, nonce, v, r, s)",
+      "expect": "pass",
+      "expect_domain": "token",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "value": "0",
+            "data": "0x5a049a70000000000000000000000000000000000000000000000000000000000000a01c1212121212121212121212121212121212121212121212121212121212121212000000000000000000000000000000000000000000000000000000000000001b34343434343434343434343434343434343434343434343434343434343434345656565656565656565656565656565656565656565656565656565656565656"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "USDC TransferWithAuthorization typed-data",
+      "expect": "pass",
+      "expect_domain": "token",
+      "chain_id": 1,
+      "typed_data": {
+        "verifying_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "primary_type": "TransferWithAuthorization",
+        "domain_name": "USD Coin",
+        "message": {
+          "from": "0x000000000000000000000000000000000000a01c",
+          "to": "0x000000000000000000000000000000000000cafe",
+          "value": "2500000",
+          "validAfter": "0",
+          "validBefore": "1900000000",
+          "nonce": "0x7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      }
+    }
+  ]
+}

@@ -9,13 +9,14 @@
 //   - `"nft_set_for_all"`   : `chain` + `contract` + `spender`
 //   - `"permit2_lockdown"`  : `token` + `spender`
 //   - `"permit2_unordered_nonce"` : `chain` + `wordPos` + `mask`
+//   - `"eip3009_authorization"`   : `token` + `authorizer` + `nonce`
 //
 // Policies typically inspect `scope.kind` and the relevant fields together
 // (e.g. `scope.kind == "erc20" && scope.spender == "0x..."`).
 
 namespace Token {
   type RevokeScope = {
-    // Discriminator: "erc20" | "nft_single_token" | "nft_set_for_all" | "permit2_lockdown" | "permit2_unordered_nonce".
+    // Discriminator: "erc20" | "nft_single_token" | "nft_set_for_all" | "permit2_lockdown" | "permit2_unordered_nonce" | "eip3009_authorization".
     kind: String,
     // Token whose allowance is being revoked (erc20, permit2_lockdown).
     token?: Core::TokenRef,
@@ -31,6 +32,10 @@ namespace Token {
     wordPos?: String,
     // Permit2 unordered nonce bitmap mask (U256 hex; permit2_unordered_nonce).
     mask?: String,
+    // EIP-3009 authorization signer.
+    authorizer?: String,
+    // EIP-3009 authorization nonce (bytes32 hex).
+    nonce?: String,
   };
 
   type RevokeApprovalContext = {

@@ -1,0 +1,130 @@
+{
+  "matched": true,
+  "bundle_id": "standard/erc20/transferWithAuthorization@1.0.0",
+  "manifest_path": "manifests/standard/erc20/transferWithAuthorization@1.0.0.json",
+  "bundle_sha256": "0x7f26865a1406c420bff1671342551620671eec60ef66e144c5c72b2f3163d937",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "standard/erc20/transferWithAuthorization@1.0.0",
+    "publisher": "circle.com",
+    "schema_version": "3",
+    "note": "USDC EIP-3009 transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32). On-chain calldata may be submitted by a relayer; current Erc20TransferAction has recipient/amount but no explicit from field, so the signer/from is decoded but not represented until a richer transfer action exists. The EIP-712 TransferWithAuthorization typed-data route is pinned here.",
+    "match": {
+      "selector": "0xe3ee160e",
+      "chain_to_addresses": {
+        "1": [
+          "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        ]
+      },
+      "typed_data": {
+        "domain_name": "USD Coin",
+        "verifying_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "primary_type": "TransferWithAuthorization",
+        "types": {
+          "TransferWithAuthorization": [
+            {
+              "name": "from",
+              "type": "address"
+            },
+            {
+              "name": "to",
+              "type": "address"
+            },
+            {
+              "name": "value",
+              "type": "uint256"
+            },
+            {
+              "name": "validAfter",
+              "type": "uint256"
+            },
+            {
+              "name": "validBefore",
+              "type": "uint256"
+            },
+            {
+              "name": "nonce",
+              "type": "bytes32"
+            }
+          ]
+        }
+      }
+    },
+    "abi_fragment": {
+      "function_name": "transferWithAuthorization",
+      "abi": {
+        "name": "transferWithAuthorization",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "validAfter",
+            "type": "uint256"
+          },
+          {
+            "name": "validBefore",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "bytes32"
+          },
+          {
+            "name": "v",
+            "type": "uint8"
+          },
+          {
+            "name": "r",
+            "type": "bytes32"
+          },
+          {
+            "name": "s",
+            "type": "bytes32"
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "token",
+        "token": {
+          "action": "erc20_transfer",
+          "erc20_transfer": {
+            "token": {
+              "key": {
+                "standard": "erc20",
+                "chain": "$chain",
+                "address": "$tx.to"
+              }
+            },
+            "recipient": "$args.to",
+            "amount": "$args.value"
+          }
+        }
+      },
+      "live_inputs": {}
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

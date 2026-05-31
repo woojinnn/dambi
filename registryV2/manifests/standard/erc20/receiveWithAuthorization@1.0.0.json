@@ -1,0 +1,75 @@
+{
+  "type": "adapter_action",
+  "id": "standard/erc20/receiveWithAuthorization@1.0.0",
+  "publisher": "circle.com",
+  "schema_version": "3",
+  "note": "USDC EIP-3009 receiveWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32). On-chain calldata may be submitted by the recipient; current Erc20TransferAction records recipient/amount but not the from field. The EIP-712 ReceiveWithAuthorization typed-data route is pinned here.",
+  "match": {
+    "selector": "0xef55bec6",
+    "chain_to_addresses": {
+      "1": ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"]
+    },
+    "typed_data": {
+      "domain_name": "USD Coin",
+      "verifying_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "primary_type": "ReceiveWithAuthorization",
+      "types": {
+        "ReceiveWithAuthorization": [
+          { "name": "from", "type": "address" },
+          { "name": "to", "type": "address" },
+          { "name": "value", "type": "uint256" },
+          { "name": "validAfter", "type": "uint256" },
+          { "name": "validBefore", "type": "uint256" },
+          { "name": "nonce", "type": "bytes32" }
+        ]
+      }
+    }
+  },
+  "abi_fragment": {
+    "function_name": "receiveWithAuthorization",
+    "abi": {
+      "name": "receiveWithAuthorization",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "from", "type": "address" },
+        { "name": "to", "type": "address" },
+        { "name": "value", "type": "uint256" },
+        { "name": "validAfter", "type": "uint256" },
+        { "name": "validBefore", "type": "uint256" },
+        { "name": "nonce", "type": "bytes32" },
+        { "name": "v", "type": "uint8" },
+        { "name": "r", "type": "bytes32" },
+        { "name": "s", "type": "bytes32" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "erc20_transfer",
+        "erc20_transfer": {
+          "token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "$chain",
+              "address": "$tx.to"
+            }
+          },
+          "recipient": "$args.to",
+          "amount": "$args.value"
+        }
+      }
+    },
+    "live_inputs": {}
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

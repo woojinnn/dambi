@@ -6968,3 +6968,131 @@ fn b3_hl_spot_send_routes_to_unknown_testnet() {
     let parsed: Value = serde_json::from_str(&out).unwrap();
     assert_hl_best_effort_unknown(&parsed, "hyperliquid/rest/spot-send@1.0.0", 421_614);
 }
+
+// ---------------------------------------------------------------------------
+// standard.USDC — verified mainnet USDC extra permission / EIP-3009 surface
+// ---------------------------------------------------------------------------
+
+const USDC_MAINNET: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const USDC_INCREASE_ALLOWANCE_INDEX: &str = include_str!(
+    "../../../registryV2/index/by-callkey/1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__0x39509351.json"
+);
+const USDC_CANCEL_AUTH_INDEX: &str = include_str!(
+    "../../../registryV2/index/by-callkey/1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__0x5a049a70.json"
+);
+const USDC_TRANSFER_WITH_AUTH_TYPED_INDEX: &str = include_str!(
+    "../../../registryV2/index/by-typed-data/1__0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48__TransferWithAuthorization.json"
+);
+
+#[test]
+fn standard_usdc_increase_allowance_routes_to_adjust_allowance() {
+    install_index_bundle(USDC_INCREASE_ALLOWANCE_INDEX);
+
+    let spender = "0x00000000000000000000000000000000deadbeef";
+    let calldata = encode_calldata(
+        "0x39509351",
+        &[
+            DynSolValue::Address(spender.parse::<AlloyAddress>().unwrap()),
+            DynSolValue::Uint(AlloyU256::from(1_500_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        USDC_MAINNET,
+        "0x39509351",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "standard/erc20/increaseAllowance@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "token", "{parsed}");
+    assert_eq!(body["action"], "erc20_adjust_allowance", "{parsed}");
+    assert_eq!(body["direction"], "increase", "{parsed}");
+    assert_eq!(body["amount_delta"], "0x16e360", "{parsed}");
+    assert_eq!(body["spender"], spender, "{parsed}");
+    assert_eq!(body["token"]["key"]["address"], USDC_MAINNET, "{parsed}");
+}
+
+#[test]
+fn standard_usdc_cancel_authorization_routes_to_eip3009_revoke_scope() {
+    install_index_bundle(USDC_CANCEL_AUTH_INDEX);
+
+    let authorizer = "0x000000000000000000000000000000000000a01c";
+    let calldata = encode_calldata(
+        "0x5a049a70",
+        &[
+            DynSolValue::Address(authorizer.parse::<AlloyAddress>().unwrap()),
+            DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0x12), 32),
+            DynSolValue::Uint(AlloyU256::from(27u64), 8),
+            DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0x34), 32),
+            DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0x56), 32),
+        ],
+    );
+    let input = route_input(1, USDC_MAINNET, "0x5a049a70", calldata, authorizer);
+
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "standard/erc20/cancelAuthorization@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "token", "{parsed}");
+    assert_eq!(body["action"], "revoke_approval", "{parsed}");
+    assert_eq!(body["scope"]["kind"], "eip3009_authorization", "{parsed}");
+    assert_eq!(body["scope"]["authorizer"], authorizer, "{parsed}");
+    assert_eq!(
+        body["scope"]["nonce"],
+        "0x1212121212121212121212121212121212121212121212121212121212121212",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["scope"]["token"]["key"]["address"], USDC_MAINNET,
+        "{parsed}"
+    );
+}
+
+#[test]
+fn standard_usdc_transfer_with_authorization_typed_data_routes_to_transfer() {
+    install_index_bundle(USDC_TRANSFER_WITH_AUTH_TYPED_INDEX);
+
+    let recipient = "0x000000000000000000000000000000000000cafe";
+    let input = json!({
+        "chain_id": 1,
+        "verifying_contract": USDC_MAINNET,
+        "primary_type": "TransferWithAuthorization",
+        "domain_name": "USD Coin",
+        "message": {
+            "from": "0x000000000000000000000000000000000000a01c",
+            "to": recipient,
+            "value": "2500000",
+            "validAfter": "0",
+            "validBefore": "1900000000",
+            "nonce": "0x7777777777777777777777777777777777777777777777777777777777777777"
+        },
+        "submitter": "0x000000000000000000000000000000000000a01c",
+        "submitted_at": 1_700_000_000_u64
+    })
+    .to_string();
+
+    let out = declarative_route_typed_data_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "standard/erc20/transferWithAuthorization@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "token", "{parsed}");
+    assert_eq!(body["action"], "erc20_transfer", "{parsed}");
+    assert_eq!(body["recipient"], recipient, "{parsed}");
+    assert_eq!(body["amount"], "0x2625a0", "{parsed}");
+    assert_eq!(body["token"]["key"]["address"], USDC_MAINNET, "{parsed}");
+}

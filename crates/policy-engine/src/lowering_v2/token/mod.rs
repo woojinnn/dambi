@@ -10,6 +10,7 @@ use simulation_reducer::action::token::TokenAction;
 
 use super::dispatch::{LowerCtx, LowerError, LoweredAction};
 
+mod erc20_adjust_allowance;
 mod erc20_approve;
 mod erc20_permit;
 mod erc20_transfer;
@@ -29,6 +30,7 @@ mod revoke_approval;
 pub(crate) fn lower(action: &TokenAction, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
     match action {
         TokenAction::Erc20Approve(a) => erc20_approve::lower(a, ctx),
+        TokenAction::Erc20AdjustAllowance(a) => erc20_adjust_allowance::lower(a, ctx),
         TokenAction::Erc20Permit(a) => erc20_permit::lower(a, ctx),
         TokenAction::Permit2Approve(a) => permit2_approve::lower(a, ctx),
         TokenAction::Permit2SignAllowance(a) => permit2_sign_allowance::lower(a, ctx),

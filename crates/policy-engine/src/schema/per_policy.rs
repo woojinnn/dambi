@@ -39,9 +39,9 @@ use super::{
     PERP_CHANGE_LEVERAGE_SCHEMA, PERP_CHANGE_MARGIN_MODE_SCHEMA, PERP_CLAIM_FUNDING_SCHEMA,
     PERP_CLOSE_POSITION_SCHEMA, PERP_DECREASE_POSITION_SCHEMA, PERP_INCREASE_POSITION_SCHEMA,
     PERP_OPEN_POSITION_SCHEMA, PERP_PLACE_LIMIT_ORDER_SCHEMA, PERP_PLACE_STOP_ORDER_SCHEMA,
-    TOKEN_ERC20_APPROVE_SCHEMA, TOKEN_ERC20_PERMIT_SCHEMA, TOKEN_ERC20_TRANSFER_SCHEMA,
-    TOKEN_NFT_APPROVE_SCHEMA, TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA, TOKEN_NFT_TRANSFER_SCHEMA,
-    TOKEN_PERMIT2_APPROVE_SCHEMA, TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA,
+    TOKEN_ERC20_ADJUST_ALLOWANCE_SCHEMA, TOKEN_ERC20_APPROVE_SCHEMA, TOKEN_ERC20_PERMIT_SCHEMA,
+    TOKEN_ERC20_TRANSFER_SCHEMA, TOKEN_NFT_APPROVE_SCHEMA, TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA,
+    TOKEN_NFT_TRANSFER_SCHEMA, TOKEN_PERMIT2_APPROVE_SCHEMA, TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA,
     TOKEN_REVOKE_APPROVAL_SCHEMA,
 };
 
@@ -316,6 +316,12 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
         pascal_stub: "ProtocolAuthorization",
     },
     // token
+    ActionEntry {
+        domain: "token",
+        action_tag: Some("erc20_adjust_allowance"),
+        schema_text: TOKEN_ERC20_ADJUST_ALLOWANCE_SCHEMA,
+        pascal_stub: "Erc20AdjustAllowance",
+    },
     ActionEntry {
         domain: "token",
         action_tag: Some("erc20_approve"),
@@ -811,9 +817,9 @@ mod tests {
                 entry.pascal_stub,
             );
         }
-        // The table covers exactly the 48 shipped actions (multicall + unknown
+        // The table covers exactly the 49 shipped actions (multicall + unknown
         // included). Guards against a row being dropped or duplicated.
-        assert_eq!(RESOLVER_TABLE.len(), 48, "resolver table must have 48 rows");
+        assert_eq!(RESOLVER_TABLE.len(), 49, "resolver table must have 49 rows");
     }
 
     /// A custom_context field whose name collides with one of the matched

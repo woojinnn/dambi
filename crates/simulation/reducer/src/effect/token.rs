@@ -25,13 +25,13 @@
 use simulation_state::pending::{
     AssetCommitment, NonceKey, PendingKind, PendingLifecycle, PendingStatus, PendingTx,
 };
-use simulation_state::primitives::Spender;
+use simulation_state::primitives::{Spender, U256};
 use simulation_state::{DataSource, EvalContext, PendingChange, StateDelta, TokenKey, WalletState};
 
 use crate::action::token::{
-    Erc20ApproveAction, Erc20PermitAction, Erc20TransferAction, NftApproveAction,
-    NftSetForAllAction, NftTransferAction, Permit2ApproveAction, Permit2SignAction,
-    RevokeApprovalAction, RevokeScope, TokenAction,
+    Erc20AdjustAllowanceAction, Erc20AllowanceAdjustment, Erc20ApproveAction, Erc20PermitAction,
+    Erc20TransferAction, NftApproveAction, NftSetForAllAction, NftTransferAction,
+    Permit2ApproveAction, Permit2SignAction, RevokeApprovalAction, RevokeScope, TokenAction,
 };
 use crate::apply::Reducer;
 use crate::error::{ReducerError, ReducerResult};
@@ -68,6 +68,7 @@ impl Reducer for TokenAction {
     fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
         match self {
             Self::Erc20Approve(a) => a.apply(state, ctx),
+            Self::Erc20AdjustAllowance(a) => a.apply(state, ctx),
             Self::Erc20Permit(a) => a.apply(state, ctx),
             Self::Permit2Approve(a) => a.apply(state, ctx),
             Self::Permit2SignAllowance(a) => a.apply(state, ctx),
@@ -97,6 +98,51 @@ impl Reducer for Erc20ApproveAction {
             &self.token,
             self.spender,
             self.amount,
+        )?;
+        Ok(delta)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ERC20 allowance adjustment — computes the post-call allowance from state.
+// ---------------------------------------------------------------------------
+
+impl Reducer for Erc20AdjustAllowanceAction {
+    fn apply(&self, state: &WalletState, ctx: &EvalContext) -> ReducerResult<StateDelta> {
+        let key = match &self.token.key {
+            TokenKey::Erc20 { chain, address } => (chain.clone(), *address),
+            _ => {
+                return Err(ReducerError::Invariant(
+                    "Erc20AdjustAllowanceAction.token must be Erc20".into(),
+                ));
+            }
+        };
+
+        let current = state
+            .approvals
+            .allowance(&key, &Spender::from(self.spender))
+            .map_or(U256::ZERO, |allowance| allowance.amount);
+        let adjusted = match self.direction {
+            Erc20AllowanceAdjustment::Increase => {
+                current.checked_add(self.amount_delta).ok_or_else(|| {
+                    ReducerError::Invariant("erc20 allowance adjustment overflow".into())
+                })?
+            }
+            Erc20AllowanceAdjustment::Decrease => {
+                current.checked_sub(self.amount_delta).ok_or_else(|| {
+                    ReducerError::Invariant("erc20 allowance adjustment underflow".into())
+                })?
+            }
+        };
+
+        let mut delta = StateDelta::new();
+        helpers::approval::set_erc20_allowance(
+            state,
+            &mut delta,
+            ctx.now,
+            &self.token,
+            self.spender,
+            adjusted,
         )?;
         Ok(delta)
     }
@@ -369,6 +415,11 @@ impl Reducer for RevokeApprovalAction {
                 // yet. The ActionBody still exposes the bitmap coordinates for
                 // policy/UI; simulation has no local approval row to mutate.
             }
+            RevokeScope::Eip3009Authorization { .. } => {
+                // EIP-3009 authorization nonces are not tracked in WalletState
+                // yet. The ActionBody still exposes the nonce cancellation for
+                // policy/UI; simulation has no local approval row to mutate.
+            }
         }
         Ok(delta)
     }
@@ -387,7 +438,7 @@ mod tests {
     use simulation_state::eval_context::RequestKind;
     use simulation_state::live_field::DataSource;
     use simulation_state::pending::{AssetCommitment, NonceKey, PendingKind};
-    use simulation_state::primitives::{Address, ChainId, Duration, Time, U256};
+    use simulation_state::primitives::{Address, ChainId, Duration, Spender, Time, U256};
     use simulation_state::token::{
         Balance, BaseCategory, FiatCurrency, PegTarget, TokenHolding, TokenKey, TokenKind, TokenRef,
     };
@@ -549,6 +600,70 @@ mod tests {
             panic!("expected ApprovalSet");
         };
         assert!(allowance.is_unlimited);
+    }
+
+    // ---------- Erc20AdjustAllowance ----------
+
+    #[test]
+    fn erc20_adjust_allowance_increase_uses_current_allowance() {
+        let mut state = empty_state();
+        let TokenKey::Erc20 { chain, address } = usdc_ref().key else {
+            panic!("expected erc20 token");
+        };
+        state.approvals.erc20.insert(
+            (chain, address),
+            [(
+                Spender::from(spender_addr()),
+                AllowanceSpec::new(U256::from(10u64), now()),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let action = Erc20AdjustAllowanceAction {
+            token: usdc_ref(),
+            spender: spender_addr(),
+            amount_delta: U256::from(7u64),
+            direction: Erc20AllowanceAdjustment::Increase,
+        };
+        let delta = action.apply(&state, &ctx()).unwrap();
+
+        let TokenChange::ApprovalSet { allowance, .. } = &delta.token_changes[0] else {
+            panic!("expected ApprovalSet");
+        };
+        assert_eq!(allowance.amount, U256::from(17u64));
+        assert_eq!(allowance.last_set_at, now());
+    }
+
+    #[test]
+    fn erc20_adjust_allowance_decrease_uses_current_allowance() {
+        let mut state = empty_state();
+        let TokenKey::Erc20 { chain, address } = usdc_ref().key else {
+            panic!("expected erc20 token");
+        };
+        state.approvals.erc20.insert(
+            (chain, address),
+            [(
+                Spender::from(spender_addr()),
+                AllowanceSpec::new(U256::from(10u64), now()),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let action = Erc20AdjustAllowanceAction {
+            token: usdc_ref(),
+            spender: spender_addr(),
+            amount_delta: U256::from(3u64),
+            direction: Erc20AllowanceAdjustment::Decrease,
+        };
+        let delta = action.apply(&state, &ctx()).unwrap();
+
+        let TokenChange::ApprovalSet { allowance, .. } = &delta.token_changes[0] else {
+            panic!("expected ApprovalSet");
+        };
+        assert_eq!(allowance.amount, U256::from(7u64));
+        assert_eq!(allowance.last_set_at, now());
     }
 
     // ---------- Erc20Permit (off-chain sig) ----------

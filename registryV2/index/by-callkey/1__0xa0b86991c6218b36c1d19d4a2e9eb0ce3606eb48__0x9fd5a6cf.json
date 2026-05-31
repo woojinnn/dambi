@@ -1,0 +1,93 @@
+{
+  "matched": true,
+  "bundle_id": "standard/erc20/permit-bytes@1.0.0",
+  "manifest_path": "manifests/standard/erc20/permit-bytes@1.0.0.json",
+  "bundle_sha256": "0x953043b8e63c4dead69dd2db16cc0ecc5566addc116601ca31e048ff1603f3a7",
+  "bundle": {
+    "type": "adapter_action",
+    "id": "standard/erc20/permit-bytes@1.0.0",
+    "publisher": "circle.com",
+    "schema_version": "3",
+    "note": "USDC mainnet compact-signature permit(address,address,uint256,uint256,bytes). The EIP-712 Permit typed-data route is already covered by standard/erc20/permit@1.0.0; this manifest covers the calldata execution variant.",
+    "match": {
+      "selector": "0x9fd5a6cf",
+      "chain_to_addresses": {
+        "1": [
+          "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        ]
+      }
+    },
+    "abi_fragment": {
+      "function_name": "permit",
+      "abi": {
+        "name": "permit",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "spender",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256"
+          },
+          {
+            "name": "signature",
+            "type": "bytes"
+          }
+        ],
+        "outputs": []
+      }
+    },
+    "emit": {
+      "strategy": "single_emit",
+      "body": {
+        "domain": "token",
+        "token": {
+          "action": "erc20_permit",
+          "erc20_permit": {
+            "token": {
+              "key": {
+                "standard": "erc20",
+                "chain": "$chain",
+                "address": "$tx.to"
+              }
+            },
+            "spender": "$args.spender",
+            "amount": "$args.value",
+            "deadline": "$args.deadline"
+          }
+        }
+      },
+      "live_inputs": {
+        "nonce": {
+          "source": {
+            "kind": "onchain_view",
+            "chain": "$chain",
+            "contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "function": "nonces(address)",
+            "decoder_id": "erc20_permit_nonce"
+          },
+          "ttl_s": 12
+        }
+      }
+    },
+    "requires": {
+      "imperative": [],
+      "adapter_capabilities": [
+        "token_metadata"
+      ],
+      "host_capabilities": [],
+      "extension": ">=0.1.0"
+    }
+  }
+}

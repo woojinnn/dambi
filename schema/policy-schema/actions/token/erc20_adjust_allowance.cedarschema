@@ -1,0 +1,35 @@
+// Token::Erc20AdjustAllowance — `ERC20` allowance delta.
+//
+// Represents `increaseAllowance(spender, addedValue)` and
+// `decreaseAllowance(spender, subtractedValue)`. Unlike
+// `Erc20Approve.amount`, `amountDelta` is not the final absolute allowance.
+
+namespace Token {
+  type Erc20AdjustAllowanceContext = {
+    // Common envelope (submitter, submittedAt, nature).
+    meta: Core::ActionMeta,
+    // Token whose allowance is being adjusted.
+    token: Core::TokenRef,
+    // Address authorized to spend.
+    spender: String,
+    // "increase" | "decrease".
+    direction: String,
+    // Allowance delta (U256 hex).
+    amountDelta: String,
+    // Token-native nano delta (raw × 10^(9 − decimals)). Host-populated.
+    amountDeltaNano?: Long,
+    // USD estimate for the delta. Host-populated.
+    amountDeltaUsd?: decimal,
+    // Manifest-extensible slot.
+    custom?: Erc20AdjustAllowanceCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type Erc20AdjustAllowanceCustomContext = {};
+
+  action "Erc20AdjustAllowance" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: Erc20AdjustAllowanceContext,
+  };
+}
