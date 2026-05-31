@@ -1,0 +1,72 @@
+{
+  "type": "adapter_action",
+  "id": "balancer/v3/router-permit-batch-and-call@1.0.0",
+  "publisher": "balancer.eth",
+  "schema_version": "3",
+  "_note": "Balancer V3 Router.permitBatchAndCall wrapper. The function bundles Permit2 batch approvals plus Router calldata; the last argument is bytes[] multicallData, so decode each child recursively against the same Router.",
+  "match": {
+    "selector": "0x19c6989f",
+    "chain_to_addresses": {
+      "1":    ["0xAE563E3f8219521950555F5962419C8919758Ea2"],
+      "8453": ["0x3f170631ed9821Ca51A59D996aB095162438DC10"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "permitBatchAndCall",
+    "abi": {
+      "name": "permitBatchAndCall",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        {
+          "name": "permitBatch",
+          "type": "tuple[]",
+          "components": [
+            { "name": "token",      "type": "address" },
+            { "name": "owner",      "type": "address" },
+            { "name": "spender",    "type": "address" },
+            { "name": "amount",   "type": "uint256" },
+            { "name": "nonce",    "type": "uint256" },
+            { "name": "deadline", "type": "uint256" }
+          ]
+        },
+        { "name": "permitSignatures", "type": "bytes[]" },
+        {
+          "name": "permit2Batch",
+          "type": "tuple",
+          "components": [
+            {
+              "name": "details",
+              "type": "tuple[]",
+              "components": [
+                { "name": "token",      "type": "address" },
+                { "name": "amount",     "type": "uint160" },
+                { "name": "expiration", "type": "uint48" },
+                { "name": "nonce",      "type": "uint48" }
+              ]
+            },
+            { "name": "spender",     "type": "address" },
+            { "name": "sigDeadline", "type": "uint256" }
+          ]
+        },
+        { "name": "permit2Signature", "type": "bytes" },
+        { "name": "multicallData", "type": "bytes[]" }
+      ],
+      "outputs": [
+        { "name": "results", "type": "bytes[]" }
+      ]
+    }
+  },
+  "emit": {
+    "strategy": "multicall_recurse",
+    "recurse_rule_id": "self_array_bytes_last_arg",
+    "recurse_arg": "multicallData",
+    "max_depth": 3
+  },
+  "requires": {
+    "imperative": ["multicall-recurse@^1.0"],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

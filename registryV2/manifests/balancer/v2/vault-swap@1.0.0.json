@@ -3,7 +3,7 @@
   "id": "balancer/v2/vault-swap@1.0.0",
   "publisher": "balancer.eth",
   "schema_version": "3",
-  "_note": "GENERIC Balancer V2 Vault.swap (selector 0x52bbbe29, cast-verified). Covers EVERY Balancer V2 single swap, NOT only Fjord. A retail Fjord Foundry LBP buy IS exactly this call (Option A: Fjord's own wrapper fns are creator-side/onlyOwner-gated; the LBP buy reaches the wallet as a direct Vault.swap). Fjord-ness is NOT baked into match/emit — it is a host:registry enrichment on live_inputs.route (registry_api/PoolMeta tells the extension which pool_ids are Fjord LBPs + the precise pool_type, which defaults to weighted here). The 5 Fjord retail operations commit/claim_allocation/refund/withdraw_commit/claim_vested are ABSENT from verified source and are out-of-scope. Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 is identical on all chains; chain_to_addresses lists the Fjord-verified-deploy chains 1/42161/43114/10/137/56.",
+  "_note": "GENERIC Balancer V2 Vault.swap (selector 0x52bbbe29, cast-verified). Covers EVERY Balancer V2 single swap, NOT only Fjord. A retail Fjord Foundry LBP buy IS exactly this call (Option A: Fjord's own wrapper fns are creator-side/onlyOwner-gated; the LBP buy reaches the wallet as a direct Vault.swap). Fjord-ness is NOT baked into match/emit — it is a host:registry enrichment on live_inputs.route (registry_api/PoolMeta tells the extension which pool_ids are Fjord LBPs + the precise pool_type, which defaults to weighted here). The 5 Fjord retail operations commit/claim_allocation/refund/withdraw_commit/claim_vested are ABSENT from verified source and are out-of-scope. Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 is identical on all chains; chain_to_addresses lists Balancer official V2 Vault deployments currently covered by this manifest.",
   "match": {
     "selector": "0x52bbbe29",
     "chain_to_addresses": {
@@ -12,7 +12,8 @@
       "43114": ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
       "10":    ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
       "137":   ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
-      "56":    ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"]
+      "56":    ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"],
+      "8453":  ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"]
     }
   },
   "abi_fragment": {
