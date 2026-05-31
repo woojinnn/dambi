@@ -132,7 +132,16 @@ mod tests {
                 size: Decimal::new("0.1"),
                 entry_price: Decimal::new("60000"),
             }],
-            open_orders: vec![],
+            open_orders: vec![HlOpenOrder {
+                asset_index: 1,
+                symbol: Some("ETH".to_owned()),
+                is_buy: false,
+                price: Decimal::new("3000"),
+                size: Decimal::new("0.25"),
+                reduce_only: true,
+                tif: "ioc".to_owned(),
+                oid: Some(42),
+            }],
             leverage_settings: vec![HlLeverageSetting {
                 asset_index: 0,
                 is_cross: true,
@@ -160,6 +169,7 @@ mod tests {
         assert_eq!(acct.pending_outflow, Decimal::new("0"));
         assert!(acct.positions.is_empty());
         assert!(acct.open_orders.is_empty());
+        assert!(acct.leverage_settings.is_empty());
         assert!(acct.agents.is_empty());
     }
 }
