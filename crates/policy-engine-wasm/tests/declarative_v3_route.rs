@@ -5253,6 +5253,102 @@ const B5_BALANCER_VAULT_SWAP_V3: &str = r#"{
   }
 }"#;
 
+const B5_BALANCER_VAULT_BATCH_SWAP_V3: &str = r#"{
+  "type": "adapter_action",
+  "id": "balancer/v2/vault-batch-swap@1.0.0",
+  "publisher": "balancer.eth",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x945bcec9",
+    "chain_to_addresses": { "1": ["0xBA12222222228d8Ba445958a75a0704d566BF2C8"] }
+  },
+  "abi_fragment": {
+    "function_name": "batchSwap",
+    "abi": {
+      "name": "batchSwap",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [
+        { "name": "kind", "type": "uint8" },
+        {
+          "name": "swaps",
+          "type": "tuple[]",
+          "components": [
+            { "name": "poolId", "type": "bytes32" },
+            { "name": "assetInIndex", "type": "uint256" },
+            { "name": "assetOutIndex", "type": "uint256" },
+            { "name": "amount", "type": "uint256" },
+            { "name": "userData", "type": "bytes" }
+          ]
+        },
+        { "name": "assets", "type": "address[]" },
+        {
+          "name": "funds",
+          "type": "tuple",
+          "components": [
+            { "name": "sender", "type": "address" },
+            { "name": "fromInternalBalance", "type": "bool" },
+            { "name": "recipient", "type": "address" },
+            { "name": "toInternalBalance", "type": "bool" }
+          ]
+        },
+        { "name": "limits", "type": "int256[]" },
+        { "name": "deadline", "type": "uint256" }
+      ],
+      "outputs": [{ "name": "assetDeltas", "type": "int256[]" }]
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "amm",
+      "amm": {
+        "action": "swap",
+        "swap": {
+          "venue": {
+            "name": "balancer_v2",
+            "chain": "$chain",
+            "vault": "$to",
+            "pool_id": "$derived.balancer_v2_batch_pool_id",
+            "pool_type": "weighted"
+          },
+          "params": {
+            "token_in": { "key": { "standard": "erc20", "chain": "$chain", "address": "$derived.balancer_v2_batch_token_in" } },
+            "token_out": { "key": { "standard": "erc20", "chain": "$chain", "address": "$derived.balancer_v2_batch_token_out" } },
+            "direction": {
+              "$match": "$args.kind",
+              "$cases": {
+                "0": { "kind": "exact_input", "amount_in": "$derived.balancer_v2_batch_amount_in", "min_amount_out": "$derived.balancer_v2_batch_min_amount_out" },
+                "1": { "kind": "exact_output", "max_amount_in": "$derived.balancer_v2_batch_max_amount_in", "amount_out": "$derived.balancer_v2_batch_amount_out" }
+              }
+            },
+            "recipient": "$args.funds[2]",
+            "slippage_bp": 50
+          },
+          "live_inputs": {
+            "route": {
+              "source": { "kind": "registry_api", "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app", "resource": { "kind": "pool_meta", "chain": "$chain", "pool_addr": "$derived.balancer_v2_batch_pool_address" }, "version": "2" },
+              "ttl_s": 86400
+            },
+            "expected_amount_out": {
+              "source": { "kind": "onchain_view", "chain": "$chain", "contract": "$to", "function": "queryBatchSwap(uint8,(bytes32,uint256,uint256,uint256,bytes)[],address[],(address,bool,address,bool))", "decoder_id": "balancer_v2_query_batch_swap" },
+              "ttl_s": 12
+            },
+            "price_impact_bp": {
+              "source": { "kind": "derived_from", "inputs": [], "calc_id": "balancer_v2_batch_price_impact_bp" },
+              "ttl_s": 12
+            },
+            "gas_estimate": {
+              "source": { "kind": "oracle_feed", "provider": "pyth", "feed_id": "gas/ethereum" },
+              "ttl_s": 6
+            }
+          }
+        }
+      }
+    }
+  }
+}"#;
+
 /// Build `Vault.swap` calldata for the given `kind` (0 = GIVEN_IN, 1 = GIVEN_OUT)
 /// + route it, returning the resolved `body` JSON. `amount` / `limit` are
 /// load-bearing — they map to amount_in/min_amount_out (GIVEN_IN) or
@@ -5424,6 +5520,90 @@ fn t22_balancer_vault_swap_given_out_exact_output() {
     assert!(
         body["params"]["direction"].get("min_amount_out").is_none(),
         "{body}"
+    );
+}
+
+#[test]
+fn t23_balancer_vault_batch_swap_given_in_routes_to_aggregate_swap() {
+    install_ok(B5_BALANCER_VAULT_BATCH_SWAP_V3);
+
+    let usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let weth = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let sender = "0x000000000000000000000000000000000000a01c"
+        .parse::<AlloyAddress>()
+        .unwrap();
+    let recipient = "0x000000000000000000000000000000000000bbbb"
+        .parse::<AlloyAddress>()
+        .unwrap();
+
+    let step = DynSolValue::Tuple(vec![
+        DynSolValue::FixedBytes(balancer_pool_id_bytes(), 32),
+        DynSolValue::Uint(AlloyU256::from(0u64), 256),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        DynSolValue::Uint(AlloyU256::from(100u64), 256),
+        DynSolValue::Bytes(vec![]),
+    ]);
+    let funds = DynSolValue::Tuple(vec![
+        DynSolValue::Address(sender),
+        DynSolValue::Bool(false),
+        DynSolValue::Address(recipient),
+        DynSolValue::Bool(false),
+    ]);
+    let calldata = encode_calldata(
+        "0x945bcec9",
+        &[
+            DynSolValue::Uint(AlloyU256::from(0u64), 8),
+            DynSolValue::Array(vec![step]),
+            DynSolValue::Array(vec![DynSolValue::Address(usdc), DynSolValue::Address(weth)]),
+            funds,
+            DynSolValue::Array(vec![
+                DynSolValue::Int(alloy_primitives::I256::try_from(100i64).unwrap(), 256),
+                DynSolValue::Int(alloy_primitives::I256::try_from(-90i64).unwrap(), 256),
+            ]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        VAULT_MAINNET,
+        "0x945bcec9",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v2/vault-batch-swap@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "swap", "{parsed}");
+    assert_eq!(body["venue"]["name"], "balancer_v2", "{parsed}");
+    assert_eq!(body["venue"]["pool_id"], LBP_POOL_ID, "{parsed}");
+    assert_eq!(
+        body["params"]["direction"]["kind"], "exact_input",
+        "{parsed}"
+    );
+    assert_eq!(body["params"]["direction"]["amount_in"], "0x64", "{parsed}");
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0x5a",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["address"], "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["recipient"], "0x000000000000000000000000000000000000bbbb",
+        "{parsed}"
     );
 }
 

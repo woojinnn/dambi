@@ -2366,6 +2366,7 @@ fn maybe_inject_balancer_v2_pool_args(
     derived: &mut BTreeMap<String, serde_json::Value>,
 ) {
     match selector {
+        "0x945bcec9" => inject_balancer_v2_batch_swap_args(args_json, derived),
         "0xb95cac28" => inject_balancer_v2_join_args(args_json, derived),
         "0x8bdb3913" => inject_balancer_v2_exit_args(args_json, derived),
         _ => {}
@@ -2433,6 +2434,196 @@ fn inject_balancer_v2_exit_args(
         "balancer_v2_exit_lp_amount".to_owned(),
         serde_json::Value::String(lp_amount.to_string()),
     );
+}
+
+fn inject_balancer_v2_batch_swap_args(
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    let assets = args_json
+        .get("assets")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let swaps = args_json
+        .get("swaps")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    if let Some(pool_id) = swaps
+        .first()
+        .and_then(|step| balancer_tuple_field(step, 0))
+        .and_then(serde_json::Value::as_str)
+    {
+        derived.insert(
+            "balancer_v2_batch_pool_id".to_owned(),
+            serde_json::Value::String(pool_id.to_owned()),
+        );
+        if let Some(pool_addr) = balancer_v2_pool_id_address(pool_id) {
+            derived.insert(
+                "balancer_v2_batch_pool_address".to_owned(),
+                serde_json::Value::String(pool_addr),
+            );
+        }
+    }
+
+    let positive_limit = balancer_batch_limit_side(args_json, true);
+    let negative_limit = balancer_batch_limit_side(args_json, false);
+
+    let first_step = swaps.first();
+    let last_step = swaps.last();
+    let fallback_token_in = first_step
+        .and_then(|step| balancer_step_index(step, 1))
+        .and_then(|idx| balancer_asset_at(&assets, idx));
+    let fallback_token_out = last_step
+        .and_then(|step| balancer_step_index(step, 2))
+        .and_then(|idx| balancer_asset_at(&assets, idx));
+    let fallback_amount_in = first_step
+        .and_then(|step| balancer_tuple_field(step, 3))
+        .and_then(balancer_json_u256)
+        .unwrap_or(alloy_primitives::U256::ZERO);
+
+    let token_in = positive_limit
+        .as_ref()
+        .map(|(token, _)| token.clone())
+        .or(fallback_token_in)
+        .unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_owned());
+    let token_out = negative_limit
+        .as_ref()
+        .map(|(token, _)| token.clone())
+        .or(fallback_token_out)
+        .unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_owned());
+    let amount_in = positive_limit
+        .as_ref()
+        .map_or(fallback_amount_in, |(_, amount)| *amount);
+    let amount_out = negative_limit
+        .as_ref()
+        .map_or(alloy_primitives::U256::ZERO, |(_, amount)| *amount);
+
+    derived.insert(
+        "balancer_v2_batch_token_in".to_owned(),
+        serde_json::Value::String(token_in),
+    );
+    derived.insert(
+        "balancer_v2_batch_token_out".to_owned(),
+        serde_json::Value::String(token_out),
+    );
+    derived.insert(
+        "balancer_v2_batch_amount_in".to_owned(),
+        serde_json::Value::String(amount_in.to_string()),
+    );
+    derived.insert(
+        "balancer_v2_batch_min_amount_out".to_owned(),
+        serde_json::Value::String(amount_out.to_string()),
+    );
+    derived.insert(
+        "balancer_v2_batch_max_amount_in".to_owned(),
+        serde_json::Value::String(amount_in.to_string()),
+    );
+    derived.insert(
+        "balancer_v2_batch_amount_out".to_owned(),
+        serde_json::Value::String(amount_out.to_string()),
+    );
+}
+
+fn balancer_v2_pool_id_address(pool_id: &str) -> Option<String> {
+    let hex = pool_id.strip_prefix("0x")?;
+    if hex.len() < 40 {
+        return None;
+    }
+    Some(format!("0x{}", &hex[..40]))
+}
+
+fn balancer_tuple_field(v: &serde_json::Value, index: usize) -> Option<&serde_json::Value> {
+    v.as_array().and_then(|arr| arr.get(index))
+}
+
+fn balancer_step_index(step: &serde_json::Value, field_index: usize) -> Option<usize> {
+    balancer_tuple_field(step, field_index)
+        .and_then(balancer_json_u256)?
+        .try_into()
+        .ok()
+}
+
+fn balancer_asset_at(assets: &[serde_json::Value], index: usize) -> Option<String> {
+    assets
+        .get(index)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+fn balancer_batch_limit_side(
+    args_json: &serde_json::Value,
+    positive: bool,
+) -> Option<(String, alloy_primitives::U256)> {
+    let assets = args_json.get("assets")?.as_array()?;
+    let limits = args_json.get("limits")?.as_array()?;
+    let mut selected_token: Option<String> = None;
+    let mut amount = alloy_primitives::U256::ZERO;
+
+    for (idx, raw) in limits.iter().enumerate() {
+        let (is_negative, abs) = balancer_signed_abs(raw)?;
+        if abs.is_zero() || (positive && is_negative) || (!positive && !is_negative) {
+            continue;
+        }
+        let Some(token) = balancer_asset_at(assets, idx) else {
+            continue;
+        };
+        match &selected_token {
+            None => {
+                selected_token = Some(token);
+                amount = abs;
+            }
+            Some(existing) if existing.eq_ignore_ascii_case(&token) => {
+                amount = amount.saturating_add(abs);
+            }
+            Some(_) => {
+                // The current `SwapAction` has one token_in and one token_out.
+                // Multi-input/multi-output batch swaps are kept non-fatal by
+                // preserving the first signed side rather than fabricating a
+                // broader aggregate the Action model cannot express.
+            }
+        }
+    }
+
+    selected_token.map(|token| (token, amount))
+}
+
+fn balancer_json_u256(v: &serde_json::Value) -> Option<alloy_primitives::U256> {
+    match v {
+        serde_json::Value::String(s) => {
+            alloy_primitives::U256::from_str_radix(s, 10)
+                .ok()
+                .or_else(|| {
+                    s.strip_prefix("0x")
+                        .and_then(|hex| alloy_primitives::U256::from_str_radix(hex, 16).ok())
+                })
+        }
+        serde_json::Value::Number(n) => n.as_u64().map(alloy_primitives::U256::from),
+        _ => None,
+    }
+}
+
+fn balancer_signed_abs(v: &serde_json::Value) -> Option<(bool, alloy_primitives::U256)> {
+    match v {
+        serde_json::Value::String(s) => {
+            if let Some(abs) = s.strip_prefix('-') {
+                Some((true, alloy_primitives::U256::from_str_radix(abs, 10).ok()?))
+            } else {
+                Some((false, alloy_primitives::U256::from_str_radix(s, 10).ok()?))
+            }
+        }
+        serde_json::Value::Number(n) => {
+            let value = n.as_i64()?;
+            let is_negative = value.is_negative();
+            Some((
+                is_negative,
+                alloy_primitives::U256::from(value.unsigned_abs()),
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn balancer_request_amounts(args_json: &serde_json::Value, index: usize) -> Vec<serde_json::Value> {

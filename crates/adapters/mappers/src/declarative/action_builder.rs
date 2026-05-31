@@ -125,6 +125,9 @@ fn placeholder_type_lookup(rest: &str) -> Option<FallbackType> {
         | "pool"
         | "pool_manager"
         | "balancer_v2_pool_address"
+        | "balancer_v2_batch_pool_address"
+        | "balancer_v2_batch_token_in"
+        | "balancer_v2_batch_token_out"
         | "v3_path_first_token"
         | "v3_path_last_token"
         | "v4_token_in"
@@ -139,12 +142,16 @@ fn placeholder_type_lookup(rest: &str) -> Option<FallbackType> {
         "fee_tier_bp" | "slippage_bp" | "aave_l2_rate_mode" => Some(U32),
         "v4_amount_in"
         | "v4_amount_out_min"
+        | "balancer_v2_batch_amount_in"
+        | "balancer_v2_batch_min_amount_out"
+        | "balancer_v2_batch_max_amount_in"
+        | "balancer_v2_batch_amount_out"
         | "balancer_v2_min_lp_out"
         | "balancer_v2_exit_lp_amount"
         | "min_lp_out"
         | "aave_l2_amount"
         | "aave_l2_debt_to_cover" => Some(U256),
-        "v4_pool_id" => Some(Bytes32),
+        "v4_pool_id" | "balancer_v2_batch_pool_id" => Some(Bytes32),
         _ => None,
     }
 }
@@ -2100,10 +2107,7 @@ mod tests {
         let out = substitute_placeholders(&ctx, &template).unwrap();
         assert_eq!(
             out,
-            json!([[
-                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                "100"
-            ]])
+            json!([["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", "100"]])
         );
     }
 }

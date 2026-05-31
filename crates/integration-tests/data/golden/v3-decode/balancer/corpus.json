@@ -1,5 +1,5 @@
 {
-  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0; exitPool (0x8bdb3913) -> pass/amm via balancer/v2/vault-exit-pool@1.0.0; joinPool (0xb95cac28) -> pass/amm via balancer/v2/vault-join-pool@1.0.0. Remaining uncovered Vault fn pinned as expect=error: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback). Zero hard decoder failures in the original 300-tx sample.",
+  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; batchSwap (0x945bcec9) -> pass/amm via balancer/v2/vault-batch-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0; exitPool (0x8bdb3913) -> pass/amm via balancer/v2/vault-exit-pool@1.0.0; joinPool (0xb95cac28) -> pass/amm via balancer/v2/vault-join-pool@1.0.0. Zero hard decoder failures in the original 300-tx sample.",
   "transactions": [
     {
       "intent": "swap",
@@ -67,7 +67,7 @@
     },
     {
       "intent": "batchSwap",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0xc1097d2ffc56d909fdbdcdcb13772b855d65f251ec004febd22e9b728c0db834",
       "chain_id": 137,
       "rpc": {
@@ -79,11 +79,11 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "batchSwap",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0xb227854269a926f3ef322ddb97e4534d53e2d10d81e7289c13edaeb15578185f",
       "chain_id": 137,
       "rpc": {
@@ -95,11 +95,11 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "batchSwap",
-      "expect": "error",
+      "expect": "pass",
       "tx_hash": "0x7e988c7d3bc018f3c8ed715dd51d846d1cf49a23c61ee729d1c33add54fd9536",
       "chain_id": 1,
       "rpc": {
@@ -111,7 +111,7 @@
           }
         ]
       },
-      "expect_error": "no_declarative_v3_mapper"
+      "expect_domain": "amm"
     },
     {
       "intent": "exitPool",
