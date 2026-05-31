@@ -459,6 +459,42 @@ fn aave_v3_variable_debt_renounce_delegation_decodes_zero_allowance() {
     );
 }
 
+/// Field-level golden for Aave V3 variable-debt market expansion.
+///
+/// The extra debt-token manifests are per-market because the delegated borrow
+/// asset changes with the debt token. This pins one non-USDC market so a
+/// copy/paste mistake cannot silently keep decoding every delegation as USDC.
+#[test]
+fn aave_v3_variable_debt_dai_approve_delegation_decodes_dai_asset() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    const VARIABLE_DEBT_DAI: &str = "0xcf8d0c70c850859266f5c338b38f9d663181c314";
+    const DAI: &str = "0x6b175474e89094c44da98b954eedeac495271d0f";
+    const DELEGATEE: &str = "0x000000000000000000000000000000000000d1e9";
+    const CALLDATA: &str = concat!(
+        "0xc04a8a10",
+        "000000000000000000000000000000000000000000000000000000000000d1e9",
+        "00000000000000000000000000000000000000000000000000000000002625a0"
+    );
+
+    let env = harness::route::route_calldata(1, VARIABLE_DEBT_DAI, "0xc04a8a10", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "approveDelegation route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "delegatee"), Some(DELEGATEE.into()));
+    assert_eq!(find_string_field(&env, "amount"), Some("0x2625a0".into()));
+
+    let asset = find_object_with_string_field(&env, "standard", "erc20")
+        .expect("delegate_borrow asset token is present");
+    assert_eq!(
+        asset.get("address").and_then(serde_json::Value::as_str),
+        Some(DAI),
+        "variableDebtDAI should decode the delegated borrow asset as DAI"
+    );
+}
+
 /// Field-level golden for Aave V3.4+ position-manager execution paths.
 ///
 /// `setUserEModeOnBehalfOf` and

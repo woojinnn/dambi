@@ -89,6 +89,32 @@
       "cargo test --workspace: 0 failed"
     ]
   },
+  "aave_v3_variable_debt_market_expansion": {
+    "protocol": "aave",
+    "contracts": [
+      "Aave V3 variableDebtDAI mainnet",
+      "Aave V3 variableDebtUSDT mainnet",
+      "Aave V3 variableDebtWBTC mainnet",
+      "Aave V3 variableDebtLINK mainnet",
+      "Aave V3 variableDebtwstETH mainnet"
+    ],
+    "status": "implemented",
+    "completed": [
+      "confirmed all five additional mainnet variable debt token proxies resolve through Sourcify to VariableDebtTokenInstance implementation 0xb27C52c7f84819e3157993489741cB60786aE330",
+      "added surface/aave/variable-debt-{dai,usdt,wbtc,link,wsteth}-mainnet.{abi,coverage}.json with the same verified 12-selector triage as variableDebtUSDC",
+      "added approveDelegation, delegationWithSig, and renounceDelegation manifests for each market so borrow delegation grant, signed grant, and revoke decode to LendingAction::DelegateBorrow",
+      "added hand corpus fixtures for all COVER selectors and DelegationWithSig typed-data across the five markets",
+      "added a field-level golden test pinning variableDebtDAI approveDelegation asset/delegatee/amount decoding"
+    ],
+    "evidence": [
+      "npm run build: 535 callkeys + 51 typed-data entries across 142 manifests",
+      "npm run check:surface: PASS with 15 gated contracts; each new debt market has 12 surface / 3 cover / 9 exclude / 3 on-chain manifests / 1 signed-struct",
+      "cargo run -p policy-engine-integration-tests --bin v3-harness -- coverage: callkeys=535 typed_data_keys=51 unique_bundles=142 install_failures=0",
+      "cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus: 165/165 matched",
+      "cargo test -p policy-engine-integration-tests --test v3_decode_harness -- --nocapture: 18 passed",
+      "cargo test --workspace: 0 failed"
+    ]
+  },
   "scenario_c_decode_gap_loop": {
     "protocol": "uniswap",
     "status": "started",
