@@ -106,6 +106,7 @@ pub mod args_resolver;
 pub mod batcher;
 pub mod calc;
 pub mod config;
+pub mod db_store;
 pub mod discovery;
 pub mod error;
 pub mod fetchers;
@@ -128,6 +129,7 @@ pub use config::{
     PythConfig, PythFeedConfig, RestAuthConfig, RestFeedConfig, RestOracleConfig, SyncConfig,
     VenuesConfig,
 };
+pub use db_store::SqliteWalletStore;
 pub use discovery::{
     discover_top_tokens, fetch_native_balance, CoinGeckoClient, DiscoveredToken, EtherscanClient,
 };
@@ -140,7 +142,7 @@ pub use fetchers::rpc::{
 pub use manifest_v2::{
     parse_live_inputs, resolve_placeholders, LiveInputSpec, LiveInputsSpec, ResolveContext,
 };
-pub use orchestrator::{Orchestrator, RefreshReport};
+pub use orchestrator::{HyperliquidAccountReport, Orchestrator, RefreshReport};
 pub use primitives_sync::PrimitivesReport;
 pub use resolver::{resolve_field, resolve_inputs, GlobalValues};
 pub use scheduler::{Scheduler, SchedulerConfig, TickReport};

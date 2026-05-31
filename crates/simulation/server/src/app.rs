@@ -1,12 +1,14 @@
 //! axum application wiring — router, shared state, and HTTP adapters.
 //!
-//! Phase 5 split: public routes (`/auth/*`, `/health`) sit outside the auth
-//! layer; everything else sits behind `require_auth` middleware so a missing
-//! / invalid JWT is rejected before the handler runs.
+//! Phase 5 split: public routes (`/auth/*`, `/health`, `/docs`,
+//! `/openapi.yaml`) sit outside the auth layer; everything else sits behind
+//! `require_auth` middleware so a missing / invalid JWT is rejected before
+//! the handler runs.
 //!
-//! State is shared as a single `AppState` carrying both the user-DB router
-//! (`MultiUserStore`) and the cross-user identity DB (`GlobalDb`). Handlers
-//! pull whichever they need via axum extractors.
+//! State is shared as a single `AppState` carrying the per-user DB router
+//! (`MultiUserStore`) plus the cross-user identity DB (`GlobalDb`). Execution
+//! reports are persisted into each user's own SQLite via
+//! `SqliteExecutionReportStore` constructed on demand from the user's pool.
 
 use axum::extract::{FromRef, State};
 use axum::http::StatusCode;
@@ -22,9 +24,10 @@ use simulation_db::{GlobalDb, MultiUserStore};
 use simulation_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 use crate::auth::{require_auth, AuthUser};
-use crate::dto::EvaluateRequest;
+use crate::db_store::SqliteExecutionReportStore;
+use crate::dto::{EvaluateRequest, ExecutionReportRequest};
 use crate::events::EventBus;
-use crate::handler::{evaluate, HandlerError};
+use crate::handler::{evaluate, report_execution, HandlerError};
 use crate::read_handlers;
 use crate::write_handlers;
 
@@ -54,7 +57,7 @@ pub struct AppState {
 
 impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Orchestrator isn't Debug (large + irrelevant to formatting).
+        // Orchestrator / CoinGeckoClient aren't Debug.
         f.debug_struct("AppState")
             .field("multi_user", &self.multi_user)
             .field("global_db", &self.global_db)
@@ -98,6 +101,8 @@ impl FromRef<AppState> for Arc<Orchestrator> {
 ///
 /// Public (no auth):
 /// - `GET  /health`                         — liveness probe.
+/// - `GET  /docs`                           — Swagger UI page.
+/// - `GET  /openapi.yaml`                   — OpenAPI 3.0 spec.
 /// - `GET  /auth/google`                    — redirect to Google consent.
 /// - `GET  /auth/google/callback`           — finish OAuth → JWT.
 ///
@@ -105,13 +110,19 @@ impl FromRef<AppState> for Arc<Orchestrator> {
 /// SSE — see `auth::middleware` for the resolution order):
 /// - `GET  /auth/me`                        — current user (id + email).
 /// - `POST /evaluate`                       — simulate action envelope(s).
+/// - `POST /execution-report`               — post-policy lifecycle facts.
 /// - `GET  /wallets`                        — list user's wallets.
 /// - `POST /wallets`                        — start tracking a new wallet.
+/// - `PATCH/DELETE /wallets/:address`       — label/owned + archive.
 /// - `POST /wallets/:address/sync`          — refresh via RPC/oracle.
 /// - `GET  /wallets/:address/state`         — full wallet state.
 /// - `GET  /wallets/:address/holdings`      — token holdings.
 /// - `GET  /wallets/:address/approvals`     — approval set.
 /// - `GET  /wallets/:address/block-heights` — per-chain sync block.
+/// - `GET  /transactions`                   — state-delta lifecycle log.
+/// - `GET  /tokens`                         — token catalog + metadata.
+/// - `GET/POST /policies`                   — Cedar policies CRUD.
+/// - `PATCH/DELETE /policies/:id`           — single-policy update / delete.
 /// - `GET  /events/stream`                  — SSE live event feed.
 ///
 /// CORS is `permissive` with private-network access enabled so both the
@@ -121,6 +132,7 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/auth/me", get(auth_me_handler))
         .route("/evaluate", post(evaluate_handler))
+        .route("/execution-report", post(execution_report_handler))
         .route(
             "/wallets",
             get(read_handlers::list_wallets).post(write_handlers::add_wallet),
@@ -214,5 +226,33 @@ async fn evaluate_handler(
         Err(err @ HandlerError::Store(_)) => {
             (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
+    }
+}
+
+/// `POST /execution-report` — record what happened after policy approval.
+///
+/// Reports land in the authenticated user's own SQLite so wallet/chain/venue
+/// callbacks stay isolated per user. Canonical wallet state still comes from
+/// the sync orchestrator; this endpoint only persists lifecycle facts that a
+/// later reconciler will confirm against chain receipts or venue snapshots.
+async fn execution_report_handler(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<ExecutionReportRequest>,
+) -> Response {
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("open user store: {e}"),
+            )
+                .into_response();
+        }
+    };
+    let report_store = SqliteExecutionReportStore::new(store.pool().clone());
+    match report_execution(&report_store, req).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }
 }

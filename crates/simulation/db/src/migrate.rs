@@ -56,10 +56,22 @@ const MIGRATION_005: Migration = Migration {
     sql: include_str!("migrations/005_user_policies.sql"),
 };
 
+const MIGRATION_006: Migration = Migration {
+    version: 6,
+    description: "positions — allow hyperliquid_account kind (widen CHECK via table rebuild)",
+    sql: include_str!("migrations/006_hyperliquid_account_kind.sql"),
+};
+
 const MIGRATION_007: Migration = Migration {
     version: 7,
+    description: "execution_reports — post-policy wallet/chain/venue lifecycle audit",
+    sql: include_str!("migrations/007_execution_reports.sql"),
+};
+
+const MIGRATION_008: Migration = Migration {
+    version: 8,
     description: "tokens metadata — logo / website / description / coingecko id (Phase 10)",
-    sql: include_str!("migrations/007_token_metadata.sql"),
+    sql: include_str!("migrations/008_token_metadata.sql"),
 };
 
 /// User-DB schema (one DB file per wallet user). Holds wallet state,
@@ -70,7 +82,9 @@ const USER_DB_MIGRATIONS: &[Migration] = &[
     MIGRATION_003,
     MIGRATION_004,
     MIGRATION_005,
+    MIGRATION_006,
     MIGRATION_007,
+    MIGRATION_008,
 ];
 
 /// Global-DB schema (single file shared across users, holds the email →
@@ -174,7 +188,7 @@ mod tests {
         let pool = Pool::open_in_memory();
         assert_eq!(current_version(&pool).unwrap(), None);
         run(&pool).unwrap();
-        assert_eq!(current_version(&pool).unwrap(), Some(7));
+        assert_eq!(current_version(&pool).unwrap(), Some(8));
     }
 
     #[test]
@@ -183,14 +197,94 @@ mod tests {
         run(&pool).unwrap();
         run(&pool).unwrap(); // 두 번째 호출도 OK
         run(&pool).unwrap(); // 세 번째도
-        assert_eq!(current_version(&pool).unwrap(), Some(7));
+        assert_eq!(current_version(&pool).unwrap(), Some(8));
 
         // _schema_migrations 에는 적용된 버전 수 만큼만 row.
         pool.with_conn(|c| {
             let n: i64 = c
                 .query_row("SELECT COUNT(*) FROM _schema_migrations", [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(n, 6);
+            assert_eq!(n, 8);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn migration_006_preserves_existing_position_rows() {
+        use crate::repositories::positions::{list_for_wallet, upsert, PositionInsert};
+        use crate::repositories::wallets::{insert as insert_wallet, WalletInsert};
+        use serde_json::json;
+        use simulation_state::primitives::ChainId;
+
+        let pool = Pool::open_in_memory();
+        // run() creates _schema_migrations before its loop; apply_one does not.
+        pool.with_conn(|c| {
+            c.execute_batch(SCHEMA_MIGRATIONS_TABLE)?;
+            Ok(())
+        })
+        .unwrap();
+        // Apply 001..=005 only: positions exists with the OLD (pre-006) CHECK.
+        for m in &[
+            MIGRATION_001,
+            MIGRATION_002,
+            MIGRATION_003,
+            MIGRATION_004,
+            MIGRATION_005,
+        ] {
+            apply_one(&pool, m).unwrap();
+        }
+
+        // Stage one OLD-kind row with a DISTINCT value in every column.
+        let (wallet_id, staged_id) = pool
+            .with_tx(|tx| {
+                let w = insert_wallet(
+                    tx,
+                    &WalletInsert {
+                        address: "0xowner".into(),
+                        label: None,
+                        is_owned: true,
+                        created_at: 1_700_000_000,
+                        chains: vec![ChainId::ethereum_mainnet()],
+                    },
+                )?;
+                let pid = upsert(
+                    tx,
+                    &PositionInsert {
+                        wallet_id: w,
+                        position_id: "POS_ID".into(),
+                        protocol: "PROTO".into(),
+                        chain: Some("eip155:1".into()),
+                        kind: "perp_position".into(),
+                        market: Some("MKT".into()),
+                        summary: Some("SUM".into()),
+                        data: json!({ "marker": "DATA_MARKER" }),
+                        primitives_synced_at: 1_738_111_222,
+                        primitives_source: json!({ "src": "SOURCE_MARKER" }),
+                    },
+                )?;
+                Ok((w, pid))
+            })
+            .unwrap();
+
+        // Migration under test: rebuild + copy.
+        apply_one(&pool, &MIGRATION_006).unwrap();
+
+        // Every field must survive the INSERT...SELECT, in the correct column.
+        pool.with_tx(|tx| {
+            let rows = list_for_wallet(tx, wallet_id)?;
+            assert_eq!(rows.len(), 1, "row count must survive rebuild");
+            let r = &rows[0];
+            assert_eq!(r.id, staged_id, "PK preserved");
+            assert_eq!(r.position_id, "POS_ID");
+            assert_eq!(r.protocol, "PROTO");
+            assert_eq!(r.chain.as_deref(), Some("eip155:1"));
+            assert_eq!(r.kind, "perp_position");
+            assert_eq!(r.market.as_deref(), Some("MKT"));
+            assert_eq!(r.summary.as_deref(), Some("SUM"));
+            assert!(r.data_json.contains("DATA_MARKER"));
+            assert_eq!(r.primitives_synced_at, 1_738_111_222);
+            assert!(r.primitives_source_json.contains("SOURCE_MARKER"));
             Ok(())
         })
         .unwrap();

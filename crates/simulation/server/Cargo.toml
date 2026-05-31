@@ -11,11 +11,11 @@ publish = false
 # policy-engine dependency: the extension owns Cedar evaluation.
 simulation-state.workspace = true
 simulation-reducer.workspace = true
-# Sync orchestrator is wired in later (TODO: live-input refresh in handler).
+# Sync orchestrator hooks live RPC/oracle fetchers into `LiveField` refresh.
 simulation-sync.workspace = true
-# SQLite-backed `WalletStore` implementation that production wiring uses.
-# The handler stays db-agnostic (operates on `&dyn WalletStore`); this dep
-# exists only so `main.rs` can construct the concrete store.
+# SQLite-backed wallet/policy/execution-report persistence. The handler
+# stays db-agnostic where possible (operates on `&dyn WalletStore`); this
+# dep is required directly for `MultiUserStore` and `SqliteExecutionReportStore`.
 simulation-db.workspace = true
 serde.workspace = true
 serde_json.workspace = true

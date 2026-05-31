@@ -9,6 +9,7 @@
 
 use async_trait::async_trait;
 
+use crate::primitives::Time;
 use crate::wallet::{WalletId, WalletState};
 
 /// Errors surfaced by [`WalletStore`] implementations.
@@ -57,4 +58,16 @@ pub trait WalletStore: Send + Sync {
 
     /// Persists `state` as an upsert (create or replace).
     async fn save(&self, state: &WalletState) -> Result<(), StoreError>;
+
+    /// Mark this wallet's pending execution reports as reconciled once an
+    /// authoritative chain/venue snapshot has been written. Returns the
+    /// number of reports moved to a terminal state. Stores without report
+    /// persistence keep the default no-op implementation.
+    async fn reconcile_reports(
+        &self,
+        _id: &WalletId,
+        _now: Time,
+    ) -> Result<usize, StoreError> {
+        Ok(0)
+    }
 }

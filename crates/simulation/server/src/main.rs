@@ -13,6 +13,10 @@
 //!   `./scopeball-sync.toml`). Required for any RPC/price fetching.
 //! - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`,
 //!   `JWT_SECRET`, `DASHBOARD_URL` — auth config (see `.env.example`).
+//!
+//! The background `Scheduler` from `simulation-sync` is not wired here yet —
+//! sync runs on-demand via `POST /wallets/:addr/sync`. A multi-user-aware
+//! periodic ticker that walks every user's wallets is follow-up work.
 
 use std::path::PathBuf;
 use std::sync::Arc;

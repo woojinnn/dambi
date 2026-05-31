@@ -3256,6 +3256,7 @@ dependencies = [
  "async-trait",
  "hex",
  "reqwest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "simulation-db",
