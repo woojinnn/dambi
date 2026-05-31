@@ -71,6 +71,8 @@ fn walk_body(
                 walk_body(child, i, now, stale, stats);
             }
         }
+        // Restaking round-1 actions carry no live inputs (no walk needed).
+        ActionBody::Restaking(_) => {}
         ActionBody::Unknown { .. } => {}
     }
 }
@@ -101,9 +103,10 @@ pub fn apply_value_to_action(
         ActionBody::Perp(p) => perp::apply(p, slot, value, now),
         ActionBody::Permission(p) => permission::apply(p, slot, value, now),
         ActionBody::LiquidStaking(ls) => liquid_staking::apply(ls, slot, value, now),
-        // No live_input apply-slots on Yield / Staking / Hyperliquid CORE → nothing
-        // to apply (Yield P1c enrichment is built at decode time, not synced).
+        // No live_input apply-slots on Yield / Restaking / Staking / Hyperliquid CORE
+        // → nothing to apply (Yield P1c enrichment is built at decode time, not synced).
         ActionBody::Yield(_)
+        | ActionBody::Restaking(_)
         | ActionBody::Staking(_)
         | ActionBody::HyperliquidCore(_)
         | ActionBody::Multicall { .. }

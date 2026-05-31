@@ -18,8 +18,8 @@
 use serde_json::Value;
 use simulation_reducer::action::Action;
 
-/// The 12 valid `ActionBody` domains (serde `domain` tags).
-pub const VALID_DOMAINS: [&str; 12] = [
+/// The 13 valid `ActionBody` domains (serde `domain` tags).
+pub const VALID_DOMAINS: [&str; 13] = [
     "token",
     "amm",
     "lending",
@@ -29,6 +29,7 @@ pub const VALID_DOMAINS: [&str; 12] = [
     "perp",
     "permission",
     "yield",
+    "restaking",
     "staking",
     "multicall",
     "unknown",
@@ -49,7 +50,7 @@ pub enum OracleLayer {
     Envelope,
     /// `data.actions` did not re-type into `Vec<Action>`.
     TypedRoundTrip,
-    /// An emitted domain tag is not one of the 8 valid domains.
+    /// An emitted domain tag is not one of the valid domains.
     Domain,
     /// `ok:false` with a hard engine error.
     ErrorClass,
@@ -100,6 +101,14 @@ fn is_shape_artifact(kind: &str, msg: &str) -> bool {
         // random out-of-enum discriminant (e.g. interestRateMode=999). Real
         // discriminants are exercised by the corpus; tolerate here.
         || msg.contains("value-map: no case")
+        // `$fn` executors over a synthetic input: random calldata yields an
+        // all-zero Curve route or an out-of-enum swap_type. Real routes are
+        // exercised by the corpus/golden (which assert the resolved token); a
+        // STRUCTURAL $fn bug (unknown fn / bad arg wiring) errors on EVERY input
+        // incl. the golden, so it is NOT masked by these data-only patterns.
+        || msg.contains("empty route (no non-zero pool slot)")
+        || msg.contains("unknown swap_type")
+        || msg.contains("missing swap_params")
     )
 }
 

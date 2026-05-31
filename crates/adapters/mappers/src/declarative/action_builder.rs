@@ -91,6 +91,17 @@ pub enum V3BuildError {
     /// canonical key form (anything other than String / Number / Bool).
     #[error("value-map malformed: {0}")]
     ValueMapMalformed(String),
+    /// A `$fn` call object (`{ $fn, $args }`) referenced an unknown function,
+    /// had a malformed shape (non-string `$fn`, non-array `$args`, stray key),
+    /// or its executor rejected the substituted arguments. Fail-loud — a
+    /// manifest author used a non-whitelisted `$fn` or wired bad args.
+    #[error("$fn '{function}' failed: {reason}")]
+    FnCall {
+        /// The `$fn` name (or a sentinel when the name itself was malformed).
+        function: String,
+        /// Human-readable cause from the shape check / executor.
+        reason: String,
+    },
 }
 
 /// Fallback type for unresolved `$resolved.<k>` / `$derived.<k>` placeholders.
@@ -254,6 +265,13 @@ pub fn substitute_placeholders(
             if map.contains_key("$match") {
                 return resolve_value_map(ctx, map);
             }
+            // A `$fn` key turns this object into a WhitelistedFn call (a value
+            // that a single `$args.x` / value-map cannot express, e.g. Curve
+            // Router NG's variable-hop output token). Additive reserved key —
+            // existing single_emit manifests carry no `$fn`, so unaffected.
+            if map.contains_key("$fn") {
+                return resolve_fn_call(ctx, map);
+            }
             let mut out = JsonMap::with_capacity(map.len());
             for (k, v) in map {
                 out.insert(k.clone(), substitute_placeholders(ctx, v)?);
@@ -329,6 +347,53 @@ fn resolve_value_map(
     } else {
         Err(V3BuildError::ValueMapNoMatch { matched: key })
     }
+}
+
+/// Resolve a `$fn` call object `{ "$fn": "<name>", "$args": [<arg templates>] }`.
+///
+/// Each entry of `$args` is run back through [`substitute_placeholders`] (so an
+/// arg may itself be `$args._route`, a literal, or a nested value-map), then the
+/// resolved JSON args are dispatched to the named WhitelistedFn executor
+/// ([`super::builtin_fn::dispatch`]). `$fn` and `$args` are the ONLY allowed
+/// keys; any other is rejected fail-loud (mirrors the value-map key guard). A
+/// missing `$args` is treated as an empty arg list.
+fn resolve_fn_call(
+    ctx: &V3MapContext<'_>,
+    map: &JsonMap<String, JsonValue>,
+) -> Result<JsonValue, V3BuildError> {
+    for k in map.keys() {
+        if !matches!(k.as_str(), "$fn" | "$args") {
+            return Err(V3BuildError::FnCall {
+                function: "<malformed>".to_owned(),
+                reason: format!("unexpected key '{k}' in $fn call (allowed: $fn, $args)"),
+            });
+        }
+    }
+    let name = map
+        .get("$fn")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| V3BuildError::FnCall {
+            function: "<malformed>".to_owned(),
+            reason: "$fn must be a string function name".to_owned(),
+        })?;
+    let arg_templates: &[JsonValue] = match map.get("$args") {
+        Some(JsonValue::Array(a)) => a,
+        None => &[],
+        Some(_) => {
+            return Err(V3BuildError::FnCall {
+                function: name.to_owned(),
+                reason: "$args must be a JSON array".to_owned(),
+            });
+        }
+    };
+    let mut resolved_args = Vec::with_capacity(arg_templates.len());
+    for tpl in arg_templates {
+        resolved_args.push(substitute_placeholders(ctx, tpl)?);
+    }
+    super::builtin_fn::dispatch(name, &resolved_args).map_err(|reason| V3BuildError::FnCall {
+        function: name.to_owned(),
+        reason,
+    })
 }
 
 /// Resolve a single `$<root>` / `$<root>.<rest>` placeholder string.

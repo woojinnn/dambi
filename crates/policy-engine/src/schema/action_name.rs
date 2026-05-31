@@ -140,6 +140,14 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "place_stop_order",
     // Permission (1)
     "protocol_authorization",
+    // Restaking (7) — `delegate` already listed above under Airdrop, so `delegate_to`
+    "complete_withdrawal",
+    "delegate_to",
+    "deposit",
+    "queue_withdrawal",
+    "redelegate",
+    "register_operator",
+    "undelegate",
     // Staking (8)
     "claim_rewards",
     "gauge_deposit",
@@ -216,11 +224,11 @@ mod tests {
 
     #[test]
     fn registry_size_matches_phase1() {
-        // Union of feat/registry-v2 (67: + 8 Staking + 5 HyperliquidCore) and the
-        // Pendle `yield` domain (11: pt_swap / yt_swap / add+remove_market_liquidity
+        // Union of feat/registry-v2 (74: + 7 Restaking + 8 Staking + 5 HyperliquidCore)
+        // and the 11 Pendle `yield` rows (pt_swap / yt_swap / add+remove_market_liquidity
         // / mint_py / redeem_py / mint_sy / redeem_sy / claim_yield / sign_limit_order
-        // / cancel_limit_order) = 78.
-        assert_eq!(REGISTERED_ACTIONS.len(), 78);
+        // / cancel_limit_order) = 85.
+        assert_eq!(REGISTERED_ACTIONS.len(), 85);
     }
 
     #[test]

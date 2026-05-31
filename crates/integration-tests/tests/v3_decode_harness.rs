@@ -358,6 +358,72 @@ fn curve_stableswap_ng_add_liquidity_bakes_pool_coins_in_order() {
     );
 }
 
+/// Field-level golden for Curve Router NG `exchange` — the `$fn` core extension.
+///
+/// router-ng cannot be expressed by a `$match` value-map: `token_out` is the
+/// LAST non-zero entry of the variable-hop `_route` array (selected per-hop by
+/// `swap_type`), and `route_hash` is a keccak of the route. This pins BOTH new
+/// WhitelistedFns — `$fn curve_route_last_token` and `$fn route_hash` — against
+/// a REAL mainnet exchange (1-hop CRV→USDC, `swap_params` hop0 `swap_type=1` →
+/// coin-producing → `token_out = route[2] = USDC`), plus `recipient =
+/// $args._receiver`. `corpus_replay` only compares verdict+domain, so a broken
+/// `$fn` (wrong `token_out`) would still pass there — this is the only guard.
+#[test]
+fn curve_router_ng_exchange_resolves_last_token_via_fn() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real mainnet tx 0x1a464128… on CurveRouter v1.2 (exchange + _receiver):
+    //   route[0] = 0xaf5191b0… (in), route[1] = pool 0x3211c6cb…,
+    //   route[2] = USDC 0xa0b86991… (out), route[3..] = 0; hop0 swap_type = 1.
+    const TO: &str = "0x45312ea0eff7e09c83cbe249fa1d7598c4c8cd4e";
+    const TOKEN_IN: &str = "0xaf5191b0de278c7286d6c7cc6ab6bb8a73ba2cd6";
+    const USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const RECEIVER: &str = "0x8b65363a01510490fba03cea97b14c73b7ee8f75";
+    const CALLDATA: &str = "0xc872a3c5000000000000000000000000af5191b0de278c7286d6c7cc6ab6bb8a73ba2cd60000000000000000000000003211c6cbef1429da3d0d58494938299c92ad5860000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010f0cf064dd592000000000000000000000000000000000000000000000000000000000000048d266430000000000000000000000003211c6cbef1429da3d0d58494938299c92ad586000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008b65363a01510490fba03cea97b14c73b7ee8f75";
+
+    let env = harness::route::route_calldata(1, TO, "0xc872a3c5", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+
+    let venue = find_object_by_key(&env, "venue").expect("swap body carries venue");
+    assert_eq!(
+        find_string_field(venue, "name").as_deref(),
+        Some("aggregator_route"),
+        "venue must be aggregator_route; got {venue}"
+    );
+    assert_eq!(
+        find_string_field(venue, "router").as_deref(),
+        Some(TO),
+        "router must be tx.to; got {venue}"
+    );
+    let route_hash = find_string_field(venue, "route_hash").expect("venue carries route_hash");
+    assert!(
+        route_hash.starts_with("0x") && route_hash.len() == 66,
+        "$fn route_hash must be 32-byte hex; got {route_hash}"
+    );
+
+    let token_in = find_object_by_key(&env, "token_in").expect("swap body carries token_in");
+    let token_out = find_object_by_key(&env, "token_out").expect("swap body carries token_out");
+    assert_eq!(
+        find_string_field(token_in, "address").as_deref(),
+        Some(TOKEN_IN),
+        "token_in must be $args._route[0]; got {token_in}"
+    );
+    assert_eq!(
+        find_string_field(token_out, "address").as_deref(),
+        Some(USDC),
+        "$fn curve_route_last_token must resolve token_out to route[2]=USDC (swap_type 1); got {token_out}"
+    );
+    assert_eq!(
+        find_string_field(&env, "recipient").as_deref(),
+        Some(RECEIVER),
+        "recipient must resolve to $args._receiver"
+    );
+}
+
 /// Field-level golden for Curve CryptoSwap-NG (V2) `exchange` — the coin-index
 /// value-map over `uint256` indices (cryptoswap uses `uint256` i/j, NOT the
 /// `int128` of stableswap-ng). `uint256` renders as a decimal STRING
@@ -391,6 +457,43 @@ fn curve_cryptoswap_exchange_resolves_uint256_coin_index() {
         find_string_field(token_out, "address").as_deref(),
         Some(WETH),
         "j=2 (uint256) must resolve token_out to coin2 (WETH); got {token_out}"
+    );
+}
+
+/// Field-level golden for Curve Twocrypto-NG (`CurveTwocryptoOptimized`, 2-coin)
+/// `exchange` — the coin-index value-map reused on a twocrypto pool (`AmmVenue::
+/// CurveV2`, 0 core code; same `uint256` i/j as cryptoswap). Pinned against a REAL
+/// mainnet tx (0x08d406f5…) on the crvUSD/cbBTC pool (Curve Twocrypto-NG factory
+/// 0x98ee851a, deployed/used by Yield Basis): `i=0` → crvUSD (coin0), `j=1` →
+/// cbBTC (coin1). `corpus_replay` checks only verdict+domain, so a swapped coin
+/// map would silently mis-decode "which token am I selling" — this pins it.
+#[test]
+fn curve_twocrypto_exchange_resolves_coin_index_to_token() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real tx 0x08d406f5… exchange(i=0, j=1, dx=3.6168e18, min_dy=0) — sell crvUSD for cbBTC.
+    const TO: &str = "0x862cb4e988fb66e72f128d1183829f8c05b6c6a0";
+    const CRVUSD: &str = "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e";
+    const CBBTC: &str = "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf";
+    const CALLDATA: &str = "0x5b41b908000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000003231ee7c5f69365a0000000000000000000000000000000000000000000000000000000000000000";
+
+    let env = harness::route::route_calldata(1, TO, "0x5b41b908", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let token_in = find_object_by_key(&env, "token_in").expect("swap body carries token_in");
+    let token_out = find_object_by_key(&env, "token_out").expect("swap body carries token_out");
+    assert_eq!(
+        find_string_field(token_in, "address").as_deref(),
+        Some(CRVUSD),
+        "i=0 must resolve token_in to coin0 (crvUSD); got {token_in}"
+    );
+    assert_eq!(
+        find_string_field(token_out, "address").as_deref(),
+        Some(CBBTC),
+        "j=1 must resolve token_out to coin1 (cbBTC); got {token_out}"
     );
 }
 
@@ -432,6 +535,86 @@ fn curve_cryptoswap_add_liquidity_bakes_three_coins_in_order() {
     }
 }
 
+/// Field-level golden for Curve StableSwap-NG on BASE (chain 8453) — cross-chain
+/// `chain_to_addresses` + the int128 coin-index value-map on the superOETHb/WETH
+/// pool. Pins that the SAME curve_v1 venue + decode resolves a Base pool: `i=0` →
+/// WETH (coin0), `j=1` → superOETHb (coin1). Demonstrates 0-core-code chain
+/// extension (manifest `chain_to_addresses: {"8453": …}`).
+#[test]
+fn curve_stableswap_ng_base_exchange_resolves_coin_index() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Base superOETHb/WETH pool. exchange(i=0, j=1, _dx=1e18, _min_dy=0.99e18).
+    const TO: &str = "0x302a94e3c28c290eaf2a4605fc52e11eb915f378";
+    const WETH: &str = "0x4200000000000000000000000000000000000006";
+    const SOETH: &str = "0xdbfefd2e8460a6ee4955a68582f85708baea60a3";
+    const CALLDATA: &str = "0x3df02124000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000dbd2fc137a30000";
+
+    let env = harness::route::route_calldata(8453, TO, "0x3df02124", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed on chain 8453: {env}"
+    );
+    let token_in = find_object_by_key(&env, "token_in").expect("swap body carries token_in");
+    let token_out = find_object_by_key(&env, "token_out").expect("swap body carries token_out");
+    assert_eq!(
+        find_string_field(token_in, "address").as_deref(),
+        Some(WETH),
+        "i=0 must resolve token_in to coin0 (WETH) on Base; got {token_in}"
+    );
+    assert_eq!(
+        find_string_field(token_out, "address").as_deref(),
+        Some(SOETH),
+        "j=1 must resolve token_out to coin1 (superOETHb) on Base; got {token_out}"
+    );
+}
+
+/// Field-level golden for Curve StableSwap-NG on Base `add_liquidity` — the DYNAMIC
+/// `uint256[]` array variant (the Base blueprint uses `uint256[]`, NOT the mainnet
+/// pools' fixed `uint256[2]`). Pins that `$args._amounts[k]` positional baking
+/// resolves over a dynamically-encoded array: `tokens[0]` = WETH paired with
+/// `_amounts[0]`, `tokens[1]` = superOETHb paired with `_amounts[1]`.
+#[test]
+fn curve_stableswap_ng_base_add_liquidity_dynamic_array_bakes_coins() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Base superOETHb/WETH. add_liquidity(_amounts=[1e18, 2e18], _min_mint_amount=1).
+    // uint256[] is dynamic → head offset 0x40, then [len=2, 1e18, 2e18].
+    const TO: &str = "0x302a94e3c28c290eaf2a4605fc52e11eb915f378";
+    const WETH: &str = "0x4200000000000000000000000000000000000006";
+    const SOETH: &str = "0xdbfefd2e8460a6ee4955a68582f85708baea60a3";
+    const CALLDATA: &str = "0xb72df5de0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000001bc16d674ec80000";
+
+    let env = harness::route::route_calldata(8453, TO, "0xb72df5de", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let tokens = find_object_by_key(&env, "tokens").expect("add_liquidity body carries tokens");
+    let arr = tokens
+        .as_array()
+        .expect("tokens is an array of [TokenRef, amount]");
+    assert_eq!(
+        arr.len(),
+        2,
+        "2-coin pool must bake exactly 2 tokens; got {tokens}"
+    );
+    assert_eq!(
+        find_string_field(&arr[0], "address").as_deref(),
+        Some(WETH),
+        "tokens[0] must be coin0 (WETH) via dynamic-array baking; got {}",
+        arr[0]
+    );
+    assert_eq!(
+        find_string_field(&arr[1], "address").as_deref(),
+        Some(SOETH),
+        "tokens[1] must be coin1 (superOETHb) via dynamic-array baking; got {}",
+        arr[1]
+    );
+}
+
 /// Field-level golden for Curve crvUSD `create_loan` — the new `LendingVenue::CrvUsd`
 /// venue + the create_loan → `borrow` mapping. On the wstETH market, `create_loan`
 /// must decode to a lending `borrow` whose `asset` is crvUSD (the DEBT token) and
@@ -471,6 +654,86 @@ fn curve_crvusd_create_loan_borrows_crvusd_against_collateral() {
     );
 }
 
+/// Field-level golden for Curve LlamaLend `create_loan` — the new
+/// `LendingVenue::LlamaLend` venue (distinct from crvUSD). On the WBTC LlamaLend
+/// market, `create_loan` must decode to a lending `borrow` with `venue.name =
+/// "llama_lend"`, `asset` = crvUSD (the borrowed token), and `venue.collateral` =
+/// WBTC. Pins both the new venue tag and the borrow/collateral split.
+#[test]
+fn curve_llamalend_create_loan_borrows_crvusd_against_collateral() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // WBTC LlamaLend market Controller. create_loan(collateral=1e18, debt=1000e18, N=10).
+    const TO: &str = "0xcad85b7fe52b1939dceebee9bcf0b2a5aa0ce617";
+    const CRVUSD: &str = "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e";
+    const WBTC: &str = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599";
+    const CALLDATA: &str = "0x23cfed030000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000003635c9adc5dea00000000000000000000000000000000000000000000000000000000000000000000a";
+
+    let env = harness::route::route_calldata(1, TO, "0x23cfed03", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let venue = find_object_by_key(&env, "venue").expect("borrow body carries venue");
+    assert_eq!(
+        find_string_field(venue, "name").as_deref(),
+        Some("llama_lend"),
+        "LlamaLend market venue.name must be llama_lend (not crv_usd); got {venue}"
+    );
+    let asset = find_object_by_key(&env, "asset").expect("borrow body carries asset");
+    assert_eq!(
+        find_string_field(asset, "address").as_deref(),
+        Some(CRVUSD),
+        "LlamaLend create_loan must borrow crvUSD; got {asset}"
+    );
+    let collateral =
+        find_object_by_key(venue, "collateral").expect("llama_lend venue carries collateral");
+    assert_eq!(
+        find_string_field(collateral, "address").as_deref(),
+        Some(WBTC),
+        "WBTC market venue.collateral must be WBTC; got {collateral}"
+    );
+}
+
+/// Field-level golden for Curve LlamaLend `approve(address,bool)` — the permission-
+/// delegation primitive (ScopeBall's raison d'être). On a newgen LlamaLend
+/// Controller (sreUSD market), `approve(_spender, _allow)` must decode to a
+/// `permission` / `protocol_authorization` granting the OPERATOR role to
+/// `_spender`, with `is_authorized` reflecting the `_allow` bool. A silent drop
+/// (as "admin") would hide a loan-management authority grant.
+#[test]
+fn curve_llamalend_approve_decodes_operator_authorization() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // sreUSD market Controller (newgen). approve(_spender=0x1111…1111, _allow=true).
+    const TO: &str = "0x4f79fe450a2baf833e8f50340bd230f5a3ecafe9";
+    const SPENDER: &str = "0x1111111111111111111111111111111111111111";
+    const CALLDATA: &str = "0x3d140d2100000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000001";
+
+    let env = harness::route::route_calldata(1, TO, "0x3d140d21", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    assert_eq!(
+        find_string_field(&env, "authorized").as_deref(),
+        Some(SPENDER),
+        "approve must authorize _spender as operator; got {env}"
+    );
+    assert_eq!(
+        find_string_field(&env, "permission").as_deref(),
+        Some("operator"),
+        "LlamaLend approve grants the operator permission; got {env}"
+    );
+    assert_eq!(
+        find_object_by_key(&env, "is_authorized").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "_allow=1 must decode is_authorized=true (grant, not revoke); got {env}"
+    );
+}
+
 /// Field-level golden: Curve veCRV `create_lock` must decode to a `staking`
 /// `lock` whose locked `token` is CRV (BAKED by the manifest — not in calldata),
 /// `amount` = `_value`, and `unlock_time` = `_unlock_time`. The corpus
@@ -506,6 +769,44 @@ fn curve_vecrv_create_lock_locks_crv_for_unlock_time() {
         find_string_field(&env, "unlock_time").as_deref(),
         Some("0x713fb300"),
         "lock unlock_time must equal _unlock_time (1900000000)"
+    );
+}
+
+/// Field-level golden: Curve FeeDistributor `claim(address)` must decode to a
+/// `staking` `claim_rewards` on the new `curve_fee_distributor` venue, with
+/// `distributor = tx.to` and `on_behalf_of = $args._addr` (the beneficiary).
+#[test]
+fn curve_fee_distributor_claim_for_decodes_venue_and_beneficiary() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real mainnet tx 0x4452dd94… on the crvUSD FeeDistributor:
+    // claim(_addr = 0x4986d3b5…).
+    const TO: &str = "0xd16d5ec345dd86fb63c6a9c43c517210f1027914";
+    const BENEFICIARY: &str = "0x4986d3b5160032ab7df0fac9503f6a2360f3f888";
+    const CALLDATA: &str =
+        "0x1e83409a0000000000000000000000004986d3b5160032ab7df0fac9503f6a2360f3f888";
+
+    let env = harness::route::route_calldata(1, TO, "0x1e83409a", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let venue = find_object_by_key(&env, "venue").expect("claim_rewards carries venue");
+    assert_eq!(
+        find_string_field(venue, "name").as_deref(),
+        Some("curve_fee_distributor"),
+        "venue must be curve_fee_distributor; got {venue}"
+    );
+    assert_eq!(
+        find_string_field(venue, "distributor").as_deref(),
+        Some(TO),
+        "distributor must be tx.to; got {venue}"
+    );
+    assert_eq!(
+        find_string_field(&env, "on_behalf_of").as_deref(),
+        Some(BENEFICIARY),
+        "on_behalf_of must resolve to $args._addr"
     );
 }
 
@@ -1762,4 +2063,227 @@ fn pendle_sign_limit_order_typed_data_decodes_order_fields() {
         Some(TOKEN.into()),
         "Order.token (SY side) mis-decoded"
     );
+}
+
+// ---------------------------------------------------------------------------
+// EigenLayer (restaking) field-level goldens. The corpus oracle checks only
+// verdict + top-level domain; these pin the decoded field VALUES (operator,
+// strategies, withdrawer, permission grant) that a wrong emit would silently
+// mis-decode — including the array_emit (queueWithdrawals) and nested-tuple
+// (completeQueuedWithdrawal `$args.withdrawal[i]`) cases the single_emit
+// `check:manifest` validate does NOT cover.
+// ---------------------------------------------------------------------------
+
+const EL_DM: &str = "0x39053d51b77dc0d36036fc1fcc8cb819df8ef37a";
+const EL_SM: &str = "0x858646372cc42e1a627fce94aa7a7033e7cf075a";
+const EL_PC: &str = "0x25e5f8b1e7adf44518d35d5b2271f114e081f0e5";
+
+/// Real mainnet `delegateTo` 0x6defd3f6…: delegate to operator 0x8c81d590….
+#[test]
+fn eigenlayer_delegate_to_decodes_operator() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const CALLDATA: &str = "0xeea9064b0000000000000000000000008c81d590cc94ca2451c4bde24c598193da74a57500000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    let env = harness::route::route_calldata(1, EL_DM, "0xeea9064b", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "delegateTo route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "domain"), Some("restaking".into()));
+    assert_eq!(
+        find_string_field(&env, "action"),
+        Some("delegate_to".into())
+    );
+    assert_eq!(
+        find_string_field(&env, "operator"),
+        Some("0x8c81d590cc94ca2451c4bde24c598193da74a575".into()),
+        "delegateTo operator mis-decoded"
+    );
+}
+
+/// Real mainnet `queueWithdrawals` 0xd00d0ca0…: array_emit over one
+/// QueuedWithdrawalParams → a Multicall wrapping a `restaking.queue_withdrawal`
+/// whose `withdrawer`, `strategies[]` come from the inner tuple via `$inputs[i]`.
+#[test]
+fn eigenlayer_queue_withdrawals_array_emit_decodes_multicall() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const CALLDATA: &str = "0x0dd8dd02000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000ba3053d3e075a8037d4c01b1ca08aa1cbe508e840000000000000000000000000000000000000000000000000000000000000001000000000000000000000000beac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000b339ee5c9cff800";
+    let env = harness::route::route_calldata(1, EL_DM, "0x0dd8dd02", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "queueWithdrawals route did not succeed: {env}"
+    );
+    // array_emit expands params[] into a Multicall; inner is restaking.queue_withdrawal.
+    assert_eq!(find_string_field(&env, "domain"), Some("multicall".into()));
+    assert_eq!(
+        find_string_field(&env, "action"),
+        Some("queue_withdrawal".into())
+    );
+    assert_eq!(
+        find_string_field(&env, "withdrawer"),
+        Some("0xba3053d3e075a8037d4c01b1ca08aa1cbe508e84".into()),
+        "queue_withdrawal withdrawer mis-decoded"
+    );
+    let strategies =
+        find_object_by_key(&env, "strategies").expect("queue_withdrawal has strategies");
+    assert_eq!(
+        strategies
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(serde_json::Value::as_str),
+        Some("0xbeac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac0"),
+        "strategies[0] (native beacon-ETH strategy sentinel) mis-decoded"
+    );
+}
+
+/// Real mainnet `completeQueuedWithdrawal` 0x3b386866…: the nested `Withdrawal`
+/// tuple's `staker` (component 0) and `strategies` (component 5) are pulled via
+/// chained-numeric `$args.withdrawal[i]`.
+#[test]
+fn eigenlayer_complete_queued_withdrawal_decodes_nested_tuple() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const CALLDATA: &str = "0xe4cc3f90000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000aa0cbae2dd290f8aed1b672ebe2e197fd969628b0000000000000000000000003601bda2b72628da309ab9df7d310ada38cae44c000000000000000000000000aa0cbae2dd290f8aed1b672ebe2e197fd969628b00000000000000000000000000000000000000000000000000000000000000ab00000000000000000000000000000000000000000000000000000000017f270e00000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000beac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000003fedc53618828c0000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000";
+    let env = harness::route::route_calldata(1, EL_DM, "0xe4cc3f90", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "completeQueuedWithdrawal route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "domain"), Some("restaking".into()));
+    assert_eq!(
+        find_string_field(&env, "action"),
+        Some("complete_withdrawal".into())
+    );
+    assert_eq!(
+        find_string_field(&env, "staker"),
+        Some("0xaa0cbae2dd290f8aed1b672ebe2e197fd969628b".into()),
+        "Withdrawal.staker (component 0) mis-decoded"
+    );
+    assert_eq!(find_bool_field(&env, "receive_as_tokens"), Some(true));
+    let strategies =
+        find_object_by_key(&env, "strategies").expect("complete_withdrawal has strategies");
+    assert_eq!(
+        strategies
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(serde_json::Value::as_str),
+        Some("0xbeac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac0"),
+        "Withdrawal.strategies[0] (component 5) mis-decoded"
+    );
+}
+
+/// Real mainnet `depositIntoStrategy` 0xb175325c…: stETH strategy + stETH token.
+#[test]
+fn eigenlayer_deposit_into_strategy_decodes_strategy_and_token() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const STETH_STRATEGY: &str = "0x93c4b944d05dfe6df7645a86cd2206016c51564d";
+    const STETH: &str = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
+    const CALLDATA: &str = "0xe7a050aa00000000000000000000000093c4b944d05dfe6df7645a86cd2206016c51564d000000000000000000000000ae7ab96520de3a18e5e111b5eaab095312d7fe8400000000000000000000000000000000000000000000000000af87f5a3404400";
+    let env = harness::route::route_calldata(1, EL_SM, "0xe7a050aa", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "depositIntoStrategy route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "domain"), Some("restaking".into()));
+    assert_eq!(find_string_field(&env, "action"), Some("deposit".into()));
+    assert_eq!(
+        find_string_field(&env, "strategy"),
+        Some(STETH_STRATEGY.into())
+    );
+    let token = find_object_by_key(&env, "token").expect("deposit has token");
+    assert_eq!(
+        token
+            .pointer("/key/address")
+            .and_then(serde_json::Value::as_str),
+        Some(STETH),
+        "deposit token (stETH) mis-decoded"
+    );
+}
+
+/// Real mainnet `setAppointee` 0x9739f464…: account grants appointee a
+/// selector-scoped call right → permission.protocol_authorization grant.
+#[test]
+fn eigenlayer_set_appointee_decodes_grant() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const ACCOUNT: &str = "0xf07f83ff977dd004060f00ecefb80a9f92775098";
+    const APPOINTEE: &str = "0x54bb392508d458cbf1e48c59d44ffbc93f912329";
+    const CALLDATA: &str = "0x950d806e000000000000000000000000f07f83ff977dd004060f00ecefb80a9f9277509800000000000000000000000054bb392508d458cbf1e48c59d44ffbc93f912329000000000000000000000000948a420b8cc1d6bfd0b6087c2e7c344a2cd0bc393635205700000000000000000000000000000000000000000000000000000000";
+    let env = harness::route::route_calldata(1, EL_PC, "0x950d806e", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "setAppointee route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "domain"), Some("permission".into()));
+    assert_eq!(find_string_field(&env, "authorizer"), Some(ACCOUNT.into()));
+    assert_eq!(
+        find_string_field(&env, "authorized"),
+        Some(APPOINTEE.into())
+    );
+    assert_eq!(find_bool_field(&env, "is_authorized"), Some(true));
+}
+
+/// Off-chain `Deposit` EIP-712 (StrategyManager): the staker authorizes a
+/// deposit on their behalf → restaking.deposit with the signed strategy/token.
+#[test]
+fn eigenlayer_deposit_typed_data_decodes_strategy_token_staker() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const STAKER: &str = "0x1111111111111111111111111111111111111111";
+    const STRATEGY: &str = "0x93c4b944d05dfe6df7645a86cd2206016c51564d";
+    const TOKEN: &str = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
+    let message = serde_json::json!({
+        "staker": STAKER,
+        "strategy": STRATEGY,
+        "token": TOKEN,
+        "amount": "1000000000000000000",
+        "nonce": "0",
+        "expiry": "9999999999"
+    });
+    let env =
+        harness::route::route_typed_data(1, EL_SM, "Deposit", None, Some("EigenLayer"), &message);
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "Deposit typed-data route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "domain"), Some("restaking".into()));
+    assert_eq!(find_string_field(&env, "action"), Some("deposit".into()));
+    assert_eq!(find_string_field(&env, "strategy"), Some(STRATEGY.into()));
+    assert_eq!(find_string_field(&env, "staker"), Some(STAKER.into()));
+}
+
+/// Off-chain `DelegationApproval` EIP-712 (DelegationManager): the operator's
+/// delegationApprover authorizes a specific staker→operator delegation →
+/// permission.protocol_authorization (authorizer = approver, authorized = staker).
+#[test]
+fn eigenlayer_delegation_approval_typed_data_decodes_grant() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const APPROVER: &str = "0x2222222222222222222222222222222222222222";
+    const STAKER: &str = "0x3333333333333333333333333333333333333333";
+    let message = serde_json::json!({
+        "delegationApprover": APPROVER,
+        "staker": STAKER,
+        "operator": "0x4444444444444444444444444444444444444444",
+        "salt": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "expiry": "9999999999"
+    });
+    let env = harness::route::route_typed_data(
+        1,
+        EL_DM,
+        "DelegationApproval",
+        None,
+        Some("EigenLayer"),
+        &message,
+    );
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "DelegationApproval typed-data route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "domain"), Some("permission".into()));
+    assert_eq!(find_string_field(&env, "authorizer"), Some(APPROVER.into()));
+    assert_eq!(find_string_field(&env, "authorized"), Some(STAKER.into()));
+    assert_eq!(find_bool_field(&env, "is_authorized"), Some(true));
 }

@@ -260,6 +260,18 @@ namespace LiquidStaking {
   };
 }
 
+namespace Restaking {
+  // -------------------------------------------------------------------------
+  // RestakingVenue — restaking venue identifier.
+  //   - "eigenlayer" → no extra fields (DelegationManager / StrategyManager /
+  //     EigenPodManager singleton set on the chain)
+  // -------------------------------------------------------------------------
+  type RestakingVenue = {
+    name: String,                // discriminated by name (currently "eigenlayer")
+    chain: String,               // CAIP-2 id, e.g. "eip155:1"
+  };
+}
+
 namespace Staking {
   // -------------------------------------------------------------------------
   // StakeVenue — Curve DAO staking / vote-escrow venue identifier. Each variant
@@ -268,6 +280,7 @@ namespace Staking {
   //   - "curve_minter"           → minter     (CRV Minter)
   //   - "curve_gauge_controller" → controller (GaugeController)
   //   - "curve_gauge"            → gauge      (per-pool liquidity gauge)
+  //   - "curve_fee_distributor"  → distributor (FeeDistributor, veCRV fee claim)
   // -------------------------------------------------------------------------
   type StakeVenue = {
     name: String,                // discriminated by name
@@ -276,6 +289,7 @@ namespace Staking {
     minter?: String,             // curve_minter
     controller?: String,         // curve_gauge_controller
     gauge?: String,              // curve_gauge
+    distributor?: String,        // curve_fee_distributor
   };
 }
 

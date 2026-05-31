@@ -21,6 +21,7 @@ pub mod lending;
 pub mod liquid_staking;
 pub mod permission;
 pub mod perp;
+pub mod restaking;
 pub mod staking;
 pub mod token;
 pub mod yield_;
