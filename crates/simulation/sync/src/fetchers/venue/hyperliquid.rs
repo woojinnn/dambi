@@ -101,7 +101,8 @@ impl HyperliquidFetcher {
     }
 
     pub async fn fetch_meta(&self, endpoint: &str) -> Result<Value, SyncError> {
-        self.fetch_info(endpoint, json!({ "type": "meta" })).await
+        self.fetch_meta_for_dex(endpoint, endpoint_dex(endpoint).as_deref())
+            .await
     }
 
     pub async fn fetch_clearinghouse_state(
@@ -109,9 +110,22 @@ impl HyperliquidFetcher {
         endpoint: &str,
         user: &Address,
     ) -> Result<Value, SyncError> {
+        self.fetch_clearinghouse_state_for_dex(endpoint, user, endpoint_dex(endpoint).as_deref())
+            .await
+    }
+
+    async fn fetch_clearinghouse_state_for_dex(
+        &self,
+        endpoint: &str,
+        user: &Address,
+        dex: Option<&str>,
+    ) -> Result<Value, SyncError> {
         self.fetch_info(
             endpoint,
-            json!({ "type": "clearinghouseState", "user": hl_user(user) }),
+            with_dex(
+                json!({ "type": "clearinghouseState", "user": hl_user(user) }),
+                dex,
+            ),
         )
         .await
     }
@@ -121,9 +135,22 @@ impl HyperliquidFetcher {
         endpoint: &str,
         user: &Address,
     ) -> Result<Value, SyncError> {
+        self.fetch_open_orders_for_dex(endpoint, user, endpoint_dex(endpoint).as_deref())
+            .await
+    }
+
+    async fn fetch_open_orders_for_dex(
+        &self,
+        endpoint: &str,
+        user: &Address,
+        dex: Option<&str>,
+    ) -> Result<Value, SyncError> {
         self.fetch_info(
             endpoint,
-            json!({ "type": "frontendOpenOrders", "user": hl_user(user) }),
+            with_dex(
+                json!({ "type": "frontendOpenOrders", "user": hl_user(user) }),
+                dex,
+            ),
         )
         .await
     }
@@ -136,16 +163,71 @@ impl HyperliquidFetcher {
         .await
     }
 
+    async fn fetch_meta_for_dex(
+        &self,
+        endpoint: &str,
+        dex: Option<&str>,
+    ) -> Result<Value, SyncError> {
+        self.fetch_info(endpoint, with_dex(json!({ "type": "meta" }), dex))
+            .await
+    }
+
+    async fn fetch_perp_dexs(&self, endpoint: &str) -> Result<Vec<String>, SyncError> {
+        let payload = self
+            .fetch_info(endpoint, json!({ "type": "perpDexs" }))
+            .await?;
+        let Some(items) = payload.as_array() else {
+            return Ok(Vec::new());
+        };
+        Ok(items
+            .iter()
+            .filter_map(|item| value_at(item, &["name"]).and_then(Value::as_str))
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .collect())
+    }
+
     pub async fn fetch_account_snapshot(
         &self,
         endpoint: &str,
         user: &Address,
     ) -> Result<HlAccount, SyncError> {
-        let clearinghouse = self.fetch_clearinghouse_state(endpoint, user).await?;
-        let open_orders = self.fetch_open_orders(endpoint, user).await?;
         let agents = self.fetch_agents(endpoint, user).await?;
-        let meta = self.fetch_meta(endpoint).await?;
-        parse_account_snapshot(&clearinghouse, &open_orders, &agents, &meta)
+        let configured_dex = endpoint_dex(endpoint);
+        let mut account = self
+            .fetch_account_snapshot_for_dex(endpoint, user, configured_dex.as_deref(), &agents)
+            .await?;
+
+        if configured_dex.is_none() {
+            for dex in self.fetch_perp_dexs(endpoint).await? {
+                let extra = self
+                    .fetch_account_snapshot_for_dex(
+                        endpoint,
+                        user,
+                        Some(&dex),
+                        &Value::Array(Vec::new()),
+                    )
+                    .await?;
+                merge_hl_account(&mut account, extra);
+            }
+        }
+
+        Ok(account)
+    }
+
+    async fn fetch_account_snapshot_for_dex(
+        &self,
+        endpoint: &str,
+        user: &Address,
+        dex: Option<&str>,
+        agents: &Value,
+    ) -> Result<HlAccount, SyncError> {
+        let clearinghouse = self
+            .fetch_clearinghouse_state_for_dex(endpoint, user, dex)
+            .await?;
+        let open_orders = self.fetch_open_orders_for_dex(endpoint, user, dex).await?;
+        let meta = self.fetch_meta_for_dex(endpoint, dex).await?;
+        parse_account_snapshot(&clearinghouse, &open_orders, agents, &meta)
     }
 
     pub async fn fetch_action_value(
@@ -185,33 +267,7 @@ impl HyperliquidFetcher {
     ) -> Result<Value, SyncError> {
         let zero_user = Address::ZERO;
         let user = user.unwrap_or(&zero_user);
-        let body = match parser_id {
-            "hl_mids" | "hl_all_mids" => json!({ "type": "allMids" }),
-            "hl_oracle" | "hl_funding" | "hl_oi" | "hl_market_meta" => {
-                json!({ "type": "metaAndAssetCtxs" })
-            }
-            "hl_open_orders" => {
-                json!({ "type": "frontendOpenOrders", "user": hl_user(user) })
-            }
-            "hl_account" | "hl_clearinghouse" => {
-                json!({ "type": "clearinghouseState", "user": hl_user(user) })
-            }
-            "hl_fees" => json!({ "type": "userFees", "user": hl_user(user) }),
-            "hl_l2_book" => {
-                let Some(symbol) = market_symbol else {
-                    return Err(sync_error("hl_l2_book requires a market symbol"));
-                };
-                json!({ "type": "l2Book", "coin": hl_coin(symbol) })
-            }
-            "hl_meta" => json!({ "type": "meta" }),
-            "hl_agents" => json!({ "type": "extraAgents", "user": hl_user(user) }),
-            other => {
-                return Err(SyncError::FetchFailed {
-                    source_id: "hyperliquid".into(),
-                    reason: format!("unknown parser_id: {other}"),
-                });
-            }
-        };
+        let body = payload_for_parser(endpoint, parser_id, user, market_symbol)?;
         self.fetch_info(endpoint, body).await
     }
 
@@ -303,6 +359,64 @@ pub(crate) fn parse_account_snapshot(
     })
 }
 
+fn merge_hl_account(target: &mut HlAccount, extra: HlAccount) {
+    target.perp_usdc = add_optional_decimals(target.perp_usdc.take(), extra.perp_usdc)
+        .or_else(|| Some(Decimal::new("0")));
+    target.positions.extend(extra.positions);
+    target.open_orders.extend(extra.open_orders);
+    target.leverage_settings.extend(extra.leverage_settings);
+    target.agents.extend(extra.agents);
+}
+
+fn add_optional_decimals(lhs: Option<Decimal>, rhs: Option<Decimal>) -> Option<Decimal> {
+    match (lhs, rhs) {
+        (Some(lhs), Some(rhs)) => {
+            let lhs = RustDecimal::from_str(lhs.as_str()).ok()?;
+            let rhs = RustDecimal::from_str(rhs.as_str()).ok()?;
+            Some(Decimal::new((lhs + rhs).normalize().to_string()))
+        }
+        (Some(lhs), None) | (None, Some(lhs)) => Some(lhs),
+        (None, None) => None,
+    }
+}
+
+fn payload_for_parser(
+    endpoint: &str,
+    parser_id: &str,
+    user: &Address,
+    market_symbol: Option<&str>,
+) -> Result<Value, SyncError> {
+    let dex = request_dex(endpoint, market_symbol);
+    match parser_id {
+        "hl_mids" | "hl_all_mids" => Ok(with_dex(json!({ "type": "allMids" }), dex.as_deref())),
+        "hl_oracle" | "hl_funding" | "hl_oi" | "hl_market_meta" => Ok(with_dex(
+            json!({ "type": "metaAndAssetCtxs" }),
+            dex.as_deref(),
+        )),
+        "hl_open_orders" => Ok(with_dex(
+            json!({ "type": "frontendOpenOrders", "user": hl_user(user) }),
+            dex.as_deref(),
+        )),
+        "hl_account" | "hl_clearinghouse" => Ok(with_dex(
+            json!({ "type": "clearinghouseState", "user": hl_user(user) }),
+            dex.as_deref(),
+        )),
+        "hl_fees" => Ok(json!({ "type": "userFees", "user": hl_user(user) })),
+        "hl_l2_book" => {
+            let Some(symbol) = market_symbol else {
+                return Err(sync_error("hl_l2_book requires a market symbol"));
+            };
+            Ok(json!({ "type": "l2Book", "coin": hl_coin(symbol, dex.as_deref()) }))
+        }
+        "hl_meta" => Ok(with_dex(json!({ "type": "meta" }), dex.as_deref())),
+        "hl_agents" => Ok(json!({ "type": "extraAgents", "user": hl_user(user) })),
+        other => Err(SyncError::FetchFailed {
+            source_id: "hyperliquid".into(),
+            reason: format!("unknown parser_id: {other}"),
+        }),
+    }
+}
+
 pub(crate) fn parse_all_mids_value(
     payload: &Value,
     market_symbol: &str,
@@ -337,12 +451,7 @@ pub(crate) fn parse_asset_ctx_value(
         .ok_or_else(|| sync_error("metaAndAssetCtxs missing asset contexts"))?;
     let index = symbol_index(meta)
         .into_iter()
-        .find_map(|(sym, ix)| {
-            symbol_candidates(market_symbol)
-                .into_iter()
-                .any(|candidate| candidate == sym)
-                .then_some(ix)
-        })
+        .find_map(|(sym, ix)| symbol_matches(&sym, market_symbol).then_some(ix))
         .ok_or_else(|| sync_error(format!("meta missing market {market_symbol}")))?;
     let ctx = ctxs
         .get(usize::try_from(index).map_err(|e| sync_error(format!("asset index: {e}")))?)
@@ -742,14 +851,13 @@ fn clearinghouse_position<'a>(
     let items = value_at(clearinghouse, &["assetPositions"])
         .and_then(Value::as_array)
         .ok_or_else(|| sync_error("clearinghouseState missing assetPositions"))?;
-    let candidates = symbol_candidates(market_symbol);
     items
         .iter()
         .filter_map(|item| value_at(item, &["position"]))
         .find(|position| {
             value_at(position, &["coin"])
                 .and_then(Value::as_str)
-                .is_some_and(|coin| candidates.iter().any(|candidate| candidate == coin))
+                .is_some_and(|coin| symbol_matches(coin, market_symbol))
         })
         .ok_or_else(|| sync_error(format!("clearinghouseState missing market {market_symbol}")))
 }
@@ -772,11 +880,44 @@ fn hl_user(user: &Address) -> String {
     format!("{user:#x}")
 }
 
-fn hl_coin(market_symbol: &str) -> String {
-    symbol_candidates(market_symbol)
-        .into_iter()
-        .min_by_key(String::len)
-        .unwrap_or_else(|| market_symbol.to_owned())
+fn hl_coin(market_symbol: &str, dex: Option<&str>) -> String {
+    let coin = strip_quote_suffix(market_symbol);
+    if coin.contains(':') {
+        return coin.to_owned();
+    }
+    match dex {
+        Some(dex) if !dex.is_empty() => format!("{dex}:{coin}"),
+        _ => coin.to_owned(),
+    }
+}
+
+fn request_dex(endpoint: &str, market_symbol: Option<&str>) -> Option<String> {
+    market_symbol
+        .and_then(market_dex)
+        .map(str::to_owned)
+        .or_else(|| endpoint_dex(endpoint))
+}
+
+fn market_dex(market_symbol: &str) -> Option<&str> {
+    let (dex, _coin) = market_symbol.split_once(':')?;
+    (!dex.is_empty()).then_some(dex)
+}
+
+fn endpoint_dex(endpoint: &str) -> Option<String> {
+    let query = endpoint.split_once('?')?.1;
+    query.split('&').find_map(|part| {
+        let (key, value) = part.split_once('=')?;
+        (key == "dex" && !value.is_empty()).then(|| value.to_owned())
+    })
+}
+
+fn with_dex(mut body: Value, dex: Option<&str>) -> Value {
+    if let Some(dex) = dex.filter(|dex| !dex.is_empty()) {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("dex".to_owned(), Value::String(dex.to_owned()));
+        }
+    }
+    body
 }
 
 fn symbol_index(meta: &Value) -> HashMap<String, u32> {
@@ -797,20 +938,19 @@ fn universe_item<'a>(meta: &'a Value, market_symbol: &str) -> Result<&'a Value, 
     let universe = value_at(meta, &["universe"])
         .and_then(Value::as_array)
         .ok_or_else(|| sync_error("meta missing universe"))?;
-    let candidates = symbol_candidates(market_symbol);
     universe
         .iter()
         .find(|item| {
             value_at(item, &["name"])
                 .and_then(Value::as_str)
-                .is_some_and(|name| candidates.iter().any(|candidate| candidate == name))
+                .is_some_and(|name| symbol_matches(name, market_symbol))
         })
         .ok_or_else(|| sync_error(format!("meta missing market {market_symbol}")))
 }
 
 fn symbol_to_index(symbols: &HashMap<String, u32>, symbol: &str) -> Result<u32, SyncError> {
-    for candidate in symbol_candidates(symbol) {
-        if let Some(ix) = symbols.get(&candidate) {
+    for (known, ix) in symbols {
+        if symbol_matches(known, symbol) {
             return Ok(*ix);
         }
     }
@@ -818,15 +958,28 @@ fn symbol_to_index(symbols: &HashMap<String, u32>, symbol: &str) -> Result<u32, 
 }
 
 fn symbol_candidates(symbol: &str) -> Vec<String> {
-    let mut out = vec![symbol.to_owned()];
-    for suffix in ["-USD", "-USDC", "-PERP", "/USD", "/USDC"] {
-        if let Some(stripped) = symbol.strip_suffix(suffix) {
-            out.push(stripped.to_owned());
-        }
+    let mut out = vec![symbol.to_owned(), strip_quote_suffix(symbol).to_owned()];
+    if let Some((_dex, base)) = strip_quote_suffix(symbol).split_once(':') {
+        out.push(base.to_owned());
     }
     out.sort();
     out.dedup();
     out
+}
+
+fn symbol_matches(lhs: &str, rhs: &str) -> bool {
+    let lhs = symbol_candidates(lhs);
+    let rhs = symbol_candidates(rhs);
+    lhs.iter().any(|l| rhs.iter().any(|r| l == r))
+}
+
+fn strip_quote_suffix(symbol: &str) -> &str {
+    for suffix in ["-USD", "-USDC", "-PERP", "/USD", "/USDC"] {
+        if let Some(stripped) = symbol.strip_suffix(suffix) {
+            return stripped;
+        }
+    }
+    symbol
 }
 
 fn parse_side_is_buy(side: String) -> Result<bool, SyncError> {
@@ -1100,6 +1253,119 @@ mod tests {
         assert_eq!(
             parse_user_fee_bp(&fees, FeeSide::Taker).unwrap(),
             json!(5u64)
+        );
+    }
+
+    #[test]
+    fn builds_dex_aware_payloads_from_prefixed_markets() {
+        let user = Address::from([0x22; 20]);
+        let endpoint = "https://api.hyperliquid.xyz/info";
+
+        assert_eq!(
+            payload_for_parser(endpoint, "hl_account", &user, Some("xyz:SPCX")).unwrap(),
+            json!({
+                "type": "clearinghouseState",
+                "user": "0x2222222222222222222222222222222222222222",
+                "dex": "xyz"
+            })
+        );
+        assert_eq!(
+            payload_for_parser(endpoint, "hl_open_orders", &user, Some("xyz:SPCX")).unwrap(),
+            json!({
+                "type": "frontendOpenOrders",
+                "user": "0x2222222222222222222222222222222222222222",
+                "dex": "xyz"
+            })
+        );
+        assert_eq!(
+            payload_for_parser(endpoint, "hl_mids", &user, Some("xyz:SPCX")).unwrap(),
+            json!({ "type": "allMids", "dex": "xyz" })
+        );
+        assert_eq!(
+            payload_for_parser(endpoint, "hl_funding", &user, Some("xyz:SPCX")).unwrap(),
+            json!({ "type": "metaAndAssetCtxs", "dex": "xyz" })
+        );
+        assert_eq!(
+            payload_for_parser(endpoint, "hl_l2_book", &user, Some("xyz:SPCX")).unwrap(),
+            json!({ "type": "l2Book", "coin": "xyz:SPCX" })
+        );
+        assert_eq!(
+            payload_for_parser(
+                "https://api.hyperliquid.xyz/info?dex=xyz",
+                "hl_meta",
+                &user,
+                Some("SPCX")
+            )
+            .unwrap(),
+            json!({ "type": "meta", "dex": "xyz" })
+        );
+        assert_eq!(
+            payload_for_parser(
+                "https://api.hyperliquid.xyz/info?dex=xyz",
+                "hl_l2_book",
+                &user,
+                Some("SPCX")
+            )
+            .unwrap(),
+            json!({ "type": "l2Book", "coin": "xyz:SPCX" })
+        );
+    }
+
+    #[test]
+    fn matches_hip3_prefixed_symbols_in_parsers() {
+        let mids = json!({ "xyz:SPCX": "203.905" });
+        assert_eq!(
+            parse_all_mids_value(&mids, "xyz:SPCX").unwrap(),
+            json!("203.905")
+        );
+
+        let meta_and_ctx = json!([
+            {
+                "universe": [
+                    { "name": "xyz:SPCX", "maxLeverage": 5, "szDecimals": 2 }
+                ],
+                "collateralToken": 0
+            },
+            [{
+                "funding": "0.00000625",
+                "openInterest": "12945.4546",
+                "markPx": "203.91",
+                "oraclePx": "203.9",
+                "midPx": "203.905",
+                "premium": "0",
+                "prevDayPx": "200",
+                "dayNtlVlm": "1000000",
+                "impactPxs": ["203.89", "203.95"]
+            }]
+        ]);
+        assert_eq!(
+            parse_asset_ctx_value(&meta_and_ctx, "SPCX", HlAssetMetric::MarkPrice).unwrap(),
+            json!("203.91")
+        );
+
+        let clearinghouse = json!({
+            "assetPositions": [{
+                "position": {
+                    "coin": "xyz:SPCX",
+                    "szi": "25.77",
+                    "liquidationPx": "180.2199216574",
+                    "unrealizedPnl": "32.9856",
+                    "leverage": { "type": "isolated", "value": 5 },
+                    "cumFunding": { "sinceOpen": "0.003908" }
+                }
+            }]
+        });
+        assert_eq!(
+            parse_state_value(
+                "hl_account",
+                &FieldLocation::PerpLiqPrice {
+                    position_id: "p".into()
+                },
+                "SPCX",
+                &clearinghouse,
+            )
+            .unwrap(),
+            json!("180.2199216574")
         );
     }
 
