@@ -21,8 +21,6 @@ pub(super) fn hl_protocol_ref() -> ProtocolRef {
 
 /// Wrap an `HlAccount` in a full `Position` envelope ready for `Open`.
 /// `now` comes from `EvalContext::now` (NOT a system clock) — preserves purity.
-// removed when task 5 wires it
-#[allow(dead_code)]
 pub(super) fn hl_position(acct: HlAccount, now: Time) -> Position {
     Position {
         id: HL_ACCOUNT_ID.to_owned(),
@@ -35,8 +33,6 @@ pub(super) fn hl_position(acct: HlAccount, now: Time) -> Position {
 }
 
 /// Find the wallet's existing `HlAccount` in base state (clone), if present.
-// removed when task 5 wires it
-#[allow(dead_code)]
 pub(super) fn find_hl_account(state: &WalletState) -> Option<HlAccount> {
     state.positions.iter().find_map(|p| match &p.kind {
         PositionKind::HyperliquidAccount(a) if p.id == HL_ACCOUNT_ID => Some(a.clone()),
