@@ -26,9 +26,9 @@ pub(super) fn apply(
     };
 
     let mut delta = StateDelta::new();
-    let id = common::HL_ACCOUNT_ID.to_owned();
 
     if common::find_hl_account(state).is_some() {
+        let id = common::HL_ACCOUNT_ID.to_owned();
         helpers::position::upsert_hl_account(state, &mut delta, &id, |pos| {
             if let PositionKind::HyperliquidAccount(a) = &mut pos.kind {
                 a.open_orders.push(order.clone());
@@ -121,11 +121,26 @@ mod tests {
             open_orders: vec![],
             ..HlAccount::default()
         };
-        let delta = apply(&order(false), &state_with_hl(base), &ctx()).unwrap();
+        let delta = apply(&order(false), &state_with_hl(base.clone()), &ctx()).unwrap();
         assert_eq!(delta.position_changes.len(), 1);
         assert!(matches!(
             delta.position_changes[0],
             PositionChange::Update { .. }
         ));
+
+        // The Update patch carries the full snapshot; verify by applying it.
+        let next = crate::helpers::delta::apply_delta(&state_with_hl(base), &delta).unwrap();
+        let acct = next
+            .positions
+            .iter()
+            .find_map(|p| match &p.kind {
+                PositionKind::HyperliquidAccount(a) => Some(a.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(acct.open_orders.len(), 1); // append landed
+        assert_eq!(acct.open_orders[0].price, Decimal::new("60000"));
+        assert!(!acct.open_orders[0].is_buy); // order(false)
+        assert_eq!(acct.perp_usdc, Decimal::new("500")); // merge, not replace
     }
 }
