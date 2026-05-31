@@ -62,7 +62,11 @@ fn extract_user(req: &Request) -> Result<AuthUser, Response> {
         Some(Err(resp)) => return Err(resp),
         None => match token_from_query(req.uri().query()) {
             Some(t) => t,
-            None => return Err(reject("missing Authorization header and `token` query param")),
+            None => {
+                return Err(reject(
+                    "missing Authorization header and `token` query param",
+                ))
+            }
         },
     };
 

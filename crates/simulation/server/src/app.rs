@@ -16,23 +16,43 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use tower_http::cors::CorsLayer;
 
+use std::sync::Arc;
+
 use simulation_db::{GlobalDb, MultiUserStore};
+use simulation_sync::Orchestrator;
 
 use crate::auth::{require_auth, AuthUser};
 use crate::dto::EvaluateRequest;
 use crate::events::EventBus;
 use crate::handler::{evaluate, HandlerError};
 use crate::read_handlers;
+use crate::write_handlers;
 
 /// Shared, cheaply-cloneable application state handed to every handler.
 ///
 /// `multi_user` opens (and caches) one SQLite store per authenticated user.
 /// `global_db` is the single cross-user identity DB (email ↔ user_id).
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AppState {
     pub multi_user: MultiUserStore,
     pub global_db: GlobalDb,
     pub event_bus: EventBus,
+    /// Sync orchestrator — wraps the per-protocol fetchers wired from
+    /// `scopeball-sync.toml`. Shared across handlers so we don't re-open
+    /// HTTP connection pools on every request.
+    pub orchestrator: Arc<Orchestrator>,
+}
+
+impl std::fmt::Debug for AppState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Orchestrator isn't Debug (large + irrelevant to formatting).
+        f.debug_struct("AppState")
+            .field("multi_user", &self.multi_user)
+            .field("global_db", &self.global_db)
+            .field("event_bus", &self.event_bus)
+            .field("orchestrator", &"<Orchestrator>")
+            .finish()
+    }
 }
 
 // Sub-state extractors so handlers can ask for just the piece they need.
@@ -54,6 +74,12 @@ impl FromRef<AppState> for EventBus {
     }
 }
 
+impl FromRef<AppState> for Arc<Orchestrator> {
+    fn from_ref(s: &AppState) -> Self {
+        s.orchestrator.clone()
+    }
+}
+
 /// Builds the service router.
 ///
 /// Public (no auth):
@@ -66,6 +92,8 @@ impl FromRef<AppState> for EventBus {
 /// - `GET  /auth/me`                        — current user (id + email).
 /// - `POST /evaluate`                       — simulate action envelope(s).
 /// - `GET  /wallets`                        — list user's wallets.
+/// - `POST /wallets`                        — start tracking a new wallet.
+/// - `POST /wallets/:address/sync`          — refresh via RPC/oracle.
 /// - `GET  /wallets/:address/state`         — full wallet state.
 /// - `GET  /wallets/:address/holdings`      — token holdings.
 /// - `GET  /wallets/:address/approvals`     — approval set.
@@ -79,7 +107,11 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/auth/me", get(auth_me_handler))
         .route("/evaluate", post(evaluate_handler))
-        .route("/wallets", get(read_handlers::list_wallets))
+        .route(
+            "/wallets",
+            get(read_handlers::list_wallets).post(write_handlers::add_wallet),
+        )
+        .route("/wallets/:address/sync", post(write_handlers::sync_wallet))
         .route("/wallets/:address/state", get(read_handlers::get_state))
         .route(
             "/wallets/:address/holdings",

@@ -8,6 +8,7 @@
 //! one with the same `JWT_SECRET` the server reads.
 
 use std::str::FromStr;
+use std::sync::Arc;
 
 use simulation_db::{GlobalDb, MultiUserStore};
 use simulation_server::app::{build_router, AppState};
@@ -15,6 +16,7 @@ use simulation_server::auth::jwt::{issue, TokenType};
 use simulation_server::dto::{EvaluateRequest, EvaluateResponse};
 use simulation_state::primitives::{Address, BlockHeight, ChainId, Time};
 use simulation_state::{EvalContext, RequestKind, WalletId, WalletState, WalletStore};
+use simulation_sync::{Orchestrator, SyncConfig};
 
 const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
 
@@ -58,6 +60,7 @@ fn spawn_state() -> (AppState, tempfile::TempDir) {
             multi_user,
             global_db,
             event_bus: simulation_server::events::EventBus::new(),
+            orchestrator: Arc::new(Orchestrator::from_sync_config(&SyncConfig::default()).unwrap()),
         },
         tmp,
     )

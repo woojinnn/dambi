@@ -4,12 +4,15 @@
 //! shared bus, and asserts the right user receives the right events.
 //! Verifies tenant isolation — alice never sees bob's events.
 
+use std::sync::Arc;
+
 use simulation_db::{GlobalDb, MultiUserStore};
 use simulation_server::app::{build_router, AppState};
 use simulation_server::auth::jwt::{issue, TokenType};
 use simulation_server::events::types::{Event, TxConfirmed};
 use simulation_server::events::EventBus;
 use simulation_state::primitives::ChainId;
+use simulation_sync::{Orchestrator, SyncConfig};
 
 const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
 
@@ -33,6 +36,7 @@ async fn spawn_server() -> (std::net::SocketAddr, EventBus) {
         multi_user,
         global_db,
         event_bus: bus.clone(),
+        orchestrator: Arc::new(Orchestrator::from_sync_config(&SyncConfig::default()).unwrap()),
     };
     let router = build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

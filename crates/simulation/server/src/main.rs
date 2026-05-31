@@ -2,27 +2,36 @@
 //!
 //! Starts the axum HTTP service: initializes tracing, opens the cross-user
 //! identity DB (`~/.scopeball/global.db`), prepares the per-user store
-//! router (`~/.scopeball/users/<id>/scopeball.db`), and serves on
-//! `SIMULATION_SERVER_ADDR` (default `127.0.0.1:8788`).
+//! router (`~/.scopeball/users/<id>/scopeball.db`), wires the sync
+//! orchestrator (RPC/oracle/venue fetchers from `scopeball-sync.toml`),
+//! and serves on `SIMULATION_SERVER_ADDR` (default `127.0.0.1:8788`).
 //!
 //! Environment variables:
 //! - `SIMULATION_SERVER_ADDR` — bind address (default `127.0.0.1:8788`).
 //! - `SCOPEBALL_HOME` — overrides `~/.scopeball` (test / sandboxing).
+//! - `SCOPEBALL_SYNC_CONFIG` — path to the sync TOML (default
+//!   `./scopeball-sync.toml`). Required for any RPC/price fetching.
 //! - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`,
 //!   `JWT_SECRET`, `DASHBOARD_URL` — auth config (see `.env.example`).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tracing_subscriber::EnvFilter;
 
 use simulation_db::{GlobalDb, MultiUserStore};
 use simulation_server::app::{build_router, AppState};
 use simulation_server::events::EventBus;
+use simulation_sync::{Orchestrator, SyncConfig};
 
 /// Default bind address. Port `8788` deliberately differs from the legacy
 /// Node.js policy-rpc host (`8787`) so the two can run side-by-side during
 /// the migration.
 const DEFAULT_ADDR: &str = "127.0.0.1:8788";
+
+/// Default sync config path. Lives next to the workspace root so the dev
+/// loop is one command (`cargo run -p simulation-server`).
+const DEFAULT_SYNC_CONFIG: &str = "./scopeball-sync.toml";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,10 +54,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let global_db = GlobalDb::open(&global_db_path)?;
     let multi_user = MultiUserStore::new(&users_dir);
 
+    // Sync orchestrator. Load the TOML config; if the file is missing we
+    // boot with an empty config (no RPC providers) — endpoints that
+    // require sync will return 503-ish errors instead of crashing the
+    // whole server at startup, so a dev can run /auth/* alone.
+    let sync_config_path = std::env::var("SCOPEBALL_SYNC_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_SYNC_CONFIG));
+    let sync_config = match SyncConfig::load_file(&sync_config_path) {
+        Ok(cfg) => {
+            tracing::info!(
+                path = %sync_config_path.display(),
+                "loaded sync config"
+            );
+            cfg
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %sync_config_path.display(),
+                error = %e,
+                "sync config not loaded — sync endpoints will fail until fixed"
+            );
+            SyncConfig::default()
+        }
+    };
+    let orchestrator = Arc::new(Orchestrator::from_sync_config(&sync_config)?);
+
     let state = AppState {
         multi_user,
         global_db,
         event_bus: EventBus::new(),
+        orchestrator,
     };
     let router = build_router(state);
 
