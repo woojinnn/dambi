@@ -42,6 +42,23 @@ pub(crate) fn lower(
         Value::String(u256_hex(action.min_sy_out)),
     );
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
+    // Market enrichment (P1c): SY/PT/YT from readTokens(), maturity from expiry().
+    m.insert(
+        "sy".into(),
+        Value::String(addr(&action.live_inputs.sy.value)),
+    );
+    m.insert(
+        "pt".into(),
+        Value::String(addr(&action.live_inputs.pt.value)),
+    );
+    m.insert(
+        "yt".into(),
+        Value::String(addr(&action.live_inputs.yt.value)),
+    );
+    m.insert(
+        "maturity".into(),
+        Value::String(u256_hex(action.live_inputs.maturity.value)),
+    );
 
     Ok(ctx.lowered(
         r#"Yield::Action::"RemoveMarketLiquidity""#,
@@ -53,14 +70,24 @@ pub(crate) fn lower(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use simulation_reducer::action::yield_::{
-        RemoveLiquidityKind, RemoveMarketLiquidityAction, YieldAction,
+        MarketTokensLiveInputs, RemoveLiquidityKind, RemoveMarketLiquidityAction, YieldAction,
     };
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::U256;
 
     use super::super::test_support::{
-        assert_conforms, onchain_meta, pendle_market, pendle_venue, usdc, user,
+        assert_conforms, live_addr, live_u256, onchain_meta, pendle_market, pendle_venue, usdc,
+        user,
     };
+
+    fn market_tokens() -> MarketTokensLiveInputs {
+        MarketTokensLiveInputs {
+            sy: live_addr(),
+            pt: live_addr(),
+            yt: live_addr(),
+            maturity: live_u256(),
+        }
+    }
 
     #[test]
     fn remove_single_token_conforms() {
@@ -75,6 +102,7 @@ mod tests {
                 min_pt_out: U256::ZERO,
                 min_sy_out: U256::ZERO,
                 recipient: user(),
+                live_inputs: market_tokens(),
             },
         ));
         assert_conforms("remove_market_liquidity", &body, &onchain_meta());
@@ -93,6 +121,7 @@ mod tests {
                 min_pt_out: U256::from(1u64),
                 min_sy_out: U256::from(1u64),
                 recipient: user(),
+                live_inputs: market_tokens(),
             },
         ));
         assert_conforms("remove_market_liquidity", &body, &onchain_meta());

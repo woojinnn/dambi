@@ -2,7 +2,8 @@
 // (ActionAddRemoveLiqV3 facet, addLiquidity*).
 //
 // Rust source: `crates/simulation/reducer/src/action/yield_/add_market_liquidity.rs`
-// (`AddMarketLiquidityAction`). No LiveInputs (P1a).
+// (`AddMarketLiquidityAction` + `MarketTokensLiveInputs`). The sy/pt/yt/maturity
+// fields are host-populated live inputs (P1c, §4d); `LiveField<T>` is inlined as `T`.
 
 namespace Yield {
   type AddMarketLiquidityContext = {
@@ -28,6 +29,12 @@ namespace Yield {
     minLpOut: String,
     // LP recipient (address).
     recipient: String,
+    // Market-derived instruments + maturity (host-populated live fields):
+    // SY/PT/YT from IPMarket.readTokens(), maturity from IPMarket.expiry().
+    sy: String,
+    pt: String,
+    yt: String,
+    maturity: String,
     // Manifest-extensible slot.
     custom?: AddMarketLiquidityCustomContext,
   };

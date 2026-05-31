@@ -265,7 +265,48 @@
         }
       }
     },
-    "live_inputs": {}
+    "live_inputs": {
+      "sy": {
+        "source": {
+          "kind": "onchain_view",
+          "chain": "$chain",
+          "contract": "$args.market",
+          "function": "readTokens()",
+          "decoder_id": "pendle_market_tokens_sy"
+        },
+        "ttl_s": 86400
+      },
+      "pt": {
+        "source": {
+          "kind": "onchain_view",
+          "chain": "$chain",
+          "contract": "$args.market",
+          "function": "readTokens()",
+          "decoder_id": "pendle_market_tokens_pt"
+        },
+        "ttl_s": 86400
+      },
+      "yt": {
+        "source": {
+          "kind": "onchain_view",
+          "chain": "$chain",
+          "contract": "$args.market",
+          "function": "readTokens()",
+          "decoder_id": "pendle_market_tokens_yt"
+        },
+        "ttl_s": 86400
+      },
+      "maturity": {
+        "source": {
+          "kind": "onchain_view",
+          "chain": "$chain",
+          "contract": "$args.market",
+          "function": "expiry()",
+          "decoder_id": "pendle_market_expiry"
+        },
+        "ttl_s": 86400
+      }
+    }
   },
   "requires": {
     "imperative": [],

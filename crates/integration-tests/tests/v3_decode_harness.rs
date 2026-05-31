@@ -1430,3 +1430,44 @@ fn pendle_swap_exact_token_for_pt_decodes_market_direction_token_recipient() {
         "external_token must be the calldata TokenInput.tokenIn"
     );
 }
+
+/// Field-level golden for the Pendle market enrichment (P1c, §4d): the same real
+/// `swapExactTokenForPt` must decode with the market→(SY,PT,YT)+maturity live
+/// inputs wired end-to-end.
+///
+/// The VALUEs are host-populated (skeleton zero here), so this pins the SOURCE
+/// views, not the values: SY/PT/YT come from `IPMarket.readTokens()` and maturity
+/// from `IPMarket.expiry()`, and — crucially — the source `contract` is the
+/// calldata `market` (resolved from `$args.market` at decode time), NOT the
+/// router `$to`. That last check is what proves the manifest-only enrichment
+/// (CASE A) actually wired: a block dropped, a view mis-named, the `contract`
+/// left at the router, or a `MarketTokensLiveInputs` round-trip break all fail
+/// here while `corpus_replay` (verdict + domain only) stays green.
+#[test]
+fn pendle_swap_market_enrichment_live_inputs_wired() {
+    // R1: install + route on the same thread.
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Same real mainnet tx 0x008bb93a… as the positional-mapping golden above.
+    const TO: &str = "0x888888888889758f76e7103c6cbf23abbf58f946";
+    const CALLDATA: &str = "0xc81f847a000000000000000000000000f1bfd60ece3b5b4d1472a3b00543c5912111b07a0000000000000000000000003c53fae231ad3c0408a8b6d33138bbff1caec3300000000000000000000000000000000000000000000001b5acd5dca234e455070000000000000000000000000000000000000000000000db0e7f06a4b959ef9e0000000000000000000000000000000000000000000001b84daa4a3b916c1da80000000000000000000000000000000000000000000001b61cfe0d4972b3df3d000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000e8d4a510000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000028000000000000000000000000038eeb52f0771140d10c4e9a9a72349a329fe8a6a00000000000000000000000000000000000000000000013c469edbe3eedbe28900000000000000000000000038eeb52f0771140d10c4e9a9a72349a329fe8a6a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+    let env = harness::route::route_calldata(1, TO, "0xc81f847a", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    // SY/PT/YT enrichment sources read IPMarket.readTokens() …
+    let read = find_object_with_string_field(&env, "function", "readTokens()")
+        .expect("market enrichment carries a readTokens() onchain_view source");
+    // … on the calldata MARKET (resolved from $args.market), NOT the router $to.
+    assert_eq!(
+        read.get("contract").and_then(serde_json::Value::as_str),
+        Some("0x3c53fae231ad3c0408a8b6d33138bbff1caec330"),
+        "readTokens() source must target the calldata market, not the router"
+    );
+    // maturity is sourced from IPMarket.expiry().
+    find_object_with_string_field(&env, "function", "expiry()")
+        .expect("market enrichment carries an expiry() onchain_view source");
+}

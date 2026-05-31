@@ -188,6 +188,14 @@ mod tests {
     #[test]
     fn view_yield_pt_swap_pendle_v2() {
         use crate::action::yield_;
+        let market_src = simulation_state::live_field::DataSource::OnchainView {
+            chain: ChainId::ethereum_mainnet(),
+            contract: addr("0xcfd848b9f6fef552204014ac67901223ad6bf679"),
+            function: "readTokens()".into(),
+            decoder_id: "pendle_market_tokens".into(),
+        };
+        let now = simulation_state::primitives::Time::from_unix(1_738_000_000);
+        let zero = addr("0x0000000000000000000000000000000000000000");
         let body = ActionBody::Yield(yield_::YieldAction::PtSwap(yield_::PtSwapAction {
             venue: yield_::YieldVenue::PendleV2 {
                 chain: ChainId::ethereum_mainnet(),
@@ -198,6 +206,12 @@ mod tests {
             exact_amount_in: U256::from(1_000_000_000u64),
             min_amount_out: U256::from(990_000_000u64),
             recipient: addr("0x000000000000000000000000000000000000a01c"),
+            live_inputs: yield_::MarketTokensLiveInputs {
+                sy: simulation_state::LiveField::new(zero, market_src.clone(), now),
+                pt: simulation_state::LiveField::new(zero, market_src.clone(), now),
+                yt: simulation_state::LiveField::new(zero, market_src.clone(), now),
+                maturity: simulation_state::LiveField::new(U256::ZERO, market_src, now),
+            },
         }));
         let view = body.view();
         assert_eq!(view.domain, "yield");

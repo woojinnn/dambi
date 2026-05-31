@@ -118,6 +118,21 @@ pub(crate) mod test_support {
         }
     }
 
+    /// Skeleton `LiveField<Address>` for conform tests — the host fills the real
+    /// value (market SY/PT/YT) at sync time, so this is a zero-address stand-in.
+    pub(crate) fn live_addr() -> LiveField<Address> {
+        LiveField::new(
+            Address::from_str("0x0000000000000000000000000000000000000000").unwrap(),
+            oracle_src(),
+            now(),
+        )
+    }
+
+    /// Skeleton `LiveField<U256>` for conform tests — host fills the maturity.
+    pub(crate) fn live_u256() -> LiveField<U256> {
+        LiveField::new(U256::ZERO, oracle_src(), now())
+    }
+
     /// An on-chain-transaction `ActionMeta` (Ethereum mainnet).
     pub(crate) fn onchain_meta() -> ActionMeta {
         ActionMeta {

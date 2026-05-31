@@ -24,6 +24,12 @@ namespace Yield {
     minAmountOut: String,
     // Output recipient (address).
     recipient: String,
+    // Market-derived instruments + maturity (host-populated live fields):
+    // SY/PT/YT from IPMarket.readTokens(), maturity from IPMarket.expiry().
+    sy: String,
+    pt: String,
+    yt: String,
+    maturity: String,
     // Manifest-extensible slot.
     custom?: PtSwapCustomContext,
   };

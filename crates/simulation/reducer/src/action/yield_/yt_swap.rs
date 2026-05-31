@@ -6,7 +6,7 @@ use tsify_next::Tsify;
 use simulation_state::primitives::{Address, U256};
 use simulation_state::token::TokenRef;
 
-use super::YieldVenue;
+use super::{MarketTokensLiveInputs, YieldVenue};
 
 /// Direction of a YT swap on a Pendle market (the four `swapExact*Yt*` entries).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
@@ -49,4 +49,6 @@ pub struct YtSwapAction {
     /// Recipient of the output (`receiver` arg).
     #[tsify(type = "string")]
     pub recipient: Address,
+    /// Market-derived instruments + maturity, fetched at simulation time.
+    pub live_inputs: MarketTokensLiveInputs,
 }

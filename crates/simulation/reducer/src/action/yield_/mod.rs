@@ -15,11 +15,22 @@
 //! `REGISTERED_ACTIONS` requires globally-unique bare tags (composer/
 //! manifest_fragment look up by bare name), and the unique names are also more
 //! user-legible ("buy PT to maturity" ≠ a generic AMM trade).
+//!
+//! The four market-based actions (`pt_swap`, `yt_swap`, `add_market_liquidity`,
+//! `remove_market_liquidity`) carry a [`MarketTokensLiveInputs`] enrichment block
+//! (P1c, §4d): the abstract `market` address alone tells the user nothing about
+//! which PT/SY/YT or maturity is at stake, so those are filled at simulation
+//! time from `IPMarket.readTokens()` (SY/PT/YT) and `IPMarket.expiry()`
+//! (maturity). The remaining actions (`mint_py`/`redeem_py` keyed by YT,
+//! `mint_sy`/`redeem_sy` by SY, `claim_yield` by market arrays) carry no
+//! enrichment yet — their locators are not a single `market`, so they are
+//! deferred to a follow-up round.
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
 
-use simulation_state::primitives::ChainId;
+use simulation_state::primitives::{Address, ChainId, U256};
+use simulation_state::LiveField;
 
 pub mod add_market_liquidity;
 pub mod claim_yield;
@@ -135,4 +146,35 @@ impl YieldVenue {
             Self::PendleV2 { .. } => "pendle_v2",
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Market enrichment (P1c, §4d)
+// ---------------------------------------------------------------------------
+
+/// Live-fetched instruments behind a Pendle `market`.
+///
+/// A market's calldata carries only the `market` address; the SY/PT/YT triplet
+/// and the maturity are derived from it. This block lets the user see *which*
+/// PT/YT and *when* it matures behind the abstract market. All four are read
+/// from the market contract itself at simulation time:
+///
+/// * `sy` / `pt` / `yt` — `IPMarket.readTokens() → (SY, PT, YT)` (no-arg view).
+/// * `maturity` — `IPMarket.expiry() → uint256` unix timestamp (no-arg view).
+///
+/// Carried by the four market-based actions ([`PtSwapAction`], [`YtSwapAction`],
+/// [`AddMarketLiquidityAction`], [`RemoveMarketLiquidityAction`]). The `source`
+/// of each [`LiveField`] points the host at `$args.market` (resolved from
+/// calldata at decode time); the `value`s are host-populated at sync time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct MarketTokensLiveInputs {
+    /// Standardized Yield token of the market (`readTokens().SY`).
+    pub sy: LiveField<Address>,
+    /// Principal Token of the market (`readTokens().PT`).
+    pub pt: LiveField<Address>,
+    /// Yield Token of the market (`readTokens().YT`).
+    pub yt: LiveField<Address>,
+    /// Market maturity as a unix timestamp (`expiry()`).
+    pub maturity: LiveField<U256>,
 }

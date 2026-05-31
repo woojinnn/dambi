@@ -948,6 +948,23 @@ fn live_input_default(domain: Option<&str>, action: Option<&str>, field: &str) -
         (Some("liquid_staking"), Some("transfer_shares"), "pooled_eth") => {
             JsonValue::String("0".into())
         }
+        // -------- Yield (Pendle market enrichment) --------
+        //
+        // The four market-based actions carry `MarketTokensLiveInputs`: SY/PT/YT
+        // from `IPMarket.readTokens()` and maturity from `IPMarket.expiry()`,
+        // sourced from the `$args.market` address. Each `LiveField<Address>` /
+        // `LiveField<U256>` rejects a `null` value, so the skeleton is a
+        // zero-address / `"0"` until the host fills the real instruments at sync.
+        (
+            Some("yield"),
+            Some("pt_swap" | "yt_swap" | "add_market_liquidity" | "remove_market_liquidity"),
+            "sy" | "pt" | "yt",
+        ) => JsonValue::String("0x0000000000000000000000000000000000000000".into()),
+        (
+            Some("yield"),
+            Some("pt_swap" | "yt_swap" | "add_market_liquidity" | "remove_market_liquidity"),
+            "maturity",
+        ) => JsonValue::String("0".into()),
         // Fallback — null lets the per-field type's `Option<T>` (if any) take
         // over; for stricter types serde reports a clear error pointing at the
         // missing catalog entry.

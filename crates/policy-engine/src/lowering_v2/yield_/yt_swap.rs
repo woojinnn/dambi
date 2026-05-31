@@ -37,6 +37,23 @@ pub(crate) fn lower(
         Value::String(u256_hex(action.min_amount_out)),
     );
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
+    // Market enrichment (P1c): SY/PT/YT from readTokens(), maturity from expiry().
+    m.insert(
+        "sy".into(),
+        Value::String(addr(&action.live_inputs.sy.value)),
+    );
+    m.insert(
+        "pt".into(),
+        Value::String(addr(&action.live_inputs.pt.value)),
+    );
+    m.insert(
+        "yt".into(),
+        Value::String(addr(&action.live_inputs.yt.value)),
+    );
+    m.insert(
+        "maturity".into(),
+        Value::String(u256_hex(action.live_inputs.maturity.value)),
+    );
 
     Ok(ctx.lowered(r#"Yield::Action::"YtSwap""#, Value::Object(m)))
 }
@@ -44,13 +61,25 @@ pub(crate) fn lower(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use simulation_reducer::action::yield_::{YieldAction, YtSwapAction, YtSwapDirection};
+    use simulation_reducer::action::yield_::{
+        MarketTokensLiveInputs, YieldAction, YtSwapAction, YtSwapDirection,
+    };
     use simulation_reducer::action::ActionBody;
     use simulation_state::primitives::U256;
 
     use super::super::test_support::{
-        assert_conforms, onchain_meta, pendle_market, pendle_venue, usdc, user,
+        assert_conforms, live_addr, live_u256, onchain_meta, pendle_market, pendle_venue, usdc,
+        user,
     };
+
+    fn market_tokens() -> MarketTokensLiveInputs {
+        MarketTokensLiveInputs {
+            sy: live_addr(),
+            pt: live_addr(),
+            yt: live_addr(),
+            maturity: live_u256(),
+        }
+    }
 
     #[test]
     fn yt_swap_token_for_yt_conforms() {
@@ -62,6 +91,7 @@ mod tests {
             exact_amount_in: U256::from(1_000_000_000u64),
             min_amount_out: U256::from(1u64),
             recipient: user(),
+            live_inputs: market_tokens(),
         }));
         assert_conforms("yt_swap", &body, &onchain_meta());
     }
@@ -76,6 +106,7 @@ mod tests {
             exact_amount_in: U256::from(100_000_000_000_000_000u64),
             min_amount_out: U256::from(1u64),
             recipient: user(),
+            live_inputs: market_tokens(),
         }));
         assert_conforms("yt_swap", &body, &onchain_meta());
     }
