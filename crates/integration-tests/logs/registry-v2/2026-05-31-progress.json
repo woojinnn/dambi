@@ -313,6 +313,25 @@
       "cargo test --workspace: 0 failed"
     ]
   },
+  "uniswap_v2_router02_l2_surface_gate": {
+    "protocol": "uniswap",
+    "contracts": [
+      "Uniswap V2 Router02 Base",
+      "Uniswap V2 Router02 Arbitrum",
+      "Uniswap V2 Router02 Optimism"
+    ],
+    "status": "implemented",
+    "completed": [
+      "added surface/uniswap/v2-router-02-{base,arbitrum,optimism}.{abi,coverage}.json from Sourcify full_match verified metadata",
+      "triaged the same 17 external state-changing Router02 selectors per chain as COVER because each maps to a user AMM swap/add/remove-liquidity action",
+      "kept existing uniswap/v2-router-02 manifests unchanged; the prior mainnet gate work already expanded every Router02 selector to Base, Arbitrum, and Optimism deployments"
+    ],
+    "evidence": [
+      "Sourcify metadata targets lib/v2-periphery/contracts/UniswapV2Router02.sol and exposes 17 external-mutating router selectors per added chain",
+      "npm run check:surface: PASS with 49 gated contracts; UniswapV2Router02 Base/Arbitrum/Optimism each 17 surface / 17 cover / 0 exclude / 17 on-chain manifests",
+      "cargo test -p policy-engine-integration-tests --test v3_decode_harness -- --nocapture: 25 passed; corpus 225/225 matched; synthetic fuzz fail=0 panicked=0"
+    ]
+  },
   "skipped_or_deferred_action_mapping": [
     {
       "protocol_or_function": "Hyperliquid Core / REST JSON actions",
