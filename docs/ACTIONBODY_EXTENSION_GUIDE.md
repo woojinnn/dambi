@@ -37,6 +37,12 @@
 
 또한 **compile-forced (위 5곳 외 추가)**: `simulation/sync/src/action_walk/<domain>.rs` 의 walk + apply match 두 곳도 exhaustive — live_inputs 없는 action 은 `<DomainAction>::<New>(_) => {}` arm 추가 (DelegateBorrow 선례).
 
+**(b′) live_field 전용 touchpoint (⚠️ silent — catch-all 이 삼킴)**: action 에 `LiveField` 를 **추가**할 때(=§2.5 enrichment)는 세 곳이 더 있는데 **컴파일러가 안 잡는다**:
+- `sync/src/walker.rs` 의 `ActionSlot` enum — variant 추가(enum 이라 누락해도 컴파일 통과).
+- `sync/src/args_resolver.rs` 의 `resolve_args` — `_ => Vec::new()` **catch-all** 이 있어 arm 누락 시 빈 args 로 조용히 진행(view 인자 미전달).
+- `mappers/.../action_builder.rs` 의 `live_input_default` — `_ => JsonValue::Null` **catch-all** → skeleton 누락 시 decode 가 `null` 거부로 실패(loud) 하거나 Option 이면 통과(silent).
+이 셋은 (c) conformance/decode 테스트 또는 §4d golden 으로만 잡힌다. 상세 = `PROTOCOL_ONBOARDING_AND_TESTING.md §4d` 의 5-touchpoint 표.
+
 **(c) 안전망**: `lowering_v2/<domain>/<sub>.rs` 의 leaf test 가 `super::super::test_support::assert_conforms(tag, body, meta)` 호출 → lowering 산출 `context` 를 **실제 Cedar schema 로 strict 구성**. `test_support`(sample builder + `assert_conforms`)는 **각 domain 의 `lowering_v2/<domain>/mod.rs` 에 자체 정의** (token/perp/lending/amm/launchpad/airdrop 6곳, sample helper 는 domain 마다 다름). Rust struct ↔ Cedar context 의 rename·타입·누락·과다를 패닉으로 잡는다. (b) 의 silent gap 을 leaf test 하나로 막는 장치이므로 **반드시 추가**.
 
 **(d) generic — 확장 시 변경 0**:
@@ -150,6 +156,80 @@ mod tests {
 ```
 
 자동 (변경 0): TS `.d.ts`, `build-index.ts`, `flatten_body`.
+
+## 2.5 — 기존 action 에 live_field 추가 (enrichment, 축 무관)
+
+축 1/2 가 **새 action/domain** 을 만드는 거라면, 이건 **이미 있는 action** 에 host-populated `LiveField<T>` 를 하나 더 다는 것이다. 디코드된 필드가 추상 단위(shares/내부 index/wrapped 수량/rate)라 사용자에게 안 읽힐 때 환산값을 보여주려고 한다. **왜·언제 하는지 = `PROTOCOL_ONBOARDING_AND_TESTING.md §4d`(enrichment decision-tree + self-check). 여기는 어떻게.** 정본 미러 = `lending::supply`(`SupplyLiveInputs`).
+
+핵심 갈림: live_field 의 source view 가 **calldata 인자를 쓰나?**
+- 인자 없는 view / oracle / derived → manifest `live_inputs.source` 만(⑤). Rust 0.
+- **calldata 인자 필요한 view** (`getPooledEthByShares(shares)`) → `DataSource::OnchainView` 에 args 필드 없음 → 아래 ②③ Tier B 필수.
+
+**① reducer — LiveInputs struct** · `action/<domain>/<action>.rs`
+```rust
+use simulation_state::LiveField;   // 추가
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct WrapLiveInputs { pub expected_wsteth: LiveField<U256> }   // non-optional
+// WrapAction 에: pub live_inputs: WrapLiveInputs   (serde default 없음 — manifest 가 항상 emit)
+```
+> `pub use self::<action>::*` wildcard 재export 면 신규 `*LiveInputs` 자동 노출. mod.rs 의 "no LiveInputs" 주석 갱신.
+
+**② sync ActionSlot + walk/apply** · `sync/src/walker.rs` + `sync/src/action_walk/<domain>.rs`
+```rust
+// walker.rs ActionSlot enum 끝에:  (⚠️ silent — enum)
+LiquidStakingWrapExpectedWsteth,
+// action_walk/<domain>.rs:  walk → push_if_stale, apply → set_field (lending.rs 미러)
+fn walk_wrap(w:&WrapAction, ix:usize, now:Time, st:&mut Vec<StaleField>, sx:&mut WalkStats) {
+    push_if_stale(st, sx, &w.live_inputs.expected_wsteth, now, ix, ActionSlot::LiquidStakingWrapExpectedWsteth);
+}
+fn apply_wrap(w:&mut WrapAction, slot:&ActionSlot, value:Value, now:Time) {
+    if matches!(slot, ActionSlot::LiquidStakingWrapExpectedWsteth) {
+        if let Some(v) = value_to_u256(&value) { set_field(&mut w.live_inputs.expected_wsteth, v, now); }
+    }
+}
+// + action_walk/mod.rs 의 walk_body/apply_value_to_action 에서 그 domain arm 이 위 walk/apply 호출 (없으면 pub mod + dispatch arm 추가)
+```
+
+**③ args_resolver — calldata 인자 추출** · `sync/src/args_resolver.rs` (인자 있는 view 만)
+```rust
+use simulation_reducer::action::liquid_staking::LiquidStakingAction;
+use crate::fetchers::decoder::encode_u256;   // encode_address/encode_u256 둘 다 이미 존재
+// resolve_args match 에:
+ActionSlot::LiquidStakingTransferSharesPooledEth => {
+    if let ActionBody::LiquidStaking(LiquidStakingAction::TransferShares(t)) = &action.body {
+        return encode_u256(t.shares).to_vec();   // shares 를 getPooledEthByShares 인자로
+    }
+    Vec::new()
+}
+```
+
+**④ generic 엔진 — skeleton** · `mappers/.../action_builder.rs` `live_input_default`
+```rust
+(Some("liquid_staking"), Some("wrap"), "expected_wsteth") => JsonValue::String("0".into()),  // U256 skeleton
+// layout 은 default Nested → 보통 live_input_layout 변경 0
+```
+
+**⑤ Cedar field + lowering** · `<action>.cedarschema` + `lowering_v2/<domain>/<action>.rs`
+```cedar
+// cedarschema: LiveField<T> → inner T flatten, non-optional, source meta 비노출
+expectedWsteth: String,   // U256 hex, host-populated
+```
+```rust
+// lowering: .value 추출
+m.insert("expectedWsteth".into(), Value::String(u256_hex(action.live_inputs.expected_wsteth.value)));
+// + test_support 에 skeleton 헬퍼: fn live_u256()->LiveField<U256>{ LiveField::new(U256::ZERO, oracle_src(), now()) }
+// + conform 테스트 생성자에 live_inputs: WrapLiveInputs{ expected_wsteth: live_u256() } 추가 (안 하면 assert_conforms 패닉)
+```
+
+**⑥ manifest source** · `registryV2/manifests/<p>/.../<func>@1.0.0.json`
+```jsonc
+"live_inputs": { "expected_wsteth": { "source": {
+  "kind":"onchain_view", "chain":"$chain", "contract":"$to",
+  "function":"getWstETHByStETH(uint256)", "decoder_id":"lido_wsteth_by_steth" }, "ttl_s": 30 } }
+```
+
+**검증**: `cargo test -p simulation-reducer -p policy-engine`(serde + conformance) → `npm run check:manifest`(emit.body shape) → golden(§4d: `source.function` pin, 값 아님) → `cargo test --workspace`. ②③④ 는 catch-all 이 삼키는 silent touchpoint(§1 b′)라 누락 시 decode-error/conformance 로만 드러난다.
 
 ## 3. 축 1 — 새 domain 추가
 

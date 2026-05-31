@@ -23,7 +23,8 @@ ScopeBall = EVM 권한 위임을 **서명 직전**에 정적 분석하는 브라
 
 ### 이 매뉴얼이 다루지 **않는** 것 (명시적 비범위)
 - **레거시 V1 ActionEnvelope 경로** — `feat(v2)! retire legacy v1 ActionEnvelope path` (commit `4e60392`) 로 **이미 제거됨**. `mapper::DeclarativeMapper`, `single_emit.rs`, `opcode_stream.rs`, `eval.rs`, `enum_tagged.rs`, `multicall.rs`, `array_emit.rs`, `builtin_fn.rs` 는 더 이상 존재하지 않는다. declarative 레이어는 **이제 V3-only by construction** 이다 — V1/V3 혼동을 할 필요가 없다.
-- **`live_inputs` 의 실제 RPC 채움** — host 의 RPC 서버가 production 에서 채운다. 테스트에서는 **default 스텁**(빈 값 / chain별 정적 주입만). 이 매뉴얼의 검증은 calldata→ActionBody **정적 디코드**만 본다.
+- **`live_inputs` *값*의 실제 RPC 채움** — live_field 의 **값**은 host RPC 서버가 production 에서 채운다(테스트는 **default 스텁** — 빈 값 / chain별 정적 주입만). 이 매뉴얼의 검증은 calldata→ActionBody **정적 디코드**만 본다.
+  - ⚠️ **그러나 "이 action 이 *어떤* live_field 를 가지는가" 는 비범위가 아니다 — P1 author 의 설계 결정(§4d ENRICHMENT)이다.** 값 채움(host·런타임)과 필드 설계(author·작성 시점)는 별개다. 디코드된 필드가 추상/불투명 단위(shares, 내부 index, wrapped 수량)면 환산 live_field 없이는 디코드가 성공해도 사용자는 의미를 못 본다. "테스트가 빈 스텁을 쓴다" ≠ "manifest 의 `live_inputs` 를 비워도 된다".
 - **Cedar 정책 평가 / 시뮬레이션 / SW 메시징** — 디코드 하류. 비범위.
 
 ### 핵심 원칙 4가지 (먼저 내면화)
@@ -100,13 +101,15 @@ raw Tx { chain, to, selector, calldata, value }
    │
    P0 RESEARCH ── 1차출처로 canonical 컨트랙트 + 주소 + 체인 인벤토리
    │
-   P1 AUTHOR  (함수마다, schema → manifest → engine 순)
+   P1 AUTHOR  (함수마다, schema → manifest → engine → enrich 순)
    │   ├ Tier3 schema  : 함수가 어느 ActionBody variant 로 매핑? 없으면 추가 or Unknown
    │   ├ Tier1 manifest: registryV2/manifests/<p>/ — abi_fragment + emit(strategy)
-   │   └ Tier2 engine  : generic 빌더로 표현 안 되는 shape 만 action_builder.rs 확장
+   │   ├ Tier2 engine  : generic 빌더로 표현 안 되는 shape 만 action_builder.rs 확장
+   │   └ ENRICH (§4d) : 디코드 필드가 user-legible 한가? 추상 단위(shares/index/wrapped/
+   │                    rate-dependent)면 환산 live_field 추가 (없으면 사유 명시 defer)
    │        ▲
    │        │  gap 분류 → 처치 → 재테스트
-   P2 TEST ⇄┘  install_v3 → route_request_v3 → ActionBody[]   (live_inputs = default)
+   P2 TEST ⇄┘  install_v3 → route_request_v3 → ActionBody[]   (live_inputs 값 = default 스텁)
    │   ├ _synthetic : 어댑터 기반 calldata 합성 + edge → 입력값 ↔ ActionBody 필드 inverse-check
    │   ├ real-tx    : 어댑터 BLIND 무작위 pull → hybrid oracle 로 정확성/커버리지 버킷
    │   └ → logs/<p>/ 기록
@@ -383,6 +386,63 @@ AssetRef 표준: `{ "key": { "standard": "erc20|erc721|erc1155", "chain": "$chai
 
 > Tier 2 변경은 WASM 에 들어가는 Rust → release PR. WASM 사이즈 예산 점검(memory: 6 MiB target).
 
+### 4d. ENRICHMENT — action 별 live_field 적정성 (★ 디코드 ≠ 완료)
+
+ScopeBall 은 사용자가 **서명 직전 intent 를 이해**하게 하는 도구다. 그러므로 P1 의 마지막 질문은 "디코드가 됐나"가 아니라 **"디코드된 필드가 사용자에게 그 자체로 읽히나? 안 읽히면 무엇으로 환산해 보여줘야 하나?"** 다. 이 단계를 건너뛰면 모든 게이트(check:surface / check:manifest / corpus / workspace)가 green 인데도 **user-illegible** 한 어댑터가 착지한다 — Lido 1차 온보딩이 정확히 그랬다(§9.9). decode-faithful("raw 필드만, live_inputs 비움")은 set_authorization 같은 **이미 읽히는** action 에만 맞다; **모든** action 의 기본값이 아니다.
+
+> 이건 §3 surface-completeness(가로 = 함수 다 덮었나)의 **세로 짝(깊이 = 덮은 action 의 intent 가 읽히나)** 이다. 단 surface 는 독립 ABI snapshot 으로 build 강제가 되지만, **enrichment 는 "이 필드가 사용자에게 읽히나"라는 제품 판단이라 객관 오라클이 없어 build-gate 불가** → 아래 decision-tree + §8.6 self-check + golden 으로 prescribe 한다(정직한 한계).
+
+#### Enrichment decision-tree (COVER action 마다, 필드별)
+```
+이 필드가 사용자에게 그 자체로 의미가 읽히나?
+  ├ YES — token-unit amount / address / bool / 이미 사람이 읽는 값   → live_field 불필요 (raw 그대로)
+  └ NO  — 추상·불투명·간접 단위:
+       · 프로토콜 내부 share/unit (Lido shares, Morpho share, vault share)
+       · wrapped/rebasing 수량 (wstETH↔stETH, cToken↔underlying)
+       · 내부 index / id (coin index, reserve index, market id)
+       · rate-dependent (LST exchange rate, APY, health factor)
+            → 그 필드를 사용자 단위로 바꾸는 live_field 를 action 에 추가
+            → 추가 못 하면(소스 모호/배열·tuple 모델링 과중) corpus _note 또는 plan 에 **사유 명시 defer**
+```
+판단 기준 = "이 숫자만 보고 사용자가 '내가 X 만큼 움직인다'를 아는가?". 모르면 enrich.
+
+#### ★ 결정적 제약 — live_field source 가 calldata 인자를 쓰면 manifest-only 가 아니다
+`DataSource::OnchainView { chain, contract, function, decoder_id }` 에는 **args 필드가 없다**(`simulation/state/src/live_field/source.rs`). 즉 `getPooledEthByShares(shares)` 처럼 **디코드된 calldata 값을 view 인자로 넘겨야 하는** live_field 는 manifest 의 `onchain_view` 만으로 불가능하다. 인자는 sync 시점에 **`crates/simulation/sync/src/args_resolver.rs` 의 `resolve_args(slot, action, state)`** 가 `ActionSlot` 별로 action 에서 추출해 인코딩한다 → **Tier B Rust 필수**. (인자 없는 view(`getTotalShares()`)나 derived 계산은 manifest-only 가능.)
+
+| live_field 종류 | manifest-only? | 작업 |
+|---|---|---|
+| 인자 없는 view (`getTotalShares()`) / oracle_feed / derived_from | ✅ | manifest `live_inputs.source` 만 |
+| **calldata 인자 필요한 view** (`getPooledEthByShares(shares)`) | ❌ | + Tier B `ActionSlot` + `args_resolver` arm |
+
+#### 5-touchpoint 레시피 (lending::supply 전 경로 미러 — `SupplyLiveInputs` 가 정본)
+calldata-인자 환산 live_field 를 한 action 에 추가하는 전 경로. (인자 없으면 B 생략.)
+
+| | touchpoint | 위치 (symbol — `grep` 재확인) |
+|---|---|---|
+| **A** reducer | `<Action>LiveInputs { <field>: LiveField<T> }` struct + action 에 `pub live_inputs` 필드 (non-optional, manifest 가 항상 emit) | `reducer/src/action/<domain>/<action>.rs` |
+| **B** sync (Tier B) | ① `ActionSlot` variant ② `action_walk/<domain>.rs` 의 `walk`(`push_if_stale(&li.<field>, slot)`) + `apply`(slot match→`set_field`) + mod dispatch arm ③ `args_resolver::resolve_args` arm — action 에서 인자 추출 후 `encode_u256`(U256) / `encode_address`(addr) (둘 다 `fetchers/decoder.rs` 에 **이미 존재**) | `sync/src/walker.rs` · `sync/src/action_walk/<domain>.rs` · `sync/src/args_resolver.rs` |
+| **C** Cedar+lowering | cedarschema 에 host-populated field(`String` for U256 hex, non-optional, LiveField→inner T flatten) + `lowering_v2/<domain>/<action>.rs` 가 `m.insert("<field>", u256_hex(action.live_inputs.<field>.value))` + `test_support` skeleton 헬퍼 + conform 테스트 생성자에 live_inputs 추가 | `schema/policy-schema/actions/<domain>/<action>.cedarschema` · `lowering_v2/<domain>/{<action>,mod}.rs` |
+| **D** generic 엔진 | `live_input_default` 카탈로그에 `(domain, action, field) => skeleton`(U256 = `JsonValue::String("0".into())`). layout 은 default `Nested` 라 보통 변경 0 | `mappers/src/declarative/action_builder.rs` |
+| **E** manifest | `emit.live_inputs.<field>.source`(Morpho supply `reserve_state` shape: `{kind:"onchain_view", chain:"$chain", contract:"$to", function:"sig(types)", decoder_id:"..."}` + `ttl_s`) | `registryV2/manifests/<p>/...` |
+
+> A·B·C 의 match 들은 exhaustive(컴파일러가 누락 강제)지만, **D 카탈로그·C cedarschema field·E manifest source 는 silent** — 빠뜨리면 컴파일은 통과하고 decode-error 나 conformance 패닉으로 나타난다. ACTIONBODY_EXTENSION_GUIDE.md §2.5 가 touchpoint 별 코드 스니펫.
+
+#### golden — 값이 아니라 source 를 pin
+live_field 의 **값**은 host 가 채우므로(테스트는 skeleton `0`) corpus/golden 으로 값 정확성을 검증할 수 없다(정직). 대신 **manifest source 가 decode 까지 wired 됐는지**를 deterministic 하게 pin:
+```rust
+// expected_wsteth 객체로 scope → source.function 이 manifest 와 일치하나
+let live = find_object_by_key(&env, "expected_wsteth").expect("...");
+assert_eq!(find_string_field(live, "function").as_deref(), Some("getWstETHByStETH(uint256)"));
+```
+이게 깨지면 = manifest 가 live_inputs 를 drop 했거나 view 를 오타냈거나 LiveInputs 필드가 round-trip 안 됨. 값 정확성(환산이 맞나)은 §8.4 의 semantic 한계 영역 — host RPC 책임.
+
+#### 빈 `live_inputs: {}` 가 정당한 경우 (defer 사유)
+- 모든 디코드 필드가 이미 user-legible (erc20 amount, recipient address, bool flag).
+- 환산 소스가 깔끔한 on-chain view 부재(예: staking APR 은 oracle report 기반) → 사유 명시 defer.
+- 배열/tuple 인자 모델링이 과중(예: `getWithdrawalStatus(uint256[])→tuple[]`) → 다음 라운드로 defer + corpus `_note`.
+
+비울 거면 **왜 비웠는지 한 줄**을 남긴다("decoded fields already in token units" / "APR source ambiguous, deferred"). 무근거 빈 `{}` = enrichment 미수행으로 간주.
+
 ---
 
 ## 5. P2 — TEST
@@ -559,6 +619,7 @@ cargo clippy -p policy-engine-integration-tests --all-targets && cargo fmt --all
 **커밋 규율:**
 - **explicit-stage only** (`git add -A` 금지). 대상 = `registryV2/manifests/<p>/**` · (재빌드 후) 해당 `registryV2/index/` 추가분 · Tier 2 Rust · Tier 3 schema · `crates/integration-tests/{logs,data/golden}/**`.
 - **절대 제외**: 무관 churn(browser-extension/index curation 등), `.env`(ETHERSCAN_API_KEY 로컬만).
+- ⚠️ **`cargo fmt --all` 함정**: base 에 unformatted-committed 파일이 있으면(타 세션/머지 잔재) `fmt --all` 이 **내 파일이 아닌 것도 재포맷** → 무관 churn. fmt 후 `git status` 로 내가 안 건드린 파일이 보이면 `git checkout HEAD -- <그 파일>` 로 revert 후 explicit-stage. (실측: Lido enrichment 시 PR 머지 잔재 5파일이 딸려옴.)
 - 메시지 말미: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
 
 ---
@@ -592,6 +653,8 @@ token · amm · lending · airdrop · launchpad · perp · multicall · unknown.
 - **fork 프로토콜 struct/opcode layout** (D006/D010): Pancake PoolKey(6 field) vs Uniswap V4(5 field) 처럼 fork 가 layout 다름 → **1차 출처 직접 fetch** 로 field index 검증. mirror 가정 금지.
 - **dotted path**: `$args.x.y` 미지원 → chained-numeric `$args.x[i][j]`.
 - **존재 안 하는 domain target**: schema 없는 domain/action 을 manifest 가 가리키면 hard-fail (Unknown 으로 안 떨어짐). schema 먼저.
+- **빈 `live_inputs: {}` ≠ 온보딩 완료** (§4d/§8.6-5): 디코드는 성공해도 추상 단위(shares/index/wrapped)는 사용자에게 안 읽힌다. 게이트가 전부 green 이어도 enrichment 누락은 자동으로 안 잡힌다 — author 가 §8.6-5 로 의식 점검.
+- **U256 직렬화 = lower-hex** (golden 작성 함정): `U256` 는 JSON 에 **lower-hex** 로 나간다(`9_800_000_000_000_000_000` → `"0x88009813ced40000"`). golden 에서 decimal 문자열로 assert 하면 실패 — 디코드 결과를 한 번 출력해 실제 직렬화 형태를 확인 후 pin.
 
 ### 8.4 정직한 한계
 - **semantic 층은 객관 오라클이 없다.** "path[0]이 진짜 token-at-risk 인가", "domain=amm 인가" 는 ScopeBall 의미모델이 정의 — 체인이 안 알려줌. provenance(값 출처)·B projection(2nd-opinion)까지가 자동 검증의 한계. 필드 **역할** 정합성은 사람(또는 미래의 시뮬레이션 trace)이 보증.
@@ -605,14 +668,19 @@ token · amm · lending · airdrop · launchpad · perp · multicall · unknown.
 - 빌더 = `action_builder.rs` build_action_body(514) / build_multicall_from_opcode_stream(966) / build_array_emit(1048) / substitute_placeholders(238).
 - 위가 안 맞으면 코드가 또 움직인 것 — §1 표를 `grep -n` 으로 갱신 후 진행.
 
-### 8.6 surface-completeness self-check (P0 마무리 게이트)
-온보딩 "완료" 선언 전 4문 — 하나라도 No 면 P0 미완. 1~3 은 산문 자가점검, **4 가 그걸 build 로 강제**:
+### 8.6 completeness self-check (P0/P1 마무리 게이트)
+온보딩 "완료" 선언 전 5문 — 하나라도 No 면 미완. 1~3·5 는 산문 자가점검, **4 가 surface 전수성을 build 로 강제**(enrichment 는 build-gate 불가, 5 가 prose):
+
+**가로 (surface — P0):**
 1. hub 의 **external state-changing 함수를 전수**했나? (block explorer Write 탭 / interface 전체 — "눈에 띄는 것만" 아님)
 2. 각 함수를 **COVER 또는 EXCLUDE:reason** 로 분류했나? (분류 안 된 함수 = 0)
 3. 모든 **approval·permit·delegation·authorization grant**(on-chain + off-chain EIP-712)를 잡았나? Unknown/skip 0?
 4. **`npm run check:surface` 가 PASS 인가?** `surface/<protocol>/<contract>.{abi,coverage}.json`(verified 전체 ABI snapshot + per-selector triage)을 작성하면 gate 가 I1~I3·S1/S2 를 기계 검증 — 위반 시 exit 1 = P0 미완. 1~3 을 사람이 빠뜨려도 독립 snapshot 이 잡는다. (§3 규약 7 / `registryV2/surface/README.md`)
 
-> §9 가 이 게이트의 반례: 1차에 supply/withdraw/borrow/repay 4 만 보고 끝냈다가 `setAuthorization`(권한 위임 primitive)을 놓침. 이 self-check 가 있었으면 2·3 에서 걸렸다. **이제 4(`check:surface`)가 기계적으로 강제** — coverage·manifest 를 둘 다 빠뜨려도 독립 ABI snapshot 이 `I1 un-triaged selector 0xeecea000 (setAuthorization)` 으로 build 를 실패시킨다(실측 검증됨).
+**세로 (enrichment — P1, §4d):**
+5. **각 COVER action 의 디코드 필드가 user-legible 한가?** 추상·불투명·간접 단위(shares / 내부 index / wrapped·rebasing 수량 / rate-dependent)를 가진 필드마다 (a) 사용자 단위로 바꾸는 live_field 를 달았거나, (b) **manifest 에 한 줄 사유로 defer 를 명시**했나? 무근거 빈 `live_inputs: {}` = No. ⚠️ 이 질문은 객관 오라클이 없어 **build 로 강제 못 한다**(§8.4) — author 가 의식적으로 통과시켜야 하는 prose gate. "게이트 다 green = 완료"의 함정이 여기 산다.
+
+> **반례 두 개.** 가로: §9 1차에 supply/withdraw/borrow/repay 4 만 보고 `setAuthorization`(권한 위임)을 놓침 → 이제 4(`check:surface`)가 `I1 un-triaged selector 0xeecea000` 으로 build 실패(실측). 세로: §9.9 Lido 1차에 6 action 전부 `live_inputs: {}` 로 착지 — 게이트는 다 green 인데 `transferShares` 의 `shares`(추상 단위)가 사용자에게 안 읽혀 **피드백으로만** 잡힘. 5 가 있었으면 author 가 작성 시점에 잡았다.
 
 ---
 
@@ -752,5 +820,29 @@ Compound V3 Comet(mainnet cUSDCv3, `0xc3d688b66703497daa19211eedff47f25384cdc3`)
 P1에서 기존 lending action으로 표현되지 않는 `buyCollateral`은 `LendingAction::BuyCollateral` Tier 3로 추가했다. `allowBySig`와 off-chain `Authorization`은 signer 보존이 필요해서 `SetAuthorization.authorizer?: Address`를 추가했다. 또 Comet cUSDCv3가 token auto-enumeration과 protocol-specific manifest를 동시에 갖는 충돌을 드러냈다: standard ERC20 sourced manifest가 Comet `approve/transfer/transferFrom`을 덮으면 permission semantics가 silent downgrade된다. 그래서 `build-index.ts`와 WASM install bridge를 "concrete protocol manifest wins"로 보강했다.
 
 P2/P3 검증은 field-level golden 3개(`allow`, `allowBySig`, `Authorization`)와 hand-encoded corpus 16건으로 pin했다. `npm run check:surface`는 Comet `20 surface · 15 cover · 5 exclude · 15 on-chain manifests · 1 signed-struct`로 PASS, `v3_decode_harness`는 10 tests green, `v3-harness corpus`는 `132/132 matched`. 한계: 이 checkout에는 `ETHERSCAN_API_KEY`가 없어 Compound corpus는 Etherscan txlist import가 아니라 verified ABI 기반 hand fixture다. 따라서 P0/P1/Tier3/gate/field-golden은 완료됐지만, 실거래 corpus augment는 후속 작업으로 남긴다.
+
+### 9.9 Lido enrichment — "게이트 green 인데 user-illegible" (§4d/§8.6-5 의 반례)
+
+Lido(Liquid Staking)는 §4d ENRICHMENT 단계가 **왜 필요한지**를 실증한 사례다. 이 절은 그 dogfood 의 transcript이자, enrichment 가 없을 때 무슨 일이 나는지의 증거다.
+
+**1차 온보딩 (commit `ad15b48d`)** — 축1 새 `liquid_staking` domain(stake/wrap/unwrap/request_withdrawal/claim_withdrawal/transfer_shares) + manifest 12. **모든 게이트 green**: check:surface PASS(stETH/wstETH/WQ 전수 triage), check:manifest 12 OK, corpus 9 pass, golden 3, workspace 0 fail. set_authorization 선례("decode-faithful, live_inputs 불필요")를 따라 **6 action 전부 `live_inputs: {}`** 로 착지.
+
+**그런데 사용자 피드백이 필요했다** (= 방법론 결함의 신호):
+1. "어댑터 live_field 전부 비어있는데 의도된거야?"
+2. (SR02 `exactOutputSingle` 의 채워진 live_inputs 를 가리키며) "이렇게 작성해야 하는 거 아니냐"
+3. **결정적**: "SR02 와 *동일하게* 쓰라는 게 아니라, 이 구조(`transferShares`)에 **필요한** live_field 가 필요하다" — `transferShares(recipient, sharesAmount)` 의 `shares` 는 **프로토콜 내부 share 단위**라, 디코드는 정확해도 사용자는 "내가 얼마(stETH)를 보내는지" 를 못 본다.
+
+**진단 = §4d 가 빠져 있었다.** 디코드는 faithful 했으나(게이트 통과), §8.6-5(enrichment-completeness)에 해당하는 질문 — "이 필드가 user-legible 한가" — 을 방법론이 묻지 않았다. §3 Morpho `setAuthorization` 누락(가로)과 **같은 구조의 결함의 세로 버전**.
+
+**처치 (commit `934d775c`)** — 환산 3종(wrap `expected_wsteth`=`getWstETHByStETH` / unwrap `expected_steth`=`getStETHByWstETH` / transfer_shares `pooled_eth`=`getPooledEthByShares`). **★ `getPooledEthByShares(shares)` 는 calldata 인자(shares)를 view 로 넘겨야 하므로 manifest-only 불가** → §4d 의 5-touchpoint 전부:
+- A `WrapLiveInputs{expected_wsteth: LiveField<U256>}` 등 (reducer)
+- B `ActionSlot::LiquidStakingTransferSharesPooledEth` + `action_walk/liquid_staking.rs`(walk/apply) + `args_resolver` arm(`encode_u256(t.shares)` — `encode_u256` 는 `fetchers/decoder.rs` 에 이미 있었음)
+- C cedarschema `pooledEth: String` + lowering `.value` + test_support `live_u256()` skeleton
+- D `live_input_default` 3 entry
+- E manifest `live_inputs.pooled_eth.source = {onchain_view, getPooledEthByShares(uint256), $to}`
+
+**golden = source.function pin**(값은 host): `lido_wrap_expected_wsteth_live_input_is_wired` 가 `find_object_by_key(env,"expected_wsteth")` → `function == "getWstETHByStETH(uint256)"` assert. 검증: workspace 0 fail, v3_decode_harness 35 pass, check:manifest 1022 OK, check:surface PASS. claim_withdrawal(`getWithdrawalStatus` tuple[]) / stake(APR 소스 모호) / request_withdrawal(amounts 이미 token 단위)는 §4d 규칙대로 **사유 명시 defer**.
+
+**교훈**: enrichment 는 게이트로 안 잡힌다(객관 오라클 부재) — author 가 §4d decision-tree + §8.6-5 self-check 로 **작성 시점에** 잡아야 한다. "디코드 성공 + 게이트 green" 은 "사용자가 intent 를 읽는다"를 보장하지 않는다. 추상 단위(shares/index/wrapped/rate)를 가진 모든 새 action 이 이 함정의 후보다.
 
 <!-- 출처: 사용자 설계 세션(V3-only/4-phase/3-tier/hybrid oracle/10k scale) + 코드 grounding(action_builder.rs·declarative_exports.rs·args_json.rs·dto.rs·oracle.rs·corpus.rs·v3_harness.rs·실제 manifest 5종·action/**·DEFECT_CATALOG.md) + §9 dogfood 실측(Morpho Blue 4함수 commit 760af8c + Full-8 보강: collateral 2 + SetAuthorization Tier 3 + off-chain Authorization). 2026-05-31. -->
