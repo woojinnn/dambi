@@ -1,4 +1,5 @@
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { Navigate, createBrowserRouter, RouterProvider } from "react-router-dom";
+
 import { ExtensionProvider } from "./sdk-context";
 import { AppShell } from "./shell/AppShell";
 import { HomeOrOnboarding } from "./pages/HomeOrOnboarding";
@@ -9,9 +10,34 @@ import { SchemaViewer } from "./pages/schema-viewer";
 import { RpcEndpointPage } from "./pages/rpc-endpoint";
 import { OnboardingPage } from "./pages/onboarding";
 
+import { AuthProvider } from "./hooks/useAuth";
+import { RequireAuth } from "./RequireAuth";
+import { LoginPage } from "./pages/LoginPage";
+import { AuthCallbackPage } from "./pages/AuthCallbackPage";
+import { WalletsPage } from "./pages/WalletsPage";
+import { ActivityPage } from "./pages/ActivityPage";
+
 // Standalone Vite app at localhost:5174 — BrowserRouter only.
 // Extension-bundling is a future concern (M-5, deferred).
 const router = createBrowserRouter([
+  // Public auth routes — sit outside the extension shell so the user can
+  // log in without a working extension connection.
+  { path: "/login", element: <LoginPage /> },
+  { path: "/auth/callback", element: <AuthCallbackPage /> },
+
+  // Server-aware (policy-rpc) subtree. Gated by `<RequireAuth>` so
+  // anonymous users bounce to /login.
+  {
+    path: "/server",
+    element: <RequireAuth />,
+    children: [
+      { index: true, element: <Navigate to="/server/wallets" replace /> },
+      { path: "wallets", element: <WalletsPage /> },
+      { path: "activity", element: <ActivityPage /> },
+    ],
+  },
+
+  // Existing extension-SDK shell — unchanged.
   {
     path: "/",
     element: (
@@ -20,31 +46,24 @@ const router = createBrowserRouter([
       </ExtensionProvider>
     ),
     children: [
-      // Phase 7 codex carry-over I: cold-start onboarding redirect.
-      // `HomeOrOnboarding` reads the configured endpoint URL and the
-      // installed enriched schema; when both are empty it redirects
-      // to `/onboarding`. Otherwise it renders `HomePage`.
       { index: true, element: <HomeOrOnboarding /> },
-      // Fix S: policies-list route is `/policies` (spec acceptance + Phase 7.5
-      // banner host + onboarding nav). The page component is still named
-      // `LibraryPage` for historical reasons; the route name is the only
-      // user-visible contract.
       { path: "policies", element: <LibraryPage /> },
       { path: "audit", element: <AuditPage /> },
       { path: "settings", element: <SettingsPage /> },
-      // Phase 7.3: enriched cedarschema viewer. Reads `?action=<snake>`
-      // from the URL.
       { path: "schema", element: <SchemaViewer /> },
-      // Phase 7.4: policy-rpc endpoint settings page.
       { path: "rpc-endpoint", element: <RpcEndpointPage /> },
-      // Phase 7.4: first-run onboarding wizard. The "show on cold
-      // storage" redirect from "/" is deferred to a follow-up; for
-      // now reach this page via direct navigation or a settings link.
       { path: "onboarding", element: <OnboardingPage /> },
     ],
   },
 ]);
 
+// `AuthProvider` wraps the entire router so both the public (/login,
+// /auth/callback) and gated (/server/*) routes share one auth context.
+// Existing extension routes don't need auth and won't read from it.
 export function AppRouter() {
-  return <RouterProvider router={router} />;
+  return (
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
+  );
 }

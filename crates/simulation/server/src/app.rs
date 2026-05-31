@@ -61,19 +61,23 @@ impl FromRef<AppState> for EventBus {
 /// - `GET  /auth/google`                    — redirect to Google consent.
 /// - `GET  /auth/google/callback`           — finish OAuth → JWT.
 ///
-/// Authenticated (`Authorization: Bearer <jwt>`):
+/// Authenticated (`Authorization: Bearer <jwt>` OR `?token=<jwt>` on
+/// SSE — see `auth::middleware` for the resolution order):
+/// - `GET  /auth/me`                        — current user (id + email).
 /// - `POST /evaluate`                       — simulate action envelope(s).
 /// - `GET  /wallets`                        — list user's wallets.
 /// - `GET  /wallets/:address/state`         — full wallet state.
 /// - `GET  /wallets/:address/holdings`      — token holdings.
 /// - `GET  /wallets/:address/approvals`     — approval set.
 /// - `GET  /wallets/:address/block-heights` — per-chain sync block.
+/// - `GET  /events/stream`                  — SSE live event feed.
 ///
 /// CORS is `permissive` with private-network access enabled so both the
 /// dashboard (127.0.0.1:5173) and the browser extension can reach the
 /// server on 127.0.0.1.
 pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
+        .route("/auth/me", get(auth_me_handler))
         .route("/evaluate", post(evaluate_handler))
         .route("/wallets", get(read_handlers::list_wallets))
         .route("/wallets/:address/state", get(read_handlers::get_state))
@@ -106,6 +110,16 @@ pub fn build_router(state: AppState) -> Router {
 /// `GET /health` — liveness probe.
 async fn health_handler() -> &'static str {
     "ok"
+}
+
+/// `GET /auth/me` — echo the authenticated user. Used by the dashboard
+/// to validate a stored JWT on page load and render the profile chip.
+async fn auth_me_handler(Extension(user): Extension<AuthUser>) -> Response {
+    Json(serde_json::json!({
+        "user_id": user.user_id,
+        "email": user.email,
+    }))
+    .into_response()
 }
 
 /// `POST /evaluate` — JSON in, JSON out. Requires auth (Phase 5).
