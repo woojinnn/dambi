@@ -460,6 +460,43 @@ fn curve_cryptoswap_exchange_resolves_uint256_coin_index() {
     );
 }
 
+/// Field-level golden for Curve Twocrypto-NG (`CurveTwocryptoOptimized`, 2-coin)
+/// `exchange` — the coin-index value-map reused on a twocrypto pool (`AmmVenue::
+/// CurveV2`, 0 core code; same `uint256` i/j as cryptoswap). Pinned against a REAL
+/// mainnet tx (0x08d406f5…) on the crvUSD/cbBTC pool (Curve Twocrypto-NG factory
+/// 0x98ee851a, deployed/used by Yield Basis): `i=0` → crvUSD (coin0), `j=1` →
+/// cbBTC (coin1). `corpus_replay` checks only verdict+domain, so a swapped coin
+/// map would silently mis-decode "which token am I selling" — this pins it.
+#[test]
+fn curve_twocrypto_exchange_resolves_coin_index_to_token() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real tx 0x08d406f5… exchange(i=0, j=1, dx=3.6168e18, min_dy=0) — sell crvUSD for cbBTC.
+    const TO: &str = "0x862cb4e988fb66e72f128d1183829f8c05b6c6a0";
+    const CRVUSD: &str = "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e";
+    const CBBTC: &str = "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf";
+    const CALLDATA: &str = "0x5b41b908000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000003231ee7c5f69365a0000000000000000000000000000000000000000000000000000000000000000";
+
+    let env = harness::route::route_calldata(1, TO, "0x5b41b908", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let token_in = find_object_by_key(&env, "token_in").expect("swap body carries token_in");
+    let token_out = find_object_by_key(&env, "token_out").expect("swap body carries token_out");
+    assert_eq!(
+        find_string_field(token_in, "address").as_deref(),
+        Some(CRVUSD),
+        "i=0 must resolve token_in to coin0 (crvUSD); got {token_in}"
+    );
+    assert_eq!(
+        find_string_field(token_out, "address").as_deref(),
+        Some(CBBTC),
+        "j=1 must resolve token_out to coin1 (cbBTC); got {token_out}"
+    );
+}
+
 /// Field-level golden for Curve CryptoSwap-NG `add_liquidity` — 3-coin positional
 /// baking. `add_liquidity(uint256[3] amounts, ...)` carries only amounts; coins
 /// are implicit. On crvUSDT/WBTC/WETH, `tokens[0..2]` must bake to USDT/WBTC/WETH
