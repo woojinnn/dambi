@@ -344,6 +344,16 @@ paths:
   /policies/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [policies]
+      summary: Single Cedar policy row
+      responses:
+        "200":
+          description: PolicyRow
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyRow" }
+        "404": { description: Policy not found }
     patch:
       tags: [policies]
       summary: Update mutable policy fields
@@ -368,6 +378,69 @@ paths:
       responses:
         "204": { description: Deleted }
         "404": { description: Policy not found }
+
+  /policy-schema:
+    get:
+      tags: [policies]
+      summary: Block-coding catalog (predicates / ops / actions)
+      description: |
+        Static JSON used by the editor's block palette. Includes
+        Korean + English labels per predicate; the FE picks the locale
+        it wants. Cacheable (5 min).
+      responses:
+        "200":
+          description: PolicySchema
+          content:
+            application/json:
+              schema: { type: object }
+
+  /policy-templates:
+    get:
+      tags: [policies]
+      summary: Starter Cedar policy library (HF guard, slippage cap, etc.)
+      responses:
+        "200":
+          description: PolicyTemplate[]
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+
+  /examples/transactions:
+    get:
+      tags: [meta]
+      summary: Fixture action envelopes used by editor/simulation pages
+      responses:
+        "200":
+          description: ExampleTransaction[]
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+
+  /spenders/{addr}:
+    parameters:
+      - { name: addr, in: path, required: true, schema: { type: string }, example: "0xe592427a0aece92de3edee1f18e0157c05861564" }
+    get:
+      tags: [wallets]
+      summary: Spender reputation lookup (known / blocked)
+      description: 404 means "unknown" — the FE should render the address with a neutral icon.
+      responses:
+        "200":
+          description: SpenderMeta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  addr:  { type: string }
+                  label: { type: string }
+                  rep:   { type: string, enum: [known, blocked] }
+                  chain: { type: string, nullable: true }
+                  notes: { type: string, nullable: true }
+        "404": { description: Address not in catalog }
 
   /events/stream:
     get:

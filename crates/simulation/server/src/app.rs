@@ -53,6 +53,10 @@ pub struct AppState {
     /// logo / website / description on newly-seen tokens. Lookups are
     /// best-effort; CoinGecko outages don't block wallet adds.
     pub coingecko: CoinGeckoClient,
+    /// Spender reputation catalog — loaded once at startup from
+    /// `scopeball-spenders.toml`. Drives `GET /spenders/:addr` and the
+    /// approval risk classifier.
+    pub spenders: crate::spenders::SpenderCatalog,
 }
 
 impl std::fmt::Debug for AppState {
@@ -68,6 +72,7 @@ impl std::fmt::Debug for AppState {
                 &self.etherscan.as_ref().map(|_| "<EtherscanClient>"),
             )
             .field("coingecko", &"<CoinGeckoClient>")
+            .field("spenders", &format_args!("<{} entries>", self.spenders.len()))
             .finish()
     }
 }
@@ -164,9 +169,17 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/policies/:id",
-            axum::routing::patch(write_handlers::patch_policy)
+            get(read_handlers::get_policy)
+                .patch(write_handlers::patch_policy)
                 .delete(write_handlers::delete_policy),
         )
+        .route("/policy-schema", get(read_handlers::get_policy_schema))
+        .route("/policy-templates", get(read_handlers::get_policy_templates))
+        .route(
+            "/examples/transactions",
+            get(read_handlers::get_example_transactions),
+        )
+        .route("/spenders/:addr", get(read_handlers::get_spender))
         .route("/events/stream", get(crate::events::sse_stream))
         .layer(from_fn(require_auth));
 

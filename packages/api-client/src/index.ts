@@ -68,3 +68,20 @@ export {
 export { listTransactions, type TxRow } from "./transactions";
 
 export { listTokens } from "./tokens";
+
+// Phase 1 catalog endpoints (policy schema, templates, examples,
+// spenders, single policy fetch).
+export {
+  getPolicySchema,
+  getPolicyTemplates,
+  getExampleTransactions,
+  getPolicy,
+  getSpender,
+  type PolicySchema,
+  type PolicyPredicate,
+  type PolicyActionMeta,
+  type PolicyTemplate,
+  type ExampleTransaction,
+  type SpenderMeta,
+  type SpenderRep,
+} from "./catalog";
