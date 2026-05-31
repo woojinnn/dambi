@@ -40,7 +40,7 @@ impl std::fmt::Debug for AppState {
 /// Builds the service router.
 ///
 /// Routes:
-/// - `POST /evaluate` — simulate action envelope(s) over wallet state.
+/// - `POST /evaluate` — simulate actions over wallet state.
 /// - `POST /execution-report` — record post-policy wallet/chain/venue outcome.
 /// - `GET  /health`   — liveness probe, returns `"ok"`.
 ///

@@ -100,8 +100,8 @@ export interface DeclarativeV3AuditMeta {
  * `"declarative-v2"` ⇒ the v3 route hit with a real (non-`Unknown`)
  *   `ActionBody`, and the verdict was driven by the stateless v2 pipeline
  *   (`plan_action_rpc_v2_json` → host dispatch → `evaluate_action_v2_json`).
- *   This is the ONLY real verdict driver for transactions after the v1
- *   declarative-envelope + static paths were removed.
+ *   This is the ONLY real verdict driver for transactions after the legacy
+ *   declarative/static fallbacks were removed.
  * `"fail_closed"` ⇒ no decoder produced an evaluable verdict, so the engine
  *   fails closed with a warn-and-proceed verdict. Covers: a v3 route
  *   miss/fault, a v3 hit whose bodies were all `Unknown`, zero v2 bundles
@@ -423,8 +423,8 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   }
 
   // Phase 4B → Phase 1/P3 — v3 route. Calls the WASM v3 entry to decode the
-  // tx into the PDF-FSM `Action[]` tree. After the v1 declarative-envelope
-  // and static paths were removed this is the SOLE input the verdict is
+  // tx into the PDF-FSM `Action[]` tree. After the legacy declarative/static
+  // fallbacks were removed this is the SOLE input the verdict is
   // driven from (via the v2 pipeline below). Failures here must never throw
   // out of the lifecycle — we fence the call and fail closed downstream.
   let declarativeV3Meta: DeclarativeV3AuditMeta | undefined;
@@ -478,6 +478,15 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
                     : v3Outcome.cause,
               }),
       });
+      // Pretty-printed dump so the decoded ActionBody[] is readable as text in
+      // DevTools (the object above collapses to `[{…}]`). Hex string fields
+      // (amounts/addresses) serialize cleanly — no BigInt in the v3 envelope.
+      if (v3Outcome.kind === "hit") {
+        console.info(
+          `[Scopeball] decoded ActionBody[] (${v3Outcome.value.actions.length})\n` +
+            JSON.stringify(v3Outcome.value.actions, null, 2),
+        );
+      }
     } catch (err) {
       console.warn("[Scopeball] declarative-route-v3 threw", {
         requestId: message.requestId,
@@ -503,7 +512,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   // Phase 1 / P2 — v2 (ActionBody-model) verdict path. When the v3 route HIT
   // with one or more real (non-`Unknown`) `ActionBody` elements, the
   // stateless v2 pipeline drives the verdict. This is the ONLY real verdict
-  // driver after the v1 declarative-envelope + static paths were removed.
+  // driver after the legacy declarative/static fallbacks were removed.
   // Fail-safe: `tryV2VerdictPath` returns `undefined` (NOT a Fail verdict —
   // that is a real verdict we honour) when there is no real action, no v2
   // bundle, or a plan/dispatch throw; the lifecycle then fails closed below
@@ -541,8 +550,8 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   //     the SignAdapter (Phase 4C) lands, so it always lands here.
   // Rather than waive the request through, we emit a warn verdict that the
   // user must explicitly approve via the verdict window (mirrors the untyped
-  // signature short-circuit). This replaces the deleted v1 declarative-
-  // envelope + static `evaluateWithPolicyRpc` fallback.
+  // signature short-circuit). This replaces the deleted legacy
+  // `evaluateWithPolicyRpc` fallback.
   console.info("[Scopeball] declarative-verdict", {
     requestId: message.requestId,
     verdictSource: "fail_closed",
@@ -916,8 +925,8 @@ function unsupportedUntypedSignatureVerdict(): VerdictDto {
  * for every typed signature (no v3 route exists for it until the SignAdapter
  * lands). `kind: "warn"` so `decideInner` opens the verdict window and requires
  * the user to explicitly proceed (mirrors `unsupportedUntypedSignatureVerdict`),
- * rather than silently waiving the request through as the deleted v1 static
- * `evaluateWithPolicyRpc` fallback would have.
+   * rather than silently waiving the request through as the deleted legacy
+   * `evaluateWithPolicyRpc` fallback would have.
  */
 function noDecoderVerdict(): VerdictDto {
   return {

@@ -1,10 +1,10 @@
 //! Service DTO contract for the simulation backend.
 //!
 //! These are the JSON request/response shapes the browser extension and the
-//! backend agree on. They **match + extend** the legacy Node.js
-//! `scopeball.evaluate_v3` contract (`wallet_id` / `envelopes` / `eval_context`
+//! backend agree on. They match the action-model `scopeball.evaluate_v3`
+//! contract (`wallet_id` / `actions` / `eval_context`
 //! → `policyRequest{actions,state_before,deltas,state_after}` / `diagnostics`),
-//! adding two fields the new architecture needs:
+//! adding one field the simulation backend needs:
 //!   - request `call_specs` — the enrichment calls the extension's
 //!     manifest-planning decided; the backend EXECUTES them.
 //!   - response `policyRequest.results` — the executed results keyed by
@@ -28,9 +28,9 @@ use simulation_state::{EvalContext, StateDelta, WalletId, WalletState};
 pub struct EvaluateRequest {
     /// Wallet identity (address + tracked chains) the simulation runs against.
     pub wallet_id: WalletId,
-    /// Caller-built action envelope(s) — decoded calldata/signature → typed
-    /// `Action` (meta + `ActionBody`). The backend simulates each in order.
-    pub envelopes: Vec<Action>,
+    /// Caller-built Actions — decoded calldata/signature → typed `Action`
+    /// (meta + `ActionBody`). The backend simulates each in order.
+    pub actions: Vec<Action>,
     /// Per-evaluation context (chain, time, request kind, simulation mode).
     pub eval_context: EvalContext,
     /// Enrichment calls the extension's manifest-planning produced; the backend
@@ -83,7 +83,7 @@ pub struct EvaluateResponse {
 /// match the v3 `policyRequest` (with `results` added).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PolicyRequest {
-    /// Typed action(s), echoed from the request `envelopes`.
+    /// Typed action(s), echoed from the request `actions`.
     pub actions: Vec<Action>,
     /// Wallet state before applying the action(s).
     pub state_before: WalletState,
@@ -136,7 +136,7 @@ pub struct ExecutionReportRequest {
     /// reports to the exact policy evaluation that authorized the action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation_id: Option<String>,
-    /// Zero-based index into [`EvaluateRequest::envelopes`] when the report is
+    /// Zero-based index into [`EvaluateRequest::actions`] when the report is
     /// tied to one action in a batch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_index: Option<usize>,
@@ -260,7 +260,7 @@ mod tests {
     fn sample_request() -> EvaluateRequest {
         EvaluateRequest {
             wallet_id: sample_wallet_id(),
-            envelopes: Vec::new(),
+            actions: Vec::new(),
             eval_context: EvalContext::new(
                 ChainId::ethereum_mainnet(),
                 Time::from_unix(1_700_000_000),
@@ -302,12 +302,12 @@ mod tests {
     }
 
     /// The wire field names match (+ extend) the `scopeball.evaluate_v3`
-    /// contract: request `wallet_id`/`envelopes`/`eval_context`/`call_specs`,
+    /// contract: request `wallet_id`/`actions`/`eval_context`/`call_specs`,
     /// response `policyRequest{actions,state_before,deltas,state_after,results}`.
     #[test]
     fn wire_field_names_match_v3_contract() {
         let rv = serde_json::to_value(sample_request()).unwrap();
-        for k in ["wallet_id", "envelopes", "eval_context", "call_specs"] {
+        for k in ["wallet_id", "actions", "eval_context", "call_specs"] {
             assert!(rv.get(k).is_some(), "request missing `{k}`");
         }
 
