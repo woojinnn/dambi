@@ -21,3 +21,4 @@ pub mod liquid_staking;
 pub mod permission;
 pub mod perp;
 pub mod token;
+pub mod yield_;

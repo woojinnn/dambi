@@ -24,6 +24,7 @@ pub mod permission;
 pub mod perp;
 pub mod token;
 pub mod view;
+pub mod yield_;
 
 pub use airdrop::AirdropAction;
 pub use amm::AmmAction;
@@ -34,6 +35,7 @@ pub use permission::PermissionAction;
 pub use perp::PerpAction;
 pub use token::TokenAction;
 pub use view::ActionView;
+pub use yield_::YieldAction;
 
 // ---------------------------------------------------------------------------
 // Common helper types
@@ -159,6 +161,8 @@ pub enum ActionBody {
     LiquidStaking(LiquidStakingAction),
     /// Protocol permission-domain action (manager/operator/relayer grants).
     Permission(PermissionAction),
+    /// Yield-tokenization-domain action (Pendle PT/YT swap, liquidity, mint/redeem, claim).
+    Yield(YieldAction),
 
     /// Batched multi-call (e.g. `Uniswap Universal Router`, `Aave`).
     Multicall {

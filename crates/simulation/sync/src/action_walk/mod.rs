@@ -56,6 +56,9 @@ fn walk_body(
         ActionBody::Perp(p) => perp::walk(p, action_index, now, stale, stats),
         ActionBody::LiquidStaking(ls) => liquid_staking::walk(ls, action_index, now, stale, stats),
         ActionBody::Permission(p) => permission::walk(p, action_index, now, stale, stats),
+        // Yield (Pendle) carries no live_inputs in P1a — enrichment (market →
+        // SY/PT/YT/maturity) is wired in P1c.
+        ActionBody::Yield(_) => {}
         ActionBody::Multicall { actions } => {
             for (i, child) in actions.iter().enumerate() {
                 walk_body(child, i, now, stale, stats);
@@ -91,7 +94,8 @@ pub fn apply_value_to_action(
         ActionBody::Perp(p) => perp::apply(p, slot, value, now),
         ActionBody::Permission(p) => permission::apply(p, slot, value, now),
         ActionBody::LiquidStaking(ls) => liquid_staking::apply(ls, slot, value, now),
-        ActionBody::Multicall { .. } | ActionBody::Unknown { .. } => {}
+        // Yield has no live_inputs slots in P1a (enrichment in P1c).
+        ActionBody::Yield(_) | ActionBody::Multicall { .. } | ActionBody::Unknown { .. } => {}
     }
 }
 

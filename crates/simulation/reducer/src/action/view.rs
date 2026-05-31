@@ -62,6 +62,11 @@ impl ActionBody {
                 action_tag: Some(a.action_tag()),
                 venue_name: a.venue_name(),
             },
+            Self::Yield(a) => ActionView {
+                domain: "yield",
+                action_tag: Some(a.action_tag()),
+                venue_name: a.venue_name(),
+            },
             Self::Multicall { .. } => ActionView {
                 domain: "multicall",
                 action_tag: None,
@@ -178,6 +183,34 @@ mod tests {
         assert_eq!(view.domain, "token");
         assert_eq!(view.action_tag, Some("erc20_approve"));
         assert_eq!(view.venue_name, None);
+    }
+
+    #[test]
+    fn view_yield_pt_swap_pendle_v2() {
+        use crate::action::yield_;
+        let body = ActionBody::Yield(yield_::YieldAction::PtSwap(yield_::PtSwapAction {
+            venue: yield_::YieldVenue::PendleV2 {
+                chain: ChainId::ethereum_mainnet(),
+            },
+            market: addr("0xcfd848b9f6fef552204014ac67901223ad6bf679"),
+            direction: yield_::PtSwapDirection::TokenForPt,
+            external_token: Some(token_ref()),
+            exact_amount_in: U256::from(1_000_000_000u64),
+            min_amount_out: U256::from(990_000_000u64),
+            recipient: addr("0x000000000000000000000000000000000000a01c"),
+        }));
+        let view = body.view();
+        assert_eq!(view.domain, "yield");
+        assert_eq!(view.action_tag, Some("pt_swap"));
+        assert_eq!(view.venue_name, Some("pendle_v2"));
+        // serde `domain` tag is the source of truth — must equal VALID_DOMAINS entry.
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(
+            json.get("domain").and_then(serde_json::Value::as_str),
+            Some("yield"),
+            "ActionBody::Yield must serialize domain tag `yield`"
+        );
+        assert_action_tag(&body);
     }
 
     #[test]

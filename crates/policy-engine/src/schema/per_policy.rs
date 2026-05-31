@@ -45,7 +45,9 @@ use super::{
     TOKEN_ERC20_APPROVE_SCHEMA, TOKEN_ERC20_PERMIT_SCHEMA, TOKEN_ERC20_TRANSFER_SCHEMA,
     TOKEN_NFT_APPROVE_SCHEMA, TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA, TOKEN_NFT_TRANSFER_SCHEMA,
     TOKEN_PERMIT2_APPROVE_SCHEMA, TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA,
-    TOKEN_REVOKE_APPROVAL_SCHEMA,
+    TOKEN_REVOKE_APPROVAL_SCHEMA, YIELD_ADD_MARKET_LIQUIDITY_SCHEMA, YIELD_CLAIM_YIELD_SCHEMA,
+    YIELD_MINT_PY_SCHEMA, YIELD_MINT_SY_SCHEMA, YIELD_PT_SWAP_SCHEMA, YIELD_REDEEM_PY_SCHEMA,
+    YIELD_REDEEM_SY_SCHEMA, YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA, YIELD_YT_SWAP_SCHEMA,
 };
 
 /// One row of the action resolver: the `(domain, action_tag)` a trigger can
@@ -249,6 +251,61 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
         action_tag: Some("wrap"),
         schema_text: LIQUID_STAKING_WRAP_SCHEMA,
         pascal_stub: "Wrap",
+    },
+    // yield
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("pt_swap"),
+        schema_text: YIELD_PT_SWAP_SCHEMA,
+        pascal_stub: "PtSwap",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("yt_swap"),
+        schema_text: YIELD_YT_SWAP_SCHEMA,
+        pascal_stub: "YtSwap",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("add_market_liquidity"),
+        schema_text: YIELD_ADD_MARKET_LIQUIDITY_SCHEMA,
+        pascal_stub: "AddMarketLiquidity",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("remove_market_liquidity"),
+        schema_text: YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA,
+        pascal_stub: "RemoveMarketLiquidity",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("mint_py"),
+        schema_text: YIELD_MINT_PY_SCHEMA,
+        pascal_stub: "MintPy",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("redeem_py"),
+        schema_text: YIELD_REDEEM_PY_SCHEMA,
+        pascal_stub: "RedeemPy",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("mint_sy"),
+        schema_text: YIELD_MINT_SY_SCHEMA,
+        pascal_stub: "MintSy",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("redeem_sy"),
+        schema_text: YIELD_REDEEM_SY_SCHEMA,
+        pascal_stub: "RedeemSy",
+    },
+    ActionEntry {
+        domain: "yield",
+        action_tag: Some("claim_yield"),
+        schema_text: YIELD_CLAIM_YIELD_SCHEMA,
+        pascal_stub: "ClaimYield",
     },
     // launchpad
     ActionEntry {
@@ -851,9 +908,9 @@ mod tests {
                 entry.pascal_stub,
             );
         }
-        // The table covers exactly the 54 shipped actions (multicall + unknown
+        // The table covers exactly the 63 shipped actions (multicall + unknown
         // included). Guards against a row being dropped or duplicated.
-        assert_eq!(RESOLVER_TABLE.len(), 54, "resolver table must have 54 rows");
+        assert_eq!(RESOLVER_TABLE.len(), 63, "resolver table must have 63 rows");
     }
 
     /// A custom_context field whose name collides with one of the matched

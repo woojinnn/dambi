@@ -91,6 +91,27 @@ const LIQUID_STAKING_UNWRAP_SCHEMA: &str =
 const LIQUID_STAKING_WRAP_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/liquid_staking/wrap.cedarschema");
 
+// yield (alphabetical)
+const YIELD_ADD_MARKET_LIQUIDITY_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/add_market_liquidity.cedarschema");
+const YIELD_CLAIM_YIELD_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/claim_yield.cedarschema");
+const YIELD_MINT_PY_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/mint_py.cedarschema");
+const YIELD_MINT_SY_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/mint_sy.cedarschema");
+const YIELD_PT_SWAP_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/pt_swap.cedarschema");
+const YIELD_REDEEM_PY_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/redeem_py.cedarschema");
+const YIELD_REDEEM_SY_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/redeem_sy.cedarschema");
+const YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/yield/remove_market_liquidity.cedarschema"
+);
+const YIELD_YT_SWAP_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/yield/yt_swap.cedarschema");
+
 // launchpad (alphabetical)
 const LAUNCHPAD_CLAIM_ALLOCATION_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/launchpad/claim_allocation.cedarschema");
@@ -186,6 +207,15 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     LIQUID_STAKING_TRANSFER_SHARES_SCHEMA,
     LIQUID_STAKING_UNWRAP_SCHEMA,
     LIQUID_STAKING_WRAP_SCHEMA,
+    YIELD_ADD_MARKET_LIQUIDITY_SCHEMA,
+    YIELD_CLAIM_YIELD_SCHEMA,
+    YIELD_MINT_PY_SCHEMA,
+    YIELD_MINT_SY_SCHEMA,
+    YIELD_PT_SWAP_SCHEMA,
+    YIELD_REDEEM_PY_SCHEMA,
+    YIELD_REDEEM_SY_SCHEMA,
+    YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA,
+    YIELD_YT_SWAP_SCHEMA,
     LAUNCHPAD_CLAIM_ALLOCATION_SCHEMA,
     LAUNCHPAD_CLAIM_VESTED_SCHEMA,
     LAUNCHPAD_COMMIT_SCHEMA,
