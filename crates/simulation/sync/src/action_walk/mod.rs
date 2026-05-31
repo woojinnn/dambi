@@ -52,8 +52,9 @@ fn walk_body(
         ActionBody::Airdrop(a) => airdrop::walk(a, action_index, now, stale, stats),
         ActionBody::Launchpad(l) => launchpad::walk(l, action_index, now, stale, stats),
         ActionBody::Perp(p) => perp::walk(p, action_index, now, stale, stats),
-        // Liquid-staking actions carry no live inputs — nothing to walk.
+        // Liquid-staking + staking actions carry no live inputs — nothing to walk.
         ActionBody::LiquidStaking(_) => {}
+        ActionBody::Staking(_) => {}
         ActionBody::Permission(p) => permission::walk(p, action_index, now, stale, stats),
         ActionBody::Multicall { actions } => {
             for (i, child) in actions.iter().enumerate() {
@@ -90,6 +91,7 @@ pub fn apply_value_to_action(
         ActionBody::Perp(p) => perp::apply(p, slot, value, now),
         ActionBody::Permission(p) => permission::apply(p, slot, value, now),
         ActionBody::LiquidStaking(_)
+        | ActionBody::Staking(_)
         | ActionBody::Multicall { .. }
         | ActionBody::Unknown { .. } => {}
     }

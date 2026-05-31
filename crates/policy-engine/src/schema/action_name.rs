@@ -128,6 +128,13 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "place_stop_order",
     // Permission (1)
     "protocol_authorization",
+    // Staking (6)
+    "claim_rewards",
+    "increase_lock_amount",
+    "increase_lock_time",
+    "lock",
+    "unlock",
+    "vote_for_gauge",
     // Token (9) — `delegate` already listed above under Airdrop
     "erc20_approve",
     "erc20_permit",
@@ -189,8 +196,8 @@ mod tests {
     #[test]
     fn registry_size_matches_phase1() {
         // 2 Core + 2 Airdrop + 6 Amm + 12 Lending + 6 LiquidStaking + 5 Launchpad
-        // + 11 Perp + 9 Token + 1 Permission = 54.
-        assert_eq!(REGISTERED_ACTIONS.len(), 54);
+        // + 11 Perp + 9 Token + 1 Permission + 6 Staking = 60.
+        assert_eq!(REGISTERED_ACTIONS.len(), 60);
     }
 
     #[test]
