@@ -14,6 +14,7 @@
 // entry below is the OpenSea Seaport conduit; addresses are lowercase hex.
 @id("setapprovalforall-operator-warning")
 @severity("warn")
+@reason("setApprovalForAll grants this operator your entire collection — it is not in your allowlist")
 forbid(principal, action == Token::Action::"NftSetApprovalForAll", resource)
 when {
   context.approved
