@@ -149,4 +149,49 @@ mod tests {
         assert_eq!(acct.leverage_settings.len(), 1);
         assert_eq!(acct.leverage_settings[0].leverage, 10);
     }
+
+    #[test]
+    fn update_leverage_appends_new_asset() {
+        // Base holds a setting for asset 0 @ 5x; apply a change for asset 1 @ 7x.
+        let base = vec![HlLeverageSetting {
+            asset_index: 0,
+            is_cross: true,
+            leverage: 5,
+        }];
+        let action = HlUpdateLeverageAction {
+            asset_index: 1, // different asset than base → forces the append branch
+            symbol: Some("ETH".to_owned()),
+            is_cross: false,
+            leverage: 7,
+        };
+        let delta = apply(&action, &state_with(base.clone()), &ctx()).unwrap();
+        assert!(matches!(
+            delta.position_changes[0],
+            PositionChange::Update { .. }
+        ));
+
+        let next = crate::helpers::delta::apply_delta(&state_with(base), &delta).unwrap();
+        let acct = next
+            .positions
+            .iter()
+            .find_map(|p| match &p.kind {
+                PositionKind::HyperliquidAccount(a) => Some(a.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(acct.leverage_settings.len(), 2); // appended, not replaced
+        let s0 = acct
+            .leverage_settings
+            .iter()
+            .find(|s| s.asset_index == 0)
+            .unwrap();
+        assert_eq!(s0.leverage, 5); // original untouched
+        let s1 = acct
+            .leverage_settings
+            .iter()
+            .find(|s| s.asset_index == 1)
+            .unwrap();
+        assert_eq!(s1.leverage, 7);
+        assert!(!s1.is_cross);
+    }
 }
