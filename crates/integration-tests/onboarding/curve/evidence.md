@@ -93,19 +93,19 @@
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| `registryV2 npm run build` output recorded | pending | |
-| registryV2 build-index vitest output recorded | pending | |
-| `npm run check:manifest` output recorded | pending | |
-| `npm run check:surface` output recorded | pending | |
-| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
-| v3-harness coverage/fuzz/corpus outputs recorded | pending | |
-| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| `cargo test --workspace` output recorded | pending | |
-| wasm build output recorded if runtime/wasm/schema changed | pending | |
-| fmt/clippy/typecheck output recorded for changed crates/packages | pending | |
-| exact staged files and commit hash recorded | pending | |
-| remaining WARNs/deferred selectors/actions listed with reason | pending | |
-| no base/worktree merge performed unless user explicitly requested it | pending | |
+| `registryV2 npm run build` output recorded | done | `cd registryV2 && npm run build` PASS: build-index wrote `1626 callkey(s) + 82 typed-data entry(ies) across 481 manifest(s)`. |
+| registryV2 build-index vitest output recorded | done | Sandbox run failed with tsx IPC `listen EPERM`; escalated rerun PASS: `cd browser-extension && node .yarn/releases/yarn-4.14.1.cjs vitest run --root ../registryV2 scripts/__tests__/build-index.test.ts` => `1 passed`, `11 passed`. |
+| `npm run check:manifest` output recorded | done | `cd registryV2 && npm run check:manifest` PASS: build-index wrote `1626 callkey(s) + 82 typed-data entry(ies) across 481 manifest(s)`; Rust v3 harness validate output `1436 single_emit manifest(s) OK, 0 structural errors [iters/manifest=24]`. |
+| `npm run check:surface` output recorded | done | `cd registryV2 && npm run check:surface` PASS: `107 gated contracts`; Curve selected subset remains `curve: 47 deployed · 41 cover · 6 exclude`; informational WARNs remain for unrelated protocols without contract-inventory enforcement and 21 ungated protocol contracts. |
+| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | done | `cd registryV2 && npm run check:universe -- --protocol curve --require-cover-linkage` PASS: `surface/curve/_pool_universe.json: 3097 candidates · 17 cover · 0 exclude · 3080 defer · source_count=3097`. |
+| v3-harness coverage/fuzz/corpus outputs recorded | done | `v3-harness coverage` PASS: local surface `callkeys=1570 typed_data_keys=82 unique_bundles=476 install_failures=0`. Curve P2 fuzz PASS: `/private/tmp/curve-fuzz-5000.json`, `total=1640000 pass=1224146 soft=415854 fail=0 panicked=0 skipped=0`. Corpus PASS as below. |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | done | `cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus --filter curve --require-expect-body` PASS: `10/10 matched`, `semantic expect_body: 10/10 pass entries pinned`. |
+| `cargo test --workspace` output recorded | done | Sandbox run failed only at `simulation-server --test auth_flow` with `PermissionDenied`; escalated rerun PASS for full workspace. Notable totals include `v3_decode_harness: 58 passed`, `policy-engine-wasm: 36 passed / 1 ignored`, `declarative_v3_route: 78 passed`, `simulation-server auth_flow: 7 passed`. |
+| wasm build output recorded if runtime/wasm/schema changed | done | Not applicable for this checkpoint: changed files are integration-test harness, Curve corpus JSON, and onboarding evidence only. No runtime WASM/schema/source crate was changed beyond test harness compilation. `cargo test --workspace` still compiled and tested `policy-engine-wasm`. |
+| fmt/clippy/typecheck output recorded for changed crates/packages | done | `cargo fmt --all -- --check` PASS; `cargo check -p policy-engine-integration-tests --all-targets` PASS; `cargo clippy -p policy-engine-integration-tests --all-targets -- -D warnings` PASS. |
+| exact staged files and commit hash recorded | done | Implementation checkpoint commit `adae01cf` (`feat(integration-tests): pin curve P2 corpus semantics`) changed: `crates/integration-tests/src/bin/v3_harness.rs`, `src/harness/{adapters.rs,corpus.rs,mod.rs}`, Curve corpus JSON files, and `crates/integration-tests/onboarding/curve/evidence.md`. P4 evidence is recorded in this follow-up phase commit. |
+| remaining WARNs/deferred selectors/actions listed with reason | done | Curve is not complete: `_pool_universe.json` explicitly defers 3,080 Curve API pool candidates; full 3,097-address real-tx sweep is not run; full Curve token surface is not machine-verified; Claude Code is unavailable because CLI is not logged in. Registry surface WARNs for unrelated non-Curve protocols are informational and unchanged. |
+| no base/worktree merge performed unless user explicitly requested it | done | No base/worktree merge was performed in this run. Current branch remains `feat/curve-onboarding-redo`; user has not requested merge. |
 
 ## Blockers
 
