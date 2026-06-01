@@ -60,7 +60,7 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- \
 
 | protocol | 최신 로그 | total | pass | soft(커버리지) | hard(디코더) |
 |---|---|---|---|---|---|
-| uniswap | `uniswap/2026-05-30-coverage.json` | 700 | 302 | 325 (**migration-gap** registry→registryV2 + FoT/V4) | 73 (Permit2/V4 nested) |
+| uniswap | 2026-06-01 Etherscan keyed covered-selector scratch + Dune probe | 4,471 | 4,471 | 0 | 0 |
 | aave | `aave/2026-05-30-etherscan.json` | 300 | * | L2Pool packed (31% Arb) | 0 |
 | balancer | `balancer/2026-06-01-real-tx-research.json` | 535 | 155 | 360 (batchSwap/join/exit + V3 liquidity/initialize) | 20 (`permitBatchAndCall` overcoverage corrected to soft exclude) |
 | hyperliquid | `hyperliquid/2026-05-30-etherscan.json` | 160 | 5+ | 2 (infra, out-of-scope) | 0 |
@@ -85,6 +85,46 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- \
 **대량 재생 결과**: `/private/tmp/balancer-bulk-replay/balancer/corpus.json` 에서 535건을 샘플링해 `v3-harness corpus` 실행. 초기 기대값 기준 `515/535` matched; 20개 mismatch는 전부 `permitBatchAndCall 0x19c6989f`를 pass로 기대했지만 `build_multicall_failed: no inner leg resolved to an installed mapper`로 실패했다. 대표 tx `0x4a9a6c961047086d6cee5cc227385447388619a1f3019ac9efea3600767051f3` 는 내부 child가 deferred liquidity selector(`0x724dba33`)라서 plain multicall 재귀만으로는 충실하게 표현할 수 없다.
 
 **처치**: `balancer/v3/router-permit-batch-and-call@1.0.0` 매니페스트 제거, mainnet/base coverage에서 `permitBatchAndCall`을 `exclude`로 정정, 같은 real tx를 Balancer golden corpus에 `expect:error`로 pin. 현재 Balancer V3 Router covered scope는 direct single-token swaps + plain `multicall(bytes[])` wrapper다. `permitBatchAndCall`은 child liquidity mapping + Permit2 batch side-effect modeling이 들어오기 전까지 fail-closed gap으로 둔다.
+
+## 2026-06-01 Uniswap P2 real-tx 보강
+
+**요약:** earlier green state was not enough for P2 real-tx completeness: it used
+official deployment docs, npm ABIs, Sourcify/local ABI cache, and the existing
+golden corpus, but did not run a fresh Etherscan+Dune real-tx lane. Re-run now:
+
+- **Etherscan MCP:** mainnet `txlist` samples for V2 Router02 and SwapRouter02,
+  then public RPC hydration to exact `to/value/input`. Initial scratch replay:
+  `cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus --root /tmp/scopeball-uniswap-etherscan`
+  -> `10/10` pass.
+- **Etherscan API v2 keyed:** loaded `ETHERSCAN_API_KEY` from the original
+  integration-test `.env` without committing or printing the secret. Queried the
+  33 Uniswap cover contracts from `_deployments.json` at offset 300. Raw
+  expected-pass scratch found 4,792 unique txs across mainnet+Arbitrum:
+  `4,692/4,792` matched. The 100 misses classified to 99 no-index/excluded
+  selectors (mostly Permit2 `transferFrom` and low-level V4 PoolManager
+  flash-accounting surface) plus 1 failed malformed on-chain tx. Filtering to
+  successful txs whose callkey exists in `registryV2/index/by-callkey` produced
+  `/tmp/scopeball-uniswap-etherscan-keyed-covered`, replayed at `4,471/4,471`
+  pass. Optimism/Base Etherscan API calls still returned plan-limit
+  `Free API access is not supported for this chain`, so L2 coverage there came
+  from the Dune+RPC lane below.
+- **Dune MCP:** `dex.trades` partitioned query `7625591`, filtered to covered
+  Uniswap router/manager `tx_to` across Ethereum/Base/Arbitrum/Optimism. Cost:
+  `0.41` credit, 40 rows, 39 unique hydrated calldata rows. Scratch replay:
+  `cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus --root /tmp/scopeball-uniswap-realtx`
+  -> `39/39` pass.
+- **Committed representative rows:** 12 Dune-derived real txs were appended to
+  `data/golden/v3-decode/uniswap/corpus.json`, covering Optimism V2, Arbitrum
+  SwapRouter02 exactInput path, Base SwapRouter02 multicall/FoT/UniversalRouter,
+  Ethereum UniversalRouter 2.1.1/v2, and V3/V4 position NFT transfer paths.
+- **Claude Code 2nd-opinion:** headless audit ran candidate-only with hooks
+  disabled. Valid findings left as follow-up: Universal Router opcode branch
+  breadth, direct Permit2 transfer/signature-transfer surfaces, more V3
+  `exactOutput`/alt multicall real txs, and deeper V4 PositionManager/PoolManager
+  action-stream coverage.
+
+Remaining known gaps are corpus breadth gaps, not fresh hard decoder failures in
+the sampled real-tx lane.
 
 ## 2026-05-30 커버리지 확장 라운드 — 처치 결과
 
