@@ -17,14 +17,30 @@ import {
   variableDebtsResolver,
   stableDebtsResolver,
 } from "./aave_v3.ts";
+import {
+  gaugesResolver,
+  stableNg2CoinBaseResolver,
+  stableNg2CoinMainnetResolver,
+} from "./curve.ts";
 import type { ProtocolResolver, ProtocolSourceKind } from "./types.ts";
 
 export { rpcClient } from "./rpc.ts";
-export type { ProtocolResolver, ProtocolSourceKind, ResolverOpts, Hex, CacheEntry, RpcClient } from "./types.ts";
+export type {
+  ProtocolResolver,
+  ProtocolResolvedAddress,
+  ProtocolSourceKind,
+  ResolverOpts,
+  Hex,
+  CacheEntry,
+  RpcClient,
+} from "./types.ts";
 
 /** Exhaustive map from source kind → resolver. Compile-time `Record` ensures coverage. */
 export const PROTOCOL_SOURCE_RESOLVERS: Record<ProtocolSourceKind, ProtocolResolver> = {
   "aave_v3:atokens": atokensResolver,
   "aave_v3:variable_debts": variableDebtsResolver,
   "aave_v3:stable_debts": stableDebtsResolver,
+  "curve:gauges": gaugesResolver,
+  "curve:factory_stable_ng_2coin_mainnet": stableNg2CoinMainnetResolver,
+  "curve:factory_stable_ng_2coin_base": stableNg2CoinBaseResolver,
 };

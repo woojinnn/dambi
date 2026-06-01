@@ -4,9 +4,10 @@
  * Protocol-agnostic gate for pool/vault/factory child address universes.
  *
  * `check:surface` proves function completeness for contracts we already found.
- * This gate proves the higher-level address set is not a no-op: a protocol
- * universe artifact must be non-empty, every candidate must be dispositioned,
- * and (optionally, for P4) every covered address must have generated callkeys.
+ * This gate proves the higher-level address set is not a no-op: every
+ * `surface/<protocol>/_*_universe.json` artifact must be non-empty, every
+ * candidate must be dispositioned, and (optionally, for P4) every covered
+ * address must have generated callkeys.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -23,7 +24,7 @@ const CALLKEY_DIR = join(REGISTRY_ROOT, "index", "by-callkey");
 
 const ADDR_RE = /^0x[0-9a-f]{40}$/;
 const DECISIONS = new Set(["cover", "exclude", "defer"]);
-const UNIVERSE_FILES = ["_address_universe.json", "_pool_universe.json"];
+const UNIVERSE_FILE_RE = /^_.*_universe\.json$/;
 
 interface Config {
   protocol?: string;
@@ -109,8 +110,7 @@ Usage:
   npm run check:universe -- --protocol curve --require-cover-linkage
 
 Artifacts:
-  registryV2/surface/<protocol>/_address_universe.json
-  registryV2/surface/<protocol>/_pool_universe.json
+  registryV2/surface/<protocol>/_*_universe.json
 
 Candidate rows must include chainId, lowercase address, decision/disposition
 (cover|exclude|defer), and reason. Defer rows also need a batch boundary.`;
@@ -132,9 +132,8 @@ function loadArtifacts(config: Config): Artifact[] {
   for (const protocol of protocols) {
     const dir = join(SURFACE_DIR, protocol);
     if (!safeExists(dir)) continue;
-    for (const file of UNIVERSE_FILES) {
+    for (const file of readdirSync(dir).filter((entry) => UNIVERSE_FILE_RE.test(entry)).sort()) {
       const path = join(dir, file);
-      if (!safeExists(path)) continue;
       const data = JSON.parse(readFileSync(path, "utf8")) as UniverseRecord;
       artifacts.push({
         path,
@@ -284,7 +283,7 @@ function main(): void {
 
   if (config.protocol && artifacts.length === 0) {
     failures.push(
-      `surface/${config.protocol}/ is missing _address_universe.json or _pool_universe.json; ` +
+      `surface/${config.protocol}/ is missing _*_universe.json; ` +
         "pool/factory/vault-heavy onboarding cannot claim P0/P4 completion without it",
     );
   }

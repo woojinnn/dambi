@@ -457,3 +457,99 @@ describe("build-index token source expansion", () => {
     expect(combined).toMatch(/chainId field \(8453\) does not match directory \(1\)/);
   });
 });
+
+describe("build-index protocol source materialization", () => {
+  it("materializes one sourced Curve pool into a per-address bundle with source placeholders substituted", () => {
+    const pool = "0x3333333333333333333333333333333333333333";
+    const coin0 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const coin1 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const root = track(
+      scaffold({
+        "curve-source.json": {
+          type: "adapter_action",
+          id: "curve/stableswap-ng/source/test/exchange@1.0.0",
+          schema_version: "3",
+          match: {
+            selector: "0x3df02124",
+            chain_to_addresses_source: "curve:factory_stable_ng_2coin_mainnet",
+            chain_ids: [1],
+          },
+          source_materialize: { kind: "per_address_context" },
+          abi_fragment: {
+            function_name: "exchange",
+            abi: {
+              type: "function",
+              name: "exchange",
+              inputs: [
+                { name: "i", type: "int128" },
+                { name: "j", type: "int128" },
+                { name: "_dx", type: "uint256" },
+                { name: "_min_dy", type: "uint256" },
+              ],
+            },
+          },
+          emit: {
+            strategy: "single_emit",
+            body: {
+              token_in: {
+                $match: "$args.i",
+                $cases: {
+                  "0": "$source.coins.0",
+                  "1": "$source.coins.1",
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const surfaceDir = join(root, "surface", "curve");
+    mkdirSync(surfaceDir, { recursive: true });
+    writeFileSync(
+      join(surfaceDir, "_pool_universe.json"),
+      JSON.stringify(
+        {
+          protocol: "curve",
+          source: "test",
+          source_count: 1,
+          candidates: [
+            {
+              chainId: 1,
+              address: pool,
+              decision: "cover",
+              reason: "test",
+              batch: "test",
+              families: ["factory-stable-ng"],
+              curve_id: "factory-stable-ng-0",
+              name: "Test Pool",
+              symbol: "TEST",
+              lpTokenAddress: pool,
+              coins: [coin0, coin1],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const res = runBuild(root);
+    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    expect(listCallkeys(root)).toEqual([`1__${pool}__0x3df02124.json`]);
+
+    const entry = JSON.parse(
+      readFileSync(join(callkeyDir(root), `1__${pool}__0x3df02124.json`), "utf8"),
+    );
+    expect(entry.bundle.id).toMatch(
+      /^curve\/stableswap-ng\/source\/test\/exchange\/1-factory-stable-ng-0-33333333@1\.0\.0$/,
+    );
+    expect(entry.bundle.match.chain_to_addresses).toEqual({ "1": [pool] });
+    expect("chain_to_addresses_source" in entry.bundle.match).toBe(false);
+    expect("source_materialize" in entry.bundle).toBe(false);
+    expect(entry.bundle.emit.body.token_in.$cases).toEqual({
+      "0": coin0,
+      "1": coin1,
+    });
+  });
+});

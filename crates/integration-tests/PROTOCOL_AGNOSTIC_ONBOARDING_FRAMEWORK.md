@@ -427,6 +427,13 @@ Rules:
 - If a generated/source resolver can safely enumerate the universe, prefer it
   over hand-maintaining large `chain_to_addresses` arrays. If not implemented,
   record why manual concrete coverage is acceptable for the batch.
+- If pool-specific metadata is required to emit the correct `ActionBody`
+  (coin map, LP token, gauge, vault asset, market id), do not use an
+  address-only resolver. Add a materialized protocol source instead:
+  resolver returns per-address context, manifest uses exact `$source.*`
+  placeholders, build-index emits one concrete bundle per address, and P4
+  `check:universe --require-cover-linkage` proves every `cover` address has at
+  least one generated callkey.
 - Unknown to-addresses observed later with known protocol selectors are P0/P2
   hard gaps, not ordinary low-traffic misses.
 

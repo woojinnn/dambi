@@ -28,7 +28,10 @@ export type Hex = string;
 export type ProtocolSourceKind =
   | "aave_v3:atokens"
   | "aave_v3:variable_debts"
-  | "aave_v3:stable_debts";
+  | "aave_v3:stable_debts"
+  | "curve:gauges"
+  | "curve:factory_stable_ng_2coin_mainnet"
+  | "curve:factory_stable_ng_2coin_base";
 
 /** A single resolver entry — one source kind → one async address fetcher. */
 export interface ProtocolResolver {
@@ -47,6 +50,23 @@ export interface ProtocolResolver {
    * reserved for unrecoverable RPC errors with no fallback cache.
    */
   resolve(chainId: number, opts: ResolverOpts): Promise<Hex[]>;
+
+  /**
+   * Optional richer resolver for protocols whose manifests need per-address
+   * metadata baked into the emitted bundle at build time. Plain address
+   * expansion is not enough for pool-heavy protocols like Curve where coin
+   * maps differ by pool.
+   */
+  resolveWithContext?(chainId: number, opts: ResolverOpts): Promise<ProtocolResolvedAddress[]>;
+}
+
+export interface ProtocolResolvedAddress {
+  /** Lowercased 0x-prefixed address to write into `match.chain_to_addresses`. */
+  address: Hex;
+  /** Unique, filesystem/id-safe suffix appended to the manifest id before @version. */
+  id_suffix?: string;
+  /** Build-time substitution context consumed by `$source.*` placeholders. */
+  context?: Record<string, unknown>;
 }
 
 export interface ResolverOpts {
