@@ -120,12 +120,9 @@ export interface DeclarativeRouteRequestV3Input {
  * Result of a successful `declarative_route_request_v3_json` call.
  *
  * `actions` is the JSON-serialised `Vec<simulation_reducer::action::Action>`
- * the WASM produced. Phase 4B emits a single-element vec whose body is the
- * `Unknown` stub; Phase 4D fills in the real `ActionBody` per registry-v2
- * manifest emit-rule.
+ * the WASM produced from the installed registry-v2 manifest emit-rule.
  *
- * `decoder_id` echoes the matched bundle's declarative decoder id when a
- * manifest matched (`""` when no match — the Phase 4B stub never matches).
+ * `decoder_id` echoes the matched bundle's declarative decoder id.
  */
 export interface DeclarativeRouteRequestV3Result {
   actions: Record<string, unknown>[];
