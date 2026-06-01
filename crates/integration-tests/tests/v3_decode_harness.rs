@@ -2419,3 +2419,79 @@ fn permit2_sign_allowance_typed_data_yields_warn_verdict() {
         "warn must be attributed to permit2-sign-allowance-confirm; got {verdict}"
     );
 }
+
+/// Companion to the PermitSingle verdict golden — locks the `tuple[]` arm of the
+/// named→positional reshape. A Permit2 `PermitBatch` signature carries
+/// `details` as an ARRAY of `PermitDetails`; the manifest fans it out via
+/// `array_emit` (`array_source: $args.permitBatch[0]`) into a `Multicall` of
+/// per-token `permit2_sign_allowance` bodies. A wallet sends `details` as named
+/// objects, so without reshaping the nested `tuple[]` the positional per-item
+/// paths (`$inputs[0]` = token) would not resolve. This pins that BOTH batch
+/// entries decode with their own token in coin order (WETH then USDC) — the
+/// `reshape_named_to_positional` tuple[] branch the PermitSingle test never hits.
+#[test]
+fn permit2_permit_batch_typed_data_reshapes_tuple_array() {
+    use serde_json::Value;
+
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    const VC: &str = "0x000000000022d473030f116ddee9f6b43ac78ba3";
+    const WETH: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+    const USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const SPENDER: &str = "0x1111111111111111111111111111111111111111";
+
+    // NAMED PermitBatch message — `details` is an array of named PermitDetails.
+    let message = serde_json::json!({
+        "details": [
+            { "token": WETH, "amount": "10000000000000000", "expiration": 4600, "nonce": 1 },
+            { "token": USDC, "amount": "5000000", "expiration": 4600, "nonce": 2 }
+        ],
+        "spender": SPENDER,
+        "sigDeadline": 1600
+    });
+
+    let env =
+        harness::route::route_typed_data(1, VC, "PermitBatch", None, Some("Permit2"), &message);
+    assert_eq!(
+        env.get("ok").and_then(Value::as_bool),
+        Some(true),
+        "PermitBatch typed-data route did not succeed: {env}"
+    );
+    let body = env
+        .pointer("/data/actions/0/body")
+        .expect("route env carries data.actions[0].body");
+    assert_eq!(
+        body.get("domain").and_then(Value::as_str),
+        Some("multicall"),
+        "PermitBatch must fan out to a multicall body; got {body}"
+    );
+    let inner = body
+        .get("actions")
+        .and_then(Value::as_array)
+        .expect("multicall body carries actions[]");
+    assert_eq!(inner.len(), 2, "two batch entries expected; got {inner:?}");
+
+    // Each entry is a permit2_sign_allowance carrying ITS OWN token, in order.
+    for (idx, want_token) in [WETH, USDC].iter().enumerate() {
+        assert_eq!(
+            inner[idx].get("action").and_then(Value::as_str),
+            Some("permit2_sign_allowance"),
+            "batch[{idx}] must be permit2_sign_allowance; got {}",
+            inner[idx]
+        );
+        assert_eq!(
+            inner[idx]
+                .pointer("/token/key/address")
+                .and_then(Value::as_str),
+            Some(*want_token),
+            "batch[{idx}] token must reshape from details[{idx}] (tuple[] arm); got {}",
+            inner[idx]
+        );
+        assert_eq!(
+            inner[idx].get("spender").and_then(Value::as_str),
+            Some(SPENDER),
+            "batch[{idx}] spender must equal the signed message spender; got {}",
+            inner[idx]
+        );
+    }
+}
