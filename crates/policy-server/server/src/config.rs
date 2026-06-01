@@ -53,8 +53,7 @@ impl ServerConfig {
                 .map(str::to_owned)
                 .collect(),
             allow_private_network: env::var("CORS_ALLOW_PRIVATE_NETWORK")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(true),
+                .map_or(true, |v| v == "1" || v.eq_ignore_ascii_case("true")),
             database_url: env::var("DATABASE_URL").ok(),
             redis_url: env::var("REDIS_URL").ok(),
         }
