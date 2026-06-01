@@ -5,23 +5,9 @@
  */
 
 import { request } from "./client";
+import type { TxRow } from "./types";
 
-export interface TxRow {
-  id: number;
-  source: string; // "live" | "backfill"
-  status: string; // "predicted" | "pending" | "confirmed" | "failed" | "historical"
-  created_at: number;
-  signed_at: number | null;
-  confirmed_at: number | null;
-  action_domain: string;
-  action_kind: string;
-  submitter: string;
-  tx_hash: string | null;
-  predicted_verdict: string | null;
-  action: unknown;
-  predicted_delta: unknown | null;
-  realized_delta: unknown | null;
-}
+export type { TxRow };
 
 /** `GET /transactions?wallet=<addr>&limit=<n>` — recent tx log. */
 export async function listTransactions(

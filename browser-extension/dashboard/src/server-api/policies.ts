@@ -5,17 +5,9 @@
  */
 
 import { request } from "./client";
+import type { InstalledPolicy, PolicySeverity } from "./types";
 
-export interface InstalledPolicy {
-  id: number;
-  name: string;
-  description: string | null;
-  cedar_text: string;
-  severity: string; // "deny" | "warn" | "info"
-  enabled: boolean;
-  created_at: number;
-  updated_at: number;
-}
+export type { InstalledPolicy };
 
 /** `GET /policies` — every installed Cedar policy for the user. */
 export async function listPolicies(): Promise<InstalledPolicy[]> {
@@ -26,7 +18,7 @@ export interface CreatePolicyBody {
   name: string;
   description?: string | null;
   cedar_text: string;
-  severity: "deny" | "warn" | "info";
+  severity: PolicySeverity;
 }
 
 /** `POST /policies` — install a new Cedar policy. Returns the new id. */
@@ -43,7 +35,7 @@ export interface PatchPolicyBody {
   name?: string;
   description?: string | null;
   cedar_text?: string;
-  severity?: "deny" | "warn" | "info";
+  severity?: PolicySeverity;
   enabled?: boolean;
 }
 
