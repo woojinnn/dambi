@@ -73,6 +73,7 @@
 | Dune `executionCostCredits` / usage delta recorded | pending | |
 | Dune rows returned / selected tx hashes recorded | pending | |
 | representative real-tx corpus/golden entries committed or justified | pending | |
+| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
 
 ## P3 Develop Evidence
 
@@ -94,6 +95,7 @@
 | `npm run check:manifest` output recorded | pending | |
 | `npm run check:surface` output recorded | pending | |
 | v3-harness coverage/fuzz/corpus outputs recorded | pending | |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
 | `cargo test --workspace` output recorded | pending | |
 | wasm build output recorded if runtime/wasm/schema changed | pending | |
 | fmt/clippy/typecheck output recorded for changed crates/packages | pending | |

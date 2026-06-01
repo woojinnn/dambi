@@ -101,6 +101,8 @@ pub struct CorpusOutcome {
     pub got: String,
     /// Whether the expectation was met.
     pub matched: bool,
+    /// Number of field-level semantic assertions attached to this corpus entry.
+    pub expect_body_assertions: usize,
 }
 
 /// Run every `corpus.json` under `root`, returning per-entry outcomes.
@@ -108,9 +110,19 @@ pub struct CorpusOutcome {
 /// Installs the local adapter surface first (same thread — R1), then routes each
 /// transaction / signature.
 pub fn run_corpus(root: &Path) -> Result<Vec<CorpusOutcome>> {
+    run_corpus_filtered(root, None)
+}
+
+/// Run `corpus.json` files whose source path contains `source_filter`.
+///
+/// The filter is case-insensitive and matched against the path relative to
+/// `root` (for example, `curve-router-ng/corpus.json`). This gives landing
+/// gates a protocol-scoped corpus check without changing the corpus layout.
+pub fn run_corpus_filtered(root: &Path, source_filter: Option<&str>) -> Result<Vec<CorpusOutcome>> {
     // Install adapters on this thread so routing resolves.
     let _surface = adapters::load_and_install()?;
     let mut outcomes = Vec::new();
+    let source_filter = source_filter.map(str::to_ascii_lowercase);
     for file in find_corpus_files(root)? {
         let raw = fs::read_to_string(&file).with_context(|| format!("read {}", file.display()))?;
         let parsed: CorpusFile =
@@ -120,6 +132,11 @@ pub fn run_corpus(root: &Path) -> Result<Vec<CorpusOutcome>> {
             .unwrap_or(&file)
             .to_string_lossy()
             .into_owned();
+        if let Some(filter) = &source_filter {
+            if !source.to_ascii_lowercase().contains(filter) {
+                continue;
+            }
+        }
         for tx in parsed.transactions {
             outcomes.push(run_tx(&tx, &source));
         }
@@ -173,6 +190,7 @@ fn run_tx(tx: &CorpusTx, source: &str) -> CorpusOutcome {
                 expect: tx.expect.clone(),
                 got: "no rpc params".to_owned(),
                 matched: false,
+                expect_body_assertions: tx.expect_body.len(),
             };
         };
         let selector = if p.data.len() >= 10 {
@@ -188,6 +206,7 @@ fn run_tx(tx: &CorpusTx, source: &str) -> CorpusOutcome {
             expect: tx.expect.clone(),
             got: "entry has neither rpc nor typed_data".to_owned(),
             matched: false,
+            expect_body_assertions: tx.expect_body.len(),
         };
     };
 
@@ -199,6 +218,7 @@ fn run_tx(tx: &CorpusTx, source: &str) -> CorpusOutcome {
         expect: tx.expect.clone(),
         got,
         matched,
+        expect_body_assertions: tx.expect_body.len(),
     }
 }
 

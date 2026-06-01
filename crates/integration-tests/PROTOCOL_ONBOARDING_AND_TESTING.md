@@ -168,7 +168,7 @@ raw Tx { chain, to, selector, calldata, value }
 5. **중요 구간은 Claude Code 2nd-opinion 을 쓴다.** P0 contract/token discovery 는 필수. 그 외에도 (a) 새 domain/action/live_field 를 추가하는 Tier3 설계, (b) 권한 grant·fund movement selector 매핑, (c) P2 synthetic edge-case 설계, (d) P2 real-tx corpus verdict 분류, (e) 반복되는 hard decoder gap 의 root-cause triage 는 Claude Code 또는 독립 sub-agent 에 같은 입력을 주고 결과를 합친다.
 6. **sub-agent 프롬프트는 self-contained·디테일하게.** sub-agent 는 **이 세션의 컨텍스트가 없다** → 프롬프트에 (a) repo·branch·cwd·worktree 경로 (b) 현재 목표/phase 와 non-goal (c) 읽을 인스트럭션 문서 (d) 정확한 대상 파일·심볼·좌표 + **미러할 기존 선례**(예: "`lending::supply` 전 경로 복제") (e) 정확한 산출물·출력 포맷·통과할 게이트 (f) 가드레일(explicit-stage·1차출처·무관 churn 금지·수정 권한 범위)을 **전부 embed**. 면밀할수록 rework 가 준다(fresh-PC self-contained 원칙과 동형).
 7. **sub-agent 결과는 candidate-only 다.** 메인 세션이 반드시 (a) 실제 코드/문서/1차 출처와 대조, (b) Codex 결과와 sub-agent 결과의 diff 정리, (c) 불일치 항목의 disposition(accept/drop/defer + 이유), (d) build/test gate 로 검증을 수행한다. sub-agent 산출물을 검증 없이 복사하거나 커밋하지 않는다.
-8. **증거 ledger 없으면 완료가 아니다.** `crates/integration-tests/ONBOARDING_EVIDENCE_TEMPLATE.md` 를 `crates/integration-tests/onboarding/<protocol>/evidence.md` 로 복사해 채운다. P0/P1/P2/P3/P4 각 mandatory row 가 `done` 또는 구체적 `blocked` 가 아니면 해당 phase 를 완료로 말하지 않는다. 완료 선언 전 `cargo run -p policy-engine-integration-tests --bin check-onboarding-evidence -- <protocol> --phase <p0|p1|p2|p3|p4|all>` 을 실행해 대상 phase gate 가 PASS 해야 한다. 사용자가 "했냐?"라고 물었을 때 "안 했습니다"가 아니라, ledger 의 명령·결과·카운트·blocker 로 답해야 한다.
+8. **증거 ledger 없으면 완료가 아니다.** `crates/integration-tests/ONBOARDING_EVIDENCE_TEMPLATE.md` 를 `crates/integration-tests/onboarding/<protocol>/evidence.md` 로 복사해 채운다. P0/P1/P2/P3/P4 각 mandatory row 가 `done` 또는 구체적 `blocked` 가 아니면 해당 phase 를 완료로 말하지 않는다. 템플릿 row 를 삭제해서 통과시키면 안 된다; `check-onboarding-evidence` 는 템플릿의 필수 row 존재 여부도 검사한다. 완료 선언 전 `cargo run -p policy-engine-integration-tests --bin check-onboarding-evidence -- <protocol> --phase <p0|p1|p2|p3|p4|all>` 을 실행해 대상 phase gate 가 PASS 해야 한다. 사용자가 "했냐?"라고 물었을 때 "안 했습니다"가 아니라, ledger 의 명령·결과·카운트·blocker 로 답해야 한다.
 
 ### 2.1a 외부 데이터 도구 요구사항 (P2 real-tx)
 
@@ -674,10 +674,11 @@ cargo build -p policy-engine-integration-tests --bin check-onboarding-evidence
 v3-harness fuzz [--iterations N] [--seed S] [--json PATH]   # 합성 전략별 sweep + 리포트
 v3-harness coverage                                          # strategy별 callkey 수 + deferred
 v3-harness replay --callkey <chain>__<addr>__<selector> [--seed S]   # 단건 재현
-v3-harness corpus [--root DIR]                              # 실거래 corpus replay + expect 체크
+v3-harness corpus [--root DIR] [--filter <protocol>] [--require-expect-body]
+                                                            # 실거래 corpus replay + expect/semantic pin 체크
 v3-harness import-etherscan|import-dune|import <export.json> [--chain N] [--out PATH]  # parse-only
 ```
-seed 기본 `0x5C09EBA1`. corpus root 기본 `data/golden/v3-decode/`.
+seed 기본 `0x5C09EBA1`. corpus root 기본 `data/golden/v3-decode/`. `--filter` 는 source path 에 대한 case-insensitive substring 이다(`curve` → `curve-router-ng/corpus.json` 등). 새 프로토콜 landing 은 `--filter <protocol> --require-expect-body` 를 반드시 추가해, 전체 corpus green 이 해당 프로토콜의 semantic field pin 부족을 가리지 못하게 한다.
 
 **Evidence gate CLI** (`src/bin/check_onboarding_evidence.rs`):
 ```bash
@@ -890,6 +891,7 @@ cd registryV2 && npx tsx scripts/build-index.ts && cd ..
 
 # 2) corpus expect flip (해결된 gap: error→pass) 후 회귀
 target/debug/v3-harness corpus
+target/debug/v3-harness corpus --filter <protocol> --require-expect-body
 cargo test -p policy-engine-integration-tests --test v3_decode_harness
 cargo test --workspace                 # 0 fail
 
@@ -919,7 +921,7 @@ target/debug/v3-harness fuzz --iterations 5000 --json /tmp/v3-report.json
 # 커버리지(strategy 분포)
 target/debug/v3-harness coverage
 # 실거래 corpus
-target/debug/v3-harness corpus [--root DIR]
+target/debug/v3-harness corpus [--root DIR] [--filter <protocol>] [--require-expect-body]
 # 단건 재현
 target/debug/v3-harness replay --callkey 1__0x<addr>__0x<sel> --seed 0x5C09EBA1
 # import (parse-only)
