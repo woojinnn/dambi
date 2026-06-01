@@ -95,28 +95,46 @@ export interface VerdictListOpts {
 }
 
 // ---------- read endpoints (bridge-routed) ----------
+//
+// Browser-page context (no extension installed) → these calls would hang
+// for the bridge default 10s before timing out, leaving every verdict
+// view stuck on "불러오는 중…". We short-circuit with a 800 ms probe:
+// if the bridge can't answer in that window, return a safe empty value
+// so React Query lands on a clean empty state instead of an error.
+const BRIDGE_PROBE_MS = 800;
+async function safeBridge<T>(payload: unknown, fallback: T): Promise<T> {
+  try {
+    return await sendToExtension<T>(payload, BRIDGE_PROBE_MS);
+  } catch {
+    return fallback;
+  }
+}
 
 /** Filtered list. Default newest-first; the SW applies `opts.limit`. */
 export async function listAuditVerdicts(
   opts: VerdictListOpts = {},
 ): Promise<VerdictDto[]> {
-  return sendToExtension<VerdictDto[]>({ type: "verdicts:list", opts });
+  return safeBridge<VerdictDto[]>({ type: "verdicts:list", opts }, []);
 }
 
 /** Pass/warn/fail summary under the same filter as `listAuditVerdicts`. */
 export async function getAuditCounts(
   opts: VerdictListOpts = {},
 ): Promise<{ pass: number; warn: number; fail: number }> {
-  return sendToExtension<{ pass: number; warn: number; fail: number }>({
-    type: "verdicts:count",
-    opts,
-  });
+  return safeBridge<{ pass: number; warn: number; fail: number }>(
+    { type: "verdicts:count", opts },
+    { pass: 0, warn: 0, fail: 0 },
+  );
 }
 
 /**
  * Fetch the filtered slice as CSV and wrap in a Blob. Callers create an
  * object URL + anchor download. (Replaces the old `auditExportUrl`, which
  * returned a server route the page opened directly.)
+ *
+ * Unlike the list/count calls, this one stays on the long 10 s timeout
+ * and surfaces failures — the user explicitly clicked "Export CSV", so
+ * silent fallback to an empty file would be confusing.
  */
 export async function exportAuditCsv(
   opts: VerdictListOpts = {},
@@ -132,20 +150,20 @@ export async function exportAuditCsv(
 export async function listHistoryVerdicts(
   opts: VerdictListOpts = {},
 ): Promise<VerdictDto[]> {
-  return sendToExtension<VerdictDto[]>({
-    type: "verdicts:list",
-    opts: { ...opts, before: opts.before },
-  });
+  return safeBridge<VerdictDto[]>(
+    { type: "verdicts:list", opts: { ...opts, before: opts.before } },
+    [],
+  );
 }
 
 /** Recent stream for the monitoring page. Defaults to limit 20. */
 export async function listFindings(
   opts: VerdictListOpts = {},
 ): Promise<VerdictDto[]> {
-  return sendToExtension<VerdictDto[]>({
-    type: "verdicts:list",
-    opts: { ...opts, limit: opts.limit ?? 20 },
-  });
+  return safeBridge<VerdictDto[]>(
+    { type: "verdicts:list", opts: { ...opts, limit: opts.limit ?? 20 } },
+    [],
+  );
 }
 
 // ---------- write endpoint ----------
