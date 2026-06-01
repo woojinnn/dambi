@@ -613,6 +613,7 @@ pub fn build_action_body(
                             action.as_deref(),
                             field_name,
                             src_payload,
+                            None,
                         );
                         live_obj.insert(field_name.clone(), wrapped);
                     }
@@ -620,12 +621,14 @@ pub fn build_action_body(
                 }
                 LiveInputLayout::Inline => {
                     for (field_name, src_payload) in map {
+                        let default_override = flat.get(field_name);
                         let wrapped = wrap_live_field(
                             ctx,
                             domain.as_deref(),
                             action.as_deref(),
                             field_name,
                             src_payload,
+                            default_override,
                         );
                         flat.insert(field_name.clone(), wrapped);
                     }
@@ -802,11 +805,12 @@ fn wrap_live_field(
     action: Option<&str>,
     field_name: &str,
     src_payload: &JsonValue,
+    default_override: Option<&JsonValue>,
 ) -> JsonValue {
     let mut out = JsonMap::new();
     out.insert(
         "value".into(),
-        live_input_default(domain, action, field_name),
+        live_input_default_with_override(domain, action, field_name, default_override),
     );
     if let Some(obj) = src_payload.as_object() {
         if let Some(src) = obj.get("source") {
@@ -825,6 +829,39 @@ fn wrap_live_field(
         JsonValue::Number(ctx.submitted_at.as_unix().into()),
     );
     JsonValue::Object(out)
+}
+
+fn live_input_default_with_override(
+    domain: Option<&str>,
+    action: Option<&str>,
+    field_name: &str,
+    default_override: Option<&JsonValue>,
+) -> JsonValue {
+    let Some(value) = default_override else {
+        return live_input_default(domain, action, field_name);
+    };
+    match (domain, action, field_name) {
+        (Some("token"), Some("permit2_sign_allowance"), "nonce") => {
+            permit2_nonce_tuple_default(value)
+                .unwrap_or_else(|| live_input_default(domain, action, field_name))
+        }
+        _ => value.clone(),
+    }
+}
+
+fn permit2_nonce_tuple_default(value: &JsonValue) -> Option<JsonValue> {
+    let nonce = u256_from_json(value)?;
+    let word = nonce / U256::from(256u64);
+    let bit = nonce.to_be_bytes::<32>()[31];
+    Some(serde_json::json!([word.to_string(), bit]))
+}
+
+fn u256_from_json(value: &JsonValue) -> Option<U256> {
+    match value {
+        JsonValue::String(s) => U256::from_str_radix(s, 10).ok(),
+        JsonValue::Number(n) => U256::from_str_radix(&n.to_string(), 10).ok(),
+        _ => None,
+    }
 }
 
 /// Deserializable zero skeleton for `simulation_reducer::action::lending::ReserveState`.

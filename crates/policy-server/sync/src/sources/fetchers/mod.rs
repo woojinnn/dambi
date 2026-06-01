@@ -16,4 +16,4 @@ pub use decoder::DecoderRegistry;
 pub use onchain::{OnchainCall, OnchainOutcome, OnchainViewFetcher};
 pub use oracle::{ChainlinkFeed, ChainlinkFeedRegistry, ChainlinkFetcher};
 pub use registry::RegistryFetcher;
-pub use venue::HyperliquidFetcher;
+pub use venue::{HyperliquidFetcher, UniswapFetcher};

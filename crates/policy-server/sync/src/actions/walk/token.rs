@@ -71,7 +71,9 @@ pub(super) fn apply(ta: &mut TokenAction, slot: &ActionSlot, value: Value, now: 
             }
         }
         (TokenAction::Permit2SignAllowance(p), ActionSlot::TokenPermit2SignNonce) => {
-            // Permit2 nonce 는 (word: U256, bit: u8). value 가 JSON [word, bit] 가정.
+            // Permit2 nonce 는 (word: U256, bit: u8). A raw nonceBitmap return
+            // value is *not* a replacement nonce and must be normalized by the
+            // orchestrator before it reaches apply.
             if let Value::Array(arr) = &value {
                 if arr.len() == 2 {
                     let word = value_to_u256(&arr[0]);
@@ -80,9 +82,6 @@ pub(super) fn apply(ta: &mut TokenAction, slot: &ActionSlot, value: Value, now: 
                         set_field(&mut p.nonce, (w, b), now);
                     }
                 }
-            } else if let Some(u) = value_to_u256(&value) {
-                // 단일 숫자만 받으면 word 만, bit=0
-                set_field(&mut p.nonce, (u, 0u8), now);
             }
         }
         _ => {}
