@@ -420,7 +420,7 @@ describe("build-index by-typed-data emission", () => {
 });
 
 describe("build-index token source expansion", () => {
-  it("expands tokens:erc20 into concrete callkeys and strips source-only fields", () => {
+  it("expands tokens:erc20 into concrete callkeys backed by a shared bundle ref", () => {
     const root = track(scaffold({ "transfer.json": erc20TransferManifest() }));
     writeToken(root, 1, ERC20_TOKEN, "erc20", { symbol: "T20" });
     writeToken(root, 1, ERC721_TOKEN, "erc721", { symbol: "NFT" });
@@ -433,9 +433,14 @@ describe("build-index token source expansion", () => {
     const entry = JSON.parse(
       readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN}__0xa9059cbb.json`), "utf8"),
     );
-    expect(entry.bundle.match.chain_to_addresses).toEqual({ "1": [ERC20_TOKEN] });
-    expect("chain_to_addresses_source" in entry.bundle.match).toBe(false);
-    expect("chain_ids" in entry.bundle.match).toBe(false);
+    expect(entry.schema_version).toBe("3-ref");
+    expect(entry.bundle_ref).toMatch(/^bundles\/0x[0-9a-f]{64}\.json$/);
+    expect(entry.context_ref).toBeUndefined();
+    expect(entry.bundle).toBeUndefined();
+    const bundle = JSON.parse(readFileSync(join(root, entry.bundle_ref), "utf8"));
+    expect(bundle.match.chain_to_addresses).toEqual({ "1": [ERC20_TOKEN] });
+    expect("chain_to_addresses_source" in bundle.match).toBe(false);
+    expect("chain_ids" in bundle.match).toBe(false);
   });
 
   it("rejects tokens:erc20 when the requested chain has no token directory", () => {
@@ -459,7 +464,7 @@ describe("build-index token source expansion", () => {
 });
 
 describe("build-index protocol source materialization", () => {
-  it("materializes one sourced Curve pool into a per-address bundle with source placeholders substituted", () => {
+  it("emits a small route entry plus template/context refs for a sourced Curve pool", () => {
     const pool = "0x3333333333333333333333333333333333333333";
     const coin0 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const coin1 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -541,15 +546,31 @@ describe("build-index protocol source materialization", () => {
     const entry = JSON.parse(
       readFileSync(join(callkeyDir(root), `1__${pool}__0x3df02124.json`), "utf8"),
     );
-    expect(entry.bundle.id).toMatch(
+    expect(entry.schema_version).toBe("3-ref");
+    expect(entry.bundle_id).toMatch(
       /^curve\/stableswap-ng\/source\/test\/exchange\/1-factory-stable-ng-0-33333333@1\.0\.0$/,
     );
-    expect(entry.bundle.match.chain_to_addresses).toEqual({ "1": [pool] });
-    expect("chain_to_addresses_source" in entry.bundle.match).toBe(false);
-    expect("source_materialize" in entry.bundle).toBe(false);
-    expect(entry.bundle.emit.body.token_in.$cases).toEqual({
-      "0": coin0,
-      "1": coin1,
+    expect(entry.bundle_ref).toMatch(/^bundles\/0x[0-9a-f]{64}\.json$/);
+    expect(entry.context_ref).toBe(
+      `contexts/curve/factory_stable_ng_2coin_mainnet/1/${pool}.json`,
+    );
+    expect(entry.bundle).toBeUndefined();
+
+    const template = JSON.parse(readFileSync(join(root, entry.bundle_ref), "utf8"));
+    expect(template.match.chain_to_addresses_source).toBe(
+      "curve:factory_stable_ng_2coin_mainnet",
+    );
+    expect(template.source_materialize).toEqual({ kind: "per_address_context" });
+    expect(template.emit.body.token_in.$cases).toEqual({
+      "0": "$source.coins.0",
+      "1": "$source.coins.1",
     });
+
+    const context = JSON.parse(readFileSync(join(root, entry.context_ref), "utf8"));
+    expect(context.schema_version).toBe("3-source-context");
+    expect(context.chain_id).toBe(1);
+    expect(context.address).toBe(pool);
+    expect(context.context.coins).toEqual([coin0, coin1]);
+    expect(context.context.id_suffix).toBe("1-factory-stable-ng-0-33333333");
   });
 });

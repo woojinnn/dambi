@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// The `emit.strategy` of a bundle — selects the WASM builder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -218,6 +218,175 @@ fn parse_callkey_stem(stem: &str) -> Option<(u64, String, String)> {
     Some((chain, to, selector))
 }
 
+fn read_registry_json(registry_root: &Path, object_ref: &str) -> Result<Value> {
+    let rel = object_ref.trim_start_matches('/');
+    if rel.contains("..") {
+        bail!("generated registry ref contains traversal: {object_ref}");
+    }
+    let path = registry_root.join(rel);
+    let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))
+}
+
+fn lookup_source_path(context: &Value, path: &str) -> Option<Value> {
+    let mut current = context;
+    for segment in path.split('.') {
+        if let Some(array) = current.as_array() {
+            let index = segment.parse::<usize>().ok()?;
+            current = array.get(index)?;
+        } else if let Some(object) = current.as_object() {
+            current = object.get(segment)?;
+        } else {
+            return None;
+        }
+    }
+    Some(current.clone())
+}
+
+fn substitute_source_placeholders(value: &Value, context: &Value) -> Result<Value> {
+    match value {
+        Value::String(s) if s.starts_with("$source.") => {
+            lookup_source_path(context, s.trim_start_matches("$source."))
+                .ok_or_else(|| anyhow!("unknown source placeholder {s:?}"))
+        }
+        Value::Array(items) => items
+            .iter()
+            .map(|item| substitute_source_placeholders(item, context))
+            .collect::<Result<Vec<_>>>()
+            .map(Value::Array),
+        Value::Object(object) => {
+            let mut out = Map::new();
+            for (key, nested) in object {
+                out.insert(
+                    key.clone(),
+                    substitute_source_placeholders(nested, context)?,
+                );
+            }
+            Ok(Value::Object(out))
+        }
+        _ => Ok(value.clone()),
+    }
+}
+
+fn sanitize_id_suffix(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_dash = false;
+    let mut last_was_slash = false;
+    for ch in value.to_ascii_lowercase().chars() {
+        let mapped = if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            ch
+        } else if ch == '/' {
+            '/'
+        } else {
+            '-'
+        };
+        if mapped == '-' {
+            if last_was_dash {
+                continue;
+            }
+            last_was_dash = true;
+            last_was_slash = false;
+        } else if mapped == '/' {
+            if last_was_slash {
+                continue;
+            }
+            last_was_slash = true;
+            last_was_dash = false;
+        } else {
+            last_was_dash = false;
+            last_was_slash = false;
+        }
+        out.push(mapped);
+    }
+    out.trim_matches('-').to_owned()
+}
+
+fn append_id_suffix(id: &str, suffix: &str) -> Result<String> {
+    let clean = sanitize_id_suffix(suffix);
+    if clean.is_empty() {
+        bail!("source materialization produced empty id suffix for {id}");
+    }
+    if let Some(at) = id.rfind('@') {
+        Ok(format!("{}/{clean}{}", &id[..at], &id[at..]))
+    } else {
+        Ok(format!("{id}/{clean}"))
+    }
+}
+
+fn materialize_ref_bundle(registry_root: &Path, entry: &Value) -> Result<Value> {
+    let bundle_ref = entry
+        .get("bundle_ref")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("ref entry missing bundle_ref"))?;
+    let template = read_registry_json(registry_root, bundle_ref)?;
+    let Some(context_ref) = entry.get("context_ref").and_then(Value::as_str) else {
+        return Ok(template);
+    };
+    let context_doc = read_registry_json(registry_root, context_ref)?;
+    let context = context_doc
+        .get("context")
+        .ok_or_else(|| anyhow!("source context document missing context"))?;
+    let substituted = substitute_source_placeholders(&template, context)?;
+    let object = substituted
+        .as_object()
+        .ok_or_else(|| anyhow!("source-substituted bundle is not an object"))?;
+    let selector = object
+        .get("match")
+        .and_then(|m| m.get("selector"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("source-substituted bundle missing match.selector"))?;
+    let id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("source-substituted bundle missing id"))?;
+    let id_suffix = context
+        .get("id_suffix")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("source context missing id_suffix"))?;
+    let chain_id = context_doc
+        .get("chain_id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| anyhow!("source context missing chain_id"))?;
+    let address = context_doc
+        .get("address")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("source context missing address"))?
+        .to_ascii_lowercase();
+
+    let mut materialized = object.clone();
+    materialized.remove("source_materialize");
+    materialized.insert(
+        "id".to_owned(),
+        Value::String(append_id_suffix(id, id_suffix)?),
+    );
+    let mut chain_map = Map::new();
+    chain_map.insert(
+        chain_id.to_string(),
+        Value::Array(vec![Value::String(address)]),
+    );
+    materialized.insert(
+        "match".to_owned(),
+        serde_json::json!({
+            "selector": selector,
+            "chain_to_addresses": Value::Object(chain_map),
+        }),
+    );
+    Ok(Value::Object(materialized))
+}
+
+fn bundle_from_index_entry(index_root: &Path, entry: &Value, path: &Path) -> Result<Value> {
+    if let Some(bundle) = entry.get("bundle") {
+        return Ok(bundle.clone());
+    }
+    if entry.get("schema_version").and_then(Value::as_str) == Some("3-ref") {
+        let registry_root = index_root
+            .parent()
+            .ok_or_else(|| anyhow!("registry index root has no parent"))?;
+        return materialize_ref_bundle(registry_root, entry);
+    }
+    bail!("no `bundle` field in {}", path.display())
+}
+
 /// Load every local index entry, install unique bundles into the WASM
 /// thread-local, and build the routable surface.
 ///
@@ -237,9 +406,7 @@ pub fn load_and_install() -> Result<RoutableSurface> {
         let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let entry: Value =
             serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
-        let bundle = entry
-            .get("bundle")
-            .ok_or_else(|| anyhow!("no `bundle` field in {}", path.display()))?;
+        let bundle = bundle_from_index_entry(&index_root, &entry, path)?;
         let bundle_id = bundle
             .get("id")
             .and_then(Value::as_str)
@@ -255,7 +422,7 @@ pub fn load_and_install() -> Result<RoutableSurface> {
         bundles
             .entry(bundle_id.clone())
             .or_insert_with(|| bundle.clone());
-        parsed_calls.push((bundle_id, chain, to, selector, bundle.clone()));
+        parsed_calls.push((bundle_id, chain, to, selector, bundle));
     }
 
     // Pass 2: install each unique bundle exactly once.
@@ -312,9 +479,7 @@ pub fn load_and_install() -> Result<RoutableSurface> {
                 fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
             let entry: Value =
                 serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
-            let Some(bundle) = entry.get("bundle") else {
-                continue;
-            };
+            let bundle = bundle_from_index_entry(&index_root, &entry, &path)?;
             let bundle_id = bundle
                 .get("id")
                 .and_then(Value::as_str)
@@ -360,7 +525,7 @@ pub fn load_and_install() -> Result<RoutableSurface> {
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned),
                 bundle_id,
-                strategy: strategy_of(bundle),
+                strategy: strategy_of(&bundle),
                 types: td
                     .and_then(|t| t.get("types"))
                     .cloned()

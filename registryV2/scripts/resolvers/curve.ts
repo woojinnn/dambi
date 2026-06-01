@@ -10,7 +10,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import type { Hex, ProtocolResolvedAddress, ProtocolResolver, ResolverOpts } from "./types.ts";
+import type {
+  Hex,
+  ProtocolResolvedAddress,
+  ProtocolResolver,
+  ProtocolSourceKind,
+  ResolverOpts,
+} from "./types.ts";
 
 const REGISTRY_ROOT = process.env.BUILD_INDEX_REGISTRY_ROOT
   ? resolve(process.env.BUILD_INDEX_REGISTRY_ROOT)
@@ -19,6 +25,24 @@ const POOL_UNIVERSE_PATH = join(REGISTRY_ROOT, "surface", "curve", "_pool_univer
 const GAUGE_UNIVERSE_PATH = join(REGISTRY_ROOT, "surface", "curve", "_gauge_universe.json");
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const ZERO_ADDRESS_RE = /^0x0{40}$/i;
+const STABLE_NG_COIN_COUNTS = [2, 3, 4, 5, 6, 7, 8] as const;
+const BASE_STABLE_NG_COIN_COUNTS = [2, 3, 4, 5, 6, 8] as const;
+type StableNgCoinCount = (typeof STABLE_NG_COIN_COUNTS)[number];
+type StableNgChain = "mainnet" | "base";
+
+interface StableNgSourceSpec {
+  readonly source: ProtocolSourceKind;
+  readonly expectedChainId: 1 | 8453;
+  readonly coinCount: StableNgCoinCount;
+}
+
+interface CurvePoolSourceSpec {
+  readonly source: ProtocolSourceKind;
+  readonly expectedChainId: 1 | 8453;
+  readonly family: string;
+  readonly curveIdPrefix?: string;
+  readonly coinCount: number;
+}
 
 interface CurvePoolCandidate {
   chainId?: number;
@@ -113,33 +137,45 @@ function slugify(value: string): string {
     .slice(0, 64);
 }
 
-function stableNg2CoinEntries(chainId: number): ProtocolResolvedAddress[] {
+function stableNgSourceKind(coinCount: StableNgCoinCount, chain: StableNgChain): ProtocolSourceKind {
+  return `curve:factory_stable_ng_${coinCount}coin_${chain}` as ProtocolSourceKind;
+}
+
+function poolEntries(
+  chainId: number,
+  family: string,
+  coinCount: number,
+  curveIdPrefix?: string,
+): ProtocolResolvedAddress[] {
   const out: ProtocolResolvedAddress[] = [];
   for (const candidate of loadPoolUniverse()) {
     const candidateChain = candidate.chainId ?? candidate.chain_id;
     if (candidateChain !== chainId) continue;
     if (candidate.decision && candidate.decision !== "cover") continue;
-    if (!(candidate.families ?? []).includes("factory-stable-ng")) continue;
+    const curveId = candidate.curve_id ?? candidateAddress(candidate);
+    const familyMatches = (candidate.families ?? []).includes(family);
+    const prefixMatches = curveIdPrefix ? String(curveId).startsWith(curveIdPrefix) : false;
+    if (curveIdPrefix ? !prefixMatches : !familyMatches) continue;
     const address = candidateAddress(candidate);
     if (!address) continue;
     const coins = activeCoins(candidate);
-    if (coins.length !== 2) continue;
-    const curveId = candidate.curve_id ?? address;
-    const name = candidate.name ?? curveId;
-    const symbol = candidate.symbol ?? curveId;
+    if (coins.length !== coinCount) continue;
+    const resolvedCurveId = candidate.curve_id ?? address;
+    const name = candidate.name ?? resolvedCurveId;
+    const symbol = candidate.symbol ?? resolvedCurveId;
     const lpToken = (candidate.lpTokenAddress ?? candidate.lp_token_address ?? address).toLowerCase();
     if (!ADDRESS_RE.test(lpToken) || ZERO_ADDRESS_RE.test(lpToken)) continue;
-    const suffix = `${chainId}-${slugify(curveId)}-${address.slice(2, 10)}`;
+    const suffix = `${chainId}-${slugify(resolvedCurveId)}-${address.slice(2, 10)}`;
     out.push({
       address,
       id_suffix: suffix,
       context: {
-        curve_id: curveId,
+        curve_id: resolvedCurveId,
         pool_name: name,
         symbol,
         lp_token: lpToken,
         coins,
-        n_coins: 2,
+        n_coins: coinCount,
       },
     });
   }
@@ -153,32 +189,122 @@ export const gaugesResolver: ProtocolResolver = {
   },
 };
 
-function makeStableNg2CoinResolver(
-  source: "curve:factory_stable_ng_2coin_mainnet" | "curve:factory_stable_ng_2coin_base",
-  expectedChainId: 1 | 8453,
-): ProtocolResolver {
+function makeStableNgResolver(spec: StableNgSourceSpec): ProtocolResolver {
+  return makePoolResolver({
+    source: spec.source,
+    expectedChainId: spec.expectedChainId,
+    family: "factory-stable-ng",
+    coinCount: spec.coinCount,
+  });
+}
+
+function makePoolResolver(spec: CurvePoolSourceSpec): ProtocolResolver {
   return {
-    source,
+    source: spec.source,
     async resolve(chainId: number, _opts: ResolverOpts): Promise<Hex[]> {
-      if (chainId !== expectedChainId) return [];
-      return stableNg2CoinEntries(chainId).map((entry) => entry.address);
+      if (chainId !== spec.expectedChainId) return [];
+      return poolEntries(chainId, spec.family, spec.coinCount, spec.curveIdPrefix).map(
+        (entry) => entry.address,
+      );
     },
     async resolveWithContext(
       chainId: number,
       _opts: ResolverOpts,
     ): Promise<ProtocolResolvedAddress[]> {
-      if (chainId !== expectedChainId) return [];
-      return stableNg2CoinEntries(chainId);
+      if (chainId !== spec.expectedChainId) return [];
+      return poolEntries(chainId, spec.family, spec.coinCount, spec.curveIdPrefix);
     },
   };
 }
 
-export const stableNg2CoinMainnetResolver = makeStableNg2CoinResolver(
-  "curve:factory_stable_ng_2coin_mainnet",
-  1,
-);
+export const stableNgResolvers: ProtocolResolver[] = [
+  ...STABLE_NG_COIN_COUNTS.map((coinCount) =>
+    makeStableNgResolver({
+      source: stableNgSourceKind(coinCount, "mainnet"),
+      expectedChainId: 1,
+      coinCount,
+    }),
+  ),
+  ...BASE_STABLE_NG_COIN_COUNTS.map((coinCount) =>
+    makeStableNgResolver({
+      source: stableNgSourceKind(coinCount, "base"),
+      expectedChainId: 8453,
+      coinCount,
+    }),
+  ),
+];
 
-export const stableNg2CoinBaseResolver = makeStableNg2CoinResolver(
-  "curve:factory_stable_ng_2coin_base",
-  8453,
-);
+export const factoryV2Resolvers: ProtocolResolver[] = [
+  ...([2, 3, 4] as const).flatMap((coinCount) => [
+    makePoolResolver({
+      source: `curve:factory_v2_${coinCount}coin_mainnet` as ProtocolSourceKind,
+      expectedChainId: 1,
+      family: "factory",
+      curveIdPrefix: "factory-v2-",
+      coinCount,
+    }),
+    makePoolResolver({
+      source: `curve:factory_v2_${coinCount}coin_base` as ProtocolSourceKind,
+      expectedChainId: 8453,
+      family: "factory",
+      curveIdPrefix: "factory-v2-",
+      coinCount,
+    }),
+  ]),
+];
+
+export const factoryCrvusdResolver = makePoolResolver({
+  source: "curve:factory_crvusd_2coin_mainnet",
+  expectedChainId: 1,
+  family: "factory-crvusd",
+  curveIdPrefix: "factory-crvusd-",
+  coinCount: 2,
+});
+
+export const factoryCryptoResolver = makePoolResolver({
+  source: "curve:factory_crypto_mainnet",
+  expectedChainId: 1,
+  family: "factory-crypto",
+  curveIdPrefix: "factory-crypto-",
+  coinCount: 2,
+});
+
+export const factoryCryptoBaseResolver = makePoolResolver({
+  source: "curve:factory_crypto_base",
+  expectedChainId: 8453,
+  family: "factory-crypto",
+  curveIdPrefix: "factory-crypto-",
+  coinCount: 2,
+});
+
+export const factoryTricryptoResolver = makePoolResolver({
+  source: "curve:factory_tricrypto_mainnet",
+  expectedChainId: 1,
+  family: "factory-tricrypto",
+  curveIdPrefix: "factory-tricrypto-",
+  coinCount: 3,
+});
+
+export const factoryTricryptoBaseResolver = makePoolResolver({
+  source: "curve:factory_tricrypto_base",
+  expectedChainId: 8453,
+  family: "factory-tricrypto",
+  curveIdPrefix: "factory-tricrypto-",
+  coinCount: 3,
+});
+
+export const factoryTwocryptoResolver = makePoolResolver({
+  source: "curve:factory_twocrypto_mainnet",
+  expectedChainId: 1,
+  family: "factory-twocrypto",
+  curveIdPrefix: "factory-twocrypto-",
+  coinCount: 2,
+});
+
+export const factoryTwocryptoBaseResolver = makePoolResolver({
+  source: "curve:factory_twocrypto_base",
+  expectedChainId: 8453,
+  family: "factory-twocrypto",
+  curveIdPrefix: "factory-twocrypto-",
+  coinCount: 2,
+});

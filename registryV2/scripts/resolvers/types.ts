@@ -30,8 +30,32 @@ export type ProtocolSourceKind =
   | "aave_v3:variable_debts"
   | "aave_v3:stable_debts"
   | "curve:gauges"
+  | "curve:factory_crvusd_2coin_mainnet"
+  | "curve:factory_crypto_base"
+  | "curve:factory_crypto_mainnet"
+  | "curve:factory_v2_2coin_base"
+  | "curve:factory_v2_2coin_mainnet"
+  | "curve:factory_v2_3coin_base"
+  | "curve:factory_v2_3coin_mainnet"
+  | "curve:factory_v2_4coin_base"
+  | "curve:factory_v2_4coin_mainnet"
   | "curve:factory_stable_ng_2coin_mainnet"
-  | "curve:factory_stable_ng_2coin_base";
+  | "curve:factory_stable_ng_3coin_mainnet"
+  | "curve:factory_stable_ng_4coin_mainnet"
+  | "curve:factory_stable_ng_5coin_mainnet"
+  | "curve:factory_stable_ng_6coin_mainnet"
+  | "curve:factory_stable_ng_7coin_mainnet"
+  | "curve:factory_stable_ng_8coin_mainnet"
+  | "curve:factory_stable_ng_2coin_base"
+  | "curve:factory_stable_ng_3coin_base"
+  | "curve:factory_stable_ng_4coin_base"
+  | "curve:factory_stable_ng_5coin_base"
+  | "curve:factory_stable_ng_6coin_base"
+  | "curve:factory_stable_ng_8coin_base"
+  | "curve:factory_tricrypto_base"
+  | "curve:factory_tricrypto_mainnet"
+  | "curve:factory_twocrypto_base"
+  | "curve:factory_twocrypto_mainnet";
 
 /** A single resolver entry — one source kind → one async address fetcher. */
 export interface ProtocolResolver {

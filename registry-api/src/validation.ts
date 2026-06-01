@@ -17,10 +17,13 @@
 const ADDRESS_LC = "0x[0-9a-f]{40}";
 const SELECTOR_LC = "0x[0-9a-f]{8}";
 const CHAIN_ID = "[1-9][0-9]*";
+const SHA256_LC = "0x[0-9a-f]{64}";
+const SAFE_SEGMENT = "[a-z0-9._-]+";
 
 const CALL_KEY_RE = new RegExp(`^${CHAIN_ID}__${ADDRESS_LC}__${SELECTOR_LC}$`);
 const CHAIN_RE = new RegExp(`^${CHAIN_ID}$`);
 const ADDRESS_RE = new RegExp(`^${ADDRESS_LC}$`);
+const BUNDLE_FILE_RE = new RegExp(`^${SHA256_LC}\\.json$`);
 
 // typed-data key = <chainId>__<verifyingContract.lower>__<primaryType>.
 // primaryType 는 EIP-712 콜론(:)이 "__" 로 escape 된 형태라 자체적으로 "__" 를
@@ -56,6 +59,8 @@ export type ProxyTarget = ProxyTargetOk | ProxyTargetErr;
 const INDEX_PREFIX = "/index/by-callkey/";
 const INDEX_TYPED_DATA_PREFIX = "/index/by-typed-data/";
 const TOKENS_PREFIX = "/tokens/";
+const BUNDLES_PREFIX = "/bundles/";
+const CONTEXTS_PREFIX = "/contexts/";
 const JSON_SUFFIX = ".json";
 
 /**
@@ -101,6 +106,30 @@ export function parseProxyTarget(pathname: string): ProxyTarget {
       isValidAddressSegment(address) &&
       !address.includes("/")
       ? { ok: true, objectName: `tokens/${chain}/${address}.json` }
+      : { ok: false };
+  }
+
+  if (pathname.startsWith(BUNDLES_PREFIX)) {
+    const file = pathname.slice(BUNDLES_PREFIX.length);
+    return BUNDLE_FILE_RE.test(file)
+      ? { ok: true, objectName: `bundles/${file}` }
+      : { ok: false };
+  }
+
+  if (pathname.startsWith(CONTEXTS_PREFIX) && pathname.endsWith(JSON_SUFFIX)) {
+    const inner = pathname.slice(CONTEXTS_PREFIX.length);
+    const parts = inner.split("/");
+    if (parts.length < 4) return { ok: false };
+    const file = parts[parts.length - 1];
+    if (!file.endsWith(JSON_SUFFIX)) return { ok: false };
+    const address = file.slice(0, file.length - JSON_SUFFIX.length);
+    const chain = parts[parts.length - 2];
+    const scopeParts = parts.slice(0, -2);
+    const safe = scopeParts.every((part) => new RegExp(`^${SAFE_SEGMENT}$`).test(part));
+    return safe &&
+      isValidChainSegment(chain) &&
+      isValidAddressSegment(address)
+      ? { ok: true, objectName: `contexts/${inner}` }
       : { ok: false };
   }
   return { ok: false };
