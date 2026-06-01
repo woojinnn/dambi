@@ -1,0 +1,65 @@
+{
+  "protocol": "morpho",
+  "source": "docs.morpho.org/get-started/resources/addresses/",
+  "url": "https://docs.morpho.org/get-started/resources/addresses/",
+  "fetchedAt": "2026-06-02",
+  "note": "I0 scope for the currently covered Morpho Blue user pre-sign surface is Ethereum and Base. The official Morpho addresses page also lists additional production/test Morpho Blue deployments; those are recorded as an onboarding blocker in crates/integration-tests/onboarding/morpho/evidence.md because this registry currently has surface snapshots/manifests only for Ethereum and Base.",
+  "contracts": [
+    {
+      "name": "Morpho Blue (Ethereum)",
+      "chainId": 1,
+      "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+      "decision": "cover",
+      "reason": "user-facing Morpho Blue singleton: supply, withdraw, borrow, repay, collateral, and authorization entry points"
+    },
+    {
+      "name": "Adaptive Curve IRM (Ethereum)",
+      "chainId": 1,
+      "address": "0x870ac11d48b15db9a138cf899d20f13f79ba00bc",
+      "decision": "exclude",
+      "reason": "interest-rate model dependency referenced by markets; users do not pre-sign direct Morpho actions against the IRM"
+    },
+    {
+      "name": "Morpho ChainlinkOracleV2 Factory (Ethereum)",
+      "chainId": 1,
+      "address": "0x3a7bb36ee3f3ee32a60e9f2b33c1e5f2e83ad766",
+      "decision": "exclude",
+      "reason": "oracle factory/infrastructure; not a user pre-sign lending action surface"
+    },
+    {
+      "name": "PreLiquidation Factory (Ethereum)",
+      "chainId": 1,
+      "address": "0x6ff33615e792e35ed1026ea7caccf42d9bf83476",
+      "decision": "exclude",
+      "reason": "pre-liquidation factory/infrastructure; current lending pre-sign coverage intentionally excludes liquidator/operator flow"
+    },
+    {
+      "name": "Morpho Blue (Base)",
+      "chainId": 8453,
+      "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+      "decision": "cover",
+      "reason": "user-facing Morpho Blue singleton on Base for the same covered action family"
+    },
+    {
+      "name": "Adaptive Curve IRM (Base)",
+      "chainId": 8453,
+      "address": "0x46415998764c29ab2a25cbea6254146d50d22687",
+      "decision": "exclude",
+      "reason": "interest-rate model dependency referenced by markets; users do not pre-sign direct Morpho actions against the IRM"
+    },
+    {
+      "name": "Morpho ChainlinkOracleV2 Factory (Base)",
+      "chainId": 8453,
+      "address": "0x2dc205f24bcb6b311e5cdf0745b0741648aebd3d",
+      "decision": "exclude",
+      "reason": "oracle factory/infrastructure; not a user pre-sign lending action surface"
+    },
+    {
+      "name": "PreLiquidation Factory (Base)",
+      "chainId": 8453,
+      "address": "0x8cd16b62e170ee0ba83d80e1f80e6085367e2aef",
+      "decision": "exclude",
+      "reason": "pre-liquidation factory/infrastructure; current lending pre-sign coverage intentionally excludes liquidator/operator flow"
+    }
+  ]
+}
