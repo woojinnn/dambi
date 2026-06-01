@@ -1,13 +1,12 @@
 import { RequestType, type ExecutionReportPayload } from "@lib/types";
-
-const DEFAULT_SIMULATION_SERVER_URL = "http://127.0.0.1:8788";
+import { getAccessToken, request } from "./scopeball-auth";
 
 /**
  * Best-effort execution report sink.
  *
- * This is deliberately narrower than the future simulation-server API client:
- * verdict/evaluate traffic still uses the existing policy path, while this
- * adapter only forwards post-policy lifecycle facts to `/execution-report`.
+ * Reports are authenticated with the same OAuth/JWT token used by `/evaluate`.
+ * A signed-out user does not have a server-side namespace, so we skip rather
+ * than POST an unauthenticated report that the server will reject.
  */
 export async function reportExecutionOutcome(
   report: ExecutionReportPayload,
@@ -21,19 +20,11 @@ export async function reportExecutionOutcome(
   if (_type !== RequestType.EXECUTION_REPORT) return;
 
   try {
-    const base =
-      process.env.SIMULATION_SERVER_URL ?? DEFAULT_SIMULATION_SERVER_URL;
-    const resp = await fetch(`${base}/execution-report`, {
+    if (!(await getAccessToken())) return;
+    await request("/execution-report", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body,
     });
-    if (!resp.ok) {
-      console.warn("[Scopeball] execution report rejected", {
-        status: resp.status,
-        statusText: resp.statusText,
-      });
-    }
   } catch (err) {
     console.warn("[Scopeball] execution report failed", {
       err: err instanceof Error ? err.message : String(err),
