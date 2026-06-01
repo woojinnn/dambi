@@ -116,8 +116,9 @@ pub async fn evaluate(
     // server stays fail-open and never decides the verdict.
     let mut results = BTreeMap::new();
     let mut diagnostics = Vec::new();
+    let fact_ctx = crate::facts::FactCtx { state: &state };
     for spec in &req.call_specs {
-        match crate::facts::dispatch(&spec.method, &spec.params, &state) {
+        match crate::facts::dispatch(&spec.method, &spec.params, &fact_ctx) {
             Ok(value) => {
                 results.insert(spec.call_id.clone(), value);
             }
