@@ -17,6 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
 
 use std::sync::Arc;
 
@@ -24,11 +25,13 @@ use simulation_db::{GlobalDb, MultiUserStore};
 use simulation_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 use crate::auth::{require_auth, AuthUser};
+use crate::dashboard_handlers;
 use crate::db_store::SqliteExecutionReportStore;
 use crate::dto::{EvaluateRequest, ExecutionReportRequest};
 use crate::events::EventBus;
 use crate::handler::{evaluate, report_execution, HandlerError};
 use crate::read_handlers;
+use crate::verdict_handlers;
 use crate::write_handlers;
 
 /// Shared, cheaply-cloneable application state handed to every handler.
@@ -164,10 +167,39 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/policies/:id",
-            axum::routing::patch(write_handlers::patch_policy)
+            get(read_handlers::get_policy)
+                .patch(write_handlers::patch_policy)
                 .delete(write_handlers::delete_policy),
         )
+        // Cedar evaluation (validate / test / simulate) moved to the
+        // browser via `@scopeball/cedar-wasm` (crates/cedar-wasm-lite).
+        // The server keeps only policy storage CRUD.
+        .route("/policy-schema", get(read_handlers::get_policy_schema))
+        .route(
+            "/policy-templates",
+            get(read_handlers::get_policy_templates),
+        )
+        .route(
+            "/examples/transactions",
+            get(read_handlers::get_example_transactions),
+        )
+        // ---- Phase 3: dashboard summary ----
+        .route("/dashboard/summary", get(dashboard_handlers::get_summary))
+        // ---- Phase 2: verdict / audit / history / findings ----
+        .route("/verdicts", post(verdict_handlers::create_verdict))
+        .route(
+            "/verdicts/:id",
+            axum::routing::patch(verdict_handlers::patch_verdict),
+        )
+        .route("/audit/verdicts", get(verdict_handlers::list_audit))
+        .route("/audit/counts", get(verdict_handlers::audit_counts))
+        .route("/audit/export", get(verdict_handlers::audit_export))
+        .route("/history/verdicts", get(verdict_handlers::list_history))
+        .route("/findings/feed", get(verdict_handlers::findings_feed))
         .route("/events/stream", get(crate::events::sse_stream))
+        // Selector decode + revoke calldata builder + Cedar sequence sim
+        // all moved to the dashboard (apps/web/src/tools/* + cedar/).
+        // The server holds only state + verdict mirror.
         .layer(from_fn(require_auth));
 
     let public = Router::new()
@@ -179,6 +211,7 @@ pub fn build_router(state: AppState) -> Router {
 
     public
         .merge(protected)
+        .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive().allow_private_network(true))
         .with_state(state)
 }

@@ -3,7 +3,7 @@ name = "simulation-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "HTTP backend service for the simulation engine — executes enrichment calls + simulates Action(s) over wallet state and returns state / statediff / results. Cedar evaluation stays in the browser extension, so this crate has NO cedar/policy-engine dependency."
+description = "HTTP backend service for the simulation engine. DB-only contract: wallet state cache, policy/verdict storage, catalog reads, auth. Cedar evaluation + selector decode + revoke calldata building live in the browser (apps/web/src/cedar + tools/, backed by crates/cedar-wasm-lite). Extensions push verdicts via `POST /verdicts`."
 publish = false
 
 [dependencies]

@@ -2295,6 +2295,7 @@ dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
  "anyhow",
+ "cedar-policy",
  "console_error_panic_hook",
  "getrandom 0.2.17",
  "hex",

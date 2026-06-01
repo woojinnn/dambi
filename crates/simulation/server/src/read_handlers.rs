@@ -87,16 +87,155 @@ pub async fn get_holdings(
     }
 }
 
-/// `GET /wallets/:address/approvals` — the full [`ApprovalSet`].
+/// `GET /wallets/:address/approvals[?with_risk=true]`.
+///
+/// Default: returns the raw [`ApprovalSet`] (back-compat).
+/// `?with_risk=true`: returns the classified shape — every approval gets
+/// a `risk[]` tag list (UNLIMITED / OLD / EXPIRED). Spender labels +
+/// KNOWN_VENUE/BLOCKED tags are no longer included on the server; that
+/// data is operator-managed and lives in the (future) registry.
 pub async fn get_approvals(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Path(address): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ApprovalsQuery>,
 ) -> Response {
     match load_state(&state.multi_user, &user.user_id, &address).await {
-        Ok(s) => Json::<ApprovalSet>(s.approvals).into_response(),
+        Ok(s) => {
+            if q.with_risk.unwrap_or(false) {
+                let classified = classify_approvals(&s.approvals);
+                Json(classified).into_response()
+            } else {
+                Json::<ApprovalSet>(s.approvals).into_response()
+            }
+        }
         Err(e) => e,
     }
+}
+
+#[derive(serde::Deserialize, Default)]
+pub struct ApprovalsQuery {
+    #[serde(default)]
+    pub with_risk: Option<bool>,
+}
+
+/// Server-classified shape mirroring `ApprovalSet` but with risk tags.
+#[derive(Serialize)]
+struct ClassifiedApprovals {
+    erc20: Vec<Erc20Approval>,
+    set_for_all: Vec<SetForAllApproval>,
+    permit2: Vec<Permit2Approval>,
+}
+
+#[derive(Serialize)]
+struct Erc20Approval {
+    chain: ChainId,
+    token: String,
+    spender: String,
+    amount: String,
+    is_unlimited: bool,
+    last_set_at: i64,
+    risk: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct SetForAllApproval {
+    chain: ChainId,
+    collection: String,
+    operator: String,
+    risk: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct Permit2Approval {
+    chain: ChainId,
+    token: String,
+    spender: String,
+    amount: String,
+    expiration: i64,
+    nonce: u32,
+    risk: Vec<&'static str>,
+}
+
+/// 90-day staleness threshold — any approval older counts as `OLD`.
+const STALE_AFTER_SECS: i64 = 90 * 24 * 3_600;
+
+fn classify_approvals(set: &ApprovalSet) -> ClassifiedApprovals {
+    use simulation_state::primitives::Time;
+
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+    )
+    .unwrap_or(0);
+
+    let _ = Time::from_unix(0); // silence import warning when only used via deref above
+
+    let mut out = ClassifiedApprovals {
+        erc20: Vec::new(),
+        set_for_all: Vec::new(),
+        permit2: Vec::new(),
+    };
+
+    for ((chain, token), per_spender) in &set.erc20 {
+        for (spender, spec) in per_spender {
+            let spender_lower = format!("{spender:#x}");
+            let mut risk: Vec<&'static str> = Vec::new();
+            if spec.is_unlimited {
+                risk.push("UNLIMITED");
+            }
+            let last = i64::try_from(spec.last_set_at.as_unix()).unwrap_or(0);
+            if last > 0 && now - last > STALE_AFTER_SECS {
+                risk.push("OLD");
+            }
+            out.erc20.push(Erc20Approval {
+                chain: chain.clone(),
+                token: format!("{token:#x}"),
+                spender: spender_lower,
+                amount: spec.amount.to_string(),
+                is_unlimited: spec.is_unlimited,
+                last_set_at: last,
+                risk,
+            });
+        }
+    }
+
+    for ((chain, collection), operators) in &set.set_for_all {
+        for operator in operators {
+            let operator_lower = format!("{operator:#x}");
+            // setApprovalForAll always confers full collection access.
+            let risk: Vec<&'static str> = vec!["UNLIMITED"];
+            out.set_for_all.push(SetForAllApproval {
+                chain: chain.clone(),
+                collection: format!("{collection:#x}"),
+                operator: operator_lower,
+                risk,
+            });
+        }
+    }
+
+    for ((chain, token, spender), allowance) in &set.permit2 {
+        let spender_lower = format!("{spender:#x}");
+        let mut risk: Vec<&'static str> = Vec::new();
+        if allowance.amount == simulation_state::primitives::U256::MAX {
+            risk.push("UNLIMITED");
+        }
+        let exp = i64::try_from(allowance.expiration.as_unix()).unwrap_or(0);
+        if exp > 0 && exp < now {
+            risk.push("EXPIRED");
+        }
+        out.permit2.push(Permit2Approval {
+            chain: chain.clone(),
+            token: format!("{token:#x}"),
+            spender: spender_lower,
+            amount: allowance.amount.to_string(),
+            expiration: exp,
+            nonce: allowance.nonce,
+            risk,
+        });
+    }
+    out
 }
 
 /// `GET /wallets/:address/block-heights` — per-chain block snapshot.
@@ -408,4 +547,75 @@ pub async fn list_policies(
         Ok(Err(e)) => internal_str(&format!("list_policies: {e}")),
         Err(e) => internal_str(&format!("join: {e}")),
     }
+}
+
+/// `GET /policies/:id` — a single Cedar policy row. 404 when the id
+/// doesn't belong to the authenticated user's DB.
+pub async fn get_policy(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<i64>,
+) -> Response {
+    let store = match state.multi_user.for_user(&user.user_id) {
+        Ok(s) => s,
+        Err(e) => return open_store_error(&e.to_string()),
+    };
+    let pool = store.pool().clone();
+    let result =
+        tokio::task::spawn_blocking(move || pool.with_tx(|tx| user_policies::get(tx, id))).await;
+    match result {
+        Ok(Ok(Some(r))) => Json(PolicyRow {
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            cedar_text: r.cedar_text,
+            severity: r.severity,
+            enabled: r.enabled,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        })
+        .into_response(),
+        Ok(Ok(None)) => (StatusCode::NOT_FOUND, "policy not found").into_response(),
+        Ok(Err(e)) => internal_str(&format!("get_policy: {e}")),
+        Err(e) => internal_str(&format!("join: {e}")),
+    }
+}
+
+// ---------- /policy-schema  /policy-templates  /examples/transactions ----------
+
+/// `GET /policy-schema` — block-coding catalog (predicate fields,
+/// operators per field kind, action enum). Static JSON embedded at
+/// build time; v1 ships an empty-ish stub so the UI can wire its
+/// fetch without waiting for the full glossary import.
+pub async fn get_policy_schema() -> Response {
+    static SCHEMA: &str = include_str!("../static/policy-schema.json");
+    static_json(SCHEMA)
+}
+
+/// `GET /policy-templates` — starter Cedar policies (HF guard, slippage
+/// cap, etc.). Static JSON; users fork these into their own catalog.
+pub async fn get_policy_templates() -> Response {
+    static TEMPLATES: &str = include_str!("../static/policy-templates.json");
+    static_json(TEMPLATES)
+}
+
+/// `GET /examples/transactions` — fixture action envelopes used by the
+/// editor's "test against TX" panel and the simulation page's example
+/// cards. Static JSON.
+pub async fn get_example_transactions() -> Response {
+    static EXAMPLES: &str = include_str!("../static/example-transactions.json");
+    static_json(EXAMPLES)
+}
+
+fn static_json(body: &'static str) -> Response {
+    use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+    (
+        StatusCode::OK,
+        [
+            (CONTENT_TYPE, "application/json; charset=utf-8"),
+            (CACHE_CONTROL, "public, max-age=300"),
+        ],
+        body,
+    )
+        .into_response()
 }

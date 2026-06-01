@@ -1,0 +1,114 @@
+[
+  {
+    "id": "ex_swap_usdc_to_eth",
+    "label": { "ko": "USDC → ETH 스왑", "en": "USDC → ETH swap" },
+    "action": {
+      "domain": "amm",
+      "kind": "swap",
+      "venue": "uniswap_v3",
+      "args": {
+        "tokenIn": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "tokenOut": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "amountIn": "5000000000",
+        "minAmountOut": "1480000000000000000",
+        "recipient": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"
+      }
+    },
+    "meta": {
+      "chainId": "eip155:1",
+      "from": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      "to": "0xe592427a0aece92de3edee1f18e0157c05861564",
+      "selector": "0x414bf389",
+      "nonce": 142
+    },
+    "context": {
+      "slippageBp": 30,
+      "priceImpactBp": 12,
+      "direction": "exact_in",
+      "amount": "5000"
+    },
+    "enrichment": {
+      "totalInputUsd": "5000.00",
+      "effectiveRateVsOracleBps": -8,
+      "recipientIsContract": false,
+      "validityDeltaSec": 120
+    },
+    "expected": { "verdict": "pass" }
+  },
+  {
+    "id": "ex_swap_high_slippage",
+    "label": { "ko": "고슬리피지 스왑", "en": "High-slippage swap" },
+    "action": {
+      "domain": "amm",
+      "kind": "swap",
+      "venue": "uniswap_v3",
+      "args": {
+        "tokenIn": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "tokenOut": "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce",
+        "amountIn": "1000000000000000000",
+        "minAmountOut": "1",
+        "recipient": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"
+      }
+    },
+    "meta": {
+      "chainId": "eip155:1",
+      "from": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      "to": "0xe592427a0aece92de3edee1f18e0157c05861564"
+    },
+    "context": {
+      "slippageBp": 320,
+      "priceImpactBp": 280
+    },
+    "enrichment": {
+      "totalInputUsd": "3500.00",
+      "effectiveRateVsOracleBps": -310,
+      "recipientIsContract": false
+    },
+    "expected": { "verdict": "deny", "failedGuards": ["max-slippage-50bp"] }
+  },
+  {
+    "id": "ex_unlimited_approve",
+    "label": { "ko": "무한 승인", "en": "Unlimited approve" },
+    "action": {
+      "domain": "token",
+      "kind": "approve",
+      "args": {
+        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "spender": "0x00000000219ab540356cbb839cbe05303d7705fa",
+        "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+      }
+    },
+    "meta": {
+      "chainId": "eip155:1",
+      "from": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    "context": {
+      "amountIsUnlimited": true
+    },
+    "expected": { "verdict": "deny", "failedGuards": ["no-unlimited-approve"] }
+  },
+  {
+    "id": "ex_lending_borrow_safe",
+    "label": { "ko": "Aave 안전 차입", "en": "Aave borrow (safe HF)" },
+    "action": {
+      "domain": "lending",
+      "kind": "borrow",
+      "venue": "aave_v3",
+      "args": {
+        "asset": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+        "amount": "500000000"
+      }
+    },
+    "meta": {
+      "chainId": "eip155:1",
+      "from": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      "to": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2"
+    },
+    "enrichment": {
+      "postHealthFactor": "2.4",
+      "totalInputUsd": "500.00"
+    },
+    "expected": { "verdict": "pass" }
+  }
+]

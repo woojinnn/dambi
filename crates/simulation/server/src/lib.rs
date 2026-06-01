@@ -45,9 +45,14 @@
 #![allow(clippy::manual_let_else)]
 #![allow(clippy::needless_pass_by_value)]
 #![allow(clippy::must_use_candidate)]
+// Several long handler functions (dashboard summary, simulate_sequence,
+// seed_holdings) exceed the 100-line clippy default; splitting them would
+// just create one-shot helpers that obscure the linear request flow.
+#![allow(clippy::too_many_lines)]
 
 pub mod app;
 pub mod auth;
+pub mod dashboard_handlers;
 pub mod db_store;
 pub mod docs;
 pub mod dto;
@@ -55,4 +60,5 @@ pub mod events;
 pub mod handler;
 pub mod read_handlers;
 pub mod store;
+pub mod verdict_handlers;
 pub mod write_handlers;

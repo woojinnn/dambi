@@ -1,0 +1,144 @@
+{
+  "$schema": "scopeball/policy-schema/v1",
+  "actions": [
+    {
+      "id": "Amm::Swap",
+      "domain": "amm",
+      "kind": "swap",
+      "label": { "ko": "AMM 스왑", "en": "AMM swap" }
+    },
+    {
+      "id": "Erc20::Transfer",
+      "domain": "token",
+      "kind": "transfer",
+      "label": { "ko": "ERC-20 전송", "en": "ERC-20 transfer" }
+    },
+    {
+      "id": "Erc20::Approve",
+      "domain": "token",
+      "kind": "approve",
+      "label": { "ko": "ERC-20 승인", "en": "ERC-20 approve" }
+    },
+    {
+      "id": "Lending::Borrow",
+      "domain": "lending",
+      "kind": "borrow",
+      "label": { "ko": "대출 차입", "en": "Lending borrow" }
+    },
+    {
+      "id": "Lending::Supply",
+      "domain": "lending",
+      "kind": "supply",
+      "label": { "ko": "대출 공급", "en": "Lending supply" }
+    }
+  ],
+  "predicates": [
+    {
+      "key": "context.tokenIn",
+      "group": "address",
+      "type": "Address",
+      "ops": ["eq", "neq", "in"],
+      "label": { "ko": "입력 토큰", "en": "Token in" },
+      "note": { "ko": "스왑 입력 토큰 컨트랙트", "en": "Input token contract for the swap" }
+    },
+    {
+      "key": "context.tokenOut",
+      "group": "address",
+      "type": "Address",
+      "ops": ["eq", "neq", "in"],
+      "label": { "ko": "출력 토큰", "en": "Token out" }
+    },
+    {
+      "key": "context.recipient",
+      "group": "address",
+      "type": "Address",
+      "ops": ["eq", "neq", "in"],
+      "label": { "ko": "수신자", "en": "Recipient" }
+    },
+    {
+      "key": "context.slippageBp",
+      "group": "numeric",
+      "type": "BasisPoints",
+      "unit": "bp",
+      "ops": ["eq", "neq", "lt", "lte", "gt", "gte"],
+      "label": { "ko": "슬리피지 (bp)", "en": "Slippage (bp)" }
+    },
+    {
+      "key": "context.priceImpactBp",
+      "group": "numeric",
+      "type": "BasisPoints",
+      "unit": "bp",
+      "ops": ["lt", "lte", "gt", "gte"],
+      "label": { "ko": "가격 영향도 (bp)", "en": "Price impact (bp)" }
+    },
+    {
+      "key": "context.amount",
+      "group": "numeric",
+      "type": "Decimal",
+      "ops": ["lt", "lte", "gt", "gte"],
+      "label": { "ko": "금액", "en": "Amount" }
+    },
+    {
+      "key": "meta.chainId",
+      "group": "enum",
+      "type": "ChainId",
+      "ops": ["eq", "neq", "in"],
+      "label": { "ko": "체인", "en": "Chain" }
+    },
+    {
+      "key": "meta.from",
+      "group": "address",
+      "type": "Address",
+      "ops": ["eq", "neq"],
+      "label": { "ko": "발신자", "en": "From" }
+    },
+    {
+      "key": "meta.to",
+      "group": "address",
+      "type": "Address",
+      "ops": ["eq", "neq", "in"],
+      "label": { "ko": "수신 컨트랙트", "en": "To contract" }
+    },
+    {
+      "key": "enrichment.totalInputUsd",
+      "group": "numeric",
+      "type": "Decimal",
+      "unit": "USD",
+      "ops": ["lt", "lte", "gt", "gte"],
+      "label": { "ko": "총 입력 가치 (USD)", "en": "Total input value (USD)" },
+      "derived": true
+    },
+    {
+      "key": "enrichment.recipientIsContract",
+      "group": "misc",
+      "type": "Boolean",
+      "ops": ["isTrue", "isFalse"],
+      "label": { "ko": "수신자가 컨트랙트", "en": "Recipient is contract" },
+      "derived": true
+    },
+    {
+      "key": "enrichment.effectiveRateVsOracleBps",
+      "group": "numeric",
+      "type": "BasisPoints",
+      "unit": "bp",
+      "ops": ["lt", "lte", "gt", "gte"],
+      "label": {
+        "ko": "오라클 대비 실효 환율 차 (bp)",
+        "en": "Effective rate vs oracle (bp)"
+      },
+      "derived": true
+    }
+  ],
+  "operators": {
+    "numeric": ["eq", "neq", "lt", "lte", "gt", "gte"],
+    "address": ["eq", "neq", "in"],
+    "enum": ["eq", "neq", "in"],
+    "boolean": ["isTrue", "isFalse"]
+  },
+  "roles": {
+    "numeric": { "tone": "blue", "icon": "🔢" },
+    "address": { "tone": "gray", "icon": "📛" },
+    "enum": { "tone": "purple", "icon": "🏷" },
+    "misc": { "tone": "amber", "icon": "•" }
+  }
+}

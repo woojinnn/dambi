@@ -138,8 +138,8 @@ the base schema. They are added by `.policy-rpc.json` manifests through
 `context_extensions` and materialized from Policy RPC JSON responses before
 Cedar evaluation.
 
-The shipped policies under `policy-rpc/examples/policies/swap/` validate against the composed base
-schema plus their paired Policy RPC manifests.
+The shipped policies under `crates/policy-engine/tests/fixtures/default_policies_v2/`
+validate against the composed base schema plus their paired Policy RPC manifests.
 
 Signature requests evaluate:
 
