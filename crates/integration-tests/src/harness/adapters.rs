@@ -11,7 +11,7 @@
 //! auto-enumerate), so installs are de-duplicated by `bundle_id` while the
 //! routable surface is built per-callkey for honest coverage accounting.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -93,6 +93,10 @@ pub struct RoutableCall {
     pub has_typed_data: bool,
     /// Index filename stem — coverage accounting + repro label.
     pub source_callkey: String,
+    /// Stable representative key for `3-ref` index entries. CI-safe author-time
+    /// validation can check one callkey per source-generated bundle template
+    /// instead of every materialized address.
+    pub source_ref_key: Option<String>,
 }
 
 /// A routable EIP-712 typed-data adapter, from one `by-typed-data` index entry.
@@ -120,6 +124,37 @@ pub struct RoutableTypedData {
     pub emit: Value,
     /// Index filename stem.
     pub source_key: String,
+}
+
+/// Loader controls for callers that need a bounded subset of the local surface.
+#[derive(Clone, Debug)]
+pub struct LoadOptions {
+    /// Optional case-sensitive substring matched against callkey stems or bundle ids.
+    pub filter: Option<String>,
+    /// For `3-ref` source-generated surfaces, load one callkey per source bundle
+    /// template instead of every materialized address.
+    pub representative_source_refs: bool,
+    /// Whether to include the typed-data index. Author-time calldata-only gates
+    /// can skip it to avoid unrelated installs.
+    pub include_typed_data: bool,
+}
+
+impl Default for LoadOptions {
+    fn default() -> Self {
+        Self {
+            filter: None,
+            representative_source_refs: false,
+            include_typed_data: true,
+        }
+    }
+}
+
+impl LoadOptions {
+    fn matches_callkey_entry(&self, stem: &str, bundle_id: &str) -> bool {
+        self.filter
+            .as_deref()
+            .is_none_or(|filter| stem.contains(filter) || bundle_id.contains(filter))
+    }
 }
 
 /// The full routable surface plus install bookkeeping.
@@ -374,6 +409,19 @@ fn materialize_ref_bundle(registry_root: &Path, entry: &Value) -> Result<Value> 
     Ok(Value::Object(materialized))
 }
 
+fn source_ref_key(entry: &Value) -> Option<String> {
+    if entry.get("schema_version").and_then(Value::as_str) != Some("3-ref") {
+        return None;
+    }
+    let bundle_ref = entry.get("bundle_ref").and_then(Value::as_str)?;
+    let source = entry
+        .get("materialization")
+        .and_then(|m| m.get("source"))
+        .and_then(Value::as_str)
+        .unwrap_or("resolved-source");
+    Some(format!("{source}|{bundle_ref}"))
+}
+
 fn bundle_from_index_entry(index_root: &Path, entry: &Value, path: &Path) -> Result<Value> {
     if let Some(bundle) = entry.get("bundle") {
         return Ok(bundle.clone());
@@ -393,6 +441,11 @@ fn bundle_from_index_entry(index_root: &Path, entry: &Value, path: &Path) -> Res
 /// **Must run on the same OS thread that subsequently routes** (the WASM v3
 /// install state is thread-local).
 pub fn load_and_install() -> Result<RoutableSurface> {
+    load_and_install_with_options(LoadOptions::default())
+}
+
+/// Load and install a filtered/representative surface subset.
+pub fn load_and_install_with_options(options: LoadOptions) -> Result<RoutableSurface> {
     let index_root = registry_index_root()?;
     let by_callkey = index_root.join("by-callkey");
     let by_typed = index_root.join("by-typed-data");
@@ -400,29 +453,45 @@ pub fn load_and_install() -> Result<RoutableSurface> {
     // Pass 1: collect unique bundles (first-wins) for de-duplicated install.
     let callkey_files = sorted_json_files(&by_callkey)?;
     let mut bundles: BTreeMap<String, Value> = BTreeMap::new();
-    let mut parsed_calls: Vec<(String, u64, String, String, Value)> = Vec::new();
+    let mut parsed_calls: Vec<(String, u64, String, String, Value, Option<String>)> = Vec::new();
+    let mut seen_source_ref_keys = HashSet::new();
 
     for path in &callkey_files {
         let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let entry: Value =
             serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("bad filename {}", path.display()))?;
+        let entry_bundle_id = entry
+            .get("bundle_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !options.matches_callkey_entry(stem, entry_bundle_id) {
+            continue;
+        }
+        let source_ref_key = source_ref_key(&entry);
+        if options.representative_source_refs {
+            if let Some(key) = &source_ref_key {
+                if !seen_source_ref_keys.insert(key.clone()) {
+                    continue;
+                }
+            }
+        }
         let bundle = bundle_from_index_entry(&index_root, &entry, path)?;
         let bundle_id = bundle
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("no `bundle.id` in {}", path.display()))?
             .to_owned();
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow!("bad filename {}", path.display()))?;
         let Some((chain, to, selector)) = parse_callkey_stem(stem) else {
             bail!("callkey filename not <chain>__<addr>__<selector>: {stem}");
         };
         bundles
             .entry(bundle_id.clone())
             .or_insert_with(|| bundle.clone());
-        parsed_calls.push((bundle_id, chain, to, selector, bundle));
+        parsed_calls.push((bundle_id, chain, to, selector, bundle, source_ref_key));
     }
 
     // Pass 2: install each unique bundle exactly once.
@@ -447,7 +516,7 @@ pub fn load_and_install() -> Result<RoutableSurface> {
     let total_callkeys = parsed_calls.len();
     let calls = parsed_calls
         .into_iter()
-        .map(|(bundle_id, chain, to, selector, bundle)| {
+        .map(|(bundle_id, chain, to, selector, bundle, source_ref_key)| {
             let emit = bundle.get("emit").cloned().unwrap_or(Value::Null);
             let has_typed_data = bundle
                 .get("match")
@@ -464,6 +533,7 @@ pub fn load_and_install() -> Result<RoutableSurface> {
                 emit,
                 has_typed_data,
                 source_callkey,
+                source_ref_key,
             }
         })
         .collect();
@@ -472,7 +542,7 @@ pub fn load_and_install() -> Result<RoutableSurface> {
     // appear under by-callkey; install any typed-only bundles here too).
     let mut typed = Vec::new();
     let mut total_typed_keys = 0;
-    if by_typed.is_dir() {
+    if options.include_typed_data && by_typed.is_dir() {
         for path in sorted_json_files(&by_typed)? {
             total_typed_keys += 1;
             let raw =

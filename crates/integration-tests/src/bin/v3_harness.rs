@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! v3-harness fuzz       [--iterations N] [--seed S] [--filter <substr>] [--json PATH]
-//! v3-harness validate   [--filter <substr>] [--iterations N]
+//! v3-harness validate   [--filter <substr>] [--iterations N] [--representative-source-refs]
 //! v3-harness coverage
 //! v3-harness replay     --callkey <chain>__<addr>__<selector> [--seed S]
 //! v3-harness corpus     [--root DIR] [--filter <substr>] [--require-expect-body] [--json PATH]
@@ -70,7 +70,7 @@ fn usage() {
         "v3-harness — v3 ActionBody decode harness\n\n\
          USAGE:\n  \
          v3-harness fuzz [--iterations N] [--seed S] [--filter <substr>] [--json PATH]\n  \
-         v3-harness validate [--filter <substr>] [--iterations N]\n  \
+         v3-harness validate [--filter <substr>] [--iterations N] [--representative-source-refs]\n  \
          v3-harness coverage\n  \
          v3-harness replay --callkey <chain>__<addr>__<selector> [--seed S]\n  \
          v3-harness corpus [--root DIR] [--filter <substr>] [--require-expect-body] [--json PATH]\n  \
@@ -84,6 +84,10 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1))
         .map(String::as_str)
+}
+
+fn flag_bool(args: &[String], name: &str) -> bool {
+    args.iter().any(|a| a == name)
 }
 
 fn flag_u64(args: &[String], name: &str, default: u64) -> Result<u64> {
@@ -181,13 +185,25 @@ fn cmd_fuzz(args: &[String]) -> Result<()> {
 fn cmd_validate(args: &[String]) -> Result<()> {
     let filter = flag(args, "--filter");
     let iters = flag_u64(args, "--iterations", 24)?;
+    let representative_source_refs = flag_bool(args, "--representative-source-refs");
     let scope = filter.map_or_else(|| "all".to_owned(), |f| format!("filter=`{f}`"));
-    let verdicts = harness::validate(filter, iters)?;
+    let verdicts = harness::validate_with_options(
+        filter,
+        iters,
+        harness::ValidateOptions {
+            representative_source_refs,
+        },
+    )?;
     let checked = verdicts.len();
     let failed: Vec<&harness::ManifestVerdict> = verdicts.iter().filter(|v| !v.ok).collect();
 
     if failed.is_empty() {
-        println!("validate ({scope}): {checked} single_emit manifest(s) OK, 0 structural errors  [iters/manifest={iters}]");
+        let mode = if representative_source_refs {
+            ", source-ref representative"
+        } else {
+            ""
+        };
+        println!("validate ({scope}): {checked} single_emit manifest(s) OK, 0 structural errors  [iters/manifest={iters}{mode}]");
         if checked == 0 {
             eprintln!(
                 "warning: no single_emit manifests matched. Did you `npm run build` after authoring? Is `--filter` right?"

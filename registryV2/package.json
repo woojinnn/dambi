@@ -8,7 +8,8 @@
     "build": "tsx scripts/build-index.ts",
     "check:universe": "tsx scripts/check-address-universe.ts",
     "check:surface": "tsx scripts/check-surface-completeness.ts",
-    "check:manifest": "tsx scripts/build-index.ts && cargo run --quiet --bin v3-harness -- validate",
+    "check:manifest": "tsx scripts/build-index.ts --summary-only --representative-source-refs && cargo run --quiet --bin v3-harness -- validate --representative-source-refs",
+    "check:manifest:full": "tsx scripts/build-index.ts && cargo run --quiet --bin v3-harness -- validate",
     "typecheck": "tsc --noEmit",
     "serve": "python3 -m http.server 8000"
   },

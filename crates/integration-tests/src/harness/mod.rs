@@ -34,6 +34,8 @@ pub mod report;
 pub mod route;
 pub mod semantic;
 
+use std::collections::HashSet;
+
 use anyhow::Result;
 
 /// Default real-tx corpus root: `<crate>/data/golden/v3-decode`.
@@ -137,6 +139,16 @@ pub fn replay(callkey: &str, seed: u64) -> Result<serde_json::Value> {
     }
 }
 
+/// Author-time structural validation options.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ValidateOptions {
+    /// For `3-ref` source-generated surfaces, validate one callkey per source
+    /// bundle template instead of every materialized address. This keeps CI
+    /// bounded for pool-heavy protocols while preserving `validate`'s exhaustive
+    /// mode for local/nightly gates.
+    pub representative_source_refs: bool,
+}
+
 /// One adapter's author-time structural-validation verdict.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ManifestVerdict {
@@ -172,8 +184,22 @@ pub struct ManifestVerdict {
 /// (`None` = whole surface). Reads the built `registryV2/index/` — run
 /// `npm run build` (build-index) after authoring, before validating.
 pub fn validate(filter: Option<&str>, iters: u64) -> Result<Vec<ManifestVerdict>> {
-    let surface = adapters::load_and_install()?;
+    validate_with_options(filter, iters, ValidateOptions::default())
+}
+
+/// Same as [`validate`], with source-ref sampling controls for CI-sized gates.
+pub fn validate_with_options(
+    filter: Option<&str>,
+    iters: u64,
+    options: ValidateOptions,
+) -> Result<Vec<ManifestVerdict>> {
+    let surface = adapters::load_and_install_with_options(adapters::LoadOptions {
+        filter: filter.map(ToOwned::to_owned),
+        representative_source_refs: options.representative_source_refs,
+        include_typed_data: false,
+    })?;
     let mut out = Vec::new();
+    let mut seen_source_ref_keys = HashSet::new();
     with_silenced_panics(|| {
         for call in surface.calls.iter().filter(|c| {
             c.strategy == adapters::Strategy::SingleEmit
@@ -181,6 +207,13 @@ pub fn validate(filter: Option<&str>, iters: u64) -> Result<Vec<ManifestVerdict>
                 && c.selector != "0x00000000"
                 && filter.is_none_or(|f| c.source_callkey.contains(f) || c.bundle_id.contains(f))
         }) {
+            if options.representative_source_refs {
+                if let Some(key) = &call.source_ref_key {
+                    if !seen_source_ref_keys.insert(key.clone()) {
+                        continue;
+                    }
+                }
+            }
             let base = encode::fnv1a64(&call.source_callkey);
             let mut verdict = ManifestVerdict {
                 bundle_id: call.bundle_id.clone(),

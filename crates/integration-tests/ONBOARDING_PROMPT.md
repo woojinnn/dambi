@@ -84,7 +84,9 @@ repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
  P1 함수마다 schema(§4a)→manifest(§4b)→engine(§4c)→enrich(§4d: 추상 단위면 환산 live_field).
     Tier3 필요 시 ActionBody + effect/view/sync + lowering_v2 + cedarschema +
     schema registration + conformance test 를 먼저 완성한 뒤 manifest 작성.
-    npm run check:manifest.
+    npm run check:manifest(CI-safe representative index + source-ref representative). Source-materialized 변경이면
+    `cargo run --bin v3-harness -- validate --filter <PROTOCOL> --representative-source-refs` 를 병행하고,
+    feasible 하면 `npm run check:manifest:full` 도 실행. full 이 resource/OOM 으로 막히면 evidence.md 에 blocker 기록.
     P1 완료 전 evidence.md 에 COVER selector→ActionBody/Tier3 mapping, permission/fund-move red-flag review,
     manifest 파일 목록, live_field/enrichment 결정, required remote policy-RPC/live/enrichment method 의
     local handler/configured endpoint test/blocker, Tier3 downstream 산출물(해당 시), check:manifest 출력 기록.
@@ -102,9 +104,9 @@ repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
     PROTOCOL_AGNOSTIC_ONBOARDING_FRAMEWORK 기준으로 expect_body 또는 field-level golden 으로 pin
     (projection 은 하니스 구현 후 사용).
  P3 gap 분류(`unknown_protocol_address` 포함)→manifest/decoder/harness/P0 universe 처치→회귀(§6).
- P4 build-index → registryV2 build-index vitest → check:manifest → check:surface →
+ P4 build-index → registryV2 build-index vitest → check:manifest(CI-safe representative index + source-ref representative) → check:surface →
     pool/factory/vault-heavy 라면 `npm run check:universe -- --protocol <PROTOCOL> --require-cover-linkage` →
-    v3-harness coverage/fuzz/corpus → cargo test --workspace 0 fail →
+    v3-harness coverage/fuzz/corpus → check:manifest:full 또는 resource blocker 기록 → cargo test --workspace 0 fail →
     wasm-build → clippy/fmt(변경 crate) → check-onboarding-evidence --phase all →
     explicit-stage 커밋.
     P3/P4 완료 전 evidence.md 에 gap bucket, fix↔gap mapping, rerun 결과, corpus expect flip/disposition,

@@ -99,6 +99,12 @@ import { fileURLToPath } from "node:url";
 
 import canonicalize from "canonicalize";
 
+import {
+  PROTOCOL_SOURCE_RESOLVERS,
+  rpcClient,
+} from "./resolvers/index.ts";
+import type { ProtocolResolvedAddress } from "./resolvers/index.ts";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -163,39 +169,9 @@ type TokenErcKindSource = `tokens:${TokenErcKind}`;
  * `<protocol>` matches Defillama convention (e.g. `aave_v3`) and `<scope>`
  * is protocol-specific (e.g. `atokens`, `variable_debts`).
  *
- * See `registryV2/docs/PROTOCOL_SOURCE_CATALOG.md` for the full catalog.
+ * See `registryV2/docs/SOURCE_CATALOG.md` for the full catalog.
  */
-type ProtocolSourceKind =
-  | "aave_v3:atokens"
-  | "aave_v3:variable_debts"
-  | "aave_v3:stable_debts"
-  | "curve:gauges"
-  | "curve:factory_crvusd_2coin_mainnet"
-  | "curve:factory_crypto_base"
-  | "curve:factory_crypto_mainnet"
-  | "curve:factory_v2_2coin_base"
-  | "curve:factory_v2_2coin_mainnet"
-  | "curve:factory_v2_3coin_base"
-  | "curve:factory_v2_3coin_mainnet"
-  | "curve:factory_v2_4coin_base"
-  | "curve:factory_v2_4coin_mainnet"
-  | "curve:factory_stable_ng_2coin_mainnet"
-  | "curve:factory_stable_ng_3coin_mainnet"
-  | "curve:factory_stable_ng_4coin_mainnet"
-  | "curve:factory_stable_ng_5coin_mainnet"
-  | "curve:factory_stable_ng_6coin_mainnet"
-  | "curve:factory_stable_ng_7coin_mainnet"
-  | "curve:factory_stable_ng_8coin_mainnet"
-  | "curve:factory_stable_ng_2coin_base"
-  | "curve:factory_stable_ng_3coin_base"
-  | "curve:factory_stable_ng_4coin_base"
-  | "curve:factory_stable_ng_5coin_base"
-  | "curve:factory_stable_ng_6coin_base"
-  | "curve:factory_stable_ng_8coin_base"
-  | "curve:factory_tricrypto_base"
-  | "curve:factory_tricrypto_mainnet"
-  | "curve:factory_twocrypto_base"
-  | "curve:factory_twocrypto_mainnet";
+type ProtocolSourceKind = `${string}:${string}`;
 
 /**
  * Source spec for `chain_to_addresses_source` — union of token erc_kind
@@ -316,42 +292,15 @@ const NATIVE_SENTINEL = "0x0000000000000000000000000000000000000000";
 
 /**
  * Protocol-aware source kinds that pass the validator. Resolution itself is
- * delegated to `scripts/resolvers/<protocol>.ts` at `resolveBundle` time —
- * this set only gates whether a manifest's `chain_to_addresses_source` is
- * a recognized protocol source vs an unknown string.
+ * delegated to `scripts/resolvers/<protocol>.ts`; this set is derived from the
+ * registered resolver map so adding a protocol does not require touching
+ * build-index.
  */
-const PROTOCOL_SOURCE_KINDS: ReadonlySet<ProtocolSourceKind> = new Set([
-  "aave_v3:atokens",
-  "aave_v3:variable_debts",
-  "aave_v3:stable_debts",
-  "curve:gauges",
-  "curve:factory_crvusd_2coin_mainnet",
-  "curve:factory_crypto_base",
-  "curve:factory_crypto_mainnet",
-  "curve:factory_v2_2coin_base",
-  "curve:factory_v2_2coin_mainnet",
-  "curve:factory_v2_3coin_base",
-  "curve:factory_v2_3coin_mainnet",
-  "curve:factory_v2_4coin_base",
-  "curve:factory_v2_4coin_mainnet",
-  "curve:factory_stable_ng_2coin_mainnet",
-  "curve:factory_stable_ng_3coin_mainnet",
-  "curve:factory_stable_ng_4coin_mainnet",
-  "curve:factory_stable_ng_5coin_mainnet",
-  "curve:factory_stable_ng_6coin_mainnet",
-  "curve:factory_stable_ng_7coin_mainnet",
-  "curve:factory_stable_ng_8coin_mainnet",
-  "curve:factory_stable_ng_2coin_base",
-  "curve:factory_stable_ng_3coin_base",
-  "curve:factory_stable_ng_4coin_base",
-  "curve:factory_stable_ng_5coin_base",
-  "curve:factory_stable_ng_6coin_base",
-  "curve:factory_stable_ng_8coin_base",
-  "curve:factory_tricrypto_base",
-  "curve:factory_tricrypto_mainnet",
-  "curve:factory_twocrypto_base",
-  "curve:factory_twocrypto_mainnet",
-]);
+const PROTOCOL_SOURCE_KINDS: ReadonlySet<string> = new Set(Object.keys(PROTOCOL_SOURCE_RESOLVERS));
+
+function isProtocolSourceKind(sourceSpec: string): sourceSpec is ProtocolSourceKind {
+  return PROTOCOL_SOURCE_KINDS.has(sourceSpec);
+}
 
 // ---------------------------------------------------------------------------
 // Filesystem helpers
@@ -604,7 +553,7 @@ function validateMatchShape(path: string, match: unknown): asserts match is Bund
       parts.length === 2 &&
       parts[0] === "tokens" &&
       TOKEN_ERC_KINDS.has(parts[1] as TokenErcKind);
-    const isProtocolSource = PROTOCOL_SOURCE_KINDS.has(sourceSpec as ProtocolSourceKind);
+    const isProtocolSource = isProtocolSourceKind(sourceSpec);
     if (!isTokenSource && !isProtocolSource) {
       const tokenList = `"tokens:erc20" | "tokens:erc721" | "tokens:erc1155" | "tokens:native"`;
       const protocolList = Array.from(PROTOCOL_SOURCE_KINDS)
@@ -709,12 +658,6 @@ function validateEmitShape(path: string, emit: unknown): void {
 // ---------------------------------------------------------------------------
 // Source resolution — sourced bundles → effective chain_to_addresses
 // ---------------------------------------------------------------------------
-
-import {
-  PROTOCOL_SOURCE_RESOLVERS,
-  rpcClient,
-} from "./resolvers/index.ts";
-import type { ProtocolResolvedAddress } from "./resolvers/index.ts";
 
 function resolveTokenBundle(
   bundle: AdapterBundle,
@@ -846,7 +789,12 @@ async function resolveProtocolBundle(
   manifestPath: string,
   forceRefresh: boolean,
 ): Promise<ResolvedOutput[]> {
-  const sourceSpec = sourced.chain_to_addresses_source as keyof typeof PROTOCOL_SOURCE_RESOLVERS;
+  const sourceSpec = sourced.chain_to_addresses_source;
+  if (!isProtocolSourceKind(sourceSpec)) {
+    throw new Error(
+      `manifests/: ${manifestPath} match.chain_to_addresses_source "${sourceSpec}" is not a registered protocol resolver`,
+    );
+  }
   const resolver = PROTOCOL_SOURCE_RESOLVERS[sourceSpec];
   if (!resolver) {
     throw new Error(
@@ -995,7 +943,20 @@ function sourceContextRef(
   return `contexts/${parts.join("/")}/${chainId}/${address.toLowerCase()}.json`;
 }
 
-function writeGeneratedJsonObject(root: string, ref: string, value: unknown): void {
+const GENERATED_JSON_WRITE_CACHE = new Map<string, Hex>();
+const SOURCE_TEMPLATE_ARTIFACT_CACHE = new WeakMap<AdapterBundle, { bundle_ref: string; template_sha256: Hex }>();
+const SOURCE_CONTEXT_ARTIFACT_CACHE = new Map<string, { context_ref: string; context_sha256: Hex }>();
+
+function writeGeneratedJsonObject(root: string, ref: string, value: unknown, sha256?: Hex): void {
+  const objectSha256 = sha256 ?? computeObjectSha256(value);
+  const previousSha256 = GENERATED_JSON_WRITE_CACHE.get(ref);
+  if (previousSha256 !== undefined) {
+    if (previousSha256 !== objectSha256) {
+      throw new Error(`generated registry ref collision for ${ref}: ${previousSha256} != ${objectSha256}`);
+    }
+    return;
+  }
+  GENERATED_JSON_WRITE_CACHE.set(ref, objectSha256);
   const outPath = join(root, ref);
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, JSON.stringify(value, null, 2) + "\n", "utf8");
@@ -1017,26 +978,34 @@ function writeSourceRefArtifacts(output: ResolvedSourceRefOutput): {
   context_ref: string;
   context_sha256: Hex;
 } {
-  const templateSha256 = computeObjectSha256(output.template);
-  const bundleRef = `bundles/${generatedObjectFileName(templateSha256)}`;
-  writeGeneratedJsonObject(REGISTRY_ROOT, bundleRef, output.template);
+  let templateArtifact = SOURCE_TEMPLATE_ARTIFACT_CACHE.get(output.template);
+  if (templateArtifact === undefined) {
+    const templateSha256 = computeObjectSha256(output.template);
+    const bundleRef = `bundles/${generatedObjectFileName(templateSha256)}`;
+    writeGeneratedJsonObject(REGISTRY_ROOT, bundleRef, output.template, templateSha256);
+    templateArtifact = { bundle_ref: bundleRef, template_sha256: templateSha256 };
+    SOURCE_TEMPLATE_ARTIFACT_CACHE.set(output.template, templateArtifact);
+  }
 
-  const contextDoc = sourceContextDocument(output);
-  const contextSha256 = computeObjectSha256(contextDoc);
   const contextRef = sourceContextRef(output.source, output.chainId, output.address);
-  writeGeneratedJsonObject(REGISTRY_ROOT, contextRef, contextDoc);
+  let contextArtifact = SOURCE_CONTEXT_ARTIFACT_CACHE.get(contextRef);
+  if (contextArtifact === undefined) {
+    const contextDoc = sourceContextDocument(output);
+    const contextSha256 = computeObjectSha256(contextDoc);
+    writeGeneratedJsonObject(REGISTRY_ROOT, contextRef, contextDoc, contextSha256);
+    contextArtifact = { context_ref: contextRef, context_sha256: contextSha256 };
+    SOURCE_CONTEXT_ARTIFACT_CACHE.set(contextRef, contextArtifact);
+  }
 
   return {
-    bundle_ref: bundleRef,
-    template_sha256: templateSha256,
-    context_ref: contextRef,
-    context_sha256: contextSha256,
+    ...templateArtifact,
+    ...contextArtifact,
   };
 }
 
 function writeBundleRefArtifact(bundle: ResolvedBundle, bundleSha256: Hex): string {
   const bundleRef = `bundles/${generatedObjectFileName(bundleSha256)}`;
-  writeGeneratedJsonObject(REGISTRY_ROOT, bundleRef, bundle);
+  writeGeneratedJsonObject(REGISTRY_ROOT, bundleRef, bundle, bundleSha256);
   return bundleRef;
 }
 
@@ -1071,6 +1040,8 @@ async function main(): Promise<void> {
   // CLI flag: `--force-refresh` invalidates the protocol-source disk cache
   // and re-fetches via RPC. Default uses cache when fresh (30-day TTL).
   const forceRefresh = process.argv.includes("--force-refresh");
+  const summaryOnly = process.argv.includes("--summary-only") || process.argv.includes("--quiet");
+  const representativeSourceRefs = process.argv.includes("--representative-source-refs");
   if (forceRefresh) {
     console.error(`[build-index] --force-refresh: protocol-aware sources will re-fetch via RPC`);
   }
@@ -1109,6 +1080,10 @@ async function main(): Promise<void> {
   let totalCallkeys = 0;
   let totalTypedDataEntries = 0;
   let totalErrors = 0;
+  let duplicateSourcedCallkeys = 0;
+  let skippedRepresentativeSourcedCallkeys = 0;
+  let writtenRepresentativeSourcedCallkeys = 0;
+  const seenRepresentativeSourcedKeys = new Set<string>();
   for (const file of manifestFiles) {
     const manifestPath = relative(REGISTRY_ROOT, file).split(/[\\/]/).join("/");
     try {
@@ -1118,20 +1093,46 @@ async function main(): Promise<void> {
       for (const output of resolvedOutputs) {
         const resolved = output.kind === "bundle" ? output.bundle : output.materialized;
         const bundleSha256 = computeBundleSha256(resolved);
+        const isSourcedManifest = "chain_to_addresses_source" in bundle.match;
+        const representativeSourcedKey = isSourcedManifest
+          ? `${(bundle.match as BundleMatchSourced).chain_to_addresses_source}|${manifestPath}`
+          : undefined;
 
         const pairs = Object.entries(resolved.match.chain_to_addresses);
         const pairCount = pairs.reduce((acc, [, addrs]) => acc + addrs.length, 0);
 
-        console.error(
-          `[build-index] ${resolved.id}\n` +
-            `              manifest:  ${manifestPath}\n` +
-            `              sha256:    ${bundleSha256}\n` +
-            `              callkeys:  ${pairCount}`,
-        );
+        if (!summaryOnly) {
+          console.error(
+            `[build-index] ${resolved.id}\n` +
+              `              manifest:  ${manifestPath}\n` +
+              `              sha256:    ${bundleSha256}\n` +
+              `              callkeys:  ${pairCount}`,
+          );
+        }
 
         for (const [chainKey, addresses] of pairs) {
           const chainId = Number(chainKey);
           for (const to of addresses) {
+            const fname = callkeyFilename(chainId, to, resolved.match.selector);
+            const outPath = join(INDEX_BY_CALLKEY_DIR, fname);
+            if (isSourcedManifest && safeExists(outPath)) {
+              duplicateSourcedCallkeys++;
+              if (!summaryOnly) {
+                console.error(
+                  `[build-index] WARN ${manifestPath}: sourced manifest skipped duplicate callkey ${fname}; keeping concrete protocol manifest`,
+                );
+              }
+              continue;
+            }
+            if (representativeSourceRefs && representativeSourcedKey !== undefined) {
+              if (seenRepresentativeSourcedKeys.has(representativeSourcedKey)) {
+                skippedRepresentativeSourcedCallkeys++;
+                continue;
+              }
+              seenRepresentativeSourcedKeys.add(representativeSourcedKey);
+              writtenRepresentativeSourcedCallkeys++;
+            }
+
             let entry: IndexEntry | RefIndexEntry;
             if (output.kind === "source_ref") {
               const refs = writeSourceRefArtifacts(output);
@@ -1149,7 +1150,7 @@ async function main(): Promise<void> {
                   address: output.address.toLowerCase() as Hex,
                 },
               };
-            } else if ("chain_to_addresses_source" in bundle.match) {
+            } else if (isSourcedManifest) {
               entry = {
                 matched: true,
                 schema_version: "3-ref",
@@ -1166,14 +1167,6 @@ async function main(): Promise<void> {
                 bundle_sha256: bundleSha256,
                 bundle: resolved,
               };
-            }
-            const fname = callkeyFilename(chainId, to, resolved.match.selector);
-            const outPath = join(INDEX_BY_CALLKEY_DIR, fname);
-            if ("chain_to_addresses_source" in bundle.match && safeExists(outPath)) {
-              console.error(
-                `[build-index] WARN ${manifestPath}: sourced manifest skipped duplicate callkey ${fname}; keeping concrete protocol manifest`,
-              );
-              continue;
             }
             writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
             totalCallkeys++;
@@ -1217,6 +1210,16 @@ async function main(): Promise<void> {
       `[build-index] FAILED — ${totalErrors} manifest(s) rejected, ${totalCallkeys} callkey(s) + ${totalTypedDataEntries} typed-data entry(ies) written`,
     );
     process.exit(1);
+  }
+  if (duplicateSourcedCallkeys > 0) {
+    console.error(
+      `[build-index] WARN skipped ${duplicateSourcedCallkeys} sourced duplicate callkey(s); concrete protocol manifests kept`,
+    );
+  }
+  if (representativeSourceRefs) {
+    console.error(
+      `[build-index] representative source-ref mode — wrote ${writtenRepresentativeSourcedCallkeys} sourced callkey representative(s), skipped ${skippedRepresentativeSourcedCallkeys}`,
+    );
   }
   console.error(
     `[build-index] done — ${totalCallkeys} callkey(s) + ${totalTypedDataEntries} typed-data entry(ies) written across ${manifestFiles.length} manifest(s)`,
