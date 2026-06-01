@@ -74,6 +74,8 @@ repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
     address universe 를 만들고 source/query/count 를 기록한다. universe 의 모든 pool/factory child 주소는
     cover/exclude/defer 로 disposition 해야 하며, 일부만 concrete 로 커버할 경우 batch boundary 와
     concrete manifest vs protocol source resolver/generator 결정을 evidence.md 에 남긴다.
+    pool-heavy/factory 는 machine-readable universe artifact 를 남긴다. source count 가 0 이거나
+    tx pull target address count 가 0 이면 성공으로 치지 말고 필터/schema 버그로 보고 즉시 수정한다.
     P0 를 완료했다고 말하기 전 evidence.md 에 Claude/sub-agent 명령, 결과 요약, Codex-only/Claude-only/dropped
     후보, 1차출처 검증 disposition, pool universe disposition(해당 시), check:surface 출력이 기록되어 있어야 한다.
  P1 함수마다 schema(§4a)→manifest(§4b)→engine(§4c)→enrich(§4d: 추상 단위면 환산 live_field).
@@ -90,6 +92,7 @@ repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
     Etherscan/Dune 연결 없으면 P2 real-tx complete 선언 금지 — blocked_external_data 와 재실행 대상 기록.
     P2 real-tx 를 완료했다고 말하기 전 evidence.md 에 Etherscan api_calls/raw_txs/unique_selectors/selector coverage,
     Dune usage baseline/query/rows/credit delta/selected tx hashes 가 기록되어 있어야 한다.
+    외부 tx pull 은 target address count 를 반드시 기록한다. 0이면 no-op 이므로 done 금지.
     pool-heavy/factory 프로토콜은 selected cover 주소만이 아니라 P0 candidate/universe 주소도 sweep 한다.
     known protocol selector 로 보이는데 to-address 가 registry/surface 에 없으면 P0/P2 hard gap 으로 버킷팅한다.
     §5d 소스별 하한 준수. semantic-critical 필드는

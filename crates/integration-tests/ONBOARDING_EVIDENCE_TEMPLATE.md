@@ -26,6 +26,7 @@
 | dropped-unverified candidates listed with reason | pending | |
 | final contract inventory verified against first-party sources | pending | |
 | pool-heavy/factory protocol address universe source/query/count recorded, or explicitly not applicable | pending | |
+| pool-heavy/factory universe artifact is machine-readable, nonzero, and committed, or explicitly not applicable | pending | |
 | every pool/factory child address in universe dispositioned as cover/exclude/defer with reason and batch boundary | pending | |
 | concrete manifest vs protocol source resolver/generator strategy decided for pool universe | pending | |
 | token-surface inventory completed or explicitly scoped out | pending | |
@@ -61,6 +62,7 @@
 |---|---|---|
 | Etherscan MCP/API availability checked | pending | |
 | Etherscan txlist pull executed adapter-blind by P0 cover addresses | pending | |
+| external tx pull target address count is nonzero and recorded | pending | |
 | Etherscan `api_calls_used` recorded | pending | |
 | Etherscan `raw_txs_seen` recorded | pending | |
 | Etherscan `unique_selectors_seen` recorded | pending | |

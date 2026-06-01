@@ -757,7 +757,8 @@ target/debug/v3-harness corpus --root /tmp/v3probe        # 격리 probe
 2. 최소 floor = **10,000 tx/protocol** 또는 selector×shape 포화. 단 모든 COVER selector 는 real tx sample ≥1 을 우선한다.
 3. recency-only bias 를 줄이려면 `sort=desc` 한 번으로 끝내지 말고, 필요한 경우 `startblock/endblock` 을 여러 window 로 나눈다.
 4. raw export 는 `/tmp` 또는 `logs/<protocol>/raw-*` scratch 로만 둔다. committed corpus 는 dedup representative + failure/excluded/high-value pass 만.
-5. evidence ledger 에 `api_calls_used`, `raw_txs_seen`, `unique_selectors_seen`, `covered_selectors_with_real_tx`, `low_traffic_or_absent_selectors`, representative tx hashes/corpus path 를 기록한다. 이 행이 비어 있으면 P2 real-tx 는 미완이다.
+5. tx pull target address count 를 기록하고, 0이면 성공으로 치지 않는다. `_deployments.json`/surface schema mismatch, wrong status field, chain filter, or empty universe bug 로 보고 수정한다.
+6. evidence ledger 에 `api_calls_used`, `raw_txs_seen`, `unique_selectors_seen`, `covered_selectors_with_real_tx`, `low_traffic_or_absent_selectors`, representative tx hashes/corpus path 를 기록한다. 이 행이 비어 있으면 P2 real-tx 는 미완이다.
 
 #### Dune (핀포인트 보완 — 조건부)
 selector 필터(`WHERE ...`)·decoded 테이블·cross-chain·빈도 통계용. credit 기반(community plan **2,500 credit/월**; `getUsage`(또는 MCP `mcp__dune__getUsage`)로 확인 — billing period 월간, **일일 캡 아님**).
