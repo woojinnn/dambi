@@ -154,7 +154,8 @@ export interface I18nString {
 export type Verdict = "pass" | "warn" | "fail";
 
 export interface VerdictRow {
-  id: number;
+  /** UUID string assigned by the SW at append time (replaces the old DB autoincrement). */
+  id: string;
   delta_id: number;
   policy_id: number | null;
   severity: PolicySeverity;
@@ -186,5 +187,6 @@ export interface DashboardSummary {
     unlimited_count: number;
     pending_count: number;
   }>;
-  unresolved_findings: number;
+  // `unresolved_findings` was removed when the verdict log moved to
+  // chrome.storage.local. See `dashboard.ts` for the migration note.
 }

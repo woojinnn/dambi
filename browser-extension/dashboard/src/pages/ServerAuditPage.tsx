@@ -2,10 +2,8 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  SERVER_BASE_URL,
-  auditExportUrl,
+  exportAuditCsv,
   getAuditCounts,
-  getStoredToken,
   listAuditVerdicts,
   listPolicies,
   setVerdictDecision,
@@ -54,12 +52,23 @@ export function ServerAuditPage() {
   });
   const policiesQ = useQuery({ queryKey: ["policies"], queryFn: listPolicies });
 
-  const onExport = () => {
-    const token = getStoredToken();
-    if (!token) return;
-    const path = auditExportUrl(opts);
-    const sep = path.includes("?") ? "&" : "?";
-    window.open(`${SERVER_BASE_URL}${path}${sep}token=${encodeURIComponent(token)}`, "_blank");
+  const onExport = async () => {
+    // SW returns the CSV body directly (storage-local has no server route to
+    // open); wrap it in an object URL + anchor download. Revoked after
+    // ~30s — long enough for browsers to dispatch the download dialog.
+    try {
+      const blob = await exportAuditCsv(opts);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (err) {
+      console.error("CSV export failed", err);
+    }
   };
 
   return (

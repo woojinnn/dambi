@@ -10,6 +10,7 @@ import {
   pendingPut,
   type PendingRequest,
 } from "./storage";
+import { appendVerdict, type VerdictInsert } from "./verdict-storage";
 import {
   EngineError,
   evaluateActionV2,
@@ -309,6 +310,130 @@ async function appendAudit(
     ...(verdictSource ? { verdictSource } : {}),
     decidedAtMs: Date.now(),
   });
+
+  // Append to chrome.storage.local verdict log so the dashboard's Audit /
+  // History / Findings pages have something to read. Fire-and-forget so
+  // a slow write never blocks the verdict response.
+  //
+  // Replaces the old `POST /verdicts` round-trip to the simulation-server.
+  // Mirrors the original DB schema "one row per (state_delta × policy)" —
+  // when multiple policies match, we append one row per match. When no
+  // policies match (a baseline pass) we still record the evaluation so
+  // the activity log shows the action happened.
+  void appendVerdictsForMessage(message, verdict).catch((err) => {
+    console.warn("[Scopeball] verdict-storage append failed (non-fatal)", err);
+  });
+}
+
+/**
+ * Mirror the WASM `VerdictDto` onto one or more rows in the
+ * chrome.storage.local-backed verdict log. Field plumbing:
+ *
+ * - `dapp_origin` comes from `message.data.hostname` (always present).
+ * - `method` is the wallet RPC method (tx / typed-sig / untyped-sig / venue
+ *   order); we map the discriminator onto the legacy `eth_*` string the
+ *   dashboard already knows.
+ * - `wallet`, `contract.addr`, `selector.sig` come from the tx envelope when
+ *   present. Typed sigs map to the verifying contract; untyped sigs leave
+ *   them null.
+ * - `policy.id` was an i64 DB FK in the old schema — the SW evaluator
+ *   produces a STRING `policy_id` instead, so we keep `id: null` and stash
+ *   the engine policy id in `policy.name` (which is what the dashboard
+ *   already renders for human-readable display).
+ * - `reason.en` is the engine's free-form reason; `reason.ko` stays null
+ *   because the engine doesn't emit translations.
+ *
+ * Fields the engine doesn't populate (`decoded_fn`, `contract.symbol`,
+ * `selector.decoded`, `delta_id`) are set to null. Future enrichment can
+ * fill them in.
+ */
+async function appendVerdictsForMessage(
+  message: Message,
+  verdict: VerdictDto,
+): Promise<void> {
+  const ts = Math.floor(Date.now() / 1000);
+  const dapp_origin = message.data.hostname ?? null;
+  const method = inferMethod(message);
+  const wallet = inferActor(message)?.toLowerCase() ?? null;
+  const { contract, selector } = inferContractSelector(message);
+
+  // Per-row severity follows the verdict.kind ⇒ severity legend. Pass /
+  // baseline-pass rows still get severity "info" so a non-`warn`/`fail`
+  // row never accidentally renders as a finding.
+  const baseInsert: Omit<VerdictInsert, "severity" | "policy" | "reason"> = {
+    ts,
+    wallet,
+    verdict: verdict.kind,
+    method,
+    decoded_fn: null,
+    dapp_origin,
+    ...(contract ? { contract } : {}),
+    ...(selector ? { selector } : {}),
+    delta_id: null,
+  };
+
+  if (verdict.kind === "pass" || !verdict.matched || verdict.matched.length === 0) {
+    await appendVerdict({
+      ...baseInsert,
+      severity: verdict.kind === "fail" ? "deny" : "info",
+      reason: { ko: null, en: null },
+    });
+    return;
+  }
+
+  // One row per matched policy — mirrors the legacy DB schema's
+  // `(state_delta × policy)` insert.
+  for (const m of verdict.matched) {
+    await appendVerdict({
+      ...baseInsert,
+      severity: m.severity,
+      // The engine policy id is a string like `__engine::timeout` or
+      // `venue::deny_unlimited`; surface it under `policy.name` so the
+      // dashboard can display it without inventing a numeric mapping.
+      policy: { id: 0, name: m.policy_id },
+      reason: { ko: null, en: m.reason ?? null },
+    });
+  }
+}
+
+/** Map the wallet-action discriminator onto the `eth_*` method string the
+ *  dashboard already renders. Venue orders don't have an RPC method, so we
+ *  surface a synthetic `venue:<name>` label instead. */
+function inferMethod(message: Message): string | null {
+  if (isTransaction(message)) return "eth_sendTransaction";
+  if (isTypedSignature(message)) return "eth_signTypedData_v4";
+  if (isUntypedSignature(message)) return "personal_sign";
+  if (isVenueOrder(message)) return `venue:${message.data.venue}`;
+  return null;
+}
+
+/** Pull `(contract, selector)` from the message envelope when present.
+ *  Returned shape matches `verdict-storage`'s `ContractRef` / `SelectorRef`. */
+function inferContractSelector(message: Message): {
+  contract?: { addr: string; symbol: null };
+  selector?: { sig: string; decoded: null };
+} {
+  if (isTransaction(message)) {
+    const to = message.data.transaction.to?.toLowerCase();
+    const data = message.data.transaction.data;
+    const sig =
+      typeof data === "string" && data.length >= 10 ? data.slice(0, 10) : null;
+    return {
+      ...(to ? { contract: { addr: to, symbol: null } } : {}),
+      ...(sig ? { selector: { sig, decoded: null } } : {}),
+    };
+  }
+  if (isTypedSignature(message)) {
+    const verifying = (
+      message.data.typedData as { domain?: { verifyingContract?: string } }
+    )?.domain?.verifyingContract?.toLowerCase();
+    return {
+      ...(verifying
+        ? { contract: { addr: verifying, symbol: null } }
+        : {}),
+    };
+  }
+  return {};
 }
 
 function logIncoming(message: Message): void {

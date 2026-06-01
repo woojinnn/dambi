@@ -20,11 +20,7 @@ use simulation_reducer::helpers::delta::apply_delta;
 use simulation_state::store::StoreError;
 use simulation_state::WalletStore;
 
-use crate::dto::{
-    Diagnostic, EvaluateRequest, EvaluateResponse, ExecutionReportOutcome, ExecutionReportRequest,
-    ExecutionReportResponse, PolicyRequest,
-};
-use crate::store::ExecutionReportStore;
+use crate::dto::{Diagnostic, EvaluateRequest, EvaluateResponse, PolicyRequest};
 
 /// Error surfaced by [`evaluate`].
 ///
@@ -152,68 +148,9 @@ pub async fn evaluate(
     })
 }
 
-/// Records a post-policy execution lifecycle report.
-///
-/// The report endpoint is deliberately *not* a state writer. It records facts
-/// such as "wallet signed", "transaction submitted", or "Hyperliquid accepted
-/// this order request" so a reconciliation loop can later compare them with
-/// authoritative chain receipts or venue snapshots. Until that reconciliation
-/// happens, canonical [`simulation_state::WalletState`] remains unchanged.
-///
-/// This matters for browser-extension correctness: a policy allow verdict does
-/// not prove that the wallet UI was shown, the user signed, a transaction
-/// landed, or a venue accepted an off-chain request.
-///
-/// # Errors
-///
-/// Returns [`HandlerError::Store`] if the report store cannot record the event.
-pub async fn report_execution(
-    store: &dyn ExecutionReportStore,
-    req: ExecutionReportRequest,
-) -> Result<ExecutionReportResponse, HandlerError> {
-    let message = execution_report_message(&req.outcome).to_owned();
-    store.record_execution_report(req).await?;
-
-    Ok(ExecutionReportResponse {
-        accepted: true,
-        canonical_state_updated: false,
-        diagnostics: vec![Diagnostic {
-            level: "info".to_owned(),
-            message,
-            call_id: None,
-        }],
-    })
-}
-
-#[must_use]
-fn execution_report_message(outcome: &ExecutionReportOutcome) -> &'static str {
-    match outcome {
-        ExecutionReportOutcome::WalletRejected { .. } => {
-            "wallet rejection recorded; no canonical state update"
-        }
-        ExecutionReportOutcome::WalletSigned { .. } => {
-            "wallet signature recorded; canonical state waits for submission and sync"
-        }
-        ExecutionReportOutcome::OnchainSubmitted { .. } => {
-            "on-chain submission recorded; canonical state waits for receipt sync"
-        }
-        ExecutionReportOutcome::OnchainConfirmed { .. } => {
-            "on-chain confirmation recorded; canonical state waits for receipt reconciliation"
-        }
-        ExecutionReportOutcome::VenueSubmitted { .. } => {
-            "venue submission recorded; canonical state waits for venue sync"
-        }
-        ExecutionReportOutcome::VenueAccepted { .. } => {
-            "venue acceptance recorded; canonical state waits for venue sync"
-        }
-        ExecutionReportOutcome::VenueRejected { .. } => {
-            "venue rejection recorded; no canonical state update"
-        }
-        ExecutionReportOutcome::Failed { .. } => {
-            "execution failure recorded; no canonical state update"
-        }
-    }
-}
+// `report_execution` was removed: post-policy execution reports now live in
+// `chrome.storage.local` (browser-extension/backend/service-worker/
+// execution-report-storage.ts). The server no longer carries that route.
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -228,7 +165,7 @@ mod tests {
     use simulation_state::primitives::{Address, BlockHeight, ChainId, Decimal, Time};
     use simulation_state::{RequestKind, WalletId, WalletState};
 
-    use crate::dto::{EvaluateRequest, ExecutionReportOutcome, ExecutionReportRequest};
+    use crate::dto::EvaluateRequest;
     use crate::store::InMemoryWalletStore;
 
     fn sample_wallet_id() -> WalletId {
@@ -367,33 +304,7 @@ mod tests {
         );
     }
 
-    /// Hyperliquid CORE orders may be sent with an already-authorized venue
-    /// agent key, so the extension can report venue acceptance without any
-    /// MetaMask-style wallet signature callback. The server records that
-    /// lifecycle event but still leaves canonical state to venue sync.
-    #[tokio::test]
-    async fn execution_report_accepts_venue_flow_without_wallet_signature() {
-        let store = InMemoryWalletStore::new();
-        let report = ExecutionReportRequest {
-            wallet_id: Some(sample_wallet_id()),
-            evaluation_id: Some("hl-eval-1".to_owned()),
-            action_index: Some(0),
-            outcome: ExecutionReportOutcome::VenueAccepted {
-                venue: "hyperliquid".to_owned(),
-                venue_order_id: Some("987654321".to_owned()),
-                client_order_id: None,
-            },
-            metadata: BTreeMap::new(),
-        };
-
-        let resp = report_execution(&store, report.clone()).await.unwrap();
-
-        assert!(resp.accepted);
-        assert!(!resp.canonical_state_updated);
-        assert!(resp
-            .diagnostics
-            .iter()
-            .any(|d| d.message.contains("venue sync")));
-        assert_eq!(store.execution_reports(), vec![report]);
-    }
+    // `execution_report_accepts_venue_flow_without_wallet_signature` was
+    // removed alongside `report_execution`: execution reports now live in
+    // chrome.storage.local and the server has no `/execution-report` route.
 }

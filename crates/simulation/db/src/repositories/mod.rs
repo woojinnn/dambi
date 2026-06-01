@@ -15,15 +15,15 @@
 pub mod approvals;
 pub mod block_heights;
 pub mod deltas;
-pub mod execution_reports;
 pub mod holdings;
-pub mod pending_txs;
 pub mod positions;
 pub mod profile;
 pub mod tokens;
 pub mod user_policies;
-pub mod verdicts;
 pub mod wallets;
+// `execution_reports`, `pending_txs`, and `verdicts` repositories were
+// removed: those tables migrated to `chrome.storage.local` in the browser
+// extension. Migration 010 drops the underlying tables.
 
 pub use deltas::{DeltaInsert, DeltaRow, DeltaSource, DeltaStatus};
 pub use profile::UserProfile;

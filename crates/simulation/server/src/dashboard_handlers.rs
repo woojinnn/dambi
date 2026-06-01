@@ -17,9 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::Serialize;
 
-use simulation_db::repositories::{
-    approvals, pending_txs, user_policies, verdicts as verdicts_repo, wallets as wallets_repo,
-};
+use simulation_db::repositories::{approvals, user_policies, wallets as wallets_repo};
 use simulation_state::primitives::ChainId;
 use simulation_state::{WalletId, WalletStore};
 
@@ -33,7 +31,11 @@ pub struct DashboardSummary {
     pub total_portfolio_usd: String,
     pub chain_breakdown: Vec<ChainShare>,
     pub wallets: Vec<WalletSummary>,
-    pub unresolved_findings: i64,
+    // `unresolved_findings` was removed when the verdicts table moved to
+    // chrome.storage.local — the dashboard reads that counter locally via
+    // `verdicts:count`. `pending_count` likewise no longer ships from the
+    // server (pending_txs table dropped); the field stays in the per-wallet
+    // payload as a hardcoded 0 for FE backwards-compat.
 }
 
 #[derive(Debug, Serialize)]
@@ -62,10 +64,12 @@ pub async fn get_summary(
         Err(e) => return internal(&format!("open user store: {e}")),
     };
 
-    // Pull the wallet list + per-wallet aggregate counts (unlimited
-    // approvals, pending txs, policy count, unresolved findings) in one
-    // spawn_blocking. Holdings/prices come from the async `WalletStore`
-    // path below.
+    // Pull the wallet list + per-wallet unlimited-approval counts + policy
+    // count in one spawn_blocking. `pending_count` was previously a DB
+    // aggregate over `pending_txs`; that table moved to
+    // `chrome.storage.local` so we hardcode `pending = 0` here and let the
+    // FE keep reading the field for backwards compat.
+    // Holdings/prices come from the async `WalletStore` path below.
     let pool = store.pool().clone();
     let counts_result = tokio::task::spawn_blocking(move || {
         pool.with_tx(|tx| {
@@ -75,30 +79,13 @@ pub async fn get_summary(
                 Vec::with_capacity(wallets.len());
             for w in &wallets {
                 let unlimited = approvals::erc20::count_unlimited_for_wallet(tx, w.id)?;
-                let pending = pending_txs::count_for_wallet(tx, w.id)?;
-                per_wallet.push((w.clone(), unlimited, pending));
+                per_wallet.push((w.clone(), unlimited, 0));
             }
-            let unresolved = verdicts_repo::count_by_verdict(
-                tx,
-                &verdicts_repo::VerdictFilter {
-                    verdict: Some("warn".into()),
-                    limit: 1,
-                    ..Default::default()
-                },
-            )?;
-            // count_by_verdict aggregates pass/warn/fail; we only want
-            // warns without a user decision. Run a tight follow-up query.
-            let undecided_warns: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM verdicts WHERE verdict = 'warn' AND user_decision IS NULL",
-                [],
-                |r| r.get(0),
-            )?;
-            let _ = unresolved; // keep the binding for clarity above
-            Ok((per_wallet, policy_count, undecided_warns))
+            Ok((per_wallet, policy_count))
         })
     })
     .await;
-    let (per_wallet, policy_count, unresolved_findings) = match counts_result {
+    let (per_wallet, policy_count) = match counts_result {
         Ok(Ok(t)) => t,
         Ok(Err(e)) => return internal(&format!("dashboard counts: {e}")),
         Err(e) => return internal(&format!("join: {e}")),
@@ -169,7 +156,6 @@ pub async fn get_summary(
         total_portfolio_usd: fmt6(total),
         chain_breakdown,
         wallets: wallet_summaries,
-        unresolved_findings,
     })
     .into_response()
 }

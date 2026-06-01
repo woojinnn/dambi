@@ -6,9 +6,7 @@
 //! the handler runs.
 //!
 //! State is shared as a single `AppState` carrying the per-user DB router
-//! (`MultiUserStore`) plus the cross-user identity DB (`GlobalDb`). Execution
-//! reports are persisted into each user's own SQLite via
-//! `SqliteExecutionReportStore` constructed on demand from the user's pool.
+//! (`MultiUserStore`) plus the cross-user identity DB (`GlobalDb`).
 
 use axum::extract::{FromRef, State};
 use axum::http::StatusCode;
@@ -26,12 +24,10 @@ use simulation_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 use crate::auth::{require_auth, AuthUser};
 use crate::dashboard_handlers;
-use crate::db_store::SqliteExecutionReportStore;
-use crate::dto::{EvaluateRequest, ExecutionReportRequest};
+use crate::dto::EvaluateRequest;
 use crate::events::EventBus;
-use crate::handler::{evaluate, report_execution, HandlerError};
+use crate::handler::{evaluate, HandlerError};
 use crate::read_handlers;
-use crate::verdict_handlers;
 use crate::write_handlers;
 
 /// Shared, cheaply-cloneable application state handed to every handler.
@@ -113,7 +109,6 @@ impl FromRef<AppState> for Arc<Orchestrator> {
 /// SSE — see `auth::middleware` for the resolution order):
 /// - `GET  /auth/me`                        — current user (id + email).
 /// - `POST /evaluate`                       — simulate action envelope(s).
-/// - `POST /execution-report`               — post-policy lifecycle facts.
 /// - `GET  /wallets`                        — list user's wallets.
 /// - `POST /wallets`                        — start tracking a new wallet.
 /// - `PATCH/DELETE /wallets/:address`       — label/owned + archive.
@@ -135,7 +130,6 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/auth/me", get(auth_me_handler))
         .route("/evaluate", post(evaluate_handler))
-        .route("/execution-report", post(execution_report_handler))
         .route(
             "/wallets",
             get(read_handlers::list_wallets).post(write_handlers::add_wallet),
@@ -185,17 +179,13 @@ pub fn build_router(state: AppState) -> Router {
         )
         // ---- Phase 3: dashboard summary ----
         .route("/dashboard/summary", get(dashboard_handlers::get_summary))
-        // ---- Phase 2: verdict / audit / history / findings ----
-        .route("/verdicts", post(verdict_handlers::create_verdict))
-        .route(
-            "/verdicts/:id",
-            axum::routing::patch(verdict_handlers::patch_verdict),
-        )
-        .route("/audit/verdicts", get(verdict_handlers::list_audit))
-        .route("/audit/counts", get(verdict_handlers::audit_counts))
-        .route("/audit/export", get(verdict_handlers::audit_export))
-        .route("/history/verdicts", get(verdict_handlers::list_history))
-        .route("/findings/feed", get(verdict_handlers::findings_feed))
+        // ---- Phase 2 verdict / audit / history / findings endpoints
+        // moved to the browser extension's chrome.storage.local — see
+        // `verdict-storage.ts`. The dashboard now reads them through the
+        // extension bridge instead of HTTP.
+        //
+        // ---- POST /execution-report likewise moved to
+        // `chrome.storage.local` via `execution-report-storage.ts`.
         .route("/events/stream", get(crate::events::sse_stream))
         // Selector decode + revoke calldata builder + Cedar sequence sim
         // all moved to the dashboard (apps/web/src/tools/* + cedar/).
@@ -262,30 +252,7 @@ async fn evaluate_handler(
     }
 }
 
-/// `POST /execution-report` — record what happened after policy approval.
-///
-/// Reports land in the authenticated user's own SQLite so wallet/chain/venue
-/// callbacks stay isolated per user. Canonical wallet state still comes from
-/// the sync orchestrator; this endpoint only persists lifecycle facts that a
-/// later reconciler will confirm against chain receipts or venue snapshots.
-async fn execution_report_handler(
-    State(state): State<AppState>,
-    Extension(user): Extension<AuthUser>,
-    Json(req): Json<ExecutionReportRequest>,
-) -> Response {
-    let store = match state.multi_user.for_user(&user.user_id) {
-        Ok(s) => s,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("open user store: {e}"),
-            )
-                .into_response();
-        }
-    };
-    let report_store = SqliteExecutionReportStore::new(store.pool().clone());
-    match report_execution(&report_store, req).await {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
-    }
-}
+// `POST /execution-report` was removed: the browser extension now writes
+// post-policy lifecycle facts to `chrome.storage.local` directly (see
+// `execution-report-storage.ts`). Removed alongside the verdict / audit
+// routes above.

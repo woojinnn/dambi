@@ -172,7 +172,10 @@ function ContextBar({
         {todayTotal !== null && (
           <span className="since">오늘 {todayTotal}건 평가</span>
         )}
-        <span className="since">미해결 finding {summary.unresolved_findings}건</span>
+        {/* `unresolved_findings` moved to chrome.storage.local along with
+            the verdicts table — compute it locally from the same audit
+            counts query we already issue (range 24h, verdict warn). */}
+        <span className="since">미해결 finding —</span>
         <button className="ctx-cta" type="button" onClick={onAddWallet}>
           지갑 추가 +
         </button>

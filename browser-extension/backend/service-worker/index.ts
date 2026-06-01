@@ -32,6 +32,20 @@ import {
   testPolicyText,
   validatePolicyText,
 } from "./wasm-bridge";
+import {
+  clearVerdicts,
+  countVerdicts,
+  exportVerdictsAsCsv,
+  listVerdicts,
+  setVerdictDecision as setVerdictDecisionStorage,
+  type VerdictFilter,
+} from "./verdict-storage";
+import {
+  clearExecutionReports,
+  countExecutionReports,
+  listExecutionReports,
+  type ExecutionReportFilter,
+} from "./execution-report-storage";
 
 const WALLET_ACTION_TYPES = new Set<string>([
   RequestType.TRANSACTION,
@@ -249,6 +263,44 @@ interface CedarSimulateRequest {
   steps_json: string;
   policies_json: string;
 }
+// Verdict log (chrome.storage.local-backed, replaces server `/verdicts`,
+// `/audit/*`, `/history/verdicts`, `/findings/feed`, `PATCH /verdicts/:id`).
+// See `verdict-storage.ts` for the row shape and bounds.
+interface VerdictsListRequest {
+  type: "verdicts:list";
+  opts?: VerdictFilter;
+}
+interface VerdictsCountRequest {
+  type: "verdicts:count";
+  opts?: VerdictFilter;
+}
+interface VerdictsSetDecisionRequest {
+  type: "verdicts:set-decision";
+  id: string;
+  decision: "trusted" | "cancelled";
+}
+interface VerdictsExportCsvRequest {
+  type: "verdicts:export-csv";
+  opts?: VerdictFilter;
+}
+interface VerdictsClearRequest {
+  type: "verdicts:clear";
+}
+
+// Execution-report log (chrome.storage.local-backed, replaces server
+// `POST /execution-report`). See `execution-report-storage.ts`.
+interface ExecutionReportsListRequest {
+  type: "execution-reports:list";
+  opts?: ExecutionReportFilter;
+}
+interface ExecutionReportsCountRequest {
+  type: "execution-reports:count";
+  opts?: ExecutionReportFilter;
+}
+interface ExecutionReportsClearRequest {
+  type: "execution-reports:clear";
+}
+
 type PopupRequest =
   | PolicyCatalogRequest
   | SetEnabledIdsRequest
@@ -258,7 +310,15 @@ type PopupRequest =
   | ScopeballListWalletsRequest
   | CedarValidateRequest
   | CedarTestRequest
-  | CedarSimulateRequest;
+  | CedarSimulateRequest
+  | VerdictsListRequest
+  | VerdictsCountRequest
+  | VerdictsSetDecisionRequest
+  | VerdictsExportCsvRequest
+  | VerdictsClearRequest
+  | ExecutionReportsListRequest
+  | ExecutionReportsCountRequest
+  | ExecutionReportsClearRequest;
 
 // webextension-polyfill's listener type accepts `true | void | Promise<any>`,
 // not `boolean`. Returning `undefined` (bare `return;`) closes the channel
@@ -395,6 +455,131 @@ Browser.runtime.onMessage.addListener(
           sendResponse({
             ok: false,
             error: { kind: "scopeball_list_wallets_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    // Verdict log handlers — chrome.storage.local replacement for the
+    // simulation-server's `/verdicts` + `/audit/*` + `/history/verdicts` +
+    // `/findings/feed` endpoints. Filter & paging happen inside
+    // `verdict-storage.ts`.
+    if (req.type === "verdicts:list") {
+      void listVerdicts((req as VerdictsListRequest).opts)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_list_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "verdicts:count") {
+      void countVerdicts((req as VerdictsCountRequest).opts)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_count_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "verdicts:set-decision") {
+      const r = req as VerdictsSetDecisionRequest;
+      if (
+        typeof r.id !== "string" ||
+        (r.decision !== "trusted" && r.decision !== "cancelled")
+      ) {
+        sendResponse({
+          ok: false,
+          error: {
+            kind: "invalid_request",
+            message: "id must be string, decision must be trusted|cancelled",
+          },
+        });
+        return true;
+      }
+      void setVerdictDecisionStorage(r.id, r.decision)
+        .then((updated) => sendResponse({ ok: true, data: { updated } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "verdicts_set_decision_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "verdicts:export-csv") {
+      void exportVerdictsAsCsv((req as VerdictsExportCsvRequest).opts)
+        .then((csv) => sendResponse({ ok: true, data: { csv } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_export_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "verdicts:clear") {
+      void clearVerdicts()
+        .then(() => sendResponse({ ok: true, data: { cleared: true } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_clear_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    // Execution-report log handlers — chrome.storage.local replacement for
+    // the simulation-server's `POST /execution-report`. Writes happen at
+    // `execution-report.ts`; the dashboard reads via these handlers.
+    if (req.type === "execution-reports:list") {
+      void listExecutionReports((req as ExecutionReportsListRequest).opts)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "execution_reports_list_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "execution-reports:count") {
+      void countExecutionReports(
+        (req as ExecutionReportsCountRequest).opts,
+      )
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "execution_reports_count_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "execution-reports:clear") {
+      void clearExecutionReports()
+        .then(() => sendResponse({ ok: true, data: { cleared: true } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "execution_reports_clear_failed",
+              message: String(err),
+            },
           }),
         );
       return true;

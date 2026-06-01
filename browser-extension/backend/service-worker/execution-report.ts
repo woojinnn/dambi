@@ -1,41 +1,33 @@
 import { RequestType, type ExecutionReportPayload } from "@lib/types";
 
-const DEFAULT_SIMULATION_SERVER_URL = "http://127.0.0.1:8788";
+import { appendExecutionReport } from "./execution-report-storage";
 
 /**
  * Best-effort execution report sink.
  *
- * This is deliberately narrower than the future simulation-server API client:
- * verdict/evaluate traffic still uses the existing policy path, while this
- * adapter only forwards post-policy lifecycle facts to `/execution-report`.
+ * Replaces the old `POST /execution-report` HTTP call to the simulation
+ * server. Reports are now written into `chrome.storage.local` so the
+ * dashboard can read them through the SW message bus (no server round-trip,
+ * no JWT, no CORS).
+ *
+ * Skipped silently for non-execution-report message types — keeps the
+ * existing call-site contract (the message dispatcher in `index.ts`
+ * forwards every message here and we just no-op on the unrelated ones).
+ *
+ * Storage writes are best-effort: a quota error or chrome.storage flake
+ * must NOT throw out of this function (the caller's reply path is already
+ * done with the wallet, and there's no UI affordance for a "we couldn't
+ * record this" warning). Errors are logged so they surface in DevTools.
  */
 export async function reportExecutionOutcome(
   report: ExecutionReportPayload,
 ): Promise<void> {
-  const {
-    type: _type,
-    hostname: _hostname,
-    bypassed: _bypassed,
-    ...body
-  } = report;
-  if (_type !== RequestType.EXECUTION_REPORT) return;
+  if (report.type !== RequestType.EXECUTION_REPORT) return;
 
   try {
-    const base =
-      process.env.SIMULATION_SERVER_URL ?? DEFAULT_SIMULATION_SERVER_URL;
-    const resp = await fetch(`${base}/execution-report`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      console.warn("[Scopeball] execution report rejected", {
-        status: resp.status,
-        statusText: resp.statusText,
-      });
-    }
+    await appendExecutionReport(report);
   } catch (err) {
-    console.warn("[Scopeball] execution report failed", {
+    console.warn("[Scopeball] execution report storage failed", {
       err: err instanceof Error ? err.message : String(err),
     });
   }

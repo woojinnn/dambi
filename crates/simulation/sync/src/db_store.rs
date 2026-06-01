@@ -7,9 +7,7 @@
 
 use async_trait::async_trait;
 
-use simulation_db::repositories::{
-    block_heights, execution_reports, holdings, positions, tokens, wallets,
-};
+use simulation_db::repositories::{block_heights, holdings, positions, tokens, wallets};
 use simulation_db::{DbError, Pool};
 use simulation_state::store::StoreError;
 use simulation_state::{
@@ -121,21 +119,10 @@ impl WalletStore for SqliteWalletStore {
         Ok(())
     }
 
-    async fn reconcile_reports(&self, id: &WalletId, now: Time) -> Result<usize, StoreError> {
-        let address = id.address.to_string().to_lowercase();
-        let reconciled = self.pool.with_tx(|tx| {
-            let Some(wallet) = wallets::get_by_address(tx, &address)? else {
-                return Ok(0);
-            };
-            execution_reports::mark_reconciled_for_wallet(
-                tx,
-                wallet.id,
-                i64::try_from(now.as_unix())
-                    .map_err(|_| DbError::Invariant("reconcile time overflow".into()))?,
-            )
-        })?;
-        Ok(reconciled)
-    }
+    // `reconcile_reports` was an `execution_reports`-table override; the
+    // table moved to `chrome.storage.local`. The trait's default no-op
+    // (returns 0) is correct now — scheduler loops still call it but get
+    // back zero reconciled rows, which matches the new reality.
 }
 
 fn position_to_insert(
@@ -206,9 +193,6 @@ mod tests {
 
     use std::str::FromStr;
 
-    use simulation_db::repositories::execution_reports::{
-        ExecutionReportInsert, OutcomeKind, ReportStage,
-    };
     use simulation_db::run_migrations;
     use simulation_state::{BlockHeight, Decimal, HlAccount, ProtocolRef};
 
@@ -219,8 +203,13 @@ mod tests {
         )
     }
 
+    /// Reduced version of the previous `…_round_trips_positions_and_reconciles_reports`
+    /// test. The reconcile half was tied to the `execution_reports` table,
+    /// which moved to `chrome.storage.local` (migration 010 drops it). The
+    /// position round-trip half is the only thing the SQLite store actually
+    /// owns now.
     #[tokio::test]
-    async fn sqlite_wallet_store_round_trips_positions_and_reconciles_reports() {
+    async fn sqlite_wallet_store_round_trips_positions() {
         let pool = Pool::open_in_memory();
         run_migrations(&pool).unwrap();
         let store = SqliteWalletStore::new(pool.clone());
@@ -247,35 +236,6 @@ mod tests {
 
         store.save(&state).await.unwrap();
 
-        let wallet_row_id = pool
-            .with_tx(|tx| {
-                let wallet =
-                    wallets::get_by_address(tx, "0x362e7e9e630481631d7c804dfe50e24b53250925")?
-                        .unwrap();
-                execution_reports::insert(
-                    tx,
-                    &ExecutionReportInsert {
-                        wallet_id: Some(wallet.id),
-                        evaluation_id: Some("eval-hl".into()),
-                        action_index: Some(0),
-                        stage: ReportStage::Venue,
-                        outcome_kind: OutcomeKind::VenueAccepted,
-                        chain: None,
-                        tx_hash: None,
-                        signature: None,
-                        venue: Some("hyperliquid".into()),
-                        venue_order_id: Some("42".into()),
-                        client_order_id: None,
-                        reason: None,
-                        raw_json: serde_json::json!({"kind":"venue_accepted"}),
-                        metadata_json: serde_json::json!({}),
-                        created_at: 1_738_000_001,
-                    },
-                )?;
-                Ok(wallet.id)
-            })
-            .unwrap();
-
         let loaded = store.load(&state.wallet_id).await.unwrap();
         assert_eq!(
             loaded
@@ -295,16 +255,5 @@ mod tests {
             }
             other => panic!("expected hyperliquid account, got {other:?}"),
         }
-
-        let reconciled = store
-            .reconcile_reports(&state.wallet_id, Time::from_unix(1_738_000_030))
-            .await
-            .unwrap();
-        assert_eq!(reconciled, 1);
-        pool.with_tx(|tx| {
-            assert!(execution_reports::list_unreconciled_for_wallet(tx, wallet_row_id)?.is_empty());
-            Ok(())
-        })
-        .unwrap();
     }
 }

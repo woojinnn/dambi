@@ -32,8 +32,10 @@ export interface DashboardSummary {
   total_portfolio_usd: Decimal;
   chain_breakdown: ChainShare[];
   wallets: DashboardWalletSummary[];
-  /** warn-level verdicts the user hasn't yet trusted/cancelled. */
-  unresolved_findings: number;
+  // `unresolved_findings` was removed when the verdict log moved to
+  // chrome.storage.local. The dashboard now reads that counter directly via
+  // `verdicts:count`. Pages that previously displayed it should call
+  // `getAuditCounts({ verdict: "warn" })` and filter for `user_decision === null`.
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
