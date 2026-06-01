@@ -569,6 +569,31 @@ describe("orchestrator", () => {
     );
   });
 
+  it("typed sig: a routed hit logs a readable off-chain signature summary to DevTools", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
+      actions: [sigPermitAction],
+      decoderId: "uniswap/permit2/permitSingle@1.0.0",
+    });
+
+    await decideMessage(typedSigMessage("typed-log-1"), {
+      onAwaitingUser: vi.fn(),
+    });
+
+    const summary = infoSpy.mock.calls
+      .map((call) => String(call[0]))
+      .find((line) => line.startsWith("[Scopeball] off-chain signature parsed"));
+    expect(summary).toBeDefined();
+    // EIP-712 primaryType + routing decoder + the decoded action tag/fields are
+    // all surfaced in one readable line.
+    expect(summary).toContain("Permit");
+    expect(summary).toContain("uniswap/permit2/permitSingle@1.0.0");
+    expect(summary).toContain("permit2_sign_allowance");
+    expect(summary).toContain("spender=");
+    expect(summary).toContain("amount=1000");
+    infoSpy.mockRestore();
+  });
+
   it("typed sig: a routed hit with a warn verdict opens the verdict window", async () => {
     mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
       actions: [sigPermitAction],

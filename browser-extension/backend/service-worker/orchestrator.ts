@@ -711,6 +711,90 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
   }
 }
 
+// ── Off-chain signature decode logging helpers ─────────────────────────────
+
+/** Abbreviate a long `0x` hex (address / 32-byte hash) for log readability. */
+function abbrevHex(value: string): string {
+  return /^0x[0-9a-fA-F]{40,}$/.test(value)
+    ? `${value.slice(0, 8)}…${value.slice(-6)}`
+    : value;
+}
+
+/**
+ * Flatten an `ActionBody`'s scalar leaves into compact `path=value` pairs for a
+ * one-line, human-readable summary. Skips the `domain` / `action` discriminants
+ * (shown in the line header) and the live-input plumbing (`source` /
+ * `synced_at` / `ttl`), and abbreviates long hex so the security-relevant fields
+ * (spender / token / amount / deadline) read at a glance.
+ */
+function summarizeBodyFields(body: unknown): string {
+  const pairs: string[] = [];
+  const walk = (value: unknown, path: string): void => {
+    if (value === null || value === undefined) return;
+    if (typeof value === "object") {
+      if (Array.isArray(value)) {
+        value.forEach((item, i) => walk(item, `${path}[${i}]`));
+        return;
+      }
+      for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+        if (path === "" && (key === "domain" || key === "action")) continue;
+        if (key === "source" || key === "synced_at" || key === "ttl") continue;
+        walk(val, path ? `${path}.${key}` : key);
+      }
+      return;
+    }
+    const rendered = typeof value === "string" ? abbrevHex(value) : String(value);
+    pairs.push(`${path}=${rendered}`);
+  };
+  walk(body, "");
+  return pairs.join("  ");
+}
+
+/**
+ * Unwrap a (possibly `Multicall`) `ActionBody` into its leaf bodies, so a
+ * batched signature (Permit2 `PermitBatch`) summarizes one line per inner
+ * permit rather than a single opaque `multicall` entry.
+ */
+function leafBodies(body: unknown): unknown[] {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    (body as { domain?: unknown }).domain === "multicall" &&
+    Array.isArray((body as { actions?: unknown }).actions)
+  ) {
+    return ((body as { actions: unknown[] }).actions).flatMap(leafBodies);
+  }
+  return [body];
+}
+
+/**
+ * Emit a signature-tailored, readable summary of a decoded off-chain payload to
+ * the ScopeBall DevTools console: the EIP-712 `domain` / `primaryType` that was
+ * signed, the routing decoder, and one `domain/action  field=value …` line per
+ * decoded (leaf) `ActionBody`. Complements the full JSON dump.
+ */
+function logParsedSignature(message: Message, routed: { actions: unknown[]; decoderId: string }): void {
+  const td = (
+    message.data as {
+      typedData?: { primaryType?: string; domain?: { name?: string } };
+    }
+  ).typedData;
+  const domainName = td?.domain?.name ?? "?";
+  const primaryType = td?.primaryType ?? "?";
+  const leaves = routed.actions.flatMap((a) =>
+    leafBodies((a as { body?: unknown }).body),
+  );
+  const lines = leaves.map((body, i) => {
+    const b = body as { domain?: string; action?: string };
+    return `  #${i} ${b?.domain ?? "?"}/${b?.action ?? "?"}  ${summarizeBodyFields(body)}`;
+  });
+  console.info(
+    `[Scopeball] off-chain signature parsed — ${domainName} / ${primaryType} ` +
+      `(${leaves.length} action${leaves.length === 1 ? "" : "s"}) via ${routed.decoderId}\n` +
+      lines.join("\n"),
+  );
+}
+
 /**
  * EIP-712 typed-data signature verdict lifecycle.
  *
@@ -766,8 +850,10 @@ async function typedSignatureLifecycle(
     };
   }
 
-  // Pretty-print the decoded ActionBody[] so DevTools shows the signature's
-  // spender / amount / deadline (mirrors the tx-path dump).
+  // Off-chain signature observability: a readable per-action summary (EIP-712
+  // domain / primaryType + each leaf body's security fields), then the full
+  // ActionBody[] JSON dump (mirrors the tx-path dump) for complete detail.
+  logParsedSignature(message, routed);
   console.info(
     `[Scopeball] decoded ActionBody[] (${routed.actions.length})\n` +
       JSON.stringify(routed.actions, null, 2),
