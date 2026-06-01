@@ -54,4 +54,35 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
     expect(parse(undefined)).toBeNull();
     expect(parseHyperliquidExchangeOrders("hyperliquid", URL, HOST, { foo: 1 })).toBeNull();
   });
+
+  it("captures the request nonce on every leg (for submitted_at threading)", () => {
+    const payloads = parse({
+      type: "order",
+      orders: [
+        { a: 0, b: true, p: "95000", s: "0.05", r: false, t: { limit: { tif: "Gtc" } } },
+        { a: 1, b: false, p: "3500", s: "1", r: false, t: { limit: { tif: "Gtc" } } },
+      ],
+      grouping: "na",
+    });
+    expect(payloads).toHaveLength(2);
+    expect(payloads!.every((p) => p.nonce === 1_700_000_000_000)).toBe(true);
+  });
+
+  it("captures a non-null vaultAddress (on-behalf-of attribution)", () => {
+    const payloads = parseHyperliquidExchangeOrders("hyperliquid", URL, HOST, {
+      action: { type: "order", orders: [{ a: 0, b: true, p: "1", s: "1" }], grouping: "na" },
+      nonce: 1_700_000_000_000,
+      vaultAddress: "0x000000000000000000000000000000000000dEaD",
+    });
+    expect(payloads![0].vaultAddress).toBe("0x000000000000000000000000000000000000dEaD");
+  });
+
+  it("omits vaultAddress when null/absent", () => {
+    const payloads = parse({
+      type: "order",
+      orders: [{ a: 0, b: true, p: "1", s: "1" }],
+      grouping: "na",
+    });
+    expect(payloads![0].vaultAddress).toBeUndefined();
+  });
 });

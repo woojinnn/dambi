@@ -219,16 +219,33 @@ function actionBody(
  * Convert a {@link VenueOrderPayload} into the `{ action, meta }` JSON pair the
  * v2 entry point consumes. Pure and synchronous.
  */
+/** Fallback `submitted_at` (unix seconds) when the request carries no nonce. */
+const HL_SUBMITTED_AT_FALLBACK = 1_738_000_000;
+
 export function hlOrderToAction(payload: VenueOrderPayload): HlActionInput {
   const action = actionBody(payload.hlAction, payload.symbol);
 
+  // HL `nonce` is a millisecond wall-clock timestamp; `ActionMeta.submitted_at`
+  // is unix seconds. Threading the real nonce lets time-scoped policies see the
+  // actual submission time instead of a fixed placeholder.
+  const submittedAt =
+    typeof payload.nonce === "number" && payload.nonce > 0
+      ? Math.floor(payload.nonce / 1000)
+      : HL_SUBMITTED_AT_FALLBACK;
+
+  // NOTE: `submitter` stays a sentinel. The /exchange body carries no master
+  // account address (only an agent signature + nonce), and the SW does not track
+  // the connected account for the HL path. Recovering the real submitter (e.g.
+  // ec-recover on user-signed actions) is deferred; for a single-user pre-sign
+  // analyzer the high-value scoping fields are destination / amount, which ARE
+  // modeled. See memory `project_hl_order_audit` (#2b).
   const meta: Record<string, unknown> = {
-    submitted_at: 1_738_000_000,
+    submitted_at: submittedAt,
     submitter: "0x000000000000000000000000000000000000a01c",
     nature: {
       kind: "offchain_sig",
       domain: { name: "Hyperliquid", version: "1" },
-      deadline: 1_738_000_600,
+      deadline: submittedAt + 600,
     },
   };
 

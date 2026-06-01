@@ -238,6 +238,19 @@ describe("hlOrderToAction", () => {
     });
   });
 
+  it("threads the request nonce (ms) into meta.submitted_at (seconds) + deadline", () => {
+    const p = shortBtc();
+    p.nonce = 1_700_000_000_000; // ms
+    const { meta } = hlOrderToAction(p);
+    expect(meta.submitted_at).toBe(1_700_000_000); // ÷1000 → seconds
+    expect((meta.nature as { deadline: number }).deadline).toBe(1_700_000_600);
+  });
+
+  it("falls back to the sentinel submitted_at when no nonce is present", () => {
+    const { meta } = hlOrderToAction(shortBtc());
+    expect(meta.submitted_at).toBe(1_738_000_000);
+  });
+
   it("converts the hl_unknown catch-all (raw wire type only)", () => {
     const { action } = hlOrderToAction(
       payload({ kind: "unknown", actionType: "convertToMultiSigUser" }),

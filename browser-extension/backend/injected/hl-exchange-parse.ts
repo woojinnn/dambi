@@ -79,14 +79,23 @@ function asObject(v: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/** Request-level attribution shared by every leg of one `/exchange` POST. */
+interface HlAttribution {
+  /** `nonce` — a millisecond wall-clock timestamp. */
+  nonce?: number;
+  /** `vaultAddress` when the order is placed on behalf of a vault. */
+  vaultAddress?: string;
+}
+
 /** Wrap one parsed CORE action in a `VenueOrderPayload` envelope. */
 function envelope(
   venue: string,
   endpoint: string,
   hostname: string,
   hlAction: VenueActionWire,
+  attribution: HlAttribution,
 ): VenueOrderPayload {
-  return {
+  const p: VenueOrderPayload = {
     type: RequestType.VENUE_ORDER,
     chainId: 0,
     hostname,
@@ -96,6 +105,9 @@ function envelope(
     // `symbol` is resolved SW-side from the venue meta cache (the wire only has
     // the numeric index); omitted here.
   };
+  if (attribution.nonce !== undefined) p.nonce = attribution.nonce;
+  if (attribution.vaultAddress !== undefined) p.vaultAddress = attribution.vaultAddress;
+  return p;
 }
 
 /** Parse the `orders[]` of a `{"type":"order"}` action — one payload per leg. */
@@ -104,6 +116,7 @@ function parseOrders(
   endpoint: string,
   hostname: string,
   action: Record<string, unknown>,
+  attribution: HlAttribution,
 ): VenueOrderPayload[] | null {
   const orders = action.orders;
   if (!Array.isArray(orders) || orders.length === 0) return null;
@@ -125,7 +138,9 @@ function parseOrders(
       t: order.t,
     };
     if (typeof order.c === "string") wire.c = order.c;
-    payloads.push(envelope(venue, endpoint, hostname, { kind: "order", order: wire }));
+    payloads.push(
+      envelope(venue, endpoint, hostname, { kind: "order", order: wire }, attribution),
+    );
   }
   return payloads.length > 0 ? payloads : null;
 }
@@ -158,13 +173,21 @@ export function parseHyperliquidExchangeOrders(
   const action = asObject(root.action);
   if (!action || typeof action.type !== "string") return null;
 
+  // Request-level attribution shared by every leg: the `nonce` (a ms wall-clock
+  // timestamp → `submitted_at`) and `vaultAddress` (on-behalf-of, when present).
+  const attribution: HlAttribution = {};
+  if (typeof root.nonce === "number") attribution.nonce = root.nonce;
+  if (typeof root.vaultAddress === "string" && root.vaultAddress.length > 0) {
+    attribution.vaultAddress = root.vaultAddress;
+  }
+
   const one = (a: VenueActionWire): VenueOrderPayload[] => [
-    envelope(venue, endpoint, hostname, a),
+    envelope(venue, endpoint, hostname, a, attribution),
   ];
 
   switch (action.type) {
     case "order":
-      return parseOrders(venue, endpoint, hostname, action);
+      return parseOrders(venue, endpoint, hostname, action, attribution);
 
     case "updateLeverage": {
       if (
