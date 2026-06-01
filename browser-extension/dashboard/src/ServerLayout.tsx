@@ -49,6 +49,12 @@ export function ServerLayout() {
           <NavBtn to="/server/policies" label="Policies" />
           <NavBtn to="/server/tokens" label="Tokens" />
           <NavBtn to="/server/activity" label="Activity" />
+          <NavBtn to="/server/summary" label="Summary" />
+          <NavBtn to="/server/editor" label="Editor" />
+          <NavBtn to="/server/simulation" label="Simulation" />
+          <NavBtn to="/server/monitoring" label="Monitoring" />
+          <NavBtn to="/server/audit" label="Audit" />
+          <NavBtn to="/server/history" label="History" />
           <NavBtn to="/server/me" label="Me" />
         </nav>
         <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13 }}>
