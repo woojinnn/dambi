@@ -62,7 +62,7 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- \
 |---|---|---|---|---|---|
 | uniswap | `uniswap/2026-05-30-coverage.json` | 700 | 302 | 325 (**migration-gap** registry→registryV2 + FoT/V4) | 73 (Permit2/V4 nested) |
 | aave | `aave/2026-05-30-etherscan.json` | 300 | * | L2Pool packed (31% Arb) | 0 |
-| balancer | `balancer/2026-05-30-etherscan.json` | 300 | 94 | 204 (batchSwap/join/exit) | 0 |
+| balancer | `balancer/2026-06-01-real-tx-research.json` | 535 | 155 | 360 (batchSwap/join/exit + V3 liquidity/initialize) | 20 (`permitBatchAndCall` overcoverage corrected to soft exclude) |
 | hyperliquid | `hyperliquid/2026-05-30-etherscan.json` | 160 | 5+ | 2 (infra, out-of-scope) | 0 |
 | layerzero | `layerzero/2026-05-30-etherscan.json` | ~640 | * | ZRO ERC20(no token file) + claim overloads | 0 |
 | uniswapx | `uniswapx/2026-05-30-etherscan.json` | 160 | 0 | 3 (reactor execute → Tier B) | 0 |
@@ -71,6 +71,20 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- \
 **최신 synthetic sweep:** `_synthetic/2026-05-31-synthetic.json` — 2,410,000 probes, 2,183,381 pass, 226,619 soft, **0 fail / 0 panic**. `soft`는 synthesis/model-limit 분류이며, fresh hard decoder regression은 없었다.
 
 새 로그를 추가하면 이 표 한 줄을 갱신한다.
+
+## 2026-06-01 Balancer V2/V3 실거래 재검증 — 정정 결과
+
+**외부 데이터 lane 확인**: Claude Code headless(`claude -p`) 2차 검토 + Etherscan v2 txlist + Dune MCP를 사용했다. Etherscan은 Free API에서 mainnet/arbitrum/polygon V2 Vault와 mainnet V3 Router를 각 10,000 tx까지 가져왔고, Base/OP/BNB/Avalanche Etherscan pulls는 Free API chain coverage 제한으로 실패해 Dune Base query로 보정했다.
+
+**selector 분포 요약**:
+- V2 Vault mainnet: `batchSwap 0x945bcec9` 3,827; `swap 0x52bbbe29` 2,317; `exitPool 0x8bdb3913` 2,128; `joinPool 0xb95cac28` 689; `setRelayerApproval 0xfa6e671d` 377.
+- V2 Vault arbitrum: `manageUserBalance 0x5c38449e` 4,078; `exitPool` 2,561; `swap` 1,793; `batchSwap` 828; `joinPool` 324; `setRelayerApproval` 303.
+- V2 Vault polygon: `batchSwap` 9,001; `exitPool` 434; `swap` 304; `joinPool` 143; `setRelayerApproval` 25.
+- V3 Router mainnet: `permitBatchAndCall 0x19c6989f` 9,097; `swapSingleTokenExactIn 0x750283bc` 283; `initialize 0x026b3d95` 233; `removeLiquidityProportional 0x51682750` 228; `addLiquidityProportional 0x724dba33` 87; `addLiquidityUnbalanced 0xc08bc851` 56; `swapSingleTokenExactOut 0x94e86ef8` 15.
+
+**대량 재생 결과**: `/private/tmp/balancer-bulk-replay/balancer/corpus.json` 에서 535건을 샘플링해 `v3-harness corpus` 실행. 초기 기대값 기준 `515/535` matched; 20개 mismatch는 전부 `permitBatchAndCall 0x19c6989f`를 pass로 기대했지만 `build_multicall_failed: no inner leg resolved to an installed mapper`로 실패했다. 대표 tx `0x4a9a6c961047086d6cee5cc227385447388619a1f3019ac9efea3600767051f3` 는 내부 child가 deferred liquidity selector(`0x724dba33`)라서 plain multicall 재귀만으로는 충실하게 표현할 수 없다.
+
+**처치**: `balancer/v3/router-permit-batch-and-call@1.0.0` 매니페스트 제거, mainnet/base coverage에서 `permitBatchAndCall`을 `exclude`로 정정, 같은 real tx를 Balancer golden corpus에 `expect:error`로 pin. 현재 Balancer V3 Router covered scope는 direct single-token swaps + plain `multicall(bytes[])` wrapper다. `permitBatchAndCall`은 child liquidity mapping + Permit2 batch side-effect modeling이 들어오기 전까지 fail-closed gap으로 둔다.
 
 ## 2026-05-30 커버리지 확장 라운드 — 처치 결과
 
