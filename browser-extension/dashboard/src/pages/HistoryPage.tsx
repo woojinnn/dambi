@@ -7,6 +7,7 @@ import {
   type VerdictListOpts,
   type VerdictRangeAlias,
 } from "../server-api";
+import { Topbar } from "../shell/Topbar";
 
 import "./verdicts.css";
 
@@ -78,6 +79,10 @@ export function HistoryPage() {
 
   return (
     <>
+      <Topbar
+        here="History"
+        subtitle={`${allRows.length}건 로드`}
+      />
       <div className="v-toolbar">
         <label>
           기간
