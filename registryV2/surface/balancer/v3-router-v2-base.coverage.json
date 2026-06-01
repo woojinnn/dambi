@@ -3,7 +3,7 @@
   "chainId": 8453,
   "address": "0x3f170631ed9821Ca51A59D996aB095162438DC10",
   "snapshot": "v3-router-v2-base.abi.json",
-  "note": "Balancer V3 Router v2 user pre-sign surface triage. Current manifests cover direct single-token swaps and recursive wrapper calls; liquidity and donation functions remain explicit deferred gaps until dynamic pool-token mapping is wired.",
+  "note": "Balancer V3 Router v2 user pre-sign surface triage. Current manifests cover direct single-token swaps and plain multicall wrappers; liquidity, donation, and Permit2 batch wrapper functions remain explicit deferred gaps until dynamic pool-token mapping and Permit2 side-effect modeling are wired.",
   "functions": {
     "0x0ca078ec": {
       "name": "addLiquidityCustom",
@@ -52,8 +52,8 @@
     },
     "0x19c6989f": {
       "name": "permitBatchAndCall",
-      "decision": "cover",
-      "reason": "wrapper: recursively decodes trailing multicallData bytes[] child Router calls; Permit2 allowance side effects are tracked as a documented follow-up gap"
+      "decision": "exclude",
+      "reason": "deferred wrapper: real mainnet samples commonly contain liquidity child calls and Permit2 batch allowance side effects; keep fail-closed until child liquidity mapping and Permit2 side-effect modeling are faithful"
     },
     "0x452db952": {
       "name": "queryAddLiquidityCustom",

@@ -1,5 +1,5 @@
 {
-  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0. Remaining uncovered Vault fns are soft no_declarative_v3_mapper, pinned here as expect=error to lock the gap; flip to expect=pass + expect_domain when the corresponding manifest lands. Remaining fns + how to add: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback); exitPool 0x8bdb3913 & joinPool 0xb95cac28 (need dynamic array zip + userData enum-tag decode for faithful LP action). Zero hard decoder failures in the original 300-tx sample. Balancer V3 Router v2 direct swap samples added 2026-06-01 from Dune queries 7623992 (Base exact-in) and 7624000 (Base exact-out): swapSingleTokenExactIn 0x750283bc and swapSingleTokenExactOut 0x94e86ef8 both route to amm.",
+  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0. Remaining uncovered Vault fns are soft no_declarative_v3_mapper, pinned here as expect=error to lock the gap; flip to expect=pass + expect_domain when the corresponding manifest lands. Remaining fns + how to add: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback); exitPool 0x8bdb3913 & joinPool 0xb95cac28 (need dynamic array zip + userData enum-tag decode for faithful LP action). Zero hard decoder failures in the original 300-tx sample. Balancer V3 Router v2 direct swap samples added 2026-06-01 from Dune queries 7623992 (Base exact-in) and 7624000 (Base exact-out): swapSingleTokenExactIn 0x750283bc and swapSingleTokenExactOut 0x94e86ef8 both route to amm. Etherscan mainnet bulk replay on 2026-06-01 showed permitBatchAndCall 0x19c6989f frequently wraps deferred liquidity calls plus Permit2 side effects; pinned as expect=error until that wrapper is faithfully modeled.",
   "transactions": [
     {
       "intent": "swap",
@@ -258,6 +258,23 @@
         ]
       },
       "expect_domain": "amm"
+    },
+    {
+      "intent": "v3_router_permitBatchAndCall_deferred_liquidity_child",
+      "expect": "error",
+      "tx_hash": "0x4a9a6c961047086d6cee5cc227385447388619a1f3019ac9efea3600767051f3",
+      "chain_id": 1,
+      "source": "etherscan:mainnet:v3-router:txlist-desc-10000",
+      "rpc": {
+        "params": [
+          {
+            "to": "0xae563e3f8219521950555f5962419c8919758ea2",
+            "value": "0",
+            "data": "0x19c6989f00000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001e00000000000000000000000000000000000000000000000000000000000000260000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060000000000000000000000000ae563e3f8219521950555f5962419c8919758ea2000000000000000000000000000000000000000000000000000000006a1ce0ca0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000ec53bf9167f50cdeb3ae105f56099aaab9061f83000000000000000000000000000000000000000000006bb7c38906b3f723d24e000000000000000000000000000000000000000000000000000000006a1ce57a000000000000000000000000000000000000000000000000000000000000185f000000000000000000000000000000000000000000000000000000000000004154bcccd8cdcc8af1bef27c6b0a27f50f0367b22da93c4089229034fb6ffb196a043f37a84a8d9fe695262726c71767f7a1347d4b500c097a5dd336e68324f4db1b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000124724dba330000000000000000000000001b66d6e129e38a54e917734e58cbdfa1968a14c300000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000087eeb33f7f40942fa5190000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000e354ea7d43d3000000000000000000000000000000000000000000006bb7c38906b3f723d24e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      },
+      "expect_error": "no_declarative_v3_mapper"
     }
   ]
 }
