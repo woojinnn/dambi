@@ -1,0 +1,42 @@
+{
+  "id": "swap-shallow-route-warn",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "route-min-depth",
+      "method": "external.swap_route_min_depth_usd",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "minPoolDepthUsd",
+          "type": "Decimal",
+          "from": "$.result.minPoolDepthUsd"
+        },
+        {
+          "kind": "context",
+          "field": "hasShallowHop",
+          "type": "Bool",
+          "from": "$.result.hasShallowHop"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "minPoolDepthUsd": "decimal",
+      "hasShallowHop": "Bool"
+    }
+  }
+}

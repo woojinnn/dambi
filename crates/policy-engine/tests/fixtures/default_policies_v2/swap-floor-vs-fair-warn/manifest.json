@@ -1,0 +1,35 @@
+{
+  "id": "swap-floor-vs-fair-warn",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "floor-vs-fair",
+      "method": "external.swap_floor_vs_fair_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "floorVsFairBp",
+          "type": "Long",
+          "from": "$.result.floorVsFairBp"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "floorVsFairBp": "Long"
+    }
+  }
+}

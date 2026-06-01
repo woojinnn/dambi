@@ -1,0 +1,35 @@
+{
+  "id": "swap-exactout-maxin-vs-fair-warn",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "maxin-vs-fair",
+      "method": "external.swap_maxin_vs_fair_bps",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "maxinVsFairBp",
+          "type": "Long",
+          "from": "$.result.maxinVsFairBp"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "maxinVsFairBp": "Long"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
   "id": "aave-delegate-borrow-allowlist-deny",
   "schema_version": 2,
-  "trigger": { "where": { "action.tag": { "eq": "delegate_borrow" } } }
+  "trigger": { "where": { "action.tag": { "eq": "delegate_borrow" }, "action.venue": { "eq": "aave_v3" } } }
 }

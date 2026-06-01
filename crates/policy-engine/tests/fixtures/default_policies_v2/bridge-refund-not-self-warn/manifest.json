@@ -1,0 +1,37 @@
+{
+  "id": "bridge-refund-not-self-warn",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.domain": {
+        "eq": "unknown"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "refund-self",
+      "method": "bridge.refund_self",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "target": "$.action.target",
+        "calldata": "$.action.calldata"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "refundNotSelf",
+          "type": "Bool",
+          "from": "$.result.refundNotSelf"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "refundNotSelf": "Bool"
+    }
+  }
+}

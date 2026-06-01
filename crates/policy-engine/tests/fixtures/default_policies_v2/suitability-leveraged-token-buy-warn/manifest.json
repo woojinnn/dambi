@@ -1,0 +1,43 @@
+{
+  "id": "suitability-leveraged-token-buy-warn",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "token-risk-class",
+      "method": "token.risk_class",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "asset": "$.action.tokenOut"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "tokenIsLeveraged",
+          "type": "Bool",
+          "from": "$.result.isLeveraged"
+        },
+        {
+          "kind": "context",
+          "field": "levClassPctAfter",
+          "type": "Decimal",
+          "from": "$.result.levClassPct"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "tokenIsLeveraged": "Bool",
+      "levClassPctAfter": "decimal"
+    }
+  }
+}

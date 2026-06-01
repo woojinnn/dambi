@@ -1,7 +1,7 @@
 {
   "id": "aave-cap-nearly-full-warn",
   "schema_version": 2,
-  "trigger": { "where": { "action.tag": { "eq": "borrow" } } },
+  "trigger": { "where": { "action.tag": { "eq": "borrow" }, "action.venue": { "eq": "aave_v3" } } },
   "policy_rpc": [
     {
       "id": "borrow-cap-used",

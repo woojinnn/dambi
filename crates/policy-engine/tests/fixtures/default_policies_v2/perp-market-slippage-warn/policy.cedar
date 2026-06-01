@@ -5,7 +5,7 @@
 // intent (the classic alt-market fat-finger). The order's own tolerance is the
 // signal: `slippageBp` is a base `Long` field of `Perp::OpenPositionContext`, so
 // this reads `context.slippageBp` DIRECTLY — no enrichment, no method, no
-// custom_context (like `high-slippage-warning`). Warn when the allowed slippage
+// custom_context (like `swap-slippage-high-warn`). Warn when the allowed slippage
 // is above 100 bp (1%, user config).
 @id("perp-market-slippage-warn")
 @severity("warn")

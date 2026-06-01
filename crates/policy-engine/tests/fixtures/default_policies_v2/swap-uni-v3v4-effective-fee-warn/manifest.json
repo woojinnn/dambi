@@ -1,0 +1,41 @@
+{
+  "id": "swap-uni-v3v4-effective-fee-warn",
+  "schema_version": 2,
+  "trigger": {
+    "where": {
+      "action.tag": {
+        "eq": "swap"
+      },
+      "action.venue": {
+        "in": [
+          "uniswap_v3",
+          "uniswap_v4"
+        ]
+      }
+    }
+  },
+  "policy_rpc": [
+    {
+      "id": "max-effective-fee",
+      "method": "external.swap_max_effective_fee_bp",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "maxEffectiveFeeBp",
+          "type": "Long",
+          "from": "$.result.maxEffectiveFeeBp"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "maxEffectiveFeeBp": "Long"
+    }
+  }
+}
