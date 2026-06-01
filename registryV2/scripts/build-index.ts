@@ -168,7 +168,34 @@ type TokenErcKindSource = `tokens:${TokenErcKind}`;
 type ProtocolSourceKind =
   | "aave_v3:atokens"
   | "aave_v3:variable_debts"
-  | "aave_v3:stable_debts";
+  | "aave_v3:stable_debts"
+  | "curve:gauges"
+  | "curve:factory_crvusd_2coin_mainnet"
+  | "curve:factory_crypto_base"
+  | "curve:factory_crypto_mainnet"
+  | "curve:factory_v2_2coin_base"
+  | "curve:factory_v2_2coin_mainnet"
+  | "curve:factory_v2_3coin_base"
+  | "curve:factory_v2_3coin_mainnet"
+  | "curve:factory_v2_4coin_base"
+  | "curve:factory_v2_4coin_mainnet"
+  | "curve:factory_stable_ng_2coin_mainnet"
+  | "curve:factory_stable_ng_3coin_mainnet"
+  | "curve:factory_stable_ng_4coin_mainnet"
+  | "curve:factory_stable_ng_5coin_mainnet"
+  | "curve:factory_stable_ng_6coin_mainnet"
+  | "curve:factory_stable_ng_7coin_mainnet"
+  | "curve:factory_stable_ng_8coin_mainnet"
+  | "curve:factory_stable_ng_2coin_base"
+  | "curve:factory_stable_ng_3coin_base"
+  | "curve:factory_stable_ng_4coin_base"
+  | "curve:factory_stable_ng_5coin_base"
+  | "curve:factory_stable_ng_6coin_base"
+  | "curve:factory_stable_ng_8coin_base"
+  | "curve:factory_tricrypto_base"
+  | "curve:factory_tricrypto_mainnet"
+  | "curve:factory_twocrypto_base"
+  | "curve:factory_twocrypto_mainnet";
 
 /**
  * Source spec for `chain_to_addresses_source` — union of token erc_kind
@@ -183,6 +210,7 @@ interface AdapterBundle {
   schema_version: "3";
   publisher?: string;
   match: BundleMatch;
+  source_materialize?: unknown;
   [key: string]: unknown;
 }
 
@@ -195,12 +223,55 @@ interface ResolvedBundle {
   [key: string]: unknown;
 }
 
+interface ResolvedBundleOutput {
+  kind: "bundle";
+  bundle: ResolvedBundle;
+}
+
+interface ResolvedSourceRefOutput {
+  kind: "source_ref";
+  materialized: ResolvedBundle;
+  template: AdapterBundle;
+  source: ProtocolSourceKind;
+  chainId: ChainId;
+  address: Hex;
+  context: Record<string, unknown>;
+}
+
+type ResolvedOutput = ResolvedBundleOutput | ResolvedSourceRefOutput;
+
 interface IndexEntry {
   matched: true;
   bundle_id: string;
   manifest_path: string;
   bundle_sha256: Hex;
   bundle: ResolvedBundle;
+}
+
+interface RefIndexEntry {
+  matched: true;
+  schema_version: "3-ref";
+  bundle_id: string;
+  manifest_path: string;
+  bundle_sha256: Hex;
+  bundle_ref: string;
+  template_sha256?: Hex;
+  context_ref?: string;
+  context_sha256?: Hex;
+  materialization?: {
+    kind: "source_context";
+    source: ProtocolSourceKind;
+    chain_id: ChainId;
+    address: Hex;
+  };
+}
+
+interface SourceContextDocument {
+  schema_version: "3-source-context";
+  source: ProtocolSourceKind;
+  chain_id: ChainId;
+  address: Hex;
+  context: Record<string, unknown>;
 }
 
 interface TokenMetadata {
@@ -227,6 +298,8 @@ const MANIFESTS_DIR = join(REGISTRY_ROOT, "manifests");
 const TOKENS_DIR = join(REGISTRY_ROOT, "tokens");
 const INDEX_BY_CALLKEY_DIR = join(REGISTRY_ROOT, "index", "by-callkey");
 const INDEX_BY_TYPED_DATA_DIR = join(REGISTRY_ROOT, "index", "by-typed-data");
+const GENERATED_BUNDLES_DIR = join(REGISTRY_ROOT, "bundles");
+const GENERATED_CONTEXTS_DIR = join(REGISTRY_ROOT, "contexts");
 
 // ---------------------------------------------------------------------------
 // Regex constants
@@ -251,6 +324,33 @@ const PROTOCOL_SOURCE_KINDS: ReadonlySet<ProtocolSourceKind> = new Set([
   "aave_v3:atokens",
   "aave_v3:variable_debts",
   "aave_v3:stable_debts",
+  "curve:gauges",
+  "curve:factory_crvusd_2coin_mainnet",
+  "curve:factory_crypto_base",
+  "curve:factory_crypto_mainnet",
+  "curve:factory_v2_2coin_base",
+  "curve:factory_v2_2coin_mainnet",
+  "curve:factory_v2_3coin_base",
+  "curve:factory_v2_3coin_mainnet",
+  "curve:factory_v2_4coin_base",
+  "curve:factory_v2_4coin_mainnet",
+  "curve:factory_stable_ng_2coin_mainnet",
+  "curve:factory_stable_ng_3coin_mainnet",
+  "curve:factory_stable_ng_4coin_mainnet",
+  "curve:factory_stable_ng_5coin_mainnet",
+  "curve:factory_stable_ng_6coin_mainnet",
+  "curve:factory_stable_ng_7coin_mainnet",
+  "curve:factory_stable_ng_8coin_mainnet",
+  "curve:factory_stable_ng_2coin_base",
+  "curve:factory_stable_ng_3coin_base",
+  "curve:factory_stable_ng_4coin_base",
+  "curve:factory_stable_ng_5coin_base",
+  "curve:factory_stable_ng_6coin_base",
+  "curve:factory_stable_ng_8coin_base",
+  "curve:factory_tricrypto_base",
+  "curve:factory_tricrypto_mainnet",
+  "curve:factory_twocrypto_base",
+  "curve:factory_twocrypto_mainnet",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -614,6 +714,7 @@ import {
   PROTOCOL_SOURCE_RESOLVERS,
   rpcClient,
 } from "./resolvers/index.ts";
+import type { ProtocolResolvedAddress } from "./resolvers/index.ts";
 
 function resolveTokenBundle(
   bundle: AdapterBundle,
@@ -652,18 +753,146 @@ function resolveTokenBundle(
   return buildResolvedFromEffective(bundle, sourced, effective);
 }
 
+function lookupSourcePath(context: Record<string, unknown>, path: string): unknown {
+  let current: unknown = context;
+  for (const segment of path.split(".")) {
+    if (Array.isArray(current)) {
+      const idx = Number(segment);
+      if (!Number.isInteger(idx)) return undefined;
+      current = current[idx];
+    } else if (current && typeof current === "object") {
+      current = (current as Record<string, unknown>)[segment];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+}
+
+function substituteSourcePlaceholders(value: unknown, context: Record<string, unknown>): unknown {
+  if (typeof value === "string") {
+    if (!value.startsWith("$source.")) return value;
+    const resolved = lookupSourcePath(context, value.slice("$source.".length));
+    if (resolved === undefined) {
+      throw new Error(`unknown source placeholder ${JSON.stringify(value)}`);
+    }
+    return resolved;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => substituteSourcePlaceholders(item, context));
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      out[key] = substituteSourcePlaceholders(nested, context);
+    }
+    return out;
+  }
+  return value;
+}
+
+function sanitizeIdSuffix(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9._/-]+/g, "-")
+    .replace(/\/+/g, "/")
+    .replace(/^-+|-+$/g, "");
+}
+
+function appendIdSuffix(id: string, suffix: string): string {
+  const clean = sanitizeIdSuffix(suffix);
+  if (!clean) throw new Error(`source_materialize produced empty id suffix for ${id}`);
+  const at = id.lastIndexOf("@");
+  if (at === -1) return `${id}/${clean}`;
+  return `${id.slice(0, at)}/${clean}${id.slice(at)}`;
+}
+
+function buildSourceContext(
+  chainId: number,
+  entry: ProtocolResolvedAddress,
+): Record<string, unknown> {
+  const context: Record<string, unknown> = { ...(entry.context ?? {}) };
+  context.address = entry.address;
+  context.chainId = chainId;
+  context.id_suffix = entry.id_suffix ?? `${chainId}-${entry.address}`;
+  return context;
+}
+
+function buildMaterializedFromSource(
+  bundle: AdapterBundle,
+  sourced: BundleMatchSourced,
+  chainId: number,
+  entry: ProtocolResolvedAddress,
+): ResolvedBundle {
+  const context = buildSourceContext(chainId, entry);
+  const substituted = substituteSourcePlaceholders(bundle, context) as AdapterBundle;
+  const { match: _match, source_materialize: _sourceMaterialize, ...rest } = substituted;
+  const id = appendIdSuffix(String(rest.id), String(context.id_suffix));
+  return {
+    ...rest,
+    id,
+    match: {
+      selector: sourced.selector,
+      chain_to_addresses: {
+        [String(chainId)]: [entry.address],
+      },
+    },
+  } as ResolvedBundle;
+}
+
 async function resolveProtocolBundle(
   bundle: AdapterBundle,
   sourced: BundleMatchSourced,
   manifestPath: string,
   forceRefresh: boolean,
-): Promise<ResolvedBundle> {
+): Promise<ResolvedOutput[]> {
   const sourceSpec = sourced.chain_to_addresses_source as keyof typeof PROTOCOL_SOURCE_RESOLVERS;
   const resolver = PROTOCOL_SOURCE_RESOLVERS[sourceSpec];
   if (!resolver) {
     throw new Error(
       `manifests/: ${manifestPath} match.chain_to_addresses_source "${sourceSpec}" has no registered resolver (PROTOCOL_SOURCE_RESOLVERS map mismatch — see scripts/resolvers/index.ts)`,
     );
+  }
+
+  if (bundle.source_materialize !== undefined) {
+    if (!resolver.resolveWithContext) {
+      throw new Error(
+        `manifests/: ${manifestPath} uses source_materialize but resolver "${sourceSpec}" does not expose resolveWithContext`,
+      );
+    }
+    const materialized: ResolvedOutput[] = [];
+    const results = await Promise.all(
+      sourced.chain_ids.map(async (chainId) => {
+        const entries = await resolver.resolveWithContext!(chainId, { rpc: rpcClient, forceRefresh });
+        return { chainId, entries };
+      }),
+    );
+    for (const { chainId, entries } of results) {
+      if (entries.length === 0) {
+        console.error(
+          `[build-index] WARN ${manifestPath}: chain ${chainId} resolver "${sourceSpec}" returned 0 materialized entries — 0 callkeys for this (chain, selector)`,
+        );
+        continue;
+      }
+      for (const entry of entries) {
+        const context = buildSourceContext(chainId, entry);
+        materialized.push({
+          kind: "source_ref",
+          materialized: buildMaterializedFromSource(bundle, sourced, chainId, entry),
+          template: bundle,
+          source: sourceSpec,
+          chainId,
+          address: entry.address.toLowerCase() as Hex,
+          context,
+        });
+      }
+    }
+    if (materialized.length === 0) {
+      throw new Error(
+        `manifests/: ${manifestPath} match.chain_to_addresses_source "${sourceSpec}" materialized to 0 bundles across all chain_ids`,
+      );
+    }
+    return materialized;
   }
 
   const effective: Record<string, Hex[]> = {};
@@ -692,7 +921,7 @@ async function resolveProtocolBundle(
     );
   }
 
-  return buildResolvedFromEffective(bundle, sourced, effective);
+  return [{ kind: "bundle", bundle: buildResolvedFromEffective(bundle, sourced, effective) }];
 }
 
 function buildResolvedFromEffective(
@@ -704,7 +933,7 @@ function buildResolvedFromEffective(
     selector: sourced.selector,
     chain_to_addresses: effective,
   };
-  const { match: _omit, ...rest } = bundle;
+  const { match: _omit, source_materialize: _sourceMaterialize, ...rest } = bundle;
   return { ...rest, match: resolvedMatch } as ResolvedBundle;
 }
 
@@ -713,10 +942,10 @@ async function resolveBundle(
   tokens: TokensByChainKind,
   manifestPath: string,
   forceRefresh: boolean,
-): Promise<ResolvedBundle> {
+): Promise<ResolvedOutput[]> {
   if ("chain_to_addresses" in bundle.match) {
     // already concrete
-    return bundle as ResolvedBundle;
+    return [{ kind: "bundle", bundle: bundle as ResolvedBundle }];
   }
 
   const sourced = bundle.match as BundleMatchSourced;
@@ -725,7 +954,7 @@ async function resolveBundle(
   // Dispatch on prefix: `tokens:*` → static token table, anything else →
   // protocol resolver (validator already rejected unknown prefixes).
   if (sourceSpec.startsWith("tokens:")) {
-    return resolveTokenBundle(bundle, sourced, tokens, manifestPath);
+    return [{ kind: "bundle", bundle: resolveTokenBundle(bundle, sourced, tokens, manifestPath) }];
   }
   return resolveProtocolBundle(bundle, sourced, manifestPath, forceRefresh);
 }
@@ -740,6 +969,75 @@ function computeBundleSha256(bundle: ResolvedBundle): Hex {
     throw new Error("canonicalize returned non-string");
   }
   return "0x" + sha256Hex(canonical);
+}
+
+function computeObjectSha256(value: unknown): Hex {
+  const canonical = canonicalize(value);
+  if (typeof canonical !== "string") {
+    throw new Error("canonicalize returned non-string");
+  }
+  return "0x" + sha256Hex(canonical);
+}
+
+function generatedObjectFileName(sha256: Hex): string {
+  return `${sha256.toLowerCase()}.json`;
+}
+
+function sourceContextRef(
+  source: ProtocolSourceKind,
+  chainId: ChainId,
+  address: Hex,
+): string {
+  const parts = source.split(":").map((part) => sanitizeIdSuffix(part));
+  if (parts.some((part) => part.length === 0)) {
+    throw new Error(`invalid source ref path for ${source}`);
+  }
+  return `contexts/${parts.join("/")}/${chainId}/${address.toLowerCase()}.json`;
+}
+
+function writeGeneratedJsonObject(root: string, ref: string, value: unknown): void {
+  const outPath = join(root, ref);
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, JSON.stringify(value, null, 2) + "\n", "utf8");
+}
+
+function sourceContextDocument(output: ResolvedSourceRefOutput): SourceContextDocument {
+  return {
+    schema_version: "3-source-context",
+    source: output.source,
+    chain_id: output.chainId,
+    address: output.address.toLowerCase() as Hex,
+    context: output.context,
+  };
+}
+
+function writeSourceRefArtifacts(output: ResolvedSourceRefOutput): {
+  bundle_ref: string;
+  template_sha256: Hex;
+  context_ref: string;
+  context_sha256: Hex;
+} {
+  const templateSha256 = computeObjectSha256(output.template);
+  const bundleRef = `bundles/${generatedObjectFileName(templateSha256)}`;
+  writeGeneratedJsonObject(REGISTRY_ROOT, bundleRef, output.template);
+
+  const contextDoc = sourceContextDocument(output);
+  const contextSha256 = computeObjectSha256(contextDoc);
+  const contextRef = sourceContextRef(output.source, output.chainId, output.address);
+  writeGeneratedJsonObject(REGISTRY_ROOT, contextRef, contextDoc);
+
+  return {
+    bundle_ref: bundleRef,
+    template_sha256: templateSha256,
+    context_ref: contextRef,
+    context_sha256: contextSha256,
+  };
+}
+
+function writeBundleRefArtifact(bundle: ResolvedBundle, bundleSha256: Hex): string {
+  const bundleRef = `bundles/${generatedObjectFileName(bundleSha256)}`;
+  writeGeneratedJsonObject(REGISTRY_ROOT, bundleRef, bundle);
+  return bundleRef;
 }
 
 function callkeyFilename(chainId: ChainId, to: Hex, selector: Hex): string {
@@ -786,6 +1084,8 @@ async function main(): Promise<void> {
     // recreated empty, ready for Phase 3C-F manifest authoring.
     wipeDir(INDEX_BY_CALLKEY_DIR);
     wipeDir(INDEX_BY_TYPED_DATA_DIR);
+    wipeDir(GENERATED_BUNDLES_DIR);
+    wipeDir(GENERATED_CONTEXTS_DIR);
     return;
   }
 
@@ -803,6 +1103,8 @@ async function main(): Promise<void> {
   // orphan 방지
   wipeDir(INDEX_BY_CALLKEY_DIR);
   wipeDir(INDEX_BY_TYPED_DATA_DIR);
+  wipeDir(GENERATED_BUNDLES_DIR);
+  wipeDir(GENERATED_CONTEXTS_DIR);
 
   let totalCallkeys = 0;
   let totalTypedDataEntries = 0;
@@ -811,65 +1113,97 @@ async function main(): Promise<void> {
     const manifestPath = relative(REGISTRY_ROOT, file).split(/[\\/]/).join("/");
     try {
       const bundle = loadBundle(file);
-      const resolved = await resolveBundle(bundle, tokens, manifestPath, forceRefresh);
-      const bundleSha256 = computeBundleSha256(resolved);
+      const resolvedOutputs = await resolveBundle(bundle, tokens, manifestPath, forceRefresh);
 
-      const pairs = Object.entries(resolved.match.chain_to_addresses);
-      const pairCount = pairs.reduce((acc, [, addrs]) => acc + addrs.length, 0);
+      for (const output of resolvedOutputs) {
+        const resolved = output.kind === "bundle" ? output.bundle : output.materialized;
+        const bundleSha256 = computeBundleSha256(resolved);
 
-      console.error(
-        `[build-index] ${resolved.id}\n` +
-          `              manifest:  ${manifestPath}\n` +
-          `              sha256:    ${bundleSha256}\n` +
-          `              callkeys:  ${pairCount}`,
-      );
+        const pairs = Object.entries(resolved.match.chain_to_addresses);
+        const pairCount = pairs.reduce((acc, [, addrs]) => acc + addrs.length, 0);
 
-      for (const [chainKey, addresses] of pairs) {
-        const chainId = Number(chainKey);
-        for (const to of addresses) {
-          const entry: IndexEntry = {
-            matched: true,
-            bundle_id: resolved.id,
-            manifest_path: manifestPath,
-            bundle_sha256: bundleSha256,
-            bundle: resolved,
-          };
-          const fname = callkeyFilename(chainId, to, resolved.match.selector);
-          const outPath = join(INDEX_BY_CALLKEY_DIR, fname);
-          if ("chain_to_addresses_source" in bundle.match && safeExists(outPath)) {
-            console.error(
-              `[build-index] WARN ${manifestPath}: sourced manifest skipped duplicate callkey ${fname}; keeping concrete protocol manifest`,
-            );
-            continue;
-          }
-          writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
-          totalCallkeys++;
-        }
-      }
+        console.error(
+          `[build-index] ${resolved.id}\n` +
+            `              manifest:  ${manifestPath}\n` +
+            `              sha256:    ${bundleSha256}\n` +
+            `              callkeys:  ${pairCount}`,
+        );
 
-      // by-typed-data index — one entry per chain when the manifest carries an
-      // EIP-712 routing descriptor. Keyed (chainId, verifying_contract,
-      // primary_type) so the SW can route an off-chain typed-sig payload.
-      if (resolved.match.typed_data) {
-        const td = resolved.match.typed_data;
-        for (const [chainKey] of pairs) {
+        for (const [chainKey, addresses] of pairs) {
           const chainId = Number(chainKey);
-          const fname = typedDataFilename(chainId, td.verifying_contract, td.primary_type, td.witness_type);
-          const outPath = join(INDEX_BY_TYPED_DATA_DIR, fname);
-          if (safeExists(outPath)) {
-            throw new Error(
-              `manifests/: ${manifestPath} duplicate typed-data index key ${fname} — add witness_type or split the routing surface`,
-            );
+          for (const to of addresses) {
+            let entry: IndexEntry | RefIndexEntry;
+            if (output.kind === "source_ref") {
+              const refs = writeSourceRefArtifacts(output);
+              entry = {
+                matched: true,
+                schema_version: "3-ref",
+                bundle_id: resolved.id,
+                manifest_path: manifestPath,
+                bundle_sha256: bundleSha256,
+                ...refs,
+                materialization: {
+                  kind: "source_context",
+                  source: output.source,
+                  chain_id: output.chainId,
+                  address: output.address.toLowerCase() as Hex,
+                },
+              };
+            } else if ("chain_to_addresses_source" in bundle.match) {
+              entry = {
+                matched: true,
+                schema_version: "3-ref",
+                bundle_id: resolved.id,
+                manifest_path: manifestPath,
+                bundle_sha256: bundleSha256,
+                bundle_ref: writeBundleRefArtifact(resolved, bundleSha256),
+              };
+            } else {
+              entry = {
+                matched: true,
+                bundle_id: resolved.id,
+                manifest_path: manifestPath,
+                bundle_sha256: bundleSha256,
+                bundle: resolved,
+              };
+            }
+            const fname = callkeyFilename(chainId, to, resolved.match.selector);
+            const outPath = join(INDEX_BY_CALLKEY_DIR, fname);
+            if ("chain_to_addresses_source" in bundle.match && safeExists(outPath)) {
+              console.error(
+                `[build-index] WARN ${manifestPath}: sourced manifest skipped duplicate callkey ${fname}; keeping concrete protocol manifest`,
+              );
+              continue;
+            }
+            writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
+            totalCallkeys++;
           }
-          const entry: IndexEntry = {
-            matched: true,
-            bundle_id: resolved.id,
-            manifest_path: manifestPath,
-            bundle_sha256: bundleSha256,
-            bundle: resolved,
-          };
-          writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
-          totalTypedDataEntries++;
+        }
+
+        // by-typed-data index — one entry per chain when the manifest carries an
+        // EIP-712 routing descriptor. Keyed (chainId, verifying_contract,
+        // primary_type) so the SW can route an off-chain typed-sig payload.
+        if (resolved.match.typed_data) {
+          const td = resolved.match.typed_data;
+          for (const [chainKey] of pairs) {
+            const chainId = Number(chainKey);
+            const fname = typedDataFilename(chainId, td.verifying_contract, td.primary_type, td.witness_type);
+            const outPath = join(INDEX_BY_TYPED_DATA_DIR, fname);
+            if (safeExists(outPath)) {
+              throw new Error(
+                `manifests/: ${manifestPath} duplicate typed-data index key ${fname} — add witness_type or split the routing surface`,
+              );
+            }
+            const entry: IndexEntry = {
+              matched: true,
+              bundle_id: resolved.id,
+              manifest_path: manifestPath,
+              bundle_sha256: bundleSha256,
+              bundle: resolved,
+            };
+            writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
+            totalTypedDataEntries++;
+          }
         }
       }
     } catch (e) {

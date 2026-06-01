@@ -77,6 +77,84 @@ describe("registry-api HTTP server", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 
+  it("materializes a ref callkey entry into the legacy full bundle response", async () => {
+    const bundleRef =
+      "bundles/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json";
+    const contextRef =
+      "contexts/curve/factory_stable_ng_2coin_mainnet/1/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json";
+    const url = await start(
+      fakeReader({
+        "index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json":
+          JSON.stringify({
+            matched: true,
+            schema_version: "3-ref",
+            bundle_id:
+              "curve/stableswap-ng/source/exchange/1-test-33333333@1.0.0",
+            manifest_path: "manifests/curve/exchange.json",
+            bundle_sha256: "0x" + "b".repeat(64),
+            bundle_ref: bundleRef,
+            context_ref: contextRef,
+          }),
+        [bundleRef]: JSON.stringify({
+          type: "adapter_action",
+          id: "curve/stableswap-ng/source/exchange@1.0.0",
+          schema_version: "3",
+          match: {
+            selector: "0x38ed1739",
+            chain_to_addresses_source: "curve:factory_stable_ng_2coin_mainnet",
+            chain_ids: [1],
+          },
+          source_materialize: { kind: "per_address_context" },
+          abi_fragment: {
+            function_name: "exchange",
+            abi: { type: "function", name: "exchange", inputs: [] },
+          },
+          emit: {
+            strategy: "single_emit",
+            body: {
+              token_in: "$source.coins.0",
+            },
+          },
+        }),
+        [contextRef]: JSON.stringify({
+          schema_version: "3-source-context",
+          source: "curve:factory_stable_ng_2coin_mainnet",
+          chain_id: 1,
+          address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+          context: {
+            id_suffix: "1-test-33333333",
+            coins: ["0x1111111111111111111111111111111111111111"],
+          },
+        }),
+      }),
+    );
+
+    const res = await fetch(`${url}${CALLKEY_PATH}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      matched: boolean;
+      bundle_id: string;
+      bundle: {
+        id: string;
+        source_materialize?: unknown;
+        match: { chain_to_addresses: Record<string, string[]> };
+        emit: { body: { token_in: string } };
+      };
+    };
+    expect(body.matched).toBe(true);
+    expect(body.bundle_id).toBe(
+      "curve/stableswap-ng/source/exchange/1-test-33333333@1.0.0",
+    );
+    expect(body.bundle.id).toBe(body.bundle_id);
+    expect(body.bundle.source_materialize).toBeUndefined();
+    expect(body.bundle.match.chain_to_addresses).toEqual({
+      "1": ["0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"],
+    });
+    expect(body.bundle.emit.body.token_in).toBe(
+      "0x1111111111111111111111111111111111111111",
+    );
+  });
+
   it("passes a GCS miss through as a real HTTP 404", async () => {
     const url = await start(fakeReader({}));
     expect((await fetch(`${url}${CALLKEY_PATH}`)).status).toBe(404);

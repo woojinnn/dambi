@@ -86,6 +86,41 @@ describe("parseProxyTarget", () => {
     );
     expect(parseProxyTarget("/tokens/1/..%2f..%2fsecret.json").ok).toBe(false);
   });
+
+  it("maps generated bundle and context refs to GCS object names", () => {
+    expect(
+      parseProxyTarget(
+        "/bundles/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json",
+      ),
+    ).toEqual({
+      ok: true,
+      objectName:
+        "bundles/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json",
+    });
+    expect(
+      parseProxyTarget(
+        "/contexts/curve/factory_stable_ng_2coin_mainnet/1/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json",
+      ),
+    ).toEqual({
+      ok: true,
+      objectName:
+        "contexts/curve/factory_stable_ng_2coin_mainnet/1/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json",
+    });
+  });
+
+  it("rejects malformed generated bundle and context refs", () => {
+    expect(parseProxyTarget("/bundles/not-a-sha.json").ok).toBe(false);
+    expect(
+      parseProxyTarget(
+        "/contexts/curve/../1/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json",
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseProxyTarget(
+        "/contexts/curve/factory/0/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json",
+      ).ok,
+    ).toBe(false);
+  });
 });
 
 describe("validation — typed-data key segment", () => {

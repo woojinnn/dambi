@@ -58,6 +58,8 @@ browser-extension/public/wasm/
 # (`cd registryV2 && npm run build`). Regenerated locally and in CI (rust job's
 # "Build registry index" step) from registryV2/{manifests,tokens}; never committed.
 /registryV2/index/
+/registryV2/bundles/
+/registryV2/contexts/
 
 # Markdown docs, research + audit notes — only README.md stays tracked.
 *.md
@@ -71,6 +73,9 @@ browser-extension/public/wasm/
 # ACTIONBODY_EXTENSION_GUIDE); this one rule un-ignores every top-level .md there
 # (current + future). Subdir .md (logs/) stay ignored except their own README.md.
 !crates/integration-tests/*.md
+!crates/integration-tests/onboarding/
+!crates/integration-tests/onboarding/**
+!crates/integration-tests/onboarding/**/*.md
 
 # integration-tests per-run harness logs — keep the dir via its README (format
 # guide + curated index), but the actual per-run dumps are local scratch.

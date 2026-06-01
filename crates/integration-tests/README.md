@@ -22,6 +22,7 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- fuzz --iteratio
 # (3) 커버리지(미커버 목록) + 실거래 corpus replay.
 cargo run -p policy-engine-integration-tests --bin v3-harness -- coverage
 cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus
+cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus --filter <protocol> --require-expect-body
 ```
 
 네트워크/브라우저/WASM 런타임/GCS **불필요**. 전부 offline + deterministic.
@@ -87,7 +88,7 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- replay \
 
 1. 노릴 callkey 의 selector/주소를 `coverage` 또는 `registryV2/index/by-callkey/` 에서 확인.
 2. calldata 를 손으로 만든다 (`selector + abi.encode(args)`).
-3. **먼저 probe** — 임시 파일에 `expect:"pass"` 로 넣고 `v3-harness corpus --root /tmp/probe` 실행 → 실제 동작(`got=...`)을 관찰.
+3. **먼저 probe** — 임시 파일에 `expect:"pass"` 로 넣고 `v3-harness corpus --root /tmp/probe` 실행 → 실제 동작(`got=...`)을 관찰. Landing 전에는 `v3-harness corpus --filter <protocol> --require-expect-body` 로 해당 프로토콜 pass corpus 가 field-level semantic assertion 을 갖는지 확인한다.
 4. 관찰된 결과로 `expect`/`expect_domain`/`expect_error` 를 정확히 pin → 최종 파일에 기록.
 
 ### B. Etherscan (실거래)

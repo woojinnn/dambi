@@ -28,7 +28,34 @@ export type Hex = string;
 export type ProtocolSourceKind =
   | "aave_v3:atokens"
   | "aave_v3:variable_debts"
-  | "aave_v3:stable_debts";
+  | "aave_v3:stable_debts"
+  | "curve:gauges"
+  | "curve:factory_crvusd_2coin_mainnet"
+  | "curve:factory_crypto_base"
+  | "curve:factory_crypto_mainnet"
+  | "curve:factory_v2_2coin_base"
+  | "curve:factory_v2_2coin_mainnet"
+  | "curve:factory_v2_3coin_base"
+  | "curve:factory_v2_3coin_mainnet"
+  | "curve:factory_v2_4coin_base"
+  | "curve:factory_v2_4coin_mainnet"
+  | "curve:factory_stable_ng_2coin_mainnet"
+  | "curve:factory_stable_ng_3coin_mainnet"
+  | "curve:factory_stable_ng_4coin_mainnet"
+  | "curve:factory_stable_ng_5coin_mainnet"
+  | "curve:factory_stable_ng_6coin_mainnet"
+  | "curve:factory_stable_ng_7coin_mainnet"
+  | "curve:factory_stable_ng_8coin_mainnet"
+  | "curve:factory_stable_ng_2coin_base"
+  | "curve:factory_stable_ng_3coin_base"
+  | "curve:factory_stable_ng_4coin_base"
+  | "curve:factory_stable_ng_5coin_base"
+  | "curve:factory_stable_ng_6coin_base"
+  | "curve:factory_stable_ng_8coin_base"
+  | "curve:factory_tricrypto_base"
+  | "curve:factory_tricrypto_mainnet"
+  | "curve:factory_twocrypto_base"
+  | "curve:factory_twocrypto_mainnet";
 
 /** A single resolver entry — one source kind → one async address fetcher. */
 export interface ProtocolResolver {
@@ -47,6 +74,23 @@ export interface ProtocolResolver {
    * reserved for unrecoverable RPC errors with no fallback cache.
    */
   resolve(chainId: number, opts: ResolverOpts): Promise<Hex[]>;
+
+  /**
+   * Optional richer resolver for protocols whose manifests need per-address
+   * metadata baked into the emitted bundle at build time. Plain address
+   * expansion is not enough for pool-heavy protocols like Curve where coin
+   * maps differ by pool.
+   */
+  resolveWithContext?(chainId: number, opts: ResolverOpts): Promise<ProtocolResolvedAddress[]>;
+}
+
+export interface ProtocolResolvedAddress {
+  /** Lowercased 0x-prefixed address to write into `match.chain_to_addresses`. */
+  address: Hex;
+  /** Unique, filesystem/id-safe suffix appended to the manifest id before @version. */
+  id_suffix?: string;
+  /** Build-time substitution context consumed by `$source.*` placeholders. */
+  context?: Record<string, unknown>;
 }
 
 export interface ResolverOpts {

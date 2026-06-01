@@ -402,6 +402,12 @@ Required artifacts:
   registry/address provider, verified deployment artifact, or Dune decoded
   namespace query.
 - retrieval command/query and count.
+- machine-readable artifact with a nonzero source count. A zero-count universe
+  or zero-target tx pull is a filter/schema bug until proven otherwise; do not
+  accept it as evidence.
+- committed `registryV2/surface/<protocol>/_address_universe.json` or
+  `_pool_universe.json`, validated with
+  `npm run check:universe -- --protocol <protocol>`.
 - disposition table: every candidate address is `cover`, `exclude`, or `defer`
   with reason.
 - if only a subset is concretely covered, a batch boundary plus explicit
@@ -421,6 +427,13 @@ Rules:
 - If a generated/source resolver can safely enumerate the universe, prefer it
   over hand-maintaining large `chain_to_addresses` arrays. If not implemented,
   record why manual concrete coverage is acceptable for the batch.
+- If pool-specific metadata is required to emit the correct `ActionBody`
+  (coin map, LP token, gauge, vault asset, market id), do not use an
+  address-only resolver. Add a materialized protocol source instead:
+  resolver returns per-address context, manifest uses exact `$source.*`
+  placeholders, build-index emits one concrete bundle per address, and P4
+  `check:universe --require-cover-linkage` proves every `cover` address has at
+  least one generated callkey.
 - Unknown to-addresses observed later with known protocol selectors are P0/P2
   hard gaps, not ordinary low-traffic misses.
 
@@ -629,6 +642,7 @@ cd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2
 cd registryV2
 npm run build
 npm run check:surface
+npm run check:universe -- --protocol <protocol> --require-cover-linkage
 npm run check:manifest
 cd ..
 
@@ -671,6 +685,7 @@ Completion evidence must include:
 - P1 authoring evidence: per-COVER selector ActionBody/Tier3 mapping, permission/fund-movement red-flag review, manifest file list, live_field/enrichment decision, required remote method disposition, Tier3 downstream artifact list if applicable, `check:manifest` output
 - P2 synthetic evidence: fuzz seed/iteration command, fixed edge matrix, pass/error corpus disposition
 - P2 Etherscan evidence: txlist command/query, api call count, raw tx count, unique selector count, per-COVER-selector real tx coverage, pool/factory candidate-universe sweep if applicable
+- P2 external tx-pull evidence: nonzero target address count, or concrete blocker explaining why the target set cannot be built yet
 - P2 Dune evidence: usage baseline, query id/SQL summary with partition WHERE, rows returned, credit cost or usage delta, selected tx hashes, selector/address stats for pool-heavy gaps if applicable
 - P3 develop evidence: gap buckets, fix-to-gap mapping, rerun output, corpus `expect` flips/exclusions, remaining defer/blocker disposition
 - P4 land evidence: `registryV2 npm run build`, build-index vitest, `check:manifest`, `check:surface`, v3-harness coverage/fuzz/corpus, workspace test output, wasm/fmt/clippy/typecheck outputs where applicable, staged file list, commit hash

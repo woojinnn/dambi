@@ -420,7 +420,7 @@ describe("build-index by-typed-data emission", () => {
 });
 
 describe("build-index token source expansion", () => {
-  it("expands tokens:erc20 into concrete callkeys and strips source-only fields", () => {
+  it("expands tokens:erc20 into concrete callkeys backed by a shared bundle ref", () => {
     const root = track(scaffold({ "transfer.json": erc20TransferManifest() }));
     writeToken(root, 1, ERC20_TOKEN, "erc20", { symbol: "T20" });
     writeToken(root, 1, ERC721_TOKEN, "erc721", { symbol: "NFT" });
@@ -433,9 +433,14 @@ describe("build-index token source expansion", () => {
     const entry = JSON.parse(
       readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN}__0xa9059cbb.json`), "utf8"),
     );
-    expect(entry.bundle.match.chain_to_addresses).toEqual({ "1": [ERC20_TOKEN] });
-    expect("chain_to_addresses_source" in entry.bundle.match).toBe(false);
-    expect("chain_ids" in entry.bundle.match).toBe(false);
+    expect(entry.schema_version).toBe("3-ref");
+    expect(entry.bundle_ref).toMatch(/^bundles\/0x[0-9a-f]{64}\.json$/);
+    expect(entry.context_ref).toBeUndefined();
+    expect(entry.bundle).toBeUndefined();
+    const bundle = JSON.parse(readFileSync(join(root, entry.bundle_ref), "utf8"));
+    expect(bundle.match.chain_to_addresses).toEqual({ "1": [ERC20_TOKEN] });
+    expect("chain_to_addresses_source" in bundle.match).toBe(false);
+    expect("chain_ids" in bundle.match).toBe(false);
   });
 
   it("rejects tokens:erc20 when the requested chain has no token directory", () => {
@@ -455,5 +460,117 @@ describe("build-index token source expansion", () => {
     expect(res.status).not.toBe(0);
     const combined = res.stderr + res.stdout;
     expect(combined).toMatch(/chainId field \(8453\) does not match directory \(1\)/);
+  });
+});
+
+describe("build-index protocol source materialization", () => {
+  it("emits a small route entry plus template/context refs for a sourced Curve pool", () => {
+    const pool = "0x3333333333333333333333333333333333333333";
+    const coin0 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const coin1 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const root = track(
+      scaffold({
+        "curve-source.json": {
+          type: "adapter_action",
+          id: "curve/stableswap-ng/source/test/exchange@1.0.0",
+          schema_version: "3",
+          match: {
+            selector: "0x3df02124",
+            chain_to_addresses_source: "curve:factory_stable_ng_2coin_mainnet",
+            chain_ids: [1],
+          },
+          source_materialize: { kind: "per_address_context" },
+          abi_fragment: {
+            function_name: "exchange",
+            abi: {
+              type: "function",
+              name: "exchange",
+              inputs: [
+                { name: "i", type: "int128" },
+                { name: "j", type: "int128" },
+                { name: "_dx", type: "uint256" },
+                { name: "_min_dy", type: "uint256" },
+              ],
+            },
+          },
+          emit: {
+            strategy: "single_emit",
+            body: {
+              token_in: {
+                $match: "$args.i",
+                $cases: {
+                  "0": "$source.coins.0",
+                  "1": "$source.coins.1",
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+    const surfaceDir = join(root, "surface", "curve");
+    mkdirSync(surfaceDir, { recursive: true });
+    writeFileSync(
+      join(surfaceDir, "_pool_universe.json"),
+      JSON.stringify(
+        {
+          protocol: "curve",
+          source: "test",
+          source_count: 1,
+          candidates: [
+            {
+              chainId: 1,
+              address: pool,
+              decision: "cover",
+              reason: "test",
+              batch: "test",
+              families: ["factory-stable-ng"],
+              curve_id: "factory-stable-ng-0",
+              name: "Test Pool",
+              symbol: "TEST",
+              lpTokenAddress: pool,
+              coins: [coin0, coin1],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const res = runBuild(root);
+    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+    expect(listCallkeys(root)).toEqual([`1__${pool}__0x3df02124.json`]);
+
+    const entry = JSON.parse(
+      readFileSync(join(callkeyDir(root), `1__${pool}__0x3df02124.json`), "utf8"),
+    );
+    expect(entry.schema_version).toBe("3-ref");
+    expect(entry.bundle_id).toMatch(
+      /^curve\/stableswap-ng\/source\/test\/exchange\/1-factory-stable-ng-0-33333333@1\.0\.0$/,
+    );
+    expect(entry.bundle_ref).toMatch(/^bundles\/0x[0-9a-f]{64}\.json$/);
+    expect(entry.context_ref).toBe(
+      `contexts/curve/factory_stable_ng_2coin_mainnet/1/${pool}.json`,
+    );
+    expect(entry.bundle).toBeUndefined();
+
+    const template = JSON.parse(readFileSync(join(root, entry.bundle_ref), "utf8"));
+    expect(template.match.chain_to_addresses_source).toBe(
+      "curve:factory_stable_ng_2coin_mainnet",
+    );
+    expect(template.source_materialize).toEqual({ kind: "per_address_context" });
+    expect(template.emit.body.token_in.$cases).toEqual({
+      "0": "$source.coins.0",
+      "1": "$source.coins.1",
+    });
+
+    const context = JSON.parse(readFileSync(join(root, entry.context_ref), "utf8"));
+    expect(context.schema_version).toBe("3-source-context");
+    expect(context.chain_id).toBe(1);
+    expect(context.address).toBe(pool);
+    expect(context.context.coins).toEqual([coin0, coin1]);
+    expect(context.context.id_suffix).toBe("1-factory-stable-ng-0-33333333");
   });
 });

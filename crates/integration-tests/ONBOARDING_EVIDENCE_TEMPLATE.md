@@ -26,8 +26,10 @@
 | dropped-unverified candidates listed with reason | pending | |
 | final contract inventory verified against first-party sources | pending | |
 | pool-heavy/factory protocol address universe source/query/count recorded, or explicitly not applicable | pending | |
+| pool-heavy/factory universe artifact is machine-readable, nonzero, and committed, or explicitly not applicable | pending | |
 | every pool/factory child address in universe dispositioned as cover/exclude/defer with reason and batch boundary | pending | |
 | concrete manifest vs protocol source resolver/generator strategy decided for pool universe | pending | |
+| `npm run check:universe -- --protocol <protocol>` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
 | token-surface inventory completed or explicitly scoped out | pending | |
 | `registryV2/surface/<protocol>/_deployments.json` updated if applicable | pending | |
 | `npm run check:surface` output recorded | pending | |
@@ -61,6 +63,7 @@
 |---|---|---|
 | Etherscan MCP/API availability checked | pending | |
 | Etherscan txlist pull executed adapter-blind by P0 cover addresses | pending | |
+| external tx pull target address count is nonzero and recorded | pending | |
 | Etherscan `api_calls_used` recorded | pending | |
 | Etherscan `raw_txs_seen` recorded | pending | |
 | Etherscan `unique_selectors_seen` recorded | pending | |
@@ -73,6 +76,7 @@
 | Dune `executionCostCredits` / usage delta recorded | pending | |
 | Dune rows returned / selected tx hashes recorded | pending | |
 | representative real-tx corpus/golden entries committed or justified | pending | |
+| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
 
 ## P3 Develop Evidence
 
@@ -93,7 +97,9 @@
 | registryV2 build-index vitest output recorded | pending | |
 | `npm run check:manifest` output recorded | pending | |
 | `npm run check:surface` output recorded | pending | |
+| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
 | v3-harness coverage/fuzz/corpus outputs recorded | pending | |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
 | `cargo test --workspace` output recorded | pending | |
 | wasm build output recorded if runtime/wasm/schema changed | pending | |
 | fmt/clippy/typecheck output recorded for changed crates/packages | pending | |

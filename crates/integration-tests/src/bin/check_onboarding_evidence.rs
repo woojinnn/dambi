@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+const EVIDENCE_TEMPLATE: &str = include_str!("../../ONBOARDING_EVIDENCE_TEMPLATE.md");
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Section {
     Metadata,
     P0,
@@ -207,6 +209,7 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
     let mut checked_rows = 0usize;
     let mut blocked_rows = 0usize;
     let mut blocker_rows = 0usize;
+    let mut seen_requirements: Vec<(Section, String)> = Vec::new();
 
     for (idx, line) in markdown.lines().enumerate() {
         let line_no = idx + 1;
@@ -259,6 +262,7 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
         }
 
         let requirement = cells[0].trim();
+        seen_requirements.push((section, normalize_requirement(requirement)));
         let status = normalize_status(&cells[1]);
         let artifact = cells[2].trim();
         match status.as_str() {
@@ -300,6 +304,17 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
             message: format!("no mandatory rows found for phase `{}`", phase.label()),
         });
     }
+    for (required_section, required) in template_requirements(phase) {
+        let found = seen_requirements
+            .iter()
+            .any(|(section, seen)| *section == required_section && *seen == required);
+        if !found {
+            findings.push(Finding {
+                line: 1,
+                message: format!("missing mandatory row `{required}`"),
+            });
+        }
+    }
     if blocked_rows > 0 && blocker_rows == 0 {
         findings.push(Finding {
             line: 1,
@@ -316,6 +331,30 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
             blocker_rows,
         },
     )
+}
+
+fn template_requirements(phase: Phase) -> Vec<(Section, String)> {
+    let mut section = Section::Other;
+    let mut rows = Vec::new();
+    for line in EVIDENCE_TEMPLATE.lines() {
+        if let Some(next) = section_from_heading(line) {
+            section = next;
+            continue;
+        }
+
+        if !phase.includes(section) {
+            continue;
+        }
+
+        let Some(cells) = parse_table_row(line) else {
+            continue;
+        };
+        if is_header_or_separator(&cells) || cells.is_empty() {
+            continue;
+        }
+        rows.push((section, normalize_requirement(&cells[0])));
+    }
+    rows
 }
 
 fn section_from_heading(line: &str) -> Option<Section> {
@@ -380,37 +419,48 @@ fn normalize_status(raw: &str) -> String {
         .replace(' ', "")
 }
 
+fn normalize_requirement(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const VALID: &str = r#"
-## Run Metadata
-
-| field | value |
-|---|---|
-| protocol | curve |
-| branch | feat/curve |
-
-## P0 Research Evidence
-
-| required evidence | status | artifact / exact command / summary |
-|---|---|---|
-| Codex research | done | notes |
-| Dune unavailable | blocked | blocked_external_data:dune |
-
-## Blockers
-
-| blocker | source | next action |
-|---|---|---|
-| dune unavailable | auth | retry after OAuth |
-"#;
+    fn completed_template() -> String {
+        let mut markdown = EVIDENCE_TEMPLATE.to_owned();
+        for field in [
+            "protocol",
+            "branch",
+            "worktree",
+            "date",
+            "main agent",
+            "base commit",
+        ] {
+            markdown = markdown.replace(&format!("| {field} | |"), &format!("| {field} | x |"));
+        }
+        markdown.replace("| pending | |", "| done | artifact |")
+    }
 
     #[test]
-    fn accepts_done_and_blocked_with_blocker_row() {
-        let (findings, stats) = check_markdown(VALID, Phase::P0);
+    fn accepts_complete_template_rows() {
+        let markdown = completed_template();
+        let (findings, stats) = check_markdown(&markdown, Phase::P0);
         assert!(findings.is_empty(), "{findings:#?}");
-        assert_eq!(stats.checked_rows, 2);
+        assert!(stats.checked_rows > 1);
+        assert_eq!(stats.blocked_rows, 0);
+    }
+
+    #[test]
+    fn accepts_blocked_with_blocker_row() {
+        let mut markdown = completed_template().replacen(
+            "| done | artifact |",
+            "| blocked | blocked_external_data:dune |",
+            1,
+        );
+        markdown = markdown.replace("| | | |", "| dune unavailable | auth | retry after OAuth |");
+        let (findings, stats) = check_markdown(&markdown, Phase::P0);
+        assert!(findings.is_empty(), "{findings:#?}");
         assert_eq!(stats.blocked_rows, 1);
         assert_eq!(stats.blocker_rows, 1);
     }
@@ -449,5 +499,29 @@ mod tests {
         assert!(findings
             .iter()
             .any(|f| f.message.contains("artifact/summary is empty")));
+    }
+
+    #[test]
+    fn rejects_omitted_template_rows() {
+        let markdown = r#"
+## Run Metadata
+| field | value |
+|---|---|
+| protocol | curve |
+| branch | feat |
+| worktree | repo |
+| date | today |
+| main agent | codex |
+| base commit | abc |
+
+## P4 Land Evidence
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| `cargo test --workspace` output recorded | done | ok |
+"#;
+        let (findings, _) = check_markdown(markdown, Phase::P4);
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("missing mandatory row")));
     }
 }
