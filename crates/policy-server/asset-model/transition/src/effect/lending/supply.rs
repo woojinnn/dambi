@@ -75,11 +75,12 @@ impl Reducer for SupplyAction {
             LendingVenue::MorphoOptimizer { .. } => {
                 morpho_optimizer::asset_to_optimizer_shares(reserve, self.amount)?
             }
-            LendingVenue::Fluid { .. } => fluid::asset_to_fluid_shares(reserve, self.amount)?,
             // MetaMorpho is an OpenZeppelin ERC-4626 vault — reuse the Fluid
             // virtual-share stand-in until vault-specific (totalAssets,totalSupply)
             // state is wired through the sync orchestrator.
-            LendingVenue::MetaMorpho { .. } => fluid::asset_to_fluid_shares(reserve, self.amount)?,
+            LendingVenue::Fluid { .. } | LendingVenue::MetaMorpho { .. } => {
+                fluid::asset_to_fluid_shares(reserve, self.amount)?
+            }
             // crvUSD / LlamaLend collateral is held 1:1 by the Controller (no
             // share/rebasing model) — the deposited collateral amount IS the
             // recorded delta.

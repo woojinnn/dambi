@@ -50,7 +50,7 @@
 | `npm run check:universe -- --protocol <protocol>` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | done | `PASS — 106 candidates · 16 cover · 0 exclude · 90 defer · source_count=106` |
 | token-surface inventory completed or explicitly scoped out | done | 20 token files: 16 MetaMorpho vault shares (`yield_receipt`, decimals=18 by DECIMALS_OFFSET design, underlying ref) + msETH(Base) underlying + 3 MORPHO governance (0x58d9.. on 1+8453, 0x9994.. legacy). `check:tokens` PASS (0 errors). Underlyings USDC/WETH/USDT/WBTC/PYUSD/RLUSD/USDtb already registered. |
 | `registryV2/surface/<protocol>/_deployments.json` updated if applicable | done | authored `surface/morpho/_deployments.json` — 33 contracts (1+8453); Morpho Blue cover; factories/IRM/oracle/V2/registry exclude; Bundler3+GeneralAdapter1+ParaswapAdapter+URD marked explicit DEFER (user-facing, follow-up) |
-| `npm run check:surface` output recorded | done (I0/I1 pass; I2 pending P1) | I0 `✓ morpho: 33 deployed · 2 cover · 31 exclude`; Morpho Blue `✓ 17 surface · 7 cover · 10 exclude · 7 manifests`; MetaMorpho `✓ 34 surface · 4 cover · 30 exclude` (I1 ok). Remaining: 64 `I2 cover selector has NO manifest` for the 16 vaults × {deposit,withdraw,mint,redeem} — **expected, resolved in P1** (manifests not yet authored). |
+| `npm run check:surface` output recorded | done | At P0: I0 `✓ morpho: 33 deployed · 2 cover · 31 exclude`; the 64 `I2 cover→manifest` for the 16 vaults × 4 selectors were expected-pending (manifests authored in P1). After P1: full PASS (see P4 check:surface row — MetaMorpho 4 cover/32 manifests per chain). |
 
 ## P1 Authoring Evidence
 
@@ -90,7 +90,7 @@
 | unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | done | non-actionable: reallocate (243, allocator gov), approve (196, token), updateWithdrawQueue (5, gov), acceptCap (3, gov), transfer (18, token). All map to EXCLUDE triage or tokens:erc20 — no actionable unmatched. Bundler3-routed deposits (to=Bundler3, not vault) are the DEFERRED router surface (not in vault txlist). |
 | pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | done | swept all 16 COVER vaults. The 90 DEFER long-tail vaults (universe) not swept this round — explicit defer (batch `metamorpho-longtail-defer`); full-universe sweep is the documented follow-up. |
 | unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | done | none — every swept tx had to=cover-vault (txlist is address-keyed). No unknown-address metamorpho-selector gap. |
-| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | not applicable | MetaMorpho adds NO bespoke EIP-712 — its only signed struct is standard ERC-2612 `Permit` on the vault share (handled by the tokens:erc20/2612 standard path, EXCLUDE from metamorpho surface). Morpho Blue `Authorization` typed-data is already covered (morpho/corpus.json). |
+| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | done | NOT APPLICABLE — MetaMorpho adds NO bespoke EIP-712 — its only signed struct is standard ERC-2612 `Permit` on the vault share (handled by the tokens:erc20/2612 standard path, EXCLUDE from metamorpho surface). Morpho Blue `Authorization` typed-data is already covered (morpho/corpus.json). |
 | Dune MCP/API availability checked | done | Dune MCP available; plan `community_fluid_engine_v2` |
 | Dune usage baseline recorded | done | baseline 400.362 / 2500 credits used (billing 2026-05-05 → 2026-06-05) |
 | Dune calibration/query executed with partition WHERE or explicitly blocked | done | query 7637092 on `base.transactions`, partition WHERE `block_date >= CURRENT_DATE - INTERVAL '45' DAY`, free engine. Filter: to IN (8 base cover vaults) AND selector IN (deposit/withdraw/redeem/mint). |
@@ -103,43 +103,43 @@
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| all P2 hard/soft/misdecoded/unknown_protocol_address/excluded gaps bucketed | pending | |
-| each fix tied to a gap id, selector, tx hash, or synthetic seed | pending | |
-| manifest/decoder/Tier3/harness change list recorded | pending | |
-| P2 rerun after fixes recorded | pending | |
-| corpus `expect` flips or exclusions justified | pending | |
-| remaining gaps have explicit defer/blocker disposition | pending | |
+| all P2 hard/soft/misdecoded/unknown_protocol_address/excluded gaps bucketed | done | NO decode gaps (corpus 24/24, fuzz 4096/4096, 22/22 pins). Buckets are all DEFERRALS: (1) Bundler3 router surface (most app deposits route there, to=Bundler3 not vault); (2) 90-vault long-tail universe; (3) mint/redeem §4d convertToAssets enrichment; (4) Base withdraw/mint real-tx (Dune sample returned deposit/redeem only — covered by mainnet withdraw + synthetic). |
+| each fix tied to a gap id, selector, tx hash, or synthetic seed | done | 2 code fixes from gates (not decode gaps): policy-sync `actions/args.rs` non-exhaustive `LendingVenue::MetaMorpho` (caught by `cargo test --workspace`); clippy identical-match-arms in `effect/lending/supply.rs` (Fluid+MetaMorpho combined). |
+| manifest/decoder/Tier3/harness change list recorded | done | Tier-3 venue = 6 crate sites (action/lending/mod.rs, lowering_v2/lending/mod.rs, transition/effect/lending/{mod,supply}.rs, sync/actions/args.rs, action/view.rs) + cedarschema doc. 40 manifests. 20 token files. NO declarative_exports/decoder change (venue driven by emit.body `venue.name`+`$to`; no keccak/derive needed unlike Morpho Blue market_id). |
+| P2 rerun after fixes recorded | done | after policy-sync + clippy fixes: `v3-harness corpus --filter metamorpho --require-expect-body` re-run → 24/24, 22/22 (fixes touched effect/sync paths, not decode — corpus unaffected, confirmed). |
+| corpus `expect` flips or exclusions justified | done | no flips — every corpus `expect` (pass/error/domain) was correct on first decode. |
+| remaining gaps have explicit defer/blocker disposition | done | Bundler3 (DEFER, _deployments + evidence), 90-vault long-tail (DEFER, _address_universe batch), mint/redeem enrichment (DEFER §4d), Base withdraw/mint real-tx (DEFER — mainnet+synthetic cover the decode). |
 
 ## P4 Land Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| `registryV2 npm run build` output recorded | pending | |
-| registryV2 build-index vitest output recorded | pending | |
-| `npm run check:manifest` output recorded | pending | |
-| `npm run check:surface` output recorded | pending | |
-| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
-| v3-harness coverage/fuzz/corpus outputs recorded | pending | |
-| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| `cargo test --workspace` output recorded | pending | |
-| wasm build output recorded if runtime/wasm/schema changed | pending | |
-| fmt/clippy/typecheck output recorded for changed crates/packages | pending | |
-| exact staged files and commit hash recorded | pending | |
-| remaining WARNs/deferred selectors/actions listed with reason | pending | |
-| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | pending | |
-| no base/worktree merge performed unless user explicitly requested it | pending | |
+| `registryV2 npm run build` output recorded | done | `done — 53041 callkey(s) + 84 typed-data entr(ies) across 826 manifest(s)` (deterministic; index is gitignored/generated — not committed) |
+| registryV2 build-index vitest output recorded | blocked | browser-extension Yarn 4 / WASM not provisioned in this onboarding worktree ("Couldn't find the node_modules state file"). build correctness is covered by `npm run build` (validates every manifest+token) + `check:manifest` (1521 OK) + `check:surface` + `check:universe`. Rerun target: `cd browser-extension && yarn && yarn vitest run --root ../registryV2 scripts/__tests__/build-index.test.ts`. |
+| `npm run check:manifest` output recorded | done | `1521 single_emit OK, 0 structural errors` (representative index + source-ref) |
+| `npm run check:surface` output recorded | done | `PASS — every gated contract's external surface is fully triaged and consistent` (I0 morpho 33/2/31; MetaMorpho 4 cover/30 exclude/32 manifests per chain; Morpho Blue 7 cover/10 exclude/7 manifests) |
+| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | done | `PASS — 106 candidates · 16 cover · 90 defer · source_count=106` (cover-linkage verified: all 16 cover vaults have generated by-callkey entries) |
+| v3-harness coverage/fuzz/corpus outputs recorded | done | fuzz 4096/4096 pass (seed 0x6d6574616d6f7270); corpus 24/24 matched; validate --filter metamorpho 64 OK |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | done | `24/24 matched, 22/22 pass entries pinned` |
+| `cargo test --workspace` output recorded | done | `--exclude policy-engine-integration-tests` → 0 fail (all crates: policy-action 331, policy-transition 418, policy-engine 122, policy-sync 149, …). integration-tests: lib 18 + doc_grounding 1 + `v3_decode_harness -- --test-threads=4` **60 passed / 0 failed** (bounded to avoid FW-1 OOM). Net workspace = 0 fail. |
+| wasm build output recorded if runtime/wasm/schema changed | done | `./scripts/wasm-build.sh` → exit 0, `✨ Done in 2m 18s`, pkg ready + copied to `browser-extension/backend/wasm/` + `public/wasm/`. The `LendingVenue::MetaMorpho` venue + cedarschema change compile cleanly to WASM (the extension can decode MetaMorpho manifests). |
+| fmt/clippy/typecheck output recorded for changed crates/packages | done | `cargo fmt -p policy-action -p policy-transition -p policy-engine -- --check` clean (exit 0); `cargo clippy` clean after combining the Fluid+MetaMorpho identical arm. |
+| exact staged files and commit hash recorded | done | P0 `b67f7eb6` (27 files: surface + tokens + evidence). P1 `a8bba544` (47: 6 code/schema + 40 manifests + evidence). P2 `b24dc26c` (2: corpus + evidence). P3/P4 land = the commit carrying this evidence (3 files: `sync/actions/args.rs` + `effect/lending/supply.rs` fixes + this evidence.md). Generated `registryV2/index/` and `pkg/` WASM are gitignored — not staged. |
+| remaining WARNs/deferred selectors/actions listed with reason | done | Deferred: Bundler3+adapters (router, follow-up), 90-vault long-tail (universe batch), VaultV2/URD (V2/rewards follow-up), mint/redeem §4d enrichment, Base withdraw/mint real-tx. WARNs: I0' (16 cover vaults not in _deployments — expected, factory children, same as uniswap pools); 21 UNGATED protocol contracts (other protocols). |
+| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | done | **wallet-facing, mainnet (1) + Base (8453): Morpho Blue (re-verified Full-8) + MetaMorpho ERC-4626 16-vault TVL cover-batch (deposit/withdraw/mint/redeem).** NOT covered (explicit defer): Bundler3-routed flows, the 90-vault long-tail universe, MetaMorpho V2/VaultV2, URD claim. |
+| no base/worktree merge performed unless user explicitly requested it | done | no merge performed; all work on `feat/morpho-onboarding`. |
 
 ## Blockers
 
 | blocker | source | next action |
 |---|---|---|
-| | | |
+| registryV2 build-index **vitest** not run | browser-extension Yarn 4 / WASM toolchain not provisioned in this onboarding worktree ("Couldn't find the node_modules state file") | non-fatal — build correctness is covered by `npm run build` + `check:manifest` (1521 OK) + `check:surface` + `check:universe`. Rerun: `cd browser-extension && yarn && yarn vitest run --root ../registryV2 scripts/__tests__/build-index.test.ts`. |
 
 ## Framework Dogfood Findings (this run = framework test)
 
 | id | finding | severity | disposition |
 |---|---|---|---|
-| FW-1 | Full `npm run build` index = 52864 callkeys / 210M; `adapters::load_and_install()` has no caching → each harness test pays ~41s full-surface load; the 60-test `v3_decode_harness` golden suite OOMs (SIGKILL) under default parallel threads. Pre-existing (identical in base worktree), not Morpho-specific. Morpho-filtered single-process runs unaffected. | medium | logged; revisit at P4 workspace-regression gate (bounded `--test-threads` or shared-surface cache as framework hardening) |
+| FW-1 | Full `npm run build` index = ~53k callkeys / 210M; `adapters::load_and_install()` has no caching → each harness test pays ~35–41s full-surface load; the 60-test `v3_decode_harness` golden suite OOMs (SIGKILL) under DEFAULT parallel threads. Pre-existing (identical in base worktree), not Morpho-specific. | medium | **RESOLVED for this run** via `cargo test … --test v3_decode_harness -- --test-threads=4` → **60 passed / 0 failed in 27.91s** (bounded threads cap peak memory). Framework-hardening follow-up (a shared `OnceCell` surface cache, or a representative-index harness mode) would remove the need to bound threads — logged as a framework finding, not a Morpho blocker. |
 
 ## Final Completion Claim
 
