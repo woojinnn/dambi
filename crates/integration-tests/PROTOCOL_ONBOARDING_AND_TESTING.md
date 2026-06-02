@@ -977,7 +977,7 @@ cd registryV2 && npx tsx scripts/build-index.ts && cd ..
 ```
 
 ### 8.2 ActionBody domain 카탈로그 (요약)
-token · amm · lending · airdrop · launchpad · perp · liquid_staking · permission · staking · multicall · unknown (11). (각 domain action 목록 = §4a 표. **작성 전 `<domain>/mod.rs` 직접 확인** — 도메인·스키마 둘 다 확장됨.)
+현재 domain (= `crates/integration-tests/src/harness/oracle.rs` 의 `VALID_DOMAINS`, 측정 `grep -n VALID_DOMAINS`): token · amm · lending · airdrop · launchpad · liquid_staking · perp · permission · yield · restaking · staking · hyperliquid_core · multicall · unknown. 각 domain 의 action 목록·상세 = §4a 표(**SSOT**). **작성 전 `<domain>/mod.rs` 직접 확인** — 도메인·스키마 둘 다 확장된다.
 
 ### 8.3 알려진 함정 (DEFECT_CATALOG.md, V3 관점)
 - **nested tuple per-component 타입 유실** (D010 류): `[i][j]` 접근 시 uint width 정보 유실 → string 화 → u64 coercion 실패. **Permit2 류는 commit `3f93f5c` 에서 해결**(chained-numeric + coercion). 새 프로토콜 nested-tuple 에서 재발 가능 → 같은 패턴 점검.
