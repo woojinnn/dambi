@@ -28,8 +28,8 @@
 |---|---|
 | representative chain (SINGLE — multichain = separate framework, deferred) | **Ethereum mainnet (`1`) ONLY.** The v6 router shares the canonical `0x1111...2a65` address on Arbitrum/Base/BSC/Polygon/Optimism but those are a SEPARATE multichain framework (explicit defer). |
 | completion target | `wallet-facing`, **single-selector subset** — AggregationRouterV6 `swap(executor,SwapDescription,data)` (`0x07ed2379`) only, decoded → `Amm::Swap` on `AggregatorRoute(OneInchV6)`. |
-| covered real-usage coverage-share (P2-measured: % of recent P0-universe txs the covered set decodes) | **P2-MEASURED (Dune, mainnet, to=router selector distribution):** see P2 SCOPE ORACLE row. `swap` (0x07ed2379) share of v6-router state-changing txs = _<filled in P2>_. |
-| user-facing DEFERs, each with its 1st-party usage-share (%/count) | **unoswap family** (12 selectors; token_out-from-packed-pool $fn gap), **clipperSwap/clipperSwapTo** (packed srcToken uint256), **LOP v4 fillOrder/cancelOrder + EIP-712 Order sign** (packed addresses + makerTraits + new IntentVenue), **permitAndCall** (permit+self-call recursion). Each share P2-measured (SCOPE ORACLE row). |
+| covered real-usage coverage-share (P2-measured: % of recent P0-universe txs the covered set decodes) | **P2-MEASURED, to=router selector distribution (users call the router directly, so tx.to IS the entrypoint — standard tx.to measurement, no router/direct discrimination needed):** `swap` (0x07ed2379) = **~70.5% (Dune 30d, 82,215 / 116,556 success txs)** and **~61.6% (Etherscan 10k most-recent, 5,082 / 8,253)** of v6-router state-changing txs. Two windows bracket it: **swap is the dominant single action, ~62–70%.** |
+| user-facing DEFERs, each with its 1st-party usage-share (%/count) | **LOP limit-order (cancel/fill)** ≈ **19.0% (30d)** — cancelOrder alone 17.9% (heavy MM cancellation traffic); the largest deferred surface, **#1 follow-up** (needs a 1inch-LOP IntentVenue + AddressLib unmask of packed Order fields). **unoswap family** ≈ **4.1% (30d)** (token_out-from-packed-pool $fn gap). **permitAndCall** ≈ 0.2% (permit+self-call recursion). **clipperSwap/clipperSwapTo** ≈ **0%** (0 occurrences in both windows — negligible; packed srcToken uint256). EXCLUDE-by-category: epoch bookkeeping (increaseEpoch/advanceEpoch) ≈ 6.2% (maker order-series invalidation, not a swap value/permission decision). |
 | direct factory-child calls | not applicable — 1inch is a singleton router, not a factory/pool-heavy protocol (no child address universe). |
 | final claim label (MUST NOT over-claim the measured coverage-share above) | see **Final Completion Claim** — bounded to the measured `swap`-selector share; explicitly *not* "the full 1inch swap surface" (unoswap/clipper/LOP deferred). |
 
@@ -72,36 +72,36 @@
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| fuzz command with seed recorded | pending | |
-| iterations >= 5000 or justified lower bound | pending | |
-| fixed edge-case matrix recorded | pending | |
-| permission/value/nested/array/opcode/deadline/path edge coverage recorded | pending | |
-| representative pass/error corpus entries committed or justified | pending | |
+| fuzz command with seed recorded | done | `v3-harness fuzz --filter 1inch --iterations 5000 --seed 0x31696e6368` → `total=5000 pass=5000 soft=0 fail=0 panic=0`; domain histogram `amm 100%`. |
+| iterations >= 5000 or justified lower bound | done | 5000 requested; 1inch routable surface = 1 callkey (swap) → 5000 swap decodes, 0 failures. |
+| fixed edge-case matrix recorded | done | fuzz boundary values (0, U256::MAX) per callkey; corpus adds natural real edges: native-ETH sentinel (0xEeee…) as src and dst, very-small (amount=30689) and very-large (87e18) amounts, distinct dstReceiver. |
+| permission/value/nested/array/opcode/deadline/path edge coverage recorded | done | `swap` calldata is structurally FLAT — `(address, static 7-field tuple, bytes)` — so no nested-recurse/array_emit/opcode-stream/deadline/path edges apply. Value edge = native-sentinel swap with msg.value>0 (NATIN corpus entry). Permission edge = N/A on swap (no grant); permitAndCall (the permit wrapper) is DEFER not silently excluded. Deferred-selector edge = unoswap route-miss (corpus `expect:error`). |
+| representative pass/error corpus entries committed or justified | done | `data/golden/v3-decode/1inch/corpus.json` — **11 entries**: 8 ERC20→ERC20 swaps (USDC/USDT/WBTC/PAXG/XAUt/…) + 2 native-sentinel swaps (ETH→token, token→ETH) all `pass` with field pins; 1 `unoswap` entry `expect:error` (deferred selector must route-miss, no mis-decode). |
 
 ## P2 Real-Tx Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| Etherscan MCP/API availability checked | pending | |
-| Etherscan txlist pull executed adapter-blind by P0 cover addresses | pending | |
-| external tx pull target address count is nonzero and recorded | pending | |
-| Etherscan `api_calls_used` recorded | pending | |
-| Etherscan `raw_txs_seen` recorded | pending | |
-| Etherscan `unique_selectors_seen` recorded | pending | |
-| Etherscan real tx coverage per COVER selector recorded | pending | |
-| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | pending | |
-| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | pending | |
-| pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | pending | |
-| unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | pending | |
-| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | pending | |
-| Dune MCP/API availability checked | pending | |
-| Dune usage baseline recorded | pending | |
-| Dune calibration/query executed with partition WHERE or explicitly blocked | pending | |
-| Dune `executionCostCredits` / usage delta recorded | pending | |
-| Dune rows returned / selected tx hashes recorded | pending | |
-| representative real-tx corpus/golden entries committed or justified | pending | |
-| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe (1st-party Etherscan/Dune: % of recent txs the covered (chain,to,selector) set decodes), and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | pending | |
+| Etherscan MCP/API availability checked | done | Etherscan v2 (`ETHERSCAN_API_KEY` in `crates/integration-tests/.env`), chain 1 — `getsourcecode`/`getabi`/`txlist` all work. |
+| Etherscan txlist pull executed adapter-blind by P0 cover addresses | done | `account&action=txlist&address=0x111111125421ca6dc452d289314280a0f8842a65&offset=10000&sort=desc` (adapter-blind by P0 cover address = the router). |
+| external tx pull target address count is nonzero and recorded | done | **1 target** (AggregationRouterV6 — the singleton cover contract). Nonzero. |
+| Etherscan `api_calls_used` recorded | done | ~5 calls: getsourcecode ×3 (v6/v5/v4) + getabi-via-getsourcecode (v6) + txlist ×1 (10k). |
+| Etherscan `raw_txs_seen` recorded | done | 10,000 rows (blocks 25215042→25231416, ~2.3 days); 8,253 success txs with to=router (1,747 isError=1 dropped). |
+| Etherscan `unique_selectors_seen` recorded | done | 16 distinct selectors in the 2.3d sample (20 in the Dune 30d window): swap, cancelOrder, increaseEpoch, unoswap/unoswap2/3, ethUnoswap/To*, cancelOrders, fillOrder/Args, fillContractOrder/Args, permitAndCall, advanceEpoch, unoswapTo/2. |
+| Etherscan real tx coverage per COVER selector recorded | done | COVER selector `swap` (0x07ed2379) = **5,082 real txs** observed (61.6% of 8,253 success txs to router). |
+| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | done | the router IS the wallet-facing target (users call it directly). **1 target**, floor 10k pulled, 8,253 success / 5,082 swap matched. target file = `surface/1inch/_deployments.json` (AggregationRouterV6 cover). |
+| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | done | non-swap = actionable-but-DEFERRED: cancelOrder 2,093 + cancelOrders 50 + fillOrder/fillContractOrder ~43 (LOP, ~26.5% 2.3d), unoswap family 420 (~5.1%), permitAndCall 16. non-actionable EXCLUDE: increaseEpoch 529 + advanceEpoch 20 (maker epoch bookkeeping ~6.7%). No mis-routed unknown. |
+| pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | done | **not applicable** — 1inch is a singleton router, no factory/pool/vault child universe. |
+| unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | done | none — txlist is keyed on the router address; every selector seen is in the v6 ABI and triaged in coverage.json. No unknown-address-with-1inch-selector gap. |
+| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | done | **not applicable this round** — the only EIP-712 surface is the LOP v4 / Fusion `Order` (domain name "1inch Aggregation Router" v6, verifyingContract = the v6 router; confirmed by discovery sub-agent), which is **DEFERRED** (coverage.json `signed_structs.Order` = exclude/DEFER). No in-scope typed-data primaryType this round. |
+| Dune MCP/API availability checked | done | Dune MCP available (`getUsage`, `createAndExecuteQuery`, free engine). |
+| Dune usage baseline recorded | done | baseline **413.812 / 2500** credits (billing 2026-05-05 → 2026-06-05, plan community_fluid_engine_v2). |
+| Dune calibration/query executed with partition WHERE or explicitly blocked | done | query **7639563** (30d selector distribution; partition WHERE `block_time >= now() - interval '30' day`, success, length(data)≥4, free engine), 21 rows. (query 7639555 first attempt FAILED on `cardinality(varbinary)` → fixed to `length()`.) |
+| Dune `executionCostCredits` / usage delta recorded | done | 0.52 credits (7639563); failed 7639555 not charged. |
+| Dune rows returned / selected tx hashes recorded | done | 30d query: 20 selector rows, 116,556 total txs. Corpus tx hashes (11) selected from the Etherscan txlist pull (real swap/native/unoswap hashes embedded in corpus.json). |
+| representative real-tx corpus/golden entries committed or justified | done | `data/golden/v3-decode/1inch/corpus.json` — 11 entries (10 pass swap incl. 2 native-sentinel + 1 unoswap error). |
+| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | done | `v3-harness corpus --filter 1inch --require-expect-body` → **11/11 matched, 10/10 pass entries pinned** (token_in=desc[0], token_out=desc[1], amount_in=desc[4], min_amount_out=desc[5], recipient=desc[3], venue.name=aggregator_route, venue.router=$to all verified on real mainnet calldata); unoswap `expect:error got:error` (deferral proof). |
+| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe (1st-party Etherscan/Dune: % of recent txs the covered (chain,to,selector) set decodes), and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | done | **MEASURED at tx.to (users call the router directly).** Covered `swap` (0x07ed2379) = **70.5% (Dune 30d, 82,215/116,556)** / **61.6% (Etherscan 2.3d, 5,082/8,253)** of v6-router success txs. DEFER usage-shares (30d): LOP cancel/fill **19.0%** (#1 follow-up), unoswap family **4.1%**, permitAndCall 0.2%, clipper **0%**. EXCLUDE: epoch bookkeeping 6.2%. Completion label bounded to ~62–70% swap-selector share (NOT "the full 1inch swap surface"). |
 
 ## P3 Develop Evidence
 
