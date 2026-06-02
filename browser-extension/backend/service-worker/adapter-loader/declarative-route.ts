@@ -158,12 +158,108 @@ function multicallChildSelectors(
   return [...selectors];
 }
 
+/** Index of the single `tuple[]` argument — the `Call[]` bundle of a
+ * `multicall_call_array` (Bundler3) manifest. */
+function callArrayArgIndex(bundle: V3Bundle): number | null {
+  const abi = bundle.abi_fragment.abi as
+    | { inputs?: Array<{ type?: unknown }> }
+    | null
+    | undefined;
+  const inputs = abi?.inputs;
+  if (!Array.isArray(inputs)) return null;
+  const indices = inputs.flatMap((input, index) =>
+    input.type === "tuple[]" ? [index] : [],
+  );
+  return indices.length === 1 ? indices[0] : null;
+}
+
+/** Decode a `Call[]` arg (`Call = (address to, bytes data, uint256 value, bool
+ * skipRevert, bytes32 callbackHash)`) far enough to extract each leg's `to` +
+ * 4-byte selector — the per-leg-to children to pre-install. The tuple carries a
+ * dynamic member (`bytes data`), so each element is itself dynamic. */
+function decodeCallArrayArg(
+  calldataHex: string,
+  argIndex: number,
+): Array<{ to: string; selector: string }> {
+  if (!isHexCalldata(calldataHex)) return [];
+  const argsStart = 4;
+  const arrayRelativeOffset = readAbiWordNumber(
+    calldataHex,
+    argsStart + argIndex * 32,
+  );
+  if (arrayRelativeOffset === null) return [];
+  const arrayStart = argsStart + arrayRelativeOffset;
+  const count = readAbiWordNumber(calldataHex, arrayStart);
+  if (count === null || count > 64) return [];
+
+  const offsetsStart = arrayStart + 32;
+  const legs: Array<{ to: string; selector: string }> = [];
+  for (let i = 0; i < count; i += 1) {
+    const elemRelativeOffset = readAbiWordNumber(
+      calldataHex,
+      offsetsStart + i * 32,
+    );
+    if (elemRelativeOffset === null) return [];
+    const elemStart = offsetsStart + elemRelativeOffset;
+
+    // tuple words: 0=to, 1=data offset (rel to elemStart), 2=value, 3=skipRevert, 4=callbackHash
+    const toWord = readAbiWord(calldataHex, elemStart);
+    if (!toWord) return [];
+    const to = `0x${toWord.slice(24)}`;
+
+    const dataRelativeOffset = readAbiWordNumber(calldataHex, elemStart + 32);
+    if (dataRelativeOffset === null) return [];
+    const dataStart = elemStart + dataRelativeOffset;
+    const dataLength = readAbiWordNumber(calldataHex, dataStart);
+    if (dataLength === null) return [];
+    if (dataLength < 4) continue; // bare value-transfer leg — no selector to route
+
+    const selStart = 2 + (dataStart + 32) * 2;
+    const selectorHex = calldataHex.slice(selStart, selStart + 8);
+    if (selectorHex.length !== 8) return [];
+    legs.push({ to, selector: `0x${selectorHex}` });
+  }
+  return legs;
+}
+
 async function preinstallMulticallChildren(args: {
   chainId: number;
   to: string;
   calldataHex: string | undefined;
   installedBundle: V3Bundle;
 }): Promise<void> {
+  const emit = args.installedBundle.emit as
+    | { strategy?: unknown }
+    | null
+    | undefined;
+
+  // PER-LEG-TO (Bundler3 `multicall(Call[])`): each leg targets its OWN `to`
+  // (e.g. GeneralAdapter1, Permit2). Pre-install at each leg's address so the
+  // engine's `multicall_call_array` re-route finds the child mapper instead of
+  // skipping it (no_declarative_v3_mapper) and dropping the leg.
+  if (emit?.strategy === "multicall_call_array") {
+    const argIndex = callArrayArgIndex(args.installedBundle);
+    if (argIndex === null || !args.calldataHex) return;
+    const seen = new Set<string>();
+    const legs = decodeCallArrayArg(args.calldataHex, argIndex).filter((leg) => {
+      const key = `${leg.to}:${leg.selector}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    await Promise.all(
+      legs.map((leg) =>
+        installDeclarativeBundleV3({
+          chainId: args.chainId,
+          to: leg.to,
+          selector: leg.selector,
+        }),
+      ),
+    );
+    return;
+  }
+
+  // SAME-TO (`multicall_recurse`, `multicall(bytes[])`): children share the outer `to`.
   const selectors = multicallChildSelectors(
     args.installedBundle,
     args.calldataHex,
