@@ -11,6 +11,9 @@ ScopeBall 의 V3 ActionBody 디코드 경로에 <PROTOCOL> 를 온보딩하라.
 repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
 
 [작업 워크플로 — 먼저 셋업]
+ · **fresh state 면 먼저 한 번**: `cd registryV2 && npm install && npm run build` — `registryV2/index/` 는
+   gitignored 생성물이라 없으면 `v3_decode_harness` 가 즉시 panic. + 데이터 lane 확인(ETHERSCAN_API_KEY =
+   crates/integration-tests/.env, 로컬·commit 금지 / Dune MCP).
  · 온보딩은 양이 크고 다단계다. **요청받은 worktree 에서 전용 브랜치를 먼저 만들고** 작업하라.
    사용자가 온보딩용 worktree/cwd 를 지정했으면 그 안에서:
    git switch -c feat/<PROTOCOL>-onboarding
@@ -27,7 +30,9 @@ repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
    같은 blocker 3회 이상 반복처럼 사용자 입력 없이는 진행 불가능할 때만.
  · **증거 없으면 완료 아님** — `crates/integration-tests/ONBOARDING_EVIDENCE_TEMPLATE.md` 를
    `crates/integration-tests/onboarding/<PROTOCOL>/evidence.md` 로 복사해 채운다. P0/P1/P2/P3/P4 각 행이
-   `done` 또는 구체적 `blocked` 가 아니면 phase/온보딩 완료 선언 금지.
+   `done` 또는 구체적 `blocked` 가 아니면 phase/온보딩 완료 선언 금지. ⚠️ status 는 **정확히 `done`/`blocked`**
+   여야 한다(파서 엄격 — `done (n/a)`·`not applicable` 같은 변형은 게이트 fail). n/a 면 status=`done`, 사유는 artifact 칸에.
+   blocked 면 Blockers 표에 행 1개 이상 필수.
    phase 완료 선언 전 `cargo run -p policy-engine-integration-tests --bin check-onboarding-evidence -- <PROTOCOL> --phase <p0|p1|p2|p3|p4|all>`
    를 실행하고, 실패하면 incomplete 로 남긴다.
    시작 시 completion scope 를 evidence 에 먼저 적는다: primary chain(s), `wallet-facing` vs `full-surface`
@@ -121,7 +126,12 @@ repo woojinnn/scopeball, cwd /Users/jhy/Desktop/ScopeBall/scopeball-registry-v2.
     + **SCOPE ORACLE — coverage-share 측정(필수)**: covered (chain,to,selector) 집합이 P0 universe(P0 의
       cover+defer 주소 전체)의 최근 실거래 중 **몇 %를 잡는지** Etherscan/Dune 으로 측정·기록. 이게 §9.4 field-level
       projection 의 scope-level 버전 — completion label 이 측정치를 초과주장 못 하게 P4 에서 대조. user-facing DEFER
-      마다 그 surface 의 usage-share 도 1차 실측(예: "Bundler3 ~5%, Dune traces 14d 3483 vs 182").
+      마다 그 surface 의 usage-share 도 1차 실측.
+      ⚠️ **측정 단위 = 유저가 *서명하는* top-level tx (tx.to)** — internal call 총합이 아니다. router-heavy 는
+      direct(to=target) vs router 경유(to=router, target 은 internal trace 에서 hit)를 `ethereum.traces` 의
+      top-level(`cardinality(trace_address)=0`) vs internal 로 분리해 센다. **"total 호출"을 "direct"로 세면 direct
+      coverage 과대평가**(실제 사고: morpho 가 "direct 95%/Bundler3 5%"(3483 vs 182) 로 오판 → 그 3483 은 total 호출을
+      direct 로 오라벨한 것; 재측정 시 진짜 direct = 전 entrypoint 의 ~2.7% / Morpho-native 의 ~16%, 나머지 ~97% router 경유. §9.x).
     router/manager/aggregator-heavy 프로토콜은 canonical wallet-facing target file 을 만들고
     router/manager/permission/signature/settlement 주소별 최근 tx 를 별도 sweep 한다(대표 프로토콜 기본값:
     target 별 약 5,000 tx). `etherscan-bulk-sweep.mjs` 사용 시 `--surface-root registryV2/surface/<PROTOCOL>`

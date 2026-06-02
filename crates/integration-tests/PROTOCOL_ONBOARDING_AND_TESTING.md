@@ -1224,7 +1224,7 @@ Lido(Liquid Staking)는 §4d ENRICHMENT 단계가 **왜 필요한지**를 실증
 
 게이트(surface/universe/corpus/evidence)는 **내부 정합성**(triage→manifest→corpus 일관)만 본다. "이 scope 가 사용자가 원하는 거냐(intent)" + "covered surface 가 실사용 dominant 를 잡냐(data)" 는 검증하지 않는다.
 
-**측정으로 사후 교정.** 사용자가 밀어붙여서야 Dune `ethereum.traces` 14d 로 실측: MetaMorpho vault 직접호출 중 **direct 95% vs Bundler3-GeneralAdapter1 5%**(3483 vs 182). → `morpho-blue`+`metamorpho` 가 dominant 커버 맞음(= 결과는 ~맞았으나, scope 정확성을 보장한 건 **게이트가 아니라 운 + 사용자 개입**).
+**측정으로 사후 교정 — 그리고 그 측정마저 처음엔 틀렸다.** 사용자가 밀어붙여서야 Dune `ethereum.traces` 14d 로 실측했는데, 처음엔 **"direct 95% vs Bundler3 5%"(3483 vs 182)** 로 읽고 "morpho-blue+metamorpho direct 커버가 dominant" 라 결론냈다. **이게 틀렸다**: 그 "direct 3483" 은 사실 vault 로의 **TOTAL 호출**(전 caller)을 direct 로 오라벨한 값이었다. top-level(`cardinality(trace_address)=0`) vs internal 로 제대로 구분해 재측정하니(SCOPE ORACLE 하드닝 후 dogfood, 2026-06) — **진짜 direct-to-vault = ~2.7%**(전 entrypoint) / **~16%**(Morpho-native, vs Bundler3), 나머지 **~97% 가 router 경유**(Bundler3 ~14.5% + aggregator). 즉 direct 가 dominant 가 아니라 **router 가 dominant**였고 이전 결론은 **반증**됐다(Bundler3-GeneralAdapter1 180 ≈ 처음 182 와 일치 — 같은 GA1, "direct" 라벨만 틀렸음). **교훈: confident 한 *틀린* 숫자가 missing 보다 나쁘다 — scope/defer 판단을 추정·미검증 측정에 걸지 말 것.**
 
 **처치 = SCOPE ORACLE** (ONBOARDING_PROMPT `[SCOPE CONTRACT]` + 본 매뉴얼 P2 + evidence `P2 Real-Tx` 의 SCOPE ORACLE row):
 1. **대표 체인 1개** — 멀티체인은 별도 프레임워크, 임의 확장 금지(§3 규약 5 개정).
