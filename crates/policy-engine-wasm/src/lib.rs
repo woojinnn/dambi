@@ -33,7 +33,10 @@ pub fn _start() {
 mod sim_types;
 
 pub use action_eval_exports::{evaluate_action_v2_json, plan_action_rpc_v2_json};
-pub use cedar_exports::{simulate_policy_sequence, test_policy_text, validate_policy_text};
+pub use cedar_exports::{
+    est_json_to_policy_text, policy_text_to_est_json, simulate_policy_sequence, test_policy_text,
+    validate_policy_text,
+};
 pub use declarative_exports::{
     declarative_install_v3_json, declarative_route_request_v3_json,
     declarative_route_typed_data_v3_json,
