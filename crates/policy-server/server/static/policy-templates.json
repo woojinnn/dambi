@@ -1,0 +1,52 @@
+[
+  {
+    "id": "max-slippage-50bp",
+    "name": { "ko": "슬리피지 50bp 초과 차단", "en": "Block slippage > 50bp" },
+    "description": {
+      "ko": "AMM 스왑에서 슬리피지가 0.5%를 넘으면 거부",
+      "en": "Reject AMM swaps with slippage above 0.5%"
+    },
+    "severity": "deny",
+    "cedar_text": "forbid(principal, action == Action::\"Amm::Swap\", resource) when { context.slippageBp > 50 };"
+  },
+  {
+    "id": "no-unlimited-approve",
+    "name": { "ko": "무한 승인 차단", "en": "Block unlimited approvals" },
+    "description": {
+      "ko": "ERC-20 approve에서 max U256 승인 거부",
+      "en": "Reject ERC-20 approve calls with U256::MAX amount"
+    },
+    "severity": "deny",
+    "cedar_text": "forbid(principal, action == Action::\"Erc20::Approve\", resource) when { context.amountIsUnlimited == true };"
+  },
+  {
+    "id": "warn-large-transfer",
+    "name": { "ko": "거액 전송 경고", "en": "Warn on large transfers" },
+    "description": {
+      "ko": "$10,000 초과 ERC-20 전송 시 경고",
+      "en": "Warn on ERC-20 transfers exceeding $10,000 USD"
+    },
+    "severity": "warn",
+    "cedar_text": "permit(principal, action == Action::\"Erc20::Transfer\", resource) when { enrichment.totalInputUsd > decimal(\"10000\") };"
+  },
+  {
+    "id": "lending-hf-guard",
+    "name": { "ko": "Health Factor 보호", "en": "Health Factor guard" },
+    "description": {
+      "ko": "Aave 차입 후 HF가 1.5 미만이면 차단",
+      "en": "Block borrow when resulting HF would drop below 1.5"
+    },
+    "severity": "deny",
+    "cedar_text": "forbid(principal, action == Action::\"Lending::Borrow\", resource) when { enrichment.postHealthFactor < decimal(\"1.5\") };"
+  },
+  {
+    "id": "blocklisted-recipient",
+    "name": { "ko": "차단된 수신자 거부", "en": "Block known-bad recipients" },
+    "description": {
+      "ko": "/spenders 카탈로그에서 blocked로 분류된 주소로의 전송 거부",
+      "en": "Reject sends to addresses tagged 'blocked' in /spenders"
+    },
+    "severity": "deny",
+    "cedar_text": "forbid(principal, action, resource) when { context.recipient in BlockedSpenders };"
+  }
+]

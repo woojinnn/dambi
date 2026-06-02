@@ -10,6 +10,7 @@ import {
   pendingPut,
   type PendingRequest,
 } from "./storage";
+import { appendVerdict, type VerdictInsert } from "./verdict-storage";
 import {
   EngineError,
   evaluateActionV2,
@@ -20,6 +21,11 @@ import {
   formatAuditMatched,
   type PolicyRpcAuditMeta,
 } from "./policy-rpc";
+import {
+  evaluate as scopeballEvaluate,
+  getAccessToken as scopeballGetAccessToken,
+  ServerError as ScopeballServerError,
+} from "./scopeball-auth";
 import {
   getDefaultPolicyBundlesV2,
   loadDefaultPolicySetV2,
@@ -304,6 +310,89 @@ async function appendAudit(
     ...(verdictSource ? { verdictSource } : {}),
     decidedAtMs: Date.now(),
   });
+
+  // Keep the user-facing verdict log on-device. The server returns simulated
+  // state for policy evaluation; the extension owns policy verdicts and audit
+  // history, so this replaces the old server `/verdicts` write path.
+  void appendVerdictsForMessage(message, verdict).catch((err) => {
+    console.warn("[Scopeball] verdict-storage append failed", err);
+  });
+}
+
+async function appendVerdictsForMessage(
+  message: Message,
+  verdict: VerdictDto,
+): Promise<void> {
+  const ts = Math.floor(Date.now() / 1000);
+  const { contract, selector } = inferContractSelector(message);
+  const base: Omit<VerdictInsert, "severity" | "policy" | "reason"> = {
+    ts,
+    wallet: inferActor(message)?.toLowerCase() ?? null,
+    verdict: verdict.kind,
+    method: inferMethod(message),
+    decoded_fn: null,
+    dapp_origin: message.data.hostname ?? null,
+    ...(contract ? { contract } : {}),
+    ...(selector ? { selector } : {}),
+    delta_id: null,
+  };
+
+  if (verdict.kind === "pass" || !verdict.matched?.length) {
+    await appendVerdict({
+      ...base,
+      severity: verdict.kind === "fail" ? "deny" : "info",
+      reason: { ko: null, en: null },
+    });
+    return;
+  }
+
+  for (const matched of verdict.matched) {
+    await appendVerdict({
+      ...base,
+      severity: matched.severity,
+      policy: {
+        id: null,
+        name: matched.policy_id,
+        severity: matched.severity,
+      },
+      reason: { ko: null, en: matched.reason ?? null },
+    });
+  }
+}
+
+function inferMethod(message: Message): string | null {
+  if (isTransaction(message)) return "eth_sendTransaction";
+  if (isTypedSignature(message)) return "eth_signTypedData_v4";
+  if (isUntypedSignature(message)) return "personal_sign";
+  if (isVenueOrder(message)) return `venue:${message.data.venue}`;
+  return null;
+}
+
+function inferContractSelector(message: Message): {
+  contract?: { addr: string; symbol: null };
+  selector?: { sig: string; decoded: null };
+} {
+  if (isTransaction(message)) {
+    const to = message.data.transaction.to?.toLowerCase();
+    const data = message.data.transaction.data;
+    const sig =
+      typeof data === "string" && data.length >= 10 ? data.slice(0, 10) : null;
+    return {
+      ...(to ? { contract: { addr: to, symbol: null } } : {}),
+      ...(sig ? { selector: { sig, decoded: null } } : {}),
+    };
+  }
+
+  if (isTypedSignature(message)) {
+    const verifyingContract = (
+      message.data.typedData as { domain?: { verifyingContract?: string } }
+    )?.domain?.verifyingContract?.toLowerCase();
+    return verifyingContract
+      ? { contract: { addr: verifyingContract, symbol: null } }
+      : {};
+  }
+
+  return {};
 }
 
 function logIncoming(message: Message): void {
@@ -757,6 +846,14 @@ async function tryV2VerdictPath(
         results,
       });
       verdicts.push(verdict);
+
+      // RECORD (Phase 8B): replay the simulation against the Scopeball
+      // server so the action + state-delta land in the authenticated
+      // user's server-side state. Best-effort — the verdict above is the source of
+      // truth for fail-closed decisions; recording is purely for the
+      // dashboard's history view. Skipped silently when the user isn't
+      // signed in to Scopeball.
+      void recordSimulationOnServer({ action, meta, tx });
     } catch (err) {
       // A plan/dispatch throw is a fault, NOT a verdict — the caller fails
       // closed (a flaky WASM/RPC call must not waive a tx through).
@@ -1112,4 +1209,75 @@ function buildConfirmUrl(
     verdict: JSON.stringify(verdict),
   });
   return Browser.runtime.getURL(`confirm.html?${params.toString()}`);
+}
+
+/**
+ * Phase 8B — replay the just-evaluated simulation against the Scopeball
+ * Rust server so the action + state-delta land in the authenticated
+ * user's server-side state.
+ *
+ * Best-effort: failures are logged but never affect the WASM verdict.
+ * Silent skip when the user isn't signed in (no JWT in chrome.storage).
+ *
+ * The server takes the same `(envelopes, eval_context, wallet_id)` triple
+ * the SW already prepared for `dispatchCallsV2`; we wrap it into the
+ * REST DTO shape (`POST /evaluate`) the server expects. The returned
+ * `policyRequest` is discarded — WASM remains the verdict source.
+ *
+ * `wallet_id.chains` defaults to the single tx chain; richer wallet-level
+ * chain sets land when the dashboard's wallet-management UI starts
+ * driving the server's `POST /wallets`.
+ */
+async function recordSimulationOnServer(input: {
+  readonly action: unknown;
+  readonly meta: unknown;
+  readonly tx: {
+    readonly chain_id: string;
+    readonly from: string;
+    readonly to: string;
+  };
+}): Promise<void> {
+  // Skip silently for signed-out users — recording is opt-in via login.
+  const hasToken = await scopeballGetAccessToken().catch(() => null);
+  if (!hasToken) return;
+
+  // Mirror the Rust `EvaluateRequest` shape:
+  //   - wallet_id: from tx.from + tx.chain_id
+  //   - envelopes: the typed action wrapped as { meta, body } (server
+  //                accepts an opaque array; reducer dispatches on body.domain)
+  //   - eval_context: minimal — chain + now + RequestKind::Transaction
+  //   - call_specs: empty (enrichment is rewritten LiveField-first per
+  //                Phase 8B; server-side dispatcher remains intentionally
+  //                unimplemented)
+  const envelope = { meta: input.meta, body: input.action };
+  const evalContext = {
+    chain: input.tx.chain_id,
+    now: Math.floor(Date.now() / 1000),
+    request_kind: "Transaction",
+    simulation_mode: "Predicted",
+  };
+  const walletId = {
+    address: input.tx.from,
+    chains: [input.tx.chain_id],
+  };
+
+  try {
+    await scopeballEvaluate({
+      wallet_id: walletId,
+      envelopes: [envelope as unknown as Record<string, unknown>],
+      eval_context: evalContext,
+      call_specs: [],
+    });
+  } catch (err) {
+    if (err instanceof ScopeballServerError && err.isUnauthorized) {
+      // Token expired between getAccessToken() and the call — swallow.
+      console.debug("[Scopeball] record skipped: server returned 401");
+      return;
+    }
+    console.warn("[Scopeball] record on server failed (non-fatal)", {
+      chain: input.tx.chain_id,
+      from: input.tx.from,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

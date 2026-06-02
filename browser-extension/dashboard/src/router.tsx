@@ -1,50 +1,59 @@
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
-import { ExtensionProvider } from "./sdk-context";
-import { AppShell } from "./shell/AppShell";
-import { HomeOrOnboarding } from "./pages/HomeOrOnboarding";
-import { LibraryPage } from "./pages/LibraryPage";
-import { AuditPage } from "./pages/AuditPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { SchemaViewer } from "./pages/schema-viewer";
-import { RpcEndpointPage } from "./pages/rpc-endpoint";
-import { OnboardingPage } from "./pages/onboarding";
+/**
+ * Dashboard router — single SPA mounted at `/`.
+ *
+ * Auth flow:
+ *   `/login`            — public, kicks the Google OAuth redirect.
+ *   `/auth/callback`    — public, parses the token from the URL hash.
+ *   everything else     — `<RequireAuth>` bounces anonymous users to /login.
+ *
+ * Shell: `<AppShell>` renders the collapsible nav rail; pages render
+ * inside its `<Outlet />`. Each page owns its own `<Topbar />` (crumb
+ * varies per route).
+ */
 
-// Standalone Vite app at localhost:5174 — BrowserRouter only.
-// Extension-bundling is a future concern (M-5, deferred).
+import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom";
+
+import { AuthProvider } from "./hooks/useAuth";
+import { RequireAuth } from "./RequireAuth";
+import { AppShell } from "./shell/AppShell";
+
+import { LoginPage } from "./pages/LoginPage";
+import { AuthCallbackPage } from "./pages/AuthCallbackPage";
+import { HomePage } from "./pages/HomePage";
+import { EditorPage } from "./pages/EditorPage";
+import { SimulationPage } from "./pages/SimulationPage";
+import { MonitoringPage } from "./pages/MonitoringPage";
+import { AuditPage } from "./pages/AuditPage";
+import { HistoryPage } from "./pages/HistoryPage";
+
 const router = createBrowserRouter([
+  { path: "/login", element: <LoginPage /> },
+  { path: "/auth/callback", element: <AuthCallbackPage /> },
   {
     path: "/",
-    element: (
-      <ExtensionProvider>
-        <AppShell />
-      </ExtensionProvider>
-    ),
+    element: <RequireAuth />,
     children: [
-      // Phase 7 codex carry-over I: cold-start onboarding redirect.
-      // `HomeOrOnboarding` reads the configured endpoint URL and the
-      // installed enriched schema; when both are empty it redirects
-      // to `/onboarding`. Otherwise it renders `HomePage`.
-      { index: true, element: <HomeOrOnboarding /> },
-      // Fix S: policies-list route is `/policies` (spec acceptance + Phase 7.5
-      // banner host + onboarding nav). The page component is still named
-      // `LibraryPage` for historical reasons; the route name is the only
-      // user-visible contract.
-      { path: "policies", element: <LibraryPage /> },
-      { path: "audit", element: <AuditPage /> },
-      { path: "settings", element: <SettingsPage /> },
-      // Phase 7.3: enriched cedarschema viewer. Reads `?action=<snake>`
-      // from the URL.
-      { path: "schema", element: <SchemaViewer /> },
-      // Phase 7.4: policy-rpc endpoint settings page.
-      { path: "rpc-endpoint", element: <RpcEndpointPage /> },
-      // Phase 7.4: first-run onboarding wizard. The "show on cold
-      // storage" redirect from "/" is deferred to a follow-up; for
-      // now reach this page via direct navigation or a settings link.
-      { path: "onboarding", element: <OnboardingPage /> },
+      {
+        path: "",
+        element: <AppShell />,
+        children: [
+          { index: true, element: <HomePage /> },
+          { path: "editor", element: <EditorPage /> },
+          { path: "simulation", element: <SimulationPage /> },
+          { path: "monitoring", element: <MonitoringPage /> },
+          { path: "audit", element: <AuditPage /> },
+          { path: "history", element: <HistoryPage /> },
+          { path: "*", element: <Navigate to="/" replace /> },
+        ],
+      },
     ],
   },
 ]);
 
 export function AppRouter() {
-  return <RouterProvider router={router} />;
+  return (
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
+  );
 }

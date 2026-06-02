@@ -1,24 +1,51 @@
 import Browser from "webextension-polyfill";
 import { Identifier } from "@lib/identifier";
-import {
-  handleDashboardRequest,
-  isDashboardRequest,
-} from "./dashboard/api";
-import {
-  handleManifestRequest,
-  isManifestRequest,
-} from "./manifests/handlers";
+import { handleDashboardRequest, isDashboardRequest } from "./dashboard/api";
+import { handleManifestRequest, isManifestRequest } from "./manifests/handlers";
 import { hydrateManifests } from "./manifests/hydrate";
 import { migrateAdapterLoaderStorageKey } from "./manifests/adapter-loader-storage-migration";
 import { detectPendingMigrations } from "./manifests/migration-detector";
 import { decideMessage } from "./orchestrator";
+import { reportExecutionOutcome } from "./execution-report";
 import {
   ensureDefaultPoliciesInstalled,
   reinstallAllPolicies,
 } from "./policies-loader";
 import { loadDefaultPolicySetV2 } from "./policies-loader-v2";
 import { applyEnabledIds, getCatalog } from "./policy-selection";
-import { RequestType, type Message, type MessageResponse } from "@lib/types";
+import {
+  isExecutionReport,
+  RequestType,
+  type Message,
+  type MessageResponse,
+} from "@lib/types";
+import {
+  clearTokens,
+  fetchMe,
+  listWallets,
+  startGoogleLogin,
+  type Me,
+  type WalletId,
+} from "./scopeball-auth";
+import {
+  simulatePolicySequence,
+  testPolicyText,
+  validatePolicyText,
+} from "./wasm-bridge";
+import {
+  clearExecutionReports,
+  countExecutionReports,
+  listExecutionReports,
+  type ExecutionReportFilter,
+} from "./execution-report-storage";
+import {
+  clearVerdicts,
+  countVerdicts,
+  exportVerdictsAsCsv,
+  listVerdicts,
+  setVerdictDecision as setStoredVerdictDecision,
+  type VerdictFilter,
+} from "./verdict-storage";
 
 const WALLET_ACTION_TYPES = new Set<string>([
   RequestType.TRANSACTION,
@@ -155,6 +182,11 @@ async function handleMessage(
     return;
   }
 
+  if (isExecutionReport(message)) {
+    await reportExecutionOutcome(message.data);
+    return;
+  }
+
   // Skip messages that aren't wallet actions (transaction / typed sig /
   // untyped sig). The proxy is injected into every iframe (manifest
   // <all_urls> + all_frames), so probes from third-party widgets like
@@ -198,7 +230,88 @@ interface SetEnabledIdsRequest {
   type: "set-enabled-ids";
   ids: string[];
 }
-type PopupRequest = PolicyCatalogRequest | SetEnabledIdsRequest;
+interface ScopeballAuthStatusRequest {
+  type: "scopeball-auth-status";
+}
+interface ScopeballAuthSignInRequest {
+  type: "scopeball-auth-sign-in";
+}
+interface ScopeballAuthSignOutRequest {
+  type: "scopeball-auth-sign-out";
+}
+interface ScopeballListWalletsRequest {
+  type: "scopeball-list-wallets";
+}
+/** apps/web Editor + Simulation pages route Cedar through the
+ *  service worker rather than bundling wasm themselves. Three
+ *  request variants map 1-1 to the new exports in
+ *  `crates/policy-engine-wasm/src/cedar_exports.rs`. */
+interface CedarValidateRequest {
+  type: "cedar-validate";
+  text: string;
+}
+interface CedarTestRequest {
+  type: "cedar-test";
+  text: string;
+  // Pre-serialized JSON of `CedarRequestInput` so the wasm boundary
+  // stays string-in / string-out and the FE doesn't have to know
+  // the rust dto shape exactly.
+  request_json: string;
+}
+interface CedarSimulateRequest {
+  type: "cedar-simulate";
+  steps_json: string;
+  policies_json: string;
+}
+interface ExecutionReportsListRequest {
+  type: "execution-reports:list";
+  opts?: ExecutionReportFilter;
+}
+interface ExecutionReportsCountRequest {
+  type: "execution-reports:count";
+  opts?: ExecutionReportFilter;
+}
+interface ExecutionReportsClearRequest {
+  type: "execution-reports:clear";
+}
+interface VerdictsListRequest {
+  type: "verdicts:list";
+  opts?: VerdictFilter;
+}
+interface VerdictsCountRequest {
+  type: "verdicts:count";
+  opts?: VerdictFilter;
+}
+interface VerdictsSetDecisionRequest {
+  type: "verdicts:set-decision";
+  id: string;
+  decision: "trusted" | "cancelled";
+}
+interface VerdictsExportCsvRequest {
+  type: "verdicts:export-csv";
+  opts?: VerdictFilter;
+}
+interface VerdictsClearRequest {
+  type: "verdicts:clear";
+}
+type PopupRequest =
+  | PolicyCatalogRequest
+  | SetEnabledIdsRequest
+  | ScopeballAuthStatusRequest
+  | ScopeballAuthSignInRequest
+  | ScopeballAuthSignOutRequest
+  | ScopeballListWalletsRequest
+  | CedarValidateRequest
+  | CedarTestRequest
+  | CedarSimulateRequest
+  | ExecutionReportsListRequest
+  | ExecutionReportsCountRequest
+  | ExecutionReportsClearRequest
+  | VerdictsListRequest
+  | VerdictsCountRequest
+  | VerdictsSetDecisionRequest
+  | VerdictsExportCsvRequest
+  | VerdictsClearRequest;
 
 // webextension-polyfill's listener type accepts `true | void | Promise<any>`,
 // not `boolean`. Returning `undefined` (bare `return;`) closes the channel
@@ -218,6 +331,45 @@ Browser.runtime.onMessage.addListener(
           }),
         );
       return true; // keep the channel open for the async response
+    }
+
+    // apps/web Cedar editor / simulation. Three message types, all
+    // forwarded to policy-engine-wasm cedar_exports. Return value is
+    // the raw JSON string the wasm produces — the FE parses.
+    if (req.type === "cedar-validate") {
+      void validatePolicyText((req as CedarValidateRequest).text)
+        .then((json) => sendResponse({ ok: true, data: json }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "cedar_validate_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "cedar-test") {
+      const r = req as CedarTestRequest;
+      void testPolicyText(r.text, r.request_json)
+        .then((json) => sendResponse({ ok: true, data: json }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "cedar_test_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "cedar-simulate") {
+      const r = req as CedarSimulateRequest;
+      void simulatePolicySequence(r.steps_json, r.policies_json)
+        .then((json) => sendResponse({ ok: true, data: json }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "cedar_simulate_failed", message: String(err) },
+          }),
+        );
+      return true;
     }
 
     if (isDashboardRequest(req)) {
@@ -240,6 +392,184 @@ Browser.runtime.onMessage.addListener(
           sendResponse({
             ok: false,
             error: { kind: "manifest_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    // Scopeball (Rust server) auth — separate from the legacy 8787 path.
+    // Each handler returns `{ ok, data | error }` so the popup can match
+    // uniformly.
+    if (req.type === "scopeball-auth-status") {
+      void fetchMe()
+        .then((me: Me | null) => sendResponse({ ok: true, data: me }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "scopeball_auth_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "scopeball-auth-sign-in") {
+      void startGoogleLogin()
+        .then(async () => {
+          const me = await fetchMe();
+          sendResponse({ ok: true, data: me });
+        })
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "scopeball_sign_in_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "scopeball-auth-sign-out") {
+      void clearTokens()
+        .then(() => sendResponse({ ok: true, data: null }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "scopeball_sign_out_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "scopeball-list-wallets") {
+      void listWallets()
+        .then((wallets: WalletId[]) =>
+          sendResponse({ ok: true, data: wallets }),
+        )
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "scopeball_list_wallets_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "execution-reports:list") {
+      void listExecutionReports((req as ExecutionReportsListRequest).opts)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "execution_reports_list_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "execution-reports:count") {
+      void countExecutionReports((req as ExecutionReportsCountRequest).opts)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "execution_reports_count_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "execution-reports:clear") {
+      void clearExecutionReports()
+        .then(() => sendResponse({ ok: true, data: { cleared: true } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "execution_reports_clear_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "verdicts:list") {
+      void listVerdicts((req as VerdictsListRequest).opts)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_list_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "verdicts:count") {
+      void countVerdicts((req as VerdictsCountRequest).opts)
+        .then((data) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_count_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "verdicts:set-decision") {
+      const r = req as VerdictsSetDecisionRequest;
+      if (
+        typeof r.id !== "string" ||
+        (r.decision !== "trusted" && r.decision !== "cancelled")
+      ) {
+        sendResponse({
+          ok: false,
+          error: {
+            kind: "invalid_request",
+            message: "id and decision are required",
+          },
+        });
+        return true;
+      }
+      void setStoredVerdictDecision(r.id, r.decision)
+        .then((updated) => sendResponse({ ok: true, data: { updated } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "verdicts_set_decision_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "verdicts:export-csv") {
+      void exportVerdictsAsCsv((req as VerdictsExportCsvRequest).opts)
+        .then((csv) => sendResponse({ ok: true, data: { csv } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_export_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "verdicts:clear") {
+      void clearVerdicts()
+        .then(() => sendResponse({ ok: true, data: { cleared: true } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "verdicts_clear_failed", message: String(err) },
           }),
         );
       return true;

@@ -16,6 +16,10 @@ const BROADCAST_ID = "__broadcast__";
 const DASHBOARD_ORIGINS = new Set([
   "http://localhost:5174",
   "http://127.0.0.1:5174",
+  // apps/web (new dashboard) — uses the same bridge for Cedar
+  // editor + simulation requests routed to policy-engine-wasm.
+  "http://localhost:5175",
+  "http://127.0.0.1:5175",
 ]);
 
 function originAllowed(origin: string): boolean {
@@ -80,6 +84,8 @@ const WATCHED_KEYS = new Set([
   // to refresh on the fly. Storage layer trims to AUDIT_MAX (100), so the
   // change events fire at most once per decision and the payload stays small.
   "requests:audit",
+  "verdicts:log",
+  "execution-reports:log",
   // Phase 6 / Task 6.5: manifest store + migration queue. The dashboard
   // manifest editor and migration banner subscribe so the UI mirrors
   // installs from other tabs and the popup.
