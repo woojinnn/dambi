@@ -1,0 +1,64 @@
+{
+  "protocol": "eigenlayer",
+  "source": "Dune query 7638869 execution 01KT4JG8KZZ8856PCQMXHC62WW",
+  "query_url": "https://dune.com/queries/7638869",
+  "measurement": "ethereum mainnet top-level user-signed tx.to, 30-day partition window, current_date - interval 30 day",
+  "rows_returned": 70,
+  "executionCostCredits": "4.054",
+  "usage_before_credits": 55.412,
+  "usage_after_credits": 59.477,
+  "disposition": [
+    {
+      "disposition": "cover",
+      "tx_count": 3184,
+      "share_pct": 76.8711
+    },
+    {
+      "disposition": "defer",
+      "tx_count": 945,
+      "share_pct": 22.8151
+    },
+    {
+      "disposition": "unknown",
+      "tx_count": 13,
+      "share_pct": 0.3139
+    }
+  ],
+  "top_selectors": [
+    {
+      "surface": "delegation.completeQueuedWithdrawals",
+      "selector": "0x9435bb43",
+      "disposition": "cover",
+      "tx_count": 1064,
+      "share_pct": 25.6881
+    },
+    {
+      "surface": "rewards.processClaim",
+      "selector": "0x3ccc861d",
+      "disposition": "defer",
+      "tx_count": 945,
+      "share_pct": 22.8151
+    },
+    {
+      "surface": "delegation.queueWithdrawals",
+      "selector": "0x0dd8dd02",
+      "disposition": "cover",
+      "tx_count": 921,
+      "share_pct": 22.2356
+    },
+    {
+      "surface": "delegation.undelegate",
+      "selector": "0xda8be864",
+      "disposition": "cover",
+      "tx_count": 472,
+      "share_pct": 11.3955
+    },
+    {
+      "surface": "strategy.depositIntoStrategy",
+      "selector": "0xe7a050aa",
+      "disposition": "cover",
+      "tx_count": 411,
+      "share_pct": 9.9227
+    }
+  ]
+}

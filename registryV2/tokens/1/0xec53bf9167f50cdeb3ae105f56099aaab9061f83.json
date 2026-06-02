@@ -1,0 +1,16 @@
+{
+  "erc_kind": "erc20",
+  "chainId": 1,
+  "address": "0xec53bf9167f50cdeb3ae105f56099aaab9061f83",
+  "symbol": "EIGEN",
+  "decimals": 18,
+  "name": "EIGEN",
+  "source": "https://github.com/Layr-Labs/eigenlayer-contracts/blob/main/script/configs/mainnet/mainnet-addresses.config.json",
+  "token_kind": {
+    "kind": "base",
+    "protocol": {
+      "name": "eigenlayer",
+      "chain": "eip155:1"
+    }
+  }
+}

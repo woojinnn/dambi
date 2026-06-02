@@ -1,0 +1,173 @@
+{
+  "protocol": "balancer",
+  "kind": "address",
+  "generatedAt": "2026-06-02T16:36:32.839Z",
+  "source": "Balancer first-party deployment inventory already captured in registryV2/surface/balancer/_deployments.json",
+  "sources": [
+    {
+      "name": "balancer-deployments:v2-vault",
+      "url": "https://github.com/balancer/balancer-deployments/tree/master/v2/tasks/20210418-vault",
+      "count": 9
+    },
+    {
+      "name": "balancer-deployments:v3-vault-router",
+      "url": "https://github.com/balancer/balancer-deployments/tree/master/v3/tasks/20250307-v3-router-v2",
+      "count": 8
+    }
+  ],
+  "source_count": 17,
+  "batch_boundary": "This artifact dispositiones Balancer top-level user-signed Vault/Router/Core deployment addresses for the current ActionBody decode scope. Pool/BPT child-token universe and liquidity verbs remain explicit user-facing DEFER batches measured in onboarding evidence; covered swaps/permissions do not route by pool tx.to.",
+  "counts": {
+    "total": 17,
+    "cover": 9,
+    "exclude": 8,
+    "defer": 0,
+    "byChain": {
+      "1": 9,
+      "10": 1,
+      "56": 1,
+      "137": 1,
+      "8453": 3,
+      "42161": 1,
+      "43114": 1
+    }
+  },
+  "candidates": [
+    {
+      "name": "Balancer V2 Vault (mainnet)",
+      "chainId": 1,
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "decision": "cover",
+      "reason": "user pre-sign entry: V2 Vault.swap and setRelayerApproval are covered by manifests; remaining Vault functions are explicitly triaged in coverage",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V2 Vault (arbitrum)",
+      "chainId": 42161,
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "decision": "cover",
+      "reason": "user pre-sign entry: V2 Vault.swap and setRelayerApproval are covered by manifests; remaining Vault functions are explicitly triaged in coverage",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V2 Vault (avalanche)",
+      "chainId": 43114,
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "decision": "cover",
+      "reason": "user pre-sign entry: V2 Vault.swap and setRelayerApproval are covered by manifests; remaining Vault functions are explicitly triaged in coverage",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V2 Vault (optimism)",
+      "chainId": 10,
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "decision": "cover",
+      "reason": "user pre-sign entry: V2 Vault.swap and setRelayerApproval are covered by manifests; remaining Vault functions are explicitly triaged in coverage",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V2 Vault (polygon)",
+      "chainId": 137,
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "decision": "cover",
+      "reason": "user pre-sign entry: V2 Vault.swap and setRelayerApproval are covered by manifests; remaining Vault functions are explicitly triaged in coverage",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V2 Vault (bsc)",
+      "chainId": 56,
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "decision": "cover",
+      "reason": "user pre-sign entry: V2 Vault.swap and setRelayerApproval are covered by manifests; remaining Vault functions are explicitly triaged in coverage",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V2 Vault (base)",
+      "chainId": 8453,
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "decision": "cover",
+      "reason": "user pre-sign entry: V2 Vault.swap and setRelayerApproval are covered by manifests; remaining Vault functions are explicitly triaged in coverage",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V2 BalancerHelpers (mainnet)",
+      "chainId": 1,
+      "address": "0x5addcca35b7a0d07c74063c48700c8590e87864e",
+      "decision": "exclude",
+      "reason": "helper/query contract; users do not sign state-changing wallet intents against it",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V2 ProtocolFeesCollector (mainnet)",
+      "chainId": 1,
+      "address": "0xce88686553686da562ce7cea497ce749da109f9f",
+      "decision": "exclude",
+      "reason": "protocol fee infra/admin surface, not a retail wallet pre-sign entry point",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V3 Router v2 (mainnet)",
+      "chainId": 1,
+      "address": "0xae563e3f8219521950555f5962419c8919758ea2",
+      "decision": "cover",
+      "reason": "user pre-sign entry: direct single-token swaps and plain multicall wrapper calls are covered by manifests",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V3 Router v2 (base)",
+      "chainId": 8453,
+      "address": "0x3f170631ed9821ca51a59d996ab095162438dc10",
+      "decision": "cover",
+      "reason": "user pre-sign entry: direct single-token swaps and plain multicall wrapper calls are covered by manifests",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V3 Vault (mainnet)",
+      "chainId": 1,
+      "address": "0xba1333333333a1ba1108e8412f11850a5c319ba9",
+      "decision": "exclude",
+      "reason": "core Vault settlement/unlock target; user pre-sign entry point for covered swaps is Router v2",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V3 Vault (base)",
+      "chainId": 8453,
+      "address": "0xba1333333333a1ba1108e8412f11850a5c319ba9",
+      "decision": "exclude",
+      "reason": "core Vault settlement/unlock target; user pre-sign entry point for covered swaps is Router v2",
+      "batch": "cross-chain-existing-surface-outside-representative-measurement"
+    },
+    {
+      "name": "Balancer V3 VaultFactory (mainnet)",
+      "chainId": 1,
+      "address": "0xac27df81663d139072e615855ef9ab0af3fbd281",
+      "decision": "exclude",
+      "reason": "protocol factory/infra, not a retail wallet swap or permission pre-sign entry",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V3 VaultExtension (mainnet)",
+      "chainId": 1,
+      "address": "0x0e8b07657d719b86e06bf0806d6729e3d528c9a9",
+      "decision": "exclude",
+      "reason": "Vault implementation/extension infra behind core Vault flow, not a direct covered user entry",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V3 VaultAdmin (mainnet)",
+      "chainId": 1,
+      "address": "0x35ffb749b273beb20f40f35edeb805012c539864",
+      "decision": "exclude",
+      "reason": "admin/governance surface, not a retail wallet pre-sign entry point",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    },
+    {
+      "name": "Balancer V3 ProtocolFeeController (mainnet)",
+      "chainId": 1,
+      "address": "0xa731c23d7c95436baaae9d52782f966e1ed07cc8",
+      "decision": "exclude",
+      "reason": "protocol fee infra/admin surface, not a retail wallet pre-sign entry point",
+      "batch": "representative-mainnet-top-level-entrypoint-inventory"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "protocol": "lido",
+  "source": "Dune query 7638869 execution 01KT4JG8KZZ8856PCQMXHC62WW",
+  "query_url": "https://dune.com/queries/7638869",
+  "measurement": "ethereum mainnet top-level user-signed tx.to, 30-day partition window, current_date - interval 30 day",
+  "rows_returned": 70,
+  "executionCostCredits": "4.054",
+  "usage_before_credits": 55.412,
+  "usage_after_credits": 59.477,
+  "disposition": [
+    {
+      "disposition": "cover",
+      "tx_count": 13115,
+      "share_pct": 45.1044
+    },
+    {
+      "disposition": "unknown_or_standard_excluded",
+      "tx_count": 15962,
+      "share_pct": 54.8956
+    }
+  ],
+  "top_selectors": [
+    {
+      "surface": "steth.submit",
+      "selector": "0xa1903eab",
+      "tx_count": 6640,
+      "share_pct": 22.8359
+    },
+    {
+      "surface": "withdrawalQueue.claimWithdrawals",
+      "selector": "0xe3afe0a3",
+      "tx_count": 2422,
+      "share_pct": 8.3296
+    },
+    {
+      "surface": "withdrawalQueue.requestWithdrawalsWithPermit",
+      "selector": "0xacf41e4d",
+      "tx_count": 1504,
+      "share_pct": 5.1725
+    },
+    {
+      "surface": "wsteth.unwrap",
+      "selector": "0xde0e9a3e",
+      "tx_count": 866,
+      "share_pct": 2.9783
+    },
+    {
+      "surface": "wsteth.wrap",
+      "selector": "0xea598cb0",
+      "tx_count": 817,
+      "share_pct": 2.8098
+    }
+  ]
+}

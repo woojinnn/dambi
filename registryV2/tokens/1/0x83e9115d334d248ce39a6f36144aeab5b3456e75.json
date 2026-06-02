@@ -1,0 +1,23 @@
+{
+  "erc_kind": "erc20",
+  "chainId": 1,
+  "address": "0x83e9115d334d248ce39a6f36144aeab5b3456e75",
+  "symbol": "bEIGEN",
+  "decimals": 18,
+  "name": "bEIGEN",
+  "source": "https://github.com/Layr-Labs/eigenlayer-contracts/blob/main/script/configs/mainnet/mainnet-addresses.config.json",
+  "token_kind": {
+    "kind": "wrapped",
+    "protocol": {
+      "name": "eigenlayer",
+      "chain": "eip155:1"
+    },
+    "wraps": {
+      "key": {
+        "standard": "erc20",
+        "chain": "eip155:1",
+        "address": "0xec53bf9167f50cdeb3ae105f56099aaab9061f83"
+      }
+    }
+  }
+}

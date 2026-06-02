@@ -1,0 +1,424 @@
+{
+  "protocol": "balancer",
+  "chainId": 1,
+  "source": "Etherscan API V2 account txlist filtered to top-level tx.to == target address",
+  "generatedAt": "2026-06-02T16:33:06.790Z",
+  "request": {
+    "startblock": 0,
+    "endblock": 99999999,
+    "sort": "desc",
+    "offset": 10000,
+    "page": 1
+  },
+  "api_calls_used": 2,
+  "target_address_count": 2,
+  "account_txs_seen": 20000,
+  "raw_txs_seen": 20000,
+  "unique_selectors_seen": 33,
+  "addresses": [
+    {
+      "name": "V2 Vault",
+      "address": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "account_txs_seen": 10000,
+      "raw_txs_seen": 10000,
+      "unique_selectors_seen": 25,
+      "covered_selectors_seen": [
+        "0x52bbbe29",
+        "0xfa6e671d"
+      ],
+      "covered_selectors_missing": [],
+      "deferred_selectors_seen": [
+        "0x945bcec9",
+        "0x8bdb3913",
+        "0xb95cac28",
+        "0x0e8e3e84"
+      ],
+      "top_selectors": [
+        {
+          "selector": "0x945bcec9",
+          "count": 3819,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0xc9878406b1978cd25917ac3675108284da19142582e0ee398bf77b2b966c2008",
+            "0xfd13854f9c7140833c0dd3d0e7f10c4186880f3b8660b4c446f08dcf2a3298fc",
+            "0x9e80513c7fa3af75e6aa44ec12590162886012ffb037a585ef089e92132f6c07",
+            "0x8c3aaa702b8cf220ccd5ad84fc6fbb7806dbec1d1a39044899244a696231643f",
+            "0x3676c928c47f8f1030e2f4f06d927a7f4e765613789ccb7dbb7bd7147956c77f"
+          ]
+        },
+        {
+          "selector": "0x52bbbe29",
+          "count": 2342,
+          "disposition": "cover",
+          "sample_tx_hashes": [
+            "0x99504e3dfb87c092648235f8cf0ba5d3245476e791682205e63cc90a8c781a0e",
+            "0xe994c833f6fd0d0fb06a5589fec1fbab113d83635cea62dab48f9bbda82a4a7f",
+            "0xd2d4963171068b76cb419345e3add82597475fd0d293fc23946b6a116e470fa8",
+            "0x6007106c8722000e8ba8c02cd3446e457ba106ae5d4fd5a39c5c9448c3cc8e52",
+            "0x8776b12e1da65b525502acc81ba9a6d944b6c0f88d9ffd5ebefed9af435887d0"
+          ]
+        },
+        {
+          "selector": "0x8bdb3913",
+          "count": 2123,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0x255feae43e984346c3c3297d5311619b18c003393f67d12e9e39f1077b8ebe9f",
+            "0x230bd91f3337dadac0737c247ec26b0e31cb1313dfa0b91b44e2c4e5b58ff0fd",
+            "0xf00c3ba679d09aa9da30c7336d21356f4d2337c6cbec4651df4f588f6fb68274",
+            "0x4bb5f4e50d73392836d51b7784df59f1808dd2fce1e755b30f8302bb8e0a06f8",
+            "0x6ec965b45b6378c43be3795e3430c569e239a55b9c87410a52c95b6e1e546455"
+          ]
+        },
+        {
+          "selector": "0xb95cac28",
+          "count": 680,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0x8acfc549ad1f2a6f2347e0420f814527e9fc278095c7babcb991624fe73e63b6",
+            "0x944db81b5b1060dc67397238145cbcb18e9e23926ed9232c3ef3deb4722ced96",
+            "0xa2d7b2b28ba2f423c60d3101840a85c07468560d85d9d287f5dd0662df57c107",
+            "0x5df7b6d4e4b4448f89df645255ead9549b6fd8577c3a7a3237f3878a976cd440",
+            "0xba0cb3a236cf507609fbc4e8c00d3b28375979ea473890682734361176c1601b"
+          ]
+        },
+        {
+          "selector": "0xfa6e671d",
+          "count": 374,
+          "disposition": "cover",
+          "sample_tx_hashes": [
+            "0x50137d68168867c41b516709725a158585a622cee760cc179a19e596d39fa1db",
+            "0xc20c7ff3b0dfc20f3de74f789345866c1a142dead2165c752057646c8bd16f97",
+            "0x58da61e36aad340f44b22d5acbf169b477b7f4e0e14adfc111394b6cf1d6151d",
+            "0xffb159e1e9adf7e81669bbfc1c1625d85407eba8ea1fcedaad92673f9ac870b2",
+            "0xbc7bafd8f61b8720141288251739a87c803590feb41ae6056014268939379b31"
+          ]
+        },
+        {
+          "selector": "0x5c38449e",
+          "count": 357,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x57dc5032d56abbbb86ef0b9d55cfc3a6d1064449aa49d40bd149470c58e2cb6b",
+            "0x23d2d9e25d6bf1d7bb293f34b63214b8e6f2c416404c7e0a4406d81686c0329d",
+            "0xfa0a12830b821ce43b8bdef5bc65820cf9303e6ae727769043fad0411c5b2776",
+            "0x105a364a3596ca89cfc2a76503aaacf123b8d177c361c84d5402ffb5a783d768",
+            "0xe05c67c8ddf52b1e0ad771d4a9aa2e8b1f50ec7b2ea3493dc4e94e89ba19202e"
+          ]
+        },
+        {
+          "selector": "0xf84d066e",
+          "count": 92,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x9f6d1369388ea8d70cae98ff7ec2d553321a23f1520dc84c53fc18fca81655d0",
+            "0xfb242665dc0760f0049235cf3b79052246ec3b49d70287e8ded830623fe22d14",
+            "0xce79926a250c62533dd4d6738444e0176d4fe2675dab2a011e981c1652b63a4a",
+            "0xb30ed1bd1b9b1a315c39ec983df080bfc402eed257ee69510d43b669cf6e9bbf",
+            "0x7c37c38f0f9620632754401217b3cdc48e5ae7a4fc11c106d99f5db2781a55ac"
+          ]
+        },
+        {
+          "selector": "0x7c9c86df",
+          "count": 68,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0xfeedcae75cbb0a5c639aed79121380568d88cde7de26ffb2e051d71ce542d028",
+            "0xfbd4dff1e3b13d248e16654eecdb2e76725d527058799c6b6717afc3d9309fc7",
+            "0x1643f62f7e72142bfeed85d46621429e20fcc92942563827c287d6a34eb8a3e2",
+            "0x321cab1880554015a278905700b7309dcc8bc41faf4c3d95dfb90de2ed5e05db",
+            "0x76d67aa8e0b1f878e9b33617c25fab9d4c9b170a01ea9cb0fd7e436a1fbc4372"
+          ]
+        },
+        {
+          "selector": "0xfe0d94c1",
+          "count": 48,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x1eb0906854c54e26ed8970b69860efa643e21d5c25c26cae7a21afd85126efac",
+            "0x3b14ff9ecfff2493b13c28edd9b052f6046ee88efbb84616c5b40010f61b4239",
+            "0xbccd8e28cc3cbb4f97ab56d107334b175866a763e143ffeed96b4e80d4933fbe",
+            "0x1cfe515394488d99d101a3509dd2bed4cb09a44ed7189c58d79226efe0dc5992",
+            "0x9c5de22e536eb3d926b1e2faf3e590bd73cc4bce9936636dc41b46e83760603c"
+          ]
+        },
+        {
+          "selector": "0x21d182ce",
+          "count": 26,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x4762b087be034687c80daf3285c8e268af5acadfe03e4251cfd989e0ea7dc821",
+            "0xc08174ba82a4b39f4bb11fe460bec2fa82f9fc6347e95f8e55d95279f8a639cd",
+            "0x3754772b5f31b1734d7627adde6991c2d90260d61683e5637be520a9acdcd022",
+            "0xa6f67e629339343db0e6b2987fc2ad40eddf40557e27ac5419f7d376b4ca57bf",
+            "0x2d30aff7e8d204f10760db6acd6a24ea29088dd4c15480931511fc117d6dd30d"
+          ]
+        },
+        {
+          "selector": "0x",
+          "count": 24,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x6c5dad4527b981c96eddb67a1253eec405fc8019573b53ae2d28a205ef8f6974",
+            "0x413dfdb455c382efac4d0491334829efc152f3b14fc7ef39a297c70721d1ecd3",
+            "0x39df2c135017f674f9c8a55ebad5f905240d0fba3ad41b0c7c2dfcd5c3f7dc48",
+            "0x95c5acece0447d8208158d672b0d4deaed447da815af4edd9ce29d2f8c63b4f0",
+            "0xf546d984d7689e656e634dcbde3eecea3cef5b42f0a76123a4ade76f3a3e9610"
+          ]
+        },
+        {
+          "selector": "0x1e662848",
+          "count": 10,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0xa63e91ec7e3652aa1496d6bc87904808dacc512538931903bd1ba525a6fb8f25",
+            "0xad92b75fc5aa68e2eeb37ab76b30b74f48053424acd1f98df01ed0795b378eee",
+            "0x167456eaee2d26e7217295350d09311a744d5a19a70ae3040fc63b3f4e255808",
+            "0x8a83f129f195539cec017f0b68081518567e7c55c4c862a5971691c9932f0375",
+            "0xa4e2c2207023437c9740d26246005ace7d57d32f0d3a7fae63b2b1382590db1e"
+          ]
+        },
+        {
+          "selector": "0xe5aeb0ec",
+          "count": 7,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x4db658aea86529ba1bc3397dbe3d86cc0ac1ec3311402037052dae074f410502",
+            "0xd9a82e20c975ce95a2428f36a6df7b35df916e62952bcb61576721123ba8b657",
+            "0x96daad9276fbaa0d1f4badaa756ba88787ede30a0f1463c5608ec0c1e3cb3658",
+            "0xd2bde17607610062d6d65834330d7e7aa879946bfbd21a9db5656453e9295c7e",
+            "0x506d915a94ffd541fafe2d39001f43346a8941e059cab021088cee9b1e7df4bb"
+          ]
+        },
+        {
+          "selector": "0x7fb5b8a5",
+          "count": 7,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x755e486908f846dbfd6f103ab7a7b16724bde45a1362f6c6e2400c9c8052f364",
+            "0x015436df1181bdd4a21d4f968fb0f78b7c45416011b2bcd81ef2b6851a9a23cf",
+            "0x5d52d1928193d8b2ffde95b2fea27cdd93649029d9270475dfb21215c5f9e284",
+            "0x0e73291d3afdaab115231e4c10017102300f4fe07deae30f758d9441c2cad428",
+            "0x5cfa410be2ab34edc7f6e4477868091c5fc230c8e1994a1bd3ba8c32e1ac81a2"
+          ]
+        },
+        {
+          "selector": "0xb6f9de95",
+          "count": 4,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0xd6d6d62f7e25b65c24654e55fb64258c32312bed9e8eaeb896c6a00ed97a1e13",
+            "0xe8d987c6dff667fab05ad96c2522104f4fe6753c1b5405b3e339ba3550cff8e4",
+            "0x4fabdb938edd2af977c9e96e8bc74d1aff53f58a2378964e83240f1d2b82cbe7",
+            "0xa54d78d1b0335a0491795e7d51a7347e762acbba4d1b03600a65d642a98351d2"
+          ]
+        },
+        {
+          "selector": "0x2e1a7d4d",
+          "count": 4,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x0e543ec495321e1a2bf42fa31260bafa8618ead0a14f0aab86155eca02c77709",
+            "0x4d46a7e4b4c1e7f1a168bfaceca61efa2d8d224331b0539326cd495a41798978",
+            "0x47b6c2af3d60253c64f087239ccd9f725fd6f04cdd015d7d8f0951973e679aae",
+            "0x94dde7df7bf08c4401406515182553000be6c5032ef679f50ce2039ce99d0bf5"
+          ]
+        },
+        {
+          "selector": "0xc8c0439f",
+          "count": 4,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0xf7c7c6e12a30c93bd18041515f9c88f926c35f6710ef8349691182fd9a78c738",
+            "0xc0bece9f00b600731a848bf2884a507ea91fe1cbdba1d22625d8a0184de53999",
+            "0x585282c03b7b7f90cefa90334b225cc0730ddc78970d2e4b3271290a5b28228a",
+            "0x14f511cb3c3a750c2346a72752c1b7ae1fd2dbe9a3f596d7f6da70324fc2986c"
+          ]
+        },
+        {
+          "selector": "0xf3fef3a3",
+          "count": 2,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0xca02d22d371d4c13b2865ab30cd17acfa633b7c7abdb93fc887fd2825155551b",
+            "0x5b9725873457cd1a464ac991d69d16c4f4ad09cac9233457b193ab925a2cbd45"
+          ]
+        },
+        {
+          "selector": "0x9456fb2e",
+          "count": 2,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x82f1f67661307e06b7678e0503e80de771d4a454b1e8612bfeb5fd0803ef40da",
+            "0xb25476f7a061b03fbc0bae1dab8ca04d18c3c9d1c312761e58369345bb593428"
+          ]
+        },
+        {
+          "selector": "0xa9059cbb",
+          "count": 2,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x04b2915d7b0a82780200c28c36bfb20917e9c2471e7ec6e9703333c73cb75e53",
+            "0x6e427fadab319d770b0194ee2dbf56c81f9a930cd720cd2595eddceb51c3cc6e"
+          ]
+        },
+        {
+          "selector": "0x2f4c7d8a",
+          "count": 1,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x7281a0ea87b2c93e914c11fc91d0d9bd7bed67b01587e571a646d28a1fe227bb"
+          ]
+        },
+        {
+          "selector": "0x00000000",
+          "count": 1,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x56a2a5c6d25973bfac0d27cc86894b3f8005d13f280f03615b5db9be3842a03f"
+          ]
+        },
+        {
+          "selector": "0x495d69cb",
+          "count": 1,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x20b20f38aacc3c1fd24a0c5e8a69e4525ec03cc63fadf1810ad0af2d2c15a4a2"
+          ]
+        },
+        {
+          "selector": "0xac542fb8",
+          "count": 1,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x223e49122f6073a67d0adf70dbb34a48341b395ad78e7190ba2fa4a3c3fdae7b"
+          ]
+        },
+        {
+          "selector": "0x0e8e3e84",
+          "count": 1,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0x6448b222fc0b47d0446adbcede8fb4fd49390cb9de6284e0143f204bb275b1db"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V3 Router v2",
+      "address": "0xae563e3f8219521950555f5962419c8919758ea2",
+      "account_txs_seen": 10000,
+      "raw_txs_seen": 10000,
+      "unique_selectors_seen": 8,
+      "covered_selectors_seen": [
+        "0x750283bc",
+        "0x94e86ef8"
+      ],
+      "covered_selectors_missing": [
+        "0xac9650d8"
+      ],
+      "deferred_selectors_seen": [
+        "0x19c6989f",
+        "0x724dba33",
+        "0xc08bc851",
+        "0x51682750",
+        "0xecb2182c"
+      ],
+      "top_selectors": [
+        {
+          "selector": "0x19c6989f",
+          "count": 9148,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0x40ec8387a028673e8761cbf027a2bbbab819fce5a3953b195f39f30bdd15ec82",
+            "0x4b666c144915aa64e83e30946f270e98c23feb5aa9158fd77958cc50ccfb1e0e",
+            "0x36419a537f27f3e931fdb7f01483c23649760d684414d131b545d4b8c079508b",
+            "0x0f68d847e076263c3795988ed42a2dc1c78e39b687586f6cb38948d8600f9dfd",
+            "0xc0336e1b4cb07872f18103cb414c2e68df4afd2068fa9748883068cf303a4abf"
+          ]
+        },
+        {
+          "selector": "0x750283bc",
+          "count": 253,
+          "disposition": "cover",
+          "sample_tx_hashes": [
+            "0xaa21fc2b6ca5301382bcf1809dbee0a973ca0ed82cee9a73cd473b4e1dd019da",
+            "0xb3379c433fce2ca46f78f4c636518b4dd919eb7cdfbe452d5c166193b8d0642e",
+            "0x31b5635b73e3272aba7c475dd62c0e1bdd9b469ce7154b81966fdbb6cb17bd77",
+            "0x55a80bc1cad806b6690360beb1b7ce6aa9352e4a97e1ee8944c085b565b4312c",
+            "0xd7037772f8d1bf9d73d3203e47c54fe35a113bf83f71239795bffd295900876b"
+          ]
+        },
+        {
+          "selector": "0x026b3d95",
+          "count": 230,
+          "disposition": "unknown",
+          "sample_tx_hashes": [
+            "0x18a89e8002e511d41afb7c55acd4dafef34951c8ad3c3854d3882ef8f8f47d49",
+            "0xc92e4dd3b1c53ecdb52bed09478f6e235c8fac8c0f15edf8023efed5e4dc9b79",
+            "0x9fc13cb68b40b20c9d7199a45e359414a92799831fbcb9e632872a29a22da357",
+            "0x90450d35033dce87801f5c22bde41661af9695829f9be0591f7af3dcf923105f",
+            "0x5f9880ec7721402751067bee92441cf91dd986528a3eea63fda3d522acbe9083"
+          ]
+        },
+        {
+          "selector": "0x51682750",
+          "count": 228,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0x459a771c3e68ad93d5e70104a64435177ca8b527b30d8e7d1e30566c027dd84d",
+            "0x1a523b1aa217c956c20fb0d4155fcfa492913aef3e7af3ced081276dcbbb1b75",
+            "0xb5b385735a3c1cd17a3a7729579f56eec5e6237d28bc6e85e8621ea07abc1cbd",
+            "0x54bdbe84f175aa1f0a6e6101bb7d17324b80aca1a0f4d855d38668c40f0f9088",
+            "0x251cdfb5890769cda09e1556b29068fb65b7a231891bc374dac741134d89b068"
+          ]
+        },
+        {
+          "selector": "0x724dba33",
+          "count": 72,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0x81cdfd43e68efa83e55ca7412debe44b834f752b7ff530e4c841abfbf56329b6",
+            "0x49d954c0b59684cf0d6239319f3a44b2f3794ea679e1ec055cce572a953ae617",
+            "0xfb08690108b41d99e5c81d1c34bbc35d73078a8e9b972915ef03c59b89a386e5",
+            "0xd052f8ebb798d7da1f164cbf713512c20d82a4da3d750e72d62b3162eb4bc573",
+            "0x6116b8503804d7802f651b2ec0a9d33495b2ab04c816c8b35953d27aff1e4934"
+          ]
+        },
+        {
+          "selector": "0xc08bc851",
+          "count": 53,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0xf942c757ca342985de0178fe655f07e8a0e311e19d27e151d5f620029a15b748",
+            "0x8463cd50a4de5ba9d54cad2b61ea07e16898831e4cf4b14efe1242fd5540a686",
+            "0x77a8962ec6881abf64168f4f01d81926b24e70e5dea5e9b3d6c545f6bab6bcf2",
+            "0xf55d3100facdb562435c3acba815b30c8afbd3abce205788a72ca31a1b32e683",
+            "0x00d369587f1a1f249c251f1f906e3e73cf02753f8b0a4b3a21387d61a0ee3173"
+          ]
+        },
+        {
+          "selector": "0x94e86ef8",
+          "count": 15,
+          "disposition": "cover",
+          "sample_tx_hashes": [
+            "0x96e83ac64c2bb803579ab9611592c1254eeaaefc5221c3bc49cce7bddc3fcecf",
+            "0x0c6a61482c4ba4f7363f25488e709d71ee782f156f2e3e1c0bad5b30b177322b",
+            "0x7411a92fda15f1b0f3cb570399b5d972aa84c9d0bc96697b89968569231cc6fc",
+            "0x38f3a463a6f5fd44899beb4d0a8f427467252bc9fa83373e0e2344483773088b",
+            "0xf55c33790238c57de5a7fb6374b78c72d233022f3096253beeef2e877b35530c"
+          ]
+        },
+        {
+          "selector": "0xecb2182c",
+          "count": 1,
+          "disposition": "defer",
+          "sample_tx_hashes": [
+            "0xf37f16c1ffaa293313b7447f7eb2129110fb60d7cb2e21d4ba174baf03bc5938"
+          ]
+        }
+      ]
+    }
+  ],
+  "summary_note": "account_txs_seen is raw Etherscan account.txlist result size; raw_txs_seen is filtered to top-level tx.to == target address. top_selectors are capped at 25 per address."
+}

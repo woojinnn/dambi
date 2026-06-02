@@ -1,0 +1,82 @@
+{
+  "protocol": "balancer",
+  "source": "Dune query 7638869 execution 01KT4JG8KZZ8856PCQMXHC62WW",
+  "query_url": "https://dune.com/queries/7638869",
+  "measurement": "ethereum mainnet top-level user-signed tx.to, 30-day partition window, current_date - interval 30 day",
+  "rows_returned": 70,
+  "executionCostCredits": "4.054",
+  "usage_before_credits": 55.412,
+  "usage_after_credits": 59.477,
+  "disposition": [
+    {
+      "disposition": "cover",
+      "tx_count": 513,
+      "share_pct": 9.5531
+    },
+    {
+      "disposition": "defer",
+      "tx_count": 4620,
+      "share_pct": 86.0335
+    },
+    {
+      "disposition": "unknown",
+      "tx_count": 237,
+      "share_pct": 4.4134
+    }
+  ],
+  "internal_trace_guardrail": [
+    {
+      "top_to": "0xae563e3f8219521950555f5962419c8919758ea2",
+      "internal_to": "0xba1333333333a1ba1108e8412f11850a5c319ba9",
+      "classification": "router_internal_hit",
+      "tx_count": 4633
+    },
+    {
+      "top_to": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "internal_to": "0xba12222222228d8ba445958a75a0704d566bf2c8",
+      "classification": "direct_top_level",
+      "tx_count": 58
+    }
+  ],
+  "top_selectors": [
+    {
+      "surface": "v3Router.permitBatchAndCall",
+      "selector": "0x19c6989f",
+      "disposition": "defer",
+      "tx_count": 4149,
+      "share_pct": 77.2626
+    },
+    {
+      "surface": "v2Vault.swap",
+      "selector": "0x52bbbe29",
+      "disposition": "cover",
+      "tx_count": 395,
+      "share_pct": 7.3557
+    },
+    {
+      "surface": "v2Vault.exitPool",
+      "selector": "0x8bdb3913",
+      "disposition": "defer",
+      "tx_count": 179,
+      "share_pct": 3.3333
+    },
+    {
+      "surface": "v3Router.removeLiquidityProportional",
+      "selector": "0x51682750",
+      "disposition": "defer",
+      "tx_count": 173,
+      "share_pct": 3.2216
+    },
+    {
+      "surface": "v3Router.swapSingleTokenExactIn",
+      "selector": "0x750283bc",
+      "disposition": "cover",
+      "tx_count": 87,
+      "share_pct": 1.6201
+    }
+  ],
+  "selected_tx_hashes": [
+    "0x40ec8387a028673e8761cbf027a2bbbab819fce5a3953b195f39f30bdd15ec82",
+    "0x99504e3dfb87c092648235f8cf0ba5d3245476e791682205e63cc90a8c781a0e"
+  ]
+}
