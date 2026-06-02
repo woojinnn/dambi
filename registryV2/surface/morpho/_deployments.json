@@ -30,8 +30,8 @@
       "name": "Bundler3",
       "chainId": 1,
       "address": "0x6566194141eefa99af43bb5aa71460ca2dc90245",
-      "decision": "exclude",
-      "reason": "DEFERRED (not infra): user-facing multicall router. MEASURED 1st-party (Dune ethereum traces+transactions, 30d, 8 cover vaults): Bundler3 carries ~84% of Morpho-NATIVE MetaMorpho vault deposits (direct-to-vault 193 tx vs Bundler3 1038 tx) and ~14.5% of ALL vault-touching txs (97% are router-mediated). It is the SINGLE highest-value decode follow-up \u2014 supersedes the prior run's unverified 'routes most actions through' prose (now data-gated). Decode = nested multicall(Call[]) -> GeneralAdapter1 adapter-ABI recursion (large separate effort)."
+      "decision": "cover",
+      "reason": "user-facing multicall router. MEASURED 1st-party (Dune, 30d): Bundler3 carries ~84% of Morpho-NATIVE MetaMorpho vault deposits (direct-to-vault 193 tx vs Bundler3 1038 tx) and ~14.5% of ALL vault-touching txs \u2014 the single highest-value entrypoint. COVERED (Q2): bundler3.coverage.json \u2014 multicall(Call[]) cover (decoded per-leg-to via the multicall_call_array strategy \u2192 GeneralAdapter1 position legs), reenter(Call[]) exclude (reenterHash-guarded). Nested-reenter callbacks inside an adapter leg's `data` = documented follow-up."
     },
     {
       "name": "GeneralAdapter1",
