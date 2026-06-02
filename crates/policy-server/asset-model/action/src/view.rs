@@ -561,6 +561,13 @@ mod tests {
             },
             "fluid",
         );
+        assert_venue!(
+            lending::LendingVenue::MetaMorpho {
+                chain: eth.clone(),
+                vault: any,
+            },
+            "metamorpho",
+        );
 
         // ---- PerpVenue: all 9 variants ----
         assert_venue!(

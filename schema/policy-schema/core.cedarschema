@@ -211,9 +211,10 @@ namespace Lending {
   //   - "morpho_optimizer" → `vault`
   //   - "spark"            → `pool`
   //   - "fluid"            → `vault`
+  //   - "metamorpho"       → `vault`  (ERC-4626 curated vault on Morpho Blue)
   // -------------------------------------------------------------------------
   type LendingVenue = {
-    name: String,                // 8 variants discriminated by name
+    name: String,                // venues discriminated by name
     chain: String,               // CAIP-2 id, e.g. "eip155:1"
     pool?: String,               // Aave v2/v3, Spark
     marketId?: Long,             // Aave v3 eMode market id (small int)
@@ -221,7 +222,7 @@ namespace Lending {
     comet?: String,              // Compound V3
     baseAsset?: Core::TokenRef,  // Compound V3
     comptroller?: String,        // Compound V2
-    vault?: String,              // Morpho Optimizer / Fluid
+    vault?: String,              // Morpho Optimizer / Fluid / MetaMorpho
   };
 
   // Reserve-level metadata — supply/borrow caps, LTV, etc.

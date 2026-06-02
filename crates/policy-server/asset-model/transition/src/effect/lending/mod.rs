@@ -102,6 +102,9 @@ pub(super) mod position_id {
             LendingVenue::Fluid { chain, vault } => {
                 format!("fluid:{}:{vault:?}", chain.as_str())
             }
+            LendingVenue::MetaMorpho { chain, vault } => {
+                format!("metamorpho:{}:{vault:?}", chain.as_str())
+            }
             LendingVenue::CrvUsd {
                 chain, controller, ..
             } => {
@@ -128,6 +131,7 @@ pub(super) const fn venue_tag(venue: &LendingVenue) -> &'static str {
         LendingVenue::MorphoBlue { .. } => "morpho_blue",
         LendingVenue::MorphoOptimizer { .. } => "morpho_optimizer",
         LendingVenue::Fluid { .. } => "fluid",
+        LendingVenue::MetaMorpho { .. } => "metamorpho",
         LendingVenue::CrvUsd { .. } => "crv_usd",
         LendingVenue::LlamaLend { .. } => "llama_lend",
     }
@@ -147,6 +151,7 @@ pub(super) fn venue_chain(venue: &LendingVenue) -> ChainId {
         | LendingVenue::MorphoBlue { chain, .. }
         | LendingVenue::MorphoOptimizer { chain, .. }
         | LendingVenue::Fluid { chain, .. }
+        | LendingVenue::MetaMorpho { chain, .. }
         | LendingVenue::CrvUsd { chain, .. }
         | LendingVenue::LlamaLend { chain, .. } => chain.clone(),
     }

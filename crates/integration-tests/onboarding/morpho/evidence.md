@@ -56,14 +56,14 @@
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| every COVER selector mapped to existing ActionBody or Tier3 requirement | pending | |
-| permission/fund-movement/red-flag selector review recorded | pending | |
-| manifest files added/changed listed | pending | |
-| enrichment/live_field decision recorded for every COVER action | pending | |
-| required remote policy-RPC/live/enrichment methods have local handler, configured endpoint test, or explicit blocker | pending | |
-| Tier3 not needed or full Tier3 downstream contract completed | pending | |
-| Tier3 files listed if applicable: ActionBody/effect/view/sync/lowering_v2/cedarschema/schema registration/conformance test | pending | |
-| `npm run check:manifest` or protocol-filtered validate output recorded | pending | |
+| every COVER selector mapped to existing ActionBody or Tier3 requirement | done | Morpho Blue 8 = existing (re-verified). MetaMorpho: deposit/mint → `LendingAction::Supply`, withdraw/redeem → `LendingAction::Withdraw`, all carrying new `LendingVenue::MetaMorpho{chain,vault}` (Tier-3 venue). |
+| permission/fund-movement/red-flag selector review recorded | done | MetaMorpho permission review: approve/permit/transfer/transferFrom on the vault SHARE token = standard ERC-20/2612 (tokens:erc20 adapter, token-surface) — NOT excluded silently. No protocol-specific permission primitive on the vault (no setAuthorization-equivalent; curator/allocator/guardian = timelocked governance, EXCLUDE). Morpho Blue setAuthorization (the core grant) already covered. |
+| manifest files added/changed listed | done | 40 new: `registryV2/manifests/morpho/metamorpho/<chain>-<underlying>-<deposit\|withdraw\|mint\|redeem>@1.0.0.json` (grouped by chain×underlying; `venue.vault=$to`, baked underlying asset). Morpho Blue manifests unchanged. |
+| enrichment/live_field decision recorded for every COVER action | done | deposit/withdraw = asset-denominated (user-legible → no enrichment needed). mint/redeem = SHARE-denominated (abstract) → §4d `convertToAssets` enrichment **DEFERRED** (documented; deposit/withdraw asset-legibility mitigates; Lido §9.9 follow-up pattern). All `live_inputs` = skeleton `derived_from` placeholders (vault-state/share-price prod-fill deferred). |
+| required remote policy-RPC/live/enrichment methods have local handler, configured endpoint test, or explicit blocker | done | live_inputs are skeleton (decode does not fetch; policy-RPC dormant). No live handler required for the decode/verdict path. Enrichment calc_ids (`metamorpho_*_skeleton`) named for future wiring. |
+| Tier3 not needed or full Tier3 downstream contract completed | done | Tier-3 = new **venue** `LendingVenue::MetaMorpho{chain,vault}` (NOT a new action/domain — reuses Supply/Withdraw). Mirrors the Fluid/MorphoOptimizer ERC-4626 vault venue. |
+| Tier3 files listed if applicable: ActionBody/effect/view/sync/lowering_v2/cedarschema/schema registration/conformance test | done | `action/src/lending/mod.rs` (enum variant + `name()`="metamorpho" + `#[serde(rename="metamorpho")]`); `lowering_v2/lending/mod.rs` (shares `{chain,vault}` arm + unit test); `transition/effect/lending/mod.rs` (position_id + venue_tag + venue_chain) + `supply.rs` (receipt-amount, reuses fluid ERC-4626 share math); `action/src/view.rs` (conformance `assert_venue!`); `schema/policy-schema/core.cedarschema` (doc; `vault?` field REUSED — no new field). **No Cedar action-registration** (venue reuses already-registered Supply/Withdraw actions — unlike §9.7 SetAuthorization which was a new action). All venue tests green (policy-engine 19, policy-action 331, policy-transition 5). |
+| `npm run check:manifest` or protocol-filtered validate output recorded | done | `check:manifest`: 1521 single_emit OK, 0 structural errors. `v3-harness validate --filter metamorpho`: 64 manifest(s) OK (16 vaults × 4 selectors), 0 errors. build-index: 53041 callkeys / 826 manifests. |
 
 ## P2 Synthetic Evidence
 
