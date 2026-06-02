@@ -1,10 +1,10 @@
 {
   "erc_kind": "erc20",
   "chainId": 8453,
-  "address": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
-  "symbol": "mwUSDC",
+  "address": "0x43cd00de63485618a5ceebe0de364cd6cbeb26e7",
+  "symbol": "gtmsETHc",
   "decimals": 18,
-  "name": "Moonwell Flagship USDC",
+  "name": "Metronome msETH Vault",
   "source": "https://blue-api.morpho.org/graphql (MetaMorpho vault, listed) + etherscan/basescan verified",
   "token_kind": {
     "kind": "yield_receipt",
@@ -16,7 +16,7 @@
       "key": {
         "standard": "erc20",
         "chain": "eip155:8453",
-        "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        "address": "0x7ba6f01772924a82d9626c126347a28299e98c98"
       }
     },
     "rebase_form": "index"

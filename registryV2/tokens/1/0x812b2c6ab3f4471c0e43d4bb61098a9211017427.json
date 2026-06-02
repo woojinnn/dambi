@@ -1,22 +1,22 @@
 {
   "erc_kind": "erc20",
-  "chainId": 8453,
-  "address": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
-  "symbol": "mwUSDC",
+  "chainId": 1,
+  "address": "0x812b2c6ab3f4471c0e43d4bb61098a9211017427",
+  "symbol": "vbgtWBTC",
   "decimals": 18,
-  "name": "Moonwell Flagship USDC",
+  "name": "Vault Bridge WBTC",
   "source": "https://blue-api.morpho.org/graphql (MetaMorpho vault, listed) + etherscan/basescan verified",
   "token_kind": {
     "kind": "yield_receipt",
     "protocol": {
       "name": "metamorpho",
-      "chain": "eip155:8453"
+      "chain": "eip155:1"
     },
     "underlying": {
       "key": {
         "standard": "erc20",
-        "chain": "eip155:8453",
-        "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        "chain": "eip155:1",
+        "address": "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599"
       }
     },
     "rebase_form": "index"

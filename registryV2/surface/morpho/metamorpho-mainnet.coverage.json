@@ -1,0 +1,188 @@
+{
+  "contract": "MetaMorpho",
+  "chainId": 1,
+  "addresses": [
+    "0x19b3cd7032b8c062e8d44eacad661a0970dd8c55",
+    "0x71cb2f8038b2c5d65ddc740b2f3268890cd2a89c",
+    "0xbeefc1cdafc5b4a649b54d07afc6bf0f75c6f4e2",
+    "0xbeef01735c132ada46aa9aa4c54623caa92a64cb",
+    "0xbeef047a543e45807105e51a8bbefcc5950fcfba",
+    "0x812b2c6ab3f4471c0e43d4bb61098a9211017427",
+    "0xdd0f28e19c1780eb6396170735d45153d261490d",
+    "0x31a5684983eee865d943a696aac155363ba024f9"
+  ],
+  "snapshot": "metamorpho-v1_1.abi.json",
+  "note": "MetaMorpho ERC-4626 vault cover-batch on chain 1 (top-8 by TVL, mixed v1.0/v1.1; full universe=_address_universe.json). EVERY snapshot external-mutating selector triaged (I1). cover=ERC-4626 deposit/withdraw/mint/redeem (concrete $to-keyed MetaMorpho manifests, venue=metamorpho); exclude=standard ERC-20/2612 (tokens:erc20 adapter) + curator/owner/allocator governance. mint/redeem share-denominated (§4d enrichment deferred).",
+  "functions": {
+    "0x6fda3868": {
+      "name": "acceptCap((address,address,address,address,uint256))",
+      "decision": "exclude",
+      "reason": "curator/timelock governance (accept a pending market supply cap)"
+    },
+    "0xa5f31d61": {
+      "name": "acceptGuardian()",
+      "decision": "exclude",
+      "reason": "governance (accept pending guardian)"
+    },
+    "0x79ba5097": {
+      "name": "acceptOwnership()",
+      "decision": "exclude",
+      "reason": "ownership (Ownable2Step accept)"
+    },
+    "0x8a2c7b39": {
+      "name": "acceptTimelock()",
+      "decision": "exclude",
+      "reason": "governance (accept pending timelock)"
+    },
+    "0x095ea7b3": {
+      "name": "approve(address,uint256)",
+      "decision": "exclude",
+      "reason": "standard ERC-20/ERC-2612 on the vault SHARE token (the vault is itself an ERC-20 yield_receipt registered in token-surface) — approve/permit/transfer/transferFrom analyzed by the tokens:erc20 standard adapter via auto-enumerate, NOT a bespoke MetaMorpho manifest (a cover here would fail I2)."
+    },
+    "0x6e553f65": {
+      "name": "deposit(uint256,address)",
+      "decision": "cover",
+      "reason": "user ERC-4626 DEPOSIT into a MetaMorpho vault (asset-denominated) -> LendingAction::Supply, venue=metamorpho{vault=$to}, asset=vault underlying, amount=assets, on_behalf_of=receiver."
+    },
+    "0x94bf804d": {
+      "name": "mint(uint256,address)",
+      "decision": "cover",
+      "reason": "user ERC-4626 MINT vault shares -> LendingAction::Supply, venue=metamorpho{vault=$to}; amount is SHARE-denominated (abstract). Decode-faithful; asset-amount legibility needs convertToAssets enrichment (§4d, deferred)."
+    },
+    "0xac9650d8": {
+      "name": "multicall(bytes[])",
+      "decision": "exclude",
+      "reason": "batch wrapper for curator/owner governance calls; not a user-position primitive"
+    },
+    "0xd505accf": {
+      "name": "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)",
+      "decision": "exclude",
+      "reason": "standard ERC-20/ERC-2612 on the vault SHARE token (the vault is itself an ERC-20 yield_receipt registered in token-surface) — approve/permit/transfer/transferFrom analyzed by the tokens:erc20 standard adapter via auto-enumerate, NOT a bespoke MetaMorpho manifest (a cover here would fail I2)."
+    },
+    "0x7299aa31": {
+      "name": "reallocate(((address,address,address,address,uint256),uint256)[])",
+      "decision": "exclude",
+      "reason": "allocator role — rebalance vault liquidity across Morpho Blue markets (curator/allocator, not depositor)"
+    },
+    "0xba087652": {
+      "name": "redeem(uint256,address,address)",
+      "decision": "cover",
+      "reason": "user ERC-4626 REDEEM vault shares -> LendingAction::Withdraw, venue=metamorpho{vault=$to}; amount is SHARE-denominated (abstract). Decode-faithful; legibility needs convertToAssets enrichment (§4d, deferred)."
+    },
+    "0x715018a6": {
+      "name": "renounceOwnership()",
+      "decision": "exclude",
+      "reason": "ownership (renounce)"
+    },
+    "0x102f7b6c": {
+      "name": "revokePendingCap(bytes32)",
+      "decision": "exclude",
+      "reason": "curator governance (revoke pending cap)"
+    },
+    "0x1ecca77c": {
+      "name": "revokePendingGuardian()",
+      "decision": "exclude",
+      "reason": "governance (revoke pending guardian)"
+    },
+    "0x4b998de5": {
+      "name": "revokePendingMarketRemoval(bytes32)",
+      "decision": "exclude",
+      "reason": "curator governance (revoke pending market removal)"
+    },
+    "0xc9649aa9": {
+      "name": "revokePendingTimelock()",
+      "decision": "exclude",
+      "reason": "governance (revoke pending timelock)"
+    },
+    "0xe90956cf": {
+      "name": "setCurator(address)",
+      "decision": "exclude",
+      "reason": "owner governance (set curator)"
+    },
+    "0x69fe0e2d": {
+      "name": "setFee(uint256)",
+      "decision": "exclude",
+      "reason": "owner governance (set performance fee)"
+    },
+    "0xe74b981b": {
+      "name": "setFeeRecipient(address)",
+      "decision": "exclude",
+      "reason": "owner governance (set fee recipient)"
+    },
+    "0xb192a84a": {
+      "name": "setIsAllocator(address,bool)",
+      "decision": "exclude",
+      "reason": "owner governance (grant/revoke allocator)"
+    },
+    "0xc47f0027": {
+      "name": "setName(string)",
+      "decision": "exclude",
+      "reason": "owner governance (set vault name)"
+    },
+    "0x2b30997b": {
+      "name": "setSkimRecipient(address)",
+      "decision": "exclude",
+      "reason": "owner governance (set skim recipient)"
+    },
+    "0x2acc56f9": {
+      "name": "setSupplyQueue(bytes32[])",
+      "decision": "exclude",
+      "reason": "allocator governance (set supply queue order)"
+    },
+    "0xb84c8246": {
+      "name": "setSymbol(string)",
+      "decision": "exclude",
+      "reason": "owner governance (set vault symbol)"
+    },
+    "0xbc25cf77": {
+      "name": "skim(address)",
+      "decision": "exclude",
+      "reason": "owner governance (skim non-vault tokens)"
+    },
+    "0x3b24c2bf": {
+      "name": "submitCap((address,address,address,address,uint256),uint256)",
+      "decision": "exclude",
+      "reason": "curator governance (submit pending market cap, timelocked)"
+    },
+    "0x9d6b4a45": {
+      "name": "submitGuardian(address)",
+      "decision": "exclude",
+      "reason": "owner governance (submit pending guardian)"
+    },
+    "0x84755b5f": {
+      "name": "submitMarketRemoval((address,address,address,address,uint256))",
+      "decision": "exclude",
+      "reason": "curator governance (submit market removal)"
+    },
+    "0x7224a512": {
+      "name": "submitTimelock(uint256)",
+      "decision": "exclude",
+      "reason": "owner governance (submit pending timelock)"
+    },
+    "0xa9059cbb": {
+      "name": "transfer(address,uint256)",
+      "decision": "exclude",
+      "reason": "standard ERC-20/ERC-2612 on the vault SHARE token (the vault is itself an ERC-20 yield_receipt registered in token-surface) — approve/permit/transfer/transferFrom analyzed by the tokens:erc20 standard adapter via auto-enumerate, NOT a bespoke MetaMorpho manifest (a cover here would fail I2)."
+    },
+    "0x23b872dd": {
+      "name": "transferFrom(address,address,uint256)",
+      "decision": "exclude",
+      "reason": "standard ERC-20/ERC-2612 on the vault SHARE token (the vault is itself an ERC-20 yield_receipt registered in token-surface) — approve/permit/transfer/transferFrom analyzed by the tokens:erc20 standard adapter via auto-enumerate, NOT a bespoke MetaMorpho manifest (a cover here would fail I2)."
+    },
+    "0xf2fde38b": {
+      "name": "transferOwnership(address)",
+      "decision": "exclude",
+      "reason": "ownership (Ownable2Step transfer)"
+    },
+    "0x41b67833": {
+      "name": "updateWithdrawQueue(uint256[])",
+      "decision": "exclude",
+      "reason": "allocator governance (reorder withdraw queue)"
+    },
+    "0xb460af94": {
+      "name": "withdraw(uint256,address,address)",
+      "decision": "cover",
+      "reason": "user ERC-4626 WITHDRAW from a MetaMorpho vault (asset-denominated) -> LendingAction::Withdraw, venue=metamorpho{vault=$to}, asset=vault underlying, amount=assets, recipient=receiver."
+    }
+  }
+}

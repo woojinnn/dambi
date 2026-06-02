@@ -1,10 +1,10 @@
 {
   "erc_kind": "erc20",
   "chainId": 8453,
-  "address": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
-  "symbol": "mwUSDC",
+  "address": "0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
+  "symbol": "steakUSDC",
   "decimals": 18,
-  "name": "Moonwell Flagship USDC",
+  "name": "Steakhouse Prime USDC",
   "source": "https://blue-api.morpho.org/graphql (MetaMorpho vault, listed) + etherscan/basescan verified",
   "token_kind": {
     "kind": "yield_receipt",

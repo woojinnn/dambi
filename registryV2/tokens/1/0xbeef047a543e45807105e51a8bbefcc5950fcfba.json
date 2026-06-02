@@ -1,22 +1,22 @@
 {
   "erc_kind": "erc20",
-  "chainId": 8453,
-  "address": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
-  "symbol": "mwUSDC",
+  "chainId": 1,
+  "address": "0xbeef047a543e45807105e51a8bbefcc5950fcfba",
+  "symbol": "steakUSDT",
   "decimals": 18,
-  "name": "Moonwell Flagship USDC",
+  "name": "Steakhouse USDT",
   "source": "https://blue-api.morpho.org/graphql (MetaMorpho vault, listed) + etherscan/basescan verified",
   "token_kind": {
     "kind": "yield_receipt",
     "protocol": {
       "name": "metamorpho",
-      "chain": "eip155:8453"
+      "chain": "eip155:1"
     },
     "underlying": {
       "key": {
         "standard": "erc20",
-        "chain": "eip155:8453",
-        "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        "chain": "eip155:1",
+        "address": "0xdac17f958d2ee523a2206206994597c13d831ec7"
       }
     },
     "rebase_form": "index"

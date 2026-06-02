@@ -1,0 +1,150 @@
+# Morpho — Onboarding Evidence Ledger
+
+> Greenfield **re-run** of the ScopeBall protocol-onboarding framework on Morpho
+> (`ONBOARDING_PROMPT.md`). Prior partial coverage (Morpho Blue Full-8, §9 worked
+> example) is treated as **unverified** and re-derived from 1st-party sources, then
+> diffed. New + re-verification converge on the same gates.
+>
+> This run also doubles as a **framework dogfood/test** — framework-level findings
+> (not Morpho-specific) are logged in the "Framework Dogfood Findings" appendix and
+> hardened per the "harden methodology on dogfood gap" rule, not patched per-instance.
+
+## Run Metadata
+
+| field | value |
+|---|---|
+| protocol | morpho |
+| branch | feat/morpho-onboarding |
+| worktree | /Users/jhy/Desktop/ScopeBall/scopeball-morpho |
+| date | 2026-06-02 |
+| main agent | Claude Opus 4.8 (1M context), this session |
+| base commit | a8909023 (feat/registry-v2 — onboarding-framework-refactor) |
+
+## Scope Classification
+
+| field | value |
+|---|---|
+| primary chain(s) | Ethereum mainnet (`1`) primary; Base (`8453`) expansion |
+| completion target | `wallet-facing` — Morpho Blue + MetaMorpho (ERC-4626 vaults) + Bundler, the surfaces a Morpho user actually signs |
+| multichain expansion | included (mainnet + Base) for Morpho Blue; MetaMorpho/Bundler chain scope set by P0 research |
+| direct factory-child calls | MetaMorpho vaults are factory children users call directly (ERC-4626); disposition (source-materialize vs concrete vs defer) decided in P0 |
+| final claim label | TBD at P4 |
+
+## P0 Research Evidence
+
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| completion scope declared: primary chain(s), wallet-facing vs full-surface/full-universe target, and multichain status | done | Scope Classification table above |
+| Codex current-session research executed | done | this session WebFetched 1st-party: IMorpho.sol (raw.githubusercontent morpho-org/morpho-blue/main) → Morpho Blue 17 external fns re-verified; IMetaMorpho.sol (morpho-org/metamorpho) → ERC-4626+ERC-2612+curator surface; docs.morpho.org/get-started/resources/addresses/ → mainnet contract addresses. Repo-state inventory via Explore agent. |
+| Claude Code or sub-agent research executed | done | sub-agents: Explore inventory `ab73ac99…` (current Morpho repo coverage); general-purpose deployments sweep `a01b32a2…` (all Morpho contracts 1+8453, running); general-purpose MetaMorpho vault cover-batch (running). (First two general-purpose research agents `ab883151…`/`ae9b7dcf…` died on a process-exit; relaunched.) |
+| Claude/sub-agent exact prompt or command recorded | done | prompts embedded in Agent calls this session (deployments sweep + vault cover-batch + repo inventory); all read-only, no repo writes |
+| Codex-only candidates listed | done | this session's own fetches surfaced VaultV2Factory / V2 adapter factories / MorphoRegistry from blue-sdk that the docs page alone underemphasized; recorded in _deployments.json |
+| Claude/sub-agent-only candidates listed | done | deployments agent surfaced per-chain Base addresses (blue-sdk chain-keyed) + URD instance example + the MORPHO two-token ambiguity; vault agent surfaced the 106-vault universe + 16-vault TVL cover-batch (blue-api GraphQL) |
+| dropped-unverified candidates listed with reason | done | MetaMorpho V1.0 [OLD] factory on Base = NOT FOUND first-party (dropped); URD instances beyond 1 example = not enumerable from static sources (deferred); MORPHO "which is transferable" left as both-tracked (Etherscan ContractName verified: 0x58d9..=ERC1967Proxy, 0x9994..=MorphoToken) |
+| final contract inventory verified against first-party sources | done | Morpho Blue `0xbbbb…effcb` (1+8453) re-verified vs IMorpho.sol → Full-8 CORRECT. All other contracts in `_deployments.json` from docs.morpho.org/addresses + blue-sdk addresses.ts; MetaMorpho v1.0/v1.1 + MORPHO ABIs fetched from Etherscan/Basescan v2 (verified). `check:surface` I0 = `✓ morpho: 33 deployed · 2 cover · 31 exclude`. |
+| pool-heavy/factory protocol address universe source/query/count recorded, or explicitly not applicable | done | MetaMorpho vault universe via `blue-api.morpho.org/graphql vaults(where:{chainId_in:[N],listed:true})`: mainnet=73, base=33 (countTotal). `surface/morpho/_address_universe.json` source_count=106. |
+| pool-heavy/factory universe artifact is machine-readable, nonzero, and committed, or explicitly not applicable | done | `surface/morpho/_address_universe.json` — 106 candidates, machine-readable, committed in P0 |
+| every pool/factory child address in universe dispositioned as cover/exclude/defer with reason and batch boundary | done | 16 cover (`metamorpho-top-tvl-cover` batch, top-8/chain by TVL) + 90 defer (`metamorpho-longtail-defer`, below cutoff, same surface). batch_boundary = blue-api listed:true snapshot 2026-06-02. |
+| concrete manifest vs protocol source resolver/generator strategy decided for pool universe | done | **concrete `$to`-keyed manifests grouped by (chain, underlying)** for the 16 cover vaults (gate-native: `gatedSourceAddresses` only hardcodes token/uniswap sources, so a custom resolver would false-fail I2). Full 106-vault source-resolver materialization = documented follow-up. |
+| direct factory-child calls are covered, source-materialized, or explicitly deferred separately from router/live-input discovery | done | vaults are factory children users call directly (ERC-4626) → covered via concrete cover-batch manifests; long-tail deferred (universe). Router (Bundler3) calls deferred separately (_deployments DEFER). |
+| `npm run check:universe -- --protocol <protocol>` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | done | `PASS — 106 candidates · 16 cover · 0 exclude · 90 defer · source_count=106` |
+| token-surface inventory completed or explicitly scoped out | done | 20 token files: 16 MetaMorpho vault shares (`yield_receipt`, decimals=18 by DECIMALS_OFFSET design, underlying ref) + msETH(Base) underlying + 3 MORPHO governance (0x58d9.. on 1+8453, 0x9994.. legacy). `check:tokens` PASS (0 errors). Underlyings USDC/WETH/USDT/WBTC/PYUSD/RLUSD/USDtb already registered. |
+| `registryV2/surface/<protocol>/_deployments.json` updated if applicable | done | authored `surface/morpho/_deployments.json` — 33 contracts (1+8453); Morpho Blue cover; factories/IRM/oracle/V2/registry exclude; Bundler3+GeneralAdapter1+ParaswapAdapter+URD marked explicit DEFER (user-facing, follow-up) |
+| `npm run check:surface` output recorded | done (I0/I1 pass; I2 pending P1) | I0 `✓ morpho: 33 deployed · 2 cover · 31 exclude`; Morpho Blue `✓ 17 surface · 7 cover · 10 exclude · 7 manifests`; MetaMorpho `✓ 34 surface · 4 cover · 30 exclude` (I1 ok). Remaining: 64 `I2 cover selector has NO manifest` for the 16 vaults × {deposit,withdraw,mint,redeem} — **expected, resolved in P1** (manifests not yet authored). |
+
+## P1 Authoring Evidence
+
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| every COVER selector mapped to existing ActionBody or Tier3 requirement | pending | |
+| permission/fund-movement/red-flag selector review recorded | pending | |
+| manifest files added/changed listed | pending | |
+| enrichment/live_field decision recorded for every COVER action | pending | |
+| required remote policy-RPC/live/enrichment methods have local handler, configured endpoint test, or explicit blocker | pending | |
+| Tier3 not needed or full Tier3 downstream contract completed | pending | |
+| Tier3 files listed if applicable: ActionBody/effect/view/sync/lowering_v2/cedarschema/schema registration/conformance test | pending | |
+| `npm run check:manifest` or protocol-filtered validate output recorded | pending | |
+
+## P2 Synthetic Evidence
+
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| fuzz command with seed recorded | pending | |
+| iterations >= 5000 or justified lower bound | pending | |
+| fixed edge-case matrix recorded | pending | |
+| permission/value/nested/array/opcode/deadline/path edge coverage recorded | pending | |
+| representative pass/error corpus entries committed or justified | pending | |
+
+## P2 Real-Tx Evidence
+
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| Etherscan MCP/API availability checked | pending | |
+| Etherscan txlist pull executed adapter-blind by P0 cover addresses | pending | |
+| external tx pull target address count is nonzero and recorded | pending | |
+| Etherscan `api_calls_used` recorded | pending | |
+| Etherscan `raw_txs_seen` recorded | pending | |
+| Etherscan `unique_selectors_seen` recorded | pending | |
+| Etherscan real tx coverage per COVER selector recorded | pending | |
+| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | pending | |
+| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | pending | |
+| pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | pending | |
+| unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | pending | |
+| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | pending | |
+| Dune MCP/API availability checked | pending | |
+| Dune usage baseline recorded | pending | |
+| Dune calibration/query executed with partition WHERE or explicitly blocked | pending | |
+| Dune `executionCostCredits` / usage delta recorded | pending | |
+| Dune rows returned / selected tx hashes recorded | pending | |
+| representative real-tx corpus/golden entries committed or justified | pending | |
+| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
+
+## P3 Develop Evidence
+
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| all P2 hard/soft/misdecoded/unknown_protocol_address/excluded gaps bucketed | pending | |
+| each fix tied to a gap id, selector, tx hash, or synthetic seed | pending | |
+| manifest/decoder/Tier3/harness change list recorded | pending | |
+| P2 rerun after fixes recorded | pending | |
+| corpus `expect` flips or exclusions justified | pending | |
+| remaining gaps have explicit defer/blocker disposition | pending | |
+
+## P4 Land Evidence
+
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| `registryV2 npm run build` output recorded | pending | |
+| registryV2 build-index vitest output recorded | pending | |
+| `npm run check:manifest` output recorded | pending | |
+| `npm run check:surface` output recorded | pending | |
+| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
+| v3-harness coverage/fuzz/corpus outputs recorded | pending | |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
+| `cargo test --workspace` output recorded | pending | |
+| wasm build output recorded if runtime/wasm/schema changed | pending | |
+| fmt/clippy/typecheck output recorded for changed crates/packages | pending | |
+| exact staged files and commit hash recorded | pending | |
+| remaining WARNs/deferred selectors/actions listed with reason | pending | |
+| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | pending | |
+| no base/worktree merge performed unless user explicitly requested it | pending | |
+
+## Blockers
+
+| blocker | source | next action |
+|---|---|---|
+| | | |
+
+## Framework Dogfood Findings (this run = framework test)
+
+| id | finding | severity | disposition |
+|---|---|---|---|
+| FW-1 | Full `npm run build` index = 52864 callkeys / 210M; `adapters::load_and_install()` has no caching → each harness test pays ~41s full-surface load; the 60-test `v3_decode_harness` golden suite OOMs (SIGKILL) under default parallel threads. Pre-existing (identical in base worktree), not Morpho-specific. Morpho-filtered single-process runs unaffected. | medium | logged; revisit at P4 workspace-regression gate (bounded `--test-threads` or shared-surface cache as framework hardening) |
+
+## Final Completion Claim
+
+Do not write "onboarding complete" unless every mandatory P0/P1/P2/P3/P4 row is `done` or has a concrete `blocked` disposition and this passes:
+
+```bash
+cargo run -p policy-engine-integration-tests --bin check-onboarding-evidence -- morpho --phase all
+```

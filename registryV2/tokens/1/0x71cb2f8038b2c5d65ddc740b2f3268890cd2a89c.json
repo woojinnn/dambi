@@ -1,22 +1,22 @@
 {
   "erc_kind": "erc20",
-  "chainId": 8453,
-  "address": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
-  "symbol": "mwUSDC",
+  "chainId": 1,
+  "address": "0x71cb2f8038b2c5d65ddc740b2f3268890cd2a89c",
+  "symbol": "senRLUSD",
   "decimals": 18,
-  "name": "Moonwell Flagship USDC",
+  "name": "Sentora RLUSD",
   "source": "https://blue-api.morpho.org/graphql (MetaMorpho vault, listed) + etherscan/basescan verified",
   "token_kind": {
     "kind": "yield_receipt",
     "protocol": {
       "name": "metamorpho",
-      "chain": "eip155:8453"
+      "chain": "eip155:1"
     },
     "underlying": {
       "key": {
         "standard": "erc20",
-        "chain": "eip155:8453",
-        "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        "chain": "eip155:1",
+        "address": "0x8292bb45bf1ee4d140127049757c2e0ff06317ed"
       }
     },
     "rebase_form": "index"

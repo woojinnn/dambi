@@ -1,0 +1,752 @@
+{
+  "protocol": "morpho",
+  "kind": "vault",
+  "source": "Morpho Blue GraphQL API https://blue-api.morpho.org/graphql \u2014 vaults(where:{chainId_in:[<chain>],listed:true})",
+  "source_count": 106,
+  "batch_boundary": "blue-api.morpho.org listed:true snapshot 2026-06-02 (mainnet 73 + base 33 = 106 listed vaults)",
+  "note": "MetaMorpho ERC-4626 vault universe. cover = top-8/chain by totalAssetsUsd (this round, concrete manifests). defer = long-tail listed vaults (same surface; full-universe via source-resolver is a documented follow-up). Vault instances are MetaMorphoFactory/MetaMorphoV1_1Factory children \u2014 routed by exact (chainId,vault,selector), so each is its own callkey.",
+  "candidates": [
+    {
+      "chainId": 1,
+      "address": "0x19b3cd7032b8c062e8d44eacad661a0970dd8c55",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0x31a5684983eee865d943a696aac155363ba024f9",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0x71cb2f8038b2c5d65ddc740b2f3268890cd2a89c",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0x812b2c6ab3f4471c0e43d4bb61098a9211017427",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef01735c132ada46aa9aa4c54623caa92a64cb",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef047a543e45807105e51a8bbefcc5950fcfba",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeefc1cdafc5b4a649b54d07afc6bf0f75c6f4e2",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0xdd0f28e19c1780eb6396170735d45153d261490d",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 1,
+      "address": "0x0b2d98bbf3e38df1d1b7be7343732e32e8b1f818",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x2371e134e3455e0593363cbf89d3b6cf53740618",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x2c25f6c25770ffec5959d34b94bf898865e5d6b1",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x2c793f5cb25b35a99648783c01e6cccc200d2096",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x2ed10624315b74a78f11fabedaa1a228c198aefb",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x2f1abb81ed86be95bcf8178ba62c8e72d6834775",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x34ece536d2ae03192b06c0a67030d1faf4c0ba43",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x443df5eee3196e9b2dd77cabd3ea76c3dee8f9b2",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x47fe8ab9ee47dd65c24df52324181790b9f47efc",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x4881ef0bf6d2365d3dd6499ccd7532bcdbce0658",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x4d52545235a3df246a8928c583e47ae7eec4acfe",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x4f460bb11cf958606c69a963b4a17f9daeeea8b6",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x4ff4186188f8406917293a9e01a1ca16d3cf9e59",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x500331c9ff24d9d11aee6b07734aa72343ea74a5",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x56a76b428244a50513ec81e225a293d128fd581d",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x62fe596d59fb077c2df736df212e0affb522dc78",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x64964e162aa18d32f91ea5b24a09529f811aeb8e",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x6859b34a9379122d25a9fa46f0882d434fee36c3",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x68aea7b82df6ccdf76235d46445ed83f85f845a3",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x6c26793c7f1e2785c09b460676e797b716f0bc8e",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x6d6d386c4855d9b604d7e14c70526407f6272394",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x701907283a57ff77e255c3f1aad790466b8ce4ef",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x711a68a82dd80cb0435b281af76b0b80804efab9",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x739d8a60ed4b14e4cb6dcaeaf79d2ec0ca092237",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x75741a12b36d181f44f389e0c6b1e0210311e3ff",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x777791c4d6dc2ce140d00d2828a7c93503c67777",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x78b18e07dc43017fceaabad0751d6464c0f56b25",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x78fc2c2ed1a4cdb5402365934ae5648adad094d0",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x79fd640000f8563a866322483524a4b48f1ed702",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x833adaef212c5cd3f78906b44bbfb18258f238f0",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x888883f0eddf69ca4bfd00af93714ff97f188888",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x8cb3649114051ca5119141a34c200d65dc0faa73",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x8eb67a509616cd6a7c1b3c8c21d48ff57df3d458",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x95eef579155cd2c5510f312c8fa39208c3be01a8",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x965ec3552427b8258bd0a0c7baa234618fc98d01",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x974c8fbf4fd795f66b85b73ebc988a51f1a040a9",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x9a8bc3b04b7f3d87cfc09ba407dced575f2d61d8",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0x9b7cca326004967f9d2b7cf5f2328d82cf65b302",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xa02f5e93f783baf150aa1f8b341ae90fe0a772f7",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xa0804346780b4c2e3be118ac957d1db82f9d7484",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xa1ff9c28ebc160c1dcde4b9aa9551f617880c6fb",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xa3fc33543beee52bc60babc80af3d29789637b6d",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xa71d08a159258553a5ac190d60fa919425ff02ea",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xa8875aaebc4f830524e35d57f9772ffacbdd6c45",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xb0f05e4de970a1aaf77f8c2f823953a367504ba9",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbdd4859050468fbc11dec07113a6e633608a1372",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef02e5e13584ab96848af90261f0c8ee04722a",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef050ecd6a16c4e7bffbb52ebba7846c4b8cd4",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef1f5bd88285e5b239b6aacb991d38cca23ac9",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef2b5fd3d94469b7782aebe6364e6e6fb1b709",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef346d7099865208ff331e4f648f4154ddaa05",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeef96b330ef1fe7ebe41ece0bd4a41a94bc03dc",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeefb9f61cc44895d8aec381373555a64191a9c4",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeefff209270748ddd194831b3fa287a5386f5bc",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeefff68cc520d68f82641eff84330c631e2490e",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xbeeffff0629438ad198c47f80d66fa4be5c0caf6",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xc080f56504e0278828a403269db945f6c6d6e014",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xc54b4e08c1dcc199fdd35c6b5ab589ffd3428a8d",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xcdaea3dde6ce5969aa1414a82a3a681ced51ce72",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xd41830d88dfd08678b0b886e0122193d54b02acc",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xd63070114470f685b75b74d60eec7c1113d33a3d",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xdc94785959b73f7a168452b3654e44fec6a750e4",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xe0c98605f279e4d7946d25b75869c69802823763",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xe89371eaaac6d46d4c3ed23453241987916224fc",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 1,
+      "address": "0xf9bddd4a9b3a45f980e11fdde96e16364ddbec49",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x1401d1271c47648ac70cbcdfa3776d4a87ce006b",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x43cd00de63485618a5ceebe0de364cd6cbeb26e7",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x7bfa7c4f149e7415b73bdedfe609237e29cbf34a",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xa0e430870c4604ccfc7b38ca7845b1ff653d0ff1",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xbeef010f9cb27031ad51e3333f9af9c6b1228183",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xbeefe94c8ad530842bfe7d8b397938ffc1cb83b2",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
+      "decision": "cover",
+      "reason": "top-TVL MetaMorpho vault in this round's cover-batch (concrete $to-keyed deposit/withdraw/mint/redeem manifests; venue=metamorpho)",
+      "batch": "metamorpho-top-tvl-cover"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x09832347586e238841f49149c84d121bc2191c53",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x1c155be6bc51f2c37d472d4c2eba7a637806e122",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x1d3b1cd0a0f242d598834b3f2d126dc6bd774657",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x1d795e29044a62da42d927c4b179269139a28a6b",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x236919f11ff9ea9550a4287696c2fc9e18e6e890",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x43e623ff7d14d5b105f7be9c488f36dbf11d1f46",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x543257ef2161176d7c8cd90ba65c2d4caef5a796",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x5435bc53f2c61298167cdb11cdf0db2bfa259ca0",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x5a32099837d89e3a794a44fb131cbbad41f87a8c",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x6770216ac60f634483ec073cbabc4011c94307cb",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x6b13c060f13af1fdb319f52315bbbf3fb1d88844",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0x6e6fcac197ee06d0164c0fba218c7bcb878f9b5c",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xa2cac0023a4797b4729db94783405189a4203afc",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xb7890cee6cf4792cdcc13489d36d9d42726ab863",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xbb819d845b573b5d7c538f5b85057160cfb5f313",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xbeef050a7485865a7a8d8ca0cc5f7536b7a3443e",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xbeef086b8807dc5e5a1740c5e3a7c4c366ea6ab5",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xbeef0c8333b3de8f0450565834db4eb05def7a5f",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xbeefa7b88064feef0cee02aaebbd95d30df3878f",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xc0c5689e6f4d256e861f65465b691aeecc0deb12",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xcbeef01994e24a60f7dcb8de98e75ad8bd4ad60d",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xe1ba476304255353aef290e6474a417d06e7b773",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xe74c499fa461af1844fca84204490877787ced56",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xef417a2512c5a41f69ae4e021648b69a7cde5d03",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    },
+    {
+      "chainId": 8453,
+      "address": "0xf24608e0ccb972b0b0f4a6446a0bbf58c701a026",
+      "decision": "defer",
+      "reason": "listed MetaMorpho vault below the top-8/chain TVL cover cutoff; identical ERC-4626 surface \u2014 deferred to a full-universe follow-up (source-resolver materialization over all listed vaults)",
+      "batch": "metamorpho-longtail-defer"
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 {
   "erc_kind": "erc20",
   "chainId": 8453,
-  "address": "0xc1256ae5ff1cf2719d4937adb3bbccab2e00a2ca",
-  "symbol": "mwUSDC",
+  "address": "0xee8f4ec5672f09119b96ab6fb59c27e1b7e44b61",
+  "symbol": "gtUSDCp",
   "decimals": 18,
-  "name": "Moonwell Flagship USDC",
+  "name": "Gauntlet USDC Prime",
   "source": "https://blue-api.morpho.org/graphql (MetaMorpho vault, listed) + etherscan/basescan verified",
   "token_kind": {
     "kind": "yield_receipt",
