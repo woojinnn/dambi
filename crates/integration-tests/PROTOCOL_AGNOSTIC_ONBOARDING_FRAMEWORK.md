@@ -76,7 +76,7 @@ crates/integration-tests/src/bin/v3_harness.rs
 
 현재 구현된 CLI 는 `fuzz`, `validate`, `coverage`, `replay`, `corpus`, `import-*` 이다. `projection.rs`, `semantic_lints.rs`, `audit.rs` 와 `audit --strict` 는 설계 목표이며 아직 실행 가능한 gate 로 취급하지 않는다. 현 landing 은 아래 §3/P4 의 manual gate 조합으로 수행한다.
 
-### 1.1 `expect_body` data contract
+### 1.1 `expect_body` data contract  ✅ 구현됨 (`semantic.rs`)
 
 `expect_body` 는 corpus entry 에 붙는 optional field-level assertion list 다. 없으면 기존 corpus 는 그대로 동작한다. 있으면 `expect:"pass"` 이후 반드시 검사한다.
 
@@ -156,7 +156,7 @@ Implementation rule:
 - path dialect 는 JSON Pointer(`/...`), `$` dotted/index(`$.data.actions[0]`), recursive field(`$..address`) 를 지원한다.
 - assertion engine 은 `ActionBody` schema 를 몰라야 한다. JSON 만 본다.
 
-### 1.2 Projection data contract
+### 1.2 Projection data contract  🔮 설계 — 미구현 (projection executor 부재; 현 landing 은 §1.1 `expect_body` + field-level golden)
 
 Projection 은 selector 단위 2nd-opinion 이다. 한 selector 에 대해 raw args 에서 기대 ActionBody field 를 계산한다.
 
@@ -202,7 +202,7 @@ Non-circularity rule:
 - Projection may NOT read `emit.body`, manifest placeholder paths, or decoder output as its expected source.
 - If expected value is computed from the same implementation path as production, it is not a projection. It is a duplicate decode smoke test.
 
-### 1.3 Semantic lints
+### 1.3 Semantic lints  🔮 설계 — 미구현
 
 Semantic lints catch broad classes before protocol-specific assertions exist.
 
@@ -226,7 +226,7 @@ Lints must support suppressions in corpus/projection:
 
 No suppression without reason.
 
-### 1.4 Protocol audit command
+### 1.4 Protocol audit command  🔮 설계 — 미구현 (현 landing = 아래 manual gate 조합)
 
 Future target CLI, not implemented locally yet:
 
