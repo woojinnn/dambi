@@ -1,5 +1,5 @@
 {
-  "_comment": "Balancer V2 Vault real-tx corpus. Source: Etherscan v2 txlist for Vault 0xBA12222222228d8Ba445958a75a0704d566BF2C8 on chains 1/42161/137, latest ~100 tx/chain, selector-agnostic, pulled 2026-05-30. Covered today: swap (0x52bbbe29) -> pass/amm via balancer/v2/vault-swap@1.0.0; setRelayerApproval (0xfa6e671d) -> pass/permission via balancer/v2/vault-set-relayer-approval@1.0.0. Remaining uncovered Vault fns are soft no_declarative_v3_mapper, pinned here as expect=error to lock the gap; flip to expect=pass + expect_domain when the corresponding manifest lands. Remaining fns + how to add: batchSwap 0x945bcec9 (TIER B - cross-array assets[swaps[i].assetInIndex], named in array_emit.rs as canonical fallback); exitPool 0x8bdb3913 & joinPool 0xb95cac28 (need dynamic array zip + userData enum-tag decode for faithful LP action). Zero hard decoder failures in the original 300-tx sample. Balancer V3 Router v2 direct swap samples added 2026-06-01 from Dune queries 7623992 (Base exact-in) and 7624000 (Base exact-out): swapSingleTokenExactIn 0x750283bc and swapSingleTokenExactOut 0x94e86ef8 both route to amm. Etherscan mainnet bulk replay on 2026-06-01 showed permitBatchAndCall 0x19c6989f frequently wraps deferred liquidity calls plus Permit2 side effects; pinned as expect=error until that wrapper is faithfully modeled.",
+  "_comment": "Balancer real-tx corpus (adapter-blind sample). Pass entries pin decoded ActionBody domain/action/venue; error entries retain intentional unsupported selector coverage.",
   "transactions": [
     {
       "intent": "swap",
@@ -15,7 +15,24 @@
           }
         ]
       },
-      "expect_domain": "amm"
+      "expect_domain": "amm",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "amm"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "swap"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "balancer_v2"
+        }
+      ]
     },
     {
       "intent": "swap",
@@ -31,7 +48,24 @@
           }
         ]
       },
-      "expect_domain": "amm"
+      "expect_domain": "amm",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "amm"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "swap"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "balancer_v2"
+        }
+      ]
     },
     {
       "intent": "swap",
@@ -47,7 +81,24 @@
           }
         ]
       },
-      "expect_domain": "amm"
+      "expect_domain": "amm",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "amm"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "swap"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "balancer_v2"
+        }
+      ]
     },
     {
       "intent": "swap",
@@ -63,7 +114,24 @@
           }
         ]
       },
-      "expect_domain": "amm"
+      "expect_domain": "amm",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "amm"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "swap"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "balancer_v2"
+        }
+      ]
     },
     {
       "intent": "batchSwap",
@@ -207,7 +275,19 @@
           }
         ]
       },
-      "expect_domain": "permission"
+      "expect_domain": "permission",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "setRelayerApproval",
@@ -223,7 +303,19 @@
           }
         ]
       },
-      "expect_domain": "permission"
+      "expect_domain": "permission",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "v3_router_swapSingleTokenExactIn",
@@ -240,7 +332,24 @@
           }
         ]
       },
-      "expect_domain": "amm"
+      "expect_domain": "amm",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "amm"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "swap"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "balancer_v3"
+        }
+      ]
     },
     {
       "intent": "v3_router_swapSingleTokenExactOut",
@@ -257,7 +366,24 @@
           }
         ]
       },
-      "expect_domain": "amm"
+      "expect_domain": "amm",
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "amm"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "swap"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "balancer_v3"
+        }
+      ]
     },
     {
       "intent": "v3_router_permitBatchAndCall_deferred_liquidity_child",

@@ -1,5 +1,5 @@
 {
-  "_comment": "EigenLayer restaking round-1 (mainnet, Etherscan txlist adapter-blind). Covered: delegation (delegate/undelegate/queue/complete withdrawals) + strategy deposit + PermissionController grants. array_emit→multicall, single→restaking, grants→permission. Deferred (expect:error): processClaim (rewards merkle-proof), depositIntoStrategyWithSignature (relayer), AllocationManager/AVSDirectory (operator-AVS round), native pod (EigenPod). See registryV2/surface/eigenlayer/.",
+  "_comment": "EigenLayer restaking round-1 (mainnet, Etherscan txlist adapter-blind). Pass entries pin decoded ActionBody domain/action/venue, including array_emit multicall child action. Deferred expect:error entries cover rewards merkle-proof, relayer signature deposit, AllocationManager/AVSDirectory, and native pod gaps.",
   "transactions": [
     {
       "intent": "delegateTo",
@@ -15,7 +15,24 @@
             "data": "0xeea9064b0000000000000000000000008c81d590cc94ca2451c4bde24c598193da74a57500000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "delegate_to"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "queueWithdrawals (array_emit)",
@@ -31,7 +48,29 @@
             "data": "0x0dd8dd02000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000ba3053d3e075a8037d4c01b1ca08aa1cbe508e840000000000000000000000000000000000000000000000000000000000000001000000000000000000000000beac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000b339ee5c9cff800"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "multicall"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].action",
+          "op": "equals",
+          "value": "queue_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "completeQueuedWithdrawals (array_emit)",
@@ -47,7 +86,29 @@
             "data": "0x9435bb4300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000ba3053d3e075a8037d4c01b1ca08aa1cbe508e840000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ba3053d3e075a8037d4c01b1ca08aa1cbe508e84000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000017e6f6c00000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000beac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000001bc16d674ec800000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "multicall"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].action",
+          "op": "equals",
+          "value": "complete_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "undelegate",
@@ -63,7 +124,24 @@
             "data": "0xda8be8640000000000000000000000005f19c4576dc24b90e9720a2b66cec2ba14469175"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "undelegate"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "queueWithdrawals (array_emit)",
@@ -79,7 +157,29 @@
             "data": "0x0dd8dd02000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000048bb7d2efb44e76fdf95820c7eb04d63242cfeab00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000fe4f44bee93503346a3ac9ee5a26b130a5796d600000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000e7c57862650ab09"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "multicall"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].action",
+          "op": "equals",
+          "value": "queue_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "undelegate",
@@ -95,7 +195,24 @@
             "data": "0xda8be8640000000000000000000000006d455725fb15d62b6fdb088e860d502a820be96a"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "undelegate"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "queueWithdrawals (array_emit)",
@@ -111,7 +228,29 @@
             "data": "0x0dd8dd02000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000a96d65d130837fe09378e7b3b89d7eff272af3f8000000000000000000000000000000000000000000000000000000000000000100000000000000000000000093c4b944d05dfe6df7645a86cd2206016c51564d00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000001662cc225ce598e7"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "multicall"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].action",
+          "op": "equals",
+          "value": "queue_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "completeQueuedWithdrawals (array_emit)",
@@ -127,7 +266,29 @@
             "data": "0x9435bb430000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000038000000000000000000000000000000000000000000000000000000000000004600000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000b431be7f477560ab9b45b6afd108a4669649481000000000000000000000000071c6f7ed8c2d4925d0baf16f6a85bb1736d412eb000000000000000000000000b431be7f477560ab9b45b6afd108a46696494810000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000017f1cf900000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000acb55c530acdb2849e6d4f36992cd8c9d50ed8f7000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000622eee02eec2d1f28000000000000000000000000b431be7f477560ab9b45b6afd108a4669649481000000000000000000000000071c6f7ed8c2d4925d0baf16f6a85bb1736d412eb000000000000000000000000b431be7f477560ab9b45b6afd108a46696494810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000017f1cf900000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000298afb19a105d59e74658c4c334ff360bade6dd200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000dabff234b311c430000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000001000000000000000000000000ec53bf9167f50cdeb3ae105f56099aaab9061f830000000000000000000000000000000000000000000000000000000000000001000000000000000000000000d5f7838f5c461feff7fe49ea5ebaf7728bb0adfa000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "multicall"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].action",
+          "op": "equals",
+          "value": "complete_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "undelegate",
@@ -143,7 +304,24 @@
             "data": "0xda8be86400000000000000000000000060770c6155f2974f41b802d983669f57b75d95b3"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "undelegate"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "completeQueuedWithdrawals (array_emit)",
@@ -159,7 +337,29 @@
             "data": "0x9435bb4300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000067313bcc9728f833963a42a07c502bb918235a3000000000000000000000000dbed88d83176316fc46797b43adee927dc2ff2f5000000000000000000000000067313bcc9728f833963a42a07c502bb918235a3000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000017f296000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120000000000000000000000000000000000000000000000000000000000000000100000000000000000000000093c4b944d05dfe6df7645a86cd2206016c51564d00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000d8b44e6a76ab5f4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000ae7ab96520de3a18e5e111b5eaab095312d7fe8400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "multicall"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].action",
+          "op": "equals",
+          "value": "complete_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.actions[0].venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "delegateTo",
@@ -175,7 +375,24 @@
             "data": "0xeea9064b0000000000000000000000008c81d590cc94ca2451c4bde24c598193da74a57500000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "delegate_to"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "delegateTo",
@@ -191,7 +408,24 @@
             "data": "0xeea9064b0000000000000000000000004cd2086e1d708e65db5d4f5712a9ca46ed4bbd0a00000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "delegate_to"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "completeQueuedWithdrawal (nested tuple)",
@@ -207,7 +441,24 @@
             "data": "0xe4cc3f90000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000aa0cbae2dd290f8aed1b672ebe2e197fd969628b0000000000000000000000003601bda2b72628da309ab9df7d310ada38cae44c000000000000000000000000aa0cbae2dd290f8aed1b672ebe2e197fd969628b00000000000000000000000000000000000000000000000000000000000000ab00000000000000000000000000000000000000000000000000000000017f270e00000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000beac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000003fedc53618828c0000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "complete_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "completeQueuedWithdrawal (nested tuple)",
@@ -223,7 +474,24 @@
             "data": "0xe4cc3f90000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000d15b787d780835ba08174b37a9a8ae92a9ce01d50000000000000000000000005accc90436492f24e6af278569691e2c942a676d000000000000000000000000d15b787d780835ba08174b37a9a8ae92a9ce01d5000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000017c2cc200000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000010000000000000000000000001bee69b7dfffa4e2d53c2a2df135c388ad25dcd200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000de0b58981be8ee30000000000000000000000000000000000000000000000000000000000000001000000000000000000000000ae78736cd615f374d3085123a210448e74fc6393"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "complete_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "completeQueuedWithdrawal (nested tuple)",
@@ -239,7 +507,24 @@
             "data": "0xe4cc3f90000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000b64277b46002f7789879858577d1dffff8f1f990000000000000000000000005accc90436492f24e6af278569691e2c942a676d0000000000000000000000000b64277b46002f7789879858577d1dffff8f1f99000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000017e5b1b00000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000fe4f44bee93503346a3ac9ee5a26b130a5796d6000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000001fbed13f0b7a5080000000000000000000000000000000000000000000000000000000000000001000000000000000000000000f951e335afb289353dc249e82926178eac7ded78"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "complete_withdrawal"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "depositIntoStrategy",
@@ -255,7 +540,24 @@
             "data": "0xe7a050aa00000000000000000000000093c4b944d05dfe6df7645a86cd2206016c51564d000000000000000000000000ae7ab96520de3a18e5e111b5eaab095312d7fe8400000000000000000000000000000000000000000000000000af87f5a3404400"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "deposit"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "depositIntoStrategy",
@@ -271,7 +573,24 @@
             "data": "0xe7a050aa00000000000000000000000093c4b944d05dfe6df7645a86cd2206016c51564d000000000000000000000000ae7ab96520de3a18e5e111b5eaab095312d7fe840000000000000000000000000000000000000000000000000010ab36d5de390a"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "deposit"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "depositIntoStrategy",
@@ -287,7 +606,24 @@
             "data": "0xe7a050aa000000000000000000000000acb55c530acdb2849e6d4f36992cd8c9d50ed8f7000000000000000000000000ec53bf9167f50cdeb3ae105f56099aaab9061f830000000000000000000000000000000000000000000000be6c83e2c553a6e000"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "restaking"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "deposit"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "eigenlayer"
+        }
+      ]
     },
     {
       "intent": "addPendingAdmin",
@@ -303,7 +639,19 @@
             "data": "0xeb5a4e87000000000000000000000000f07f83ff977dd004060f00ecefb80a9f927750980000000000000000000000007b0ac51037f43754275bd87446d35351f58448fe"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "setAppointee",
@@ -319,7 +667,19 @@
             "data": "0x950d806e000000000000000000000000f07f83ff977dd004060f00ecefb80a9f9277509800000000000000000000000054bb392508d458cbf1e48c59d44ffbc93f912329000000000000000000000000948a420b8cc1d6bfd0b6087c2e7c344a2cd0bc393635205700000000000000000000000000000000000000000000000000000000"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "addPendingAdmin",
@@ -335,7 +695,19 @@
             "data": "0xeb5a4e8700000000000000000000000054b12f8fe6c1f327d1ae1039b77bc14d27f0376b0000000000000000000000007b0ac51037f43754275bd87446d35351f58448fe"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "setAppointee",
@@ -351,7 +723,19 @@
             "data": "0x950d806e00000000000000000000000054b12f8fe6c1f327d1ae1039b77bc14d27f0376b00000000000000000000000019971ee28c30bb064459fe86d71fed6e00cede23000000000000000000000000948a420b8cc1d6bfd0b6087c2e7c344a2cd0bc393635205700000000000000000000000000000000000000000000000000000000"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "acceptAdmin",
@@ -367,7 +751,19 @@
             "data": "0x628806ef000000000000000000000000128e65461ee2d794fc7f1a8c732dd9a275a8618c"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "acceptAdmin",
@@ -383,7 +779,19 @@
             "data": "0x628806ef000000000000000000000000902038d2d5278dd6504c135ffa49bf635d475f7e"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "acceptAdmin",
@@ -399,7 +807,19 @@
             "data": "0x628806ef0000000000000000000000005accc90436492f24e6af278569691e2c942a676d"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "addPendingAdmin",
@@ -415,7 +835,19 @@
             "data": "0xeb5a4e870000000000000000000000005accc90436492f24e6af278569691e2c942a676d000000000000000000000000425d39a089b643bc1c16135ceae00f6bb071106e"
           }
         ]
-      }
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "permission"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "protocol_authorization"
+        }
+      ]
     },
     {
       "intent": "processClaim (DEFERRED — merkle-proof reward claim)",
