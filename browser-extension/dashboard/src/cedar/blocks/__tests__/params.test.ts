@@ -177,3 +177,56 @@ describe("integration", () => {
     }
   });
 });
+
+describe("property: parameterize → fill across all value kinds (1000 cases)", () => {
+  const lcg = (seed: number) => {
+    let x = (seed >>> 0) || 1;
+    return () => {
+      x = (Math.imul(x, 1103515245) + 12345) >>> 0;
+      return x / 0xffffffff;
+    };
+  };
+  const ri = (rng: () => number, n: number) => Math.floor(rng() * n);
+
+  const randValue = (rng: () => number): Expr => {
+    switch (ri(rng, 5)) {
+      case 0: return { kind: "lit", litType: "long", value: ri(rng, 100000) };
+      case 1: return { kind: "lit", litType: "string", value: "s" + ri(rng, 50) };
+      case 2: return { kind: "lit", litType: "bool", value: rng() < 0.5 };
+      case 3: return { kind: "litEntity", entity: { type: "T" + ri(rng, 5), id: "e" + ri(rng, 9) } };
+      default:
+        return { kind: "set", elements: Array.from({ length: ri(rng, 4) }, () => ({ kind: "lit", litType: "string", value: "x" + ri(rng, 9) })) };
+    }
+  };
+  // The raw fill value that reproduces a given value node.
+  const defaultFill = (v: Expr): any => {
+    if (v.kind === "lit") return v.value;
+    if (v.kind === "litEntity") return { type: v.entity.type, id: v.entity.id };
+    if (v.kind === "set") return v.elements.map((e) => (e.kind === "lit" ? e.value : null));
+    return null;
+  };
+
+  it("extract + required/optional + fill(default)/fill(new) all hold", () => {
+    for (let i = 1; i <= 1000; i++) {
+      const rng = lcg(i);
+      const value = randValue(rng);
+      const ir = policyWith({ kind: "binary", op: "==", left: { kind: "var", name: "context" }, right: value });
+      const optional = i % 2 === 0;
+      const tmpl = replaceNode(ir, (e) => e === value, makeHole(value, { name: "p", optional }));
+
+      expect(extractParams(tmpl).map((s) => s.name)).toEqual(["p"]);
+
+      const empty = fillParams(tmpl, {});
+      if (optional) {
+        expect(empty.ok, `seed ${i} optional empty`).toBe(true);
+        if (empty.ok) expect(empty.policy).toEqual(ir);
+      } else {
+        expect(empty, `seed ${i} required empty`).toMatchObject({ ok: false, errors: [{ reason: "missing" }] });
+      }
+
+      const filled = fillParams(tmpl, { p: defaultFill(value) });
+      expect(filled.ok, `seed ${i} fill default: ${JSON.stringify(filled)}`).toBe(true);
+      if (filled.ok) expect(filled.policy).toEqual(ir); // fill-own-default reproduces original
+    }
+  });
+});

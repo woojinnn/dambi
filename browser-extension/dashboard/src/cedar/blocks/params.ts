@@ -1,7 +1,43 @@
-// Policy parameterization (customizable fields). Author side: turn a value node
-// into a named parameter `hole` (`makeHole`) and swap it into the tree
-// (`replaceNode`). Adopter side (added below): `extractParams` / `fillParams`.
-// Pure functions over the block IR; no schema dependency. See the design spec.
+/**
+ * # Policy parameterization (customizable fields)
+ *
+ * Lets a policy **author** expose specific value fields as adopter-editable
+ * "parameters", and an **adopter** fill them to produce a concrete policy. Pure
+ * functions over the block IR ({@link PolicyIR}) — no schema dependency, no UI.
+ *
+ * A *template* is just a {@link PolicyIR} that contains one or more `hole` nodes
+ * ({@link HoleNode}); it is plain JSON, so store/ship it however you like.
+ *
+ * ## Author — turn a value into a parameter
+ * ```ts
+ * // The UI knows which value node the user selected. Build a hole + swap it in:
+ * const hole = makeHole(selected, { name: "maxUsd", label: "Max swap (USD)", constraints: { min: 0 } });
+ * const template = replaceNode(policyIr, (e) => e === selected, hole);
+ * ```
+ *
+ * ## Adopter — fill the parameters
+ * ```ts
+ * const specs = extractParams(template);            // → render a form (name/label/type/constraints/default)
+ * const result = fillParams(template, { maxUsd: 5000 });
+ * if (result.ok) {
+ *   const est = blocksToEst(result.policy);         // hole-free → serializable
+ *   // const { text } = JSON.parse(est_json_to_policy_text(JSON.stringify(est)));  // WASM → Cedar text
+ * } else {
+ *   showErrors(result.errors);                      // reason: missing | type | range | enum | unknown
+ * }
+ * ```
+ *
+ * ## Rules
+ * - Only **value nodes** (`lit` / `litEntity` / `set`) are parameterizable; `makeHole`
+ *   throws otherwise.
+ * - Parameters are **required by default**. Mark `optional: true` to let an unsupplied
+ *   value fall back to the captured `default`; otherwise `fillParams` returns a `missing`
+ *   error.
+ * - Types are **author-set** (`label`/`type`/`constraints`); `expected` is inferred from
+ *   the marked value's structure (no schema lookup).
+ * - A template is intentionally incomplete — `blocksToEst` throws on a `hole`. Always
+ *   `fillParams` to a hole-free policy before serializing.
+ */
 
 import type {
   Expr,
