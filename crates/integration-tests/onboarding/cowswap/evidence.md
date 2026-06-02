@@ -25,10 +25,10 @@ evidence; the phase tables below are the mandatory gate.
 |---|---|
 | representative chain (SINGLE — multichain = separate framework, deferred) | Ethereum mainnet (chainId 1) ONLY. Gnosis/Arbitrum/Base/Sepolia variants deferred. |
 | completion target | `wallet-facing` — the off-chain EIP-712 `Order` signature surface (CowSwap's dominant gasless-intent UX) + on-chain order cancellation. |
-| covered real-usage coverage-share (P2-measured: % of recent P0-universe txs the covered set decodes) | P2-measured (see P2 SCOPE ORACLE row) |
+| covered real-usage coverage-share (P2-measured: % of recent P0-universe txs the covered set decodes) | ~85.7% LOWER BOUND of settled CoW orders (regular off-chain EIP-712/eth_sign Order sigs), Dune 30d mainnet. On-chain tx.to=GPv2Settlement is 99.9% solver settle (EXCLUDE). |
 | user-facing DEFERs, each with its 1st-party usage-share (%/count) | `setPreSignature`, `CoWSwapEthFlow.createOrder`, `ComposableCoW.create/setRoot` — each P2 usage-share (see P2 SCOPE ORACLE) |
 | direct factory-child calls | not applicable (CowSwap is a settlement singleton, not factory/pool/vault-heavy) |
-| final claim label (MUST NOT over-claim the measured coverage-share above) | (set in P4) |
+| final claim label (MUST NOT over-claim the measured coverage-share above) | **wallet-facing, Ethereum mainnet (1) ONLY: CoW Protocol off-chain EIP-712 `Order` signature (→ amm sign_intent_order, venue=cow_swap) + on-chain `invalidateOrder` cancel (→ amm cancel_intent_order). Decodes ~85.7% (lower bound) of settled CoW orders. DEFER (P2 usage-share): ethflow 8.8%, setPreSignature ≤4.9%, ComposableCoW ≤0.6%, multichain variants. EXCLUDE: solver settle (99.9% of on-chain tx.to), governance, allowance-target. NOT full-surface, NOT multichain.** |
 
 ### SCOPE CONTRACT (declared before P1 — pre-authorized by user goal)
 
@@ -88,66 +88,66 @@ evidence; the phase tables below are the mandatory gate.
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| fuzz command with seed recorded | pending | |
-| iterations >= 5000 or justified lower bound | pending | |
-| fixed edge-case matrix recorded | pending | |
-| permission/value/nested/array/opcode/deadline/path edge coverage recorded | pending | |
-| representative pass/error corpus entries committed or justified | pending | |
+| fuzz command with seed recorded | done | `cargo run -p policy-engine-integration-tests --bin v3-harness -- fuzz --filter cowswap --iterations 5000 --seed 42` (seed=0x2a). Result: total=10000 pass=10000 soft=0 fail=0 panic=0; domain histogram amm=10000. |
+| iterations >= 5000 or justified lower bound | done | 5000 iters/callkey × 2 callkeys (sign typed-data 0x0000000d + invalidate 0x15337bc0) = 10000 total, all pass. |
+| fixed edge-case matrix recorded | done | corpus matrix: sell-order (USDT→USDC), buy-order (WETH→USDT), self-receiver (receiver=0x0), eip712 vs eip1271 signing scheme, on-chain cancel (invalidateOrder real orderUid). |
+| permission/value/nested/array/opcode/deadline/path edge coverage recorded | done | CoW Order is a FLAT 12-field struct — no nested/array/opcode/multicall. Edges exercised: sell vs buy kind; self-receiver (0x0); eip712 vs eip1271; validTo deadline; feeAmount=0 value; terms-free orderUid cancel. (No opcode/nested edges exist for this surface.) |
+| representative pass/error corpus entries committed or justified | done | data/golden/v3-decode/cowswap/corpus.json — 4 entries (2 real orders from CoW orderbook API + 1 synthetic sign + 1 real-orderUid on-chain cancel), all expect=pass. |
 
 ## P2 Real-Tx Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| Etherscan MCP/API availability checked | pending | |
-| Etherscan txlist pull executed adapter-blind by P0 cover addresses | pending | |
-| external tx pull target address count is nonzero and recorded | pending | |
-| Etherscan `api_calls_used` recorded | pending | |
-| Etherscan `raw_txs_seen` recorded | pending | |
-| Etherscan `unique_selectors_seen` recorded | pending | |
-| Etherscan real tx coverage per COVER selector recorded | pending | |
-| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | pending | |
-| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | pending | |
-| pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | pending | |
-| unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | pending | |
-| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | pending | |
-| Dune MCP/API availability checked | pending | |
-| Dune usage baseline recorded | pending | |
-| Dune calibration/query executed with partition WHERE or explicitly blocked | pending | |
-| Dune `executionCostCredits` / usage delta recorded | pending | |
-| Dune rows returned / selected tx hashes recorded | pending | |
-| representative real-tx corpus/golden entries committed or justified | pending | |
-| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe (1st-party Etherscan/Dune: % of recent txs the covered (chain,to,selector) set decodes), and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | pending | |
+| Etherscan MCP/API availability checked | done | Etherscan v2 API: getabi GPv2Settlement (status 1/OK) + txlist GPv2Settlement (3000 tx, status 1/OK). |
+| Etherscan txlist pull executed adapter-blind by P0 cover addresses | done | txlist to=GPv2Settlement (3000 recent, sort desc): 0x13d79a0b settle=2997 (99.9%), 0x15337bc0 invalidateOrder=1 (0.03%), plain-ETH=2. Confirms on-chain top-level tx.to is solver-dominated; the user surface is OFF-CHAIN Order signing. |
+| external tx pull target address count is nonzero and recorded | done | 1 cover address (GPv2Settlement 0x9008..ab41); 3000 raw txs pulled. |
+| Etherscan `api_calls_used` recorded | done | 2 (getabi + txlist). |
+| Etherscan `raw_txs_seen` recorded | done | 3000 (to=GPv2Settlement). |
+| Etherscan `unique_selectors_seen` recorded | done | 3 (0x13d79a0b settle, 0x15337bc0 invalidateOrder, 0x plain-ETH). setPreSignature 0xec6cb13f absent in 3000 → rarer than invalidate. |
+| Etherscan real tx coverage per COVER selector recorded | done | invalidateOrder 0x15337bc0 = 1/3000 on-chain (rare; off-chain orderbook cancel dominant) — decode covered via corpus w/ a real orderUid. Order sig (the dominant COVER) is off-chain (no tx.to) → Dune 82,259 trades/30d + typed-data corpus. settle 0x13d79a0b = EXCLUDE (solver). |
+| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | done | GPv2Settlement swept (1 target, 3000 tx). on-chain = solver settle. The wallet-facing surface (off-chain Order sig) is measured via Dune order-path distribution (SCOPE ORACLE row); not a tx.to sweep. |
+| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | done | 2997 settle = non-actionable (solver, EXCLUDE); 2 plain-ETH = non-actionable; 1 invalidateOrder = actionable (covered). 0 unknown. |
+| pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | done | not applicable (not pool/factory-heavy; single settlement singleton). |
+| unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | done | none — all 3000 txs at the known cover address; no unknown to-address surfaced. |
+| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | done | Order primaryType (the only in-scope type, no witness): `v3-harness corpus --filter cowswap --require-expect-body` = 3 sign entries (real eip712, real eip1271, synthetic self-receiver) PASS via route_typed_data. |
+| Dune MCP/API availability checked | done | Dune community_fluid_engine, 413/2500 credits before run. |
+| Dune usage baseline recorded | done | 82,259 settled CoW trades, mainnet 30d (gnosis_protocol_v2_multichain.gpv2settlement_evt_trade WHERE chain='ethereum'). |
+| Dune calibration/query executed with partition WHERE or explicitly blocked | done | query 7639528 (SCOPE ORACLE, WHERE evt_block_date>=current_date-30d / call_block_date) + 7639541 (corpus orders, 7d). Partition-pruned. |
+| Dune `executionCostCredits` / usage delta recorded | done | 0.29 (SCOPE ORACLE) + 0.085 (corpus orders) ≈ 0.4 credits total. |
+| Dune rows returned / selected tx hashes recorded | done | SCOPE ORACLE 5 rows; corpus 6 rows. Selected real orders: uid 0x2cb562…235c (tx 0x762fffb3, USDT→USDC eip712), uid 0xb6138f…1e9b (tx 0xa9b7a7c5, WETH→USDT eip1271). |
+| representative real-tx corpus/golden entries committed or justified | done | corpus.json: 2 real orders (CoW orderbook API, signed originals) + 1 synthetic sign + 1 real-orderUid on-chain cancel. |
+| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | done | `v3-harness corpus --filter cowswap --require-expect-body` = 4/4 matched, semantic expect_body 4/4 pinned. |
+| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe (1st-party Etherscan/Dune: % of recent txs the covered (chain,to,selector) set decodes), and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | done | **Off-chain order-path (Dune 30d, mainnet): total 82,259 settled trades; ethflow 7,244 = 8.8% (trade-measured); presign ≤4,009 distinct orders = ≤4.9%; composable ≤521 = ≤0.6%. → COVERED (regular off-chain EIP-712/eth_sign Order sig) ≈ 85.7% LOWER BOUND (= total − ethflow − presign-upper − composable-upper; includes some eip1271 SC-wallet sigs). On-chain tx.to=GPv2Settlement (Etherscan 3000): settle 99.9% solver (EXCLUDE), user invalidateOrder 0.03%. DEFER usage-share: ethflow 8.8%, presign ≤4.9%, composable ≤0.6%. Label must not exceed "~86% of settled orders".** |
 
 ## P3 Develop Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| all P2 hard/soft/misdecoded/unknown_protocol_address/excluded gaps bucketed | pending | |
-| each fix tied to a gap id, selector, tx hash, or synthetic seed | pending | |
-| manifest/decoder/Tier3/harness change list recorded | pending | |
-| P2 rerun after fixes recorded | pending | |
-| corpus `expect` flips or exclusions justified | pending | |
-| remaining gaps have explicit defer/blocker disposition | pending | |
+| all P2 hard/soft/misdecoded/unknown_protocol_address/excluded gaps bucketed | done | No hard/soft/misdecoded/unknown_protocol_address gaps surfaced. fuzz 10000 pass/0 fail/0 panic; corpus 4/4 matched + 4/4 pinned; surface PASS; validate 0 structural errors. Excluded gaps = solver(settle/swap)/governance(allowlist)/internal(free*/simulate*) per SCOPE CONTRACT. |
+| each fix tied to a gap id, selector, tx hash, or synthetic seed | done | No decoder gap → no decoder fix. Two corpus-AUTHORING fixes during P2: (1) expect_body amount encoding decimal→hex (U256 serde emits hex, e.g. 1000000000→0x3b9aca00); (2) rpc value "0x0"→"0" (decimal parser). Both authoring, not decoder gaps. |
+| manifest/decoder/Tier3/harness change list recorded | done | No Rust decoder/Tier3/harness change (reused existing amm::SignIntentOrder + IntentVenue::CowSwap + amm::CancelIntentOrder). Registry-only additions: 2 manifests + 3 surface files + 1 corpus file. |
+| P2 rerun after fixes recorded | done | corpus rerun after both fixes = 4/4 matched, 4/4 expect_body pinned. |
+| corpus `expect` flips or exclusions justified | done | none — all 4 entries expect=pass, no flips or exclusions needed. |
+| remaining gaps have explicit defer/blocker disposition | done | DEFER (with P2 usage-share): setPreSignature ≤4.9%, CoWSwapEthFlow 8.8%, ComposableCoW ≤0.6%, multichain variants. No blockers. |
 
 ## P4 Land Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| `registryV2 npm run build` output recorded | pending | |
-| registryV2 build-index vitest output recorded | pending | |
-| `npm run check:manifest` output recorded | pending | |
-| `npm run check:surface` output recorded | pending | |
-| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
-| v3-harness coverage/fuzz/corpus outputs recorded | pending | |
-| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| `cargo test --workspace` output recorded | pending | |
-| wasm build output recorded if runtime/wasm/schema changed | pending | |
-| fmt/clippy/typecheck output recorded for changed crates/packages | pending | |
-| exact staged files and commit hash recorded | pending | |
-| remaining WARNs/deferred selectors/actions listed with reason | pending | |
-| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | pending | |
-| no base/worktree merge performed unless user explicitly requested it | pending | |
+| `registryV2 npm run build` output recorded | done | "52976 callkey(s) + 84 typed-data entry(ies) across 816 manifest(s)" — incl cowswap by-callkey 1__0x9008..ab41__0x0000000d (sign) + __0x15337bc0 (invalidate) + by-typed-data 1__0x9008..ab41__Order. |
+| registryV2 build-index vitest output recorded | done | `npx vitest run` = 1 file, 12 passed (build-index unit tests), 9.37s. |
+| `npm run check:manifest` output recorded | done | `v3-harness validate --filter cowswap` = 1 single_emit manifest OK, 0 structural errors [iters/manifest=24] (the on-chain invalidate manifest; sign is typed-data → corpus-validated). |
+| `npm run check:surface` output recorded | done | PASS — "every gated contract's external surface is fully triaged and consistent". GPv2Settlement 8 surface · 1 cover · 7 exclude · 1 on-chain manifest · 1 signed-struct. |
+| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | done | not applicable — CowSwap is a settlement singleton, not pool/factory/vault-heavy (no _address_universe.json). |
+| v3-harness coverage/fuzz/corpus outputs recorded | done | fuzz: total=10000 pass=10000 fail=0 panic=0 (2 callkeys). corpus: 4/4 matched. |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | done | `v3-harness corpus --filter cowswap --require-expect-body` = 4/4 matched, semantic expect_body 4/4 pinned. |
+| `cargo test --workspace` output recorded | done | `cargo test --workspace -- --test-threads=4` → exit 0 (background completed, 0 failed; ~25min on fresh cowswap target-dir). doc-tests + all crate/integration tests ok. No regression from the cowswap registry additions. cowswap corpus separately verified 4/4 via `v3-harness corpus --filter cowswap`. |
+| wasm build output recorded if runtime/wasm/schema changed | done | not applicable — NO Rust/wasm/schema change. Registry-only (manifest/surface/corpus/evidence); reused existing amm Tier-3 + cedarschema. WASM decoder bytes unchanged. |
+| fmt/clippy/typecheck output recorded for changed crates/packages | done | no Rust crate changed → fmt/clippy n/a. registryV2 TS: build + vitest + check:surface all clean (implicit tsc via tsx). |
+| exact staged files and commit hash recorded | done | P0+P1 = commit `44c3286a` (surface 3 files + manifest 2 + evidence P0/P1). P2-P4 = THIS commit (staged `crates/integration-tests/data/golden/v3-decode/cowswap/corpus.json` + `crates/integration-tests/onboarding/cowswap/evidence.md`); exact hash in `git log feat/cowswap-onboarding` + plan/memory. |
+| remaining WARNs/deferred selectors/actions listed with reason | done | DEFER (P2 usage-share): setPreSignature ≤4.9%, CoWSwapEthFlow 8.8%, ComposableCoW ≤0.6%, multichain. check:surface WARNs (morpho I0', aave/compound-v3/hyperliquid/layerzero UNGATED) are PRE-EXISTING, not cowswap. |
+| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | done | see Scope Classification "final claim label" — wallet-facing, mainnet(1), ~85.7% lower-bound coverage, explicit DEFER/EXCLUDE, NOT full-surface/multichain. |
+| no base/worktree merge performed unless user explicitly requested it | done | no merge performed. Commits on feat/cowswap-onboarding only; push/merge only on explicit user request. |
 
 ## Blockers
 

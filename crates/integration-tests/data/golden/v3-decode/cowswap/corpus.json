@@ -1,0 +1,134 @@
+{
+  "_comment": "CoW Protocol EIP-712 Order signing corpus (mainnet). Hand-built typed-data fixtures because CoW orders are signed off-chain (orderbook) and do NOT appear in Etherscan tx input. Entries 1-2 are REAL mainnet orders pulled from the CoW orderbook API (order uid in intent), entry 3 is a synthetic self-receiver edge. domain='Gnosis Protocol' v2, verifying_contract=GPv2Settlement 0x9008d19f58aabd9ed0d60971565aa8510560ab41, primary_type=Order. kind/sellTokenBalance/buyTokenBalance are EIP-712 'string'. buy_min := order buyAmount (the signed minimum, NOT the trade-executed amount). NOTE expect_body amounts are U256 hex (the ActionBody serde encoding), while typed_data.message amounts are EIP-712 decimal strings.",
+  "transactions": [
+    {
+      "intent": "CowSwap Order sign — USDT->USDC sell-order, eip712 (real mainnet, uid 0x2cb562...235c, tx 0x762fffb3)",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "typed_data": {
+        "verifying_contract": "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+        "primary_type": "Order",
+        "domain_name": "Gnosis Protocol",
+        "message": {
+          "sellToken": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+          "buyToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "receiver": "0x88f066a9e6a94a3f2a6ed2924712c520d6857329",
+          "sellAmount": "1000000000",
+          "buyAmount": "981314510",
+          "validTo": 1780425564,
+          "appData": "0x01ff60f93ed732dcbf9fa1e0689b147ddc8f4778b825f323a3c25f30d20f7b83",
+          "feeAmount": "0",
+          "kind": "sell",
+          "partiallyFillable": false,
+          "sellTokenBalance": "erc20",
+          "buyTokenBalance": "erc20"
+        }
+      },
+      "expect_body": [
+        { "path": "$.data.actions[0].body.domain", "op": "equals", "value": "amm" },
+        { "path": "$.data.actions[0].body.action", "op": "equals", "value": "sign_intent_order" },
+        { "path": "$.data.actions[0].body.venue.name", "op": "equals", "value": "cow_swap" },
+        { "path": "$.data.actions[0].body.venue.settlement", "op": "hex_eq", "value": "0x9008d19f58aabd9ed0d60971565aa8510560ab41" },
+        { "path": "$.data.actions[0].body.sell.key.address", "op": "hex_eq", "value": "0xdac17f958d2ee523a2206206994597c13d831ec7" },
+        { "path": "$.data.actions[0].body.buy.key.address", "op": "hex_eq", "value": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
+        { "path": "$.data.actions[0].body.sell_amount", "op": "equals", "value": "0x3b9aca00" },
+        { "path": "$.data.actions[0].body.buy_min", "op": "equals", "value": "0x3a7dabce" },
+        { "path": "$.data.actions[0].body.recipient", "op": "hex_eq", "value": "0x88f066a9e6a94a3f2a6ed2924712c520d6857329" },
+        { "path": "$.data.actions[0].body.order_kind", "op": "equals", "value": "limit" }
+      ]
+    },
+    {
+      "intent": "CowSwap Order sign — WETH->USDT buy-order, eip1271 SC-wallet (real mainnet, uid 0xb6138f...1e9b, tx 0xa9b7a7c5)",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "typed_data": {
+        "verifying_contract": "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+        "primary_type": "Order",
+        "domain_name": "Gnosis Protocol",
+        "message": {
+          "sellToken": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+          "buyToken": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+          "receiver": "0x0400e301e186c865c60f0ca2a50e5539a413199f",
+          "sellAmount": "527765556277597296",
+          "buyAmount": "1000300000",
+          "validTo": 1780424347,
+          "appData": "0xc621b98ea7ecd709407dc8d1ae1992ea591cca427b6fc9edc9402588ca71ae86",
+          "feeAmount": "0",
+          "kind": "buy",
+          "partiallyFillable": false,
+          "sellTokenBalance": "erc20",
+          "buyTokenBalance": "erc20"
+        }
+      },
+      "expect_body": [
+        { "path": "$.data.actions[0].body.domain", "op": "equals", "value": "amm" },
+        { "path": "$.data.actions[0].body.action", "op": "equals", "value": "sign_intent_order" },
+        { "path": "$.data.actions[0].body.venue.name", "op": "equals", "value": "cow_swap" },
+        { "path": "$.data.actions[0].body.sell.key.address", "op": "hex_eq", "value": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" },
+        { "path": "$.data.actions[0].body.buy.key.address", "op": "hex_eq", "value": "0xdac17f958d2ee523a2206206994597c13d831ec7" },
+        { "path": "$.data.actions[0].body.sell_amount", "op": "equals", "value": "0x752fffa2a9cd470" },
+        { "path": "$.data.actions[0].body.buy_min", "op": "equals", "value": "0x3b9f5de0" },
+        { "path": "$.data.actions[0].body.recipient", "op": "hex_eq", "value": "0x0400e301e186c865c60f0ca2a50e5539a413199f" },
+        { "path": "$.data.actions[0].body.order_kind", "op": "equals", "value": "limit" }
+      ]
+    },
+    {
+      "intent": "CowSwap Order sign — WETH->DAI sell-order with self-receiver (receiver=0x0) [synthetic edge]",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "typed_data": {
+        "verifying_contract": "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+        "primary_type": "Order",
+        "domain_name": "Gnosis Protocol",
+        "message": {
+          "sellToken": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+          "buyToken": "0x6b175474e89094c44da98b954eedeac495271d0f",
+          "receiver": "0x0000000000000000000000000000000000000000",
+          "sellAmount": "1000000000000000000",
+          "buyAmount": "3000000000000000000000",
+          "validTo": 2000000000,
+          "appData": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "feeAmount": "0",
+          "kind": "sell",
+          "partiallyFillable": false,
+          "sellTokenBalance": "erc20",
+          "buyTokenBalance": "erc20"
+        }
+      },
+      "expect_body": [
+        { "path": "$.data.actions[0].body.action", "op": "equals", "value": "sign_intent_order" },
+        { "path": "$.data.actions[0].body.venue.name", "op": "equals", "value": "cow_swap" },
+        { "path": "$.data.actions[0].body.sell.key.address", "op": "hex_eq", "value": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" },
+        { "path": "$.data.actions[0].body.buy.key.address", "op": "hex_eq", "value": "0x6b175474e89094c44da98b954eedeac495271d0f" },
+        { "path": "$.data.actions[0].body.sell_amount", "op": "equals", "value": "0xde0b6b3a7640000" },
+        { "path": "$.data.actions[0].body.buy_min", "op": "equals", "value": "0xa2a15d09519be00000" },
+        { "path": "$.data.actions[0].body.recipient", "op": "hex_eq", "value": "0x0000000000000000000000000000000000000000" }
+      ]
+    },
+    {
+      "intent": "CowSwap invalidateOrder — on-chain order cancellation (real orderUid 0x2cb562...235c)",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0x9008d19f58aabd9ed0d60971565aa8510560ab41",
+            "value": "0",
+            "data": "0x15337bc0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000382cb562cff2b65ad6aea6fbd6fd922ca3cb3d711dfef26f7d829daa6fb4746f1388f066a9e6a94a3f2a6ed2924712c520d68573296a1f235c0000000000000000"
+          }
+        ]
+      },
+      "expect_body": [
+        { "path": "$.data.actions[0].body.domain", "op": "equals", "value": "amm" },
+        { "path": "$.data.actions[0].body.action", "op": "equals", "value": "cancel_intent_order" },
+        { "path": "$.data.actions[0].body.venue.name", "op": "equals", "value": "cow_swap" },
+        { "path": "$.data.actions[0].body.venue.settlement", "op": "hex_eq", "value": "0x9008d19f58aabd9ed0d60971565aa8510560ab41" },
+        { "path": "$.data.actions[0].body.order_hash", "op": "hex_eq", "value": "0x2cb562cff2b65ad6aea6fbd6fd922ca3cb3d711dfef26f7d829daa6fb4746f1388f066a9e6a94a3f2a6ed2924712c520d68573296a1f235c" }
+      ]
+    }
+  ]
+}
