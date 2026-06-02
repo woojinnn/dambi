@@ -89,3 +89,32 @@ export async function listManagedPolicies(): Promise<ManagedPolicy[]> {
     throw err;
   }
 }
+
+/** Storage key the SW writes when the popup or dashboard toggles a
+ *  policy on/off. Exposed so the dashboard can scope its React Query
+ *  invalidation to broadcasts that touch this key. */
+export const ENABLED_IDS_STORAGE_KEY = "policy-selection:enabled-ids";
+
+/** Read the set of enabled policy ids (the same set the popup's
+ *  checkbox column mutates). Returns `[]` when the extension isn't
+ *  installed so callers can treat "no extension" as "nothing enabled". */
+export async function getEnabledPolicyIds(): Promise<string[]> {
+  try {
+    return await sendToExtension<string[]>({ type: "policy-selection:get" });
+  } catch (err) {
+    if (err instanceof ExtensionBridgeTimeout) return [];
+    throw err;
+  }
+}
+
+/** Replace the enabled-policy set. Sends the full desired list (the
+ *  SW handler is a setter, not a toggle) so the caller must compute
+ *  `next = current.with/without(id)` before calling. */
+export async function setEnabledPolicyIds(ids: string[]): Promise<void> {
+  try {
+    await sendToExtension({ type: "set-enabled-ids", ids });
+  } catch (err) {
+    if (err instanceof ExtensionBridgeTimeout) return;
+    throw err;
+  }
+}

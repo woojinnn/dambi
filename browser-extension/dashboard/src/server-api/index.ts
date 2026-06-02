@@ -116,10 +116,15 @@ export {
   putPolicy,
   deletePolicy as deleteManagedPolicy,
   listManagedPolicies,
+  getEnabledPolicyIds,
+  setEnabledPolicyIds,
+  ENABLED_IDS_STORAGE_KEY,
   dashboardId,
   stripDashboardId,
   type ManagedPolicy,
 } from "./extension-sync";
+
+export { subscribeToBroadcast } from "./extension-bridge";
 
 // Shared primitive types — kept in one file (./types) to mirror the
 // Rust DTOs. Re-exported here so consumer pages can

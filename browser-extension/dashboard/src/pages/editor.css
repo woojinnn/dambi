@@ -281,15 +281,14 @@
 }
 
 .policy-card {
+  position: relative;
   display: flex; flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-left: 3px solid var(--hairline);
   border-radius: var(--r-md);
-  padding: 14px 16px;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color .12s ease, transform .08s ease;
+  transition: border-color .12s ease, transform .08s ease, opacity .12s ease;
+  overflow: hidden;
 }
 .policy-card:hover {
   border-color: var(--slate-300);
@@ -298,6 +297,37 @@
 .policy-card.deny { border-left-color: var(--fail-500, var(--fail-800)); }
 .policy-card.warn { border-left-color: var(--warn-500, var(--warn-800)); }
 .policy-card.info { border-left-color: var(--cyan-500, var(--cyan-800)); }
+/* Disabled-looking when the policy isn't currently enforced. */
+.policy-card:not(.is-enabled) .pc-open { opacity: .55; }
+
+/* ── enable/disable checkbox ── */
+.policy-card .pc-check {
+  position: absolute;
+  top: 10px; right: 10px;
+  display: inline-flex; align-items: center;
+  z-index: 2;
+  cursor: pointer;
+  padding: 4px; margin: -4px;     /* expand hit-target without moving the box */
+}
+.policy-card .pc-check input[type="checkbox"] {
+  width: 16px; height: 16px;
+  margin: 0;
+  accent-color: var(--slate-700);
+  cursor: pointer;
+}
+
+/* ── click-to-open body (the rest of the card) ── */
+.policy-card .pc-open {
+  display: flex; flex-direction: column;
+  width: 100%; height: 100%;
+  padding: 14px 44px 14px 16px;   /* right padding leaves room for the checkbox */
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
 
 .policy-card .pc-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -344,13 +374,4 @@
   font-size: 10.5px;
   color: var(--slate-400);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.policy-card .pc-mode {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: var(--r-pill);
-  background: var(--fog-300);
-  color: var(--slate-600);
-  flex-shrink: 0;
 }

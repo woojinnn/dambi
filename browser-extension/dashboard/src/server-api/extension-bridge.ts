@@ -140,3 +140,50 @@ export async function sendToExtension<T>(
     );
   });
 }
+
+// ─── broadcasts ──────────────────────────────────────────────────────
+
+/** Shape of `chrome.storage.local` change broadcasts the content-script
+ *  fans out via window.postMessage. */
+interface BridgeBroadcastEnvelope {
+  source: typeof RES_TAG;
+  id: typeof BROADCAST_ID;
+  event: "changed";
+  keys: string[];
+}
+
+function isBridgeBroadcast(value: unknown): value is BridgeBroadcastEnvelope {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return (
+    o.source === RES_TAG &&
+    o.id === BROADCAST_ID &&
+    o.event === "changed" &&
+    Array.isArray(o.keys)
+  );
+}
+
+/**
+ * Subscribe to storage-change broadcasts from the content-script bridge.
+ *
+ * The SW listens to `chrome.storage.local.onChanged` and, for a curated
+ * key set (`policy-selection:enabled-ids`, `dashboard:policies`, etc.),
+ * the content-script forwards a single page-side `postMessage`. Callers
+ * use this to invalidate a React Query when the popup (or another tab)
+ * mutates the same storage key behind their back.
+ *
+ * Returns an unsubscribe function — callers store it in a `useEffect`
+ * cleanup.
+ */
+export function subscribeToBroadcast(
+  callback: (keys: string[]) => void,
+): () => void {
+  const handler = (event: MessageEvent): void => {
+    if (event.source !== window) return;
+    if (event.origin !== window.location.origin) return;
+    if (!isBridgeBroadcast(event.data)) return;
+    callback(event.data.keys);
+  };
+  window.addEventListener("message", handler);
+  return () => window.removeEventListener("message", handler);
+}
