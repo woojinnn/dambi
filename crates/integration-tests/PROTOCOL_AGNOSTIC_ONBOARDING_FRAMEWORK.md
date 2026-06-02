@@ -840,7 +840,7 @@ A protocol is onboarded only when all of these are true:
 - `_deployments.json` exists or omission is explicitly approved for that protocol.
 - Every covered contract has ABI snapshot and coverage.
 - `check:surface` has no failures for the protocol.
-- Every COVER selector has manifest or documented Tier B/Tier 3 implementation.
+- Every COVER selector has manifest or documented Tier 2/Tier 3 implementation.
 - Every COVER selector has at least one semantic oracle:
   - projection when implemented, or
   - `expect_body`, or

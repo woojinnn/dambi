@@ -211,7 +211,7 @@ mod tests {
 
 핵심 갈림: live_field 의 source view 가 **calldata 인자를 쓰나?**
 - 인자 없는 view / oracle / derived → manifest `live_inputs.source` 만(⑤). Rust 0.
-- **calldata 인자 필요한 view** (`getPooledEthByShares(shares)`) → `DataSource::OnchainView` 에 args 필드 없음 → 아래 ②③ Tier B 필수.
+- **calldata 인자 필요한 view** (`getPooledEthByShares(shares)`) → `DataSource::OnchainView` 에 args 필드 없음 → 아래 ②③ Tier 2 필수.
 
 **① reducer — LiveInputs struct** · `action/<domain>/<action>.rs`
 ```rust
