@@ -30,7 +30,12 @@ import {
   getDefaultPolicyBundlesV2,
   loadDefaultPolicySetV2,
 } from "./policies-loader-v2";
-import type { MatchedPolicyDto, VerdictDto } from "./wasm-bridge.types";
+import type {
+  ActionBundleInputDto,
+  ActionTxInputDto,
+  MatchedPolicyDto,
+  VerdictDto,
+} from "./wasm-bridge.types";
 import {
   isTransaction,
   isTypedSignature,
@@ -1007,17 +1012,19 @@ async function typedSignatureLifecycle(
     const action = (a as { body: unknown }).body;
     const meta = (a as { meta?: unknown }).meta;
     try {
-      const planned = await planActionRpcV2({ manifests, action, meta, tx });
-      const results =
-        planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
-      const verdict = await evaluateActionV2({
-        action,
-        meta,
-        tx,
-        bundles,
-        results,
-      });
-      verdicts.push(verdict);
+      // Per-child fan-out: evaluate this body and (if a multicall) each inner
+      // child. No `recordSimulationOnServer` on the sig path (it never recorded).
+      verdicts.push(
+        ...(await evaluateBodyTree(
+          action,
+          meta,
+          tx,
+          bundles,
+          manifests,
+          policyRpcUrl,
+          message.requestId,
+        )),
+      );
     } catch (err) {
       // A plan/dispatch/evaluate throw is a fault → warn-closed (mirrors tx).
       console.warn("[Scopeball] typed-sig-verdict threw", {
@@ -1063,6 +1070,81 @@ function venueDenyVerdict(reason: string): VerdictDto {
   };
 }
 
+/**
+ * Evaluate one decoded `ActionBody` against the installed v2 bundles, then — if
+ * it is a `Multicall` — recurse into each inner child as its own evaluate
+ * envelope. Returns the FLAT list of per-position verdicts (this body's, then
+ * each descendant's) for the caller to aggregate by deny-overrides.
+ *
+ * This is the SW half of the multicall per-child fan-out (mirrors the Rust
+ * `sync::actions::walk::walk_body` recursion). The WASM `evaluate_action_v2`
+ * scope gate decides which bundles fire at each position: `Outer`-scoped
+ * policies fire on the multicall batch here; `Inner`-scoped (default) policies
+ * fire when this function re-enters with each child. Without the recursion an
+ * `Inner` slippage/recipient policy would never see a UR-`execute`-wrapped swap.
+ *
+ * An `unknown`-domain body is skipped (NOT fail-closed) so one undecodable child
+ * never blocks its siblings or the outer batch; the top-level all-unknown case
+ * is still fail-closed by each caller's `realActions` guard. Children share the
+ * parent `meta` (the decoded `Multicall` carries no per-child meta).
+ * `recordSimulationOnServer` is intentionally NOT called here — recording stays
+ * at the top-level caller so its granularity is unchanged.
+ *
+ * Throws only what `planActionRpcV2` / `dispatchCallsV2` throw; the caller's
+ * try/catch turns that into a fail-closed verdict.
+ */
+async function evaluateBodyTree(
+  body: unknown,
+  meta: unknown,
+  tx: ActionTxInputDto,
+  bundles: readonly ActionBundleInputDto[],
+  manifests: readonly unknown[],
+  policyRpcUrl: string,
+  requestId: string,
+): Promise<VerdictDto[]> {
+  const verdicts: VerdictDto[] = [];
+  const domain =
+    typeof body === "object" && body !== null
+      ? (body as { domain?: unknown }).domain
+      : undefined;
+
+  if (domain !== undefined && domain !== "unknown") {
+    // PLAN → DISPATCH (only when something is planned; a shared results map
+    // would clobber since `call_id` repeats across siblings) → EVALUATE.
+    const planned = await planActionRpcV2({ manifests, action: body, meta, tx });
+    const results =
+      planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
+    verdicts.push(
+      await evaluateActionV2({ action: body, meta, tx, bundles, results }),
+    );
+  } else if (domain === "unknown") {
+    console.debug("[Scopeball] per-child skip (unknown body)", { requestId });
+  }
+
+  // Recurse into multicall children — each its own envelope, parent meta shared.
+  // A nested multicall is evaluated as a batch (Outer policies) AND recursed.
+  if (domain === "multicall") {
+    const children = (body as { actions?: unknown }).actions;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        verdicts.push(
+          ...(await evaluateBodyTree(
+            child,
+            meta,
+            tx,
+            bundles,
+            manifests,
+            policyRpcUrl,
+            requestId,
+          )),
+        );
+      }
+    }
+  }
+
+  return verdicts;
+}
+
 async function tryV2VerdictPath(
   message: Message,
   actions: Record<string, unknown>[],
@@ -1102,27 +1184,29 @@ async function tryV2VerdictPath(
     const action = (a as { body: unknown }).body;
     const meta = (a as { meta?: unknown }).meta;
     try {
-      // PLAN: lower the action + plan its v2 policy-RPC calls.
-      const planned = await planActionRpcV2({ manifests, action, meta, tx });
-      // DISPATCH: fresh per-action results map (shared map would clobber:
-      // `call_id` repeats across action elements).
-      const results = await dispatchCallsV2(planned, policyRpcUrl);
-      // EVALUATE: never throws for policy/system faults (always Fail inside).
-      const verdict = await evaluateActionV2({
-        action,
-        meta,
-        tx,
-        bundles,
-        results,
-      });
-      verdicts.push(verdict);
+      // Per-child fan-out: evaluate this action AND, if it is a multicall, each
+      // inner child as its own envelope. The WASM scope gate (A1) decides which
+      // bundles fire at the batch vs the child positions; this supplies both.
+      // `evaluateActionV2` never throws for policy/system faults (Fail inside) —
+      // only plan/dispatch can throw.
+      verdicts.push(
+        ...(await evaluateBodyTree(
+          action,
+          meta,
+          tx,
+          bundles,
+          manifests,
+          policyRpcUrl,
+          message.requestId,
+        )),
+      );
 
-      // RECORD (Phase 8B): replay the simulation against the Scopeball
-      // server so the action + state-delta land in the authenticated
-      // user's server-side state. Best-effort — the verdict above is the source of
+      // RECORD (Phase 8B): replay the simulation against the Scopeball server
+      // so the action + state-delta land in the authenticated user's
+      // server-side state. Best-effort — the verdict above is the source of
       // truth for fail-closed decisions; recording is purely for the
-      // dashboard's history view. Skipped silently when the user isn't
-      // signed in to Scopeball.
+      // dashboard's history view. Skipped silently when the user isn't signed
+      // in to Scopeball. Recorded per TOP-LEVEL action (granularity unchanged).
       void recordSimulationOnServer({ action, meta, tx });
     } catch (err) {
       // A plan/dispatch throw is a fault, NOT a verdict — the caller fails
