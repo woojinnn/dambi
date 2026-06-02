@@ -2,6 +2,8 @@
 
 > Copy this file to `crates/integration-tests/onboarding/<protocol>/evidence.md` for each protocol onboarding run.
 > This is a completion gate, not a nice-to-have note. If any mandatory row is missing, the phase is incomplete.
+>
+> **SSOT:** this template is the single source of truth for *per-phase evidence requirements* — `check-onboarding-evidence` parses it and cross-checks every mandatory row. The spine's §2.1b table, §3.1 P0 step, and §8.6 self-check summarize it; on conflict, this file wins. (The definition of "onboarded" itself lives in `PROTOCOL_AGNOSTIC_ONBOARDING_FRAMEWORK.md` §6.)
 
 ## Run Metadata
 

@@ -835,7 +835,7 @@ Existing corpus without `expect_body` is legacy-valid but not semantically compl
 
 ## 6. Definition of Done
 
-A protocol is onboarded only when all of these are true:
+A protocol is onboarded only when all of these are true. **This list is the SSOT for what "onboarded" means**; the spine's §2.1b phase-gate table and `ONBOARDING_EVIDENCE_TEMPLATE.md` are the operational checklist that proves each item (the latter enforced by `check-onboarding-evidence`):
 
 - `_deployments.json` exists or omission is explicitly approved for that protocol.
 - Every covered contract has ABI snapshot and coverage.
