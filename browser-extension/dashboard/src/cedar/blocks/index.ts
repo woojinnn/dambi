@@ -34,6 +34,18 @@
  * const schema = descriptorFromCustomTypes(custom_types);
  * const ir = estToBlocks(est, schema); // attr nodes now carry type/source for styling
  * ```
+ *
+ * ## Parameterization — author marks fields, adopter fills them
+ * ```ts
+ * import { makeHole, replaceNode, extractParams, fillParams } from "../cedar/blocks";
+ *
+ * // Author: expose a value node as an editable parameter.
+ * const tmpl = replaceNode(ir, (e) => e === selected, makeHole(selected, { name: "maxUsd", label: "Max (USD)" }));
+ * // Adopter: read params → render form → fill → concrete policy.
+ * const result = fillParams(tmpl, { maxUsd: 5000 });
+ * if (result.ok) blocksToEst(result.policy); // hole-free, serializable
+ * ```
+ * See `./params` for the full parameterization guide.
  */
 
 export { estToBlocks } from "./estToBlocks";
