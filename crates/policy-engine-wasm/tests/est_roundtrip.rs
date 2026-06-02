@@ -4,6 +4,7 @@
 //! See docs/superpowers/plans/2026-06-02-cedar-block-ir-conversion.md (Task 0).
 
 use cedar_policy::Policy;
+use policy_engine_wasm::{est_json_to_policy_text, policy_text_to_est_json};
 use std::str::FromStr;
 
 /// (name, category, cedar_text) — covers the 12 spec test categories.
@@ -106,4 +107,37 @@ fn emit_est_corpus_fixture() {
     );
     std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
     std::fs::write(path, serde_json::to_string_pretty(&out).unwrap()).unwrap();
+}
+
+// ── Phase 1: text↔EST WASM exports ──────────────────────────────────────
+
+#[test]
+fn text_to_est_ok_and_err() {
+    let ok = policy_text_to_est_json("permit(principal, action, resource);".into());
+    let v: serde_json::Value = serde_json::from_str(&ok).unwrap();
+    assert_eq!(v["ok"], serde_json::json!(true));
+    assert_eq!(v["policies"][0]["est"]["effect"], serde_json::json!("permit"));
+
+    let err = policy_text_to_est_json("permit(".into());
+    let e: serde_json::Value = serde_json::from_str(&err).unwrap();
+    assert_eq!(e["ok"], serde_json::json!(false));
+    assert!(!e["error"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn est_to_text_ok_and_err() {
+    // Round-trip through both exports: text → est → text.
+    let est_resp = policy_text_to_est_json("permit(principal, action, resource);".into());
+    let est = serde_json::from_str::<serde_json::Value>(&est_resp).unwrap()["policies"][0]["est"]
+        .clone();
+    let resp = est_json_to_policy_text(serde_json::to_string(&est).unwrap());
+    let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+    assert_eq!(v["ok"], serde_json::json!(true));
+    assert!(v["text"].as_str().unwrap().contains("permit"));
+
+    let bad = est_json_to_policy_text("{\"effect\":\"nope\"}".into());
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&bad).unwrap()["ok"],
+        serde_json::json!(false)
+    );
 }
