@@ -1,5 +1,5 @@
 {
-  "_comment": "Morpho Blue (mainnet, chain 1) real-tx corpus - Etherscan v2 txlist of singleton 0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb (2026-05-30 last-400, adapter-blind). FULL user surface (8): on-chain supply/withdraw/borrow/repay (loan asset) + supplyCollateral/withdrawCollateral (collateral asset, marketParams[1]) + setAuthorization (operator grant, Tier 3 LendingAction::SetAuthorization) -> pass/lending; off-chain Authorization EIP-712 (the pre-sign operator-grant signature; minimal domain = chainId+verifyingContract, no name) routed via by-typed-data -> pass/lending (hand fixture - Etherscan has no off-chain sigs). Excluded (no manifest): createMarket/liquidate (keeper/setup) -> error. market_id = keccak(MarketParams) Tier B; authorized/is_authorized field-level pinned in golden #[test]s. Selectors keccak-verified.",
+  "_comment": "Morpho Blue corpus with semantically pinned Ethereum real transactions, fresh Etherscan V2 representatives from the 2026-06-02 adapter-blind singleton sweep, Base hand/typed fixtures, and excluded-selector error cases. Base direct real transactions are recorded in onboarding Dune evidence because Etherscan V2 free API does not expose Base txlist rows.",
   "transactions": [
     {
       "intent": "morpho supply #1",
@@ -1565,6 +1565,209 @@
           "deadline": "2000000000"
         }
       }
+    },
+    {
+      "intent": "morpho supply fresh Etherscan Morpho Blue (Ethereum)",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "expect_action": "supply",
+      "tx_hash": "0xc220e044eaafbf0ec397cfccf8313051383ddaba3f0eae2c9be99353137a6419",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+            "value": "0",
+            "data": "0xa99aad89000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000890a5122aa1da30fec4286de7904ff808f0bd74a000000000000000000000000b0b6fc449ccf81ff4129a86ddc814412e3cd9aa4000000000000000000000000870ac11d48b15db9a138cf899d20f13f79ba00bc0000000000000000000000000000000000000000000000000bef55718ad6000000000000000000000000000000000000000000000000000000000000004c4b4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008f334b2f4910396238e60d8b55ae1360f12bce2a00000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "lending"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "supply"
+        }
+      ]
+    },
+    {
+      "intent": "morpho withdraw fresh Etherscan Morpho Blue (Ethereum)",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "expect_action": "withdraw",
+      "tx_hash": "0xacac7aba68a8174aca5919627203db989d0d8371a042d929f1511ce88ba5e074",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+            "value": "0",
+            "data": "0x5c2bea49000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000890a5122aa1da30fec4286de7904ff808f0bd74a000000000000000000000000b0b6fc449ccf81ff4129a86ddc814412e3cd9aa4000000000000000000000000870ac11d48b15db9a138cf899d20f13f79ba00bc0000000000000000000000000000000000000000000000000bef55718ad6000000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008f334b2f4910396238e60d8b55ae1360f12bce2a0000000000000000000000008f334b2f4910396238e60d8b55ae1360f12bce2a"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "lending"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "withdraw"
+        }
+      ]
+    },
+    {
+      "intent": "morpho borrow fresh Etherscan Morpho Blue (Ethereum)",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "expect_action": "borrow",
+      "tx_hash": "0x5faa59705ee31123f79999f47a248127fb32436b2354ba599de712ffeb7d84d9",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+            "value": "0",
+            "data": "0x50d8cd4b000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000d341a146a4fd20ea89898e4d86ae1829bf3a1c230000000000000000000000001f96824a00dd81bf4694471d1f0741e6a4de0cc2000000000000000000000000870ac11d48b15db9a138cf899d20f13f79ba00bc0000000000000000000000000000000000000000000000000cb2bba6f17b80000000000000000000000000000000000000000000000000000000000000015f900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b47f11484e19f1914d32fd393b17671221c10f1f000000000000000000000000b47f11484e19f1914d32fd393b17671221c10f1f"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "lending"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "borrow"
+        }
+      ]
+    },
+    {
+      "intent": "morpho repay fresh Etherscan Morpho Blue (Ethereum)",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "expect_action": "repay",
+      "tx_hash": "0x5a1ce19f6da695aa00bf939ce20e9b060e6e743b4a71d25504832239ac0cb05b",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+            "value": "0",
+            "data": "0x20b76e81000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000001d69402390657308c91179aa184bf992908c1e08000000000000000000000000da25bff53bf9e12c728cd83ff9fc22c581f564cd000000000000000000000000870ac11d48b15db9a138cf899d20f13f79ba00bc0000000000000000000000000000000000000000000000000cb2bba6f17b8000000000000000000000000000000000000000000000000000000000007f7654930000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c1ca0ca710dadc5799c70c25c73a74ff4418a2ea00000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "lending"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "repay"
+        }
+      ]
+    },
+    {
+      "intent": "morpho supplyCollateral fresh Etherscan Morpho Blue (Ethereum)",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "expect_action": "supply",
+      "tx_hash": "0xcf639485838b1fe2afb451ef9c01ddd73b78f8a140dfa5cc70fd3ae1dbf8f92a",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+            "value": "0",
+            "data": "0x238d6579000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000d341a146a4fd20ea89898e4d86ae1829bf3a1c230000000000000000000000001f96824a00dd81bf4694471d1f0741e6a4de0cc2000000000000000000000000870ac11d48b15db9a138cf899d20f13f79ba00bc0000000000000000000000000000000000000000000000000cb2bba6f17b800000000000000000000000000000000000000000000000000002c68af0bb140000000000000000000000000000b47f11484e19f1914d32fd393b17671221c10f1f00000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "lending"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "supply"
+        }
+      ]
+    },
+    {
+      "intent": "morpho withdrawCollateral fresh Etherscan Morpho Blue (Ethereum)",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "expect_action": "withdraw",
+      "tx_hash": "0x17f48f19f3c3eb4e8ee0f35eeb7e08ef8461775a3a1103f6d219c42670236daa",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+            "value": "0",
+            "data": "0x8720316d000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000002260fac5e5542a773aa44fbcfedf7c193bc2c599000000000000000000000000dddd770badd886df3864029e4b377b5f6a2b6b83000000000000000000000000870ac11d48b15db9a138cf899d20f13f79ba00bc0000000000000000000000000000000000000000000000000bef55718ad600000000000000000000000000000000000000000000000000000000000000012110000000000000000000000000b0105f6582ec7a07c419990b1b38474a08f3f912000000000000000000000000b0105f6582ec7a07c419990b1b38474a08f3f912"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "lending"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "withdraw"
+        }
+      ]
+    },
+    {
+      "intent": "morpho setAuthorization fresh Etherscan Morpho Blue (Ethereum)",
+      "expect": "pass",
+      "expect_domain": "lending",
+      "expect_action": "set_authorization",
+      "tx_hash": "0x703ee6b42afb4d574739b48083c7173136a18d07866a44cee4f4984d4d6cd660",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+            "value": "0",
+            "data": "0xeecea0000000000000000000000000004a6c312ec70e8747a587ee860a0353cd42be0ae00000000000000000000000000000000000000000000000000000000000000001"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.domain",
+          "op": "equals",
+          "value": "lending"
+        },
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "set_authorization"
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,209 @@
+{
+  "protocol": "morpho",
+  "source": "Etherscan v2 account txlist, page=1 offset=10000 sort=desc, adapter-blind over registryV2/surface/morpho cover addresses",
+  "fetched_at": "2026-06-02T02:22:00.469Z",
+  "api_calls_used": 2,
+  "target_address_count": 2,
+  "raw_txs_seen": 10000,
+  "unique_selectors_seen": 12,
+  "successful_address_count": 1,
+  "blocked_address_count": 1,
+  "blocked_address_reasons": [
+    {
+      "chain_id": 8453,
+      "name": "Morpho Blue (Base)",
+      "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+      "reason": "Free API access is not supported for this chain. Please upgrade your api plan for full chain coverage. https://etherscan.io/apis"
+    }
+  ],
+  "selector_totals": {
+    "0xeecea000": 617,
+    "0x5c2bea49": 2803,
+    "0xa99aad89": 1528,
+    "0x50d8cd4b": 864,
+    "0x238d6579": 687,
+    "0x8c1358a2": 168,
+    "0x8720316d": 630,
+    "0x20b76e81": 731,
+    "0x151c1ade": 1843,
+    "0xd8eabcb8": 85,
+    "<none>": 5,
+    "0x5cffe9de": 39
+  },
+  "cover_selector_coverage": [
+    {
+      "selector": "0xa99aad89",
+      "name": "supply",
+      "action": "supply",
+      "ethereum_observed_txs": 1528,
+      "selected_corpus_tx": {
+        "chain_id": 1,
+        "target_name": "Morpho Blue (Ethereum)",
+        "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+        "tx_hash": "0xc220e044eaafbf0ec397cfccf8313051383ddaba3f0eae2c9be99353137a6419",
+        "function_name": "supply(tuple marketParams,uint256 assets,uint256 shares,address onBehalf,bytes data)"
+      }
+    },
+    {
+      "selector": "0x5c2bea49",
+      "name": "withdraw",
+      "action": "withdraw",
+      "ethereum_observed_txs": 2803,
+      "selected_corpus_tx": {
+        "chain_id": 1,
+        "target_name": "Morpho Blue (Ethereum)",
+        "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+        "tx_hash": "0xacac7aba68a8174aca5919627203db989d0d8371a042d929f1511ce88ba5e074",
+        "function_name": "withdraw(tuple marketParams,uint256 assets,uint256 shares,address onBehalf,address receiver)"
+      }
+    },
+    {
+      "selector": "0x50d8cd4b",
+      "name": "borrow",
+      "action": "borrow",
+      "ethereum_observed_txs": 864,
+      "selected_corpus_tx": {
+        "chain_id": 1,
+        "target_name": "Morpho Blue (Ethereum)",
+        "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+        "tx_hash": "0x5faa59705ee31123f79999f47a248127fb32436b2354ba599de712ffeb7d84d9",
+        "function_name": "borrow(tuple marketParams,uint256 assets,uint256 shares,address onBehalf,address receiver)"
+      }
+    },
+    {
+      "selector": "0x20b76e81",
+      "name": "repay",
+      "action": "repay",
+      "ethereum_observed_txs": 731,
+      "selected_corpus_tx": {
+        "chain_id": 1,
+        "target_name": "Morpho Blue (Ethereum)",
+        "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+        "tx_hash": "0x5a1ce19f6da695aa00bf939ce20e9b060e6e743b4a71d25504832239ac0cb05b",
+        "function_name": "repay(tuple marketParams,uint256 assets,uint256 shares,address onBehalf,bytes data)"
+      }
+    },
+    {
+      "selector": "0x238d6579",
+      "name": "supplyCollateral",
+      "action": "supply",
+      "ethereum_observed_txs": 687,
+      "selected_corpus_tx": {
+        "chain_id": 1,
+        "target_name": "Morpho Blue (Ethereum)",
+        "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+        "tx_hash": "0xcf639485838b1fe2afb451ef9c01ddd73b78f8a140dfa5cc70fd3ae1dbf8f92a",
+        "function_name": "supplyCollateral(tuple marketParams,uint256 assets,address onBehalf,bytes data)"
+      }
+    },
+    {
+      "selector": "0x8720316d",
+      "name": "withdrawCollateral",
+      "action": "withdraw",
+      "ethereum_observed_txs": 630,
+      "selected_corpus_tx": {
+        "chain_id": 1,
+        "target_name": "Morpho Blue (Ethereum)",
+        "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+        "tx_hash": "0x17f48f19f3c3eb4e8ee0f35eeb7e08ef8461775a3a1103f6d219c42670236daa",
+        "function_name": "withdrawCollateral(tuple marketParams,uint256 assets,address onBehalf,address receiver)"
+      }
+    },
+    {
+      "selector": "0xeecea000",
+      "name": "setAuthorization",
+      "action": "set_authorization",
+      "ethereum_observed_txs": 617,
+      "selected_corpus_tx": {
+        "chain_id": 1,
+        "target_name": "Morpho Blue (Ethereum)",
+        "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+        "tx_hash": "0x703ee6b42afb4d574739b48083c7173136a18d07866a44cee4f4984d4d6cd660",
+        "function_name": "setAuthorization(address _address, bool _authorized)"
+      }
+    }
+  ],
+  "observed_onchain_cover_selectors": 7,
+  "missing_onchain_cover_selectors": [],
+  "corpus_imported_fresh_real_txs": 7,
+  "corpus_selected_tx_hashes": [
+    {
+      "intent": "morpho supply fresh Etherscan Morpho Blue (Ethereum)",
+      "chain_id": 1,
+      "tx_hash": "0xc220e044eaafbf0ec397cfccf8313051383ddaba3f0eae2c9be99353137a6419"
+    },
+    {
+      "intent": "morpho withdraw fresh Etherscan Morpho Blue (Ethereum)",
+      "chain_id": 1,
+      "tx_hash": "0xacac7aba68a8174aca5919627203db989d0d8371a042d929f1511ce88ba5e074"
+    },
+    {
+      "intent": "morpho borrow fresh Etherscan Morpho Blue (Ethereum)",
+      "chain_id": 1,
+      "tx_hash": "0x5faa59705ee31123f79999f47a248127fb32436b2354ba599de712ffeb7d84d9"
+    },
+    {
+      "intent": "morpho repay fresh Etherscan Morpho Blue (Ethereum)",
+      "chain_id": 1,
+      "tx_hash": "0x5a1ce19f6da695aa00bf939ce20e9b060e6e743b4a71d25504832239ac0cb05b"
+    },
+    {
+      "intent": "morpho supplyCollateral fresh Etherscan Morpho Blue (Ethereum)",
+      "chain_id": 1,
+      "tx_hash": "0xcf639485838b1fe2afb451ef9c01ddd73b78f8a140dfa5cc70fd3ae1dbf8f92a"
+    },
+    {
+      "intent": "morpho withdrawCollateral fresh Etherscan Morpho Blue (Ethereum)",
+      "chain_id": 1,
+      "tx_hash": "0x17f48f19f3c3eb4e8ee0f35eeb7e08ef8461775a3a1103f6d219c42670236daa"
+    },
+    {
+      "intent": "morpho setAuthorization fresh Etherscan Morpho Blue (Ethereum)",
+      "chain_id": 1,
+      "tx_hash": "0x703ee6b42afb4d574739b48083c7173136a18d07866a44cee4f4984d4d6cd660"
+    }
+  ],
+  "calls": [
+    {
+      "index": 1,
+      "chain_id": 1,
+      "name": "Morpho Blue (Ethereum)",
+      "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+      "status": "1",
+      "message": "OK",
+      "result_note": null,
+      "row_count": 10000,
+      "unique_selectors": 12,
+      "selectors": {
+        "0xeecea000": 617,
+        "0x5c2bea49": 2803,
+        "0xa99aad89": 1528,
+        "0x50d8cd4b": 864,
+        "0x238d6579": 687,
+        "0x8c1358a2": 168,
+        "0x8720316d": 630,
+        "0x20b76e81": 731,
+        "0x151c1ade": 1843,
+        "0xd8eabcb8": 85,
+        "<none>": 5,
+        "0x5cffe9de": 39
+      }
+    },
+    {
+      "index": 2,
+      "chain_id": 8453,
+      "name": "Morpho Blue (Base)",
+      "address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+      "status": "0",
+      "message": "NOTOK",
+      "result_note": "Free API access is not supported for this chain. Please upgrade your api plan for full chain coverage. https://etherscan.io/apis",
+      "row_count": 0,
+      "unique_selectors": 0,
+      "selectors": {}
+    }
+  ],
+  "notes": [
+    "Raw per-transaction Etherscan rows were intentionally not committed; they remain in /tmp for this session only.",
+    "Authorization typed-data selector 0x00000001 is not part of account txlist selector coverage and remains covered by typed-data corpus entries."
+  ]
+}

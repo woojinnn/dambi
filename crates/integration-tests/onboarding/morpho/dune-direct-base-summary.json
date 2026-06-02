@@ -1,0 +1,109 @@
+{
+  "protocol": "morpho",
+  "source": "Dune MCP Base direct singleton tx sweep for Etherscan V2 free-plan blocked Base lane",
+  "date": "2026-06-02",
+  "query_id": 7633652,
+  "execution_id": "01KT32CB12GSR5QJV2HCYJZJ01",
+  "execution_cost_credits": 5.24,
+  "rows_returned": 14,
+  "scope": {
+    "chain_id": 8453,
+    "chain": "base",
+    "table": "base.transactions",
+    "target_address": "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb",
+    "partition_filter": "block_time >= now() - interval '90' day",
+    "representative_limit": "up to 2 latest rows per selector",
+    "selectors_targeted": [
+      {
+        "selector": "0xa99aad89",
+        "name": "supply",
+        "action": "supply"
+      },
+      {
+        "selector": "0x5c2bea49",
+        "name": "withdraw",
+        "action": "withdraw"
+      },
+      {
+        "selector": "0x50d8cd4b",
+        "name": "borrow",
+        "action": "borrow"
+      },
+      {
+        "selector": "0x20b76e81",
+        "name": "repay",
+        "action": "repay"
+      },
+      {
+        "selector": "0x238d6579",
+        "name": "supplyCollateral",
+        "action": "supply"
+      },
+      {
+        "selector": "0x8720316d",
+        "name": "withdrawCollateral",
+        "action": "withdraw"
+      },
+      {
+        "selector": "0xeecea000",
+        "name": "setAuthorization",
+        "action": "set_authorization"
+      }
+    ]
+  },
+  "observed_onchain_cover_selectors": 7,
+  "selected_direct_hashes": [
+    {
+      "selector": "0x20b76e81",
+      "name": "repay",
+      "tx_hash": "0x820bdf578ab3080203bddb428ddfd6af719f01f4502cdf5f24deb6d49b243fce",
+      "block_time": "2026-06-02 01:29:05.000 UTC"
+    },
+    {
+      "selector": "0x238d6579",
+      "name": "supplyCollateral",
+      "tx_hash": "0xe54cc20143446ed697d7733df449e8e128c7d67dc7d693cba942e73293f4cdf3",
+      "block_time": "2026-06-02 02:06:49.000 UTC"
+    },
+    {
+      "selector": "0x50d8cd4b",
+      "name": "borrow",
+      "tx_hash": "0x2e3ba028eaa99bbb9659534934350d4378d94f0d19414f01b91984c59c98ed47",
+      "block_time": "2026-06-02 02:08:43.000 UTC"
+    },
+    {
+      "selector": "0x5c2bea49",
+      "name": "withdraw",
+      "tx_hash": "0xad818ef05c250f0d166abe44ce843f3f5bcdd63b5bfcf884257ee35d82b24b43",
+      "block_time": "2026-06-02 02:05:13.000 UTC"
+    },
+    {
+      "selector": "0x8720316d",
+      "name": "withdrawCollateral",
+      "tx_hash": "0x2c037a78a0d50a229da552567265235b86c5a70a0dc71f47c30d1fdc3a358ba0",
+      "block_time": "2026-06-02 01:58:49.000 UTC"
+    },
+    {
+      "selector": "0xa99aad89",
+      "name": "supply",
+      "tx_hash": "0x7cd2dd9a9c0318705b5610a0d6ff5fe51d525b0ad8e31a0d502ffcbd26747c69",
+      "block_time": "2026-06-01 22:11:41.000 UTC"
+    },
+    {
+      "selector": "0xeecea000",
+      "name": "setAuthorization",
+      "tx_hash": "0x335029a44e4476bf3ebb0717ccdb96d65b7026f58d8f01bd42611f49fa6de194",
+      "block_time": "2026-06-02 02:06:55.000 UTC"
+    }
+  ],
+  "calibration_query": {
+    "query_id": 7630558,
+    "execution_id": "01KT1WB5102VX8J76P5735YTHK",
+    "execution_cost_credits": 0.23,
+    "rows_returned": 14
+  },
+  "limitations": [
+    "Etherscan V2 rejected Base account txlist on the free API plan, so Base direct-call evidence comes from Dune.",
+    "Only direct top-level singleton calls were considered corpus-suitable; router/aggregator top-level transactions from decoded call tables were not imported into the direct-call corpus."
+  ]
+}
