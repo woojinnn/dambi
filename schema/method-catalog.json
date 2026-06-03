@@ -2741,6 +2741,10 @@
           "untrustedZone": {
             "type": "Bool",
             "from": "$.result.untrustedZone"
+          },
+          "considerationNearZero": {
+            "type": "Bool",
+            "from": "$.result.considerationNearZero"
           }
         }
       },
@@ -3045,6 +3049,162 @@
         "from": "$.result.isInterestBearing"
       },
       "origin": "bundled"
+    },
+    "permit.full_balance_unknown_spender": {
+      "name": "permit.full_balance_unknown_spender",
+      "status": "planned",
+      "server": "sim-server",
+      "readKind": "state",
+      "description": "(policy-factory adopted) permit2-unknown-spender-full-balance-warn",
+      "stateDependency": "Reads wallet state: (1) token_holdings balance for the owner+token to form the full-balance ratio denominator; (2) interaction/approval history (and/or user allowlist) for the owner to decide spender familiarity. No new state surface required — both reads exist conceptually in the simulation-state holdings + approval history; this method composes them. If approval/interaction history is not yet materialized in sim-server, spenderIsKnown degrades to allowlist-only until that read lands (call stays optional → fail-open).",
+      "params": {
+        "chain_id": "Long — EVM chain id (from $.root.chain_id)",
+        "owner": "String — connected wallet address (from $.root.from)",
+        "token": "TokenRef — token whose permit is being signed (from $.action.token)",
+        "amount": "String — raw U256 hex permit allowance amount (from $.action.amount)",
+        "spender": "String — address authorized to spend (from $.action.spender)"
+      },
+      "returns": {
+        "fullBalancePct": "decimal — permit `amount` / wallet's current balance of `token` × 100, 4dp dotted. Saturates at a large value when amount is U256::MAX / unlimited so the >90 branch fires. Mirrors precedent token.outflow_pct_of_holding.",
+        "spenderIsKnown": "bool — true iff `spender` is an address the wallet has previously approved/interacted with or that sits on the user's known-good/allowlist; false for first-seen / unfamiliar spenders."
+      },
+      "origin": "policy-factory"
+    },
+    "order.recipient_lookalike_history": {
+      "name": "order.recipient_lookalike_history",
+      "status": "planned",
+      "server": "sim-server",
+      "readKind": "wallet-send-history",
+      "description": "(policy-factory adopted) transfer-recipient-lookalike-poisoning-deny",
+      "stateDependency": "Reads the wallet's prior-recipient set (send history) maintained by the Aggregator/sim-server. The look-alike comparison (configurable prefix/suffix length, e.g. first 4 + last 4 hex chars match, middle mismatch) is performed entirely server-side; only a scalar Bool is projected into Cedar context. No send-history state is introduced into the stateless policy-engine layer — consistent with order.swap_count_24h and intent.near_duplicate_pending. Distinct from external.address_blocklisted: the comparison set is the wallet's OWN private history, not a public registry, hence needs-method (sim-server) rather than needs-external.",
+      "params": {
+        "chain_id": "String — CAIP-2 chain id from $.root.chain_id",
+        "owner": "String — sending wallet (EOA) from $.root.from",
+        "recipient": "String — candidate destination address (Erc20Transfer.recipient)"
+      },
+      "returns": {
+        "lookalike": "Bool — true iff `recipient` matches a prior recipient on prefix AND suffix but differs in the middle, AND `recipient` itself has never been a recipient of `owner` before (a seeded doppelgänger). false otherwise (including when send-history is empty)."
+      },
+      "origin": "policy-factory"
+    },
+    "external.recipient_first_seen": {
+      "name": "external.recipient_first_seen",
+      "status": "planned",
+      "server": "external",
+      "readKind": "external",
+      "description": "Returns whether `from` has ever previously sent funds to / interacted with `recipient` on `chain_id`. Host reads the wallet's on-chain counterparty history (explorer / tx index) outside the stateless ",
+      "stateDependency": "external-history (wallet on-chain counterparty history). No new in-engine Cedar state surface; engine stays stateless and reads only the Bool. Mirrors external.address_blocklisted host-lookup pattern.",
+      "params": {
+        "chain_id": "String — CAIP-2 / numeric chain id of the transfer (from $.root.chain_id)",
+        "from": "String — the sending wallet address (from $.root.from)",
+        "recipient": "String — the ERC20 transfer recipient (from $.action.recipient)"
+      },
+      "returns": {
+        "first_time": "Bool — true iff `from` has no prior outbound transfer/interaction to `recipient` on `chain_id`. Projected into context.custom.firstTimeRecipient."
+      },
+      "origin": "policy-factory"
+    },
+    "valuation.native_reserve_after": {
+      "name": "valuation.native_reserve_after",
+      "status": "planned",
+      "server": "sim-server",
+      "readKind": "state-reducer",
+      "description": "(policy-factory adopted) swap-native-gas-starvation-warn: would this action leave native gas balance below a reserve floor? Reads WalletState native holding + gas/spend; State2/reducer family (cf. position.health_factor_after).",
+      "stateDependency": "Reads ONLY the real WalletState native gas holding (TokenHolding.kind==NativeGas; TokenHolding.balance U256) plus action gas_estimate and conditional native spend_amount. Host does the U256 subtract+floor compare; Cedar reads one projected Bool. No new Cedar state surface. optional => fail-open until sim-server serves it.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id",
+          "description": "numeric chain id"
+        },
+        "owner": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.root.from",
+          "description": "acting wallet"
+        },
+        "gas_estimate": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.gasEstimate",
+          "description": "U256 hex gas cost of this action"
+        },
+        "spend_asset": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.tokenIn",
+          "description": "token being sold; decides if spend debits native"
+        },
+        "spend_amount": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.direction.amountIn",
+          "description": "U256 hex amount sold (exact_input)"
+        }
+      },
+      "returns": {
+        "kind": "scalar",
+        "type": "Bool",
+        "from": "$.result.reserveBelowFloor"
+      },
+      "origin": "policy-factory"
+    },
+    "external.spender_reputation": {
+      "name": "external.spender_reputation",
+      "status": "planned",
+      "server": "external",
+      "readKind": "external",
+      "description": "(policy-factory adopted) approve-spender-unknown-contract-warn: spender HAS code (contract via eth_getCode) AND not in a known-good/allowlist registry. Complement of external.spender_is_eoa (which fires on EOA spenders).",
+      "stateDependency": "external reputation/allowlist feed + eth_getCode codehash probe; NOT wallet-state DB. Cedar reads only the Bool. optional => fail-open.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id",
+          "description": "chain the approve settles on"
+        },
+        "address": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.spender",
+          "description": "erc20_approve spender"
+        }
+      },
+      "returns": {
+        "kind": "scalar",
+        "type": "Bool",
+        "from": "$.result.unknownContract"
+      },
+      "origin": "policy-factory"
+    },
+    "external.token_symbol_canonical_mismatch": {
+      "name": "external.token_symbol_canonical_mismatch",
+      "status": "planned",
+      "server": "external",
+      "readKind": "external",
+      "description": "(policy-factory adopted) swap-out-token-symbol-spoof-warn: tokenOut's symbol resolves to a known canonical coin whose official contract != tokenOut's address (ticker impersonation at a non-official contract). Inverse of token.swap_out_classification's 'unclassified'.",
+      "stateDependency": "external symbol->canonical-address registry (curated well-known tickers->official contract per chain); external reference data, NOT per-wallet state. optional => fail-open.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id",
+          "description": "chain the swap settles on"
+        },
+        "asset": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.tokenOut",
+          "description": "token being bought; symbol resolved host-side from address"
+        }
+      },
+      "returns": {
+        "kind": "scalar",
+        "type": "Bool",
+        "from": "$.result.symbol_spoof"
+      },
+      "origin": "policy-factory"
     }
   }
 }

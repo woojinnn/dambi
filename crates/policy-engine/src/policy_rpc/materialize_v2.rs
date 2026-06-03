@@ -531,7 +531,7 @@ mod tests {
     // injects a MOCK rpc result, materializes it into context.custom, then
     // evaluates the shipped `unlimited-approval-deny` policy (`@severity("deny")`
     // → Verdict::Fail). Mirrors the swap end-to-end above and the shipped
-    // fixture at tests/fixtures/default_policies_v2/unlimited-approval-deny.
+    // fixture at tests/fixtures/default_policies_v2/phase1/unlimited-approval-deny.
     // ---------------------------------------------------------------------
 
     /// The GEN-01 deny manifest, identical to the shipped fixture.

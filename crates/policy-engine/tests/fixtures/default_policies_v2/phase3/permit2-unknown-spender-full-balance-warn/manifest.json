@@ -1,0 +1,39 @@
+{
+  "id": "permit2-unknown-spender-full-balance-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "erc20_permit" } } },
+  "policy_rpc": [
+    {
+      "id": "permit-full-balance-unknown-spender",
+      "method": "permit.full_balance_unknown_spender",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "token": "$.action.token",
+        "amount": "$.action.amount",
+        "spender": "$.action.spender"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "permitFullBalancePct",
+          "type": "Decimal",
+          "from": "$.result.fullBalancePct"
+        },
+        {
+          "kind": "context",
+          "field": "spenderIsKnown",
+          "type": "Bool",
+          "from": "$.result.spenderIsKnown"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "permitFullBalancePct": "decimal",
+      "spenderIsKnown": "Bool"
+    }
+  }
+}

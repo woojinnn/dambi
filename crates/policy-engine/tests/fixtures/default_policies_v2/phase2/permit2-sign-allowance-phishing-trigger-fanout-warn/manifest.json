@@ -1,0 +1,57 @@
+{
+  "id": "permit2-sign-allowance-phishing-trigger-fanout-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "permit2_sign_allowance" } } },
+  "policy_rpc": [
+    {
+      "id": "chain-mismatch",
+      "method": "signature.chain_mismatch",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "domain_chain_id": "$.action.meta.nature.domain.chainId"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "chainMismatch",
+          "type": "Bool",
+          "from": "$.result.mismatch"
+        }
+      ],
+      "optional": true
+    },
+    {
+      "id": "permit-full-balance-unknown-spender",
+      "method": "permit.full_balance_unknown_spender",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "token": "$.action.token",
+        "amount": "$.action.amount",
+        "spender": "$.action.spender"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "permitFullBalancePct",
+          "type": "Decimal",
+          "from": "$.result.fullBalancePct"
+        },
+        {
+          "kind": "context",
+          "field": "spenderIsKnown",
+          "type": "Bool",
+          "from": "$.result.spenderIsKnown"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": {
+    "fields": {
+      "chainMismatch": "Bool",
+      "permitFullBalancePct": "decimal",
+      "spenderIsKnown": "Bool"
+    }
+  }
+}

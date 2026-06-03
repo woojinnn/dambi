@@ -70,18 +70,39 @@ function copyDefaultPoliciesV2() {
     return;
   }
 
-  const ids = fs
-    .readdirSync(v2Dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort(); // deterministic order so the asset hashes stably across builds
+  // A dir is a BUNDLE iff it directly holds a manifest.json; any other dir
+  // (`phaseN/`, `phase1/A/`, …) is a grouping dir, recursed at ANY depth.
+  // Supports flat `<v2Dir>/<id>/`, phased `<v2Dir>/<phaseN>/<id>/`, and nested
+  // `<v2Dir>/<phaseN>/<sub>/<id>/` layouts alike. The emitted `id` is always the
+  // bundle (policy) dir name, so the shipped asset stays a FLAT
+  // `{id, policy, manifest}[]` regardless of nesting.
+  function collectBundles(root) {
+    const out = [];
+    function walk(dir) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const full = path.join(dir, entry.name);
+        if (fs.existsSync(path.join(full, "manifest.json"))) {
+          out.push({ id: entry.name, dir: full });
+        } else {
+          walk(full);
+        }
+      }
+    }
+    walk(root);
+    return out;
+  }
 
-  const set = ids.map((id) => ({
+  // Sort by id with plain string comparison (matches the previous `.sort()` on
+  // dir names) so the asset hashes stably across builds.
+  const bundles = collectBundles(v2Dir).sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
+
+  const set = bundles.map(({ id, dir }) => ({
     id,
-    policy: fs.readFileSync(path.join(v2Dir, id, "policy.cedar"), "utf8"),
-    manifest: JSON.parse(
-      fs.readFileSync(path.join(v2Dir, id, "manifest.json"), "utf8"),
-    ),
+    policy: fs.readFileSync(path.join(dir, "policy.cedar"), "utf8"),
+    manifest: JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")),
   }));
 
   fs.writeFileSync(destPath, JSON.stringify(set, null, 2));

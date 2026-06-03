@@ -1,0 +1,25 @@
+{
+  "id": "swap-out-token-symbol-spoof-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "swap" } } },
+  "policy_rpc": [
+    {
+      "id": "out-token-symbol-canonical-mismatch",
+      "method": "external.token_symbol_canonical_mismatch",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "asset": "$.action.tokenOut"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "outTokenSymbolSpoof",
+          "type": "Bool",
+          "from": "$.result.symbol_spoof"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "outTokenSymbolSpoof": "Bool" } }
+}

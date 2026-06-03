@@ -25,6 +25,32 @@ fn default_policies_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/default_policies_v2")
 }
 
+/// Collect every policy bundle dir under `root`, at ANY nesting depth. A
+/// directory is a bundle iff it directly contains a `manifest.json`; any other
+/// directory (`phaseN/`, `phase1/A/`, …) is a grouping dir and is recursed
+/// into. Supports the flat `<root>/<id>/`, phased `<root>/<phaseN>/<id>/`, and
+/// nested `<root>/<phaseN>/<sub>/<id>/` layouts alike. Non-dir entries
+/// (e.g. `.DS_Store`) are skipped.
+fn collect_bundles(root: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).expect("read default_policies_v2 fixture dir") {
+            let entry = entry.expect("dir entry");
+            if !entry.file_type().expect("file type").is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            if path.join("manifest.json").is_file() {
+                out.push(path); // a bundle dir — do not descend into it
+            } else {
+                walk(&path, out); // a grouping dir (phaseN, A/B, …) — recurse
+            }
+        }
+    }
+    let mut bundles = Vec::new();
+    walk(root, &mut bundles);
+    bundles
+}
+
 /// Every shipped default v2 bundle is internally consistent: the manifest
 /// parses + validates, its id matches the on-disk directory, and the policy
 /// compiles against the schema the manifest synthesizes.
@@ -33,12 +59,7 @@ fn default_v2_bundles_are_internally_consistent() {
     let dir = default_policies_dir();
     let mut checked = 0;
 
-    for entry in fs::read_dir(&dir).expect("read default_policies_v2 fixture dir") {
-        let entry = entry.expect("dir entry");
-        if !entry.file_type().expect("file type").is_dir() {
-            continue;
-        }
-        let bundle = entry.path();
+    for bundle in collect_bundles(&dir) {
         let id = bundle
             .file_name()
             .expect("bundle dir name")

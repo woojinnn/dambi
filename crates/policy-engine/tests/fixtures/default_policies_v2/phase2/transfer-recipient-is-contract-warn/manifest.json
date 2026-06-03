@@ -1,0 +1,25 @@
+{
+  "id": "transfer-recipient-is-contract-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "erc20_transfer" } } },
+  "policy_rpc": [
+    {
+      "id": "recipient-is-contract",
+      "method": "external.recipient_is_contract",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "address": "$.action.recipient"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "recipientIsContract",
+          "type": "Bool",
+          "from": "$.result.isContract"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "recipientIsContract": "Bool" } }
+}

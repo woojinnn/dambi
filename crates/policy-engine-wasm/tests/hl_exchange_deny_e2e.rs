@@ -97,13 +97,36 @@ fn run(action: Value, bundles: Value) -> Value {
 /// Read a shipped seed bundle (`policy.cedar` + `manifest.json`) verbatim — the
 /// SAME artifact `copy-default-policies.js` ships into the extension.
 fn seed_bundle(id: &str) -> Value {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("policy-engine")
         .join("tests")
         .join("fixtures")
-        .join("default_policies_v2")
-        .join(id);
+        .join("default_policies_v2");
+    // Resolve `<id>` at ANY nesting depth (flat `<root>/<id>`, phased
+    // `<root>/<phaseN>/<id>`, or nested `<root>/<phaseN>/<sub>/<id>`): walk for
+    // the dir named `<id>` that directly holds a manifest.json.
+    fn find(dir: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
+        for entry in std::fs::read_dir(dir)
+            .expect("read default_policies_v2 fixture dir")
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path();
+            if path.join("manifest.json").is_file() {
+                if path.file_name().map(|n| n == id).unwrap_or(false) {
+                    return Some(path);
+                }
+            } else if let Some(found) = find(&path, id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    let dir = find(&root, id)
+        .unwrap_or_else(|| panic!("seed bundle `{id}` not found under default_policies_v2"));
     let policy = std::fs::read_to_string(dir.join("policy.cedar")).expect("read seed policy.cedar");
     let manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
