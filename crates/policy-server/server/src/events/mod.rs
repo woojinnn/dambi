@@ -6,11 +6,13 @@
 //!   per-client SSE response.
 
 pub mod bus;
+pub mod notify;
 pub mod pubsub;
 pub mod sse;
 pub mod types;
 
 pub use bus::EventBus;
+pub use notify::publish_tick_events;
 pub use pubsub::{
     spawn_redis_event_forwarder, EventPublisher, LocalEventPublisher, RedisEventPublisher,
 };
