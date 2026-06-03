@@ -471,7 +471,7 @@
       }
     },
     {
-      "intent": "swap ETH->token (native srcToken sentinel) \u2014 1inch v6; ETH modeled as 0xEeee\u2026 sentinel erc20 TokenRef (documented edge)",
+      "intent": "swap ETH->token (native srcToken sentinel) \u2014 1inch v6; ETH modeled as 0xEeee\u2026 sentinel -> TokenKey::Native via the token_key_or_native $fn (P4 follow-up)",
       "expect": "pass",
       "expect_domain": "amm",
       "expect_body": [
@@ -486,9 +486,9 @@
           "value": "aggregator_route"
         },
         {
-          "path": "$.data.actions[0].body.params.token_in.key.address",
-          "op": "hex_eq",
-          "value": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          "path": "$.data.actions[0].body.params.token_in.key.standard",
+          "op": "equals",
+          "value": "native"
         },
         {
           "path": "$.data.actions[0].body.params.token_out.key.address",
@@ -524,7 +524,7 @@
       }
     },
     {
-      "intent": "swap token->ETH (native dstToken sentinel) \u2014 1inch v6; ETH modeled as 0xEeee\u2026 sentinel erc20 TokenRef (documented edge)",
+      "intent": "swap token->ETH (native dstToken sentinel) \u2014 1inch v6; ETH modeled as 0xEeee\u2026 sentinel -> TokenKey::Native via the token_key_or_native $fn (P4 follow-up)",
       "expect": "pass",
       "expect_domain": "amm",
       "expect_body": [
@@ -544,9 +544,9 @@
           "value": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
         },
         {
-          "path": "$.data.actions[0].body.params.token_out.key.address",
-          "op": "hex_eq",
-          "value": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          "path": "$.data.actions[0].body.params.token_out.key.standard",
+          "op": "equals",
+          "value": "native"
         },
         {
           "path": "$.data.actions[0].body.params.direction.amount_in",

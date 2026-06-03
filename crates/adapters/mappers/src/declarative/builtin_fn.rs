@@ -33,6 +33,7 @@ pub const WHITELIST: &[&str] = &[
     "address_from_uint256",
     "maker_traits_expiry",
     "coalesce_address",
+    "token_key_or_native",
     "uniswap_v3_pool_swap_field",
     "uniswapx_reactor_order_field",
 ];
@@ -50,6 +51,7 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "address_from_uint256" => address_from_uint256(args),
         "maker_traits_expiry" => maker_traits_expiry(args),
         "coalesce_address" => coalesce_address(args),
+        "token_key_or_native" => token_key_or_native(args),
         "uniswap_v3_pool_swap_field" => uniswap_v3_pool_swap_field(args),
         "uniswapx_reactor_order_field" => uniswapx_reactor_order_field(args),
         _ => Err(format!(
@@ -227,6 +229,44 @@ fn coalesce_address(args: &[JsonValue]) -> Result<JsonValue, String> {
         addr
     };
     Ok(JsonValue::String(format!("{chosen:#x}")))
+}
+
+/// `token_key_or_native(address, chain) -> TokenKey` — build a token `key` object,
+/// mapping the 1inch native-asset sentinel (`0xEeeeeEee...EEeEeEEe`) to a
+/// `TokenKey::Native { chain }` and any other address to
+/// `TokenKey::Erc20 { chain, address }`. Lets a swap whose token_in/token_out is
+/// native ETH decode to the native key (which a "limit native spend" policy keys
+/// on) instead of the opaque sentinel address. Returns the `key` object verbatim
+/// (the only `$fn` that returns a JSON object, not a scalar).
+fn token_key_or_native(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "token_key_or_native expects 2 args (address, chain), got {}",
+            args.len()
+        ));
+    }
+    let address = json_address(&args[0], "token_key_or_native: address")?;
+    let chain = args[1]
+        .as_str()
+        .ok_or("token_key_or_native: chain arg is not a string")?;
+    // 1inch (and most aggregators) use this sentinel for the native gas asset.
+    const NATIVE_SENTINEL: &str = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    let mut key = serde_json::Map::new();
+    if format!("{address:#x}") == NATIVE_SENTINEL {
+        key.insert(
+            "standard".to_owned(),
+            JsonValue::String("native".to_owned()),
+        );
+        key.insert("chain".to_owned(), JsonValue::String(chain.to_owned()));
+    } else {
+        key.insert("standard".to_owned(), JsonValue::String("erc20".to_owned()));
+        key.insert("chain".to_owned(), JsonValue::String(chain.to_owned()));
+        key.insert(
+            "address".to_owned(),
+            JsonValue::String(format!("{address:#x}")),
+        );
+    }
+    Ok(JsonValue::Object(key))
 }
 
 /// `uniswap_v3_pool_swap_field(amountSpecified, zeroForOne, token0, token1, field)`.
@@ -915,6 +955,33 @@ mod tests {
         // wrong arity + non-address error out.
         assert!(coalesce_address(&[json!(a)]).is_err());
         assert!(coalesce_address(&[json!("nope"), json!(b)]).is_err());
+    }
+
+    #[test]
+    fn token_key_or_native_maps_sentinel_to_native_else_erc20() {
+        let chain = "eip155:1";
+        // Native sentinel -> native key (no address).
+        let native = token_key_or_native(&[
+            json!("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+            json!(chain),
+        ])
+        .unwrap();
+        assert_eq!(native["standard"], json!("native"));
+        assert_eq!(native["chain"], json!(chain));
+        assert!(native.get("address").is_none());
+        // A real ERC-20 -> erc20 key with the lowercase address.
+        let erc20 = token_key_or_native(&[
+            json!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+            json!(chain),
+        ])
+        .unwrap();
+        assert_eq!(erc20["standard"], json!("erc20"));
+        assert_eq!(
+            erc20["address"],
+            json!("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+        );
+        // arity + bad address error out.
+        assert!(token_key_or_native(&[json!("0x0")]).is_err());
     }
 
     #[test]

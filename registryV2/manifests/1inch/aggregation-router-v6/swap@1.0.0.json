@@ -56,17 +56,17 @@
           },
           "params": {
             "token_in": {
-              "key": { "standard": "erc20", "chain": "$chain", "address": "$args.desc[0]" }
+              "key": { "$fn": "token_key_or_native", "$args": ["$args.desc[0]", "$chain"] }
             },
             "token_out": {
-              "key": { "standard": "erc20", "chain": "$chain", "address": "$args.desc[1]" }
+              "key": { "$fn": "token_key_or_native", "$args": ["$args.desc[1]", "$chain"] }
             },
             "direction": {
               "kind": "exact_input",
               "amount_in": "$args.desc[4]",
               "min_amount_out": "$args.desc[5]"
             },
-            "recipient": "$args.desc[3]",
+            "recipient": { "$fn": "coalesce_address", "$args": ["$args.desc[3]", "$tx.from"] },
             "slippage_bp": 0
           },
           "live_inputs": {

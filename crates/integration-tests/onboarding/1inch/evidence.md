@@ -201,6 +201,21 @@
 | gates (Round 4) | done | 1inch corpus **16/16** (executor pinned); full corpus **350/350** (no regression); `cargo test --workspace --exclude policy-engine-integration-tests` **0 failed** (7 construction sites compile + `swap_venue_aggregator_route_conforms` with `executor: Some` validates against the Cedar `executor?` field); `check:manifest` **1486 OK**; `cargo fmt` + `cargo clippy --workspace --all-targets -- -D warnings` clean; `./scripts/wasm-build.sh` OK. |
 | note | done | Defense-in-depth: the swap's fund-safety is already bounded by `minReturnAmount`/`dstReceiver`; the executor slot adds an explicit, statically-decodable handle for executor-allowlist policies. The dormant enrichment `AggregatorMeta.executor` (live route metadata) is a separate, platform-dependent concern (Track 2). |
 
+## Follow-up Round 4 — native-sentinel + dstReceiver edges (P4, 2026-06-03)
+
+> Two swap-decode edge refinements: (1) the native-asset sentinel (`0xEeee…EEeE`) now decodes
+> to `TokenKey::Native` instead of an erc20-with-sentinel key, so a "limit native ETH spend"
+> policy keys on Native; (2) `dstReceiver == 0` (the router sends output to msg.sender) now
+> resolves the recipient to the sender instead of emitting `0x0`.
+
+| item | status | artifact / summary |
+|---|---|---|
+| new `$fn` `token_key_or_native(address, chain)` | done | `crates/adapters/mappers/src/declarative/builtin_fn.rs` — maps the 1inch native sentinel (`0xeeee…eeee`) to `TokenKey::Native { chain }`, any other address to `TokenKey::Erc20 { chain, address }`. The only `$fn` that returns a JSON OBJECT (the token `key`), not a scalar. + unit test (`mappers` builtin_fn **15/15**). |
+| swap manifest | done | `swap@1.0.0.json`: `token_in`/`token_out` keys are now `{"$fn":"token_key_or_native","$args":["$args.desc[0\|1]","$chain"]}` (native-aware); `recipient` is now `{"$fn":"coalesce_address","$args":["$args.desc[3]","$tx.from"]}` (reuses the P1 `coalesce_address` $fn — `dstReceiver==0` resolves to msg.sender). |
+| corpus | done | the 2 native swap entries now pin `token_in\|out.key.standard == "native"` (was the sentinel address); the 8 ERC-20 entries (non-sentinel) still pin `key.address` (erc20). recipient pins unchanged (real dstReceiver non-zero → coalesce returns it). |
+| gates (Round 5) | done | 1inch corpus **16/16** (15/15 pinned, incl. both native entries → Native); full corpus **350/350** (no regression — non-1inch swap manifests unaffected); `cargo test --workspace --exclude policy-engine-integration-tests` **0 failed**; `check:manifest` **1486 OK**; `cargo fmt` + `cargo clippy -p mappers --all-targets -- -D warnings` clean; `./scripts/wasm-build.sh` OK. |
+| scope note | done | Applied to the dominant `swap` path (where native ETH is common). Clipper keeps the erc20 key (native-via-Clipper ≈ 0% of an already ~0% surface; would need a nested `token_key_or_native(address_from_uint256(...))` — a documented minor edge, not wired this round). |
+
 Verify:
 
 ```bash
