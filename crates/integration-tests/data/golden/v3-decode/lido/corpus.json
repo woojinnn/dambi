@@ -188,6 +188,16 @@
           "path": "$.data.actions[0].body.owner",
           "op": "hex_eq",
           "value": "0xcc9eb059623ca6687897c40e55c5b5b5a09f73f8"
+        },
+        {
+          "path": "$.data.actions[0].body.embedded_permit.value",
+          "op": "u256_hex_eq",
+          "value": "0x7edf11bda615641b"
+        },
+        {
+          "path": "$.data.actions[0].body.embedded_permit.deadline",
+          "op": "u256_hex_eq",
+          "value": "0x6a1cf28f"
         }
       ]
     },
@@ -231,6 +241,16 @@
           "path": "$.data.actions[0].body.owner",
           "op": "hex_eq",
           "value": "0xc7f9e94843c24b847695c04b2e556a66ddcd44de"
+        },
+        {
+          "path": "$.data.actions[0].body.embedded_permit.value",
+          "op": "u256_hex_eq",
+          "value": "0x1a0556e39bff311eb"
+        },
+        {
+          "path": "$.data.actions[0].body.embedded_permit.deadline",
+          "op": "u256_hex_eq",
+          "value": "0x6a1cd737"
         }
       ]
     },

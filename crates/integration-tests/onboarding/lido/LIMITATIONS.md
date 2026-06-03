@@ -51,8 +51,36 @@
 - **Files:** `crates/policy-engine-wasm/src/declarative_exports.rs`, `registryV2/scripts/build-index.ts`, `registryV2/manifests/lido/{steth,wsteth}/`, `data/golden/v3-decode/lido/corpus.json`.
 - **Gate:** a real bare-ETH-to-stETH and bare-ETH-to-wstETH tx in the corpus decodes to `liquid_staking.stake` (not warn); `check:surface` still PASS (the sentinel isn't an ABI selector — confirm it doesn't break I1); `--require-expect-body` pins the value.
 
-### L2 — `*WithPermit` embedded allowance grant is not surfaced  [MEDIUM]
-- **What:** `requestWithdrawalsWithPermit` / `requestWithdrawalsWstETHWithPermit` carry an in-calldata EIP-2612 permit `(value, deadline, v, r, s)` that grants the WithdrawalQueue an allowance over the user's stETH/wstETH. The current body emits only `request_withdrawal{amounts, owner, token}` and **drops** the permit's `value`/`deadline`.
+### L2 — `*WithPermit` embedded allowance grant  ✅ RESOLVED (was MEDIUM)
+> **Resolution (this run, axis-2 ActionBody extension):**
+> - **ActionBody:** new `EmbeddedPermit { value, deadline }` struct + optional
+>   `embedded_permit: Option<EmbeddedPermit>` on `RequestWithdrawalAction`
+>   (`action/src/liquid_staking/request_withdrawal.rs`). `#[serde(default,
+>   skip_serializing_if)]` → absent for the non-permit variants. The signature
+>   (`v,r,s`) stays decode-only.
+> - **Cedar:** `LiquidStaking::EmbeddedPermit` type + optional `embedded_permit?`
+>   attribute on `RequestWithdrawalContext` (`request_withdrawal.cedarschema`);
+>   lowering inserts it when present (`lowering_v2/.../request_withdrawal.rs`). New
+>   `request_withdrawal_with_permit_conforms` conformance test.
+> - **Manifests:** the 2 `*WithPermit` manifests emit `embedded_permit` from the
+>   decoded permit tuple. **Decode gotcha caught:** calldata tuples decode to a
+>   **positional array**, so the path is `$args._permit[0]` (value) /
+>   `$args._permit[1]` (deadline) — NOT named `.value`/`.deadline` (named access
+>   only works for typed-data, not calldata; validate flagged it).
+> - **Corpus:** the 2 `*WithPermit` entries pin `embedded_permit.value` +
+>   `.deadline`, independently verified against the real calldata.
+>
+> **Gates green:** `cargo test --workspace` 1378/0 (incl. the new conformance test);
+> `validate --filter lido` 12 OK; `corpus --filter lido --require-expect-body`
+> 11/11; check:surface/manifest/tokens PASS; wasm-build + tsc clean; extension
+> vitest 394/0; changed-crate clippy/fmt clean.
+>
+> **Note:** the queue (spender) is implicit — it is the `to` contract itself, so no
+> spender field is needed; the `value`/`deadline` are the policy-relevant fields.
+>
+> ---
+>
+> - **What:** `requestWithdrawalsWithPermit` / `requestWithdrawalsWstETHWithPermit` carry an in-calldata EIP-2612 permit `(value, deadline, v, r, s)` that grants the WithdrawalQueue an allowance over the user's stETH/wstETH. The current body emits only `request_withdrawal{amounts, owner, token}` and **drops** the permit's `value`/`deadline`.
 - **Why it matters:** ScopeBall is a *permission*-scope analyzer; an embedded allowance grant is on-mission to surface. Currently invisible.
 - **Materiality:** bounded — `spender` is the queue contract itself (self-contained), and the withdrawal `amounts` (the economic intent) ARE surfaced. So low risk, but a real modeling omission.
 - **Approach:** axis-2 Tier-3 extension — add an optional `embedded_permit: { value, deadline }` (spender is implicit = the queue) to `RequestWithdrawalAction` (`crates/policy-server/asset-model/action/src/liquid_staking/request_withdrawal.rs`). Then map it in the two `*WithPermit` manifests' `emit.body` (`$args._permit.value`, `$args._permit.deadline`). Requires the full Tier-3 downstream: effect/view/sync if needed, `lowering_v2/liquid_staking/request_withdrawal.rs`, cedarschema, conformance (`MissingAction`). Non-permit request variants leave the field absent.
