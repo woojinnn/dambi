@@ -2,14 +2,15 @@
   "type": "adapter_action",
   "id": "aave/aave-token/delegate@1.0.0",
   "publisher": "aave.eth",
-  "note": "AAVE governance delegate(address) \u2014 delegates BOTH voting + proposition power to delegatee. Maps to Airdrop::Delegate (power_type=voting_and_proposition). The airdrop domain already models ERC20Votes-style governance delegation, so NO new domain (\u00a70.1 action-model preflight). AaveTokenV3 0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9; selector keccak-verified. Also covers aAAVE 0xa700.. (same delegation surface; SCOPE ORACLE aAAVE delegate 2.5% > AAVE 0%).",
+  "note": "AAVE governance delegate(address) \u2014 delegates BOTH voting + proposition power to delegatee. Maps to Airdrop::Delegate (power_type=voting_and_proposition). The airdrop domain already models ERC20Votes-style governance delegation, so NO new domain (\u00a70.1 action-model preflight). AaveTokenV3 0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9; selector keccak-verified. Also covers aAAVE 0xa700.. and stkAAVE 0x4da2.. (same governance-delegation surface; delegate is a permission primitive \u2014 never excluded).",
   "schema_version": "3",
   "match": {
     "selector": "0x5c19a95c",
     "chain_to_addresses": {
       "1": [
         "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
-        "0xa700b4eb416be35b2911fd5dee80678ff64ff6c9"
+        "0xa700b4eb416be35b2911fd5dee80678ff64ff6c9",
+        "0x4da27a545c0c5b758a6ba100e3a049001de870f5"
       ]
     }
   },

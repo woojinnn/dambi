@@ -2,14 +2,15 @@
   "type": "adapter_action",
   "id": "aave/aave-token/delegate-by-type@1.0.0",
   "publisher": "aave.eth",
-  "note": "AAVE governance delegateByType(address,uint8) \u2014 delegates ONE governance power type (0=voting, 1=proposition). Maps to Airdrop::Delegate with power_type value-mapped from delegationType. AaveTokenV3 0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9; selector keccak-verified. Also covers aAAVE 0xa700.. (same delegation surface; SCOPE ORACLE aAAVE delegate 2.5% > AAVE 0%).",
+  "note": "AAVE governance delegateByType(address,uint8) \u2014 delegates ONE governance power type (0=voting, 1=proposition). Maps to Airdrop::Delegate with power_type value-mapped from delegationType. AaveTokenV3 0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9; selector keccak-verified. Also covers aAAVE 0xa700.. and stkAAVE 0x4da2.. (same governance-delegation surface; delegate is a permission primitive \u2014 never excluded).",
   "schema_version": "3",
   "match": {
     "selector": "0xdc937e1c",
     "chain_to_addresses": {
       "1": [
         "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
-        "0xa700b4eb416be35b2911fd5dee80678ff64ff6c9"
+        "0xa700b4eb416be35b2911fd5dee80678ff64ff6c9",
+        "0x4da27a545c0c5b758a6ba100e3a049001de870f5"
       ]
     }
   },

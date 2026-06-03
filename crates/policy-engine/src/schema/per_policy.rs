@@ -27,7 +27,8 @@ use policy_transition::action::ActionView;
 
 use super::{
     AIRDROP_CLAIM_SCHEMA, AIRDROP_DELEGATE_SCHEMA, AMM_ADD_LIQUIDITY_SCHEMA,
-    AMM_CANCEL_INTENT_ORDER_SCHEMA, AMM_COLLECT_FEES_SCHEMA, AMM_REMOVE_LIQUIDITY_SCHEMA,
+    AMM_CANCEL_INTENT_ORDER_SCHEMA, AMM_COLLECT_FEES_SCHEMA, AMM_GSM_SWAP_SCHEMA,
+    AMM_REMOVE_LIQUIDITY_SCHEMA,
     AMM_SETTLE_INTENT_ORDER_SCHEMA, AMM_SIGN_INTENT_ORDER_SCHEMA, AMM_SWAP_SCHEMA,
     CORE_MULTICALL_SCHEMA, CORE_SCHEMA, CORE_UNKNOWN_SCHEMA, HL_APPROVE_AGENT_SCHEMA,
     HL_APPROVE_BUILDER_FEE_SCHEMA, HL_C_DEPOSIT_SCHEMA, HL_C_WITHDRAW_SCHEMA, HL_ORDER_SCHEMA,
@@ -51,9 +52,10 @@ use super::{
     RESTAKING_COMPLETE_WITHDRAWAL_SCHEMA, RESTAKING_DELEGATE_TO_SCHEMA, RESTAKING_DEPOSIT_SCHEMA,
     RESTAKING_QUEUE_WITHDRAWAL_SCHEMA, RESTAKING_REDELEGATE_SCHEMA,
     RESTAKING_REGISTER_OPERATOR_SCHEMA, RESTAKING_UNDELEGATE_SCHEMA, STAKING_CLAIM_REWARDS_SCHEMA,
-    STAKING_GAUGE_DEPOSIT_SCHEMA, STAKING_GAUGE_WITHDRAW_SCHEMA,
+    STAKING_COOLDOWN_SCHEMA, STAKING_GAUGE_DEPOSIT_SCHEMA, STAKING_GAUGE_WITHDRAW_SCHEMA,
     STAKING_INCREASE_LOCK_AMOUNT_SCHEMA, STAKING_INCREASE_LOCK_TIME_SCHEMA, STAKING_LOCK_SCHEMA,
-    STAKING_UNLOCK_SCHEMA, STAKING_VOTE_FOR_GAUGE_SCHEMA, TOKEN_ERC20_APPROVE_SCHEMA,
+    STAKING_REDEEM_SCHEMA, STAKING_STAKE_SCHEMA, STAKING_UNLOCK_SCHEMA,
+    STAKING_VOTE_FOR_GAUGE_SCHEMA, TOKEN_ERC20_APPROVE_SCHEMA,
     TOKEN_ERC20_PERMIT_SCHEMA, TOKEN_ERC20_TRANSFER_SCHEMA, TOKEN_NFT_APPROVE_SCHEMA,
     TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA, TOKEN_NFT_TRANSFER_SCHEMA, TOKEN_PERMIT2_APPROVE_SCHEMA,
     TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA, TOKEN_PERMIT2_SIGN_TRANSFER_SCHEMA,
@@ -141,6 +143,12 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
         action_tag: Some("collect_fees"),
         schema_text: AMM_COLLECT_FEES_SCHEMA,
         pascal_stub: "CollectFees",
+    },
+    ActionEntry {
+        domain: "amm",
+        action_tag: Some("gsm_swap"),
+        schema_text: AMM_GSM_SWAP_SCHEMA,
+        pascal_stub: "GsmSwap",
     },
     ActionEntry {
         domain: "amm",
@@ -535,6 +543,24 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
         action_tag: Some("vote_for_gauge"),
         schema_text: STAKING_VOTE_FOR_GAUGE_SCHEMA,
         pascal_stub: "VoteForGauge",
+    },
+    ActionEntry {
+        domain: "staking",
+        action_tag: Some("stake"),
+        schema_text: STAKING_STAKE_SCHEMA,
+        pascal_stub: "Stake",
+    },
+    ActionEntry {
+        domain: "staking",
+        action_tag: Some("cooldown"),
+        schema_text: STAKING_COOLDOWN_SCHEMA,
+        pascal_stub: "Cooldown",
+    },
+    ActionEntry {
+        domain: "staking",
+        action_tag: Some("redeem"),
+        schema_text: STAKING_REDEEM_SCHEMA,
+        pascal_stub: "Redeem",
     },
     // token
     ActionEntry {
@@ -1162,8 +1188,8 @@ mod tests {
         // Guards against a row being dropped or duplicated.
         assert_eq!(
             RESOLVER_TABLE.len(),
-            101,
-            "resolver table must have 101 rows"
+            105,
+            "resolver table must have 105 rows"
         );
     }
 
