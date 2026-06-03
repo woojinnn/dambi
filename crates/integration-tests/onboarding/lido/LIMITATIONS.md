@@ -168,9 +168,33 @@ Structural items remain accepted-by-design (not faked).** Not pushed/merged.
 
 ## Larger — real work, separate scope (get a user decision before starting)
 
-### L6 — enrichment live-inputs never materialize at runtime
-- wrap/unwrap/transferShares declare `onchain_view` live-inputs (getWstETHByStETH etc.), but the policy-RPC host that fetches them is **dormant framework-wide** (no configured endpoint; verdicts are 100% local WASM Cedar). So the user sees the input amount, never the converted output amount.
-- **Not a lido fix** — it's the whole `/v1/rpc` dormancy (see `reference_v2_enrichment_and_rpc_dormant`). Wiring it is a framework/infra task (woojinnn's policy-server). Document as framework-level; do not attempt under lido scope without a decision.
+### L6 — enrichment live-inputs never materialize at runtime  ⏳ (A) landed · (B) designed
+> **(A) Lido slice ✅ landed** (`03de73e3`): the 3 Lido `decoder_id`s
+> (`lido_wsteth_by_steth` / `lido_steth_by_wsteth` / `lido_pooled_eth_by_shares`)
+> are now registered in `DecoderRegistry::with_builtins()` (`sync/.../decoder.rs`,
+> aliasing `decode_u256_as_string`). Inert until the framework route exists, but
+> ready — zero added risk.
+>
+> **(B) Framework design ✅ written**: full design doc at
+> `crates/integration-tests/onboarding/lido/L6_ENRICHMENT_RPC_DESIGN.md` (route +
+> handler + AppState injection + config + **security threat model** + impl steps +
+> test plan + woojinnn coordination). **Key findings:** (1) the gap is a single
+> missing hop — a server-side `POST /v1/rpc` fetch+decode route (`app.rs` has none;
+> `/evaluate` stubs `results = {}`); (2) the v2 wire carries **no `to`/`data`** —
+> `method` is an opaque name, `params` structured JSON — so the server **cannot**
+> be a generic eth_call proxy and **must** whitelist-resolve each call against a
+> registry call-spec mirror (this is both the function and the load-bearing SSRF
+> control); (3) verdict-isolation is **not** structural — a policy that *gates* on a
+> `context.custom.*` enrichment field WILL flip on a wrong value (`materialize_v2.rs:449-526`),
+> so the whitelist is what keeps gating-consumed values trustworthy.
+>
+> **Still framework-wide + needs woojinnn (route tier/auth, middleware, config,
+> provider isolation) before implementation.** (B) is design-only; not started.
+>
+> ---
+>
+> - wrap/unwrap/transferShares declare `onchain_view` live-inputs (getWstETHByStETH etc.), but the policy-RPC host that fetches them is **dormant framework-wide** (no configured endpoint; verdicts are 100% local WASM Cedar). So the user sees the input amount, never the converted output amount.
+> - **Not a lido fix** — it's the whole `/v1/rpc` dormancy (see `reference_v2_enrichment_and_rpc_dormant`). Wiring it is a framework/infra task (woojinnn's policy-server).
 
 ### L7 — multichain (L2 wstETH) not covered
 - Only Ethereum mainnet. L2 wstETH (Arbitrum/OP/Base) + Lido-on-other-chains are deferred by the single-representative-chain rule. Onboarding them = a **separate framework run** per chain. Additive scope; user decides if/when.
