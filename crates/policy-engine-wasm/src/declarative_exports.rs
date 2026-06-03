@@ -17,7 +17,7 @@
 //! Wire shape (input/output) is documented inline next to each export.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use mappers::declarative::action_builder::{
     build_action_body, build_array_emit, substitute_placeholders,
@@ -129,6 +129,12 @@ struct DeclarativeV3State {
     /// empty. [`declarative_route_typed_data_v3_json`] resolves a wallet
     /// `eth_signTypedData` payload through it.
     typed_data_bridge: HashMap<TypedDataBridgeKey, String>,
+    /// Callkeys an install tried to bind to a DIFFERENT `bundle_id` than the one
+    /// already present. After the registry trims each served bundle's match to
+    /// its own callkey (build-index) this is unreachable, but it is the runtime
+    /// backstop (N1): a future content collision cannot silently mis-route — a
+    /// conflicted key's route returns `callkey_conflict` → warn-closed.
+    conflicted: HashSet<BridgeKey>,
 }
 
 thread_local! {
@@ -246,7 +252,20 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                     to: to.to_ascii_lowercase(),
                     selector: selector.clone(),
                 };
-                state.bridge.entry(key).or_insert_with(|| bundle_id.clone());
+                match state.bridge.get(&key).cloned() {
+                    // N1 runtime guard: a DIFFERENT bundle already owns this
+                    // callkey. The old `or_insert_with` silently kept the first,
+                    // letting an attacker pin a canonical address to a subset
+                    // bundle by installing it first. Mark it conflicted instead.
+                    Some(existing) if existing != bundle_id => {
+                        state.conflicted.insert(key);
+                    }
+                    // Same bundle re-installing — idempotent no-op.
+                    Some(_) => {}
+                    None => {
+                        state.bridge.insert(key, bundle_id.clone());
+                    }
+                }
             }
             if let Some((ref vc, ref pt, ref wt)) = typed_data_route {
                 for (chain_id, _to) in bundle_match.entries() {
@@ -411,6 +430,19 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             to: input.to.to_ascii_lowercase(),
             selector: lookup_selector.clone(),
         };
+
+        // N1 runtime guard: a callkey claimed by two different bundles at install
+        // is refused here rather than mis-routed to whichever installed first. S4
+        // buckets this EngineError as a fault → warn-closed.
+        if DECLARATIVE_V3_STATE.with(|state| state.borrow().conflicted.contains(&key)) {
+            return Err(EngineErrorDto::new(
+                "callkey_conflict",
+                format!(
+                    "callkey conflict for chain_id={} to={} selector={lookup_selector} — refusing to mis-route to a non-authoritative bundle",
+                    input.chain_id, input.to
+                ),
+            ));
+        }
 
         let (bundle_id, bundle_value) = DECLARATIVE_V3_STATE
             .with(|state| {
@@ -3039,6 +3071,55 @@ mod tests {
             parsed["error"]["kind"], "no_declarative_v3_mapper",
             "{parsed}"
         );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // N1 (runtime guard) — two DIFFERENT bundles claiming the SAME callkey must
+    // NOT be silently resolved first-install-wins (which let an attacker pin a
+    // canonical address to a subset bundle by installing it first). The key is
+    // marked conflicted → its route fails `callkey_conflict` → warn-closed.
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn bridge_conflict_routes_callkey_conflict_not_silent_misroute() {
+        let addr = "0x000000000000000000000000000000000000c0ff";
+        let foo = Function::parse("foo()").unwrap();
+        let calldata = foo.abi_encode_input(&[]).unwrap();
+        let selector = format!("0x{}", hex::encode(&calldata[0..4]));
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+
+        let bundle = |id: &str| {
+            json!({
+                "type": "adapter_action", "id": id, "publisher": "test", "schema_version": "3",
+                "match": { "selector": selector, "chain_to_addresses": { "1": [addr] } },
+                "abi_fragment": { "function_name": "foo", "abi": {
+                    "name": "foo", "type": "function", "stateMutability": "nonpayable",
+                    "inputs": [], "outputs": [] } },
+                "emit": { "strategy": "single_emit", "body": { "domain": "unknown", "unknown": {
+                    "target": "$to", "chain": "$chain", "calldata": "$calldata", "value": "$tx.value" } } },
+                "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+            })
+        };
+
+        let a: Value = serde_json::from_str(&declarative_install_v3_json(
+            bundle("test/conflict-a@1.0.0").to_string(),
+        ))
+        .unwrap();
+        assert_eq!(a["ok"], true, "{a}");
+        let b: Value = serde_json::from_str(&declarative_install_v3_json(
+            bundle("test/conflict-b@1.0.0").to_string(),
+        ))
+        .unwrap();
+        assert_eq!(b["ok"], true, "{b}");
+
+        let route_input = json!({
+            "chain_id": 1, "to": addr, "selector": selector, "calldata": calldata_hex,
+            "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+        });
+        let out = declarative_route_request_v3_json(route_input.to_string());
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "callkey_conflict", "{parsed}");
     }
 
     // ──────────────────────────────────────────────────────────────────────
