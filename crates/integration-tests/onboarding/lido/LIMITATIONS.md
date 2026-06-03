@@ -128,8 +128,28 @@
 - **Files:** corpus, evidence.
 - **Gate:** corpus grows or an explicit accept note is added.
 
-### L5 — token-metadata semantic imprecision  [LOW]
-- **What:** `PegKind` enum = {HardPeg, SoftPeg, Rebasing} only; wstETH is an index-appreciating wrapper (not 1:1), so it uses the best-fit `hard_peg` — imprecise. unstETH NFT uses `stake_receipt` (a withdrawal/maturity claim; `maturity_note` would be apter but is unused).
+### L5 — token-metadata semantic precision  ✅ RESOLVED (was LOW)
+> **Resolution (this run):**
+> - **`PegKind::ExchangeRate`** added (`token/kind.rs`) — "non-rebasing wrapper
+>   redeemable for a monotonically rising amount of the underlying via an on-chain
+>   exchange rate (wstETH→stETH, rETH→ETH); balance fixed, value accrues in the
+>   rate". Purely additive (no exhaustive `match` on `PegKind` anywhere — verified
+>   by grep; `PegKind` is not lowered to Cedar, so no cedarschema change). wstETH's
+>   token JSON `peg_kind` flipped `hard_peg`→`exchange_rate`. A
+>   `peg_kind_wire_names_round_trip` unit test locks the serde wire names the
+>   registry JSON depends on (`exchange_rate` ↔ `ExchangeRate`).
+> - **unstETH `token_kind` decision: KEEP `stake_receipt`.** `MaturityNote` was
+>   considered but rejected — it requires a fixed `maturity: Time`, which a Lido
+>   withdrawal NFT does NOT have (finalization depends on queue processing + oracle
+>   reports, not a fixed timestamp). `stake_receipt` (a redemption/withdrawal claim
+>   on the underlying) is the honest best-fit; no JSON change.
+>
+> **Gates:** `cargo test -p policy-state` (incl. round-trip) green; `check:tokens`
+> 0 errors; build-index clean; wasm-build + changed-crate clippy/fmt clean.
+>
+> ---
+>
+> - **What:** `PegKind` enum = {HardPeg, SoftPeg, Rebasing} only; wstETH is an index-appreciating wrapper (not 1:1), so it uses the best-fit `hard_peg` — imprecise. unstETH NFT uses `stake_receipt` (a withdrawal/maturity claim; `maturity_note` would be apter but is unused).
 - **Approach:** add a `PegKind` variant for index/exchange-rate wrappers (e.g. `ExchangeRate`) in `crates/policy-server/asset-model/state/src/token/kind.rs` — exhaustive-match edit across serialization + any lowering that matches PegKind — then set wstETH to it. Decide unstETH `token_kind` (keep stake_receipt vs introduce maturity_note usage). Re-run `check:tokens` + build-index.
 - **Files:** `.../token/kind.rs`, `registryV2/tokens/1/0x7f39…json` (+ unstETH), wasm if the type is wasm-exported.
 - **Gate:** `cargo test --workspace`, `check:tokens` PASS, build-index clean.
