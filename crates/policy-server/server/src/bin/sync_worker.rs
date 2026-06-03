@@ -1,8 +1,9 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use policy_server::config::ServerConfig;
 use policy_server::coordination::build_coordinator;
+use policy_server::events::{publish_tick_events, RedisEventPublisher};
 use policy_server::storage::StorageBackend;
 use policy_sync::{Orchestrator, Scheduler, SchedulerConfig, SyncConfig};
 use tracing_subscriber::EnvFilter;
@@ -25,6 +26,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sync_config = SyncConfig::load_file(sync_config_path)?;
     let orchestrator = Arc::new(Orchestrator::from_sync_config(&sync_config)?);
     let coordinator = build_coordinator(&config).await?;
+
+    // The worker is a separate process from the API, so a local in-process bus
+    // would have no SSE subscribers. Live `wallet_synced` events therefore only
+    // flow when Redis is configured — the API replicas forward them to their SSE
+    // clients. Without Redis the worker still refreshes and persists state; it
+    // simply can't push live notifications.
+    let publisher: Option<RedisEventPublisher> = match config.redis_url.as_deref() {
+        Some(url) if !url.trim().is_empty() => {
+            match RedisEventPublisher::connect(url, config.redis_events_channel.clone()).await {
+                Ok(p) => {
+                    tracing::info!(
+                        channel = %config.redis_events_channel,
+                        "sync worker: Redis event fanout enabled"
+                    );
+                    Some(p)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "sync worker: Redis connect failed — live wallet_synced events disabled"
+                    );
+                    None
+                }
+            }
+        }
+        _ => {
+            tracing::info!(
+                "sync worker: REDIS_URL not set — live wallet_synced events disabled (state still persisted)"
+            );
+            None
+        }
+    };
 
     let tick_interval = Duration::from_secs(
         std::env::var("SYNC_WORKER_TICK_SECS")
@@ -59,7 +92,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 errors = report.errors.len(),
                 "sync worker tick complete"
             );
+
+            // Push one live `wallet_synced` per refreshed wallet so dashboards
+            // update without waiting for the next manual sync or page reload.
+            if let Some(publisher) = &publisher {
+                publish_tick_events(publisher, &user_id, &report.synced_wallets, unix_now()).await;
+            }
         }
         tokio::time::sleep(tick_interval).await;
     }
+}
+
+/// Current Unix time in whole seconds, clamped to a non-negative `i64` for the
+/// event payload. Returns 0 if the system clock is before the epoch.
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or(0)
 }
