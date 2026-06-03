@@ -93,7 +93,7 @@
 | Dune rows returned / selected tx hashes recorded | done | n/a — real tx hashes sourced from Etherscan (corpus entries carry tx_hash). |
 | representative real-tx corpus/golden entries committed or justified | done | crates/integration-tests/data/golden/v3-decode/balancer/corpus.json — 21 dedup entries (real tx_hash for all real entries; 3 V3 single-token-liq hand-edges marked synthetic). |
 | protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | done | **corpus: 21/21 matched; semantic expect_body: 15/15 pass entries pinned.** expect_body computed by INDEPENDENT eth_abi decode (non-circular). |
-| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe, and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | done | **MEASURED: V2 Vault ≈93.3% of recent direct mainnet tx covered; V3 Router-v2 ≈7% EFFECTIVE.** Critical finding: permitBatchAndCall = 91.7% of V3 direct tx but only 454/9173 (4.9%) have a COVERED child — 95.1% wrap deferred proportional/unbalanced liquidity → fail-closed. So V3's dominant ~93% is uncovered (proportional liquidity, pool-token resolver needed). Completion label reflects this (does NOT claim V3 full/wallet-facing-complete). |
+| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe (1st-party Etherscan/Dune: % of recent txs the covered (chain,to,selector) set decodes), and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | done | **MEASURED: V2 Vault ≈93.3% of recent direct mainnet tx covered; V3 Router-v2 ≈7% EFFECTIVE.** Critical finding: permitBatchAndCall = 91.7% of V3 direct tx but only 454/9173 (4.9%) have a COVERED child — 95.1% wrap deferred proportional/unbalanced liquidity → fail-closed. So V3's dominant ~93% is uncovered (proportional liquidity, pool-token resolver needed). Completion label reflects this (does NOT claim V3 full/wallet-facing-complete). |
 
 ## P3 Develop Evidence
 
@@ -110,20 +110,20 @@
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| `registryV2 npm run build` output recorded | pending | |
-| registryV2 build-index vitest output recorded | pending | |
-| `npm run check:manifest` output recorded | pending | |
-| `npm run check:surface` output recorded | pending | |
-| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
-| v3-harness coverage/fuzz/corpus outputs recorded | pending | |
-| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| `cargo test --workspace` output recorded | pending | |
-| wasm build output recorded if runtime/wasm/schema changed | pending | |
-| fmt/clippy/typecheck output recorded for changed crates/packages | pending | |
-| exact staged files and commit hash recorded | pending | |
-| remaining WARNs/deferred selectors/actions listed with reason | pending | |
-| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | pending | |
-| no base/worktree merge performed unless user explicitly requested it | pending | |
+| `registryV2 npm run build` output recorded | done | 899 manifests, 53482 callkeys + 85 typed-data entries written; my $fn (balancer_*) validated against fn_whitelist.json; WARNs are pre-existing (239 sourced-dup + 16 UR collision), not balancer. |
+| registryV2 build-index vitest output recorded | done | `vitest run scripts/__tests__/build-index.test.ts` → 1 file, 12 tests passed (5.23s). |
+| `npm run check:manifest` output recorded | done | v3-harness validate (representative source refs): ALL = 1787 single_emit OK, 0 structural errors; filter=balancer = 24 OK, 0 errors. |
+| `npm run check:surface` output recorded | done | PASS — V2 Vault[1] 5 cover/5 manifests, V3 Router-v2[1] 7 cover/7 manifests, I0 balancer 27 deployed/9 cover/18 exclude. |
+| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | done | n/a — singleton Vault/Router scope (no _address_universe.json); not pool/factory-direct onboarding this run. |
+| v3-harness coverage/fuzz/corpus outputs recorded | done | fuzz 0x5C09EBA1 5000/callkey total=120000 fail=0 panic=0 (soft 36740 tolerated); corpus 21/21 matched. |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | done | corpus 21/21 matched; semantic expect_body 15/15 pass entries pinned. |
+| `cargo test --workspace` output recorded | done | exit 0, 0 `test result: FAILED` (full workspace incl mappers builtins 6/6, harness corpus, policy-engine). |
+| wasm build output recorded if runtime/wasm/schema changed | done | `./scripts/wasm-build.sh` — WASM bundle rebuilt with the Tier-2 mappers `$fn` builtins (mappers feeds policy-engine-wasm declarative route). Compiled clean. |
+| fmt/clippy/typecheck output recorded for changed crates/packages | done | `cargo fmt -p mappers` clean (only builtin_fn.rs, no unrelated churn); `cargo clippy -p mappers --all-targets -- -D warnings` exit 0. (No browser-extension TS changed → ext typecheck unaffected; WASM rebuilt above.) |
+| exact staged files and commit hash recorded | done | P0+P1 `81ed50eb` (4 builtins+fn_whitelist, 7 manifests, _deployments+2 coverage, evidence); P2+P3 `2d85deba` (corpus); P4 fmt+evidence commit (below). Files listed in P1 row. |
+| remaining WARNs/deferred selectors/actions listed with reason | done | #1 V3 proportional/unbalanced liquidity (~89% of V3) — pool-token resolver needed; #2-3 additional V3 routers (BatchRouter/CompositeLiquidityRouter/etc) + V2 BalancerRelayer v6; #4 multichain (V2 7-chain new fns, V3 base); #5 V2 flashLoan/manageUserBalance; permitBatchAndCall Permit2-grant not separately surfaced. All with measured usage in _deployments/coverage. Pre-existing non-balancer build-index WARNs unaffected. |
+| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | done | **primary-chain (mainnet) V2 Vault wallet-facing ≈93% covered; V3 Router-v2 swaps + single-token liquidity + permitBatchAndCall(covered-child) covered ≈7%, dominant ~93% (proportional/unbalanced liquidity) DEFERRED. NOT full-surface, NOT multichain.** |
+| no base/worktree merge performed unless user explicitly requested it | done | no merge performed — work isolated on feat/balancer-onboarding (worktree scopeball-balancer); base/registry-v2 untouched (the accidental builtin_fn pollution there was surgically reverted, preserving the other session's unoswap/1inch work). |
 
 ## Blockers
 

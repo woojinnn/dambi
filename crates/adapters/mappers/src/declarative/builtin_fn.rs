@@ -431,8 +431,7 @@ fn balancer_zip_token_amounts(args: &[JsonValue]) -> Result<JsonValue, String> {
         let addr = json_address(asset, &format!("balancer_zip_token_amounts: assets[{i}]"))?;
         // Normalise the amount to a decimal string (U256 is serde-de'd from a
         // string), matching how args_json renders width-256 uints.
-        let amount_u256 =
-            json_u256(amount, &format!("balancer_zip_token_amounts: amounts[{i}]"))?;
+        let amount_u256 = json_u256(amount, &format!("balancer_zip_token_amounts: amounts[{i}]"))?;
         let mut key = serde_json::Map::new();
         key.insert("standard".to_owned(), JsonValue::String("erc20".to_owned()));
         key.insert("chain".to_owned(), JsonValue::String(chain.to_owned()));
@@ -473,8 +472,9 @@ fn balancer_pool_id_to_address(args: &[JsonValue]) -> Result<JsonValue, String> 
             body.len()
         ));
     }
-    let addr = Address::from_str(&format!("0x{}", &body[..40]))
-        .map_err(|e| format!("balancer_pool_id_to_address: leading 20 bytes not an address: {e}"))?;
+    let addr = Address::from_str(&format!("0x{}", &body[..40])).map_err(|e| {
+        format!("balancer_pool_id_to_address: leading 20 bytes not an address: {e}")
+    })?;
     Ok(JsonValue::String(format!("{addr:#x}")))
 }
 
@@ -530,7 +530,10 @@ fn balancer_v2_userdata_field(args: &[JsonValue]) -> Result<JsonValue, String> {
         "join" => enum_dispatch(&user_data, &BALANCER_V2_JOIN_KIND),
         "exit" => enum_try_dispatch(
             &user_data,
-            &[&BALANCER_V2_EXIT_KIND_WEIGHTED, &BALANCER_V2_EXIT_KIND_STABLE],
+            &[
+                &BALANCER_V2_EXIT_KIND_WEIGHTED,
+                &BALANCER_V2_EXIT_KIND_STABLE,
+            ],
         ),
         other => {
             return Err(format!(
@@ -607,7 +610,12 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
             .cloned()
             .unwrap_or_else(|| JsonValue::String("0".to_owned()))),
         "direction_kind" => Ok(JsonValue::String(
-            if kind == 0 { "exact_input" } else { "exact_output" }.to_owned(),
+            if kind == 0 {
+                "exact_input"
+            } else {
+                "exact_output"
+            }
+            .to_owned(),
         )),
         other => Err(format!(
             "balancer_v2_batch_swap_field: unsupported field '{other}'"
@@ -1365,12 +1373,8 @@ mod tests {
     #[test]
     fn balancer_zip_token_amounts_zips_index_aligned() {
         let chain = "eip155:1";
-        let out = balancer_zip_token_amounts(&[
-            json!(chain),
-            json!([A, B]),
-            json!(["100", "200"]),
-        ])
-        .unwrap();
+        let out = balancer_zip_token_amounts(&[json!(chain), json!([A, B]), json!(["100", "200"])])
+            .unwrap();
         // [[{key:{standard,chain,address:A}}, "100"], [{...B}, "200"]]
         assert_eq!(out.as_array().unwrap().len(), 2);
         assert_eq!(out[0][0]["key"]["standard"], json!("erc20"));
@@ -1448,12 +1452,15 @@ mod tests {
     fn balancer_v2_userdata_field_unknown_kind_is_zero() {
         // kind 99 matches no entry → conservative "0".
         let ud = encode_userdata(vec![uint(99)]);
-        let out = balancer_v2_userdata_field(&[json!(ud), json!("join"), json!("min_bpt")]).unwrap();
+        let out =
+            balancer_v2_userdata_field(&[json!(ud), json!("join"), json!("min_bpt")]).unwrap();
         assert_eq!(out, json!("0"));
         // bad field / class / arity error out.
         let ud1 = encode_userdata(vec![uint(0), uint(1), uint(0)]);
         assert!(balancer_v2_userdata_field(&[json!(ud1), json!("exit"), json!("nope")]).is_err());
-        assert!(balancer_v2_userdata_field(&[json!("0x"), json!("nope"), json!("bpt_in")]).is_err());
+        assert!(
+            balancer_v2_userdata_field(&[json!("0x"), json!("nope"), json!("bpt_in")]).is_err()
+        );
     }
 
     #[test]
@@ -1493,9 +1500,13 @@ mod tests {
             json!("direction_kind"),
         ])
         .unwrap();
-        let amount =
-            balancer_v2_batch_swap_field(&[json!(0), swaps.clone(), assets.clone(), json!("amount")])
-                .unwrap();
+        let amount = balancer_v2_batch_swap_field(&[
+            json!(0),
+            swaps.clone(),
+            assets.clone(),
+            json!("amount"),
+        ])
+        .unwrap();
         let pool =
             balancer_v2_batch_swap_field(&[json!(0), swaps.clone(), assets, json!("pool_id")])
                 .unwrap();
@@ -1514,8 +1525,13 @@ mod tests {
         // empty assets → zero-address sentinel (shape-valid, fuzz would-revert case).
         let ok_swaps = json!([[POOL1, "0", "1", "1", "0x"]]);
         assert_eq!(
-            balancer_v2_batch_swap_field(&[json!(0), ok_swaps.clone(), json!([]), json!("token_in")])
-                .unwrap(),
+            balancer_v2_batch_swap_field(&[
+                json!(0),
+                ok_swaps.clone(),
+                json!([]),
+                json!("token_in")
+            ])
+            .unwrap(),
             json!("0x0000000000000000000000000000000000000000")
         );
         // unsupported field still errors (structural manifest bug, not data).
