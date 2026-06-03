@@ -438,6 +438,87 @@
           "value": "0xd2cda16cf00a1410"
         }
       ]
+    },
+    {
+      "intent": "transferShares",
+      "expect": "pass",
+      "expect_domain": "liquid_staking",
+      "tx_hash": "0xab81357c4dc78efd36f6127215b962f3bab39e0a5760448c08ff6b6a4c8ef290",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+            "value": "0",
+            "data": "0x8fcb4e5b000000000000000000000000855eaff58f3f627653c2de8b5ec771ebaf0d1a21000000000000000000000000000000000000000000000000004538fb9513ff97"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "transfer_shares"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "lido"
+        },
+        {
+          "path": "$.data.actions[0].body.recipient",
+          "op": "hex_eq",
+          "value": "0x855eaff58f3f627653c2de8b5ec771ebaf0d1a21"
+        },
+        {
+          "path": "$.data.actions[0].body.shares",
+          "op": "u256_hex_eq",
+          "value": "0x4538fb9513ff97"
+        }
+      ]
+    },
+    {
+      "intent": "transferSharesFrom",
+      "expect": "pass",
+      "expect_domain": "liquid_staking",
+      "tx_hash": "0x71b67f44744c25fa3bf17c6a3ce7a1b3c9e1a0045da615d8519eb59d607535a8",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+            "value": "0",
+            "data": "0x6d780459000000000000000000000000db4ef21a4fd9002f6af5a296d0fd592605b7e55b0000000000000000000000000b70f851a1890f59ff11244b14fef41eb2f6abcc0000000000000000000000000000000000000000000000000000105ef39b2000"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "transfer_shares"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "lido"
+        },
+        {
+          "path": "$.data.actions[0].body.from",
+          "op": "hex_eq",
+          "value": "0xdb4ef21a4fd9002f6af5a296d0fd592605b7e55b"
+        },
+        {
+          "path": "$.data.actions[0].body.recipient",
+          "op": "hex_eq",
+          "value": "0x0b70f851a1890f59ff11244b14fef41eb2f6abcc"
+        },
+        {
+          "path": "$.data.actions[0].body.shares",
+          "op": "u256_hex_eq",
+          "value": "0x105ef39b2000"
+        }
+      ]
     }
   ]
 }

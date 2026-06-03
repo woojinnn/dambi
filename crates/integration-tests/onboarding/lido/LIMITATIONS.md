@@ -111,8 +111,19 @@
 - **Files:** `data/golden/v3-decode/lido/corpus.json` (comments), `crates/integration-tests/tests/v3_decode_harness.rs` (new goldens).
 - **Gate:** new goldens pass; `--require-expect-body` still 9/9.
 
-### L4 — transferShares / transferSharesFrom have no real-tx coverage  [LOW]
-- **What:** both are covered (manifests + synthetic), but the 30k recent sweep had **0** real txs for them, so they're real-tx-unverified.
+### L4 — transferShares / transferSharesFrom real-tx coverage  ✅ RESOLVED (was LOW)
+> **Resolution (this run):** a deeper Etherscan sweep (~block 11M→25.2M, ~1.68M
+> top-level stETH txs) FOUND both (the recent 30k window had 0 because they thin
+> out in the contract's earlier history): **transferShares 85**, **transferSharesFrom
+> 15**. Two real-tx corpus entries added with field-level pins reasoned from the
+> calldata: `transferShares 0xab81357c…` (recipient `0x855eaff5…`, shares
+> `0x4538fb9513ff97` = 19_484_426_582_097_815) and `transferSharesFrom 0x71b67f44…`
+> (sender `0xdb4ef21a…`, recipient `0x0b70f851…`, shares `0x105ef39b2000` =
+> 18_000_000_000_000). `corpus --filter lido --require-expect-body` = **13/13**.
+>
+> ---
+>
+> - **What:** both are covered (manifests + synthetic), but the 30k recent sweep had **0** real txs for them, so they're real-tx-unverified.
 - **Approach:** targeted Etherscan pull on stETH filtered to selectors `0x8fcb4e5b` / `0x6d780459` over a deeper block range; if found, add a corpus entry each (with expect_body). If genuinely absent on mainnet recently, record "accept: low-volume, synthetic+manifest covered" in evidence.
 - **Files:** corpus, evidence.
 - **Gate:** corpus grows or an explicit accept note is added.
