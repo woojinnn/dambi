@@ -180,6 +180,33 @@ async function preinstallMulticallChildren(args: {
 }
 
 /**
+ * Reserved sentinel for selector-less BARE native-ETH transfers (B.3). A tx with
+ * EMPTY calldata has no 4-byte selector, so it cannot be keyed by a real function.
+ */
+const NATIVE_TRANSFER_SELECTOR = "0x00000000";
+
+/**
+ * Route a value-bearing EMPTY-calldata tx under the native-transfer sentinel so a
+ * `match.selector="0x00000000"` manifest (Lido bare-ETH stake into stETH's
+ * fallback / wstETH's receive; HyperLiquid HYPE deposit) can decode it. The WASM
+ * route substitutes the same sentinel ONLY for empty calldata, so it never
+ * collides with a real dispatch. An address with no sentinel manifest simply
+ * misses on install → the same fail-closed warn as before (one extra registry
+ * lookup). Gated on value > 0: an empty-calldata 0-value call stakes nothing, so
+ * it stays a plain `no_selector` miss (no pointless lookup per zero-value poke).
+ */
+function nativeTransferSelector(
+  calldataHex: string | undefined,
+  valueWei: string | undefined,
+): string | null {
+  const isEmptyCalldata =
+    calldataHex === undefined || calldataHex === "" || calldataHex === "0x";
+  const isValueBearing =
+    valueWei !== undefined && valueWei !== "" && valueWei !== "0";
+  return isEmptyCalldata && isValueBearing ? NATIVE_TRANSFER_SELECTOR : null;
+}
+
+/**
  * Phase M4 — v3 route entry. Pipeline:
  *   1. extract 4-byte selector,
  *   2. JIT install (registry-api-v3 fetch + WASM `declarative_install_v3_json`)
@@ -204,7 +231,9 @@ export async function tryDeclarativeRouteV3(args: {
   blockTimestamp?: number;
   calldataHex: string | undefined;
 }): Promise<DeclarativeRouteV3Outcome> {
-  const selector = extractSelector(args.calldataHex);
+  const selector =
+    extractSelector(args.calldataHex) ??
+    nativeTransferSelector(args.calldataHex, args.valueWei);
   if (!selector) {
     return { kind: "miss", reason: "no_selector" };
   }
@@ -242,7 +271,7 @@ export async function tryDeclarativeRouteV3(args: {
       chain_id: args.chainId,
       to: args.to,
       selector,
-      calldata: args.calldataHex!,
+      calldata: args.calldataHex ?? "0x",
       ...(args.valueWei !== undefined ? { value: args.valueWei } : {}),
       ...(args.gasLimit !== undefined ? { gas_limit: args.gasLimit } : {}),
       ...(args.gasPrice !== undefined ? { gas_price: args.gasPrice } : {}),

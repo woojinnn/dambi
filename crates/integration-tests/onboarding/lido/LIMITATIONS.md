@@ -15,8 +15,34 @@
 
 ## Addressable — fix these (priority order)
 
-### L1 — bare-ETH selectorless stake is undecoded  [HIGH]
-- **What:** sending ETH with **empty calldata** to stETH (`Lido` fallback, `NON_EMPTY_DATA`-guarded) or to wstETH (`receive()`, stakes+wraps in one step) mints the staking token. These txs have **no 4-byte selector**, so the `(chain,to,selector)` router misses them and the orchestrator fail-closes to a generic `warn`. The user sees "unknown action" instead of "you stake X ETH".
+### L1 — bare-ETH selectorless stake  ✅ RESOLVED (was HIGH)
+> **Resolution (this run, manifest+gate+loader — NO core-decoder change):** the WASM
+> route already supported the selector-less path (`declarative_exports.rs`
+> `NATIVE_TRANSFER_SELECTOR = "0x00000000"`: empty calldata → sentinel lookup → empty
+> args, body reads `$tx.value`); the gap was purely (a) no Lido sentinel manifest, and
+> (b) the extension loader pre-gating empty calldata before the WASM route. Landed:
+> - **2 manifests** `manifests/lido/{steth,wsteth}/stake-eth@1.0.0.json` keyed on the
+>   `0x00000000` sentinel → emit `liquid_staking.stake { venue: lido, amount: $tx.value }`.
+> - **2 coverage entries** (`steth/wsteth.coverage.json` `0x00000000` = cover) + a
+>   **surface-gate enhancement** (`check-surface-completeness.ts`: `hasNativeEntrypoint` +
+>   I1' exemption) so the sentinel is grounded in the snapshot's payable `fallback()` /
+>   `receive()` entry instead of a function-selector — a structural gate gap, not a hack.
+> - **2 real-tx corpus entries** (`0x651d8e2d…` ETH→stETH, `0xf5ef5c38…` ETH→wstETH),
+>   `expect_body` pinning `action=stake` + `amount=$tx.value`. `corpus --filter lido
+>   --require-expect-body` = **11/11**.
+> - **loader wire-up** (`declarative-route.ts` `nativeTransferSelector`): a value-bearing
+>   empty-calldata tx synthesizes the `0x00000000` sentinel (gated on value>0); a
+>   non-sentinel address still misses → same warn as before (one extra registry lookup).
+>   3 new vitest cases; `tsc --noEmit` clean; full extension suite green.
+>
+> **Materiality of the fix:** the bare-ETH stake now decodes to `liquid_staking.stake`
+> (real verdict) instead of a fail-closed `warn`. The wstETH variant's stake-then-wrap is
+> modeled as `stake` (primary intent); the wstETH-vs-stETH output token is a wrap
+> refinement not represented in `StakeAction` (acceptable — noted in the manifest).
+>
+> ---
+>
+> - **What:** sending ETH with **empty calldata** to stETH (`Lido` fallback, `NON_EMPTY_DATA`-guarded) or to wstETH (`receive()`, stakes+wraps in one step) mints the staking token. These txs have **no 4-byte selector**, so the `(chain,to,selector)` router misses them and the orchestrator fail-closes to a generic `warn`. The user sees "unknown action" instead of "you stake X ETH".
 - **Why it matters:** it is a genuine wallet-facing stake path that ScopeBall cannot name. Conservative (warn) but zero decode value.
 - **Materiality:** measured ~0.06% of direct txs (17 / 30 000 in the P2 sweep) — small, but it is the one concrete *decode* gap, not a scope choice.
 - **Approach:** FIRST investigate whether empty-calldata / native-sentinel routing is even expressible. The harness `coverage` output lists `native-transfer sentinel 0x00000000` as a deferred category, and `harness/mod.rs::replay` special-cases `selector == "0x00000000"` — so a sentinel concept exists. Check `crates/policy-engine-wasm/src/declarative_exports.rs` (route resolution) + the registry callkey scheme (`registryV2/scripts/build-index.ts`) for whether a manifest can key on selector `0x00000000` + a value-bearing tx.

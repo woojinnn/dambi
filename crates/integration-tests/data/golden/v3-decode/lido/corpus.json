@@ -352,6 +352,72 @@
           "value": "0x8e01dc1a08ddf5a47ca992ba389ae290bc6362bc"
         }
       ]
+    },
+    {
+      "intent": "stakeEthViaFallback",
+      "expect": "pass",
+      "expect_domain": "liquid_staking",
+      "tx_hash": "0x651d8e2dd61d6f9bb571fe1df010b9f1482d8507ec56702dbd9f8f3844373c4c",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+            "value": "1530000000000000000",
+            "data": "0x"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "stake"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "lido"
+        },
+        {
+          "path": "$.data.actions[0].body.amount",
+          "op": "u256_hex_eq",
+          "value": "0x153ba6e4ca590000"
+        }
+      ]
+    },
+    {
+      "intent": "stakeEthViaReceiveWstETH",
+      "expect": "pass",
+      "expect_domain": "liquid_staking",
+      "tx_hash": "0xf5ef5c38f9f6cb2b820929257e2dd67f933b37d68c3022f23adad58205772705",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+            "value": "15189974607446283280",
+            "data": "0x"
+          }
+        ]
+      },
+      "expect_body": [
+        {
+          "path": "$.data.actions[0].body.action",
+          "op": "equals",
+          "value": "stake"
+        },
+        {
+          "path": "$.data.actions[0].body.venue.name",
+          "op": "equals",
+          "value": "lido"
+        },
+        {
+          "path": "$.data.actions[0].body.amount",
+          "op": "u256_hex_eq",
+          "value": "0xd2cda16cf00a1410"
+        }
+      ]
     }
   ]
 }
