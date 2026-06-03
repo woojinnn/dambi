@@ -477,11 +477,12 @@ mod tests {
                 chain: eth.clone(),
                 router: any,
                 route_hash: "0x00".into(),
+                executor: None,
             },
             "aggregator_route",
         );
 
-        // ---- IntentVenue: all 4 variants ----
+        // ---- IntentVenue: all 5 variants ----
         assert_venue!(
             amm::IntentVenue::UniswapX {
                 chain: eth.clone(),
@@ -501,6 +502,13 @@ mod tests {
             "one_inch_fusion",
         );
         assert_venue!(amm::IntentVenue::Bebop { chain: eth.clone() }, "bebop");
+        assert_venue!(
+            amm::IntentVenue::OneInchLimitOrder {
+                chain: eth.clone(),
+                verifying_contract: any,
+            },
+            "one_inch_limit_order",
+        );
 
         // ---- LendingVenue: all 8 variants ----
         assert_venue!(

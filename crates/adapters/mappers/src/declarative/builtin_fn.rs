@@ -20,12 +20,20 @@ use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{keccak256, Address, U256};
 use serde_json::Value as JsonValue;
 
-/// The whitelist of accepted `$fn` names. The author-time validator
-/// (`registryV2/scripts/build-index.ts` `validateEmitShape`) mirrors this so an
-/// unknown `$fn` fails at build-index time, not only at decode time.
+/// The whitelist of accepted `$fn` names — the **sole** gate on `$fn` names, and
+/// enforced at **decode time only**: [`dispatch`] rejects any name not listed here.
+/// The author-time validator (`registryV2/scripts/build-index.ts`
+/// `validateEmitShape`) checks only `emit.strategy`, NOT `$fn` names, so adding a
+/// new `$fn` is a Rust-only change (a manifest referencing an unknown `$fn` builds
+/// fine but fails to decode).
 pub const WHITELIST: &[&str] = &[
     "curve_route_last_token",
     "route_hash",
+    "keccak256",
+    "address_from_uint256",
+    "maker_traits_expiry",
+    "coalesce_address",
+    "token_key_or_native",
     "uniswap_v3_pool_swap_field",
     "uniswapx_reactor_order_field",
 ];
@@ -39,6 +47,11 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
     match name {
         "curve_route_last_token" => curve_route_last_token(args),
         "route_hash" => route_hash(args),
+        "keccak256" => keccak256_hex(args),
+        "address_from_uint256" => address_from_uint256(args),
+        "maker_traits_expiry" => maker_traits_expiry(args),
+        "coalesce_address" => coalesce_address(args),
+        "token_key_or_native" => token_key_or_native(args),
         "uniswap_v3_pool_swap_field" => uniswap_v3_pool_swap_field(args),
         "uniswapx_reactor_order_field" => uniswapx_reactor_order_field(args),
         _ => Err(format!(
@@ -134,6 +147,126 @@ fn route_hash(args: &[JsonValue]) -> Result<JsonValue, String> {
         bytes.extend_from_slice(addr.as_slice());
     }
     Ok(JsonValue::String(format!("{:#x}", keccak256(&bytes))))
+}
+
+/// `keccak256(data: bytes) -> bytes32` — keccak256 of an opaque byte string,
+/// returned as `0x`-prefixed 32-byte hex. General-purpose route/calldata identity
+/// for aggregator venues whose route lives in an opaque `bytes` arg (e.g. 1inch v6
+/// `swap(executor, desc, data)` — `data` carries the executor route). Feeds
+/// `AmmVenue::AggregatorRoute.route_hash` ("32-byte hex hash of the route"). Unlike
+/// [`route_hash`] (which packs an `address[11]` route), this hashes raw bytes.
+fn keccak256_hex(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "keccak256 expects 1 arg (data), got {}",
+            args.len()
+        ));
+    }
+    let bytes = json_hex_bytes(&args[0], "keccak256: data")?;
+    Ok(JsonValue::String(format!("{:#x}", keccak256(&bytes))))
+}
+
+/// `address_from_uint256(packed: uint256) -> address` — unmask the low 160 bits
+/// of a `uint256` into an address. 1inch's `AddressLib` packs an address into the
+/// low 160 bits of a `uint256` (the high 96 bits carry flags), so a calldata or
+/// struct field declared `uint256` that is really an address (Clipper `srcToken`,
+/// LOP `Order` maker/makerAsset/takerAsset) is decoded to its address here.
+/// Returns a lowercase `0x` hex address.
+fn address_from_uint256(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "address_from_uint256 expects 1 arg (packed uint256), got {}",
+            args.len()
+        ));
+    }
+    let packed = json_u256(&args[0], "address_from_uint256: packed")?;
+    // Big-endian word; the low 160 bits = the last 20 bytes = the address.
+    let bytes = packed.to_be_bytes::<32>();
+    let addr = Address::from_slice(&bytes[12..]);
+    Ok(JsonValue::String(format!("{addr:#x}")))
+}
+
+/// `maker_traits_expiry(maker_traits: uint256) -> uint` — extract the 1inch LOP v4
+/// `MakerTraits` order expiration: bits `[80, 120)`, a `uint40` ABSOLUTE
+/// UNIX-seconds timestamp (`(makerTraits >> 80) & ((1<<40)-1)`). On-chain `0`
+/// means "never expires"; this fn remaps `0` → max `uint40` (`0xFF_FFFF_FFFF`,
+/// ~year 36812) so a never-expiring order surfaces as a far-future `valid_until`
+/// (a policy treating `valid_until` as an upper bound flags it) rather than a
+/// long-past epoch-0. Returns a JSON number (the `uint40` always fits `u64`),
+/// matching `Time`'s `#[serde(transparent)] u64` shape.
+fn maker_traits_expiry(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "maker_traits_expiry expects 1 arg (makerTraits), got {}",
+            args.len()
+        ));
+    }
+    let traits = json_u256(&args[0], "maker_traits_expiry: makerTraits")?;
+    let mask = U256::from(0xFF_FFFF_FFFFu64); // (1 << 40) - 1, a uint40
+    let expiry = (traits >> 80usize) & mask;
+    let expiry = if expiry.is_zero() { mask } else { expiry };
+    let secs = u64::try_from(expiry)
+        .map_err(|_| "maker_traits_expiry: expiry does not fit u64".to_owned())?;
+    Ok(JsonValue::Number(serde_json::Number::from(secs)))
+}
+
+/// `coalesce_address(addr: address, fallback: address) -> address` — return `addr`
+/// if it is a non-zero address, else `fallback`. Resolves an "empty" recipient slot
+/// to a default — 1inch LOP `Order.receiver == 0` means the maker is the recipient,
+/// so `coalesce_address($args.order.receiver, $args.order.maker)` yields the
+/// effective recipient. Returns a lowercase `0x` hex address.
+fn coalesce_address(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "coalesce_address expects 2 args (addr, fallback), got {}",
+            args.len()
+        ));
+    }
+    let addr = json_address(&args[0], "coalesce_address: addr")?;
+    let chosen = if addr.is_zero() {
+        json_address(&args[1], "coalesce_address: fallback")?
+    } else {
+        addr
+    };
+    Ok(JsonValue::String(format!("{chosen:#x}")))
+}
+
+/// `token_key_or_native(address, chain) -> TokenKey` — build a token `key` object,
+/// mapping the 1inch native-asset sentinel (`0xEeeeeEee...EEeEeEEe`) to a
+/// `TokenKey::Native { chain }` and any other address to
+/// `TokenKey::Erc20 { chain, address }`. Lets a swap whose token_in/token_out is
+/// native ETH decode to the native key (which a "limit native spend" policy keys
+/// on) instead of the opaque sentinel address. Returns the `key` object verbatim
+/// (the only `$fn` that returns a JSON object, not a scalar).
+fn token_key_or_native(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "token_key_or_native expects 2 args (address, chain), got {}",
+            args.len()
+        ));
+    }
+    let address = json_address(&args[0], "token_key_or_native: address")?;
+    let chain = args[1]
+        .as_str()
+        .ok_or("token_key_or_native: chain arg is not a string")?;
+    // 1inch (and most aggregators) use this sentinel for the native gas asset.
+    const NATIVE_SENTINEL: &str = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    let mut key = serde_json::Map::new();
+    if format!("{address:#x}") == NATIVE_SENTINEL {
+        key.insert(
+            "standard".to_owned(),
+            JsonValue::String("native".to_owned()),
+        );
+        key.insert("chain".to_owned(), JsonValue::String(chain.to_owned()));
+    } else {
+        key.insert("standard".to_owned(), JsonValue::String("erc20".to_owned()));
+        key.insert("chain".to_owned(), JsonValue::String(chain.to_owned()));
+        key.insert(
+            "address".to_owned(),
+            JsonValue::String(format!("{address:#x}")),
+        );
+    }
+    Ok(JsonValue::Object(key))
 }
 
 /// `uniswap_v3_pool_swap_field(amountSpecified, zeroForOne, token0, token1, field)`.
@@ -552,6 +685,29 @@ fn json_hex_bytes(value: &JsonValue, label: &str) -> Result<Vec<u8>, String> {
     hex::decode(body).map_err(|e| format!("{label} is not valid hex: {e}"))
 }
 
+/// Parse a JSON uint — decimal string (width > 64), `0x` hex string, or JSON
+/// number (width ≤ 64) — into `U256`, matching how [`super::args_json`] renders
+/// decoded uints.
+fn json_u256(value: &JsonValue, label: &str) -> Result<U256, String> {
+    match value {
+        JsonValue::Number(n) => n
+            .as_u64()
+            .map(U256::from)
+            .ok_or_else(|| format!("{label} is not a non-negative integer: {n}")),
+        JsonValue::String(s) => {
+            let trimmed = s.trim();
+            if let Some(hex) = trimmed.strip_prefix("0x") {
+                U256::from_str_radix(hex, 16)
+                    .map_err(|e| format!("{label} is not a valid hex uint ({s}): {e}"))
+            } else {
+                U256::from_str_radix(trimmed, 10)
+                    .map_err(|e| format!("{label} is not a valid decimal uint ({s}): {e}"))
+            }
+        }
+        other => Err(format!("{label} is not a uint: {other}")),
+    }
+}
+
 fn json_address(value: &JsonValue, label: &str) -> Result<Address, String> {
     let s = value
         .as_str()
@@ -712,6 +868,120 @@ mod tests {
                                  // different route → different hash
         let other = route_hash(&[route(&[A, POOL1, C])]).unwrap();
         assert_ne!(h1, other);
+    }
+
+    #[test]
+    fn keccak256_hashes_bytes_deterministically_to_32_bytes() {
+        // keccak256("") is the well-known empty-input hash.
+        let empty = keccak256_hex(&[json!("0x")]).unwrap();
+        assert_eq!(
+            empty.as_str().unwrap(),
+            "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        );
+        // Deterministic + exactly 32 bytes for arbitrary data.
+        let d = json!("0xdeadbeef");
+        let h1 = keccak256_hex(std::slice::from_ref(&d)).unwrap();
+        let h2 = keccak256_hex(&[d]).unwrap();
+        assert_eq!(h1, h2);
+        assert_eq!(h1.as_str().unwrap().len(), 66); // 0x + 64 hex
+                                                    // different data → different hash
+        let other = keccak256_hex(&[json!("0xdeadbeff")]).unwrap();
+        assert_ne!(h1, other);
+        // wrong arg count + non-hex error out
+        assert!(keccak256_hex(&[]).is_err());
+        assert!(keccak256_hex(&[json!("not-hex")]).is_err());
+    }
+
+    #[test]
+    fn address_from_uint256_unmasks_low_160_bits() {
+        // High 96 bits (flags) are discarded; low 160 bits = the address.
+        // Word = 0xdeadbeef..00 (high 12 bytes) ++ 0xaa..aa (low 20 bytes).
+        let packed = json!("0xdeadbeef0000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let out = address_from_uint256(&[packed]).unwrap();
+        assert_eq!(
+            out.as_str().unwrap(),
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+
+        // Decimal-string form (how a width-256 uint is rendered) and JSON number.
+        let dec = address_from_uint256(&[json!("1")]).unwrap();
+        assert_eq!(
+            dec.as_str().unwrap(),
+            "0x0000000000000000000000000000000000000001"
+        );
+        let num = address_from_uint256(&[json!(255)]).unwrap();
+        assert_eq!(
+            num.as_str().unwrap(),
+            "0x00000000000000000000000000000000000000ff"
+        );
+
+        // Wrong arg count + non-numeric error out.
+        assert!(address_from_uint256(&[]).is_err());
+        assert!(address_from_uint256(&[json!("not-a-number")]).is_err());
+    }
+
+    #[test]
+    fn maker_traits_expiry_extracts_bits_80_to_120() {
+        // expiry 101 at bits [80,120); a high flag bit (255) must be ignored.
+        let traits = (U256::from(101u64) << 80usize) | (U256::from(1u64) << 255usize);
+        let out = maker_traits_expiry(&[json!(format!("{traits:#x}"))]).unwrap();
+        assert_eq!(out, json!(101u64));
+
+        // A realistic uint40 unix timestamp round-trips.
+        let traits = U256::from(1_738_003_600u64) << 80usize;
+        let out = maker_traits_expiry(&[json!(format!("{traits:#x}"))]).unwrap();
+        assert_eq!(out, json!(1_738_003_600u64));
+
+        // expiry region == 0 (never-expires) remaps to the max-uint40 sentinel.
+        let no_expiry = (U256::from(1u64) << 255usize) | U256::from(0xdeadu64);
+        let out = maker_traits_expiry(&[json!(format!("{no_expiry:#x}"))]).unwrap();
+        assert_eq!(out, json!(0xFF_FFFF_FFFFu64)); // 1_099_511_627_775
+
+        assert!(maker_traits_expiry(&[]).is_err());
+    }
+
+    #[test]
+    fn coalesce_address_prefers_nonzero_then_fallback() {
+        let a = "0x1111111111111111111111111111111111111111";
+        let b = "0x2222222222222222222222222222222222222222";
+        let zero = "0x0000000000000000000000000000000000000000";
+        // non-zero addr → returned as-is (lowercase).
+        assert_eq!(coalesce_address(&[json!(a), json!(b)]).unwrap(), json!(a));
+        // zero addr → fallback.
+        assert_eq!(
+            coalesce_address(&[json!(zero), json!(b)]).unwrap(),
+            json!(b)
+        );
+        // wrong arity + non-address error out.
+        assert!(coalesce_address(&[json!(a)]).is_err());
+        assert!(coalesce_address(&[json!("nope"), json!(b)]).is_err());
+    }
+
+    #[test]
+    fn token_key_or_native_maps_sentinel_to_native_else_erc20() {
+        let chain = "eip155:1";
+        // Native sentinel -> native key (no address).
+        let native = token_key_or_native(&[
+            json!("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+            json!(chain),
+        ])
+        .unwrap();
+        assert_eq!(native["standard"], json!("native"));
+        assert_eq!(native["chain"], json!(chain));
+        assert!(native.get("address").is_none());
+        // A real ERC-20 -> erc20 key with the lowercase address.
+        let erc20 = token_key_or_native(&[
+            json!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+            json!(chain),
+        ])
+        .unwrap();
+        assert_eq!(erc20["standard"], json!("erc20"));
+        assert_eq!(
+            erc20["address"],
+            json!("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+        );
+        // arity + bad address error out.
+        assert!(token_key_or_native(&[json!("0x0")]).is_err());
     }
 
     #[test]

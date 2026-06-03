@@ -187,6 +187,18 @@ mod tests {
         super::super::test_support::assert_conforms("sign_intent_order", &body, &meta);
     }
 
+    /// `one_inch_limit_order` venue → `{ chain, verifyingContract }` (1inch LOP v4).
+    #[test]
+    fn sign_intent_venue_one_inch_limit_order_conforms() {
+        let venue = IntentVenue::OneInchLimitOrder {
+            chain: ChainId::ethereum_mainnet(),
+            verifying_contract: Address::from_str("0x111111125421ca6dc452d289314280a0f8842a65")
+                .unwrap(),
+        };
+        let (body, meta) = sample_sign_intent_with(venue, IntentOrderKind::Limit);
+        super::super::test_support::assert_conforms("sign_intent_order", &body, &meta);
+    }
+
     /// Each `IntentOrderKind` drives the gate, and the emitted `orderKind`
     /// string is pinned to its exact snake_case spelling.
     #[test]
