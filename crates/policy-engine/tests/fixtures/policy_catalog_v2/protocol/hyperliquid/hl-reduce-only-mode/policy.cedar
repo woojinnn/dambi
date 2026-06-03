@@ -11,5 +11,10 @@
 @id("hl-reduce-only-mode")
 @severity("deny")
 @reason("Reduce-only mode is active — only position-closing (reduce-only) orders are allowed")
-forbid(principal, action == HyperliquidCore::Action::"HlOrder", resource)
+forbid(
+  principal,
+  // Plain order + TWAP — a TWAP open must not bypass the lockdown.
+  action in [HyperliquidCore::Action::"HlOrder", HyperliquidCore::Action::"HlTwapOrder"],
+  resource
+)
 when { context.positionEffect == "open" };

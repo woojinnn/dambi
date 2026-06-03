@@ -30,7 +30,8 @@ use policy_engine::schema::compose_per_policy;
 
 use policy_state::primitives::{Address, Decimal, Time};
 use policy_transition::action::hyperliquid_core::{
-    HlOrderAction, HlUpdateLeverageAction, HlWithdrawAction, HyperliquidCoreAction,
+    HlOrderAction, HlTwapOrderAction, HlUpdateLeverageAction, HlWithdrawAction,
+    HyperliquidCoreAction,
 };
 use policy_transition::action::{ActionBody, ActionMeta, ActionNature, Eip712Domain};
 
@@ -75,6 +76,20 @@ fn order(is_buy: bool, size: &str, reduce_only: bool) -> ActionBody {
     }))
 }
 
+/// Build a TWAP order action. `is_buy=false` ⇒ short; `reduce_only=true` ⇒ a
+/// reduce-only TWAP (closes/shrinks → positionEffect "reduce").
+fn twap(is_buy: bool, reduce_only: bool) -> ActionBody {
+    ActionBody::HyperliquidCore(HyperliquidCoreAction::TwapOrder(HlTwapOrderAction {
+        asset_index: 0,
+        symbol: Some("BTC".to_owned()),
+        is_buy,
+        size: Decimal::new("10"),
+        reduce_only,
+        minutes: 30,
+        randomize: false,
+    }))
+}
+
 /// A minimal v2 manifest triggering on the given HL Core action tag.
 fn manifest(tag: &str) -> ManifestV2 {
     serde_json::from_value(json!({
@@ -109,6 +124,52 @@ fn evaluate(body: &ActionBody, tag: &str, policy: &str) -> Verdict {
         )
         .expect("evaluate")
 }
+
+/// Manifest whose trigger matches BOTH HL order tags, so `compose_per_policy`
+/// synthesizes a schema containing HlOrder AND HlTwapOrder — required for a
+/// policy scoped to `action in [HlOrder, HlTwapOrder]` to validate.
+fn manifest_multi() -> ManifestV2 {
+    serde_json::from_value(json!({
+        "id": "hl-order-multi-guard",
+        "schema_version": 2,
+        "trigger": { "where": { "action.tag": { "in": ["hl_order", "hl_twap_order"] } } },
+        "policy_rpc": [],
+        "custom_context": { "fields": {} }
+    }))
+    .expect("ManifestV2 deserializes")
+}
+
+/// Evaluate one action against `policy` using the multi-tag (order + twap)
+/// manifest, returning the `Verdict`.
+fn evaluate_multi(body: &ActionBody, policy: &str) -> Verdict {
+    let meta = hl_meta();
+    let tx = TxMeta {
+        from: FROM,
+        to: TO_SENTINEL,
+    };
+    let lowered = lower_action(body, &meta, &tx).expect("lower_action");
+    let schema = compose_per_policy(&manifest_multi()).expect("compose_per_policy");
+    let engine = PolicyEngine::build_from_per_policy(&[(policy.to_owned(), schema)])
+        .expect("build_from_per_policy");
+    engine
+        .evaluate(
+            &lowered.principal,
+            &lowered.action_uid,
+            &lowered.resource,
+            &json!([]),
+            &lowered.context,
+        )
+        .expect("evaluate")
+}
+
+// The shipped no-new-short shape, scoped to BOTH order types so a TWAP short
+// cannot bypass it. Mirrors default_policies_v2/hl-no-short-perp.
+const DENY_SHORT_MULTI: &str = "\
+@id(\"hl/no-short-multi\")\n\
+@severity(\"deny\")\n\
+@reason(\"Opening a new short on Hyperliquid is blocked by policy\")\n\
+forbid(principal, action in [HyperliquidCore::Action::\"HlOrder\", HyperliquidCore::Action::\"HlTwapOrder\"], resource)\n\
+when { context.venue.name == \"hyperliquid\" && context.side == \"short\" && context.positionEffect == \"open\" };\n";
 
 // The deny policy under test: block opening NEW short exposure on Hyperliquid.
 // `side == "short"` is the order DIRECTION (sell), which also covers reduce-only
@@ -214,6 +275,42 @@ fn reduce_only_lockdown_blocks_opens_allows_closes() {
         evaluate(&order(false, "0.1", true), "hl_order", DENY_OPEN),
         Verdict::Pass,
         "a reduce-only sell (long-close) must pass reduce-only lockdown"
+    );
+}
+
+/// TWAP COVERAGE: a no-new-short scoped to `action in [HlOrder, HlTwapOrder]`
+/// blocks an opening TWAP short but passes a reduce-only TWAP (long-close) and a
+/// TWAP long — closing the bypass where a short is submitted as a TWAP. The same
+/// policy still blocks a plain opening order short.
+#[test]
+fn twap_short_is_covered_by_multi_action_no_short() {
+    // Opening TWAP short → blocked.
+    assert!(
+        matches!(
+            evaluate_multi(&twap(false, false), DENY_SHORT_MULTI),
+            Verdict::Fail(_)
+        ),
+        "an opening TWAP short must be blocked"
+    );
+    // Reduce-only TWAP short (long-close) → passes (positionEffect == reduce).
+    assert_eq!(
+        evaluate_multi(&twap(false, true), DENY_SHORT_MULTI),
+        Verdict::Pass,
+        "a reduce-only TWAP short (long-close) must pass"
+    );
+    // TWAP long → passes.
+    assert_eq!(
+        evaluate_multi(&twap(true, false), DENY_SHORT_MULTI),
+        Verdict::Pass,
+        "a TWAP long must pass"
+    );
+    // Plain opening order short still blocked through the SAME multi-action policy.
+    assert!(
+        matches!(
+            evaluate_multi(&order(false, "0.1", false), DENY_SHORT_MULTI),
+            Verdict::Fail(_)
+        ),
+        "a plain opening order short must still be blocked"
     );
 }
 

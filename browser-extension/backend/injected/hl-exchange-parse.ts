@@ -13,11 +13,13 @@
  * `subAccountTransfer` / `cDeposit` / `cWithdraw`) and permission / delegation
  * (`approveAgent` / `approveBuilderFee` / `tokenDelegate`).
  *
- * Anything else routes through the `hl_unknown` catch-all UNLESS it is in
- * {@link BENIGN_PASS_THROUGH} (high-frequency, fund-/permission-neutral actions
- * like `cancel` / `modify` / `scheduleCancel`), which returns `null` and passes
- * through unevaluated. So a fund- or permission-moving action we have not
- * explicitly modeled can never silently pass the venue.
+ * Order-placing variants `modify` / `batchModify` are decoded as order legs (they
+ * re-place a full order spec and can open exposure). Anything else routes through
+ * the `hl_unknown` catch-all UNLESS it is in {@link BENIGN_PASS_THROUGH}
+ * (high-frequency, fund-/permission-neutral actions like `cancel` /
+ * `scheduleCancel`), which returns `null` and passes through unevaluated. So a
+ * fund- or permission-moving action we have not explicitly modeled can never
+ * silently pass the venue.
  */
 import {
   RequestType,
@@ -48,18 +50,21 @@ export function matchVenue(url: string): string | undefined {
 }
 
 /**
- * `/exchange` action types that move no funds and grant no permission, and that
- * the live app POSTs at high frequency (order lifecycle / admin). These pass
- * through unevaluated (`null`) rather than routing to the `hl_unknown` catch-all
- * — gating them would add SW + WASM round-trips per cancel/modify with no
- * security value. Everything NOT here and NOT explicitly modeled becomes
- * `hl_unknown`, so a novel fund / permission action is never silently allowed.
+ * `/exchange` action types that move no funds, grant no permission, and place no
+ * order, and that the live app POSTs at high frequency (cancel / admin). These
+ * pass through unevaluated (`null`) rather than routing to the `hl_unknown`
+ * catch-all — gating them would add SW + WASM round-trips per cancel with no
+ * security value. Order-placing `modify` / `batchModify` are deliberately NOT
+ * here (they are decoded as order legs). Everything NOT here and NOT explicitly
+ * modeled becomes `hl_unknown`, so a novel fund / permission / order action is
+ * never silently allowed.
  */
 const BENIGN_PASS_THROUGH: ReadonlySet<string> = new Set([
   "cancel",
   "cancelByCloid",
-  "modify",
-  "batchModify",
+  // NOTE: `modify` / `batchModify` are NOT benign — they re-place a full order
+  // spec (can open/grow exposure) and are decoded as order legs (see
+  // `parseModify`), so they are deliberately absent from this set.
   "twapCancel",
   "scheduleCancel",
   "noop",
@@ -126,6 +131,29 @@ function unknownPayload(
   );
 }
 
+/**
+ * Build a {@link HyperliquidOrderWire} from a raw order object, or `null` when it
+ * is not a valid order leg. An order-wire entry must at least carry the numeric
+ * asset index `a` and the boolean side `b`. Shared by `order`, `modify` and
+ * `batchModify` (all three carry the same order spec).
+ */
+function orderWireFrom(o: unknown): HyperliquidOrderWire | null {
+  const order = asObject(o);
+  if (!order || typeof order.a !== "number" || typeof order.b !== "boolean") {
+    return null;
+  }
+  const wire: HyperliquidOrderWire = {
+    a: order.a,
+    b: order.b,
+    p: String(order.p ?? ""),
+    s: String(order.s ?? ""),
+    r: typeof order.r === "boolean" ? order.r : false,
+    t: order.t,
+  };
+  if (typeof order.c === "string") wire.c = order.c;
+  return wire;
+}
+
 /** Parse the `orders[]` of a `{"type":"order"}` action — one payload per leg. */
 function parseOrders(
   venue: string,
@@ -142,22 +170,11 @@ function parseOrders(
   const payloads: VenueOrderPayload[] = [];
   let sawInvalidLeg = false;
   for (const o of orders) {
-    const order = asObject(o);
-    // An order-wire entry must at least carry the numeric asset index `a` and
-    // the boolean side `b`; anything else is not an order leg.
-    if (!order || typeof order.a !== "number" || typeof order.b !== "boolean") {
+    const wire = orderWireFrom(o);
+    if (!wire) {
       sawInvalidLeg = true;
       continue;
     }
-    const wire: HyperliquidOrderWire = {
-      a: order.a,
-      b: order.b,
-      p: String(order.p ?? ""),
-      s: String(order.s ?? ""),
-      r: typeof order.r === "boolean" ? order.r : false,
-      t: order.t,
-    };
-    if (typeof order.c === "string") wire.c = order.c;
     payloads.push(
       envelope(venue, endpoint, hostname, { kind: "order", order: wire }, attribution),
     );
@@ -168,6 +185,41 @@ function parseOrders(
   return payloads.length > 0
     ? payloads
     : [unknownPayload(venue, endpoint, hostname, "order", attribution)];
+}
+
+/**
+ * Parse a `{"type":"modify"}` / `{"type":"batchModify"}` action. Both REPLACE a
+ * resting order with a full new order spec, so they can OPEN or grow exposure —
+ * they are NOT benign no-ops. Every carried `order` is decoded exactly like a
+ * freshly-placed order leg, so a no-new-short / reduce-only-lockdown policy sees
+ * the resulting order.
+ *
+ * If NO valid order is carried (empty `modifies`, or an order spec HL would
+ * itself reject as malformed), the request places no exposure, so it stays
+ * benign (`null`, pass-through) — the bypass it closes is an OPENING ORDER,
+ * which is only present when a leg decodes.
+ */
+function parseModify(
+  venue: string,
+  endpoint: string,
+  hostname: string,
+  action: Record<string, unknown>,
+  attribution: HlAttribution,
+): VenueOrderPayload[] | null {
+  const legs: unknown[] = Array.isArray(action.modifies)
+    ? (action.modifies as unknown[]).map((m) => asObject(m)?.order)
+    : [action.order];
+
+  const payloads: VenueOrderPayload[] = [];
+  for (const o of legs) {
+    const wire = orderWireFrom(o);
+    if (wire) {
+      payloads.push(
+        envelope(venue, endpoint, hostname, { kind: "order", order: wire }, attribution),
+      );
+    }
+  }
+  return payloads.length > 0 ? payloads : null;
 }
 
 /**
@@ -217,6 +269,11 @@ export function parseHyperliquidExchangeOrders(
   switch (actionType) {
     case "order":
       return parseOrders(venue, endpoint, hostname, action, attribution);
+
+    case "modify":
+    case "batchModify":
+      // Both re-place a full order spec → decode as order leg(s), never benign.
+      return parseModify(venue, endpoint, hostname, action, attribution);
 
     case "updateLeverage": {
       if (

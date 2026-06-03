@@ -11,7 +11,12 @@
 @id("hl-no-short-perp")
 @severity("deny")
 @reason("Opening a new short perp on Hyperliquid is blocked by your policy")
-forbid(principal, action == HyperliquidCore::Action::"HlOrder", resource)
+forbid(
+  principal,
+  // Plain order + TWAP — a TWAP short must not bypass the control.
+  action in [HyperliquidCore::Action::"HlOrder", HyperliquidCore::Action::"HlTwapOrder"],
+  resource
+)
 when {
   context.venue.name == "hyperliquid"
     && context.side == "short"

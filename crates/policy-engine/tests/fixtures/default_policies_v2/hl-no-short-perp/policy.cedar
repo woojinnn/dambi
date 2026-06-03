@@ -3,7 +3,9 @@
 @reason("Opening a new short perp on Hyperliquid is blocked by policy")
 forbid(
   principal,
-  action == HyperliquidCore::Action::"HlOrder",
+  // Covers BOTH a plain order and a TWAP order — a TWAP short is still a short,
+  // so it must not bypass this control (both contexts carry venue/side/positionEffect).
+  action in [HyperliquidCore::Action::"HlOrder", HyperliquidCore::Action::"HlTwapOrder"],
   resource
 )
 when {
