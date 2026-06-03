@@ -14,9 +14,9 @@ use rust_decimal::Decimal as RustDecimal;
 use serde_json::{json, Value};
 
 use policy_state::position::{
-    HlAccount, HlAgentApproval, HlBorrowLendAccount, HlBorrowLendBalance, HlBorrowLendTokenState,
-    HlLeverageSetting, HlOpenOrder, HlPosition, HlSpotBalance, HlStakingAccount,
-    HlStakingDelegation, HlVaultEquity,
+    CoreFresh, HlAccount, HlAgentApproval, HlBorrowLendAccount, HlBorrowLendBalance,
+    HlBorrowLendTokenState, HlLeverageSetting, HlOpenOrder, HlPosition, HlSpotBalance,
+    HlStakingAccount, HlStakingDelegation, HlVaultEquity,
 };
 use policy_state::primitives::Time;
 use policy_state::{Address, DataSource, Decimal, MarketRef, VenueRef, U256};
@@ -129,6 +129,27 @@ impl HyperliquidFetcher {
         let v = self.fetch_perp_dexs(endpoint).await?;
         self.dexs_cache.lock().unwrap().put((), v.clone(), now);
         Ok(v)
+    }
+
+    /// Best-effort **core** fetch for the **native** dex (no perp-dex fan-out).
+    /// Returns `(account, fresh, errors)`; `fresh` tells the caller which core
+    /// domains to overwrite vs preserve.
+    pub async fn fetch_hl_core(
+        &self,
+        endpoint: &str,
+        user: &Address,
+        now: Time,
+    ) -> (HlAccount, CoreFresh, Vec<String>) {
+        let meta = match self.cached_meta(endpoint, now).await {
+            Ok(m) => m,
+            Err(e) => {
+                return (HlAccount::default(), CoreFresh::default(), vec![format!("meta: {e}")]);
+            }
+        };
+        let clearinghouse = self.fetch_clearinghouse_state(endpoint, user).await;
+        let spot = self.fetch_spot_clearinghouse_state(endpoint, user).await;
+        let open_orders = self.fetch_open_orders(endpoint, user).await;
+        assemble_core(clearinghouse, spot, open_orders, &meta)
     }
 
     pub async fn fetch_clearinghouse_state(
@@ -432,6 +453,61 @@ pub(crate) enum HlAssetMetric {
 pub(crate) enum FeeSide {
     Maker,
     Taker,
+}
+
+/// Assemble the **core** `HlAccount` from already-fetched parts, best-effort.
+/// `clearinghouse` is the anchor (no `perp_usdc` / positions / leverage without
+/// it); `spot` and `open_orders` are additive. Returns `(account, fresh, errors)`
+/// where `fresh` marks exactly the domains that fetched **and** parsed OK, so the
+/// caller's `merge_core` overwrites only those and preserves the rest.
+pub(crate) fn assemble_core(
+    clearinghouse: Result<Value, SyncError>,
+    spot: Result<Value, SyncError>,
+    open_orders: Result<Value, SyncError>,
+    meta: &Value,
+) -> (HlAccount, CoreFresh, Vec<String>) {
+    let mut errors = Vec::new();
+    let mut fresh = CoreFresh::default();
+    let empty_agents = Value::Array(Vec::new());
+
+    let clearinghouse = match clearinghouse {
+        Ok(v) => v,
+        Err(e) => {
+            errors.push(format!("clearinghouse: {e}"));
+            // No anchor → all-false mask → caller preserves all core fields.
+            return (HlAccount::default(), fresh, errors);
+        }
+    };
+    let (orders_val, orders_ok) = match open_orders {
+        Ok(v) => (v, true),
+        Err(e) => {
+            errors.push(format!("open_orders: {e}"));
+            (Value::Array(Vec::new()), false)
+        }
+    };
+    let mut account =
+        match parse_account_snapshot(&clearinghouse, &orders_val, &empty_agents, meta) {
+            Ok(a) => {
+                fresh.clearinghouse = true;
+                fresh.open_orders = orders_ok;
+                a
+            }
+            Err(e) => {
+                errors.push(format!("parse core: {e}"));
+                return (HlAccount::default(), CoreFresh::default(), errors);
+            }
+        };
+    match spot {
+        Ok(v) => match parse_hl_spot_balances(&v) {
+            Ok(b) => {
+                account.spot_balances = b;
+                fresh.spot = true;
+            }
+            Err(e) => errors.push(format!("spot parse: {e}")),
+        },
+        Err(e) => errors.push(format!("spot: {e}")),
+    }
+    (account, fresh, errors)
 }
 
 pub(crate) fn parse_account_snapshot(
@@ -1377,6 +1453,29 @@ mod tests {
     use super::*;
     use policy_state::DataSource;
     use policy_state::Decimal;
+
+    #[test]
+    fn assemble_core_is_best_effort() {
+        // clearinghouse OK, spot FAILS, openOrders OK, meta OK.
+        let clearinghouse = serde_json::json!({ "withdrawable": "600.5", "assetPositions": [] });
+        let open_orders = serde_json::json!([]);
+        let meta = serde_json::json!({ "universe": [] });
+        let spot_err: Result<Value, SyncError> = Err(SyncError::FetchFailed {
+            source_id: "hyperliquid".into(),
+            reason: "boom".into(),
+        });
+
+        let (acct, fresh, errors) =
+            assemble_core(Ok(clearinghouse), spot_err, Ok(open_orders), &meta);
+        // core present despite spot failure
+        assert_eq!(acct.perp_usdc, Some(Decimal::new("600.5")));
+        assert!(acct.spot_balances.is_empty()); // failed → left empty
+        assert!(fresh.clearinghouse); // clearinghouse domain fresh
+        assert!(fresh.open_orders); // orders domain fresh
+        assert!(!fresh.spot); // spot NOT fresh → caller preserves prior value
+        assert_eq!(errors.len(), 1); // one recorded error (spot)
+        assert!(errors[0].contains("spot"));
+    }
 
     #[test]
     fn rejects_non_venue_source() {
