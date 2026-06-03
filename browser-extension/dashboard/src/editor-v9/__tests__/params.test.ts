@@ -33,7 +33,7 @@ function basePolicy(): PolicyIR {
 describe("editor-v9 parameterisation (template → adopter)", () => {
   it("makeHole + fillParams round-trips a long literal", () => {
     const tmpl = basePolicy();
-    const lit = { kind: "lit", litType: "long" as const, value: 100 };
+    const lit = { kind: "lit" as const, litType: "long" as const, value: 100 };
     const hole = makeHole(lit, { name: "maxUsd", label: "Max swap (USD)" });
     tmpl.conditions.push({
       kind: "when",
@@ -62,7 +62,7 @@ describe("editor-v9 parameterisation (template → adopter)", () => {
 
   it("required hole missing → fillParams returns missing error", () => {
     const tmpl = basePolicy();
-    const lit = { kind: "lit", litType: "string" as const, value: "USDT" };
+    const lit = { kind: "lit" as const, litType: "string" as const, value: "USDT" };
     const hole = makeHole(lit, { name: "token" });
     tmpl.conditions.push({ kind: "when", body: hole });
 
@@ -76,7 +76,7 @@ describe("editor-v9 parameterisation (template → adopter)", () => {
 
   it("optional hole falls back to default when unsupplied", () => {
     const tmpl = basePolicy();
-    const lit = { kind: "lit", litType: "long" as const, value: 42 };
+    const lit = { kind: "lit" as const, litType: "long" as const, value: 42 };
     const hole = makeHole(lit, { name: "n", optional: true });
     tmpl.conditions.push({ kind: "when", body: hole });
 
@@ -90,7 +90,7 @@ describe("editor-v9 parameterisation (template → adopter)", () => {
 
   it("constraint enum is enforced", () => {
     const tmpl = basePolicy();
-    const lit = { kind: "lit", litType: "string" as const, value: "low" };
+    const lit = { kind: "lit" as const, litType: "string" as const, value: "low" };
     const hole = makeHole(lit, {
       name: "tier",
       constraints: { enum: ["low", "med", "high"] },
@@ -113,8 +113,8 @@ describe("editor-v9 parameterisation (template → adopter)", () => {
 
   it("duplicate hole names trigger extractParams to throw", () => {
     const tmpl = basePolicy();
-    const litA = { kind: "lit", litType: "long" as const, value: 1 };
-    const litB = { kind: "lit", litType: "long" as const, value: 2 };
+    const litA = { kind: "lit" as const, litType: "long" as const, value: 1 };
+    const litB = { kind: "lit" as const, litType: "long" as const, value: 2 };
     tmpl.conditions.push(
       { kind: "when", body: makeHole(litA, { name: "x" }) },
       { kind: "when", body: makeHole(litB, { name: "x" }) },

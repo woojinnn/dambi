@@ -136,8 +136,9 @@ export function registerMakeParamContextMenu(): void {
     scopeType: Blockly.ContextMenuRegistry.ScopeType.BLOCK,
     displayText: () => "파라미터로 만들기…",
     preconditionFn: ({ block }) =>
-      PARAMETERISABLE_TYPES.has(block.type) ? "enabled" : "hidden",
+      block && PARAMETERISABLE_TYPES.has(block.type) ? "enabled" : "hidden",
     callback: ({ block }) => {
+      if (!block) return;
       const ws = block.workspace as Blockly.WorkspaceSvg;
       const errors: string[] = [];
       const expr: Expr = readExprFromBlock(block, errors);
