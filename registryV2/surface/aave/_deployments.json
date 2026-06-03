@@ -108,21 +108,21 @@
       "chainId": 1,
       "address": "0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f",
       "decision": "exclude",
-      "reason": "deferred user-facing surface (GHO permit + facilitator mint); usage-share measured P2, follow-up round"
+      "reason": "no protocol-specific contract surface to decode: transfer/approve/permit = standard ERC-20 (erc20 standard adapter); mint/burn/addFacilitator = facilitator-gated (non-EOA). GHO is covered as a registered TOKEN (tokens/1/0x40d16f…, check:tokens) so amounts are legible across Pool-borrow / GSM swap / stkGHO stake — not as a cover contract."
     },
     {
       "name": "GSM USDC",
       "chainId": 1,
       "address": "0x3a3868898305f04bec7fea77becff04c13444112",
-      "decision": "exclude",
-      "reason": "deferred user-facing surface (buyAsset/sellAsset GHO stability swap); usage-share P2, follow-up"
+      "decision": "cover",
+      "reason": "user GSM swap surface: buyAsset/sellAsset (GHO↔USDC fixed-price). snapshot gsm-usdc-mainnet (impl 0x320be97b…); maps to amm::GsmSwap."
     },
     {
       "name": "GSM USDT",
       "chainId": 1,
       "address": "0x882285e62656b9623af136ce3078c6bdcc33f5e3",
-      "decision": "exclude",
-      "reason": "deferred user-facing surface (GSM swap); usage-share P2, follow-up"
+      "decision": "cover",
+      "reason": "user GSM swap surface: buyAsset/sellAsset (GHO↔USDT fixed-price). snapshot gsm-usdt-mainnet (impl 0x31fe806e…); maps to amm::GsmSwap."
     },
     {
       "name": "SGHO (Savings GHO, ERC4626)",
@@ -142,15 +142,15 @@
       "name": "stkAAVE (StakedAaveV3)",
       "chainId": 1,
       "address": "0x4da27a545c0c5b758a6ba100e3a049001de870f5",
-      "decision": "exclude",
-      "reason": "deferred user-facing surface (safety-module stake/redeem/cooldown + governance delegation); AAVE delegation is the dominant delegation target this run covers; usage-share P2, follow-up"
+      "decision": "cover",
+      "reason": "user safety-module surface: stake/cooldown/redeem/claimRewards (→ staking domain) + governance delegate/delegateByType (→ airdrop::Delegate). snapshot stkaave-mainnet (impl 0x0fe58fe1…)."
     },
     {
       "name": "stkGHO (StakedGho)",
       "chainId": 1,
       "address": "0x1a88df1cfe15af22b3c4c783d4e6f7f9e0c1885d",
-      "decision": "exclude",
-      "reason": "deferred user-facing surface (safety-module staking); usage-share P2, follow-up"
+      "decision": "cover",
+      "reason": "user safety-module surface: stake/cooldown/redeem/claimRewards (→ staking domain); no governance delegation (GHO non-gov). snapshot stkgho-mainnet (impl 0x50f9d4e2…)."
     },
     {
       "name": "stkABPT",
