@@ -316,3 +316,89 @@ describe("tryDeclarativeRouteV3", () => {
     expect(calls).toContainEqual({ to: GA1, selector: "0xaabbccdd" });
   });
 });
+
+const STETH = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
+const stethStakeEthBundle: V3Bundle = {
+  type: "adapter_action",
+  id: "lido/steth/stake-eth@1.0.0",
+  publisher: "lido.eth",
+  schema_version: "3",
+  match: {
+    selector: "0x00000000",
+    chain_to_addresses: { "1": [STETH] },
+  },
+  abi_fragment: {
+    function_name: "fallback",
+    abi: { name: "fallback", type: "function", stateMutability: "payable", inputs: [] },
+  },
+  emit: {
+    strategy: "single_emit",
+    body: { domain: "liquid_staking" },
+  },
+};
+
+describe("tryDeclarativeRouteV3 — selector-less native-ETH stake", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("routes a value-bearing empty-calldata tx under the 0x00000000 sentinel", async () => {
+    mocks.installDeclarativeBundleV3.mockImplementation(
+      async ({ selector }: { selector: string }) =>
+        selector === "0x00000000" ? installed(stethStakeEthBundle) : null,
+    );
+    mocks.declarativeRouteRequestV3.mockResolvedValue({
+      decoder_id: "lido/steth/stake-eth@1.0.0",
+      actions: [{ body: { domain: "liquid_staking", action: "stake" } }],
+    });
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0x31ca56db7d434bcb3a588149acf5d2b615aec477",
+      to: STETH,
+      valueWei: "1530000000000000000",
+      calldataHex: "0x",
+    });
+
+    expect(outcome.kind).toBe("hit");
+    expect(mocks.installDeclarativeBundleV3).toHaveBeenCalledWith({
+      chainId: 1,
+      to: STETH,
+      selector: "0x00000000",
+    });
+    // Empty calldata is normalised to "0x" when handed to the WASM route.
+    expect(mocks.declarativeRouteRequestV3).toHaveBeenCalledWith(
+      expect.objectContaining({ selector: "0x00000000", calldata: "0x" }),
+    );
+  });
+
+  it("misses for a bare-ETH transfer to an address with no sentinel manifest", async () => {
+    mocks.installDeclarativeBundleV3.mockResolvedValue(null);
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0xabc0000000000000000000000000000000000001",
+      to: "0x1111111111111111111111111111111111111111",
+      valueWei: "1000000000000000000",
+      calldataHex: "0x",
+    });
+
+    expect(outcome).toEqual({ kind: "miss", reason: "bundle_not_installed" });
+    expect(mocks.installDeclarativeBundleV3).toHaveBeenCalledWith(
+      expect.objectContaining({ selector: "0x00000000" }),
+    );
+  });
+
+  it("does NOT synthesize the sentinel for a 0-value empty-calldata tx", async () => {
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0xabc0000000000000000000000000000000000001",
+      to: STETH,
+      valueWei: "0",
+      calldataHex: "0x",
+    });
+
+    expect(outcome).toEqual({ kind: "miss", reason: "no_selector" });
+    expect(mocks.installDeclarativeBundleV3).not.toHaveBeenCalled();
+  });
+});

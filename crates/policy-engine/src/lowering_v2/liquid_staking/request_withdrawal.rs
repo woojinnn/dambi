@@ -37,6 +37,15 @@ pub(crate) fn lower(
     );
     m.insert("owner".into(), Value::String(addr(&action.owner)));
 
+    // `…WithPermit` variants carry an embedded EIP-2612 allowance grant to the
+    // queue; surface its policy-relevant fields (value, deadline) when present.
+    if let Some(permit) = &action.embedded_permit {
+        let mut p = Map::new();
+        p.insert("value".into(), Value::String(u256_hex(permit.value)));
+        p.insert("deadline".into(), Value::String(u256_hex(permit.deadline)));
+        m.insert("embedded_permit".into(), Value::Object(p));
+    }
+
     Ok(ctx.lowered(
         r#"LiquidStaking::Action::"RequestWithdrawal""#,
         Value::Object(m),
@@ -47,7 +56,9 @@ pub(crate) fn lower(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use policy_state::primitives::U256;
-    use policy_transition::action::liquid_staking::{LiquidStakingAction, RequestWithdrawalAction};
+    use policy_transition::action::liquid_staking::{
+        EmbeddedPermit, LiquidStakingAction, RequestWithdrawalAction,
+    };
     use policy_transition::action::ActionBody;
 
     use super::super::test_support::{lido_venue, onchain_meta, other, steth};
@@ -60,6 +71,24 @@ mod tests {
                 token: steth(),
                 amounts: vec![U256::from(1_000_000_000_000_000_000u64), U256::from(2u64)],
                 owner: other(),
+                embedded_permit: None,
+            },
+        ));
+        super::super::test_support::assert_conforms("request_withdrawal", &body, &onchain_meta());
+    }
+
+    #[test]
+    fn request_withdrawal_with_permit_conforms() {
+        let body = ActionBody::LiquidStaking(LiquidStakingAction::RequestWithdrawal(
+            RequestWithdrawalAction {
+                venue: lido_venue(),
+                token: steth(),
+                amounts: vec![U256::from(1_000_000_000_000_000_000u64)],
+                owner: other(),
+                embedded_permit: Some(EmbeddedPermit {
+                    value: U256::from(1_000_000_000_000_000_000u64),
+                    deadline: U256::from(1_780_000_000u64),
+                }),
             },
         ));
         super::super::test_support::assert_conforms("request_withdrawal", &body, &onchain_meta());

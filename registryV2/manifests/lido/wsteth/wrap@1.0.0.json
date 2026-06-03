@@ -38,7 +38,7 @@
           "chain": "$chain",
           "contract": "$to",
           "function": "getWstETHByStETH(uint256)",
-          "decoder_id": "lido_wsteth_by_steth"
+          "decoder_id": "u256"
         },
         "ttl_s": 30
       }

@@ -98,6 +98,16 @@ const TOKENS_DIR = join(REGISTRY_ROOT, "tokens");
 const SELECTOR_RE = /^0x[0-9a-fA-F]{8}$/;
 const MUTABLE = new Set(["nonpayable", "payable"]);
 
+/**
+ * Reserved sentinel for selector-less BARE-ETH transfers (empty calldata + value):
+ * a payable `receive()` / `fallback()` has no 4-byte function selector, so build-
+ * index + the WASM route key such calls under the all-zero word `0x00000000`
+ * (which still satisfies `SELECTOR_RE`). A coverage file may OPT IN to cover this
+ * sentinel; I1' grounds it in the snapshot's receive/fallback entry (see
+ * `hasNativeEntrypoint`) instead of the function-selector surface check.
+ */
+const NATIVE_TRANSFER_SELECTOR = "0x00000000";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -508,6 +518,22 @@ function mutatingSelectors(snap: Snapshot): Map<string, string> {
   return out;
 }
 
+/**
+ * Does the snapshot expose a value-receiving entrypoint with NO 4-byte selector —
+ * a `receive()` (payable by EVM definition) or a payable `fallback()`? Bare-ETH
+ * calls (empty calldata + value) hit these and are routed under the reserved
+ * `0x00000000` native-transfer sentinel, not by a function selector. This grounds
+ * an opt-in `0x00000000` coverage entry in 1st-party ABI so I1' can accept it as a
+ * real surface (e.g. Lido: ETH→stETH fallback stake / ETH→wstETH receive stake).
+ */
+function hasNativeEntrypoint(snap: Snapshot): boolean {
+  return snap.abi.some(
+    (item) =>
+      item.type === "receive" ||
+      (item.type === "fallback" && item.stateMutability === "payable"),
+  );
+}
+
 function main(): void {
   const failures: string[] = [];
   const warnings: string[] = [];
@@ -560,7 +586,17 @@ function main(): void {
     }
     // I1' — no stale / malformed coverage entries (once).
     for (const sel of Object.keys(fns)) {
-      if (!surface.has(sel)) {
+      if (sel === NATIVE_TRANSFER_SELECTOR) {
+        // Selector-less native-transfer sentinel (bare-ETH receive()/fallback()).
+        // It is NOT an ABI function selector, so it is absent from `surface`;
+        // ground it in the snapshot's receive/fallback entry instead of the
+        // function-surface check (opt-in — only files that cover it reach here).
+        if (!hasNativeEntrypoint(snap)) {
+          failures.push(
+            `${label}: I1' native-transfer sentinel ${sel} (${fns[sel].name}) requires a receive() or payable fallback() entry in the snapshot to ground it`,
+          );
+        }
+      } else if (!surface.has(sel)) {
         failures.push(`${label}: I1' coverage selector ${sel} (${fns[sel].name}) is NOT an external-mutating fn in the snapshot (stale/typo)`);
       }
       if (!SELECTOR_RE.test(sel)) {
