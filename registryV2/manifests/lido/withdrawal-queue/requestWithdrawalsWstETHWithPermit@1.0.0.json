@@ -39,7 +39,11 @@
           "venue": { "name": "lido", "chain": "$chain" },
           "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0" } },
           "amounts": "$args._amounts",
-          "owner": "$args._owner"
+          "owner": "$args._owner",
+          "embedded_permit": {
+            "value": "$args._permit[0]",
+            "deadline": "$args._permit[1]"
+          }
         }
       }
     },

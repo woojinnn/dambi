@@ -19,19 +19,19 @@
 | protocol | morpho |
 | branch | feat/morpho-onboarding |
 | worktree | /Users/jhy/Desktop/ScopeBall/scopeball-morpho |
-| date | 2026-06-02 |
+| date | 2026-06-02 (re-run); **2026-06-03 (Q1 vault long-tail promotion → all 73 listed mainnet vaults cover)** |
 | main agent | Claude Opus 4.8 (1M context), this session |
-| base commit | a8909023 (feat/registry-v2); hardening cherry-picked at 67426771 |
+| base commit | a8909023 (feat/registry-v2); hardening cherry-picked at 67426771; mainnet-only reconciliation at 4116ce65; **Q1 on c9916daf** |
 
 ## Scope Classification
 
 | field | value |
 |---|---|
 | representative chain (SINGLE — multichain = separate framework, deferred) | **Ethereum mainnet (`1`) ONLY.** Base (`8453`) and all other chains = explicit defer (separate multichain framework). The prior run's mainnet **+ Base** expansion was reverted under the hardened one-chain SCOPE CONTRACT (see FW-2). |
-| completion target | `wallet-facing`, **direct-call subset** — Morpho Blue singleton (direct + off-chain Authorization) + MetaMorpho ERC-4626 8-vault TVL cover-batch, **direct-to-vault calls only**. |
-| covered real-usage coverage-share (P2-measured: % of recent P0-universe txs the covered set decodes) | **MetaMorpho (Dune 30d, mainnet):** the 8 cover vaults = **41%** of vault-direct ERC4626 txs across all 73 listed vaults (65-vault long-tail = 59%). Of all user txs reaching the 8 cover vaults, **direct-to-vault (what ScopeBall decodes) = 2.7%**; Bundler3 = 14.5%; other routers/aggregators/AA = 82.8%. Among Morpho-native paths (direct vs Bundler3): direct = **~16%**. **Morpho Blue:** singleton, all 8 user selectors + Authorization covered for *direct* calls; router-routed Blue actions share the same deferral (not separately quantified this round). |
-| user-facing DEFERs, each with its 1st-party usage-share (%/count) | **Bundler3** (multicall router): **~84% of Morpho-native MetaMorpho vault deposits** (Dune 30d: direct 193 tx vs Bundler3 1038 tx), ~14.5% of all vault-touching txs — **#1 follow-up**. **65-vault long-tail**: ~59% of vault-direct ERC4626 txs (M1). **Other routers/aggregators/ERC-4337 AA-entrypoints**: ~83% of all vault-touching txs, fragmented (M3/M4). **Base/multichain, MetaMorpho V2/VaultV2, URD claim, mint/redeem §4d enrichment**: separate-surface defers. |
-| direct factory-child calls | covered (8 concrete `$to`-keyed cover vaults) + deferred (65-vault long-tail universe, same surface) |
+| completion target | `wallet-facing`, **direct-call subset** — Morpho Blue singleton (direct + off-chain Authorization) + MetaMorpho ERC-4626 **all 73 listed mainnet vaults** (Q1 long-tail promotion; was an 8-vault TVL cover-batch), **direct-to-vault calls only**. |
+| covered real-usage coverage-share (P2-measured: % of recent P0-universe txs the covered set decodes) | **Q1 (all 73 listed covered):** vault-direct = **100%** of listed mainnet vaults (was 41% with 8); listed-vault **TVL = 100%** ($1.26B; the 8 cover were 75.7%). **BUT all-entrypoint coverage ceiling is unchanged at ~2.7%** — direct-to-vault is a *minority* of user entrypoints. FW-2 8-cover sample (Dune 30d): direct-to-vault **2.7%** / Bundler3 **14.5%** / other routers+aggregators+AA **82.8%**; Morpho-native direct ≈ **16%** (rest via Bundler3). Q1 fills the direct slice fully (~1.1%→~2.7% of all entrypoints) but **Bundler3 (Q2) is the unlock for the dominant ~14.5%**. **Morpho Blue:** singleton, all 8 user selectors + Authorization covered for *direct* calls. |
+| user-facing DEFERs, each with its 1st-party usage-share (%/count) | **Bundler3** (multicall router): **~84% of Morpho-native MetaMorpho vault deposits** (Dune 30d: direct 193 tx vs Bundler3 1038 tx), ~14.5% of all vault-touching txs — **#1 follow-up (Q2)**. **Other routers/aggregators/ERC-4337 AA-entrypoints**: ~83% of all vault-touching txs, fragmented (M3/M4). **Base/multichain, MetaMorpho V2/VaultV2, URD claim, mint/redeem §4d enrichment**: separate-surface defers. *(65-vault long-tail — formerly the #2 defer — is now COVERED by Q1.)* |
+| direct factory-child calls | **covered — all 73 listed mainnet vaults** via concrete `$to`-keyed manifests grouped by (chain, underlying) (Q1; was 8 cover + 65 defer) |
 | final claim label (MUST NOT over-claim the measured coverage-share above) | see **Final Completion Claim** — bounded to the measured shares; explicitly *not* "the full surface a Morpho user signs." |
 
 ## P0 Research Evidence
@@ -157,15 +157,119 @@
 
 **Conclusion:** all three hardened rules caught their target errors and drove convergence to a mainnet-only, data-gated, coverage-bounded, non-over-claiming onboarding. The hardening (cherry-picked at `67426771`) is sufficient for these failure modes; the only net-new insight (FW-2) is that the 1st-party rule's extension to usage/dominance claims is load-bearing — it caught a *wrong* number, not just a missing one — which the cherry-picked guardrail already encodes.
 
+## Q1 Follow-up — Vault Long-tail Promotion (2026-06-03)
+
+> **Supersedes the 8-cover / 65-defer split recorded in P0–P4 above** (those rows document the
+> original re-run state). Q1 promotes the entire listed mainnet MetaMorpho universe to COVER.
+> Mechanical, registry-data-only (no Rust/decoder/schema change) — same ERC-4626 surface the 8
+> cover vaults already proved.
+
+**What changed.** All **65 long-tail vaults → COVER**, so all **73 listed mainnet vaults** are now
+decoded. Done via the existing gate-native pattern (concrete `$to`-keyed manifests grouped by
+`(chain=1, underlying)`, `venue=metamorpho{vault=$to}`, underlying asset baked) — **not** a custom
+source-resolver (that path false-fails `check:surface` I2 per `gatedSourceAddresses`).
+
+**1st-party data.** `blue-api.morpho.org/graphql vaults(where:{chainId_in:[1],listed:true})` snapshot
+2026-06-02 → 73 vaults, 18 underlyings, total TVL **$1,262,352,932**. Share `decimals()` confirmed
+**on-chain = 18 for all 73** (batch `eth_call` via publicnode; MetaMorpho `DECIMALS_OFFSET=18−assetDecimals` invariant).
+
+**Files (registry-data only):**
+- `tokens/1/<vault>.json` — **65 new** `yield_receipt` share tokens (8 pre-existing skipped; underlying ref resolves for all 65; decimals=18).
+- `manifests/morpho/metamorpho/1-<underlying>-{deposit,withdraw,mint,redeem}@1.0.0.json` — **44 new** (11 new underlyings × 4: AUSD/cbBTC/DAI/EURC/EURCV/eUSD/LBTC/msETH/msUSD/USDf/wstETH) + **28 existing** had their `chain_to_addresses` list expanded to the full per-underlying vault set (structural-drift scan: 0 — only address-list + note changed).
+- `surface/morpho/_address_universe.json` — 73 candidates all `cover` (was 8/65); `surface/morpho/metamorpho-mainnet.coverage.json` — `addresses` 8→73 (functions triage untouched).
+- All 18 underlyings already registered (no new underlying tokens). `_deployments.json` untouched (vaults are factory children, deliberately not a deployment-list contract).
+
+**Honest coverage re-measurement.** Covering all 73 maxes the **direct-to-vault axis** but does **not**
+change the user-entrypoint ceiling:
+
+| axis | before Q1 (8 cover) | after Q1 (73 cover) |
+|---|---|---|
+| listed mainnet vaults covered | 8 / 73 | **73 / 73 (100%)** |
+| listed-vault TVL covered | 75.7% ($956M) | **100% ($1.26B)** |
+| vault-direct ERC4626 tx | ~41% | **~100%** (all listed vaults) |
+| **all user entrypoints** (what users sign) | ~1.1% | **~2.7%** (ceiling) |
+
+The all-entrypoint number is still bounded by FW-2: **direct-to-vault ≈ 2.7%**, Bundler3 ≈ **14.5%**,
+other routers/aggregators/AA ≈ **82.8%** (8-cover sample; the all-73 entrypoint split was not
+re-run — the router-dominance is already established and Q1 doesn't move it). **Q1 fully decodes the
+direct slice; Bundler3 (Q2) remains the single highest-value unlock (~14.5%).**
+
+**Gates (all green, mainnet-only).** `npm run build` → 53,429 callkeys / 83 typed-data / 858 manifests;
+`check:surface` **PASS** (I0 `18 deployed · 1 cover · 17 exclude`; 73 I0' WARN = factory children not in
+`_deployments`, expected/benign, was 8); `check:universe --protocol morpho --require-cover-linkage`
+**PASS — 73 candidates · 73 cover · 0 exclude · 0 defer** (all linked); `check:tokens` **PASS** (0 errors;
+65 new tokens add 0 warns — underlying refs all resolve; on-chain decimals=18 verified for all 73).
+**Decode proof:** `v3-harness corpus --filter metamorpho --require-expect-body` → **17/17 matched, 15/15
+pinned** — added 2 real-tx entries on a NEW-underlying vault (wstETH `bbqWSTETH`: deposit `0xe8e7fc8c…`
++ redeem `0x27dddde0…`), both `expect=pass got=pass` with `venue.vault`/`asset.address`/`amount`/party
+pins verified → the Q1-generated manifests decode real on-chain txs, not merely pass structural gates.
+(The wstETH deposit even carries a 24-byte trailing referral suffix — decoded correctly, same as the
+pre-existing USDC entry with that suffix.) **Full `v3_decode_harness` 60-test golden = 60/60 PASS**
+(1670s under parallel-session RAM pressure) — confirms the metamorpho-isolated registry-data change
+does not regress any other protocol's decode. `cargo test --workspace` (non-harness pure-Rust crates)
+unchanged from the c9916daf green state (no Rust touched).
+
+## Q2 Follow-up — Bundler3 `multicall(Call[])` decode (2026-06-03)
+
+> The **#1 data-gated DEFER from Q1**: Bundler3 (~14.5% of all vault-touching txs / ~84% of Morpho-native
+> deposits) is now decoded. Core-decoder change (a new **per-leg-to** multicall strategy) + GeneralAdapter1
+> adapter-leg surface. Commits: `dff1fba6`(engine) → `58290439`(GA1) → `634d7c3a`(Bundler3) →
+> `07af0876`(corpus) → `0a57c9ce`(extension).
+
+**What changed.**
+- **Engine** (`policy-engine-wasm`): new ADDITIVE `multicall_call_array` emit.strategy — decodes
+  `multicall(Call[])` (`Call=(address to,bytes data,uint256 value,bool skipRevert,bytes32 callbackHash)`)
+  by re-routing each leg **at its OWN `to`** (per-leg-to), vs the existing same-`to` `multicall_recurse`.
+  Plus `maybe_inject_metamorpho_underlying` (arg-shape-gated injector + committed 73-vault snapshot) so a
+  GeneralAdapter1 `erc4626*` leg fills the REQUIRED `asset` (the vault is a runtime arg; the underlying is
+  not in calldata, unlike the direct metamorpho manifests that bake it).
+- **GeneralAdapter1** surface + **10 cover manifests**: morpho* (6) → the SAME Morpho Blue body as a direct
+  call (market from `$args.marketParams`, `market_id` auto-derived); erc4626* (4) → metamorpho{vault=$args.vault}.
+  16 exclude (onMorpho* callbacks + deferred plumbing/staking/wrapper).
+- **Bundler3** surface + `multicall(Call[])` manifest (`multicall_call_array`); `reenter`=exclude (guarded).
+- **Extension** loader: per-leg-to child pre-install (each leg installed at its own `to`).
+
+**Real-tx validation** (`v3-harness corpus --filter bundler3 --require-expect-body` → **2/2 matched, 2/2
+pinned**): a `[morphoWithdrawCollateral, erc20Transfer(skip)]` bundle → `Multicall[withdraw]` (`market_id`
+keccak-derived, asset=wstETH collateral / amount / recipient pinned); a `[Permit2 permit,
+morphoSupplyCollateral, erc20Transfer(skip)]` bundle → `Multicall[permit2, supply]` — demonstrating
+per-leg-to routing to **TWO different contracts** (Permit2 + GeneralAdapter1) and unmapped-leg skipping.
+
+**Gates (all green) — post Q2 honest-review fixes (D-A…D-E2).** check:surface PASS (Bundler3 2/1/1;
+GeneralAdapter1 26/**20**/6; I0 morpho 3 cover); check:manifest **1761** OK / 0 errors; check:universe 73
+cover-linkage; check:tokens PASS; engine unit tests (`multicall_call_array_routes_each_leg_by_its_own_to`,
+`…unknown_vault_metamorpho_fails_whole_bundle` [D-A], `extract_morpho_reenter_legs_decodes_supplycollateral_callback`
+[D-C]); extension vitest **3/3** (incl D-C callback pre-install); **`v3_decode_harness` golden 61/61** +
+bundler3 corpus **4/4 field-pinned** (withdraw+sweep / permit2+pull+supply+sweep / flashLoan-leverage / Lido
+deleverage); `cargo test --workspace` 0 fail; wasm32 compile + wasm-pack bundle + tsc 0.
+
+**Honest coverage re-measurement — FRESH all-73 (supersedes the ~17% 8-cover estimate).** A fresh Dune
+measurement over ALL 73 listed mainnet vaults (30d, ERC-4626 `Deposit` events bucketed by tx.to entrypoint,
+n=10,860) gives the true post-Q2 split: **direct-to-vault 1.64%** (Q1) + **Bundler3 11.95%** (Q2) =
+**covered ≈ 13.6%**; **other 86.41%**. The prior ~17% (direct 2.7% + Bundler3 14.5%) was extrapolated from
+the 8-cover FW-2 sample, which over-weighted Bundler3 — the all-73 reality is lower. The 86% "other" is a
+FRAGMENTED long tail of zapper/aggregator/router contracts (top 3 unknown routers ≈ 32%:
+`0x33024d47…` 11.5% / `0x50461744…` 10.7% / `0x8a25a24e…` 10.3%), **NOT AA-dominated** — the ERC-4337
+EntryPoint `0x0000000071727de2…` is only ~2.1% (correcting the prior "AA-entrypoints" framing). (GA1-direct =
+0%, confirming GA1 is reached only via Bundler3.) WITHIN a Bundler3 bundle the morpho-blue/metamorpho legs
+decode FULL (per-leg-to → `ActionBody::Multicall`), and the Q2 honest-review deficiencies are CLOSED:
+**D-A** unknown-vault erc4626 → REFUSE the bundle (warn-closed), never a 0x0-asset silent decode;
+**D-B** transfer/plumbing legs (erc20/permit2/native transfer, wrap/unwrap) → token-domain `erc20_transfer`;
+**D-C** nested `reenter(Call[])` callbacks (leverage/flash-loan loops) → recursed (even on EXCLUDE
+morphoFlashLoan); **D-D** Lido stake legs (stakeEth/wrapStEth/unwrapStEth) → liquid_staking. Residual
+within-Bundler3 defers: **ParaswapAdapter swap** (srcToken/destToken ARE explicit, but the AMOUNTS live in the
+opaque Augustus `bytes callData` and amm SwapAction needs concrete amounts — 0.49% of bundles) + **erc4626*
+underlying for any vault outside the 73-snapshot** (D-A refuses it; re-gen the snapshot to extend).
+
 ## Final Completion Claim
 
-**Onboarding status: COMPLETE (mainnet-only, direct-call subset), bounded by measured coverage.**
+**Onboarding status: COMPLETE (mainnet-only; full listed-vault direct coverage + Bundler3 router), bounded by measured entrypoint share.**
 
-> **wallet-facing, Ethereum mainnet (`1`) ONLY: Morpho Blue Full-8 (re-verified) — supply/withdraw/borrow/repay/supplyCollateral/withdrawCollateral/setAuthorization + off-chain Authorization — plus MetaMorpho ERC-4626 8-vault TVL cover-batch, DIRECT-to-vault deposit/withdraw/mint/redeem only.**
+> **wallet-facing, Ethereum mainnet (`1`) ONLY: Morpho Blue Full-8 — supply/withdraw/borrow/repay/supplyCollateral/withdrawCollateral/setAuthorization + off-chain Authorization — plus MetaMorpho ERC-4626 ALL 73 listed mainnet vaults (Q1, direct) plus Bundler3 `multicall(Call[])` decoded per-leg-to into GeneralAdapter1 position legs (Q2).**
 >
-> **Measured coverage (Dune, mainnet, 30d):** the 8 cover vaults capture **~41%** of vault-direct ERC4626 txs across all 73 listed vaults; direct-to-vault calls (the only MetaMorpho path ScopeBall statically decodes) are **~16% of Morpho-native vault deposits** (~84% route via Bundler3) and **~2.7% of all txs** reaching these vaults (97% router-mediated). This is **NOT "the full surface a Morpho user signs"** — most users sign to a router.
+> **Measured coverage (FRESH all-73, 30d Deposit-entrypoint split, n=10,860):** Q1 covers 100% of listed mainnet vaults / TVL / vault-direct txs. Q2 + the D-A…D-D fixes add the Bundler3 router (full per-leg decode incl `reenter` callbacks). Across all 73 vaults' deposit entrypoints: **covered ≈ 13.6%** (direct-to-vault 1.64% + Bundler3 11.95%). This **supersedes the prior ~17%** (an 8-cover-sample extrapolation that over-weighted Bundler3). This is **NOT "the full surface a Morpho user signs"** — the remaining **~86%** routes through a FRAGMENTED long tail of other zapper/aggregator/router contracts (top 3 ≈ 32%; ERC-4337 AA only ~2.1%, NOT the dominant path), still deferred.
 >
-> **Deferred (data-gated, separate-surface or separate-framework):** Bundler3 multicall router (~84% Morpho-native vault deposits — the single highest-value follow-up); the 65-vault long-tail (~59% of vault-direct txs); other routers/aggregators/ERC-4337 AA-entrypoints (~83% of all, fragmented); Base & all other chains (multichain framework); MetaMorpho V2/VaultV2; URD claim; mint/redeem §4d `convertToAssets` enrichment.
+> **Deferred (data-gated, separate-surface or separate-framework):** other routers/aggregators (~86% of deposit entrypoints, fragmented long tail — top 3 unknown routers ≈ 32%); ParaswapAdapter swap (amounts in opaque Augustus callData; 0.49% of Bundler3 bundles); erc4626* underlying for vaults outside the 73-snapshot (D-A refuses, not silent); Base & all other chains (multichain framework); MetaMorpho V2/VaultV2; URD claim; mint/redeem §4d `convertToAssets` enrichment. *(The 65-vault long-tail [Q1], Bundler3 [Q2], and the Q2 honest-review deficiencies [D-A transfer-IN/0x0-asset, D-B plumbing, D-C nested callbacks, D-D Lido] are no longer deferred.)*
 
 Verify:
 

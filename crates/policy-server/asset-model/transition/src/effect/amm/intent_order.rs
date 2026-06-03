@@ -90,6 +90,18 @@ fn project_venue(venue: &IntentVenue) -> (VenueRef, Address) {
             },
             Address::ZERO,
         ),
+        // 1inch LOP v4: the embedding AggregationRouterV6 (verifying contract)
+        // pulls `sell` from the maker on fill, so it is the spender.
+        IntentVenue::OneInchLimitOrder {
+            chain,
+            verifying_contract,
+        } => (
+            VenueRef {
+                name: "one_inch_limit_order".into(),
+                chain: Some(chain.clone()),
+            },
+            *verifying_contract,
+        ),
     }
 }
 

@@ -131,6 +131,9 @@ fn intent_chain_id(venue: &IntentVenue) -> Option<u64> {
         IntentVenue::OneInchFusion { chain } | IntentVenue::Bebop { chain } => {
             eip155_chain_id(chain.as_str())
         }
+        // 1inch LOP v4 is not served by the Uniswap quote builder; only its
+        // chain id is meaningful here.
+        IntentVenue::OneInchLimitOrder { chain, .. } => eip155_chain_id(chain.as_str()),
     }
 }
 

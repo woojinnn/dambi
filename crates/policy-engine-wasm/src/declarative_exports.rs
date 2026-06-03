@@ -527,6 +527,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
         // 5-tuple). The single_emit analogue of `maybe_inject_v4_pool_id`.
         let mut derived = BTreeMap::new();
         maybe_inject_morpho_market_id(&args_json, &mut derived);
+        maybe_inject_metamorpho_underlying(&args_json, &mut derived);
         maybe_inject_uniswap_v3_path(&args_json, &mut derived);
 
         let ctx = V3MapContext {
@@ -543,6 +544,27 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             derived,
             inputs: None,
         };
+
+        // D-C (generalized): a manifest's `emit.reenter_callback_arg` names the
+        // `bytes` arg carrying an `abi.encode(Call[])` re-entry callback the
+        // `multicall_call_array` caller recurses into — manifest-driven, so the
+        // engine has NO per-protocol callback-selector list.
+        let reenter_callback = emit
+            .get("reenter_callback_arg")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|arg| args_json.get(arg))
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned);
+        // `reenter_only` is a pure re-entry trampoline (e.g. a Morpho flash loan):
+        // it has NO own body — the whole intent is in the callback the caller
+        // recurses into. Emit no action; surface only the callback.
+        if strategy == "reenter_only" {
+            return Ok(DeclarativeRouteRequestV3ResultDto {
+                actions: vec![],
+                decoder_id: bundle_id,
+                reenter_callback,
+            });
+        }
 
         let body = match strategy.as_str() {
             "single_emit" => {
@@ -739,6 +761,19 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                 &args_json,
                 emit,
             )?,
+            // Cat D' — `multicall_call_array` (PER-LEG-TO: Bundler3
+            // `multicall(Call[])`, Call = (address to, bytes data, uint256 value,
+            // bool skipRevert, bytes32 callbackHash)). Unlike `multicall_recurse`
+            // (same-`to`, `bytes[]` legs), each leg carries its OWN target `to`, so
+            // we re-route the leg's `data` THERE (e.g. Bundler3 → GeneralAdapter1)
+            // and wrap the mapped legs in one `ActionBody::Multicall`.
+            "multicall_call_array" => build_multicall_call_array_body(
+                input.chain_id,
+                &input.submitter,
+                input.submitted_at,
+                &args_json,
+                emit,
+            )?,
             other => {
                 return Err(EngineErrorDto::new(
                     "unsupported_strategy",
@@ -752,6 +787,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
         Ok(DeclarativeRouteRequestV3ResultDto {
             actions: vec![action],
             decoder_id: bundle_id,
+            reenter_callback,
         })
     })();
 
@@ -1094,6 +1130,8 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
         Ok(DeclarativeRouteRequestV3ResultDto {
             actions: vec![action],
             decoder_id: bundle_id,
+            // Typed-data signatures carry no calldata, hence no re-entry callback.
+            reenter_callback: None,
         })
     })();
 
@@ -2244,6 +2282,29 @@ fn maybe_inject_morpho_market_id(
     }
 }
 
+/// If the decoded top-level args carry a MetaMorpho `vault` argument (a
+/// GeneralAdapter1 `erc4626*` leg — `erc4626Deposit/Mint/Withdraw/Redeem`),
+/// inject `$derived.metamorpho_underlying`: the vault's underlying asset, which
+/// is NOT in the leg calldata (the leg carries only the vault address). Sourced
+/// from the committed mainnet vault→underlying snapshot
+/// ([`crate::metamorpho_underlying`]). A no-op for every non-vault call
+/// (value-gated on a known listed vault). The single_emit analogue of the
+/// per-vault baked `asset` used by the DIRECT metamorpho manifests.
+fn maybe_inject_metamorpho_underlying(
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    let Some(vault) = args_json.get("vault").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    if let Some(underlying) = crate::metamorpho_underlying::underlying_of(&vault.to_lowercase()) {
+        derived.insert(
+            "metamorpho_underlying".to_owned(),
+            serde_json::Value::String(underlying.to_owned()),
+        );
+    }
+}
+
 /// Uniswap V3 SwapRouter `exactInput` / `exactOutput` carry a packed `bytes path`
 /// in top-level args. The declarative grammar can reference derived placeholders
 /// but cannot unpack `[token20][fee3]...`; inject the stable endpoints and first
@@ -2486,6 +2547,349 @@ fn build_multicall_recurse_body(
     Ok(v3_action::ActionBody::Multicall { actions })
 }
 
+/// Cat D' — `multicall_call_array`: Bundler3-style `multicall(Call[])` where each
+/// `Call = (address to, bytes data, uint256 value, bool skipRevert, bytes32 callbackHash)`
+/// carries its OWN target. Unlike [`build_multicall_recurse_body`] (same-`to`,
+/// `bytes[]` legs), we read each leg's `to` from the decoded positional tuple and
+/// re-route the leg's `data` THERE (e.g. Bundler3 → GeneralAdapter1), wrapping the
+/// mapped legs in one [`ActionBody::Multicall`]. Unmapped helper legs (no installed
+/// mapper) are skipped; if NO leg resolves we reject (never an empty no-op).
+///
+/// Recursion is bounded: each leg's `data` is a strict sub-slice of the outer
+/// calldata (shrinks every level) and the per-level fan-out is capped at
+/// `MAX_MULTICALL_CHILDREN`.
+fn build_multicall_call_array_body(
+    chain_id: u64,
+    submitter: &str,
+    submitted_at: u64,
+    args_json: &serde_json::Value,
+    emit: &serde_json::Value,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    const MAX_MULTICALL_CHILDREN: usize = 64;
+
+    // Select the `Call[]` argument: an explicit `recurse_arg` name, else the single
+    // array-valued argument (the bundle is the only array for `multicall(Call[])`).
+    let bundle_value =
+        if let Some(recurse_arg) = emit.get("recurse_arg").and_then(serde_json::Value::as_str) {
+            args_json.get(recurse_arg).ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall_call_array: recurse_arg {recurse_arg:?} not found"),
+                )
+            })?
+        } else {
+            let Some(obj) = args_json.as_object() else {
+                return Err(EngineErrorDto::new(
+                    "build_multicall_failed",
+                    "multicall_call_array: no Call[] array argument".to_string(),
+                ));
+            };
+            let mut array_args = obj.values().filter(|v| v.is_array());
+            match (array_args.next(), array_args.next()) {
+                (Some(single), None) => single,
+                (None, _) => {
+                    return Err(EngineErrorDto::new(
+                        "build_multicall_failed",
+                        "multicall_call_array: no Call[] array argument".to_string(),
+                    ));
+                }
+                (Some(_), Some(_)) => {
+                    return Err(EngineErrorDto::new(
+                        "build_multicall_failed",
+                        "multicall_call_array: ambiguous (multiple array arguments)".to_string(),
+                    ));
+                }
+            }
+        };
+    let legs = bundle_value.as_array().ok_or_else(|| {
+        EngineErrorDto::new(
+            "build_multicall_failed",
+            "multicall_call_array: selected argument is not a Call[] array".to_string(),
+        )
+    })?;
+    if legs.len() > MAX_MULTICALL_CHILDREN {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            format!(
+                "multicall_call_array child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
+                legs.len()
+            ),
+        ));
+    }
+
+    // `max_depth` bounds only the `reenter(Call[])` callback recursion (D-C).
+    let max_depth = emit
+        .get("max_depth")
+        .and_then(serde_json::Value::as_u64)
+        .map_or(4, |d| usize::try_from(d).unwrap_or(4));
+
+    let actions = process_call_legs(chain_id, submitter, submitted_at, legs, 0, max_depth)?;
+
+    if actions.is_empty() {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            "multicall_call_array: no inner leg resolved to an installed mapper".to_string(),
+        ));
+    }
+
+    Ok(v3_action::ActionBody::Multicall { actions })
+}
+
+/// Process a decoded `Call[]` (positional `[to,data,value,skipRevert,callbackHash]`
+/// tuples), re-routing each leg AT ITS OWN `to` and folding the mapped legs into a
+/// flat `Vec<ActionBody>`. Shared by the top-level Bundler3 `multicall(Call[])`
+/// decode and the nested `reenter(Call[])` callback recursion (D-C).
+///
+/// LENIENT: returns whatever resolved (possibly EMPTY) so a `reenter` callback
+/// whose legs are all unmapped (e.g. a swap via a deferred adapter) does not fail
+/// the outer bundle — only the TOP-LEVEL caller rejects an all-empty decode.
+/// `depth`/`max_depth` bound the callback recursion (each callback `data` is a
+/// strict sub-slice; the per-level fan-out is capped at `MAX_MULTICALL_CHILDREN`).
+fn process_call_legs(
+    chain_id: u64,
+    submitter: &str,
+    submitted_at: u64,
+    legs: &[serde_json::Value],
+    depth: usize,
+    max_depth: usize,
+) -> Result<Vec<v3_action::ActionBody>, EngineErrorDto> {
+    const MAX_MULTICALL_CHILDREN: usize = 64;
+    if legs.len() > MAX_MULTICALL_CHILDREN {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            format!(
+                "multicall_call_array child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
+                legs.len()
+            ),
+        ));
+    }
+
+    let mut actions: Vec<v3_action::ActionBody> = Vec::new();
+    for (index, leg) in legs.iter().enumerate() {
+        // Each leg is a positional tuple array: [to, data, value, skipRevert, callbackHash].
+        let fields = leg.as_array().ok_or_else(|| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall_call_array leg #{index} is not a Call tuple array"),
+            )
+        })?;
+        let leg_to = fields
+            .first()
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall_call_array leg #{index} missing tuple field 0 (to)"),
+                )
+            })?;
+        let leg_data = fields
+            .get(1)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall_call_array leg #{index} missing tuple field 1 (data)"),
+                )
+            })?;
+        // Call.value (tuple field 2, uint256 → decimal string) — forward it so a
+        // native-value leg (e.g. wrapNative) sees the right msg.value. Default "0".
+        let leg_value = fields
+            .get(2)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("0");
+
+        let stripped = leg_data.strip_prefix("0x").unwrap_or(leg_data);
+        let data_bytes = hex::decode(stripped).map_err(|error| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall_call_array leg #{index} data not hex: {error}"),
+            )
+        })?;
+        if data_bytes.len() < 4 {
+            // A bare value-transfer leg (empty / `<4B` data) has no selector to
+            // route — skip it; the mapped legs carry the intent.
+            continue;
+        }
+        let leg_selector = format!("0x{}", hex::encode(&data_bytes[0..4]));
+
+        // Re-enter the public entrypoint AT THE LEG'S OWN `to` (the per-leg-to
+        // difference vs `multicall_recurse`).
+        let inner_input = serde_json::json!({
+            "chain_id": chain_id,
+            "to": leg_to,
+            "selector": leg_selector,
+            "calldata": leg_data,
+            "value": leg_value,
+            "submitter": submitter,
+            "submitted_at": submitted_at,
+        });
+        let out = declarative_route_request_v3_json(inner_input.to_string());
+        let parsed: serde_json::Value = serde_json::from_str(&out).map_err(|error| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall_call_array leg #{index} result not JSON: {error}"),
+            )
+        })?;
+
+        if parsed.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+            let inner_actions = parsed
+                .pointer("/data/actions")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| {
+                    EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!("multicall_call_array leg #{index} result missing data.actions"),
+                    )
+                })?;
+            for action in inner_actions {
+                let body_json = action.get("body").ok_or_else(|| {
+                    EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!("multicall_call_array leg #{index} action missing body"),
+                    )
+                })?;
+                let body: v3_action::ActionBody = serde_json::from_value(body_json.clone())
+                    .map_err(|error| {
+                        EngineErrorDto::new(
+                            "build_multicall_failed",
+                            format!("multicall_call_array leg #{index} body deserialize: {error}"),
+                        )
+                    })?;
+                // D-A: a GeneralAdapter1 `erc4626*` leg whose MetaMorpho vault is
+                // OUTSIDE the committed `metamorpho_underlying` snapshot could not
+                // resolve its underlying, so the required `asset` fell back to the
+                // zero address — a confidently-WRONG decode. Refuse the WHOLE bundle
+                // (fail loud → warn-closed) rather than silently skip the leg: a
+                // malicious batch could otherwise hide a large unknown-vault deposit
+                // behind a benign known-vault one. (Re-gen the snapshot when the
+                // listed set changes; see `crate::metamorpho_underlying`.)
+                if is_unresolved_metamorpho_underlying(&body) {
+                    return Err(EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!(
+                            "multicall_call_array leg #{index}: MetaMorpho vault underlying \
+                             unresolved (vault outside the committed snapshot) — refusing a \
+                             0x0-asset decode"
+                        ),
+                    ));
+                }
+                actions.push(body);
+            }
+        } else {
+            let kind = parsed
+                .pointer("/error/kind")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            // Unmapped helper / deferred-adapter leg (no installed mapper, or no
+            // adapter registered for that `to`) — no primary body, but DON'T bail:
+            // a Morpho callback leg (notably the EXCLUDE `morphoFlashLoan`) still
+            // carries a `reenter(Call[])` we want to surface, so fall through to the
+            // callback extraction below. Any OTHER error (a mapped leg that failed
+            // to decode) is surfaced so the batch fails loud, not silently dropped.
+            if kind != "no_declarative_v3_mapper" && kind != "route_failed" {
+                let message = parsed
+                    .pointer("/error/message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                return Err(EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall_call_array leg #{index} ({leg_selector}): {kind}: {message}"),
+                ));
+            }
+        }
+
+        // D-C (generalized): the route surfaces `data.reenter_callback` when the
+        // leg's manifest declares `emit.reenter_callback_arg` — the raw
+        // `abi.encode(Call[])` re-entry callback (Bundler3 re-enters it at the
+        // just-called adapter mid-execution: leverage / flash-loan loops). The
+        // primary body (if any) is already pushed; ALSO decode the callback legs so
+        // they aren't opaque. Bounded by `max_depth`; an all-unmapped callback
+        // contributes nothing. NO per-protocol selector list — fully manifest-driven.
+        if depth < max_depth {
+            if let Some(callback_hex) = parsed
+                .pointer("/data/reenter_callback")
+                .and_then(serde_json::Value::as_str)
+            {
+                if let Some(callback_legs) = decode_reenter_call_array(callback_hex)? {
+                    let nested = process_call_legs(
+                        chain_id,
+                        submitter,
+                        submitted_at,
+                        &callback_legs,
+                        depth + 1,
+                        max_depth,
+                    )?;
+                    actions.extend(nested);
+                }
+            }
+        }
+    }
+
+    Ok(actions)
+}
+
+/// Decode a `reenter(Call[])` callback — the raw `abi.encode(Call[])` bytes a
+/// manifest's `emit.reenter_callback_arg` points at (surfaced by the route as
+/// `data.reenter_callback`) — into its positional `Call[]` legs. `Ok(None)` for an
+/// empty callback. PROTOCOL-AGNOSTIC: the `Call = (address,bytes,uint256,bool,
+/// bytes32)` tuple is the framework's standard re-entry shape, so this carries no
+/// per-protocol knowledge — any bundler-adapter that nests a `Call[]` in a leg arg
+/// reuses it by declaring the arg name in its manifest. (The callback `data` has
+/// NO `reenter` selector prefix — Bundler3's `CoreAdapter.reenterBundler3` does
+/// `bytes.concat(reenter.selector, data)` itself.)
+fn decode_reenter_call_array(
+    callback_hex: &str,
+) -> Result<Option<Vec<serde_json::Value>>, EngineErrorDto> {
+    let stripped = callback_hex.strip_prefix("0x").unwrap_or(callback_hex);
+    if stripped.is_empty() {
+        return Ok(None);
+    }
+    let data_bytes = hex::decode(stripped).map_err(|error| {
+        EngineErrorDto::new(
+            "build_multicall_failed",
+            format!("reenter callback: data not hex: {error}"),
+        )
+    })?;
+    let bundle =
+        decode_inputs_abi_tuple("((address,bytes,uint256,bool,bytes32)[] bundle)", &data_bytes)
+            .map_err(|error| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("reenter callback: Call[] decode failed: {error}"),
+                )
+            })?;
+    let legs = bundle
+        .get("bundle")
+        .and_then(serde_json::Value::as_array)
+        .filter(|legs| !legs.is_empty());
+    Ok(legs.cloned())
+}
+
+/// D-A guard for [`build_multicall_call_array_body`]: is `body` a GeneralAdapter1
+/// `erc4626*` leg (MetaMorpho `supply`/`withdraw`) whose required `asset` resolved
+/// to the ZERO address? That happens only when the leg's vault is outside the
+/// committed `metamorpho_underlying` snapshot, so `maybe_inject_metamorpho_underlying`
+/// could not fill the underlying and placeholder substitution fell back to `0x0`.
+/// A real MetaMorpho underlying is never the zero address, so `0x0` is an
+/// unambiguous "unresolved" sentinel. (morpho* legs are unaffected — their asset
+/// derives from `MarketParams`, which is always present in the leg calldata.)
+fn is_unresolved_metamorpho_underlying(body: &v3_action::ActionBody) -> bool {
+    use v3_action::lending::{LendingAction, LendingVenue};
+    let v3_action::ActionBody::Lending(action) = body else {
+        return false;
+    };
+    let (venue, asset) = match action {
+        LendingAction::Supply(a) => (&a.venue, &a.asset),
+        LendingAction::Withdraw(a) => (&a.venue, &a.asset),
+        _ => return false,
+    };
+    matches!(venue, LendingVenue::MetaMorpho { .. })
+        && asset
+            .key
+            .contract()
+            .is_some_and(|addr| *addr == alloy_primitives::Address::ZERO)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2677,6 +3081,253 @@ mod tests {
         assert_eq!(body_json["domain"], "multicall", "{body_json}");
         assert_eq!(body_json["actions"].as_array().unwrap().len(), 1);
         assert_eq!(body_json["actions"][0]["domain"], "unknown", "{body_json}");
+    }
+
+    #[test]
+    fn multicall_call_array_routes_each_leg_by_its_own_to() {
+        // Per-leg-to: the child mapper is installed ONLY at `adapter`. If the
+        // decode wrongly used a fixed outer `to` it would MISS — so a successful
+        // decode structurally proves each leg is routed at its own `Call.to`.
+        let adapter = "0x000000000000000000000000000000000000ada9";
+        let submitter = "0x000000000000000000000000000000000000aaaa";
+        let zero32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+        let child_fn = Function::parse("foo(uint256)").unwrap();
+        let child_calldata = child_fn
+            .abi_encode_input(&[DynSolValue::Uint(U256::from(777_u64), 256)])
+            .unwrap();
+        let child_selector = format!("0x{}", hex::encode(&child_calldata[0..4]));
+        let child_hex = format!("0x{}", hex::encode(&child_calldata));
+
+        let child_bundle = json!({
+            "type": "adapter_action",
+            "id": "test/mca-child@1.0.0",
+            "publisher": "test",
+            "schema_version": "3",
+            "match": { "selector": child_selector, "chain_to_addresses": { "1": [adapter] } },
+            "abi_fragment": {
+                "function_name": "foo",
+                "abi": {
+                    "name": "foo", "type": "function", "stateMutability": "nonpayable",
+                    "inputs": [{ "name": "amount", "type": "uint256" }], "outputs": []
+                }
+            },
+            "emit": {
+                "strategy": "single_emit",
+                "body": { "domain": "unknown", "unknown": {
+                    "target": "$to", "chain": "$chain", "calldata": "$calldata", "value": "$tx.value"
+                } }
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(child_bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        // Decoded `Call[]` bundle: each leg is a POSITIONAL tuple array
+        // [to, data, value, skipRevert, callbackHash]. One mapped leg → adapter.
+        let args = json!({ "bundle": [[adapter, child_hex, "0", false, zero32]] });
+        let body = build_multicall_call_array_body(
+            1,
+            submitter,
+            1_700_000_000,
+            &args,
+            &json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle", "max_depth": 3 }),
+        )
+        .unwrap();
+        let body_json = serde_json::to_value(body).unwrap();
+        assert_eq!(body_json["domain"], "multicall", "{body_json}");
+        assert_eq!(body_json["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(body_json["actions"][0]["domain"], "unknown", "{body_json}");
+        // (Per-leg-to is proven structurally: the child mapper is installed ONLY at
+        // `adapter`, so a successful decode REQUIRES routing the leg at its own `to`.)
+
+        // A bundle whose ONLY leg targets an uninstalled `to` resolves nothing →
+        // reject (never an empty no-op).
+        let unmapped = "0x000000000000000000000000000000000000dead";
+        let only_unmapped = json!({ "bundle": [[unmapped, child_hex, "0", false, zero32]] });
+        let err = build_multicall_call_array_body(
+            1,
+            submitter,
+            1_700_000_000,
+            &only_unmapped,
+            &json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle" }),
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("no inner leg resolved"),
+            "expected resolved==0 rejection, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn multicall_call_array_unknown_vault_metamorpho_fails_whole_bundle() {
+        // D-A: a GeneralAdapter1 `erc4626*` leg whose vault is OUTSIDE the
+        // committed `metamorpho_underlying` snapshot cannot resolve its required
+        // `asset` (the underlying is a runtime arg, not in calldata) → placeholder
+        // substitution falls back to 0x0. We REFUSE the whole bundle rather than
+        // emit a confidently-wrong 0x0-asset Supply. A KNOWN vault still decodes
+        // with its real underlying (proving the guard is value-gated, not a blanket
+        // metamorpho block).
+        let adapter = "0x4a6c312ec70e8747a587ee860a0353cd42be0ae0"; // GeneralAdapter1
+        let submitter = "0x000000000000000000000000000000000000aaaa";
+        let zero32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+        let erc4626 = Function::parse(
+            "erc4626Deposit(address vault, uint256 assets, uint256 maxSharePriceE27, address receiver)",
+        )
+        .unwrap();
+        let probe = erc4626
+            .abi_encode_input(&[
+                DynSolValue::Address(AlloyAddress::ZERO),
+                DynSolValue::Uint(U256::ZERO, 256),
+                DynSolValue::Uint(U256::ZERO, 256),
+                DynSolValue::Address(AlloyAddress::ZERO),
+            ])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&probe[0..4]));
+
+        // Synthetic copy of the real GA1 erc4626Deposit manifest (body +
+        // live_inputs skeleton); only the `match` is test-local.
+        let manifest = json!({
+            "type": "adapter_action",
+            "id": "test/mca-erc4626@1.0.0",
+            "publisher": "test",
+            "schema_version": "3",
+            "match": { "selector": selector, "chain_to_addresses": { "1": [adapter] } },
+            "abi_fragment": {
+                "function_name": "erc4626Deposit",
+                "abi": {
+                    "name": "erc4626Deposit", "type": "function", "stateMutability": "nonpayable",
+                    "inputs": [
+                        { "name": "vault", "type": "address" },
+                        { "name": "assets", "type": "uint256" },
+                        { "name": "maxSharePriceE27", "type": "uint256" },
+                        { "name": "receiver", "type": "address" }
+                    ],
+                    "outputs": []
+                }
+            },
+            "emit": {
+                "strategy": "single_emit",
+                "body": { "domain": "lending", "lending": { "action": "supply", "supply": {
+                    "venue": { "name": "metamorpho", "chain": "$chain", "vault": "$args.vault" },
+                    "asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "$derived.metamorpho_underlying" } },
+                    "amount": "$args.assets",
+                    "on_behalf_of": "$args.receiver"
+                } } },
+                "live_inputs": {
+                    "reserve_state": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_reserve_state_skeleton" }, "ttl_s": 30 },
+                    "supply_apy": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_supply_apy_skeleton" }, "ttl_s": 30 },
+                    "a_token_price_usd": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_share_price_skeleton" }, "ttl_s": 60 },
+                    "eligible_as_collat": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_collat_flag_skeleton" }, "ttl_s": 60 },
+                    "user_state_before": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_user_state_skeleton" }, "ttl_s": 12 }
+                }
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(manifest.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let receiver: AlloyAddress = submitter.parse().unwrap();
+        let emit = json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle", "max_depth": 3 });
+        let encode_leg = |vault: &str| -> String {
+            let cd = erc4626
+                .abi_encode_input(&[
+                    DynSolValue::Address(vault.parse().unwrap()),
+                    DynSolValue::Uint(U256::from(1_000_000_u64), 256),
+                    DynSolValue::Uint(U256::ZERO, 256),
+                    DynSolValue::Address(receiver),
+                ])
+                .unwrap();
+            format!("0x{}", hex::encode(cd))
+        };
+
+        // KNOWN vault (snapshot[0]) → underlying resolves to USDC, decodes clean.
+        let known_vault = "0x0b2d98bbf3e38df1d1b7be7343732e32e8b1f818";
+        let known_underlying: AlloyAddress =
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".parse().unwrap();
+        let known_bundle =
+            json!({ "bundle": [[adapter, encode_leg(known_vault), "0", false, zero32]] });
+        let body =
+            build_multicall_call_array_body(1, submitter, 1_700_000_000, &known_bundle, &emit)
+                .expect("known-vault metamorpho leg should decode");
+        let v3_action::ActionBody::Multicall { actions } = body else {
+            panic!("expected a multicall body");
+        };
+        assert_eq!(actions.len(), 1);
+        let v3_action::ActionBody::Lending(v3_action::lending::LendingAction::Supply(supply)) =
+            &actions[0]
+        else {
+            panic!("expected a metamorpho supply leg, got {:?}", actions[0]);
+        };
+        assert_eq!(
+            supply.asset.key.contract(),
+            Some(&known_underlying),
+            "known vault underlying must resolve from the snapshot"
+        );
+
+        // UNKNOWN vault (not in the snapshot) → underlying unresolved → the whole
+        // bundle is REFUSED (no 0x0-asset Supply leaks through).
+        let unknown_vault = "0x000000000000000000000000000000000000dead";
+        let unknown_bundle =
+            json!({ "bundle": [[adapter, encode_leg(unknown_vault), "0", false, zero32]] });
+        let err =
+            build_multicall_call_array_body(1, submitter, 1_700_000_000, &unknown_bundle, &emit)
+                .unwrap_err();
+        assert!(
+            err.message.contains("underlying unresolved"),
+            "expected a metamorpho-underlying rejection, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_reenter_call_array_decodes_callback_legs() {
+        // The reenter callback is raw abi.encode(Call[]) (the route surfaces it as
+        // `data.reenter_callback` via the manifest's `reenter_callback_arg`). The
+        // decoder is protocol-agnostic — no selector knowledge. Build a 2-leg
+        // callback and assert the positional Call[] decode.
+        let a1 = AlloyAddress::from([0x11; 20]);
+        let a2 = AlloyAddress::from([0x22; 20]);
+        let mk_call = |to: AlloyAddress, sel: u32| {
+            DynSolValue::Tuple(vec![
+                DynSolValue::Address(to),
+                DynSolValue::Bytes(sel.to_be_bytes().to_vec()),
+                DynSolValue::Uint(U256::ZERO, 256),
+                DynSolValue::Bool(false),
+                DynSolValue::FixedBytes(alloy_primitives::B256::ZERO, 32),
+            ])
+        };
+        // abi.encode(Call[]) == the args encoding of `reenter(Call[])` minus its
+        // 4-byte selector.
+        let reenter =
+            Function::parse("reenter((address,bytes,uint256,bool,bytes32)[] bundle)").unwrap();
+        let reenter_calldata = reenter
+            .abi_encode_input(&[DynSolValue::Array(vec![
+                mk_call(a1, 0xaabb_ccdd),
+                mk_call(a2, 0x1122_3344),
+            ])])
+            .unwrap();
+        let callback_hex = format!("0x{}", hex::encode(&reenter_calldata[4..]));
+
+        let legs = decode_reenter_call_array(&callback_hex)
+            .unwrap()
+            .expect("non-empty callback");
+        assert_eq!(legs.len(), 2, "callback Call[] should decode 2 legs");
+        let leg_to = |i: usize| {
+            legs[i].as_array().unwrap()[0]
+                .as_str()
+                .unwrap()
+                .parse::<AlloyAddress>()
+                .unwrap()
+        };
+        assert_eq!(leg_to(0), a1, "leg0 `to`");
+        assert_eq!(leg_to(1), a2, "leg1 `to`");
+
+        // Empty callback → None (a plain leg with no re-entry).
+        assert!(decode_reenter_call_array("0x").unwrap().is_none());
+        assert!(decode_reenter_call_array("").unwrap().is_none());
     }
 
     #[test]
