@@ -37,7 +37,13 @@ IMAGE="asia-northeast3-docker.pkg.dev/${PROJECT_ID}/scopeball/registry-api:${IMA
 # 배포값(docs/REGISTRY_GCP_SPEC.md §3.3)과 일치.
 CPU="${CPU:-1}"
 MEMORY="${MEMORY:-256Mi}"
-MIN_INSTANCES="${MIN_INSTANCES:-0}"
+# Keep 1 warm instance: with low/single-user traffic a scale-to-zero (0) proxy
+# cold-starts on the first request after idle, and the extension's JIT registry
+# fetch has no per-fetch timeout — a cold start blows past the 8s lifecycle cap
+# and the wallet pre-sign verdict surfaces `__engine::timeout`. min=1 keeps the
+# fetch ~0.1s. Set MIN_INSTANCES=0 to opt back into scale-to-zero (cheaper, but
+# reintroduces the cold-start timeout for sporadic traffic).
+MIN_INSTANCES="${MIN_INSTANCES:-1}"
 MAX_INSTANCES="${MAX_INSTANCES:-3}"
 CONCURRENCY="${CONCURRENCY:-80}"
 TIMEOUT="${TIMEOUT:-300}"
