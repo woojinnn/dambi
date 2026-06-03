@@ -3,7 +3,7 @@
   "chainId": 1,
   "address": "0x4a6c312ec70e8747a587ee860a0353cd42be0ae0",
   "snapshot": "general-adapter1.abi.json",
-  "note": "GeneralAdapter1 — the adapter Bundler3 multicall(Call[]) legs target on Ethereum mainnet. EVERY external-mutating selector triaged (I1). cover = the 10 user position legs (erc4626Deposit/Mint/Withdraw/Redeem → metamorpho; morphoSupply/SupplyCollateral/Borrow/Repay/Withdraw/WithdrawCollateral → morpho_blue), reached per-leg-to from a Bundler3 bundle. exclude = onMorpho* callbacks (reenterHash-guarded) + DEFERRED plumbing (transfers/wraps), staking (stakeEth/wrapStEth), flash-loan, MORPHO wrapper.",
+  "note": "GeneralAdapter1 — the adapter Bundler3 multicall(Call[]) legs target on Ethereum mainnet. EVERY external-mutating selector triaged (I1). cover = 16 legs: 10 user position legs (erc4626Deposit/Mint/Withdraw/Redeem → metamorpho; morphoSupply/SupplyCollateral/Borrow/Repay/Withdraw/WithdrawCollateral → morpho_blue) + 6 funding/plumbing legs (erc20Transfer/erc20TransferFrom/permit2TransferFrom/nativeTransfer → token/erc20_transfer; wrapNative/unwrapNative → net WETH/native credit), reached per-leg-to from a Bundler3 bundle. exclude = onMorpho* callbacks (reenterHash-guarded), staking (stakeEth/wrapStEth/unwrapStEth), flash-loan, MORPHO wrapper.",
   "functions": {
     "0x6ef5eeae": {
       "name": "erc4626Deposit(address,uint256,uint256,address)",
@@ -107,33 +107,33 @@
     },
     "0x3790767d": {
       "name": "erc20Transfer(address,address,uint256)",
-      "decision": "exclude",
-      "reason": "DEFERRED: bundle funding/plumbing leg (token/native transfer or wrap into the adapter) — the PAIRED lending leg captures the user position intent; the approve/permit grant to Bundler3 is gated separately. Token-domain transfer coverage is a follow-up."
+      "decision": "cover",
+      "reason": "GA1 sends `amount` of `token` to `receiver` from its own balance (bundle funding / leftover sweep) → token/erc20_transfer (token+amount+recipient legible). Per-leg-to multicall child."
     },
     "0xd96ca0b9": {
       "name": "erc20TransferFrom(address,address,uint256)",
-      "decision": "exclude",
-      "reason": "DEFERRED: bundle funding/plumbing leg (token/native transfer or wrap into the adapter) — the PAIRED lending leg captures the user position intent; the approve/permit grant to Bundler3 is gated separately. Token-domain transfer coverage is a follow-up."
+      "decision": "cover",
+      "reason": "GA1 pulls `amount` of `token` from the bundle initiator (user ERC20 approval) to `receiver` → token/erc20_transfer. Bundle token-IN (over-pull bound by the approval)."
     },
     "0x827fcfcc": {
       "name": "permit2TransferFrom(address,address,uint256)",
-      "decision": "exclude",
-      "reason": "DEFERRED: bundle funding/plumbing leg (token/native transfer or wrap into the adapter) — the PAIRED lending leg captures the user position intent; the approve/permit grant to Bundler3 is gated separately. Token-domain transfer coverage is a follow-up."
+      "decision": "cover",
+      "reason": "GA1 pulls `amount` of `token` from the user via Permit2 ALLOWANCE to `receiver` → token/erc20_transfer. Bundle token-IN (over-pull bound by the Permit2 allowance); owner/nonce/deadline not in this calldata."
     },
     "0xf2522bcd": {
       "name": "nativeTransfer(address,uint256)",
-      "decision": "exclude",
-      "reason": "DEFERRED: bundle funding/plumbing leg (token/native transfer or wrap into the adapter) — the PAIRED lending leg captures the user position intent; the approve/permit grant to Bundler3 is gated separately. Token-domain transfer coverage is a follow-up."
+      "decision": "cover",
+      "reason": "GA1 sends `amount` native ETH to `receiver` from its own balance → token/erc20_transfer (native token key). Per-leg-to multicall child."
     },
     "0x3244c12c": {
       "name": "wrapNative(uint256,address)",
-      "decision": "exclude",
-      "reason": "DEFERRED: bundle funding/plumbing leg (token/native transfer or wrap into the adapter) — the PAIRED lending leg captures the user position intent; the approve/permit grant to Bundler3 is gated separately. Token-domain transfer coverage is a follow-up."
+      "decision": "cover",
+      "reason": "GA1 wraps `amount` native ETH into WETH, credits `receiver` → token/erc20_transfer of the net WETH credit ($resolved.weth). Per-leg-to multicall child."
     },
     "0xb172af6d": {
       "name": "unwrapNative(uint256,address)",
-      "decision": "exclude",
-      "reason": "DEFERRED: bundle funding/plumbing leg (token/native transfer or wrap into the adapter) — the PAIRED lending leg captures the user position intent; the approve/permit grant to Bundler3 is gated separately. Token-domain transfer coverage is a follow-up."
+      "decision": "cover",
+      "reason": "GA1 unwraps `amount` WETH into native ETH, credits `receiver` → token/erc20_transfer of the net native credit. Per-leg-to multicall child."
     }
   }
 }

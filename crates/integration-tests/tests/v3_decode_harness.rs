@@ -218,31 +218,19 @@ fn bundler3_multicall_legs_decode_expected_fields() {
             .unwrap_or_else(|| panic!("missing {ptr} in {v}"))
             .to_ascii_lowercase()
     };
-    // `amount` is a U256 — serialized as a "0x"-quantity hex string (alloy), but
-    // tolerate a decimal string / JSON number too.
-    let amount = |v: &serde_json::Value| -> u128 {
-        match v.pointer("/amount").expect("amount field") {
-            serde_json::Value::Number(n) => u128::from(n.as_u64().expect("amount u64")),
-            serde_json::Value::String(t) => t.strip_prefix("0x").map_or_else(
-                || t.parse::<u128>().expect("amount decimal u128"),
-                |hex| u128::from_str_radix(hex, 16).expect("amount hex u128"),
-            ),
-            other => panic!("amount not number/string: {other}"),
-        }
-    };
+    // Amounts serialize as minimal "0x"-quantity hex (alloy U256); compare as
+    // lowercased hex strings via `s` so a max-uint "sweep all" (overflows u128)
+    // stays exact.
+    const MAX_UINT: &str = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
     // ── tx 0x4e65d9d1…: morphoWithdrawCollateral (wstETH collat, USDC market) +
-    //    erc20Transfer (GA1 exclude → skipped) → Multicall[withdraw].
+    //    erc20Transfer (wstETH sweep-all to the user) → Multicall[withdraw, transfer].
     let env1 = route_tx("0x4e65d9d130d9ab1c948adc21c4b8adf117b5986d874eb80ff06ebc17f602f5ee");
     let legs1 = env1
         .pointer("/data/actions/0/body/actions")
         .and_then(serde_json::Value::as_array)
         .expect("withdraw multicall legs");
-    assert_eq!(
-        legs1.len(),
-        1,
-        "the erc20Transfer leg must be skipped → 1 leg: {env1}"
-    );
+    assert_eq!(legs1.len(), 2, "withdraw + D-B sweep transfer leg: {env1}");
     let w = &legs1[0];
     assert_eq!(s(w, "/domain"), "lending");
     assert_eq!(s(w, "/action"), "withdraw");
@@ -257,15 +245,28 @@ fn bundler3_multicall_legs_decode_expected_fields() {
         "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
         "withdraw asset (wstETH)"
     );
-    assert_eq!(amount(w), 0xfa15_c771_d680_1232, "withdraw amount");
+    assert_eq!(s(w, "/amount"), "0xfa15c771d6801232", "withdraw amount");
     assert_eq!(
         s(w, "/recipient"),
         "0x5a6e5fe82536c16a678e859a404a6a8f7d870cb3",
         "withdraw recipient"
     );
+    // D-B: the erc20Transfer plumbing leg is now COVERED (was skipped) — a
+    // wstETH sweep-all (max-uint) back to the user.
+    let t = &legs1[1];
+    assert_eq!(s(t, "/domain"), "token");
+    assert_eq!(s(t, "/action"), "erc20_transfer");
+    assert_eq!(
+        s(t, "/token/key/address"),
+        "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "sweep token (wstETH)"
+    );
+    assert_eq!(s(t, "/recipient"), "0x5a6e5fe82536c16a678e859a404a6a8f7d870cb3");
+    assert_eq!(s(t, "/amount"), MAX_UINT, "sweep amount = max-uint");
 
-    // ── tx 0xeea1e0df…: Permit2 permit (→Permit2) + morphoSupplyCollateral
-    //    (WBTC collat, →GA1) + erc20Transfer (skipped) → Multicall[token, supply].
+    // ── tx 0xeea1e0df…: Permit2 permit (→Permit2) + permit2TransferFrom (WBTC
+    //    user→GA1) + morphoSupplyCollateral (WBTC, →GA1) + erc20Transfer (WBTC
+    //    sweep) → Multicall[permit2_sign_allowance, transfer, supply, transfer].
     let env2 = route_tx("0xeea1e0dfab0683b7981e1553fab7697108b2c31d73529094386f44b58b76ee5c");
     let legs2 = env2
         .pointer("/data/actions/0/body/actions")
@@ -273,11 +274,29 @@ fn bundler3_multicall_legs_decode_expected_fields() {
         .expect("supply multicall legs");
     assert_eq!(
         legs2.len(),
-        2,
-        "[permit2(token), supply]; the erc20Transfer leg must be skipped: {env2}"
+        4,
+        "[permit2 allowance, permit2TransferFrom, supply, sweep]: {env2}"
     );
-    assert_eq!(s(&legs2[0], "/domain"), "token", "leg0 = Permit2 permit");
-    let sup = &legs2[1];
+    // leg0 — Permit2 on-chain permit (allowance).
+    assert_eq!(s(&legs2[0], "/domain"), "token");
+    assert_eq!(s(&legs2[0], "/action"), "permit2_sign_allowance");
+    // leg1 — D-B: permit2TransferFrom, the bundle's token-IN (WBTC user→GA1).
+    let pull = &legs2[1];
+    assert_eq!(s(pull, "/domain"), "token");
+    assert_eq!(s(pull, "/action"), "erc20_transfer");
+    assert_eq!(
+        s(pull, "/token/key/address"),
+        "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+        "pull token (WBTC)"
+    );
+    assert_eq!(
+        s(pull, "/recipient"),
+        "0x4a6c312ec70e8747a587ee860a0353cd42be0ae0",
+        "pull recipient (GeneralAdapter1)"
+    );
+    assert_eq!(s(pull, "/amount"), "0xe4e1c0", "pull amount");
+    // leg2 — morphoSupplyCollateral.
+    let sup = &legs2[2];
     assert_eq!(s(sup, "/domain"), "lending");
     assert_eq!(s(sup, "/action"), "supply");
     assert_eq!(s(sup, "/venue/name"), "morpho_blue");
@@ -291,12 +310,22 @@ fn bundler3_multicall_legs_decode_expected_fields() {
         "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
         "supply asset (WBTC)"
     );
-    assert_eq!(amount(sup), 0xe4_e1c0, "supply amount");
+    assert_eq!(s(sup, "/amount"), "0xe4e1c0", "supply amount");
     assert_eq!(
         s(sup, "/on_behalf_of"),
         "0x5ac65511fef88144f531b79043bc524e5562b8b3",
         "supply on_behalf_of"
     );
+    // leg3 — D-B: erc20Transfer leftover WBTC sweep-all to the user.
+    let sweep = &legs2[3];
+    assert_eq!(s(sweep, "/domain"), "token");
+    assert_eq!(s(sweep, "/action"), "erc20_transfer");
+    assert_eq!(
+        s(sweep, "/recipient"),
+        "0x5ac65511fef88144f531b79043bc524e5562b8b3",
+        "sweep recipient (user)"
+    );
+    assert_eq!(s(sweep, "/amount"), MAX_UINT, "sweep amount = max-uint");
 }
 
 /// Recursively find the first `"<field>": <bool>` entry in a JSON value.
