@@ -19,11 +19,11 @@
 | field | value |
 |---|---|
 | representative chain (SINGLE — multichain = separate framework, deferred) | mainnet (chainId 1) — Balancer max-activity chain. Existing multichain V2 swap/relayer (7 chains) kept as legacy-present; new-function multichain expansion deferred. |
-| completion target | `wallet-facing` |
-| covered real-usage coverage-share (P2-measured) | pending (P2 SCOPE ORACLE) |
-| user-facing DEFERs, each with its 1st-party usage-share (%/count) | V3 addLiquidityProportional 0.6% / addLiquidityUnbalanced 0.5% / removeLiquidityProportional 2.3% (pool-token list not in calldata; decode-time resolver unwired); V2 flashLoan 3.6% (integrator callback); V2 manageUserBalance/managePoolBalance <1%; V3 initialize 2.3% (one-time bootstrap); permitBatchAndCall's bundled Permit2 grant (children covered, grant not separately surfaced); multichain expansion of new functions. |
+| completion target | `wallet-facing` (V2 Vault); **V3 Router-v2 PARTIAL — see coverage-share** |
+| covered real-usage coverage-share (P2-measured) | **V2 Vault mainnet ≈ 93.3%** of recent direct tx (swap 23.4% + setRelayerApproval 3.7% + batchSwap 38.2% + joinPool 6.8% + exitPool 21.2%). **V3 Router-v2 mainnet ≈ 7%** EFFECTIVE (swapIn 2.4% + swapOut 0.1% + permitBatchAndCall-with-covered-child ≈4.5%). ⚠️ permitBatchAndCall is 91.7% of V3 direct tx BUT only **454/9173 (4.9%)** have a COVERED child — the other 95.1% wrap proportional/unbalanced liquidity (DEFERRED) and fail-closed. So V3's dominant ~93% is uncovered. |
+| user-facing DEFERs, each with its 1st-party usage-share (%/count) | **V3 proportional/unbalanced liquidity (DOMINANT ~89% of V3 via permitBatchAndCall children: addLiqProportional 44.8% + removeLiqProportional 44.7% + addLiqUnbalanced 3.1% of pBC children; + direct removeLiquidityProportional 2.3%)** — pool-token list NOT in calldata → needs decode-time pool-token resolver / pool-universe source-materialization (NOT wired). V2 flashLoan 3.6% (integrator callback). V2 manageUserBalance/managePoolBalance <1%. V3 initialize 2.3% (one-time bootstrap). permitBatchAndCall's bundled Permit2 grant (children covered, grant not separately surfaced). Additional V3 routers (BatchRouter/CompositeLiquidityRouter v2/BufferRouter/Aggregator×2/UnbalancedAddViaSwap) + V2 BalancerRelayer v6 (all high/active, own decoders needed). Multichain expansion of all new functions. |
 | direct factory-child calls | deferred (wallet-facing router/vault scope; direct pool calls = full-universe follow-up) |
-| final claim label (MUST NOT over-claim) | pending (P4, derived from SCOPE ORACLE) |
+| final claim label (MUST NOT over-claim) | **primary-chain (mainnet) V2 Vault wallet-facing ≈93% covered; V3 Router-v2 swaps + single-token liquidity + permitBatchAndCall(covered-child) covered ≈7%, dominant ~93% (proportional/unbalanced liquidity) DEFERRED (pool-token resolver needed). NOT full-surface; NOT multichain.** |
 
 ## P0 Research Evidence
 
@@ -64,47 +64,47 @@
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| fuzz command with seed recorded | pending | |
-| iterations >= 5000 or justified lower bound | pending | |
-| fixed edge-case matrix recorded | pending | |
-| permission/value/nested/array/opcode/deadline/path edge coverage recorded | pending | |
-| representative pass/error corpus entries committed or justified | pending | |
+| fuzz command with seed recorded | done | `v3-harness fuzz --iterations 5000 --seed 0x5C09EBA1 --filter balancer` |
+| iterations >= 5000 or justified lower bound | done | 5000/callkey, total=120000; **fail=0, panic=0**; soft=36740 (tolerated value-map-no-case for fuzz kind≥2 + random userData/array artifacts); domain histogram amm 48260 / permission 35000, unknown=0.0% (no Unknown leakage). |
+| fixed edge-case matrix recorded | done | corpus real-tx + hand edges span: batchSwap 2-asset & 4-asset (entry[6] mainnet token_out=assets[3]) & kind 0/1; joinPool kind 0(INIT)/1; exitPool kind 1 incl 0-amount minAmountsOut; permitBatchAndCall covered-child(swapIn) vs all-deferred-child(proportional→fail-closed); V3 single-token liquidity ×3 hand-edges; multichain miss (non-mainnet → no_declarative_v3_mapper). |
+| permission/value/nested/array/opcode/deadline/path edge coverage recorded | done | permission: setRelayerApproval (ProtocolAuthorization). value/array: join/exit assets[]+amounts[] zip, batchSwap swaps[]/assets[]. nested: permitBatchAndCall multicall_recurse. enum-tag: userData JoinKind/ExitKind. (No opcode-stream / typed-data in Balancer scope.) |
+| representative pass/error corpus entries committed or justified | done | 21 entries: 15 pass (swap×4, relayer×2, V3 swap×2, batchSwap mainnet, exit mainnet, join mainnet, permitBatchAndCall covered-child, 3 V3 single-token-liq hand-edges) + 6 error (5 non-mainnet batchSwap/join/exit = multichain-deferred no_declarative_v3_mapper, 1 permitBatchAndCall all-deferred-child = build_multicall_failed). |
 
 ## P2 Real-Tx Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
 | Etherscan MCP/API availability checked | done | api.etherscan.io v2 txlist verified (status 1 OK) against V2 Vault + V3 Router; ETHERSCAN_API_KEY local. |
-| Etherscan txlist pull executed adapter-blind by P0 cover addresses | pending | |
-| external tx pull target address count is nonzero and recorded | pending | |
-| Etherscan `api_calls_used` recorded | pending | |
-| Etherscan `raw_txs_seen` recorded | pending | |
-| Etherscan `unique_selectors_seen` recorded | pending | |
-| Etherscan real tx coverage per COVER selector recorded | pending | |
-| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | pending | |
-| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | pending | |
-| pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | pending | |
-| unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | pending | |
-| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | pending | |
-| Dune MCP/API availability checked | pending | |
-| Dune usage baseline recorded | pending | |
-| Dune calibration/query executed with partition WHERE or explicitly blocked | pending | |
-| Dune `executionCostCredits` / usage delta recorded | pending | |
-| Dune rows returned / selected tx hashes recorded | pending | |
-| representative real-tx corpus/golden entries committed or justified | pending | |
-| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe, and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | pending | |
+| Etherscan txlist pull executed adapter-blind by P0 cover addresses | done | txlist offset=10000 sort=desc against V2 Vault (0xBA12…) and V3 Router-v2 (0xAE56…) on mainnet (chain 1); selector-tallied (not adapter-chosen). |
+| external tx pull target address count is nonzero and recorded | done | 2 swept targets (V2 Vault, V3 Router-v2) + 10 discovered contracts dispositioned; nonzero. |
+| Etherscan `api_calls_used` recorded | done | ~6 calls: V2 Vault dist (1), V3 Router dist (1), permitBatchAndCall child-decode sweep (1, 10k), permitBatchAndCall covered-child find (1, 10k), discovery sub-agent (~41 incl getsourcecode), probes (1). Daily 100k budget — negligible. |
+| Etherscan `raw_txs_seen` recorded | done | ~30,000 (V2 Vault 10k + V3 Router 10k + permitBatchAndCall child sweep 10k) + sub-agent samples. |
+| Etherscan `unique_selectors_seen` recorded | done | V2 Vault: 15 (batchSwap/swap/exitPool/joinPool/setRelayerApproval/flashLoan/queryBatchSwap/managePoolBalance/manageUserBalance/native/…). V3 Router-v2: 8 (permitBatchAndCall/swapIn/initialize/removeLiqProportional/addLiqProportional/addLiqUnbalanced/swapOut/removeLiqSingleIn). |
+| Etherscan real tx coverage per COVER selector recorded | done | swap ✓(4 real), setRelayerApproval ✓(2), batchSwap ✓(3 real mainnet+other), joinPool ✓(real mainnet), exitPool ✓(real mainnet), V3 swapIn/out ✓(real), permitBatchAndCall ✓(real covered-child). V3 single-token liquidity = NEAR-ZERO direct tx (appears only as permitBatchAndCall child: removeLiqSingleIn 62, swapIn 384 as children) → covered by hand-edge corpus + validate (low-traffic note). |
+| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | done | swept the 2 canonical wallet-facing entries (V2 Vault, V3 Router-v2), 10k tx each. Matched(covered) V2≈93.3% / V3≈7% of direct tx; unmatched = deferred-with-data (V3 proportional liq dominant). |
+| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | done | V2 unmatched ≈6.7%: flashLoan 3.6% (non-retail integrator, EXCLUDE), queryBatchSwap 0.9% (query), admin/manage <2% (EXCLUDE), native 0.2%. V3 unmatched ≈93%: actionable-DEFERRED = proportional/unbalanced liquidity (addLiqProportional 44.8%+removeLiqProportional 44.7%+addLiqUnbalanced 3.1% of pBC children; direct removeLiqProportional 2.3%) — pool-token resolver needed; initialize 2.3% (bootstrap). |
+| pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | done | n/a — singleton Vault/Router scope (no pool universe this run; direct-pool calls deferred). |
+| unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | done | none — all observed Balancer-selector tx target the known Vault/Router-v2 addresses (no unknown_protocol_address). Discovered additional routers (BatchRouter etc.) are dispositioned in _deployments, not unknown. |
+| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | done | n/a — Balancer V2/V3 core (Vault/Router) has NO in-scope EIP-712 user-signing surface (signed_structs={}); relayer approval is an on-chain call. Permit2 sigs inside permitBatchAndCall are the Permit2 standard's domain (handled elsewhere), not a Balancer typed-data manifest. |
+| Dune MCP/API availability checked | done | not used — Etherscan v2 txlist (10k/call, mainnet) fully covered the single representative chain; Dune is the gap-lane for Free-tier Base/OP gaps, n/a for mainnet single-chain selector distribution + child decode. |
+| Dune usage baseline recorded | done | n/a (Dune not used; see above). |
+| Dune calibration/query executed with partition WHERE or explicitly blocked | done | n/a — Etherscan-sufficient for mainnet. |
+| Dune `executionCostCredits` / usage delta recorded | done | n/a (0 — Dune not used). |
+| Dune rows returned / selected tx hashes recorded | done | n/a — real tx hashes sourced from Etherscan (corpus entries carry tx_hash). |
+| representative real-tx corpus/golden entries committed or justified | done | crates/integration-tests/data/golden/v3-decode/balancer/corpus.json — 21 dedup entries (real tx_hash for all real entries; 3 V3 single-token-liq hand-edges marked synthetic). |
+| protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | done | **corpus: 21/21 matched; semantic expect_body: 15/15 pass entries pinned.** expect_body computed by INDEPENDENT eth_abi decode (non-circular). |
+| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe, and each user-facing DEFER's usage-share recorded; completion label must not over-claim it | done | **MEASURED: V2 Vault ≈93.3% of recent direct mainnet tx covered; V3 Router-v2 ≈7% EFFECTIVE.** Critical finding: permitBatchAndCall = 91.7% of V3 direct tx but only 454/9173 (4.9%) have a COVERED child — 95.1% wrap deferred proportional/unbalanced liquidity → fail-closed. So V3's dominant ~93% is uncovered (proportional liquidity, pool-token resolver needed). Completion label reflects this (does NOT claim V3 full/wallet-facing-complete). |
 
 ## P3 Develop Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| all P2 hard/soft/misdecoded/unknown_protocol_address/excluded gaps bucketed | pending | |
-| each fix tied to a gap id, selector, tx hash, or synthetic seed | pending | |
-| manifest/decoder/Tier3/harness change list recorded | pending | |
-| P2 rerun after fixes recorded | pending | |
-| corpus `expect` flips or exclusions justified | pending | |
-| remaining gaps have explicit defer/blocker disposition | pending | |
+| all P2 hard/soft/misdecoded/unknown_protocol_address/excluded gaps bucketed | done | uncovered→covered: batchSwap/joinPool/exitPool (V2), single-token liquidity + permitBatchAndCall (V3). DEFERRED (actionable, data-backed): V3 proportional/unbalanced liquidity (dominant), V2 flashLoan/manageUserBalance, additional V3 routers + V2 BalancerRelayer v6, multichain. EXCLUDE: admin/asset-manager/query. No mis_decoded (corpus expect_body verified). No unknown_protocol_address. |
+| each fix tied to a gap id, selector, tx hash, or synthetic seed | done | builtins↔selectors: zip+userdata→joinPool 0xb95cac28/exitPool 0x8bdb3913; pool_id→exitPool lp_token; batch_swap_field→batchSwap 0x945bcec9; multicall_recurse recurse_arg→permitBatchAndCall 0x19c6989f. Tolerant-builtin fix tied to validate seeds 0x3a31c463e6f4c81d (batchSwap) / 0x5becb20d34810f23 (joinPool). corpus flips tied to real tx_hashes. |
+| manifest/decoder/Tier3/harness change list recorded | done | 4 Tier-2 `$fn` builtins (builtin_fn.rs + fn_whitelist.json), 7 manifests, 3 coverage.json + _deployments.json. NO Tier-3, NO harness/oracle change (fuzz-tolerance handled in the builtins, not by extending is_shape_artifact — keeps the harness protocol-agnostic). |
+| P2 rerun after fixes recorded | done | after tolerant-builtin fix: validate all=1787 OK/0 err (was 3 fail); corpus 21/21 matched, 15/15 expect_body pinned; fuzz fail=0/panic=0. |
+| corpus `expect` flips or exclusions justified | done | 8 mainnet entries error→pass+expect_body (batchSwap×1·exit×1·join×1 mainnet + pre-existing swap/relayer/V3-swap pinned); 5 non-mainnet reverted to error+no_declarative_v3_mapper (mainnet-only manifests, multichain deferred); permitBatchAndCall kind no_declarative_v3_mapper→build_multicall_failed (now has manifest, all-deferred child); +1 permitBatchAndCall covered-child pass + 3 V3 single-token-liq hand-edges. |
+| remaining gaps have explicit defer/blocker disposition | done | #1 V3 proportional/unbalanced liquidity (≈89% of V3 via permitBatchAndCall + 2.3% direct) — BLOCKER: pool-token list not in calldata, needs decode-time pool-token resolver / pool-universe source-materialization. #2-3 additional V3 routers + V2 BalancerRelayer v6 (own decoders). #4 multichain. #5 V2 flashLoan/manage (low/non-retail). All in _deployments/coverage reasons with measured usage. |
 
 ## P4 Land Evidence
 
