@@ -187,9 +187,10 @@ namespace Amm {
   //   - "cow_swap":       chain, settlement
   //   - "one_inch_fusion":chain
   //   - "bebop":          chain
+  //   - "one_inch_limit_order": chain, verifyingContract
   // -------------------------------------------------------------------------
   type IntentVenue = {
-    // "uniswap_x" | "cow_swap" | "one_inch_fusion" | "bebop"
+    // "uniswap_x" | "cow_swap" | "one_inch_fusion" | "bebop" | "one_inch_limit_order"
     name: String,
     // CAIP-2 chain id.
     chain: String,
@@ -197,6 +198,8 @@ namespace Amm {
     reactor?: String,
     // CowSwap GPv2Settlement contract. Present iff name = "cow_swap".
     settlement?: String,
+    // 1inch LOP v4 EIP-712 verifying contract. Present iff name = "one_inch_limit_order".
+    verifyingContract?: String,
   };
 }
 

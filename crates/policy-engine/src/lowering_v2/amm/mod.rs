@@ -155,7 +155,8 @@ const fn balancer_pool_type(pool_type: &BalancerPoolType) -> &'static str {
 /// Lower an [`IntentVenue`] → `{ name, chain, reactor?, settlement? }`
 /// (`Amm::IntentVenue`). Shared by `SignIntentOrder` / `CancelIntentOrder`.
 /// Only `UniswapX` carries `reactor`; only `CowSwap` carries `settlement`;
-/// `OneInchFusion` / `Bebop` expose only `{ name, chain }`.
+/// `OneInchLimitOrder` carries `verifyingContract`; `OneInchFusion` / `Bebop`
+/// expose only `{ name, chain }`.
 pub(crate) fn lower_intent_venue(venue: &IntentVenue) -> Value {
     let mut m = Map::new();
     m.insert("name".into(), Value::String(venue.name().into()));
@@ -170,6 +171,16 @@ pub(crate) fn lower_intent_venue(venue: &IntentVenue) -> Value {
         }
         IntentVenue::OneInchFusion { chain } | IntentVenue::Bebop { chain } => {
             m.insert("chain".into(), Value::String(chain.to_string()));
+        }
+        IntentVenue::OneInchLimitOrder {
+            chain,
+            verifying_contract,
+        } => {
+            m.insert("chain".into(), Value::String(chain.to_string()));
+            m.insert(
+                "verifyingContract".into(),
+                Value::String(addr(verifying_contract)),
+            );
         }
     }
     Value::Object(m)

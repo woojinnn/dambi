@@ -624,6 +624,83 @@
       }
     },
     {
+      "intent": "1inch LOP v4 cancelOrder (maker on-chain) -> Amm::CancelIntentOrder on OneInchLimitOrder venue",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "expect_body": [
+        { "path": "$.data.actions[0].body.action", "op": "equals", "value": "cancel_intent_order" },
+        { "path": "$.data.actions[0].body.venue.name", "op": "equals", "value": "one_inch_limit_order" },
+        { "path": "$.data.actions[0].body.venue.verifying_contract", "op": "hex_eq", "value": "0x111111125421ca6dc452d289314280a0f8842a65" },
+        { "path": "$.data.actions[0].body.order_hash", "op": "hex_eq", "value": "0x29a85ea581b585d5da979edcca89a3a07ea836168d2341766f19cde4e24657be" }
+      ],
+      "tx_hash": "0x0d225caa058daa5edf7bb8570597a519da6440951006077c3afc1c3749542b49",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0x111111125421ca6dc452d289314280a0f8842a65",
+            "value": "0",
+            "data": "0xb68fb0204e0000000000000000000000000000287d006a1fa00c0000000000000000000029a85ea581b585d5da979edcca89a3a07ea836168d2341766f19cde4e24657be"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "1inch LOP v4 cancelOrders (maker batch) -> array_emit Amm::CancelIntentOrder per orderHash (2 actions, multicall envelope)",
+      "expect": "pass",
+      "expect_domain": "multicall",
+      "expect_body": [
+        { "path": "$.data.actions[0].body.actions[0].action", "op": "equals", "value": "cancel_intent_order" },
+        { "path": "$.data.actions[0].body.actions[0].venue.name", "op": "equals", "value": "one_inch_limit_order" },
+        { "path": "$.data.actions[0].body.actions[0].order_hash", "op": "hex_eq", "value": "0x90679acce0f7f3d03aed6042d89ab76718901808bb80258df0fa33a6a8269349" },
+        { "path": "$.data.actions[0].body.actions[1].order_hash", "op": "hex_eq", "value": "0x7b307a1e30673af79b96d032102668f7430da0c07e1af4a7a656d76e4f7fcf25" }
+      ],
+      "tx_hash": "0x1ebed9bf62b7e726a4da43e150f802a5803b29e1a85d04705b5fd56bb45de19f",
+      "chain_id": 1,
+      "rpc": {
+        "params": [
+          {
+            "to": "0x111111125421ca6dc452d289314280a0f8842a65",
+            "value": "0",
+            "data": "0x89e7c650000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000024e00000000000000000000000000001e66006a1f903b000000000000000000004e00000000000000000000000000001e66006a1f902200000000000000000000000000000000000000000000000000000000000000000000000000000000000290679acce0f7f3d03aed6042d89ab76718901808bb80258df0fa33a6a82693497b307a1e30673af79b96d032102668f7430da0c07e1af4a7a656d76e4f7fcf25"
+          }
+        ]
+      }
+    },
+    {
+      "intent": "1inch LOP v4 Order sign (off-chain EIP-712, maker) -> Amm::SignIntentOrder; real Order from fillOrder 0xb4d057de; receiver=0 -> recipient=maker (coalesce_address $fn); valid_until from makerTraits (maker_traits_expiry $fn)",
+      "expect": "pass",
+      "expect_domain": "amm",
+      "chain_id": 1,
+      "typed_data": {
+        "verifying_contract": "0x111111125421ca6dc452d289314280a0f8842a65",
+        "primary_type": "Order",
+        "domain_name": "1inch Aggregation Router",
+        "message": {
+          "salt": "6815303215141116618661898788",
+          "maker": "0x67336cec42645f55059eff241cb02ea5cc52ff86",
+          "receiver": "0x0000000000000000000000000000000000000000",
+          "makerAsset": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+          "takerAsset": "0x68749665ff8d2d112fa859aa293f07a622782f38",
+          "makingAmount": "705722211148915",
+          "takingAmount": "294",
+          "makerTraits": "21091858861496530872019177976883332436750080"
+        }
+      },
+      "expect_body": [
+        { "path": "$.data.actions[0].body.action", "op": "equals", "value": "sign_intent_order" },
+        { "path": "$.data.actions[0].body.venue.name", "op": "equals", "value": "one_inch_limit_order" },
+        { "path": "$.data.actions[0].body.venue.verifying_contract", "op": "hex_eq", "value": "0x111111125421ca6dc452d289314280a0f8842a65" },
+        { "path": "$.data.actions[0].body.sell.key.address", "op": "hex_eq", "value": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" },
+        { "path": "$.data.actions[0].body.buy.key.address", "op": "hex_eq", "value": "0x68749665ff8d2d112fa859aa293f07a622782f38" },
+        { "path": "$.data.actions[0].body.sell_amount", "op": "u256_hex_eq", "value": "0x281d9c1b4a473" },
+        { "path": "$.data.actions[0].body.buy_min", "op": "u256_hex_eq", "value": "0x126" },
+        { "path": "$.data.actions[0].body.order_kind", "op": "equals", "value": "limit" },
+        { "path": "$.data.actions[0].body.recipient", "op": "hex_eq", "value": "0x67336cec42645f55059eff241cb02ea5cc52ff86" },
+        { "path": "$.data.actions[0].body.valid_until", "op": "equals", "value": 1780453531 }
+      ]
+    },
+    {
       "intent": "unoswap (0x83800a8e) \u2014 DEFERRED selector: no manifest, must route-miss (token_out from packed pool, $fn gap)",
       "expect": "error",
       "tx_hash": "0x53151a4b076ed26c87f663106b7e6ce33c41a89f122230b2880b916c0796069e",

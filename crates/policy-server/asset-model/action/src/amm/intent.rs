@@ -108,6 +108,17 @@ pub enum IntentVenue {
         /// Chain the Bebop order is bound to.
         chain: ChainId,
     },
+    /// `1inch Limit Order Protocol` (LOP v4) maker-signed limit orders. Distinct
+    /// from [`Self::OneInchFusion`] (RFQ / Dutch-resolver): a plain signed limit
+    /// order with on-chain maker cancellation. Carries the EIP-712 verifying
+    /// contract — the `AggregationRouterV6` the LOP v4 is embedded in.
+    OneInchLimitOrder {
+        /// Chain the LOP order is bound to.
+        chain: ChainId,
+        /// EIP-712 verifying contract (`AggregationRouterV6`).
+        #[tsify(type = "string")]
+        verifying_contract: Address,
+    },
 }
 
 impl IntentVenue {
@@ -121,6 +132,7 @@ impl IntentVenue {
             Self::CowSwap { .. } => "cow_swap",
             Self::OneInchFusion { .. } => "one_inch_fusion",
             Self::Bebop { .. } => "bebop",
+            Self::OneInchLimitOrder { .. } => "one_inch_limit_order",
         }
     }
 }

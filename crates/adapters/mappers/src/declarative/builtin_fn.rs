@@ -31,6 +31,8 @@ pub const WHITELIST: &[&str] = &[
     "route_hash",
     "keccak256",
     "address_from_uint256",
+    "maker_traits_expiry",
+    "coalesce_address",
     "uniswap_v3_pool_swap_field",
     "uniswapx_reactor_order_field",
 ];
@@ -46,6 +48,8 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "route_hash" => route_hash(args),
         "keccak256" => keccak256_hex(args),
         "address_from_uint256" => address_from_uint256(args),
+        "maker_traits_expiry" => maker_traits_expiry(args),
+        "coalesce_address" => coalesce_address(args),
         "uniswap_v3_pool_swap_field" => uniswap_v3_pool_swap_field(args),
         "uniswapx_reactor_order_field" => uniswapx_reactor_order_field(args),
         _ => Err(format!(
@@ -178,6 +182,51 @@ fn address_from_uint256(args: &[JsonValue]) -> Result<JsonValue, String> {
     let bytes = packed.to_be_bytes::<32>();
     let addr = Address::from_slice(&bytes[12..]);
     Ok(JsonValue::String(format!("{addr:#x}")))
+}
+
+/// `maker_traits_expiry(maker_traits: uint256) -> uint` — extract the 1inch LOP v4
+/// `MakerTraits` order expiration: bits `[80, 120)`, a `uint40` ABSOLUTE
+/// UNIX-seconds timestamp (`(makerTraits >> 80) & ((1<<40)-1)`). On-chain `0`
+/// means "never expires"; this fn remaps `0` → max `uint40` (`0xFF_FFFF_FFFF`,
+/// ~year 36812) so a never-expiring order surfaces as a far-future `valid_until`
+/// (a policy treating `valid_until` as an upper bound flags it) rather than a
+/// long-past epoch-0. Returns a JSON number (the `uint40` always fits `u64`),
+/// matching `Time`'s `#[serde(transparent)] u64` shape.
+fn maker_traits_expiry(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "maker_traits_expiry expects 1 arg (makerTraits), got {}",
+            args.len()
+        ));
+    }
+    let traits = json_u256(&args[0], "maker_traits_expiry: makerTraits")?;
+    let mask = U256::from(0xFF_FFFF_FFFFu64); // (1 << 40) - 1, a uint40
+    let expiry = (traits >> 80usize) & mask;
+    let expiry = if expiry.is_zero() { mask } else { expiry };
+    let secs = u64::try_from(expiry)
+        .map_err(|_| "maker_traits_expiry: expiry does not fit u64".to_owned())?;
+    Ok(JsonValue::Number(serde_json::Number::from(secs)))
+}
+
+/// `coalesce_address(addr: address, fallback: address) -> address` — return `addr`
+/// if it is a non-zero address, else `fallback`. Resolves an "empty" recipient slot
+/// to a default — 1inch LOP `Order.receiver == 0` means the maker is the recipient,
+/// so `coalesce_address($args.order.receiver, $args.order.maker)` yields the
+/// effective recipient. Returns a lowercase `0x` hex address.
+fn coalesce_address(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "coalesce_address expects 2 args (addr, fallback), got {}",
+            args.len()
+        ));
+    }
+    let addr = json_address(&args[0], "coalesce_address: addr")?;
+    let chosen = if addr.is_zero() {
+        json_address(&args[1], "coalesce_address: fallback")?
+    } else {
+        addr
+    };
+    Ok(JsonValue::String(format!("{chosen:#x}")))
 }
 
 /// `uniswap_v3_pool_swap_field(amountSpecified, zeroForOne, token0, token1, field)`.
@@ -829,6 +878,43 @@ mod tests {
         // Wrong arg count + non-numeric error out.
         assert!(address_from_uint256(&[]).is_err());
         assert!(address_from_uint256(&[json!("not-a-number")]).is_err());
+    }
+
+    #[test]
+    fn maker_traits_expiry_extracts_bits_80_to_120() {
+        // expiry 101 at bits [80,120); a high flag bit (255) must be ignored.
+        let traits = (U256::from(101u64) << 80usize) | (U256::from(1u64) << 255usize);
+        let out = maker_traits_expiry(&[json!(format!("{traits:#x}"))]).unwrap();
+        assert_eq!(out, json!(101u64));
+
+        // A realistic uint40 unix timestamp round-trips.
+        let traits = U256::from(1_738_003_600u64) << 80usize;
+        let out = maker_traits_expiry(&[json!(format!("{traits:#x}"))]).unwrap();
+        assert_eq!(out, json!(1_738_003_600u64));
+
+        // expiry region == 0 (never-expires) remaps to the max-uint40 sentinel.
+        let no_expiry = (U256::from(1u64) << 255usize) | U256::from(0xdeadu64);
+        let out = maker_traits_expiry(&[json!(format!("{no_expiry:#x}"))]).unwrap();
+        assert_eq!(out, json!(0xFF_FFFF_FFFFu64)); // 1_099_511_627_775
+
+        assert!(maker_traits_expiry(&[]).is_err());
+    }
+
+    #[test]
+    fn coalesce_address_prefers_nonzero_then_fallback() {
+        let a = "0x1111111111111111111111111111111111111111";
+        let b = "0x2222222222222222222222222222222222222222";
+        let zero = "0x0000000000000000000000000000000000000000";
+        // non-zero addr → returned as-is (lowercase).
+        assert_eq!(coalesce_address(&[json!(a), json!(b)]).unwrap(), json!(a));
+        // zero addr → fallback.
+        assert_eq!(
+            coalesce_address(&[json!(zero), json!(b)]).unwrap(),
+            json!(b)
+        );
+        // wrong arity + non-address error out.
+        assert!(coalesce_address(&[json!(a)]).is_err());
+        assert!(coalesce_address(&[json!("nope"), json!(b)]).is_err());
     }
 
     #[test]
