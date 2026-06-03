@@ -7,21 +7,7 @@
     "selector": "0x24856bc3",
     "chain_to_addresses": {
       "1": [
-        "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
-        "0x4c82d1FbFE28C977cbb58D8C7Ff8FCf9F70A2cca",
         "0x3fC91A3afd70395CD496C647d5a6CC9D4B2b7FAD"
-      ],
-      "10": [
-        "0x851116D9223fabED8E56C0E6b8Ad0c31d98B3507",
-        "0x8B844F726710Dc1D16328C6825cb7E97Cb89D6b2"
-      ],
-      "8453": [
-        "0x6fF5693b99212Da76ad316178A184AB56D299b43",
-        "0xFdf682F51FE81Aa4898F0AE2163d8A55c127fbC7"
-      ],
-      "42161": [
-        "0xa51afafe0263b40edaef0df8781ea9aa03e381a3",
-        "0x8B844F726710Dc1D16328C6825cb7E97Cb89D6b2"
       ]
     }
   },
