@@ -76,6 +76,14 @@ pub(crate) fn lower_stake_venue(venue: &StakeVenue) -> Value {
             m.insert("chain".into(), Value::String(chain.to_string()));
             m.insert("module".into(), Value::String(addr(module)));
         }
+        StakeVenue::AaveUmbrellaStakeToken { chain, stake_token } => {
+            m.insert("chain".into(), Value::String(chain.to_string()));
+            m.insert("stakeToken".into(), Value::String(addr(stake_token)));
+        }
+        StakeVenue::AaveUmbrellaRewardsController { chain, controller } => {
+            m.insert("chain".into(), Value::String(chain.to_string()));
+            m.insert("controller".into(), Value::String(addr(controller)));
+        }
     }
     Value::Object(m)
 }

@@ -46,6 +46,7 @@ pub const WHITELIST: &[&str] = &[
     "uniswapx_reactor_order_field",
     "tuple_array_field",
     "array_len",
+    "u64_saturating",
 ];
 
 /// Dispatch a `$fn` call by name against its already-substituted JSON args.
@@ -66,6 +67,7 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "uniswapx_reactor_order_field" => uniswapx_reactor_order_field(args),
         "tuple_array_field" => tuple_array_field(args),
         "array_len" => array_len(args),
+        "u64_saturating" => u64_saturating(args),
         _ => Err(format!(
             "unknown $fn '{name}' (whitelist: {})",
             WHITELIST.join(", ")
@@ -812,6 +814,24 @@ fn json_to_u64(v: &JsonValue) -> Option<u64> {
         JsonValue::String(s) => s.parse::<u64>().ok(),
         _ => None,
     }
+}
+
+/// `u64_saturating(uint) -> u64 number`. Clamps a (possibly >u64) uint-like
+/// value to `u64::MAX`. Used by Umbrella batch permit-deadline fields.
+fn u64_saturating(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!("u64_saturating expects 1 arg, got {}", args.len()));
+    }
+    let value = match &args[0] {
+        JsonValue::Number(n) => n.as_u64().unwrap_or(u64::MAX),
+        JsonValue::String(s) => s.parse::<u64>().unwrap_or(u64::MAX),
+        other => {
+            return Err(format!(
+                "u64_saturating: argument is not a uint-like value: {other}"
+            ))
+        }
+    };
+    Ok(JsonValue::Number(serde_json::Number::from(value)))
 }
 
 /// `array_len(array) -> decimal-string length`. Used for proposal payload counts.

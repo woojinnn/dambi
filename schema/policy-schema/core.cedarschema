@@ -301,6 +301,8 @@ namespace Staking {
     gauge?: String,              // curve_gauge
     distributor?: String,        // curve_fee_distributor
     module?: String,             // aave_safety_module
+    stakeToken?: String,         // aave_umbrella_stake_token
+    // aave_umbrella_rewards_controller reuses `controller?` (above).
   };
 }
 

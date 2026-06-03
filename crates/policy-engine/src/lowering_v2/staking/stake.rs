@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 use policy_transition::action::staking::StakeAction;
 
 use super::super::common::cedar::{addr, u256_hex};
+use super::super::common::token::lower_token_ref;
 use super::super::dispatch::{LowerCtx, LowerError, LoweredAction};
 use super::lower_stake_venue;
 
@@ -20,7 +21,13 @@ pub(crate) fn lower(action: &StakeAction, ctx: &LowerCtx<'_>) -> Result<LoweredA
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_stake_venue(&action.venue));
+    if let Some(asset) = &action.asset {
+        m.insert("asset".into(), lower_token_ref(asset));
+    }
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(on_behalf_of) = &action.on_behalf_of {
+        m.insert("onBehalfOf".into(), Value::String(addr(on_behalf_of)));
+    }
     if let Some(recipient) = &action.recipient {
         m.insert("recipient".into(), Value::String(addr(recipient)));
     }
@@ -43,7 +50,9 @@ mod tests {
     fn stake_to_recipient_conforms() {
         let body = ActionBody::Staking(StakingAction::Stake(StakeAction {
             venue: aave_safety_module_venue(),
+            asset: None,
             amount: U256::from(1_000_000_000_000_000_000u64),
+            on_behalf_of: None,
             recipient: Some(other()),
         }));
         assert_conforms("stake", &body, &onchain_meta());
@@ -53,7 +62,9 @@ mod tests {
     fn stake_with_permit_no_recipient_conforms() {
         let body = ActionBody::Staking(StakingAction::Stake(StakeAction {
             venue: aave_safety_module_venue(),
+            asset: None,
             amount: U256::from(5_000_000_000_000_000_000u64),
+            on_behalf_of: None,
             recipient: None,
         }));
         assert_conforms("stake", &body, &onchain_meta());

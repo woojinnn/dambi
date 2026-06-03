@@ -173,6 +173,25 @@ pub enum StakeVenue {
         #[tsify(type = "string")]
         module: Address,
     },
+    /// Aave Umbrella per-asset stake token (`stkwaUSDC`, `stkwaWETH`, `stkGHO`,
+    /// …) — the ERC4626-style umbrella safety vault a user stakes/cooldowns/
+    /// redeems against directly.
+    AaveUmbrellaStakeToken {
+        /// Chain hosting the deployment.
+        chain: ChainId,
+        /// Umbrella stake-token (vault) contract address.
+        #[tsify(type = "string")]
+        stake_token: Address,
+    },
+    /// Aave Umbrella `RewardsController` — the contract a user `claimRewards`
+    /// against for umbrella stake-token incentives.
+    AaveUmbrellaRewardsController {
+        /// Chain hosting the deployment.
+        chain: ChainId,
+        /// `RewardsController` contract address.
+        #[tsify(type = "string")]
+        controller: Address,
+    },
 }
 
 impl StakeVenue {
@@ -189,6 +208,8 @@ impl StakeVenue {
             Self::CurveGauge { .. } => "curve_gauge",
             Self::CurveFeeDistributor { .. } => "curve_fee_distributor",
             Self::AaveSafetyModule { .. } => "aave_safety_module",
+            Self::AaveUmbrellaStakeToken { .. } => "aave_umbrella_stake_token",
+            Self::AaveUmbrellaRewardsController { .. } => "aave_umbrella_rewards_controller",
         }
     }
 }

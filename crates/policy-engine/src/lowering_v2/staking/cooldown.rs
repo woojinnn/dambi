@@ -4,6 +4,7 @@ use serde_json::{Map, Value};
 
 use policy_transition::action::staking::CooldownAction;
 
+use super::super::common::cedar::addr;
 use super::super::dispatch::{LowerCtx, LowerError, LoweredAction};
 use super::lower_stake_venue;
 
@@ -22,6 +23,9 @@ pub(crate) fn lower(
     let mut m = Map::new();
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_stake_venue(&action.venue));
+    if let Some(account) = &action.account {
+        m.insert("account".into(), Value::String(addr(account)));
+    }
 
     Ok(ctx.lowered(r#"Staking::Action::"Cooldown""#, Value::Object(m)))
 }
@@ -38,6 +42,7 @@ mod tests {
     fn cooldown_conforms() {
         let body = ActionBody::Staking(StakingAction::Cooldown(CooldownAction {
             venue: aave_safety_module_venue(),
+            account: None,
         }));
         assert_conforms("cooldown", &body, &onchain_meta());
     }
