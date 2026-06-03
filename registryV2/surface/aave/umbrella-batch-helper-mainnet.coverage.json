@@ -46,8 +46,8 @@
     },
     "0xc531de40": {
       "name": "permit",
-      "decision": "cover",
-      "reason": "user-facing Aave permit action covered by registry manifest"
+      "decision": "exclude",
+      "reason": "standard ERC-20/2612 method; erc20 standard adapter auto-enumerates via tokens:erc20 (umbrella stake-token = ERC4626 share, transferable)"
     },
     "0x38957dd9": {
       "name": "redeem",

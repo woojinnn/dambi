@@ -11,8 +11,8 @@
   "functions": {
     "0x095ea7b3": {
       "name": "approve",
-      "decision": "cover",
-      "reason": "user-facing Aave approve action covered by registry manifest"
+      "decision": "exclude",
+      "reason": "standard ERC-20/2612 method; erc20 standard adapter auto-enumerates via tokens:erc20 (umbrella stake-token = ERC4626 share, transferable)"
     },
     "0x787a08a6": {
       "name": "cooldown",
@@ -66,8 +66,8 @@
     },
     "0xd505accf": {
       "name": "permit",
-      "decision": "cover",
-      "reason": "user-facing Aave permit action covered by registry manifest"
+      "decision": "exclude",
+      "reason": "standard ERC-20/2612 method; erc20 standard adapter auto-enumerates via tokens:erc20 (umbrella stake-token = ERC4626 share, transferable)"
     },
     "0xba087652": {
       "name": "redeem",
@@ -101,13 +101,13 @@
     },
     "0xa9059cbb": {
       "name": "transfer",
-      "decision": "cover",
-      "reason": "user-facing Aave transfer action covered by registry manifest"
+      "decision": "exclude",
+      "reason": "standard ERC-20/2612 method; erc20 standard adapter auto-enumerates via tokens:erc20 (umbrella stake-token = ERC4626 share, transferable)"
     },
     "0x23b872dd": {
       "name": "transferFrom",
-      "decision": "cover",
-      "reason": "user-facing Aave transferFrom action covered by registry manifest"
+      "decision": "exclude",
+      "reason": "standard ERC-20/2612 method; erc20 standard adapter auto-enumerates via tokens:erc20 (umbrella stake-token = ERC4626 share, transferable)"
     },
     "0xf2fde38b": {
       "name": "transferOwnership",
@@ -127,8 +127,8 @@
   },
   "signed_structs": {
     "Permit": {
-      "decision": "cover",
-      "reason": "Umbrella stake token EIP-2612 Permit typed-data route"
+      "decision": "exclude",
+      "reason": "standard EIP-2612 Permit; erc20 standard adapter"
     }
   }
 }
