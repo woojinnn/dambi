@@ -158,8 +158,8 @@ const fn lending_venue_pool_address(
     venue: &policy_transition::action::lending::LendingVenue,
 ) -> Option<policy_state::Address> {
     use policy_transition::action::lending::LendingVenue::{
-        AaveV2, AaveV3, CompoundV2, CompoundV3, CrvUsd, Fluid, LlamaLend, MetaMorpho, MorphoBlue,
-        MorphoOptimizer, Spark,
+        AaveV2, AaveV3, AaveV3Periphery, CompoundV2, CompoundV3, CrvUsd, Fluid, LlamaLend,
+        MetaMorpho, MorphoBlue, MorphoOptimizer, Spark,
     };
     match venue {
         AaveV3 { pool, .. } | AaveV2 { pool, .. } | Spark { pool, .. } => Some(*pool),
@@ -170,6 +170,7 @@ const fn lending_venue_pool_address(
         }
         // crvUSD and LlamaLend use one controller address per market.
         CrvUsd { controller, .. } | LlamaLend { controller, .. } => Some(*controller),
+        AaveV3Periphery { adapter, .. } => Some(*adapter),
         MorphoBlue { .. } => None,
     }
 }
