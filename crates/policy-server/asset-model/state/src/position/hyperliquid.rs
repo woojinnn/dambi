@@ -71,6 +71,28 @@ impl Default for HlAccount {
     }
 }
 
+impl HlAccount {
+    /// Replace the core-owned fields (positions / orders / spot / margin) from a
+    /// freshly fetched core snapshot, preserving long-tail fields and the
+    /// reducer-owned `pending_outflow`.
+    pub fn merge_core(&mut self, core: Self) {
+        self.perp_usdc = core.perp_usdc;
+        self.positions = core.positions;
+        self.open_orders = core.open_orders;
+        self.spot_balances = core.spot_balances;
+        self.leverage_settings = core.leverage_settings;
+    }
+
+    /// Replace the long-tail-owned fields (staking / vaults / borrow-lend /
+    /// agents), preserving core fields and `pending_outflow`.
+    pub fn merge_longtail(&mut self, lt: Self) {
+        self.staking = lt.staking;
+        self.vault_equities = lt.vault_equities;
+        self.borrow_lend = lt.borrow_lend;
+        self.agents = lt.agents;
+    }
+}
+
 /// A filled Hyperliquid perp position.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
@@ -262,6 +284,35 @@ pub struct HlAgentApproval {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[tsify(optional)]
     pub agent_name: Option<String>,
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn acct(tag: &str) -> HlAccount {
+        HlAccount {
+            perp_usdc: Some(Decimal::new(tag)),
+            pending_outflow: Decimal::new("42"),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn merge_core_replaces_core_keeps_longtail_and_outflow() {
+        let mut persisted = acct("1");
+        let fresh = acct("2");
+        persisted.merge_core(fresh);
+        assert_eq!(persisted.perp_usdc, Some(Decimal::new("2"))); // core replaced
+        assert_eq!(persisted.pending_outflow, Decimal::new("42")); // reducer field kept
+    }
+
+    #[test]
+    fn merge_longtail_replaces_longtail_keeps_core() {
+        let mut persisted = acct("1");
+        persisted.merge_longtail(HlAccount::default());
+        assert_eq!(persisted.perp_usdc, Some(Decimal::new("1"))); // core untouched
+    }
 }
 
 #[cfg(test)]
