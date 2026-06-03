@@ -326,6 +326,33 @@ fn bundler3_multicall_legs_decode_expected_fields() {
         "sweep recipient (user)"
     );
     assert_eq!(s(sweep, "/amount"), MAX_UINT, "sweep amount = max-uint");
+
+    // ── tx 0x5c27d91d…: leverage — a top-level morphoFlashLoan (EXCLUDE) whose
+    //    reenter(Call[]) callback (D-C) borrows USDT against the supplied
+    //    collateral. The borrow leg has NO top-level source, so its presence
+    //    PROVES the nested callback decoded. Index-independent (find by action).
+    let env3 =
+        route_tx("0x5c27d91dad83e273eda6e48e713f0e48136bc760767fc399d8d00eeefdadf303");
+    let legs3 = env3
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("leverage multicall legs");
+    let borrow = legs3
+        .iter()
+        .find(|l| l.pointer("/action").and_then(serde_json::Value::as_str) == Some("borrow"))
+        .expect("D-C: the morphoFlashLoan reenter callback's borrow leg must surface");
+    assert_eq!(s(borrow, "/domain"), "lending");
+    assert_eq!(s(borrow, "/venue/name"), "morpho_blue");
+    assert_eq!(
+        s(borrow, "/venue/market_id"),
+        "0x3fea56ab83b05840dc83dc6b3d2f2fbd938147cbaa8126bac529e6c820058253",
+        "callback borrow market_id"
+    );
+    assert_eq!(
+        s(borrow, "/asset/key/address"),
+        "0xdac17f958d2ee523a2206206994597c13d831ec7",
+        "callback borrow asset (USDT)"
+    );
 }
 
 /// Recursively find the first `"<field>": <bool>` entry in a JSON value.

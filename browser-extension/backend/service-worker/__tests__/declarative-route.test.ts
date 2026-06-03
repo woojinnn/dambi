@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { encodeFunctionData, type Hex } from "viem";
+import { encodeAbiParameters, encodeFunctionData, type Hex } from "viem";
 
 const mocks = vi.hoisted(() => ({
   installDeclarativeBundleV3: vi.fn(),
@@ -211,5 +211,95 @@ describe("tryDeclarativeRouteV3", () => {
       { to: GA1, selector: "0x6ef5eeae" },
       { to: GA1, selector: "0x5b866db6" },
     ]);
+  });
+
+  it("preinstalls Bundler3 reenter(Call[]) callback legs nested in a morphoFlashLoan (D-C)", async () => {
+    const zero32 = `0x${"00".repeat(32)}` as Hex;
+    const callTupleArray = [
+      {
+        type: "tuple[]",
+        components: [
+          { name: "to", type: "address" },
+          { name: "data", type: "bytes" },
+          { name: "value", type: "uint256" },
+          { name: "skipRevert", type: "bool" },
+          { name: "callbackHash", type: "bytes32" },
+        ],
+      },
+    ] as const;
+    const morphoFlashLoanAbi = [
+      {
+        name: "morphoFlashLoan",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "token", type: "address" },
+          { name: "assets", type: "uint256" },
+          { name: "data", type: "bytes" },
+        ],
+      },
+    ] as const;
+
+    // The flashLoan's reenter callback carries one leg (selector 0xaabbccdd at
+    // GA1) that exists ONLY inside the callback — never at the top level.
+    const callbackData = encodeAbiParameters(callTupleArray, [
+      [
+        {
+          to: GA1,
+          data: "0xaabbccdd" as Hex,
+          value: 0n,
+          skipRevert: false,
+          callbackHash: zero32,
+        },
+      ],
+    ]);
+    const flashLoanData = encodeFunctionData({
+      abi: morphoFlashLoanAbi,
+      functionName: "morphoFlashLoan",
+      args: ["0xdac17f958d2ee523a2206206994597c13d831ec7", 1000n, callbackData],
+    });
+    const bundleCalldata = encodeFunctionData({
+      abi: bundler3MulticallAbi,
+      functionName: "multicall",
+      args: [
+        [
+          {
+            to: GA1,
+            data: flashLoanData,
+            value: 0n,
+            skipRevert: false,
+            callbackHash: zero32,
+          },
+        ],
+      ],
+    });
+
+    mocks.installDeclarativeBundleV3.mockImplementation(
+      async ({ selector }: { selector: string }) =>
+        selector === "0x374f435d"
+          ? installed(bundler3MulticallBundle)
+          : installed(childBundle),
+    );
+    mocks.declarativeRouteRequestV3.mockResolvedValue({
+      decoder_id: "morpho/bundler3/1-multicall@1.0.0",
+      actions: [{ body: { domain: "multicall", actions: [] } }],
+    });
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0x676fa5b94067c2be14bc025df6c5c80dedf49a54",
+      to: BUNDLER3,
+      calldataHex: bundleCalldata,
+    });
+
+    expect(outcome.kind).toBe("hit");
+    const calls = mocks.installDeclarativeBundleV3.mock.calls.map(([arg]) => ({
+      to: (arg as { to: string }).to.toLowerCase(),
+      selector: (arg as { selector: string }).selector,
+    }));
+    // Outer bundle + the top-level flashLoan leg + the CALLBACK-only leg.
+    expect(calls).toContainEqual({ to: BUNDLER3, selector: "0x374f435d" });
+    expect(calls).toContainEqual({ to: GA1, selector: "0xe2975912" });
+    expect(calls).toContainEqual({ to: GA1, selector: "0xaabbccdd" });
   });
 });
