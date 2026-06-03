@@ -169,6 +169,136 @@ fn morpho_supply_market_id_is_keccak_marketparams() {
     );
 }
 
+/// Field-level golden (manual oracle layer "A") for the two real Bundler3
+/// `multicall(Call[])` txs in `bundler3/corpus.json`.
+///
+/// `corpus_replay` compares ONLY the verdict + top-level `domain`, so a per-leg
+/// field regression — a wrong `market_id`/`asset`/`amount`/party, or a skipped
+/// plumbing leg leaking through — passes it SILENTLY. This pins the decoded leg
+/// bodies: each `Call` is re-routed at its OWN `to` (GeneralAdapter1 / Permit2),
+/// the `erc20Transfer` plumbing leg is skipped (GA1 exclude), and the rest fold
+/// into one `ActionBody::Multicall`. Calldata + expectations are read straight
+/// from the corpus file (single source of truth — no transcription drift) and
+/// asserted by FIELD. Mirrors `morpho_supply_market_id_is_keccak_marketparams`.
+#[test]
+fn bundler3_multicall_legs_decode_expected_fields() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    let corpus_path = harness::default_corpus_root()
+        .join("bundler3")
+        .join("corpus.json");
+    let corpus: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&corpus_path).expect("read bundler3 corpus"))
+            .expect("parse bundler3 corpus");
+
+    // Route a corpus tx by hash through the production decoder; assert it hit.
+    let route_tx = |tx_hash: &str| -> serde_json::Value {
+        let tx = corpus["transactions"]
+            .as_array()
+            .expect("corpus transactions")
+            .iter()
+            .find(|t| t["tx_hash"] == tx_hash)
+            .unwrap_or_else(|| panic!("tx {tx_hash} not in bundler3 corpus"));
+        let p = &tx["rpc"]["params"][0];
+        let to = p["to"].as_str().expect("tx.to");
+        let data = p["data"].as_str().expect("tx.data");
+        let env = harness::route::route_calldata(1, to, &data[..10], data, "0");
+        assert_eq!(
+            env.get("ok").and_then(serde_json::Value::as_bool),
+            Some(true),
+            "route did not succeed for {tx_hash}: {env}"
+        );
+        env
+    };
+    // The decoded leg bodies are internally tagged (flattened): a leg's fields
+    // (`domain`/`action`/`venue`/`asset`/`amount`/party) sit at the leg root.
+    let s = |v: &serde_json::Value, ptr: &str| -> String {
+        v.pointer(ptr)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("missing {ptr} in {v}"))
+            .to_ascii_lowercase()
+    };
+    // `amount` is a U256 — serialized as a "0x"-quantity hex string (alloy), but
+    // tolerate a decimal string / JSON number too.
+    let amount = |v: &serde_json::Value| -> u128 {
+        match v.pointer("/amount").expect("amount field") {
+            serde_json::Value::Number(n) => u128::from(n.as_u64().expect("amount u64")),
+            serde_json::Value::String(t) => t.strip_prefix("0x").map_or_else(
+                || t.parse::<u128>().expect("amount decimal u128"),
+                |hex| u128::from_str_radix(hex, 16).expect("amount hex u128"),
+            ),
+            other => panic!("amount not number/string: {other}"),
+        }
+    };
+
+    // ── tx 0x4e65d9d1…: morphoWithdrawCollateral (wstETH collat, USDC market) +
+    //    erc20Transfer (GA1 exclude → skipped) → Multicall[withdraw].
+    let env1 = route_tx("0x4e65d9d130d9ab1c948adc21c4b8adf117b5986d874eb80ff06ebc17f602f5ee");
+    let legs1 = env1
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("withdraw multicall legs");
+    assert_eq!(
+        legs1.len(),
+        1,
+        "the erc20Transfer leg must be skipped → 1 leg: {env1}"
+    );
+    let w = &legs1[0];
+    assert_eq!(s(w, "/domain"), "lending");
+    assert_eq!(s(w, "/action"), "withdraw");
+    assert_eq!(s(w, "/venue/name"), "morpho_blue");
+    assert_eq!(
+        s(w, "/venue/market_id"),
+        "0xb323495f7e4148be5643a4ea4a8221eef163e4bccfdedc2a6f4696baacbc86cc",
+        "withdraw market_id regressed (keccak(MarketParams))"
+    );
+    assert_eq!(
+        s(w, "/asset/key/address"),
+        "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "withdraw asset (wstETH)"
+    );
+    assert_eq!(amount(w), 0xfa15_c771_d680_1232, "withdraw amount");
+    assert_eq!(
+        s(w, "/recipient"),
+        "0x5a6e5fe82536c16a678e859a404a6a8f7d870cb3",
+        "withdraw recipient"
+    );
+
+    // ── tx 0xeea1e0df…: Permit2 permit (→Permit2) + morphoSupplyCollateral
+    //    (WBTC collat, →GA1) + erc20Transfer (skipped) → Multicall[token, supply].
+    let env2 = route_tx("0xeea1e0dfab0683b7981e1553fab7697108b2c31d73529094386f44b58b76ee5c");
+    let legs2 = env2
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("supply multicall legs");
+    assert_eq!(
+        legs2.len(),
+        2,
+        "[permit2(token), supply]; the erc20Transfer leg must be skipped: {env2}"
+    );
+    assert_eq!(s(&legs2[0], "/domain"), "token", "leg0 = Permit2 permit");
+    let sup = &legs2[1];
+    assert_eq!(s(sup, "/domain"), "lending");
+    assert_eq!(s(sup, "/action"), "supply");
+    assert_eq!(s(sup, "/venue/name"), "morpho_blue");
+    assert_eq!(
+        s(sup, "/venue/market_id"),
+        "0xb7a75cabc2e8eadd0bc661340a9e359d9828bed6d5cbbcd64188bca8c01e399e",
+        "supply market_id regressed (keccak(MarketParams))"
+    );
+    assert_eq!(
+        s(sup, "/asset/key/address"),
+        "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+        "supply asset (WBTC)"
+    );
+    assert_eq!(amount(sup), 0xe4_e1c0, "supply amount");
+    assert_eq!(
+        s(sup, "/on_behalf_of"),
+        "0x5ac65511fef88144f531b79043bc524e5562b8b3",
+        "supply on_behalf_of"
+    );
+}
+
 /// Recursively find the first `"<field>": <bool>` entry in a JSON value.
 fn find_bool_field(v: &serde_json::Value, field: &str) -> Option<bool> {
     match v {
