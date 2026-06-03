@@ -62,6 +62,13 @@ impl DecoderRegistry {
         r.register("aave_user_data", decode_aave_user_data);
         r.register("bool", decode_bool);
         r.register("address", decode_address);
+        // Lido liquid-staking exchange-rate views — each returns a single uint256
+        // (getWstETHByStETH / getStETHByWstETH / getPooledEthByShares), so they
+        // alias the u256 decoder. Referenced by the lido/{wsteth,steth} manifest
+        // `live_inputs` onchain_view blocks (wrap/unwrap/transferShares enrichment).
+        r.register("lido_wsteth_by_steth", decode_u256_as_string);
+        r.register("lido_steth_by_wsteth", decode_u256_as_string);
+        r.register("lido_pooled_eth_by_shares", decode_u256_as_string);
         r
     }
 
@@ -200,5 +207,27 @@ mod tests {
         let r = DecoderRegistry::with_builtins();
         let err = r.decode("nonexistent", &[]).unwrap_err();
         assert!(matches!(err, SyncError::UnknownDecoder(_)));
+    }
+
+    #[test]
+    fn lido_exchange_rate_decoders_registered() {
+        // The lido/{wsteth,steth} manifests' onchain_view live_inputs reference
+        // these decoder_ids; each Lido view (getWstETHByStETH / getStETHByWstETH /
+        // getPooledEthByShares) returns a single uint256. Without these the
+        // OnchainViewFetcher would raise SyncError::UnknownDecoder for Lido.
+        let r = DecoderRegistry::with_builtins();
+        let mut data = [0u8; 32];
+        data[31] = 5;
+        for id in [
+            "lido_wsteth_by_steth",
+            "lido_steth_by_wsteth",
+            "lido_pooled_eth_by_shares",
+        ] {
+            assert_eq!(
+                r.decode(id, &data).unwrap(),
+                Value::String("5".to_string()),
+                "decoder_id {id} must resolve to the u256 decoder"
+            );
+        }
     }
 }
