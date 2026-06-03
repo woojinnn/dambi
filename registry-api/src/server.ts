@@ -31,10 +31,11 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { RegistryApiConfig } from "./config.js";
-import type { ObjectReader } from "./gcs-client.js";
+import type { ObjectReader, ObjectResult } from "./gcs-client.js";
 import { ObjectCache, type CacheValue } from "./cache.js";
 import { TokenBucketRateLimiter } from "./rate-limiter.js";
 import { LogStore } from "./log-store.js";
+import { SingleFlight } from "./single-flight.js";
 import { parseProxyTarget } from "./validation.js";
 import type { NowMs } from "./types.js";
 
@@ -76,6 +77,7 @@ export function createRegistryApiServer(
       nowMs,
     });
   const logStore = options.logStore ?? new LogStore();
+  const singleFlight = new SingleFlight<ObjectResult>();
 
   return createServer(async (request, response) => {
     try {
@@ -87,6 +89,7 @@ export function createRegistryApiServer(
         cache,
         rateLimiter,
         logStore,
+        singleFlight,
         nowMs,
       });
     } catch (error) {
@@ -108,6 +111,7 @@ interface RouteInput {
   cache: ObjectCache;
   rateLimiter: TokenBucketRateLimiter;
   logStore: LogStore;
+  singleFlight: SingleFlight<ObjectResult>;
   nowMs: NowMs;
 }
 
@@ -171,7 +175,11 @@ async function handleProxy(input: RouteInput, proxyPath: string): Promise<void> 
 
   // 1. client IP 별 rate limit — validation 보다 먼저 돌려서 garbage path
   //    폭주도 throttle 한다.
-  const ip = clientIp(input.request);
+  const ip = extractClientIp(
+    input.request.headers["x-forwarded-for"],
+    input.request.socket.remoteAddress,
+    input.config.trustedProxyHops,
+  );
   if (!input.rateLimiter.allow(ip)) {
     input.response.writeHead(429, {
       ...CORS_HEADERS,
@@ -206,8 +214,11 @@ async function handleProxy(input: RouteInput, proxyPath: string): Promise<void> 
     return;
   }
 
-  // 4. cache miss → 비공개 버킷 read.
-  const result = await input.reader.read(target.objectName);
+  // 4. cache miss → 비공개 버킷 read. single-flight 로 동시 cold-miss 를 1회 read 로
+  //    coalesce (위협모델 A3 thundering-herd).
+  const result = await input.singleFlight.run(target.objectName, () =>
+    input.reader.read(target.objectName),
+  );
 
   if (result.kind === "found") {
     let value: CacheValue;
@@ -320,11 +331,38 @@ async function readGeneratedJson<T>(
   ref: string,
 ): Promise<T> {
   const objectName = normalizeObjectRef(ref);
-  const result = await input.reader.read(objectName);
+
+  // Cache only CONTENT-ADDRESSED sub-reads: bundles/<sha256>.json are immutable
+  // by hash, so a sibling callkey reusing a cached template is always byte-
+  // identical. contexts/<source>/<chain>/<addr>.json are address-keyed (NOT
+  // hash-named) → the same object name can hold different content across a
+  // registry rebuild, so caching them could serve a sibling a stale context.
+  // Read those fresh (single-flight still dedupes concurrent reads). One bundle
+  // template is shared by hundreds of callkeys, so that is where the win is.
+  const cacheable = objectName.startsWith("bundles/");
+  if (cacheable) {
+    const cached = input.cache.get(objectName);
+    if (cached && cached.status === 200) {
+      return parseJsonBuffer<T>(cached.body, objectName);
+    }
+  }
+
+  const result = await input.singleFlight.run(objectName, () =>
+    input.reader.read(objectName),
+  );
   if (result.kind !== "found") {
     const kind =
       result.kind === "upstream_error" ? `upstream_error: ${result.message}` : "not_found";
     throw new Error(`${objectName}: ${kind}`);
+  }
+  // Only successful, content-addressed sub-reads are cached — a missing/failed
+  // template stays a 502 (ref_materialization_failed) and is re-attempted.
+  if (cacheable) {
+    input.cache.set(objectName, {
+      status: 200,
+      body: result.body,
+      contentType: result.contentType,
+    });
   }
   return parseJsonBuffer<T>(result.body, objectName);
 }
@@ -517,16 +555,44 @@ function writeProxy404(response: ServerResponse): void {
 }
 
 /**
- * best-effort client IP. Cloud Run 은 Google front end 뒤에 있어
- * X-Forwarded-For 가 세팅됨; left-most 가 원 client. 로컬 실행은 socket 주소.
+ * Trusted client IP for rate-limiting (threat model A1).
+ *
+ * X-Forwarded-For is APPENDED hop-by-hop: the LEFT entries are client-supplied
+ * (spoofable), the RIGHT entries are added by trusted infrastructure. The old
+ * code took the LEFTMOST, so any caller could rotate a fake leftmost value to
+ * mint a fresh rate-limit bucket on every request and nullify the per-IP cap.
+ * Instead we count `trustedProxyHops` from the RIGHT and take that entry.
+ *
+ * On Cloud Run the rightmost entry is ALWAYS one Google's frontend appended (a
+ * request cannot reach the container otherwise), so it is never client-spoofable.
+ * The default `trustedProxyHops = 0` (rightmost) therefore FAILS SAFE: it can
+ * never be bypassed — worst case, in a topology where the rightmost is a shared
+ * LB IP, it over-throttles (a global instead of per-IP cap; still cost-safe).
+ * A default of 1 would be UNSAFE: if the edge appended only one hop, the
+ * second-from-right is the client-supplied (spoofable) value → bypass. For
+ * direct *.run.app the rightmost is the genuine client IP (true per-IP); behind
+ * a Google HTTP LB set TRUSTED_PROXY_HOPS to the LB hop count.
+ *
+ * Falls back to the socket peer address when the list is absent or shorter than
+ * the offset — never to a spoofable leftmost. (On Cloud Run the socket peer is
+ * the frontend, so the fallback is a shared/global bucket, not per-IP.)
  */
-function clientIp(request: IncomingMessage): string {
-  const xff = request.headers["x-forwarded-for"];
-  if (typeof xff === "string" && xff.length > 0) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
+export function extractClientIp(
+  xffHeader: string | string[] | undefined,
+  socketAddr: string | undefined,
+  trustedProxyHops: number,
+): string {
+  const raw = Array.isArray(xffHeader) ? xffHeader.join(",") : xffHeader;
+  if (typeof raw === "string" && raw.length > 0) {
+    const hops = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const offset = Math.max(0, Math.trunc(trustedProxyHops));
+    const idx = hops.length - 1 - offset;
+    if (idx >= 0 && idx < hops.length) return hops[idx];
   }
-  return request.socket.remoteAddress ?? "unknown";
+  return socketAddr ?? "unknown";
 }
 
 function logRequest(

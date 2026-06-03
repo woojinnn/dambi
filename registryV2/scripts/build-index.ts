@@ -1042,6 +1042,11 @@ async function main(): Promise<void> {
   const forceRefresh = process.argv.includes("--force-refresh");
   const summaryOnly = process.argv.includes("--summary-only") || process.argv.includes("--quiet");
   const representativeSourceRefs = process.argv.includes("--representative-source-refs");
+  // STRICT mode rejects concrete callkey collisions (threat model C5) instead of
+  // last-wins overwriting. Off by default so the build stays green while a known
+  // overlap is reconciled; flip on in CI once the routing surface is disjoint.
+  const strictCallkeys =
+    process.argv.includes("--strict-callkeys") || process.env.STRICT_CALLKEYS === "1";
   if (forceRefresh) {
     console.error(`[build-index] --force-refresh: protocol-aware sources will re-fetch via RPC`);
   }
@@ -1083,7 +1088,14 @@ async function main(): Promise<void> {
   let duplicateSourcedCallkeys = 0;
   let skippedRepresentativeSourcedCallkeys = 0;
   let writtenRepresentativeSourcedCallkeys = 0;
+  let duplicateConcreteCallkeys = 0;
+  let collidingConcreteCallkeys = 0;
   const seenRepresentativeSourcedKeys = new Set<string>();
+  // Concrete (non-sourced) callkey ownership for collision detection (threat
+  // model C5): two concrete manifests must not silently shadow the same
+  // (chain_id, to, selector). Sourced fill-ins are NOT recorded here — concrete
+  // overwriting a sourced entry stays intended.
+  const concreteCallkeyOwners = new Map<string, { manifestPath: string; sha256: Hex }>();
   for (const file of manifestFiles) {
     const manifestPath = relative(REGISTRY_ROOT, file).split(/[\\/]/).join("/");
     try {
@@ -1168,6 +1180,37 @@ async function main(): Promise<void> {
                 bundle: resolved,
               };
             }
+            if (!isSourcedManifest) {
+              // C5: a concrete manifest is authoritative for its callkey. Detect
+              // when a DIFFERENT concrete manifest already claimed it.
+              const prior = concreteCallkeyOwners.get(fname);
+              if (prior && prior.manifestPath !== manifestPath) {
+                if (prior.sha256 === bundleSha256) {
+                  // Identical bundle from two manifests — harmless; keep first.
+                  duplicateConcreteCallkeys++;
+                  if (!summaryOnly) {
+                    console.error(
+                      `[build-index] WARN ${manifestPath}: callkey ${fname} already emitted by ${prior.manifestPath} with an identical bundle; keeping the first`,
+                    );
+                  }
+                  continue;
+                }
+                // Different bundles = ambiguous routing surface (silent shadowing
+                // before this check). Always enumerate via WARN + last-wins so the
+                // FULL collision set is reported; STRICT then fails the build once,
+                // after the loop, having listed every collision (throwing here would
+                // abandon the manifest's remaining callkeys and under-report).
+                const msg = `callkey collision: ${fname} is claimed by both ${prior.manifestPath} and ${manifestPath} with different bundles`;
+                collidingConcreteCallkeys++;
+                if (!summaryOnly) {
+                  console.error(
+                    `[build-index] WARN ${manifestPath}: ${msg}; last-wins${strictCallkeys ? " (STRICT_CALLKEYS — build fails after all collisions are listed)" : " (set STRICT_CALLKEYS=1 to reject)"}`,
+                  );
+                }
+                // fall through → last-wins overwrite (full enumeration preserved)
+              }
+              concreteCallkeyOwners.set(fname, { manifestPath, sha256: bundleSha256 });
+            }
             writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
             totalCallkeys++;
           }
@@ -1215,6 +1258,22 @@ async function main(): Promise<void> {
     console.error(
       `[build-index] WARN skipped ${duplicateSourcedCallkeys} sourced duplicate callkey(s); concrete protocol manifests kept`,
     );
+  }
+  if (duplicateConcreteCallkeys > 0) {
+    console.error(
+      `[build-index] WARN ${duplicateConcreteCallkeys} concrete callkey(s) duplicated by an identical bundle from another manifest; kept the first`,
+    );
+  }
+  if (collidingConcreteCallkeys > 0) {
+    console.error(
+      `[build-index] WARN ${collidingConcreteCallkeys} concrete callkey COLLISION(s) — two manifests with different bundles shadow the same (chain,to,selector); resolved last-wins. Reconcile the routing surface, then enforce STRICT_CALLKEYS=1.`,
+    );
+  }
+  if (strictCallkeys && collidingConcreteCallkeys > 0) {
+    console.error(
+      `[build-index] STRICT_CALLKEYS FAILED — ${collidingConcreteCallkeys} concrete callkey collision(s). Reconcile so each (chain_id, to, selector) has one owner.`,
+    );
+    process.exit(1);
   }
   if (representativeSourceRefs) {
     console.error(
