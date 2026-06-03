@@ -130,6 +130,26 @@ evidence; the phase tables below are the mandatory gate.
 | corpus `expect` flips or exclusions justified | done | none — all 9 entries expect=pass, no flips or exclusions needed. |
 | remaining gaps have explicit defer/blocker disposition | done | DEFER (L2-refined usage-share): setPreSignature 4.5% (defer-stays L5b — opaque uid, no terms), ComposableCoW ≤0.6% (defer-stays L5c — conditional-order complexity vs share), multichain variants. CoWSwapEthFlow COVERED in L5a (9.3%). No blockers. |
 
+### L3 — dropped-field disposition (hardening round)
+
+The CoW `Order` has 12 EIP-712 fields; the decoder maps 7 into `amm sign_intent_order`
+(venue, sell, buy, sell_amount, buy_min, recipient, valid_until) and drops 5. L3 asks
+whether any dropped field must be added to `SignIntentOrderAction` (a Tier-3 change).
+Test: does the field EXPAND the fund/permission authorization beyond what's captured?
+**Verdict: no Tier-3 needed — the fund-authorization scope (max spend = sellAmount,
+min receive = buyAmount, recipient, expiry, tokens, venue) is fully captured; the
+dropped fields are within-bound or enrichment-only.**
+
+Per-field disposition (format is a bullet list, not a status table, on purpose):
+
+- **`kind` (sell/buy)** — not a scope boundary. Picks which of sellAmount/buyAmount is exact vs a bound. SELL = spend exactly sellAmount, receive ≥buyAmount; BUY = spend ≤sellAmount (cap), receive exactly buyAmount. Current `sell_amount=sellAmount` / `buy_min=buyAmount` already encodes the WORST CASE for both (max spend, min receive). order_kind is fixed to `limit` (price-discovery axis = Dutch/Limit/Rfq; CoW orders are limit).
+- **`partiallyFillable`** — not a scope boundary. A partial fill stays within the same sellAmount/buyAmount bounds; total authorization unchanged.
+- **`feeAmount`** — not a scope boundary. Fee is taken from WITHIN sellAmount (for ethflow, msg.value = sellAmount+feeAmount, but the order's sell is sellAmount); does not raise max spend. Modern orders carry feeAmount=0 (fees moved into the limit price).
+- **`sellTokenBalance` / `buyTokenBalance` (erc20/external/internal)** — not a scope boundary. Selects WHERE funds settle (wallet vs Balancer vault); the AMOUNT bound is unchanged and exposure stays gated by the user's VaultRelayer approval.
+- **`appData` (bytes32)** — enrichment-only, NOT a static-decode gap. 1st-party (docs.cow.fi/app-data): appData is a bytes32 HASH of an off-chain IPFS JSON; the signed order contains ONLY the hash. It can carry **hooks** (arbitrary pre/post `target`+`callData`) — a real risk — but the hooks live in the off-chain doc, so they are NOT statically decodable from the signature (only the hash is present). appData is frequently non-empty for BENIGN orders too (commits to app/referrer/quote metadata — corpus entries 1-2 are real orders with non-zero appData and NO hooks), so a static `appData != 0` check cannot distinguish hooks from metadata (high false-positive). Hook execution is solver social-consensus (not contract-enforced) and funds stay bounded by the VaultRelayer approval (analyzed by the erc20 approve adapter). Capturing the hash statically = low-actionability + would pollute the venue-shared `SignIntentOrderAction` (UniswapX/Fusion/Bebop don't have it). **Correct disposition: enrichment-backed enhancement** (fetch the appData doc → decode hooks → scope target/callData), adjacent to L4; out of this static-decode onboarding's scope.
+
+No code/manifest/corpus change for L3 (disposition is "intentional non-mapping" + appData→hooks routed to the enrichment roadmap).
+
 ## P4 Land Evidence
 
 | required evidence | status | artifact / exact command / summary |
