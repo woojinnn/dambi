@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::watch;
 
-use policy_state::{Time, WalletStore};
+use policy_state::{Time, WalletId, WalletStore};
 
 use crate::error::SyncError;
 use crate::orchestrator::{Orchestrator, RefreshReport};
@@ -42,6 +42,10 @@ pub struct TickReport {
     pub total_fields_updated: usize,
     pub total_fields_failed: usize,
     pub errors: Vec<String>,
+    /// Wallet ids that were successfully refreshed and persisted this tick.
+    /// Surfaced (beyond the aggregate counters) so the caller can emit one
+    /// real-time `wallet_synced` event per wallet.
+    pub synced_wallets: Vec<WalletId>,
 }
 
 pub struct Scheduler {
@@ -151,6 +155,7 @@ impl Scheduler {
             match self.store.save(&state).await {
                 Ok(()) => {
                     report.wallets_processed += 1;
+                    report.synced_wallets.push(wid);
                 }
                 Err(e) => report.errors.push(format!("save {}: {}", wid.address, e)),
             }
@@ -267,6 +272,19 @@ priority = 1
         let report = s.tick_once().await.unwrap();
         assert_eq!(report.wallets_processed, 1);
         assert_eq!(report.total_fields_updated, 0); // empty state
+    }
+
+    #[tokio::test]
+    async fn tick_records_synced_wallets() {
+        // The background worker needs to know *which* wallets a tick refreshed
+        // so it can emit one `wallet_synced` event per wallet. The aggregate
+        // counters can't carry that, so the tick surfaces the wallet ids that
+        // were successfully loaded, refreshed, and saved.
+        let s = mk_scheduler();
+        let report = s.tick_once().await.unwrap();
+        assert_eq!(report.wallets_processed, 1);
+        assert_eq!(report.synced_wallets.len(), 1);
+        assert_eq!(report.synced_wallets[0].address, Address::ZERO);
     }
 
     #[tokio::test]

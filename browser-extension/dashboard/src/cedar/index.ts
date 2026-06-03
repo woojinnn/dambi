@@ -17,6 +17,8 @@ import {
   sendToExtension,
 } from "../server-api/extension-bridge";
 import type { PolicySeverity, Verdict } from "../server-api";
+import { blocksToEst, estToBlocks } from "./blocks";
+import type { PolicyIR, SchemaDescriptor } from "./blocks";
 
 // ── public types (match the old api-client shapes) ──────────────────────
 
@@ -169,4 +171,58 @@ export async function simulateSequenceLocal(
     BRIDGE_TIMEOUT_MS,
   );
   return JSON.parse(raw) as SequenceResp;
+}
+
+// ── block-IR bridge (text↔EST↔blocks) ────────────────────────────────────
+
+/** Cedar text → block IR (one PolicyIR per policy in the text). Routes
+ *  text→EST through the SW + wasm bridge, then converts EST→IR locally.
+ *  `descriptor` (optional) drives schema annotations on `attr` nodes. */
+export async function textToBlocks(
+  cedarText: string,
+  descriptor: SchemaDescriptor | null = null,
+): Promise<PolicyIR[]> {
+  const raw = await sendToExtension<string>(
+    { type: "cedar-text-to-est", text: cedarText },
+    BRIDGE_TIMEOUT_MS,
+  );
+  const parsed = JSON.parse(raw) as
+    | { ok: true; policies: { id: string; est: unknown }[] }
+    | { ok: false; error?: string };
+  if (!parsed.ok) throw new Error(parsed.error ?? "cedar text→EST failed");
+  return parsed.policies.map((p) =>
+    estToBlocks(p.est as Parameters<typeof estToBlocks>[0], descriptor),
+  );
+}
+
+/** Block IR → Cedar text. Converts IR→EST locally (throws on unfilled
+ *  holes — call fillParams first), then routes EST→text through the bridge. */
+export async function blocksToText(ir: PolicyIR): Promise<string> {
+  const est = blocksToEst(ir);
+  const raw = await sendToExtension<string>(
+    { type: "cedar-est-to-text", est_json: JSON.stringify(est) },
+    BRIDGE_TIMEOUT_MS,
+  );
+  const parsed = JSON.parse(raw) as
+    | { ok: true; text: string }
+    | { ok: false; error?: string };
+  if (!parsed.ok) throw new Error(parsed.error ?? "cedar EST→text failed");
+  return parsed.text;
+}
+
+/** Fetch the per-action typed field catalog from the SW (wasm-built). Returns a
+ *  {@link SchemaDescriptor} keyed by the policy-facing action id (e.g. `"Swap"`)
+ *  — pass it straight into {@link textToBlocks} for schema annotations. Fetch
+ *  once and reuse across policies. Soft-fails to `null` when the extension
+ *  bridge is unavailable, so the UI still renders blocks (without annotations). */
+export async function fetchFieldCatalog(): Promise<SchemaDescriptor | null> {
+  try {
+    return await sendToExtension<SchemaDescriptor>(
+      { type: "manifest:get-field-catalog" },
+      BRIDGE_TIMEOUT_MS,
+    );
+  } catch (err) {
+    if (isMissingBridge(err)) return null;
+    throw err;
+  }
 }

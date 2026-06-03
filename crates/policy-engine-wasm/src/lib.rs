@@ -19,6 +19,7 @@ mod cedar_exports;
 mod declarative_exports;
 mod dto;
 mod exports;
+pub mod field_catalog;
 mod policy_request_exports;
 mod trigger_exports;
 
@@ -33,13 +34,16 @@ pub fn _start() {
 mod sim_types;
 
 pub use action_eval_exports::{evaluate_action_v2_json, plan_action_rpc_v2_json};
-pub use cedar_exports::{simulate_policy_sequence, test_policy_text, validate_policy_text};
+pub use cedar_exports::{
+    est_json_to_policy_text, policy_text_to_est_json, simulate_policy_sequence, test_policy_text,
+    validate_policy_text,
+};
 pub use declarative_exports::{
     declarative_install_v3_json, declarative_route_request_v3_json,
     declarative_route_typed_data_v3_json,
 };
 pub use exports::{
-    get_alias_table_json, install_policies_json, preview_custom_schema_json,
+    field_catalog_json, get_alias_table_json, install_policies_json, preview_custom_schema_json,
     preview_installed_schema_json, preview_schema_json,
 };
 pub use policy_request_exports::evaluate_policy_request_json;

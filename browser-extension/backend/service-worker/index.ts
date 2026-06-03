@@ -12,7 +12,7 @@ import {
   reinstallAllPolicies,
 } from "./policies-loader";
 import { loadDefaultPolicySetV2 } from "./policies-loader-v2";
-import { applyEnabledIds, getCatalog } from "./policy-selection";
+import { applyEnabledIds, getCatalog, getEnabledIds } from "./policy-selection";
 import {
   isExecutionReport,
   RequestType,
@@ -28,6 +28,8 @@ import {
   type WalletId,
 } from "./scopeball-auth";
 import {
+  estToPolicyText,
+  policyTextToEst,
   simulatePolicySequence,
   testPolicyText,
   validatePolicyText,
@@ -273,6 +275,15 @@ interface CedarSimulateRequest {
   steps_json: string;
   policies_json: string;
 }
+interface CedarTextToEstRequest {
+  type: "cedar-text-to-est";
+  text: string;
+}
+interface CedarEstToTextRequest {
+  type: "cedar-est-to-text";
+  // Pre-serialized EST JSON (a single policy's EST object).
+  est_json: string;
+}
 interface ExecutionReportsListRequest {
   type: "execution-reports:list";
   opts?: ExecutionReportFilter;
@@ -304,9 +315,17 @@ interface VerdictsExportCsvRequest {
 interface VerdictsClearRequest {
   type: "verdicts:clear";
 }
+/** Read just the enabled-policy id list. The dashboard's policy list
+ *  uses this for the checkbox state; the popup also uses it indirectly
+ *  via `policy-catalog`. Keeping a dedicated `:get` lets the dashboard
+ *  invalidate the lighter query on storage broadcasts. */
+interface PolicySelectionGetRequest {
+  type: "policy-selection:get";
+}
 type PopupRequest =
   | PolicyCatalogRequest
   | SetEnabledIdsRequest
+  | PolicySelectionGetRequest
   | ScopeballAuthStatusRequest
   | ScopeballAuthSignInRequest
   | ScopeballAuthSignOutRequest
@@ -314,6 +333,8 @@ type PopupRequest =
   | CedarValidateRequest
   | CedarTestRequest
   | CedarSimulateRequest
+  | CedarTextToEstRequest
+  | CedarEstToTextRequest
   | ExecutionReportsListRequest
   | ExecutionReportsCountRequest
   | ExecutionReportsClearRequest
@@ -377,6 +398,28 @@ Browser.runtime.onMessage.addListener(
           sendResponse({
             ok: false,
             error: { kind: "cedar_simulate_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "cedar-text-to-est") {
+      void policyTextToEst((req as CedarTextToEstRequest).text)
+        .then((json) => sendResponse({ ok: true, data: json }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "cedar_text_to_est_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "cedar-est-to-text") {
+      void estToPolicyText((req as CedarEstToTextRequest).est_json)
+        .then((json) => sendResponse({ ok: true, data: json }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "cedar_est_to_text_failed", message: String(err) },
           }),
         );
       return true;
@@ -580,6 +623,18 @@ Browser.runtime.onMessage.addListener(
           sendResponse({
             ok: false,
             error: { kind: "verdicts_clear_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "policy-selection:get") {
+      void getEnabledIds()
+        .then((ids) => sendResponse({ ok: true, data: ids }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "policy_selection_get_failed", message: String(err) },
           }),
         );
       return true;
