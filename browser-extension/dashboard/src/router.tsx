@@ -26,6 +26,7 @@ import { EditorDetailPage } from "./pages/editor/EditorDetailPage";
 import { SimulationPage } from "./pages/SimulationPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { MarketPage } from "./pages/MarketPage";
 
 const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
@@ -45,6 +46,7 @@ const router = createBrowserRouter([
           { path: "simulation", element: <SimulationPage /> },
           { path: "monitoring", element: <MonitoringPage /> },
           { path: "history", element: <HistoryPage /> },
+          { path: "market", element: <MarketPage /> },
           { path: "*", element: <Navigate to="/" replace /> },
         ],
       },

@@ -1,0 +1,20 @@
+/* Market page — iframe fills the content area below Topbar. The bundle
+   inside owns its own styles; this file only governs the wrapper. */
+
+.market-frame {
+  position: relative;
+  width: 100%;
+  /* Topbar is the only non-iframe element above us inside <main>; fill
+     the rest of the viewport without introducing a scrollbar on the
+     SPA frame (the iframe handles its own scroll). */
+  height: calc(100vh - var(--topbar-h, 56px));
+  background: var(--surface);
+}
+
+.market-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
