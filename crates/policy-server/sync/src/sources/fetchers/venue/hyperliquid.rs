@@ -15,8 +15,8 @@ use serde_json::{json, Value};
 
 use policy_state::position::{
     CoreFresh, HlAccount, HlAgentApproval, HlBorrowLendAccount, HlBorrowLendBalance,
-    HlBorrowLendTokenState, HlLeverageSetting, HlOpenOrder, HlPosition, HlSpotBalance,
-    HlStakingAccount, HlStakingDelegation, HlVaultEquity, LongtailFresh,
+    HlBorrowLendTokenState, HlLeverageSetting, HlOpenOrder, HlPerpDexMargin, HlPosition,
+    HlSpotBalance, HlStakingAccount, HlStakingDelegation, HlVaultEquity, LongtailFresh,
 };
 use policy_state::primitives::Time;
 use policy_state::{Address, DataSource, Decimal, MarketRef, VenueRef, U256};
@@ -378,7 +378,7 @@ impl HyperliquidFetcher {
             .await?;
         let open_orders = self.fetch_open_orders_for_dex(endpoint, user, dex).await?;
         let meta = self.fetch_meta_for_dex(endpoint, dex).await?;
-        parse_account_snapshot(&clearinghouse, &open_orders, agents, &meta)
+        parse_account_snapshot(&clearinghouse, &open_orders, agents, &meta, dex)
     }
 
     pub async fn fetch_action_value(
@@ -515,7 +515,7 @@ pub(crate) fn assemble_core(
             Value::Array(Vec::new())
         }
     };
-    let mut account = match parse_account_snapshot(&clearinghouse, &orders_val, &empty_agents, meta)
+    let mut account = match parse_account_snapshot(&clearinghouse, &orders_val, &empty_agents, meta, None)
     {
         Ok(a) => {
             // Native dex bundle parsed → native is fresh. (Task 4 generalizes this
@@ -611,19 +611,45 @@ pub(crate) fn parse_account_snapshot(
     open_orders: &Value,
     agents: &Value,
     meta: &Value,
+    dex: Option<&str>,
 ) -> Result<HlAccount, SyncError> {
     let symbols = symbol_index(meta);
-    let positions = parse_hl_positions(clearinghouse, &symbols)?;
-    let open_orders = parse_hl_open_orders(open_orders, &symbols)?;
-    let leverage_settings = parse_hl_leverage_settings(clearinghouse, &symbols)?;
+    let mut positions = parse_hl_positions(clearinghouse, &symbols)?;
+    let mut open_orders = parse_hl_open_orders(open_orders, &symbols)?;
+    let mut leverage_settings = parse_hl_leverage_settings(clearinghouse, &symbols)?;
     let agents = parse_hl_agents(agents)?;
+
+    // Stamp every per-dex item with the dex it was fetched from (None = native).
+    for p in &mut positions {
+        p.dex = dex.map(str::to_owned);
+    }
+    for o in &mut open_orders {
+        o.dex = dex.map(str::to_owned);
+    }
+    for l in &mut leverage_settings {
+        l.dex = dex.map(str::to_owned);
+    }
+
+    // `withdrawable` powers both `perp_usdc` (kept for the legacy
+    // `merge_hl_account` fan-out path; the fresh fan-out path re-derives it in
+    // `merge_core` from `perp_dex_margins`) and this dex's margin entry.
     let perp_usdc = value_at(clearinghouse, &["withdrawable"])
         .map(state_decimal_from_value)
         .transpose()?;
+    let withdrawable = perp_usdc.clone().unwrap_or_else(|| Decimal::new("0"));
+    let account_value = value_at(clearinghouse, &["marginSummary", "accountValue"])
+        .map(state_decimal_from_value)
+        .transpose()?
+        .unwrap_or_else(|| Decimal::new("0"));
+    let perp_dex_margins = vec![HlPerpDexMargin {
+        dex: dex.map(str::to_owned),
+        withdrawable,
+        account_value,
+    }];
 
     Ok(HlAccount {
         perp_usdc,
-        perp_dex_margins: Vec::new(),
+        perp_dex_margins,
         pending_outflow: Decimal::new("0"),
         positions,
         open_orders,
@@ -1227,8 +1253,11 @@ fn parse_hl_positions(
             is_long: szi.is_sign_positive(),
             size: Decimal::new(szi.abs().normalize().to_string()),
             entry_price,
-            dex: None,
-            liquidation_price: None,
+            dex: None, // parse_account_snapshot stamps the real dex
+            liquidation_price: value_at(position, &["liquidationPx"])
+                .filter(|v| !v.is_null())
+                .map(state_decimal_from_value)
+                .transpose()?,
         });
     }
     Ok(out)
@@ -1683,6 +1712,40 @@ mod tests {
     }
 
     #[test]
+    fn parse_snapshot_tags_dex_and_reads_liq_and_margin() {
+        let clearinghouse = json!({
+            "withdrawable": "5",
+            "marginSummary": { "accountValue": "3219.36" },
+            "assetPositions": [{
+                "position": {
+                    "coin": "xyz:NVDA",
+                    "szi": "24.616",
+                    "entryPx": "217.25",
+                    "liquidationPx": "151.81",
+                    "leverage": { "type": "cross", "value": 3 }
+                }
+            }]
+        });
+        let meta = json!({ "universe": [{ "name": "NVDA" }] });
+        let acct =
+            parse_account_snapshot(&clearinghouse, &json!([]), &json!([]), &meta, Some("xyz"))
+                .unwrap();
+
+        assert_eq!(acct.positions.len(), 1);
+        assert_eq!(acct.positions[0].dex.as_deref(), Some("xyz"));
+        assert_eq!(
+            acct.positions[0].liquidation_price,
+            Some(Decimal::new("151.81"))
+        );
+        assert_eq!(acct.leverage_settings.len(), 1);
+        assert_eq!(acct.leverage_settings[0].dex.as_deref(), Some("xyz"));
+        assert_eq!(acct.perp_dex_margins.len(), 1);
+        assert_eq!(acct.perp_dex_margins[0].dex.as_deref(), Some("xyz"));
+        assert_eq!(acct.perp_dex_margins[0].withdrawable, Decimal::new("5"));
+        assert_eq!(acct.perp_dex_margins[0].account_value, Decimal::new("3219.36"));
+    }
+
+    #[test]
     fn parses_account_snapshot_from_hypersdk_shapes() {
         let clearinghouse = json!({
             "marginSummary": {
@@ -1747,9 +1810,15 @@ mod tests {
             "collateralToken": 0
         });
 
-        let acct = parse_account_snapshot(&clearinghouse, &open_orders, &agents, &meta).unwrap();
+        let acct =
+            parse_account_snapshot(&clearinghouse, &open_orders, &agents, &meta, None).unwrap();
 
         assert_eq!(acct.perp_usdc, Some(Decimal::new("600.5")));
+        // Per-dex margin emitted for the native dex (withdrawable + accountValue).
+        assert_eq!(acct.perp_dex_margins.len(), 1);
+        assert_eq!(acct.perp_dex_margins[0].dex, None);
+        assert_eq!(acct.perp_dex_margins[0].withdrawable, Decimal::new("600.5"));
+        assert_eq!(acct.perp_dex_margins[0].account_value, Decimal::new("1000.5"));
         assert_eq!(acct.pending_outflow, Decimal::new("0"));
         assert_eq!(acct.positions.len(), 1);
         assert_eq!(acct.positions[0].asset_index, 0);
@@ -1757,6 +1826,11 @@ mod tests {
         assert!(acct.positions[0].is_long);
         assert_eq!(acct.positions[0].size, Decimal::new("0.1"));
         assert_eq!(acct.positions[0].entry_price, Decimal::new("60000"));
+        assert_eq!(acct.positions[0].dex, None); // native
+        assert_eq!(
+            acct.positions[0].liquidation_price,
+            Some(Decimal::new("50000"))
+        );
         assert_eq!(acct.open_orders.len(), 1);
         assert_eq!(acct.open_orders[0].asset_index, 1);
         assert_eq!(acct.open_orders[0].symbol.as_deref(), Some("ETH"));
