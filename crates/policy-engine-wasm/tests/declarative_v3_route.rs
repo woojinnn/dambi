@@ -6044,8 +6044,9 @@ fn b3_hl_whype_transfer_from() {
 // `hyperliquid_core::hl_unknown { action_type }` (the args are HL uint64
 // fixed-point that the declarative grammar cannot scale to human amounts, so a
 // named-but-unstructured body is the honest mapping — see the manifest _note).
-const HL_COREWRITER_FULL_MANIFEST: &str =
-    include_str!("../../../registryV2/manifests/hyperliquid/core-writer/send-raw-action@1.0.0.json");
+const HL_COREWRITER_FULL_MANIFEST: &str = include_str!(
+    "../../../registryV2/manifests/hyperliquid/core-writer/send-raw-action@1.0.0.json"
+);
 
 // b3.a — action 11 (Cancel by cloid) → STRUCTURED `Perp(CancelOrder)` body.
 // The headline structured-perp win: cloid (uint128) decodes to a JSON string
@@ -6210,7 +6211,10 @@ fn b3_corewriter_bad_version_default_unknown() {
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "hyperliquid_core", "{parsed}");
     assert_eq!(body["action"], "hl_unknown", "{parsed}");
-    assert_eq!(body["action_type"], "unrecognizedCoreWriterAction", "{parsed}");
+    assert_eq!(
+        body["action_type"], "unrecognizedCoreWriterAction",
+        "{parsed}"
+    );
 }
 
 // ===========================================================================
@@ -6317,8 +6321,16 @@ fn b3_hl_usd_send_routes_to_structured() {
 
     let out = declarative_route_typed_data_v3_json(input);
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    let body = assert_hl_structured(&parsed, "hyperliquid/rest/usd-send@1.0.0", HL_MAINNET, "hl_usd_send");
-    assert_eq!(body["destination"], "0x00000000000000000000000000000000deadbeef", "{parsed}");
+    let body = assert_hl_structured(
+        &parsed,
+        "hyperliquid/rest/usd-send@1.0.0",
+        HL_MAINNET,
+        "hl_usd_send",
+    );
+    assert_eq!(
+        body["destination"], "0x00000000000000000000000000000000deadbeef",
+        "{parsed}"
+    );
     assert_eq!(body["amount"], "100.0", "{parsed}");
 }
 
@@ -6342,9 +6354,16 @@ fn b3_hl_token_delegate_routes_to_structured() {
 
     let out = declarative_route_typed_data_v3_json(input);
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    let body =
-        assert_hl_structured(&parsed, "hyperliquid/rest/token-delegate@1.0.0", HL_MAINNET, "hl_token_delegate");
-    assert_eq!(body["validator"], "0x00000000000000000000000000000000cafef00d", "{parsed}");
+    let body = assert_hl_structured(
+        &parsed,
+        "hyperliquid/rest/token-delegate@1.0.0",
+        HL_MAINNET,
+        "hl_token_delegate",
+    );
+    assert_eq!(
+        body["validator"], "0x00000000000000000000000000000000cafef00d",
+        "{parsed}"
+    );
     assert_eq!(body["is_undelegate"], false, "{parsed}");
     assert_eq!(body["wei"], "5000000000", "{parsed}");
 }
@@ -6474,8 +6493,19 @@ fn b3_hl_spot_send_routes_to_structured_testnet() {
 
     let out = declarative_route_typed_data_v3_json(input);
     let parsed: Value = serde_json::from_str(&out).unwrap();
-    let body = assert_hl_structured(&parsed, "hyperliquid/rest/spot-send@1.0.0", 421_614, "hl_spot_send");
-    assert_eq!(body["destination"], "0x00000000000000000000000000000000deadbeef", "{parsed}");
-    assert_eq!(body["token"], "PURR:0xc1fb593aeffbeb02f85e0b7c0f6f3b8a7e7f7e7e", "{parsed}");
+    let body = assert_hl_structured(
+        &parsed,
+        "hyperliquid/rest/spot-send@1.0.0",
+        421_614,
+        "hl_spot_send",
+    );
+    assert_eq!(
+        body["destination"], "0x00000000000000000000000000000000deadbeef",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["token"], "PURR:0xc1fb593aeffbeb02f85e0b7c0f6f3b8a7e7f7e7e",
+        "{parsed}"
+    );
     assert_eq!(body["amount"], "42.5", "{parsed}");
 }
