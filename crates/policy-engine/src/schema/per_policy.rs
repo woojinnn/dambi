@@ -30,6 +30,10 @@ use super::{
     AMM_CANCEL_INTENT_ORDER_SCHEMA, AMM_COLLECT_FEES_SCHEMA, AMM_GSM_SWAP_SCHEMA,
     AMM_REMOVE_LIQUIDITY_SCHEMA, AMM_SETTLE_INTENT_ORDER_SCHEMA, AMM_SIGN_INTENT_ORDER_SCHEMA,
     AMM_SWAP_SCHEMA, CORE_MULTICALL_SCHEMA, CORE_SCHEMA, CORE_UNKNOWN_SCHEMA,
+    GOVERNANCE_ACTIVATE_VOTING_SCHEMA, GOVERNANCE_CANCEL_SCHEMA, GOVERNANCE_CLOSE_VOTE_SCHEMA,
+    GOVERNANCE_DELEGATE_SCHEMA, GOVERNANCE_EXECUTE_SCHEMA, GOVERNANCE_PROPOSE_SCHEMA,
+    GOVERNANCE_QUEUE_SCHEMA, GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA, GOVERNANCE_START_VOTE_SCHEMA,
+    GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA, GOVERNANCE_VOTE_SCHEMA,
     HL_APPROVE_AGENT_SCHEMA, HL_APPROVE_BUILDER_FEE_SCHEMA, HL_C_DEPOSIT_SCHEMA,
     HL_C_WITHDRAW_SCHEMA, HL_ORDER_SCHEMA, HL_SEND_ASSET_SCHEMA, HL_SEND_TO_EVM_WITH_DATA_SCHEMA,
     HL_SPOT_SEND_SCHEMA, HL_SUB_ACCOUNT_TRANSFER_SCHEMA, HL_TOKEN_DELEGATE_SCHEMA,
@@ -117,6 +121,73 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
         action_tag: Some("delegate"),
         schema_text: AIRDROP_DELEGATE_SCHEMA,
         pascal_stub: "Delegate",
+    },
+    // governance
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("delegate"),
+        schema_text: GOVERNANCE_DELEGATE_SCHEMA,
+        pascal_stub: "Delegate",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("vote"),
+        schema_text: GOVERNANCE_VOTE_SCHEMA,
+        pascal_stub: "Vote",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("propose"),
+        schema_text: GOVERNANCE_PROPOSE_SCHEMA,
+        pascal_stub: "Propose",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("cancel"),
+        schema_text: GOVERNANCE_CANCEL_SCHEMA,
+        pascal_stub: "Cancel",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("activate_voting"),
+        schema_text: GOVERNANCE_ACTIVATE_VOTING_SCHEMA,
+        pascal_stub: "ActivateVoting",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("queue"),
+        schema_text: GOVERNANCE_QUEUE_SCHEMA,
+        pascal_stub: "Queue",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("execute"),
+        schema_text: GOVERNANCE_EXECUTE_SCHEMA,
+        pascal_stub: "Execute",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("start_vote"),
+        schema_text: GOVERNANCE_START_VOTE_SCHEMA,
+        pascal_stub: "StartVote",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("close_vote"),
+        schema_text: GOVERNANCE_CLOSE_VOTE_SCHEMA,
+        pascal_stub: "CloseVote",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("redeem_cancellation_fee"),
+        schema_text: GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA,
+        pascal_stub: "RedeemCancellationFee",
+    },
+    ActionEntry {
+        domain: "governance",
+        action_tag: Some("update_representative"),
+        schema_text: GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA,
+        pascal_stub: "UpdateRepresentative",
     },
     // amm
     ActionEntry {
@@ -1187,8 +1258,8 @@ mod tests {
         // Guards against a row being dropped or duplicated.
         assert_eq!(
             RESOLVER_TABLE.len(),
-            105,
-            "resolver table must have 105 rows"
+            116,
+            "resolver table must have 116 rows"
         );
     }
 

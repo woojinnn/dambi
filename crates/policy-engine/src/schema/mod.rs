@@ -52,6 +52,32 @@ const AMM_SIGN_INTENT_ORDER_SCHEMA: &str =
 const AMM_SWAP_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/amm/swap.cedarschema");
 
+// governance (alphabetical)
+const GOVERNANCE_ACTIVATE_VOTING_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/activate_voting.cedarschema");
+const GOVERNANCE_CANCEL_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/cancel.cedarschema");
+const GOVERNANCE_CLOSE_VOTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/close_vote.cedarschema");
+const GOVERNANCE_DELEGATE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/delegate.cedarschema");
+const GOVERNANCE_EXECUTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/execute.cedarschema");
+const GOVERNANCE_PROPOSE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/propose.cedarschema");
+const GOVERNANCE_QUEUE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/queue.cedarschema");
+const GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/governance/redeem_cancellation_fee.cedarschema"
+);
+const GOVERNANCE_START_VOTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/start_vote.cedarschema");
+const GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/governance/update_representative.cedarschema"
+);
+const GOVERNANCE_VOTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/vote.cedarschema");
+
 // lending (alphabetical)
 const LENDING_BORROW_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/borrow.cedarschema");
@@ -299,6 +325,17 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     AMM_SETTLE_INTENT_ORDER_SCHEMA,
     AMM_SIGN_INTENT_ORDER_SCHEMA,
     AMM_SWAP_SCHEMA,
+    GOVERNANCE_ACTIVATE_VOTING_SCHEMA,
+    GOVERNANCE_CANCEL_SCHEMA,
+    GOVERNANCE_CLOSE_VOTE_SCHEMA,
+    GOVERNANCE_DELEGATE_SCHEMA,
+    GOVERNANCE_EXECUTE_SCHEMA,
+    GOVERNANCE_PROPOSE_SCHEMA,
+    GOVERNANCE_QUEUE_SCHEMA,
+    GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA,
+    GOVERNANCE_START_VOTE_SCHEMA,
+    GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA,
+    GOVERNANCE_VOTE_SCHEMA,
     LENDING_BORROW_SCHEMA,
     LENDING_DELEGATE_BORROW_SCHEMA,
     LENDING_DISABLE_COLLATERAL_SCHEMA,

@@ -13,6 +13,7 @@ use policy_state::{LiveField, NonceKey};
 
 pub mod airdrop;
 pub mod amm;
+pub mod governance;
 pub mod hyperliquid_core;
 pub mod launchpad;
 pub mod lending;
@@ -28,6 +29,7 @@ pub mod yield_;
 
 pub use airdrop::AirdropAction;
 pub use amm::AmmAction;
+pub use governance::GovernanceAction;
 pub use hyperliquid_core::HyperliquidCoreAction;
 pub use launchpad::LaunchpadAction;
 pub use lending::LendingAction;
@@ -169,6 +171,8 @@ pub enum ActionBody {
     Restaking(RestakingAction),
     /// Staking / vote-escrow-domain action (veCRV lock, claim rewards, gauge vote, ...).
     Staking(StakingAction),
+    /// Governance-domain action (proposal lifecycle, voting, power delegation).
+    Governance(GovernanceAction),
     /// Hyperliquid CORE action (off-chain L1 order / leverage / fund movement),
     /// intercepted from a `/exchange` POST rather than `window.ethereum`.
     HyperliquidCore(HyperliquidCoreAction),

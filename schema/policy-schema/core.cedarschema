@@ -434,3 +434,19 @@ namespace HyperliquidCore {
     assetIndex: Long,
   };
 }
+
+namespace Governance {
+  // -------------------------------------------------------------------------
+  // GovernanceVenue — DAO governance contract/token identifier.
+  //   - "aave_governance_v3"  → governance
+  //   - "aave_voting_machine" → votingMachine
+  //   - "governance_token"    → token
+  // -------------------------------------------------------------------------
+  type GovernanceVenue = {
+    name: String,
+    chain: String,
+    governance?: String,
+    votingMachine?: String,
+    token?: Core::TokenRef,
+  };
+}

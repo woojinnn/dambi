@@ -90,6 +90,18 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "settle_intent_order",
     "sign_intent_order",
     "swap",
+    // Governance (10) — `delegate` already listed above under Airdrop (dedup;
+    // per-domain disambiguation in per_policy::RESOLVER_TABLE).
+    "activate_voting",
+    "cancel",
+    "close_vote",
+    "execute",
+    "propose",
+    "queue",
+    "redeem_cancellation_fee",
+    "start_vote",
+    "update_representative",
+    "vote",
     // Lending (12)
     "borrow",
     "buy_collateral",
@@ -254,7 +266,7 @@ mod tests {
         // vault_transfer / sub_account_transfer) + 2 permission (approve_builder_fee
         // / token_delegate) + 2 trading/margin (twap_order / update_isolated_margin)
         // = 98, plus `settle_intent_order` for on-chain intent settlement = 99.
-        assert_eq!(REGISTERED_ACTIONS.len(), 104);
+        assert_eq!(REGISTERED_ACTIONS.len(), 114);
     }
 
     #[test]

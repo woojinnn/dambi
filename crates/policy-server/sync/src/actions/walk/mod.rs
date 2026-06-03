@@ -46,6 +46,8 @@ fn walk_body(
         ActionBody::LiquidStaking(ls) => liquid_staking::walk(ls, action_index, now, stale, stats),
         // staking actions carry no live inputs — nothing to walk.
         ActionBody::Staking(_) => {}
+        // governance actions carry no live inputs — nothing to walk.
+        ActionBody::Governance(_) => {}
         ActionBody::Permission(p) => permission::walk(p, action_index, now, stale, stats),
         // Yield (Pendle) carries no live_inputs in P1a — enrichment (market →
         // SY/PT/YT/maturity) is wired in P1c (the source descriptor is built at
@@ -92,6 +94,7 @@ pub fn apply_value_to_action(
         ActionBody::Yield(_)
         | ActionBody::Restaking(_)
         | ActionBody::Staking(_)
+        | ActionBody::Governance(_)
         | ActionBody::HyperliquidCore(_)
         | ActionBody::Multicall { .. }
         | ActionBody::Unknown { .. } => {}
