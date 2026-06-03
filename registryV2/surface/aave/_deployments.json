@@ -3,7 +3,7 @@
   "source": "bgd-labs/aave-address-book (AaveV3Ethereum.sol, GovernanceV3Ethereum.sol, AaveSafetyModule.sol, GhoEthereum.sol, UmbrellaEthereum.sol) + Etherscan-verified ABIs",
   "url": "https://github.com/bgd-labs/aave-address-book/blob/main/src/AaveV3Ethereum.sol",
   "fetchedAt": "2026-06-03",
-  "note": "Aave on Ethereum mainnet (chainId 1) \u2014 representative-chain onboarding. SCOPE: lending Pool + WETHGateway + variable-debt credit delegation + AAVE governance-power delegation (governance domain, axis-1). DEFER (user-facing, usage-share measured P2): GHO/GSM/SGHO, stkAAVE/stkGHO/Umbrella safety-module staking, Governance proposal/voting, aAAVE/stkAAVE delegation (same surface as AAVE; AAVE dominant). L2 deployments = multichain expansion deferred (separate framework). EXCLUDE = infra/admin/keeper/standard-ERC20.",
+  "note": "Aave on Ethereum mainnet (chainId 1) — representative-chain onboarding. SCOPE: lending Pool + WETHGateway + variable-debt credit delegation + AAVE governance-power delegation (governance domain, axis-1). DEFER (user-facing, usage-share measured P2): GHO/GSM/SGHO, stkAAVE/stkGHO/Umbrella safety-module staking, Governance proposal/voting, aAAVE/stkAAVE delegation (same surface as AAVE; AAVE dominant). L2 deployments = multichain expansion deferred (separate framework). EXCLUDE = infra/admin/keeper/standard-ERC20.",
   "contracts": [
     {
       "name": "Pool (v3.4 proxy)",
@@ -24,7 +24,7 @@
       "chainId": 1,
       "address": "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
       "decision": "cover",
-      "reason": "governance-power delegation surface (delegate/metaDelegate) \u2014 governance domain axis-1; standard ERC-20 via erc20 adapter"
+      "reason": "governance-power delegation surface (delegate/metaDelegate) — governance domain axis-1; standard ERC-20 via erc20 adapter"
     },
     {
       "name": "variableDebtToken DAI",
@@ -184,15 +184,15 @@
       "name": "Governance V3 (proxy)",
       "chainId": 1,
       "address": "0x9aee0b04504cef83a65ac3f0e838d0593bcb2bc7",
-      "decision": "exclude",
-      "reason": "deferred user-facing surface (createProposal/cancelProposal/updateRepresentativesForChain); usage-share P2, follow-up. Crank fns (activateVoting/executeProposal/redeemCancellationFee) are permissionless, no pre-sign user intent"
+      "decision": "cover",
+      "reason": "user governance: createProposal/cancel/queue/execute/redeemCancellationFee/updateRepresentatives → governance domain. snapshot governance-core-mainnet."
     },
     {
       "name": "VotingMachine",
       "chainId": 1,
       "address": "0x06a1795a88b82700896583e123f46be43877bfb6",
-      "decision": "exclude",
-      "reason": "deferred user-facing surface (submitVote/submitVoteBySignature); usage-share P2, follow-up. Vote weight is a storage-proof tuple, opaque to static decode"
+      "decision": "cover",
+      "reason": "user governance voting: submitVote(BySignature)/startProposalVote/closeAndSendVote → governance domain. snapshot governance-voting-machine-mainnet."
     },
     {
       "name": "PayloadsController",
