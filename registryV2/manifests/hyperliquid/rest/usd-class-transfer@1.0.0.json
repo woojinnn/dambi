@@ -3,7 +3,7 @@
   "id": "hyperliquid/rest/usd-class-transfer@1.0.0",
   "publisher": "hyperliquid",
   "schema_version": "3",
-  "_note_mapping": "HyperLiquid Mode B `HyperliquidTransaction:UsdClassTransfer` — off-chain L1 transfer of USDC between the perp and spot wallets (`toPerp` bool) signed via eth_signTypedData_v4. `amount` decimal-string + the perp/spot class concept have no faithful 8-domain ActionBody mapping → best-effort `Unknown` (routing win; structured representation = deferred off-chain-exchange variant, OUT OF SCOPE). See usd-send@1.0.0 for the full B.3 rationale.",
+  "_note_mapping": "HyperLiquid Mode B (UserSigned) `HyperliquidTransaction:UsdClassTransfer` — an OFF-CHAIN L1 action authorized by an eth_signTypedData_v4 signature (domain.name=HyperliquidSignTransaction, version=1, verifyingContract=0x0, chainId=signatureChainId). Decoded to the `hyperliquid_core::hl_usd_class_transfer` ActionBody (the HL-native thin off-chain action domain, reused from the /exchange Flow-3 path) so a single policy fires for BOTH the typed-sig pre-sign moment and the /exchange POST. Amounts are decimal strings (fractional-safe Decimal) and addresses are L1 identifier strings — both map losslessly. SUPERSEDES the prior `domain:unknown` mapping (the off-chain-exchange ActionBody variant the old note deferred now exists).",
   "match": {
     "selector": "0x00000004",
     "chain_to_addresses": {
@@ -46,12 +46,13 @@
   "emit": {
     "strategy": "single_emit",
     "body": {
-      "domain": "unknown",
-      "unknown": {
-        "target": "0x0000000000000000000000000000000000000000",
-        "chain": "$chain",
-        "calldata": "0x",
-        "value": "0"
+      "domain": "hyperliquid_core",
+      "hyperliquid_core": {
+        "action": "hl_usd_class_transfer",
+        "hl_usd_class_transfer": {
+          "amount": "$args.usdClassTransfer.amount",
+          "to_perp": "$args.usdClassTransfer.toPerp"
+        }
       }
     }
   },
