@@ -17,6 +17,10 @@ namespace HyperliquidCore {
     size: String,
     // Reduce-only.
     reduceOnly: Bool,
+    // Derived position intent: "open" or "reduce" (reduce-only ⇒ closes/shrinks).
+    // See `order.cedarschema` — lets "no new shorts" match
+    // `side=="short" && positionEffect=="open"` without blocking long-closes.
+    positionEffect: String,
     // Duration in minutes the TWAP runs over.
     minutes: Long,
     // Randomize sub-order timing.

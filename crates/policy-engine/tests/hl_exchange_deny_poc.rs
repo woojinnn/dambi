@@ -58,8 +58,10 @@ fn hl_meta() -> ActionMeta {
     }
 }
 
-/// Build a Hyperliquid order action. `is_buy=false` ⇒ short.
-fn order(is_buy: bool, size: &str) -> ActionBody {
+/// Build a Hyperliquid order action. `is_buy=false` ⇒ short (sell) DIRECTION;
+/// `reduce_only=true` ⇒ the order can only shrink an existing position (a
+/// long-CLOSE when the side is short), so `positionEffect` lowers to "reduce".
+fn order(is_buy: bool, size: &str, reduce_only: bool) -> ActionBody {
     ActionBody::HyperliquidCore(HyperliquidCoreAction::Order(HlOrderAction {
         asset_index: 0,
         symbol: Some("BTC".to_owned()),
@@ -68,7 +70,7 @@ fn order(is_buy: bool, size: &str) -> ActionBody {
         // Fractional size is preserved verbatim — the whole reason the HL Core
         // model uses `Decimal`, not `U256` (which rejects "0.1").
         size: Decimal::new(size),
-        reduce_only: false,
+        reduce_only,
         tif: "gtc".to_owned(),
     }))
 }
@@ -108,14 +110,27 @@ fn evaluate(body: &ActionBody, tag: &str, policy: &str) -> Verdict {
         .expect("evaluate")
 }
 
-// The deny policy under test: block SHORT orders on Hyperliquid. Pure
-// string-equality on base context fields — no decimal/has guards needed.
+// The deny policy under test: block opening NEW short exposure on Hyperliquid.
+// `side == "short"` is the order DIRECTION (sell), which also covers reduce-only
+// long-CLOSES; the `positionEffect == "open"` guard restricts the deny to new
+// short exposure so a position exit is never blocked. Pure string-equality on
+// base context fields — no decimal/has guards needed.
 const DENY_SHORT: &str = "\
 @id(\"hl/no-short\")\n\
 @severity(\"deny\")\n\
-@reason(\"Short orders on Hyperliquid are blocked by policy\")\n\
+@reason(\"Opening a new short on Hyperliquid is blocked by policy\")\n\
 forbid(principal, action == HyperliquidCore::Action::\"HlOrder\", resource)\n\
-when { context.venue.name == \"hyperliquid\" && context.side == \"short\" };\n";
+when { context.venue.name == \"hyperliquid\" && context.side == \"short\" && context.positionEffect == \"open\" };\n";
+
+// Reduce-only lockdown: only position-CLOSING (reduce-only) orders may pass —
+// every position-OPENING order is blocked regardless of side. Matches on the
+// derived `positionEffect` alone.
+const DENY_OPEN: &str = "\
+@id(\"hl/reduce-only-mode\")\n\
+@severity(\"deny\")\n\
+@reason(\"Reduce-only mode — only position-closing orders are allowed\")\n\
+forbid(principal, action == HyperliquidCore::Action::\"HlOrder\", resource)\n\
+when { context.positionEffect == \"open\" };\n";
 
 // A confirm (warn) policy for the fund-movement `HlWithdraw` action.
 const CONFIRM_WITHDRAW: &str = "\
@@ -132,10 +147,11 @@ const CONFIRM_HIGH_LEVERAGE: &str = "\
 forbid(principal, action == HyperliquidCore::Action::\"HlUpdateLeverage\", resource)\n\
 when { context.venue.name == \"hyperliquid\" && context.leverage > 20 };\n";
 
-/// THE PROOF: a Hyperliquid short order is BLOCKED (`Verdict::Fail`).
+/// THE PROOF: opening a NEW short order (short side, NOT reduce-only) is BLOCKED
+/// (`Verdict::Fail`).
 #[test]
-fn hyperliquid_short_order_is_denied() {
-    match evaluate(&order(false, "0.1"), "hl_order", DENY_SHORT) {
+fn hyperliquid_opening_short_order_is_denied() {
+    match evaluate(&order(false, "0.1", false), "hl_order", DENY_SHORT) {
         Verdict::Fail(matched) => assert!(
             matched.iter().any(|m| m.policy_id == "hl/no-short"),
             "expected the hl/no-short deny rule to match, got: {matched:?}"
@@ -144,15 +160,60 @@ fn hyperliquid_short_order_is_denied() {
     }
 }
 
+/// THE FALSE-POSITIVE FIX: a reduce-only SHORT order is a long-CLOSE (position
+/// exit), NOT new short exposure. The corrected deny (`positionEffect == "open"`)
+/// must let it PASS. Before this fix, a naive `side == "short"` rule wrongly
+/// blocked ~72% of "short" orders (reduce-only long-closes), trapping users in
+/// their positions. This is the core behavioral guarantee of the (A+D) change.
+#[test]
+fn hyperliquid_reduce_only_short_is_long_close_and_passes() {
+    assert_eq!(
+        evaluate(&order(false, "0.1", true), "hl_order", DENY_SHORT),
+        Verdict::Pass,
+        "a reduce-only short (long-close / position exit) must NOT be blocked by a no-new-short deny"
+    );
+}
+
 /// CONTROL: a LONG order (is_buy=true) is NOT blocked by the short-only deny.
 /// Proves the deny is conditional on the order, not a blanket fail — and that a
 /// fractional size flows through (no truncation, no deserialize failure).
 #[test]
 fn hyperliquid_long_order_passes() {
     assert_eq!(
-        evaluate(&order(true, "0.1"), "hl_order", DENY_SHORT),
+        evaluate(&order(true, "0.1", false), "hl_order", DENY_SHORT),
         Verdict::Pass,
         "a long order must pass the short-only deny"
+    );
+}
+
+/// Reduce-only lockdown: every OPENING order (long or short) is blocked, while
+/// every reduce-only (closing) order passes — proving `positionEffect` cleanly
+/// separates open-vs-close independent of side.
+#[test]
+fn reduce_only_lockdown_blocks_opens_allows_closes() {
+    assert!(
+        matches!(
+            evaluate(&order(true, "0.1", false), "hl_order", DENY_OPEN),
+            Verdict::Fail(_)
+        ),
+        "opening a long must be blocked under reduce-only lockdown"
+    );
+    assert!(
+        matches!(
+            evaluate(&order(false, "0.1", false), "hl_order", DENY_OPEN),
+            Verdict::Fail(_)
+        ),
+        "opening a short must be blocked under reduce-only lockdown"
+    );
+    assert_eq!(
+        evaluate(&order(true, "0.1", true), "hl_order", DENY_OPEN),
+        Verdict::Pass,
+        "a reduce-only buy (short-close) must pass reduce-only lockdown"
+    );
+    assert_eq!(
+        evaluate(&order(false, "0.1", true), "hl_order", DENY_OPEN),
+        Verdict::Pass,
+        "a reduce-only sell (long-close) must pass reduce-only lockdown"
     );
 }
 
@@ -208,7 +269,7 @@ fn no_policy_passes_baseline() {
     const ALLOW_ALL: &str =
         "@id(\"noop\")\n@severity(\"warn\")\npermit(principal, action, resource);\n";
     assert_eq!(
-        evaluate(&order(false, "0.1"), "hl_order", ALLOW_ALL),
+        evaluate(&order(false, "0.1", false), "hl_order", ALLOW_ALL),
         Verdict::Pass
     );
 }
