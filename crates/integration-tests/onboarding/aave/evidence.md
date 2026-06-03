@@ -56,14 +56,14 @@ evidence; the phase tables below are the mandatory gate.
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| every COVER selector mapped to existing ActionBody or Tier3 requirement | pending | |
-| permission/fund-movement/red-flag selector review recorded | pending | |
-| manifest files added/changed listed | pending | |
-| enrichment/live_field decision recorded for every COVER action | pending | |
-| required remote policy-RPC/live/enrichment methods have local handler, configured endpoint test, or explicit blocker | pending | |
-| Tier3 not needed or full Tier3 downstream contract completed | pending | |
-| Tier3 files listed if applicable: ActionBody/effect/view/sync/lowering_v2/cedarschema/schema registration/conformance test | pending | |
-| `npm run check:manifest` or protocol-filtered validate output recorded | pending | |
+| every COVER selector mapped to existing ActionBody or Tier3 requirement | done | on-chain delegate(0x5c19a95c)→Airdrop::Delegate{power_type=voting_and_proposition}; delegateByType(0xdc937e1c)→Airdrop::Delegate{power_type value-mapped 0=voting/1=proposition}; off-chain Delegate/DelegateByType typed-data→Airdrop::Delegate (signed_structs). metaDelegate(0xa095ac19)/metaDelegateByType(0x657f0cde)=relayer-submit EXCLUDE (signer risk captured at off-chain sign; I2-driven correction). **NO new domain** — §0.1 preflight: airdrop::DelegateGovernanceAction already models ERC20Votes governance delegation; new governance domain would be over-engineering (key dogfood finding). |
+| permission/fund-movement/red-flag selector review recorded | done | delegate = permission-grant red-flag: delegates ENTIRE governance voting/proposition power, no amount, all-or-nothing, not a token transfer (allowance policies miss it). Off-chain metaDelegate is the EIP-712 phishing surface (sign a Delegate blob, no on-chain tx → attacker gets vote weight). Flagged in manifest notes. |
+| manifest files added/changed listed | done | NEW: registryV2/manifests/aave/aave-token/{delegate,delegate-by-type,meta-delegate,meta-delegate-by-type}@1.0.0.json. CHANGED: surface/aave/aave-token-mainnet.coverage.json (metaDelegate/metaDelegateByType cover→exclude relayer-submit). |
+| enrichment/live_field decision recorded for every COVER action | done | Airdrop::Delegate already carries live_inputs {current_delegate, voting_power} (host-fetched). delegatee=address (legible), power_type=enum (legible). No NEW live_field; AAVE manifests wire current_delegate/voting_power via derived_from (aave_token_*). power_type is a static calldata-decoded enum, not a live_field. |
+| required remote policy-RPC/live/enrichment methods have local handler, configured endpoint test, or explicit blocker | done | live_inputs calc_id `aave_token_current_delegate` / `aave_token_voting_power` (derived_from, host-side). EXPLICIT BLOCKER/defer: host-side calc not registered (mirrors compound_v2_current_delegate/voting_power, also unregistered — pre-existing pattern); harness uses skeleton 0; out of this static-decode run's scope. Not load-bearing for decode correctness. |
+| Tier3 not needed or full Tier3 downstream contract completed | done | No new ActionBody domain/action (preflight reuse of airdrop::Delegate). Field extension (power_type) completed across all ActionBody-extension touchpoints (next row). |
+| Tier3 files listed if applicable: ActionBody/effect/view/sync/lowering_v2/cedarschema/schema registration/conformance test | done | Field extension (GovernancePowerType enum + DelegateGovernanceAction.power_type, #[serde(default)] back-compat): action/src/airdrop/delegate.rs (enum+struct), lowering_v2/airdrop/delegate.rs (powerType lower + 2 conformance tests), schema/policy-schema/actions/airdrop/delegate.cedarschema (powerType field), effect/airdrop.rs + lowering_v2/multicall.rs (6 literal updates). NO schema-register-site change (action "delegate" already in SHIPPED_SCHEMA_FILES/REGISTERED_ACTIONS/RESOLVER_TABLE). conformance assert_conforms PASS (policy-engine). serde default verified (policy-transition 418 passed). |
+| `npm run check:manifest` or protocol-filtered validate output recorded | done | `v3-harness validate --filter aave --representative-source-refs`: 82 single_emit manifest(s) OK, 0 structural errors. check:surface PASS (AaveTokenV3 11 surface · 2 cover · 9 exclude · 2 on-chain manifest · 2 signed-struct). |
 
 ## P2 Synthetic Evidence
 

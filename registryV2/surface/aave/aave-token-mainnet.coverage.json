@@ -36,13 +36,13 @@
     },
     "0xa095ac19": {
       "name": "metaDelegate",
-      "decision": "cover",
-      "reason": "governance power-delegation primitive (voting/proposition); ScopeBall core permission-delegation red-flag \u2014 relayed via EIP-712 Delegate signature (off-chain phishing surface)"
+      "decision": "exclude",
+      "reason": "relayer-submit: on-chain consumer of an off-chain EIP-712 Delegate signature (v,r,s). The delegator (signer) risk is captured at the off-chain typed-data Delegate sign \u2014 see signed_structs.Delegate (cover) \u2014 not at this relayer-submitted tx. Mirrors Morpho setAuthorizationWithSig EXCLUDE."
     },
     "0x657f0cde": {
       "name": "metaDelegateByType",
-      "decision": "cover",
-      "reason": "governance power-delegation primitive (voting/proposition); ScopeBall core permission-delegation red-flag \u2014 relayed via EIP-712 DelegateByType signature"
+      "decision": "exclude",
+      "reason": "relayer-submit: on-chain consumer of an off-chain EIP-712 DelegateByType signature (v,r,s). The delegator (signer) risk is captured at the off-chain typed-data DelegateByType sign \u2014 see signed_structs.DelegateByType (cover) \u2014 not at this relayer-submitted tx. Mirrors Morpho setAuthorizationWithSig EXCLUDE."
     },
     "0xd505accf": {
       "name": "permit",
