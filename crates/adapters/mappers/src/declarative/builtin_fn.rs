@@ -20,9 +20,12 @@ use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{keccak256, Address, U256};
 use serde_json::Value as JsonValue;
 
-/// The whitelist of accepted `$fn` names. The author-time validator
-/// (`registryV2/scripts/build-index.ts` `validateEmitShape`) mirrors this so an
-/// unknown `$fn` fails at build-index time, not only at decode time.
+/// The whitelist of accepted `$fn` names. The **single source of truth** is the
+/// sibling [`fn_whitelist.json`](./fn_whitelist.json) — `whitelist_matches_shared_json`
+/// asserts this const equals it, and `registryV2/scripts/build-index.ts`
+/// `validateEmitShape` reads that same JSON and **rejects any manifest `$fn` not in
+/// it**, so an unknown / typo'd `$fn` now fails at build-index time, not only at
+/// decode time in the user's wallet. Keep this const and the JSON in lockstep.
 pub const WHITELIST: &[&str] = &[
     "curve_route_last_token",
     "route_hash",
@@ -650,6 +653,25 @@ fn json_to_u64(v: &JsonValue) -> Option<u64> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn whitelist_matches_shared_json() {
+        // Single source of truth: registryV2/scripts/build-index.ts validates
+        // manifest `$fn` names against this same JSON. Keep WHITELIST and
+        // fn_whitelist.json identical so the build-time gate and the decode-time
+        // dispatch agree — a drift would let an unknown `$fn` pass one but not the
+        // other.
+        let shared: Vec<String> = serde_json::from_str(include_str!("fn_whitelist.json"))
+            .expect("parse fn_whitelist.json");
+        assert_eq!(
+            WHITELIST
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            shared,
+            "Rust WHITELIST and fn_whitelist.json (build-index source) drifted",
+        );
+    }
 
     const A: &str = "0x1111111111111111111111111111111111111111";
     const POOL1: &str = "0x2222222222222222222222222222222222222222";

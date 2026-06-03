@@ -640,6 +640,31 @@ function validateTypedDataShape(path: string, td: unknown): asserts td is V3Type
  * an empty `emit` block (or one missing the discriminator) almost always
  * indicates a hand-edit accident.
  */
+// The mappers crate's `$fn` executor whitelist is the single source of truth
+// (crates/adapters/mappers/src/declarative/builtin_fn.rs WHITELIST, asserted
+// equal to this JSON by the Rust test `whitelist_matches_shared_json`). Reading
+// it here makes the build gate reject a typo'd / unimplemented `$fn` at author
+// time instead of fail-closing at decode time in the user's wallet.
+const FN_WHITELIST: ReadonlySet<string> = new Set(
+  JSON.parse(
+    readFileSync(
+      resolve(__dirname, "../../crates/adapters/mappers/src/declarative/fn_whitelist.json"),
+      "utf8",
+    ),
+  ) as string[],
+);
+
+/** Recursively collect every `$fn` name referenced anywhere in an emit subtree. */
+function collectFnNames(node: unknown, out: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const x of node) collectFnNames(x, out);
+  } else if (node && typeof node === "object") {
+    const o = node as Record<string, unknown>;
+    if (typeof o.$fn === "string") out.add(o.$fn);
+    for (const v of Object.values(o)) collectFnNames(v, out);
+  }
+}
+
 function validateEmitShape(path: string, emit: unknown): void {
   if (emit === undefined) {
     throw new Error(`manifests/: ${path} missing required "emit" block`);
@@ -652,6 +677,19 @@ function validateEmitShape(path: string, emit: unknown): void {
     throw new Error(
       `manifests/: ${path} emit.strategy must be a non-empty string (e.g. "single_emit", "array_emit", "multicall_recurse", "opcode_stream_dispatch")`,
     );
+  }
+  // $fn gate: every `$fn` referenced anywhere in emit must be a known mappers
+  // executor (closes the previously-false "build-index mirrors the WHITELIST" claim).
+  const fnNames = new Set<string>();
+  collectFnNames(e, fnNames);
+  for (const fn of fnNames) {
+    if (!FN_WHITELIST.has(fn)) {
+      throw new Error(
+        `manifests/: ${path} emit references unknown $fn "${fn}" — not in the mappers $fn whitelist ` +
+          `(crates/adapters/mappers/src/declarative/fn_whitelist.json: ${[...FN_WHITELIST].join(", ")}). ` +
+          `Add the executor to builtin_fn.rs + fn_whitelist.json, or fix the typo.`,
+      );
+    }
   }
 }
 
