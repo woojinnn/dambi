@@ -1716,7 +1716,27 @@ mod tests {
             println!("  {o:?}");
         }
         println!("leverage_settings: {}", core.leverage_settings.len());
+        println!("perp_dex_margins ({}):", core.perp_dex_margins.len());
+        for m in &core.perp_dex_margins {
+            println!("  {m:?}");
+        }
         println!("core errors: {errors:?}");
+
+        // The known test wallet holds NVDA/SPCX on the `xyz` builder dex; assert
+        // the fan-out captured at least one builder-dex position carrying a
+        // liquidation price (zero-size positions are exempt).
+        if std::env::var("HL_LIVE_EXPECT_BUILDER").is_ok() {
+            assert!(
+                core.positions.iter().any(|p| p.dex.is_some()),
+                "expected at least one builder-dex position"
+            );
+            assert!(
+                core.positions.iter().all(|p| p.dex.is_none()
+                    || p.liquidation_price.is_some()
+                    || p.size == Decimal::new("0")),
+                "builder positions should carry a liquidation price"
+            );
+        }
 
         let (lt, lfresh, lerrors) = f.fetch_hl_longtail("", &user).await;
         println!(
