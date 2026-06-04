@@ -5,6 +5,11 @@ metadata:
   labels:
     {{- include "policy-server.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
+  {{- if .Values.backendConfig.enabled }}
+  annotations:
+    cloud.google.com/backend-config: '{"default": "{{ printf "%s-backendconfig" (include "policy-server.fullname" .) }}"}'
+    cloud.google.com/neg: '{"ingress": true}'
+  {{- end }}
 spec:
   type: {{ .Values.service.type | default "ClusterIP" }}
   ports:
