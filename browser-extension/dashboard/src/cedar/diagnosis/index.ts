@@ -11,8 +11,6 @@ export interface Diagnosis {
   culprits: string[];
   /** Paths whose probe errored (render a distinct "uneval" state). */
   errored: string[];
-  /** False when the policy contains hole/raw → caller falls back to @reason. */
-  diagnosable: boolean;
 }
 
 /** Turn a WASM truth-map result into culprit leaf paths via the blame walker. */
@@ -26,5 +24,5 @@ export function diagnoseFromResult(
   const truth: TruthMap = {};
   for (const id of probeIds) truth[id] = trueSet.has(id);
   const culprits = blame(policy, truth).filter((p) => !errSet.has(p));
-  return { culprits, errored: result.error_ids, diagnosable: true };
+  return { culprits, errored: result.error_ids };
 }

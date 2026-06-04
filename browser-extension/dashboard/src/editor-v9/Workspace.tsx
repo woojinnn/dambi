@@ -272,6 +272,12 @@ export function WorkspaceV9({
         return;
       }
 
+      if (policy.effect !== "forbid") {
+        clearCulprits(ws);
+        setSimulateMsg("forbid 정책만 진단할 수 있습니다");
+        return;
+      }
+
       // Action uid id (Pascal) — only an `== Action::"Id"` scope names one.
       const actionScope = policy.scope.action;
       const actionId =
