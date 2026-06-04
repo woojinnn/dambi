@@ -6,7 +6,7 @@ metadata:
     {{- include "policy-server.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
-  type: ClusterIP
+  type: {{ .Values.service.type | default "ClusterIP" }}
   ports:
     - name: http
       port: 80

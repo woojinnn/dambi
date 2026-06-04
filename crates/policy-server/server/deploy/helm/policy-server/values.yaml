@@ -5,6 +5,9 @@ image:
 
 existingSecret: policy-server-secrets
 
+service:
+  type: ClusterIP
+
 api:
   replicas: 1
   port: 8788
