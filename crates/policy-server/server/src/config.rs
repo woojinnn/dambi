@@ -45,13 +45,7 @@ impl ServerConfig {
             public_api_url: env::var("PUBLIC_API_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:8788".to_owned()),
             cors_allowed_origins: env::var("CORS_ALLOWED_ORIGINS")
-                .unwrap_or_else(|_| {
-                    [
-                        "http://127.0.0.1:5173",
-                        "http://localhost:5173",
-                    ]
-                    .join(",")
-                })
+                .unwrap_or_else(|_| ["http://127.0.0.1:5173", "http://localhost:5173"].join(","))
                 .split(',')
                 .map(str::trim)
                 .filter(|s| !s.is_empty())

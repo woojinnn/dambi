@@ -18,31 +18,22 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use policy_db::market::{
-    create_listing as db_create_listing,
-    create_version as db_create_version,
-    get_latest_version as db_get_latest_version,
-    get_listing_by_id as db_get_listing_by_id,
-    get_listing_by_slug as db_get_listing_by_slug,
-    get_version as db_get_version,
-    list_listings as db_list_listings,
-    list_reviews as db_list_reviews,
-    list_watches as db_list_watches,
-    record_install as db_record_install,
-    unwatch as db_unwatch,
-    upsert_review as db_upsert_review,
-    validate_semver,
-    vote_helpful as db_vote_helpful,
-    watch as db_watch,
-    ListingFilter, ListingRow, ListingSort as DbListingSort, NewListing, ReviewRow, VersionBody,
-    VersionRow, LIST_LIMIT_DEFAULT,
+    create_listing as db_create_listing, create_version as db_create_version,
+    get_latest_version as db_get_latest_version, get_listing_by_id as db_get_listing_by_id,
+    get_listing_by_slug as db_get_listing_by_slug, get_version as db_get_version,
+    list_listings as db_list_listings, list_reviews as db_list_reviews,
+    list_watches as db_list_watches, record_install as db_record_install, unwatch as db_unwatch,
+    upsert_review as db_upsert_review, validate_semver, vote_helpful as db_vote_helpful,
+    watch as db_watch, ListingFilter, ListingRow, ListingSort as DbListingSort, NewListing,
+    ReviewRow, VersionBody, VersionRow, LIST_LIMIT_DEFAULT,
 };
 
 use crate::app::AppState;
 use crate::auth::AuthUser;
 use crate::market_dto::{
-    CreateInstallReq, CreateListingReq, CreateReviewReq, CreateVersionReq, I18nText, ListingDetail,
-    ListingKind, ListingSort, ListingStatus, ListingSummary, ListingVersion, ListListingsQuery,
-    PublisherTier, Review, Severity, SetMember,
+    CreateInstallReq, CreateListingReq, CreateReviewReq, CreateVersionReq, I18nText,
+    ListListingsQuery, ListingDetail, ListingKind, ListingSort, ListingStatus, ListingSummary,
+    ListingVersion, PublisherTier, Review, SetMember, Severity,
 };
 
 // ---------------------------------------------------------------------------
@@ -229,7 +220,7 @@ pub async fn create_listing(
     }
 }
 
-/// `POST /market/listings/:id/versions` — publish a new SemVer version. Only
+/// `POST /market/listings/:id/versions` — publish a new `SemVer` version. Only
 /// the original publisher may do this.
 pub async fn create_version(
     State(state): State<AppState>,
@@ -244,7 +235,10 @@ pub async fn create_version(
         Err(e) => return server_error(&e.to_string()),
     };
     if listing.publisher_id != user.user_id {
-        return (StatusCode::FORBIDDEN, "only the publisher can release new versions")
+        return (
+            StatusCode::FORBIDDEN,
+            "only the publisher can release new versions",
+        )
             .into_response();
     }
     if let Err(e) = validate_semver(&req.version) {
@@ -262,7 +256,8 @@ pub async fn create_version(
     let body = match listing.kind.as_str() {
         "policy" => {
             if req.cedar_text.is_none() {
-                return (StatusCode::BAD_REQUEST, "policy version needs cedar_text").into_response();
+                return (StatusCode::BAD_REQUEST, "policy version needs cedar_text")
+                    .into_response();
             }
             VersionBody {
                 cedar_text: req.cedar_text,
@@ -273,7 +268,7 @@ pub async fn create_version(
             }
         }
         "set" => {
-            if req.members.as_ref().map_or(true, std::vec::Vec::is_empty) {
+            if req.members.as_ref().is_none_or(std::vec::Vec::is_empty) {
                 return (StatusCode::BAD_REQUEST, "set version needs members[]").into_response();
             }
             VersionBody {
@@ -364,7 +359,14 @@ pub async fn watch(
     Extension(user): Extension<AuthUser>,
     Path(listing_id): Path<Uuid>,
 ) -> Response {
-    match db_watch(state.global_db.pool(), &user.user_id, listing_id, now_secs()).await {
+    match db_watch(
+        state.global_db.pool(),
+        &user.user_id,
+        listing_id,
+        now_secs(),
+    )
+    .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => server_error(&e.to_string()),
     }
@@ -398,10 +400,10 @@ fn validate_create_req(req: &CreateListingReq) -> Result<(), String> {
     }
     match req.kind {
         ListingKind::Policy => {
-            if req.cedar_text.as_deref().map_or(true, str::is_empty) {
+            if req.cedar_text.as_deref().is_none_or(str::is_empty) {
                 return Err("policy listing needs cedar_text".into());
             }
-            if req.domain.as_deref().map_or(true, str::is_empty) {
+            if req.domain.as_deref().is_none_or(str::is_empty) {
                 return Err("policy listing needs domain".into());
             }
             if req.severity.is_none() {
@@ -412,7 +414,7 @@ fn validate_create_req(req: &CreateListingReq) -> Result<(), String> {
             }
         }
         ListingKind::Set => {
-            if req.members.as_ref().map_or(true, std::vec::Vec::is_empty) {
+            if req.members.as_ref().is_none_or(std::vec::Vec::is_empty) {
                 return Err("set listing needs at least one member".into());
             }
             if req.cedar_text.is_some() {
@@ -499,7 +501,11 @@ fn i18n_to_json(t: &I18nText) -> Value {
 }
 
 fn json_to_i18n(v: &Value) -> I18nText {
-    let en = v.get("en").and_then(|x| x.as_str()).unwrap_or("").to_owned();
+    let en = v
+        .get("en")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_owned();
     let ko = v.get("ko").and_then(|x| x.as_str()).map(str::to_owned);
     I18nText { en, ko }
 }

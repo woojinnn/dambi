@@ -10,6 +10,8 @@
 //!
 //! Requires the same `DATABASE_URL` as the server itself.
 
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::BTreeSet;
 
 use serde::Deserialize;
@@ -37,9 +39,8 @@ struct SeedEntry {
 
 /// Embed the editor seed JSON at compile time so the binary stays
 /// self-contained — no runtime path arg, no cwd dependence.
-const PHASE1A_JSON: &str = include_str!(
-    "../../../../../browser-extension/dashboard/src/pages/editor/phase1A-seed.json"
-);
+const PHASE1A_JSON: &str =
+    include_str!("../../../../../browser-extension/dashboard/src/pages/editor/phase1A-seed.json");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -341,16 +342,22 @@ fn infer_domain(slug: &str) -> &'static str {
         s if s.starts_with("nft-")
             || s.starts_with("seaport-")
             || s.starts_with("setapprovalforall-")
-            || s.starts_with("market-order-") => "nft",
+            || s.starts_with("market-order-") =>
+        {
+            "nft"
+        }
         s if s.starts_with("portfolio-")
             || s.starts_with("alloc-")
             || s.starts_with("behav-")
             || s.starts_with("suitability-")
-            || s.starts_with("values-") => "portfolio",
+            || s.starts_with("values-") =>
+        {
+            "portfolio"
+        }
         s if s.starts_with("stk-") => "staking",
-        s if s.starts_with("swap-")
-            || s.starts_with("intent-")
-            || s.starts_with("large-swap-") => "swap",
+        s if s.starts_with("swap-") || s.starts_with("intent-") || s.starts_with("large-swap-") => {
+            "swap"
+        }
         _ => "security",
     }
 }
@@ -369,22 +376,38 @@ fn infer_severity(slug: &str) -> &'static str {
 /// with one or more intents; here we recover the obvious ones from substrings.
 fn infer_intents(slug: &str) -> Vec<&'static str> {
     let mut out = Vec::new();
-    if slug.contains("slippage") || slug.contains("price-impact") { out.push("slippage"); }
-    if slug.contains("sandwich") { out.push("sandwich"); }
-    if slug.contains("permit") || slug.contains("drain") { out.push("drainer"); }
+    if slug.contains("slippage") || slug.contains("price-impact") {
+        out.push("slippage");
+    }
+    if slug.contains("sandwich") {
+        out.push("sandwich");
+    }
+    if slug.contains("permit") || slug.contains("drain") {
+        out.push("drainer");
+    }
     if slug.contains("phishing") || slug.contains("spoof") || slug.contains("blind-sign") {
         out.push("phishing");
     }
-    if slug.contains("recipient") { out.push("recipient"); }
+    if slug.contains("recipient") {
+        out.push("recipient");
+    }
     if slug.contains("approval") || slug.contains("allowance") || slug.contains("approve") {
         out.push("approval");
     }
-    if slug.contains("unlimited") { out.push("unlimited"); }
-    if slug.contains("liq-") || slug.contains("liquidation") || slug.contains("leverage")
-        || slug.contains("hf-") || slug.contains("ltv") {
+    if slug.contains("unlimited") {
+        out.push("unlimited");
+    }
+    if slug.contains("liq-")
+        || slug.contains("liquidation")
+        || slug.contains("leverage")
+        || slug.contains("hf-")
+        || slug.contains("ltv")
+    {
         out.push("liquidation");
     }
-    if slug.contains("depeg") || slug.contains("peg") { out.push("depeg"); }
+    if slug.contains("depeg") || slug.contains("peg") {
+        out.push("depeg");
+    }
     if slug.contains("denylist") || slug.contains("sanctions") || slug.contains("ofac") {
         out.push("compliance");
     }
@@ -402,8 +425,10 @@ fn derive_display_name(slug: &str) -> (String, String) {
         .split('-')
         .map(|w| {
             let upper = w.to_uppercase();
-            if matches!(upper.as_str(), "HF" | "LST" | "WETH" | "AAVE" | "NFT"
-                | "USDC" | "LP" | "AMM" | "LTV" | "DEX") {
+            if matches!(
+                upper.as_str(),
+                "HF" | "LST" | "WETH" | "AAVE" | "NFT" | "USDC" | "LP" | "AMM" | "LTV" | "DEX"
+            ) {
                 upper
             } else {
                 let mut chars = w.chars();

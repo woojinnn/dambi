@@ -57,17 +57,14 @@ pub struct I18nText {
 /// landing sort (the homepage is folded into the browse page).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ListingSort {
+    #[default]
     Popular,
     New,
     Rating,
 }
 
-impl Default for ListingSort {
-    fn default() -> Self {
-        Self::Popular
-    }
-}
 
 /// Query parameters for `GET /market/listings`. All filters are optional.
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -182,7 +179,7 @@ pub struct CreateListingReq {
     #[serde(default)]
     pub severity: Option<Severity>,
 
-    /// Initial SemVer. Defaults to "1.0.0" when omitted.
+    /// Initial `SemVer`. Defaults to "1.0.0" when omitted.
     #[serde(default = "default_initial_version")]
     pub version: String,
 
@@ -206,7 +203,7 @@ fn default_initial_version() -> String {
     "1.0.0".to_string()
 }
 
-/// `POST /market/listings/:id/versions` body — publish a new SemVer
+/// `POST /market/listings/:id/versions` body — publish a new `SemVer`
 /// version of an existing listing. The kind is locked at the listing
 /// level; the body fields here must match.
 #[derive(Clone, Debug, Deserialize)]
