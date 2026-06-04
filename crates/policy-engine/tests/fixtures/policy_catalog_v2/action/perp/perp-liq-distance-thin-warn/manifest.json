@@ -1,0 +1,26 @@
+{
+  "id": "perp-liq-distance-thin-warn",
+  "schema_version": 2,
+  "trigger": { "where": { "action.tag": { "eq": "open_position" } } },
+  "policy_rpc": [
+    {
+      "id": "liq-distance",
+      "method": "perp.liq_distance_bp",
+      "params": {
+        "chain_id": "$.root.chain_id",
+        "owner": "$.root.from",
+        "action": "$.action"
+      },
+      "outputs": [
+        {
+          "kind": "context",
+          "field": "liqDistanceBp",
+          "type": "Long",
+          "from": "$.result.liqDistanceBp"
+        }
+      ],
+      "optional": true
+    }
+  ],
+  "custom_context": { "fields": { "liqDistanceBp": "Long" } }
+}
