@@ -158,10 +158,19 @@ impl PostgresGlobalDb {
         let email = email.to_lowercase();
         let user_id = derive_user_id(&email);
         let now = unix_now_or_default();
+        // `users` has two unique constraints — users_pkey (user_id) and
+        // users_email_key (email) — and user_id is derived 1:1 from email, so a
+        // same-email insert collides on both at once. `ON CONFLICT ... DO UPDATE`
+        // names only one arbiter, leaving the other unguarded: concurrent
+        // first-time logins then raced to insert the non-arbiter index and failed
+        // with a duplicate-key 500. `ON CONFLICT DO NOTHING` (no target) makes
+        // every unique index an arbiter, so the insert never hard-errors; the
+        // follow-up UPDATE refreshes last_login_at on the now-committed row
+        // (created_at and provider are intentionally left untouched).
         query(
             "INSERT INTO users (user_id, email, provider, created_at, last_login_at)
              VALUES ($1, $2, $3, $4, $4)
-             ON CONFLICT(email) DO UPDATE SET last_login_at = excluded.last_login_at",
+             ON CONFLICT DO NOTHING",
         )
         .bind(&user_id)
         .bind(&email)
@@ -170,6 +179,12 @@ impl PostgresGlobalDb {
         .execute(&self.pool)
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
+        query("UPDATE users SET last_login_at = $1 WHERE user_id = $2")
+            .bind(now)
+            .bind(&user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
         Ok(user_id)
     }
 
