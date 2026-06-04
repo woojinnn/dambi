@@ -4,7 +4,7 @@ raw Tx (calldata) / EIP-712 typed-data 를 **production 디코더**로 돌려 `A
 
 > **이 README 는 사람 + 에이전트(Claude Code) 둘 다를 위한 runbook 이다.** §6 "Log → Gap → Develop 루프" 가 핵심 — 다른 팀원의 Claude Code 가 이 파일만 읽고 (1) 3-source 입력 생성 → (2) 하니스 실행 + 로그 수집 → (3) 부족한 부분(gap) 자동 분류 → (4) 어디를 고칠지 판단 → (5) 회귀로 닫기 를 **자율 수행**할 수 있도록 작성했다.
 >
-> **범위 — framework 진입점 맵**: 이 README 는 **P3-P4(decode 테스트 + fix 루프)** 담당. 새 프로토콜을 **처음부터 온보딩(P0 research → P1 Tier A/B/3 authoring)** 하려면 먼저 **`PROTOCOL_AGNOSTIC_ONBOARDING_FRAMEWORK.md`**(프로토콜 독립 completion model + semantic oracle contract)를 읽고, 세부 실행은 **`PROTOCOL_ONBOARDING_AND_TESTING.md`**(4-phase·3-tier·worked example 전체 spine), Tier 3 ActionBody 확장은 **`ACTIONBODY_EXTENSION_GUIDE.md`**, surface 전수성 gate(어댑터 누락 차단)는 **`registryV2/surface/README.md`**(gate 데이터 옆 — `npm run check:surface`)를 본다. **인스트럭션 문서는 전부 tracked 파일이다.**
+> **범위 — framework 진입점 맵**: 이 README 는 **P3-P4(decode 테스트 + fix 루프)** 담당. 새 프로토콜을 **처음부터 온보딩(P0 research → P1 Tier 1/2/3 authoring)** 하려면 먼저 **`PROTOCOL_AGNOSTIC_ONBOARDING_FRAMEWORK.md`**(프로토콜 독립 completion model + semantic oracle contract)를 읽고, 세부 실행은 **`PROTOCOL_ONBOARDING_AND_TESTING.md`**(4-phase·3-tier·worked example 전체 spine), Tier 3 ActionBody 확장은 **`ACTIONBODY_EXTENSION_GUIDE.md`**, surface 전수성 gate(어댑터 누락 차단)는 **`registryV2/surface/README.md`**(gate 데이터 옆 — `npm run check:surface`)를 본다. **인스트럭션 문서는 전부 tracked 파일이다.**
 
 ---
 
@@ -228,7 +228,7 @@ cargo run -p policy-engine-integration-tests --bin v3-harness -- coverage
 cargo run -p policy-engine-integration-tests --bin v3-harness -- corpus
 ```
 
-결과는 **`logs/<protocol>/`** 에 프로토콜별로 기록한다 (포맷·인덱스 = [`logs/README.md`](logs/README.md)). 실거래(Etherscan/Dune) 실행도 같은 포맷의 `logs/<protocol>/YYYY-MM-DD-<source>.json` 으로 남겨, 다음 실행/에이전트가 직전 로그와 diff 해 진행도(고친 gap, 새 gap)를 추적한다. 실제 예시: `logs/uniswap/2026-05-30-etherscan-fresh.json` (최신 실거래 90건 중 40건 디코드 공백 — V2 fee-on-transfer / NFPM multicall 미등록 + UR V4·Permit2 디코더 gap).
+결과는 **`logs/<protocol>/`** 에 프로토콜별로 기록한다 (포맷·인덱스 = [`logs/README.md`](logs/README.md)). 실거래(Etherscan/Dune) 실행도 같은 포맷의 `logs/<protocol>/YYYY-MM-DD-<source>.json` 으로 남겨, 다음 실행/에이전트가 직전 로그와 diff 해 진행도(고친 gap, 새 gap)를 추적한다. 실제 예시(스냅샷): `logs/uniswap/2026-05-30-etherscan-fresh.json` — 그 배치의 실거래 일부가 V2 fee-on-transfer / NFPM multicall 미등록 + UR V4·Permit2 디코더 gap 으로 디코드 공백 분류됨 (건수는 당시 측정값; 현 수치는 재측정).
 
 ### Step 2 — CLASSIFY (report 신호 → gap 종류)
 

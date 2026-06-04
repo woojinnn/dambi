@@ -1,7 +1,9 @@
 pub mod hyperliquid;
 pub mod ttl_cache;
+pub mod uniswap;
 
 pub use hyperliquid::HyperliquidFetcher;
+pub use uniswap::UniswapFetcher;
 
 pub mod uniswap_x;
 

@@ -39,6 +39,7 @@ mod airdrop;
 mod amm;
 mod common;
 mod dispatch;
+mod governance;
 mod hyperliquid_core;
 mod launchpad;
 mod lending;

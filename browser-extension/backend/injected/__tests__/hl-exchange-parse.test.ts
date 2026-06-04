@@ -105,4 +105,40 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
     });
     expect(payloads![0].vaultAddress).toBeUndefined();
   });
+
+  // SECURITY: `modify` / `batchModify` re-place a full order spec and can OPEN
+  // exposure, so they must be DECODED as order legs (not passed through), else a
+  // no-new-short / reduce-only policy is bypassable by submitting via modify.
+  it("decodes a modify carrying a real order as an order leg (NOT pass-through)", () => {
+    const payloads = parse({
+      type: "modify",
+      oid: 123,
+      order: { a: 4, b: false, p: "62000", s: "2.5", r: false, t: { limit: { tif: "Gtc" } } },
+    });
+    expect(payloads).toHaveLength(1);
+    expect(payloads![0].hlAction.kind).toBe("order");
+    // The decoded order carries the opening-short fields a no-new-short policy needs.
+    expect((payloads![0].hlAction as { order: { a: number; b: boolean; r: boolean } }).order).toMatchObject({
+      a: 4,
+      b: false, // short (sell)
+      r: false, // opening (not reduce-only)
+    });
+  });
+
+  it("fans out a batchModify into one order leg per carried order", () => {
+    const payloads = parse({
+      type: "batchModify",
+      modifies: [
+        { oid: 1, order: { a: 0, b: false, p: "62000", s: "1", r: false, t: { limit: { tif: "Gtc" } } } },
+        { oid: 2, order: { a: 1, b: true, p: "3500", s: "5", r: true, t: { limit: { tif: "Ioc" } } } },
+      ],
+    });
+    expect(payloads).toHaveLength(2);
+    expect(payloads!.every((p) => p.hlAction.kind === "order")).toBe(true);
+  });
+
+  it("keeps an order-less modify / empty batchModify benign (null — no exposure placed)", () => {
+    expect(parse({ type: "modify", oid: 1, order: {} })).toBeNull();
+    expect(parse({ type: "batchModify", modifies: [] })).toBeNull();
+  });
 });

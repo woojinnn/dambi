@@ -13,7 +13,10 @@ use super::dispatch::{LowerCtx, LowerError, LoweredAction};
 mod add_liquidity;
 mod cancel_intent_order;
 mod collect_fees;
+mod gsm_swap;
+mod pre_sign_intent_order;
 mod remove_liquidity;
+mod settle_intent_order;
 mod sign_intent_order;
 mod swap;
 
@@ -25,11 +28,14 @@ mod swap;
 pub(crate) fn lower(action: &AmmAction, ctx: &LowerCtx<'_>) -> Result<LoweredAction, LowerError> {
     match action {
         AmmAction::Swap(a) => swap::lower(a, ctx),
+        AmmAction::GsmSwap(a) => gsm_swap::lower(a, ctx),
         AmmAction::AddLiquidity(a) => add_liquidity::lower(a, ctx),
         AmmAction::RemoveLiquidity(a) => remove_liquidity::lower(a, ctx),
         AmmAction::CollectFees(a) => collect_fees::lower(a, ctx),
         AmmAction::SignIntentOrder(a) => sign_intent_order::lower(a, ctx),
+        AmmAction::SettleIntentOrder(a) => settle_intent_order::lower(a, ctx),
         AmmAction::CancelIntentOrder(a) => cancel_intent_order::lower(a, ctx),
+        AmmAction::PreSignIntentOrder(a) => pre_sign_intent_order::lower(a, ctx),
     }
 }
 
@@ -125,14 +131,22 @@ pub(crate) fn lower_amm_venue(venue: &AmmVenue) -> Value {
             m.insert("pair".into(), Value::String(addr(pair)));
             m.insert("binStep".into(), Value::from(i64::from(*bin_step)));
         }
+        AmmVenue::AaveGsm { chain, gsm } => {
+            m.insert("chain".into(), Value::String(chain.to_string()));
+            m.insert("gsm".into(), Value::String(addr(gsm)));
+        }
         AmmVenue::AggregatorRoute {
             chain,
             router,
             route_hash,
+            executor,
         } => {
             m.insert("chain".into(), Value::String(chain.to_string()));
             m.insert("router".into(), Value::String(addr(router)));
             m.insert("routeHash".into(), Value::String(route_hash.clone()));
+            if let Some(executor) = executor {
+                m.insert("executor".into(), Value::String(addr(executor)));
+            }
         }
     }
     Value::Object(m)
@@ -153,7 +167,8 @@ const fn balancer_pool_type(pool_type: &BalancerPoolType) -> &'static str {
 /// Lower an [`IntentVenue`] → `{ name, chain, reactor?, settlement? }`
 /// (`Amm::IntentVenue`). Shared by `SignIntentOrder` / `CancelIntentOrder`.
 /// Only `UniswapX` carries `reactor`; only `CowSwap` carries `settlement`;
-/// `OneInchFusion` / `Bebop` expose only `{ name, chain }`.
+/// `OneInchLimitOrder` carries `verifyingContract`; `OneInchFusion` / `Bebop`
+/// expose only `{ name, chain }`.
 pub(crate) fn lower_intent_venue(venue: &IntentVenue) -> Value {
     let mut m = Map::new();
     m.insert("name".into(), Value::String(venue.name().into()));
@@ -168,6 +183,16 @@ pub(crate) fn lower_intent_venue(venue: &IntentVenue) -> Value {
         }
         IntentVenue::OneInchFusion { chain } | IntentVenue::Bebop { chain } => {
             m.insert("chain".into(), Value::String(chain.to_string()));
+        }
+        IntentVenue::OneInchLimitOrder {
+            chain,
+            verifying_contract,
+        } => {
+            m.insert("chain".into(), Value::String(chain.to_string()));
+            m.insert(
+                "verifyingContract".into(),
+                Value::String(addr(verifying_contract)),
+            );
         }
     }
     Value::Object(m)

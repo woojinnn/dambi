@@ -76,6 +76,11 @@ impl ActionBody {
                 action_tag: Some(a.action_tag()),
                 venue_name: a.venue_name(),
             },
+            Self::Governance(a) => ActionView {
+                domain: "governance",
+                action_tag: Some(a.action_tag()),
+                venue_name: a.venue_name(),
+            },
             Self::HyperliquidCore(a) => ActionView {
                 domain: "hyperliquid_core",
                 action_tag: Some(a.action_tag()),
@@ -158,7 +163,7 @@ mod tests {
             venue: v3,
             params: amm::SwapParams {
                 token_in: usdc,
-                token_out: weth,
+                token_out: Some(weth),
                 direction: amm::SwapDirection::ExactInput {
                     amount_in: U256::from(1_000_000_000u64),
                     min_amount_out: U256::from(300_000_000_000_000_000u64),
@@ -477,11 +482,12 @@ mod tests {
                 chain: eth.clone(),
                 router: any,
                 route_hash: "0x00".into(),
+                executor: None,
             },
             "aggregator_route",
         );
 
-        // ---- IntentVenue: all 4 variants ----
+        // ---- IntentVenue: all 5 variants ----
         assert_venue!(
             amm::IntentVenue::UniswapX {
                 chain: eth.clone(),
@@ -501,6 +507,13 @@ mod tests {
             "one_inch_fusion",
         );
         assert_venue!(amm::IntentVenue::Bebop { chain: eth.clone() }, "bebop");
+        assert_venue!(
+            amm::IntentVenue::OneInchLimitOrder {
+                chain: eth.clone(),
+                verifying_contract: any,
+            },
+            "one_inch_limit_order",
+        );
 
         // ---- LendingVenue: all 8 variants ----
         assert_venue!(
@@ -560,6 +573,13 @@ mod tests {
                 vault: any,
             },
             "fluid",
+        );
+        assert_venue!(
+            lending::LendingVenue::MetaMorpho {
+                chain: eth.clone(),
+                vault: any,
+            },
+            "metamorpho",
         );
 
         // ---- PerpVenue: all 9 variants ----

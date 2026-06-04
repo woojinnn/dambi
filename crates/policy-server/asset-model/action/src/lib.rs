@@ -13,6 +13,7 @@ use policy_state::{LiveField, NonceKey};
 
 pub mod airdrop;
 pub mod amm;
+pub mod governance;
 pub mod hyperliquid_core;
 pub mod launchpad;
 pub mod lending;
@@ -28,6 +29,7 @@ pub mod yield_;
 
 pub use airdrop::AirdropAction;
 pub use amm::AmmAction;
+pub use governance::GovernanceAction;
 pub use hyperliquid_core::HyperliquidCoreAction;
 pub use launchpad::LaunchpadAction;
 pub use lending::LendingAction;
@@ -169,6 +171,8 @@ pub enum ActionBody {
     Restaking(RestakingAction),
     /// Staking / vote-escrow-domain action (veCRV lock, claim rewards, gauge vote, ...).
     Staking(StakingAction),
+    /// Governance-domain action (proposal lifecycle, voting, power delegation).
+    Governance(GovernanceAction),
     /// Hyperliquid CORE action (off-chain L1 order / leverage / fund movement),
     /// intercepted from a `/exchange` POST rather than `window.ethereum`.
     HyperliquidCore(HyperliquidCoreAction),
@@ -470,10 +474,11 @@ mod smoke {
                 router: Address::from_str("0x111111125421ca6dc452d289314280a0f8842a65").unwrap(),
                 route_hash: "0xabc0000000000000000000000000000000000000000000000000000000000000"
                     .into(),
+                executor: None,
             },
             params: amm::SwapParams {
                 token_in: usdc,
-                token_out: wbtc,
+                token_out: Some(wbtc),
                 direction: amm::SwapDirection::ExactInput {
                     amount_in: U256::from(50_000_000_000u64),
                     min_amount_out: U256::from(74_000_000u64),
@@ -589,7 +594,7 @@ mod smoke {
             venue: v3,
             params: amm::SwapParams {
                 token_in: usdc,
-                token_out: weth,
+                token_out: Some(weth),
                 direction: amm::SwapDirection::ExactInput {
                     amount_in: U256::from(1_000_000_000u64),
                     min_amount_out: U256::from(300_000_000_000_000_000u64),

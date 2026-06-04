@@ -2,6 +2,8 @@
 
 > Copy this file to `crates/integration-tests/onboarding/<protocol>/evidence.md` for each protocol onboarding run.
 > This is a completion gate, not a nice-to-have note. If any mandatory row is missing, the phase is incomplete.
+>
+> **SSOT:** this template is the single source of truth for *per-phase evidence requirements* — `check-onboarding-evidence` parses it and cross-checks every mandatory row. The spine's §2.1b table, §3.1 P0 step, and §8.6 self-check summarize it; on conflict, this file wins. (The definition of "onboarded" itself lives in `PROTOCOL_AGNOSTIC_ONBOARDING_FRAMEWORK.md` §6.)
 
 ## Run Metadata
 
@@ -14,10 +16,28 @@
 | main agent | |
 | base commit | |
 
+## Scope Classification
+
+Use this section to make the final claim precise. This table is narrative
+evidence; the phase tables below are the mandatory gate.
+
+| field | value |
+|---|---|
+| representative chain (SINGLE — multichain = separate framework, deferred) | |
+| completion target | `wallet-facing` / `full-surface` / `full factory-child universe` |
+| **pre-decision** cross-entry volume distribution (tx-share of EACH user-facing entry; which dominates) — measured BEFORE the cover/defer boundary (H1) | |
+| per-cover-candidate wrapper/router selector child resolution-rate (effective coverage = decoded children / real children; NOT manifest-presence) (H3) | |
+| covered real-usage coverage-share — **volume-weighted protocol-level**: Σ covered top-level tx / Σ all top-level tx across every user-facing entry (NOT per-contract selector-share) (H2), wrappers counted by child resolution-rate (H3) | |
+| user-facing DEFERs, each with its 1st-party usage-share (%/count) | |
+| direct factory-child calls | covered / source-materialized sample / deferred / not applicable |
+| final claim label (MUST NOT over-claim the measured coverage-share above) | |
+
 ## P0 Research Evidence
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
+| completion scope declared: primary chain(s), wallet-facing vs full-surface/full-universe target, and multichain status | pending | |
+| pre-decision cross-entry volume distribution measured BEFORE the cover/defer boundary (tx-share of each user-facing entry; which entry dominates), so cover/defer is data-driven not assumed (H1) | pending | |
 | Codex current-session research executed | pending | |
 | Claude Code or sub-agent research executed | pending | |
 | Claude/sub-agent exact prompt or command recorded | pending | |
@@ -29,6 +49,7 @@
 | pool-heavy/factory universe artifact is machine-readable, nonzero, and committed, or explicitly not applicable | pending | |
 | every pool/factory child address in universe dispositioned as cover/exclude/defer with reason and batch boundary | pending | |
 | concrete manifest vs protocol source resolver/generator strategy decided for pool universe | pending | |
+| direct factory-child calls are covered, source-materialized, or explicitly deferred separately from router/live-input discovery | pending | |
 | `npm run check:universe -- --protocol <protocol>` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
 | token-surface inventory completed or explicitly scoped out | pending | |
 | `registryV2/surface/<protocol>/_deployments.json` updated if applicable | pending | |
@@ -68,8 +89,11 @@
 | Etherscan `raw_txs_seen` recorded | pending | |
 | Etherscan `unique_selectors_seen` recorded | pending | |
 | Etherscan real tx coverage per COVER selector recorded | pending | |
+| wallet-facing target sweep executed or explicitly not applicable, with target count, per-target floor, raw/matched tx counts, and target file | pending | |
+| unmatched Etherscan txs classified as actionable/non-actionable with disposition counts | pending | |
 | pool-heavy/factory protocols swept candidate/universe addresses, not only selected cover addresses, or explicitly not applicable | pending | |
 | unknown to-addresses with known protocol selectors bucketed as P0/P2 hard gaps | pending | |
+| typed-data signing corpus/golden executed for every in-scope EIP-712 primaryType/witnessType, or explicitly not applicable | pending | |
 | Dune MCP/API availability checked | pending | |
 | Dune usage baseline recorded | pending | |
 | Dune calibration/query executed with partition WHERE or explicitly blocked | pending | |
@@ -77,6 +101,7 @@
 | Dune rows returned / selected tx hashes recorded | pending | |
 | representative real-tx corpus/golden entries committed or justified | pending | |
 | protocol-filtered corpus replay executed with semantic pin gate: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
+| SCOPE ORACLE — covered-surface real-usage coverage-share measured on the P0 universe (1st-party Etherscan/Dune: % of recent txs the covered set decodes), **volume-weighted protocol-level (Σ covered top-level tx / Σ all top-level tx across every user-facing entry, NOT per-contract selector-share) (H2)** and **every wrapper/router selector counted by child resolution-rate, not manifest-presence (H3)**, with each user-facing DEFER's usage-share recorded; completion label must not over-claim it | pending | |
 
 ## P3 Develop Evidence
 
@@ -105,6 +130,7 @@
 | fmt/clippy/typecheck output recorded for changed crates/packages | pending | |
 | exact staged files and commit hash recorded | pending | |
 | remaining WARNs/deferred selectors/actions listed with reason | pending | |
+| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | pending | |
 | no base/worktree merge performed unless user explicitly requested it | pending | |
 
 ## Blockers

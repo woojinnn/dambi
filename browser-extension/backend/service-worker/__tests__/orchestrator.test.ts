@@ -405,6 +405,216 @@ describe("orchestrator", () => {
     );
   });
 
+  it("WASM-1: a sibling leg's plan throw does NOT demote an already-computed FAIL to a warn", async () => {
+    // Two real top-level actions. Leg 0 evaluates to a deny `fail`; leg 1's
+    // planActionRpcV2 throws (a flaky WASM/RPC fault). The fault must NOT
+    // discard leg 0's computed Fail — deny-overrides means the tx stays `fail`,
+    // never silently downgraded to an approvable warn. (Before the fix the
+    // per-leg `return undefined` dropped the whole tx into the warn tail.)
+    const legA = {
+      meta: v3SwapAction.meta,
+      body: { domain: "amm", swap: { recipient: OWNER } },
+    };
+    const legB = {
+      meta: v3SwapAction.meta,
+      body: { domain: "amm", swap: { recipient: ROUTER } },
+    };
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
+      kind: "hit" as const,
+      value: { actions: [legA, legB], decoderId: "registry-v2.test/multi-leg" },
+    });
+    // Leg 0: no planned calls → evaluates to a deny fail. Leg 1: plan throws.
+    mocks.planActionRpcV2
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("plan_failed: flaky leg"));
+    mocks.evaluateActionV2.mockResolvedValueOnce({
+      kind: "fail",
+      matched: [
+        {
+          policy_id: "deny-policy",
+          reason: "blocked by policy",
+          severity: "deny",
+          origin: "action",
+        },
+      ],
+    });
+
+    const result = await decideMessage(txMessage("wasm1-fail-survives"));
+
+    // The computed FAIL from leg 0 survives leg 1's fault (was "warn" pre-fix).
+    expect(result.verdict.kind).toBe("fail");
+    expect(result.ok).toBe(false);
+    expect(mocks.evaluateActionV2).toHaveBeenCalledOnce();
+  });
+
+  // ── Phase A — multicall per-child fan-out (evaluateBodyTree) ─────────────
+  // A UR `execute` decodes to ONE `Multicall` Action whose `body.actions` are
+  // full child ActionBodies. The SW must evaluate the outer batch AND re-enter
+  // the v2 pipeline for EACH child (parent meta shared), so per-child-detail
+  // (Inner-scoped) policies see the wrapped swap/transfer. Aggregation is
+  // deny-overrides across all positions.
+
+  const swapChild = { domain: "amm", swap: { recipient: OWNER, slippageBp: 50 } };
+  const transferChild = {
+    domain: "token",
+    token: { action: "erc20_transfer", erc20_transfer: { recipient: ROUTER } },
+  };
+  const multicallAction = {
+    meta: {
+      submitted_at: { unix: 1_738_000_000 },
+      submitter: OWNER,
+      nature: { kind: "onchain_tx" },
+    },
+    body: { domain: "multicall", actions: [swapChild, transferChild] },
+  };
+
+  it("phaseA: a multicall fans out — outer batch + each inner child evaluated", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
+      kind: "hit",
+      value: {
+        actions: [multicallAction],
+        decoderId: "registry-v2.uniswap/universal-router/execute",
+      },
+    });
+    // All positions pass (beforeEach default) → decideMessage resolves w/o a window.
+
+    const { ok, verdict } = await decideMessage(txMessage("v2-multicall-1"), {
+      onAwaitingUser: vi.fn(),
+    });
+
+    expect(ok).toBe(true);
+    expect(verdict.kind).toBe("pass");
+    // THE fan-out: the outer multicall + BOTH children are each evaluated.
+    expect(mocks.evaluateActionV2).toHaveBeenCalledTimes(3);
+    expect(mocks.planActionRpcV2).toHaveBeenCalledTimes(3);
+    const evaluatedBodies = mocks.evaluateActionV2.mock.calls.map(
+      (c) => (c[0] as { action: unknown }).action,
+    );
+    expect(evaluatedBodies).toEqual([
+      multicallAction.body, // outer batch (Outer-scoped policies fire here)
+      swapChild, //            inner child #1 (Inner-scoped policies fire here)
+      transferChild, //        inner child #2
+    ]);
+    // Children share the parent meta (the decoded multicall has no per-child meta).
+    const metas = mocks.evaluateActionV2.mock.calls.map(
+      (c) => (c[0] as { meta: unknown }).meta,
+    );
+    expect(metas).toEqual([
+      multicallAction.meta,
+      multicallAction.meta,
+      multicallAction.meta,
+    ]);
+  });
+
+  it("phaseA: a failing inner child blocks the whole multicall (deny-overrides)", async () => {
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
+      kind: "hit",
+      value: {
+        actions: [multicallAction],
+        decoderId: "registry-v2.uniswap/universal-router/execute",
+      },
+    });
+    // Outer batch + transfer child pass; the inner SWAP child trips a deny.
+    mocks.evaluateActionV2.mockImplementation(async (input: unknown) => {
+      const body = (input as { action: { domain?: string } }).action;
+      if (body.domain === "amm") {
+        return {
+          kind: "fail",
+          matched: [
+            {
+              policy_id: "swap-recipient-deny",
+              reason: "recipient not allow-listed",
+              severity: "deny",
+              origin: "action",
+            },
+          ],
+        };
+      }
+      return { kind: "pass" };
+    });
+
+    const result = await decideMessage(txMessage("v2-multicall-fail-1"));
+
+    expect(result.ok).toBe(false);
+    expect(result.verdict.kind).toBe("fail");
+    // All three positions were evaluated; the child's fail wins by deny-overrides.
+    expect(mocks.evaluateActionV2).toHaveBeenCalledTimes(3);
+    expect(result.verdict.matched?.[0]?.policy_id).toBe("swap-recipient-deny");
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({ verdictSource: "declarative-v2" }),
+    );
+  });
+
+  it("phaseA/N2-N3: an unknown inner child WARN-closes the batch (not pass), siblings still evaluate", async () => {
+    const unknownChild = { domain: "unknown", target: ROUTER, calldata: "0x" };
+    const mixed = {
+      meta: multicallAction.meta,
+      body: { domain: "multicall", actions: [swapChild, unknownChild] },
+    };
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
+      kind: "hit",
+      value: {
+        actions: [mixed],
+        decoderId: "registry-v2.uniswap/universal-router/execute",
+      },
+    });
+
+    // The unknown leg now contributes a `__engine::partial_decode` warn instead
+    // of vanishing, so the batch warn-closes and opens the modal — the user can
+    // still Trust-and-proceed, but a partially-decoded batch can no longer PASS
+    // silently on its legible siblings alone (N2/N3).
+    const { ok, verdict } = await decideAndApprove(
+      txMessage("v2-multicall-unknown-1"),
+      true,
+    );
+
+    expect(verdict.kind).toBe("warn");
+    expect(ok).toBe(true);
+    // Outer batch + the swap child still call the v2 pipeline; the unknown child
+    // does NOT (it contributes a synthetic warn), so still exactly 2 evaluations.
+    expect(mocks.evaluateActionV2).toHaveBeenCalledTimes(2);
+    const evaluatedBodies = mocks.evaluateActionV2.mock.calls.map(
+      (c) => (c[0] as { action: unknown }).action,
+    );
+    expect(evaluatedBodies).toEqual([mixed.body, swapChild]);
+  });
+
+  it("phaseA/N3: [deny-leg, unknown-leg] still FAILS — deny outranks the partial-decode warn", async () => {
+    const denyChild = { domain: "amm", swap: { recipient: ROUTER } };
+    const unknownChild = { domain: "unknown", target: ROUTER, calldata: "0x" };
+    const mixed = {
+      meta: multicallAction.meta,
+      body: { domain: "multicall", actions: [denyChild, unknownChild] },
+    };
+    mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
+      kind: "hit",
+      value: { actions: [mixed], decoderId: "registry-v2.test/deny-plus-unknown" },
+    });
+    mocks.evaluateActionV2.mockImplementation(async (input: unknown) => {
+      const body = (input as { action: { domain?: string } }).action;
+      if (body.domain === "amm") {
+        return {
+          kind: "fail",
+          matched: [
+            {
+              policy_id: "swap-deny",
+              reason: "recipient not allow-listed",
+              severity: "deny",
+              origin: "action",
+            },
+          ],
+        };
+      }
+      return { kind: "pass" }; // the outer multicall batch position
+    });
+
+    const result = await decideMessage(txMessage("v2-deny-plus-unknown"));
+
+    expect(result.ok).toBe(false);
+    expect(result.verdict.kind).toBe("fail");
+    expect(result.verdict.matched?.[0]?.policy_id).toBe("swap-deny");
+  });
+
   // ── Phase 1 / P3 — FAIL-CLOSED tail ──────────────────────────────────
   // Every case the deleted legacy declarative/static path used to
   // catch now emits the `__engine::no_decoder` warn verdict, which requires

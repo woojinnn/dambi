@@ -402,6 +402,7 @@ mod tests {
             chain: ChainId::ethereum_mainnet(),
             router: one_inch_router(),
             route_hash: zero_hash(),
+            executor: None,
         }
     }
 
@@ -441,7 +442,7 @@ mod tests {
             venue: aggregator_venue(),
             params: SwapParams {
                 token_in: usdc_ref(),
-                token_out: weth_ref(),
+                token_out: Some(weth_ref()),
                 direction: SwapDirection::ExactInput {
                     amount_in,
                     min_amount_out: min_out,

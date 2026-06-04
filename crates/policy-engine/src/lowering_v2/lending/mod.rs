@@ -18,6 +18,7 @@ mod delegate_borrow;
 mod disable_collateral;
 mod enable_collateral;
 mod liquidate;
+mod periphery_operation;
 mod repay;
 mod set_authorization;
 mod set_e_mode;
@@ -48,6 +49,7 @@ pub(crate) fn lower(
         LendingAction::DelegateBorrow(a) => delegate_borrow::lower(a, ctx),
         LendingAction::Liquidate(a) => liquidate::lower(a, ctx),
         LendingAction::SetAuthorization(a) => set_authorization::lower(a, ctx),
+        LendingAction::PeripheryOperation(a) => periphery_operation::lower(a, ctx),
     }
 }
 
@@ -92,8 +94,11 @@ pub(crate) fn lower_lending_venue(venue: &LendingVenue) -> Value {
             // Morpho Blue's market id is a 32-byte hex string → `marketIdStr`.
             m.insert("marketIdStr".into(), Value::String(market_id.clone()));
         }
-        // MorphoOptimizer and Fluid both expose only `{ chain, vault }`.
-        LendingVenue::MorphoOptimizer { chain, vault } | LendingVenue::Fluid { chain, vault } => {
+        // MorphoOptimizer, Fluid, and MetaMorpho all expose only `{ chain, vault }`
+        // (the discriminating `name` is already set above), so they share one arm.
+        LendingVenue::MorphoOptimizer { chain, vault }
+        | LendingVenue::Fluid { chain, vault }
+        | LendingVenue::MetaMorpho { chain, vault } => {
             m.insert("chain".into(), Value::String(chain.to_string()));
             m.insert("vault".into(), Value::String(addr(vault)));
         }
@@ -109,6 +114,11 @@ pub(crate) fn lower_lending_venue(venue: &LendingVenue) -> Value {
         } => {
             m.insert("chain".into(), Value::String(chain.to_string()));
             m.insert("pool".into(), Value::String(addr(controller)));
+        }
+        // Aave V3 periphery adapter — carries the adapter address under `adapter`.
+        LendingVenue::AaveV3Periphery { chain, adapter } => {
+            m.insert("chain".into(), Value::String(chain.to_string()));
+            m.insert("adapter".into(), Value::String(addr(adapter)));
         }
     }
     Value::Object(m)
@@ -258,6 +268,16 @@ mod tests {
             morpho["marketIdStr"],
             serde_json::json!("0xabc0000000000000000000000000000000000000000000000000000000000000")
         );
+
+        // MetaMorpho shares the `{ name, chain, vault }` arm (ERC-4626 vault).
+        let metamorpho = lower_lending_venue(&LendingVenue::MetaMorpho {
+            chain: ChainId::ethereum_mainnet(),
+            vault: Address::from_str("0xbeef01735c132ada46aa9aa4c54623caa92a64cb").unwrap(),
+        });
+        assert_eq!(metamorpho["name"], serde_json::json!("metamorpho"));
+        assert_eq!(metamorpho["chain"], serde_json::json!("eip155:1"));
+        assert!(metamorpho.get("vault").is_some());
+        assert!(metamorpho.get("marketIdStr").is_none());
     }
 
     /// `CompoundV3` carries a `baseAsset: Core::TokenRef`, lowered via

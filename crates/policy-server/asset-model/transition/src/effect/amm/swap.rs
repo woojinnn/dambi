@@ -125,6 +125,14 @@ impl Reducer for SwapAction {
                             protocol: "aggregator_route".into(),
                         });
                     }
+                    // AaveGsm only ever carries `AmmAction::GsmSwap` (its own
+                    // reducer); a GSM venue inside a routed `Swap` hop is invalid.
+                    AmmVenue::AaveGsm { .. } => {
+                        return Err(ReducerError::UnsupportedProtocol {
+                            action: "swap".into(),
+                            protocol: "aave_gsm".into(),
+                        });
+                    }
                 };
             }
             total_out = total_out.saturating_add(hop_in);
@@ -166,7 +174,9 @@ impl Reducer for SwapAction {
             &self.params.token_in.key,
             total_amount_in,
         )?;
-        helpers::balance::credit(state, &mut delta, &self.params.token_out.key, total_out)?;
+        if let Some(token_out) = &self.params.token_out {
+            helpers::balance::credit(state, &mut delta, &token_out.key, total_out)?;
+        }
         Ok(delta)
     }
 }
@@ -336,7 +346,7 @@ mod tests {
             venue,
             params: SwapParams {
                 token_in,
-                token_out,
+                token_out: Some(token_out),
                 direction: SwapDirection::ExactInput {
                     amount_in,
                     min_amount_out: min_out,
@@ -462,7 +472,7 @@ mod tests {
             venue: v2_venue(),
             params: SwapParams {
                 token_in: usdc_ref(),
-                token_out: weth_ref(),
+                token_out: Some(weth_ref()),
                 direction: SwapDirection::ExactInput {
                     amount_in: U256::from(1_000u64),
                     min_amount_out: U256::from(900u64),
@@ -534,7 +544,7 @@ mod tests {
             venue: v2_venue(),
             params: SwapParams {
                 token_in: usdc_ref(),
-                token_out: weth_ref(),
+                token_out: Some(weth_ref()),
                 direction: SwapDirection::ExactInput {
                     amount_in: U256::from(1_000u64),
                     min_amount_out: U256::ZERO,
@@ -579,7 +589,7 @@ mod tests {
             venue: v2_venue(),
             params: SwapParams {
                 token_in: usdc_ref(),
-                token_out: weth_ref(),
+                token_out: Some(weth_ref()),
                 direction: SwapDirection::ExactOutput {
                     max_amount_in: U256::from(1_000u64),
                     amount_out: U256::from(500u64),
@@ -974,6 +984,7 @@ mod tests {
             chain: ChainId::ethereum_mainnet(),
             router: one_inch_router_addr(),
             route_hash: format!("0x{}", "00".repeat(32)),
+            executor: None,
         }
     }
 
@@ -1009,7 +1020,7 @@ mod tests {
             venue: aggregator_venue(),
             params: SwapParams {
                 token_in: usdc_ref(),
-                token_out: weth_ref(),
+                token_out: Some(weth_ref()),
                 direction: SwapDirection::ExactInput {
                     amount_in,
                     min_amount_out: min_out,
@@ -1108,6 +1119,7 @@ mod tests {
             chain: ChainId::ethereum_mainnet(),
             router: one_inch_router_addr(),
             route_hash: format!("0x{}", "00".repeat(32)),
+            executor: None,
         };
         let route = SwapRoute {
             paths: vec![RoutePath {
@@ -1128,7 +1140,7 @@ mod tests {
             venue: v2_venue(),
             params: SwapParams {
                 token_in: usdc_ref(),
-                token_out: weth_ref(),
+                token_out: Some(weth_ref()),
                 direction: SwapDirection::ExactInput {
                     amount_in: U256::from(1_000u64),
                     min_amount_out: U256::ZERO,

@@ -54,8 +54,9 @@
  * ----------------------------------
  * Only (chainId,address) pairs that HAVE a coverage file are enforced. Protocol
  * contracts with manifests but NO snapshot are reported as "ungated" (a visible
- * WARN, never silent — onboarding them is opt-in per protocol). ERC token
- * standards (manifests using `chain_to_addresses_source`) are out of scope.
+ * WARN, never silent — onboarding them is opt-in per protocol). Sourced
+ * manifests are gate-scoped: token standards and supported protocol sources
+ * count only when a coverage file explicitly marks that selector as "cover".
  *
  * Limits (honest)
  * ---------------
@@ -92,9 +93,20 @@ const REGISTRY_ROOT = process.env.BUILD_INDEX_REGISTRY_ROOT
   : resolve(__dirname, "..");
 const MANIFESTS_DIR = join(REGISTRY_ROOT, "manifests");
 const SURFACE_DIR = join(REGISTRY_ROOT, "surface");
+const TOKENS_DIR = join(REGISTRY_ROOT, "tokens");
 
 const SELECTOR_RE = /^0x[0-9a-fA-F]{8}$/;
 const MUTABLE = new Set(["nonpayable", "payable"]);
+
+/**
+ * Reserved sentinel for selector-less BARE-ETH transfers (empty calldata + value):
+ * a payable `receive()` / `fallback()` has no 4-byte function selector, so build-
+ * index + the WASM route key such calls under the all-zero word `0x00000000`
+ * (which still satisfies `SELECTOR_RE`). A coverage file may OPT IN to cover this
+ * sentinel; I1' grounds it in the snapshot's receive/fallback entry (see
+ * `hasNativeEntrypoint`) instead of the function-selector surface check.
+ */
+const NATIVE_TRANSFER_SELECTOR = "0x00000000";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -174,6 +186,9 @@ interface ContractManifests {
   signedTypes: Map<string, string[]>; // EIP-712 primary_type -> manifest rel-paths
 }
 
+type TokenErcKind = "erc20" | "erc721" | "erc1155" | "native";
+type GatedCoverageSelectors = Map<string, Set<string>>;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -211,7 +226,10 @@ const ckey = (chainId: number, addr: string): string => `${chainId}__${addr.toLo
 
 /** First path segment under manifests/ — the protocol grouping for reports. */
 function protocolOf(manifestPath: string): string {
-  const rel = relative(MANIFESTS_DIR, manifestPath);
+  const normalized = manifestPath.split(/[\\/]/).join("/");
+  const rel = normalized.startsWith("manifests/")
+    ? normalized.slice("manifests/".length)
+    : relative(MANIFESTS_DIR, manifestPath).split(/[\\/]/).join("/");
   const seg = rel.split(/[/\\]/)[0];
   return seg || "(root)";
 }
@@ -223,12 +241,143 @@ function surfaceProtocolOf(coverageRelPath: string): string {
 }
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+const TOKEN_SOURCE_RE = /^tokens:(erc20|erc721|erc1155|native)$/;
+const UNISWAP_V2_PAIR_SOURCE = "uniswap:v2_pair_candidates";
+const UNISWAP_V2_PAIR_BATCH = "uniswap-v2-child-universe-deferred";
+const UNISWAP_V3_POOL_SOURCE = "uniswap:v3_pool_candidates";
+const UNISWAP_V3_POOL_BATCH = "uniswap-v3-child-universe-deferred";
+// Balancer V3 liquidity manifests are source-materialized but, unlike Curve/Uniswap
+// (one callkey per pool), they materialize to the SINGLE V3 Router; the per-pool
+// token list rides as `$source.pool_tokens` context, not as per-pool callkeys.
+const BALANCER_V3_POOL_TOKENS_SOURCE = "balancer_v3:pool_tokens";
+const BALANCER_V3_ROUTER_MAINNET = "0xae563e3f8219521950555f5962419c8919758ea2";
+const BALANCER_V3_COMPOSITE_TOKENS_SOURCE = "balancer_v3:composite_pool_tokens";
+const BALANCER_V3_COMPOSITE_MAINNET = "0xb21a277466e7db6934556a1ce12eb3f032815c8a";
+
+function coverageAddresses(cov: Coverage): Hex[] {
+  return (
+    cov.addresses && cov.addresses.length > 0
+      ? cov.addresses
+      : cov.address
+        ? [cov.address]
+        : []
+  ).map((a) => a.toLowerCase());
+}
+
+function buildGatedCoverageSelectors(units: SurfaceUnit[]): GatedCoverageSelectors {
+  const out: GatedCoverageSelectors = new Map();
+  for (const { coverage: cov } of units) {
+    for (const addr of coverageAddresses(cov)) {
+      const key = ckey(cov.chainId, addr);
+      let selectors = out.get(key);
+      if (!selectors) {
+        selectors = new Set<string>();
+        out.set(key, selectors);
+      }
+      for (const [sel, fn] of Object.entries(cov.functions ?? {})) {
+        if (fn.decision === "cover") selectors.add(sel.toLowerCase());
+      }
+    }
+  }
+  return out;
+}
+
+const TOKEN_ADDRESS_CACHE = new Map<string, Hex[]>();
+
+function tokenAddressesForKind(chainId: number, ercKind: TokenErcKind): Hex[] {
+  const cacheKey = `${chainId}:${ercKind}`;
+  const cached = TOKEN_ADDRESS_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const out: Hex[] = [];
+  const dir = join(TOKENS_DIR, String(chainId));
+  if (safeExists(dir)) {
+    for (const fname of readdirSync(dir)) {
+      if (!fname.endsWith(".json")) continue;
+      const path = join(dir, fname);
+      const obj = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      const address = String(obj.address ?? "").toLowerCase();
+      if (obj.erc_kind === ercKind && ADDR_RE.test(address)) out.push(address);
+    }
+  }
+
+  out.sort();
+  TOKEN_ADDRESS_CACHE.set(cacheKey, out);
+  return out;
+}
+
+const UNISWAP_SOURCE_CACHE = new Map<string, Hex[]>();
+
+function uniswapCandidateAddresses(chainId: number, batch: string): Hex[] {
+  const cacheKey = `${chainId}:${batch}`;
+  const cached = UNISWAP_SOURCE_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const out: Hex[] = [];
+  const path = join(SURFACE_DIR, "uniswap", "_address_universe.json");
+  if (safeExists(path)) {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as
+      | { candidates?: Array<Record<string, unknown>> }
+      | Array<Record<string, unknown>>;
+    const candidates = Array.isArray(parsed) ? parsed : Array.isArray(parsed.candidates) ? parsed.candidates : [];
+    for (const candidate of candidates) {
+      const candidateChain = candidate.chainId ?? candidate.chain_id;
+      const address = String(candidate.address ?? "").toLowerCase();
+      if (candidateChain !== chainId) continue;
+      if (candidate.decision !== "cover") continue;
+      if (candidate.batch !== batch) continue;
+      if (ADDR_RE.test(address) && !/^0x0{40}$/i.test(address)) out.push(address);
+    }
+  }
+
+  out.sort();
+  UNISWAP_SOURCE_CACHE.set(cacheKey, out);
+  return out;
+}
+
+function gatedSourceAddresses(
+  sourceSpec: string,
+  chainIds: unknown,
+  selector: string,
+  gatedCoverageSelectors: GatedCoverageSelectors,
+): Record<string, Hex[]> {
+  if (!Array.isArray(chainIds)) return {};
+
+  const tokenMatch = sourceSpec.match(TOKEN_SOURCE_RE);
+  const out: Record<string, Hex[]> = {};
+  for (const chainIdRaw of chainIds) {
+    const chainId = Number(chainIdRaw);
+    if (!Number.isInteger(chainId) || chainId < 1) continue;
+
+    let candidates: Hex[] = [];
+    if (tokenMatch) {
+      candidates = tokenAddressesForKind(chainId, tokenMatch[1] as TokenErcKind);
+    } else if (sourceSpec === UNISWAP_V2_PAIR_SOURCE) {
+      candidates = uniswapCandidateAddresses(chainId, UNISWAP_V2_PAIR_BATCH);
+    } else if (sourceSpec === UNISWAP_V3_POOL_SOURCE) {
+      candidates = uniswapCandidateAddresses(chainId, UNISWAP_V3_POOL_BATCH);
+    } else if (sourceSpec === BALANCER_V3_POOL_TOKENS_SOURCE) {
+      // Materializes to the single V3 Router (mainnet); cover selectors live on
+      // the Router and the pool->tokens map rides as $source context.
+      candidates = chainId === 1 ? [BALANCER_V3_ROUTER_MAINNET] : [];
+    } else if (sourceSpec === BALANCER_V3_COMPOSITE_TOKENS_SOURCE) {
+      // Materializes to the single CompositeLiquidityRouter v2 (mainnet).
+      candidates = chainId === 1 ? [BALANCER_V3_COMPOSITE_MAINNET] : [];
+    } else {
+      continue;
+    }
+
+    const selected = candidates.filter((addr) => gatedCoverageSelectors.get(ckey(chainId, addr))?.has(selector));
+    if (selected.length > 0) out[String(chainId)] = selected;
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Step 1 — collect the authored manifest surface, grouped per (chainId,address)
 // ---------------------------------------------------------------------------
 
-function collectManifestSurface(): {
+function collectManifestSurface(gatedCoverageSelectors: GatedCoverageSelectors): {
   byContract: Map<string, ContractManifests>;
   protocolByKey: Map<string, string>;
 } {
@@ -255,11 +404,6 @@ function collectManifestSurface(): {
     const m = obj?.match;
     if (!m || typeof m !== "object") continue;
 
-    // ERC token standards auto-enumerate from tokens/ — out of gate scope.
-    if ("chain_to_addresses_source" in m) continue;
-    const c2a = m.chain_to_addresses;
-    if (!c2a || typeof c2a !== "object") continue;
-
     const selector = String(m.selector ?? "").toLowerCase();
     const isTypedData = m.typed_data && typeof m.typed_data === "object";
     const primaryType: string | undefined = isTypedData ? m.typed_data.primary_type : undefined;
@@ -273,6 +417,30 @@ function collectManifestSurface(): {
       typeof abi === "object" &&
       abi.type === "function" &&
       toFunctionSelector(abi).toLowerCase() === selector;
+
+    const sourceSpec = typeof m.chain_to_addresses_source === "string" ? m.chain_to_addresses_source : undefined;
+    if (sourceSpec) {
+      if (hasConcreteOnchainSelector) {
+        const effective = gatedSourceAddresses(sourceSpec, m.chain_ids, selector, gatedCoverageSelectors);
+        for (const [chainStr, addrs] of Object.entries(effective)) {
+          const chainId = Number(chainStr);
+          if (!Number.isInteger(chainId)) continue;
+          for (const addrRaw of addrs) {
+            const addr = String(addrRaw).toLowerCase();
+            const key = ckey(chainId, addr);
+            const v = get(key);
+            const arr = v.onchainSelectors.get(selector) ?? [];
+            if (!arr.includes(rel)) arr.push(rel);
+            v.onchainSelectors.set(selector, arr);
+            if (!protocolByKey.has(key)) protocolByKey.set(key, protocolOf(path));
+          }
+        }
+      }
+      continue;
+    }
+
+    const c2a = m.chain_to_addresses;
+    if (!c2a || typeof c2a !== "object") continue;
 
     for (const [chainStr, addrs] of Object.entries(c2a)) {
       const chainId = Number(chainStr);
@@ -364,13 +532,29 @@ function mutatingSelectors(snap: Snapshot): Map<string, string> {
   return out;
 }
 
+/**
+ * Does the snapshot expose a value-receiving entrypoint with NO 4-byte selector —
+ * a `receive()` (payable by EVM definition) or a payable `fallback()`? Bare-ETH
+ * calls (empty calldata + value) hit these and are routed under the reserved
+ * `0x00000000` native-transfer sentinel, not by a function selector. This grounds
+ * an opt-in `0x00000000` coverage entry in 1st-party ABI so I1' can accept it as a
+ * real surface (e.g. Lido: ETH→stETH fallback stake / ETH→wstETH receive stake).
+ */
+function hasNativeEntrypoint(snap: Snapshot): boolean {
+  return snap.abi.some(
+    (item) =>
+      item.type === "receive" ||
+      (item.type === "fallback" && item.stateMutability === "payable"),
+  );
+}
+
 function main(): void {
   const failures: string[] = [];
   const warnings: string[] = [];
   const summary: string[] = [];
 
-  const { byContract, protocolByKey } = collectManifestSurface();
   const units = loadSurfaceUnits();
+  const { byContract, protocolByKey } = collectManifestSurface(buildGatedCoverageSelectors(units));
   const gatedKeys = new Set<string>();
   const gatedByProtocol = new Map<string, Set<string>>(); // protocol -> ckeys (for I0)
 
@@ -381,13 +565,7 @@ function main(): void {
     // Effective pool addresses sharing this snapshot's ABI. Single-address mode
     // (cov.address) and multi-address mode (cov.addresses[], factory pools)
     // both normalise to a lowercased list.
-    const effectiveAddresses = (
-      cov.addresses && cov.addresses.length > 0
-        ? cov.addresses
-        : cov.address
-          ? [cov.address]
-          : []
-    ).map((a) => a.toLowerCase());
+    const effectiveAddresses = coverageAddresses(cov);
     if (effectiveAddresses.length === 0) {
       failures.push(`${label}: coverage has neither "address" nor a non-empty "addresses[]"`);
       continue;
@@ -422,7 +600,17 @@ function main(): void {
     }
     // I1' — no stale / malformed coverage entries (once).
     for (const sel of Object.keys(fns)) {
-      if (!surface.has(sel)) {
+      if (sel === NATIVE_TRANSFER_SELECTOR) {
+        // Selector-less native-transfer sentinel (bare-ETH receive()/fallback()).
+        // It is NOT an ABI function selector, so it is absent from `surface`;
+        // ground it in the snapshot's receive/fallback entry instead of the
+        // function-surface check (opt-in — only files that cover it reach here).
+        if (!hasNativeEntrypoint(snap)) {
+          failures.push(
+            `${label}: I1' native-transfer sentinel ${sel} (${fns[sel].name}) requires a receive() or payable fallback() entry in the snapshot to ground it`,
+          );
+        }
+      } else if (!surface.has(sel)) {
         failures.push(`${label}: I1' coverage selector ${sel} (${fns[sel].name}) is NOT an external-mutating fn in the snapshot (stale/typo)`);
       }
       if (!SELECTOR_RE.test(sel)) {

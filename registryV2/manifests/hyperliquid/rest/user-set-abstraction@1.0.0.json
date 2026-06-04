@@ -3,7 +3,7 @@
   "id": "hyperliquid/rest/user-set-abstraction@1.0.0",
   "publisher": "hyperliquid",
   "schema_version": "3",
-  "_note_mapping": "HyperLiquid Mode B `HyperliquidTransaction:UserSetAbstraction` — off-chain L1 set of an `abstraction` (L1 string) for a `user` address, signed via eth_signTypedData_v4. A configuration/permission action with no faithful 8-domain ActionBody mapping → best-effort `Unknown` (routing win; structured representation = deferred off-chain-exchange variant, OUT OF SCOPE). See usd-send@1.0.0 for the full B.3 rationale.",
+  "_note_mapping": "HyperLiquid Mode B (UserSigned) `HyperliquidTransaction:UserSetAbstraction` — an OFF-CHAIN L1 action signed via eth_signTypedData_v4 (domain.name=HyperliquidSignTransaction, version=1, verifyingContract=0x0). Decoded to hyperliquid_core::hl_unknown carrying action_type='userSetAbstraction' so a policy sees an attributed HyperLiquid action (gate on context.actionType) instead of an anonymous domain:unknown. sets the DEX abstraction target for a user (account-level config) — admin permission op, no fund movement. A structured variant is deferred (low/admin usage; opaque or non-fund-moving fields).",
   "match": {
     "selector": "0x00000007",
     "chain_to_addresses": {
@@ -46,12 +46,12 @@
   "emit": {
     "strategy": "single_emit",
     "body": {
-      "domain": "unknown",
-      "unknown": {
-        "target": "0x0000000000000000000000000000000000000000",
-        "chain": "$chain",
-        "calldata": "0x",
-        "value": "0"
+      "domain": "hyperliquid_core",
+      "hyperliquid_core": {
+        "action": "hl_unknown",
+        "hl_unknown": {
+          "action_type": "userSetAbstraction"
+        }
       }
     }
   },

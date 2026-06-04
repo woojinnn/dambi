@@ -72,9 +72,9 @@ fn manifest(tag: &str) -> Value {
 const DENY_SHORT: &str = "\
 @id(\"hl/no-short\")\n\
 @severity(\"deny\")\n\
-@reason(\"Short orders on Hyperliquid are blocked by policy\")\n\
+@reason(\"Opening a new short on Hyperliquid is blocked by policy\")\n\
 forbid(principal, action == HyperliquidCore::Action::\"HlOrder\", resource)\n\
-when { context.venue.name == \"hyperliquid\" && context.side == \"short\" };\n";
+when { context.venue.name == \"hyperliquid\" && context.side == \"short\" && context.positionEffect == \"open\" };\n";
 
 /// Assemble the `EvaluateActionInput` envelope and run it through the entry
 /// point. Returns the parsed output envelope.

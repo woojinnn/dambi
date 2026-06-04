@@ -30,6 +30,13 @@ pub(crate) fn lower(
     );
     m.insert("size".into(), Value::String(action.size.0.clone()));
     m.insert("reduceOnly".into(), Value::Bool(action.reduce_only));
+    // Derived intent (see `order.rs`): reduce-only ⇒ "reduce" (closes/shrinks an
+    // existing position), else "open". Lets a "no new shorts" policy match
+    // `side=="short" && positionEffect=="open"` without blocking long-closes.
+    m.insert(
+        "positionEffect".into(),
+        Value::String(if action.reduce_only { "reduce" } else { "open" }.into()),
+    );
     m.insert("minutes".into(), Value::from(i64::from(action.minutes)));
     m.insert("randomize".into(), Value::Bool(action.randomize));
 
@@ -61,5 +68,33 @@ mod tests {
                 randomize: true,
             }));
         assert_conforms("hl_twap_order", &body, &offchain_meta());
+    }
+
+    /// `positionEffect` mirrors `order.rs`: derived from `reduce_only`, orthogonal
+    /// to `side`. A reduce-only sell TWAP is `side=="short"` / effect `"reduce"`.
+    #[test]
+    fn twap_position_effect_derives_from_reduce_only() {
+        use crate::lowering_v2::{lower_action, TxMeta};
+        let tx = TxMeta {
+            from: "0x1111111111111111111111111111111111111111",
+            to: "0x2222222222222222222222222222222222222222",
+        };
+        let make = |reduce_only: bool| {
+            ActionBody::HyperliquidCore(HyperliquidCoreAction::TwapOrder(HlTwapOrderAction {
+                asset_index: 0,
+                symbol: Some("BTC".to_owned()),
+                is_buy: false, // sell ⇒ side == "short"
+                size: Decimal::new("10"),
+                reduce_only,
+                minutes: 30,
+                randomize: true,
+            }))
+        };
+        let open = lower_action(&make(false), &offchain_meta(), &tx).unwrap();
+        assert_eq!(open.context["side"], "short");
+        assert_eq!(open.context["positionEffect"], "open");
+        let reduce = lower_action(&make(true), &offchain_meta(), &tx).unwrap();
+        assert_eq!(reduce.context["side"], "short");
+        assert_eq!(reduce.context["positionEffect"], "reduce");
     }
 }

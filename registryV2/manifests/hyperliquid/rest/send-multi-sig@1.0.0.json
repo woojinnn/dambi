@@ -3,7 +3,7 @@
   "id": "hyperliquid/rest/send-multi-sig@1.0.0",
   "publisher": "hyperliquid",
   "schema_version": "3",
-  "_note_mapping": "HyperLiquid Mode B `HyperliquidTransaction:SendMultiSig` — off-chain L1 submission of a multi-sig action (`multiSigActionHash` bytes32 wrapping an inner action), signed via eth_signTypedData_v4. A meta/wrapper action whose inner intent is opaque at the wrapper layer → best-effort `Unknown` (routing win; structured representation, incl. recursive decode of the inner action, = deferred off-chain-exchange variant, OUT OF SCOPE). See usd-send@1.0.0 for the full B.3 rationale.",
+  "_note_mapping": "HyperLiquid Mode B (UserSigned) `HyperliquidTransaction:SendMultiSig` — an OFF-CHAIN L1 action signed via eth_signTypedData_v4 (domain.name=HyperliquidSignTransaction, version=1, verifyingContract=0x0). Decoded to hyperliquid_core::hl_unknown carrying action_type='sendMultiSig' so a policy sees an attributed HyperLiquid action (gate on context.actionType) instead of an anonymous domain:unknown. submits a pre-authorized multi-sig action by hash (multiSigActionHash:bytes32) — the inner action is opaque (only its hash is signed) so it cannot be structurally decoded. A structured variant is deferred (low/admin usage; opaque or non-fund-moving fields).",
   "match": {
     "selector": "0x0000000a",
     "chain_to_addresses": {
@@ -44,12 +44,12 @@
   "emit": {
     "strategy": "single_emit",
     "body": {
-      "domain": "unknown",
-      "unknown": {
-        "target": "0x0000000000000000000000000000000000000000",
-        "chain": "$chain",
-        "calldata": "0x",
-        "value": "0"
+      "domain": "hyperliquid_core",
+      "hyperliquid_core": {
+        "action": "hl_unknown",
+        "hl_unknown": {
+          "action_type": "sendMultiSig"
+        }
       }
     }
   },

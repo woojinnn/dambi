@@ -39,6 +39,7 @@ const baseConfig = {
   rateLimitBurst: 1000,
   rateLimitRefillPerSec: 1000,
   rateLimitMaxIps: 1000,
+  trustedProxyHops: 0,
 };
 
 describe("registry-api HTTP server", () => {
@@ -155,6 +156,36 @@ describe("registry-api HTTP server", () => {
     );
   });
 
+  it("fetches a shared bundle template only once across sibling callkeys (sub-read cache)", async () => {
+    const bundleRef =
+      "bundles/0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.json";
+    const refEntry = (addr: string) =>
+      JSON.stringify({
+        matched: true,
+        schema_version: "3-ref",
+        bundle_id: `curve/pool/exchange/${addr}@1.0.0`,
+        manifest_path: "manifests/curve/exchange.json",
+        bundle_sha256: "0x" + "c".repeat(64),
+        bundle_ref: bundleRef,
+      });
+    const KEY1 =
+      "/index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json";
+    const KEY2 =
+      "/index/by-callkey/1__0x1111111111111111111111111111111111111111__0x38ed1739.json";
+    const reader = fakeReader({
+      "index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json":
+        refEntry("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+      "index/by-callkey/1__0x1111111111111111111111111111111111111111__0x38ed1739.json":
+        refEntry("0x1111111111111111111111111111111111111111"),
+      [bundleRef]: JSON.stringify({ id: "shared", emit: { strategy: "single_emit" } }),
+    });
+    const url = await start(reader);
+    expect((await fetch(`${url}${KEY1}`)).status).toBe(200);
+    expect((await fetch(`${url}${KEY2}`)).status).toBe(200);
+    // Both callkeys resolve the same bundle template, but it is fetched once.
+    expect(reader.reads.filter((r) => r === bundleRef)).toHaveLength(1);
+  });
+
   it("passes a GCS miss through as a real HTTP 404", async () => {
     const url = await start(fakeReader({}));
     expect((await fetch(`${url}${CALLKEY_PATH}`)).status).toBe(404);
@@ -217,6 +248,28 @@ describe("registry-api HTTP server", () => {
       (await fetch(`${url}${CALLKEY_PATH}`)).status,
       (await fetch(`${url}${CALLKEY_PATH}`)).status,
     ];
+    expect(codes).toEqual([200, 200, 429]);
+  });
+
+  it("keys the rate limit on the trusted rightmost XFF hop, not a spoofable leftmost (A1)", async () => {
+    // Simulates Cloud Run: the genuine client IP (8.8.8.8) is appended by the
+    // trusted edge as the rightmost entry; the attacker rotates the leftmost
+    // client-supplied value every request hoping for a fresh bucket. With the
+    // old leftmost logic each request would mint a new bucket and never 429.
+    const url = await start(
+      fakeReader({
+        "index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json":
+          "{}",
+      }),
+      { ...baseConfig, rateLimitBurst: 2, rateLimitRefillPerSec: 0 },
+    );
+    const codes: number[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const res = await fetch(`${url}${CALLKEY_PATH}`, {
+        headers: { "x-forwarded-for": `10.0.0.${i}, 8.8.8.8` },
+      });
+      codes.push(res.status);
+    }
     expect(codes).toEqual([200, 200, 429]);
   });
 

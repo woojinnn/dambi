@@ -169,6 +169,214 @@ fn morpho_supply_market_id_is_keccak_marketparams() {
     );
 }
 
+/// Field-level golden (manual oracle layer "A") for the two real Bundler3
+/// `multicall(Call[])` txs in `bundler3/corpus.json`.
+///
+/// `corpus_replay` compares ONLY the verdict + top-level `domain`, so a per-leg
+/// field regression — a wrong `market_id`/`asset`/`amount`/party, or a skipped
+/// plumbing leg leaking through — passes it SILENTLY. This pins the decoded leg
+/// bodies: each `Call` is re-routed at its OWN `to` (GeneralAdapter1 / Permit2),
+/// the `erc20Transfer` plumbing leg is skipped (GA1 exclude), and the rest fold
+/// into one `ActionBody::Multicall`. Calldata + expectations are read straight
+/// from the corpus file (single source of truth — no transcription drift) and
+/// asserted by FIELD. Mirrors `morpho_supply_market_id_is_keccak_marketparams`.
+#[test]
+fn bundler3_multicall_legs_decode_expected_fields() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    let corpus_path = harness::default_corpus_root()
+        .join("bundler3")
+        .join("corpus.json");
+    let corpus: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&corpus_path).expect("read bundler3 corpus"))
+            .expect("parse bundler3 corpus");
+
+    // Route a corpus tx by hash through the production decoder; assert it hit.
+    let route_tx = |tx_hash: &str| -> serde_json::Value {
+        let tx = corpus["transactions"]
+            .as_array()
+            .expect("corpus transactions")
+            .iter()
+            .find(|t| t["tx_hash"] == tx_hash)
+            .unwrap_or_else(|| panic!("tx {tx_hash} not in bundler3 corpus"));
+        let p = &tx["rpc"]["params"][0];
+        let to = p["to"].as_str().expect("tx.to");
+        let data = p["data"].as_str().expect("tx.data");
+        let env = harness::route::route_calldata(1, to, &data[..10], data, "0");
+        assert_eq!(
+            env.get("ok").and_then(serde_json::Value::as_bool),
+            Some(true),
+            "route did not succeed for {tx_hash}: {env}"
+        );
+        env
+    };
+    // The decoded leg bodies are internally tagged (flattened): a leg's fields
+    // (`domain`/`action`/`venue`/`asset`/`amount`/party) sit at the leg root.
+    let s = |v: &serde_json::Value, ptr: &str| -> String {
+        v.pointer(ptr)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("missing {ptr} in {v}"))
+            .to_ascii_lowercase()
+    };
+    // Amounts serialize as minimal "0x"-quantity hex (alloy U256); compare as
+    // lowercased hex strings via `s` so a max-uint "sweep all" (overflows u128)
+    // stays exact.
+    const MAX_UINT: &str = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+    // ── tx 0x4e65d9d1…: morphoWithdrawCollateral (wstETH collat, USDC market) +
+    //    erc20Transfer (wstETH sweep-all to the user) → Multicall[withdraw, transfer].
+    let env1 = route_tx("0x4e65d9d130d9ab1c948adc21c4b8adf117b5986d874eb80ff06ebc17f602f5ee");
+    let legs1 = env1
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("withdraw multicall legs");
+    assert_eq!(legs1.len(), 2, "withdraw + D-B sweep transfer leg: {env1}");
+    let w = &legs1[0];
+    assert_eq!(s(w, "/domain"), "lending");
+    assert_eq!(s(w, "/action"), "withdraw");
+    assert_eq!(s(w, "/venue/name"), "morpho_blue");
+    assert_eq!(
+        s(w, "/venue/market_id"),
+        "0xb323495f7e4148be5643a4ea4a8221eef163e4bccfdedc2a6f4696baacbc86cc",
+        "withdraw market_id regressed (keccak(MarketParams))"
+    );
+    assert_eq!(
+        s(w, "/asset/key/address"),
+        "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "withdraw asset (wstETH)"
+    );
+    assert_eq!(s(w, "/amount"), "0xfa15c771d6801232", "withdraw amount");
+    assert_eq!(
+        s(w, "/recipient"),
+        "0x5a6e5fe82536c16a678e859a404a6a8f7d870cb3",
+        "withdraw recipient"
+    );
+    // D-B: the erc20Transfer plumbing leg is now COVERED (was skipped) — a
+    // wstETH sweep-all (max-uint) back to the user.
+    let t = &legs1[1];
+    assert_eq!(s(t, "/domain"), "token");
+    assert_eq!(s(t, "/action"), "erc20_transfer");
+    assert_eq!(
+        s(t, "/token/key/address"),
+        "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+        "sweep token (wstETH)"
+    );
+    assert_eq!(
+        s(t, "/recipient"),
+        "0x5a6e5fe82536c16a678e859a404a6a8f7d870cb3"
+    );
+    assert_eq!(s(t, "/amount"), MAX_UINT, "sweep amount = max-uint");
+
+    // ── tx 0xeea1e0df…: Permit2 permit (→Permit2) + permit2TransferFrom (WBTC
+    //    user→GA1) + morphoSupplyCollateral (WBTC, →GA1) + erc20Transfer (WBTC
+    //    sweep) → Multicall[permit2_sign_allowance, transfer, supply, transfer].
+    let env2 = route_tx("0xeea1e0dfab0683b7981e1553fab7697108b2c31d73529094386f44b58b76ee5c");
+    let legs2 = env2
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("supply multicall legs");
+    assert_eq!(
+        legs2.len(),
+        4,
+        "[permit2 allowance, permit2TransferFrom, supply, sweep]: {env2}"
+    );
+    // leg0 — Permit2 on-chain permit (allowance).
+    assert_eq!(s(&legs2[0], "/domain"), "token");
+    assert_eq!(s(&legs2[0], "/action"), "permit2_sign_allowance");
+    // leg1 — D-B: permit2TransferFrom, the bundle's token-IN (WBTC user→GA1).
+    let pull = &legs2[1];
+    assert_eq!(s(pull, "/domain"), "token");
+    assert_eq!(s(pull, "/action"), "erc20_transfer");
+    assert_eq!(
+        s(pull, "/token/key/address"),
+        "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+        "pull token (WBTC)"
+    );
+    assert_eq!(
+        s(pull, "/recipient"),
+        "0x4a6c312ec70e8747a587ee860a0353cd42be0ae0",
+        "pull recipient (GeneralAdapter1)"
+    );
+    assert_eq!(s(pull, "/amount"), "0xe4e1c0", "pull amount");
+    // leg2 — morphoSupplyCollateral.
+    let sup = &legs2[2];
+    assert_eq!(s(sup, "/domain"), "lending");
+    assert_eq!(s(sup, "/action"), "supply");
+    assert_eq!(s(sup, "/venue/name"), "morpho_blue");
+    assert_eq!(
+        s(sup, "/venue/market_id"),
+        "0xb7a75cabc2e8eadd0bc661340a9e359d9828bed6d5cbbcd64188bca8c01e399e",
+        "supply market_id regressed (keccak(MarketParams))"
+    );
+    assert_eq!(
+        s(sup, "/asset/key/address"),
+        "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+        "supply asset (WBTC)"
+    );
+    assert_eq!(s(sup, "/amount"), "0xe4e1c0", "supply amount");
+    assert_eq!(
+        s(sup, "/on_behalf_of"),
+        "0x5ac65511fef88144f531b79043bc524e5562b8b3",
+        "supply on_behalf_of"
+    );
+    // leg3 — D-B: erc20Transfer leftover WBTC sweep-all to the user.
+    let sweep = &legs2[3];
+    assert_eq!(s(sweep, "/domain"), "token");
+    assert_eq!(s(sweep, "/action"), "erc20_transfer");
+    assert_eq!(
+        s(sweep, "/recipient"),
+        "0x5ac65511fef88144f531b79043bc524e5562b8b3",
+        "sweep recipient (user)"
+    );
+    assert_eq!(s(sweep, "/amount"), MAX_UINT, "sweep amount = max-uint");
+
+    // ── tx 0x5c27d91d…: leverage — a top-level morphoFlashLoan (EXCLUDE) whose
+    //    reenter(Call[]) callback (D-C) borrows USDT against the supplied
+    //    collateral. The borrow leg has NO top-level source, so its presence
+    //    PROVES the nested callback decoded. Index-independent (find by action).
+    let env3 = route_tx("0x5c27d91dad83e273eda6e48e713f0e48136bc760767fc399d8d00eeefdadf303");
+    let legs3 = env3
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("leverage multicall legs");
+    let borrow = legs3
+        .iter()
+        .find(|l| l.pointer("/action").and_then(serde_json::Value::as_str) == Some("borrow"))
+        .expect("D-C: the morphoFlashLoan reenter callback's borrow leg must surface");
+    assert_eq!(s(borrow, "/domain"), "lending");
+    assert_eq!(s(borrow, "/venue/name"), "morpho_blue");
+    assert_eq!(
+        s(borrow, "/venue/market_id"),
+        "0x3fea56ab83b05840dc83dc6b3d2f2fbd938147cbaa8126bac529e6c820058253",
+        "callback borrow market_id"
+    );
+    assert_eq!(
+        s(borrow, "/asset/key/address"),
+        "0xdac17f958d2ee523a2206206994597c13d831ec7",
+        "callback borrow asset (USDT)"
+    );
+
+    // ── tx 0x1b7307b0…: Lido deleverage — the GA1 unwrapStEth leg (D-D) decodes
+    //    as liquid_staking/unwrap (venue=lido), no longer a skipped staking leg.
+    let env4 = route_tx("0x1b7307b031762dbbc55af5a4164bd771b5a4d2e923f6f07740a9fddfe1b9e645");
+    let legs4 = env4
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("lido deleverage multicall legs");
+    let unwrap = legs4
+        .iter()
+        .find(|l| {
+            l.pointer("/domain").and_then(serde_json::Value::as_str) == Some("liquid_staking")
+        })
+        .expect("D-D: the unwrapStEth leg must surface as liquid_staking");
+    assert_eq!(s(unwrap, "/action"), "unwrap");
+    assert_eq!(
+        s(unwrap, "/venue/name"),
+        "lido",
+        "GA1 unwrapStEth → Lido unwrap"
+    );
+}
+
 /// Recursively find the first `"<field>": <bool>` entry in a JSON value.
 fn find_bool_field(v: &serde_json::Value, field: &str) -> Option<bool> {
     match v {
@@ -1118,6 +1326,104 @@ fn lido_wrap_expected_wsteth_live_input_is_wired() {
         find_string_field(live, "function").as_deref(),
         Some("getWstETHByStETH(uint256)"),
         "expected_wsteth onchain_view source fn mis-wired: {env}"
+    );
+}
+
+/// Field-level golden (L3 independence): a real wstETH `unwrap` must decode to a
+/// `liquid_staking` `unwrap` whose `amount` is the supplied `_wstETHAmount` (NOT
+/// `msg.value`, which is 0) with the `expected_steth` live-input source wired.
+/// Value reasoned from calldata: 0x226c6a3c70ff3b9a == 2_480_474_302_600_657_818.
+#[test]
+fn lido_unwrap_amount_and_live_input_decode() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real mainnet unwrap tx 0x0de246bd…: _wstETHAmount = 2480474302600657818.
+    const TO: &str = "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0";
+    const CALLDATA: &str =
+        "0xde0e9a3e000000000000000000000000000000000000000000000000226c6a3c70ff3b9a";
+
+    let env = harness::route::route_calldata(1, TO, "0xde0e9a3e", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    assert_eq!(
+        find_string_field(&env, "amount").as_deref(),
+        Some("0x226c6a3c70ff3b9a"),
+        "Unwrap.amount must equal _wstETHAmount (not msg.value): {env}"
+    );
+    let live = find_object_by_key(&env, "expected_steth")
+        .expect("unwrap body carries the expected_steth live field");
+    assert_eq!(
+        find_string_field(live, "function").as_deref(),
+        Some("getStETHByWstETH(uint256)"),
+        "expected_steth onchain_view source fn mis-wired: {env}"
+    );
+}
+
+/// Field-level golden (L3 independence): a real `claimWithdrawal(uint256 _requestId)`
+/// must decode to a `liquid_staking` `claim_withdrawal` carrying the single request
+/// id in `request_ids[0]`. Value reasoned from calldata: 0x1eb2f == 125_743.
+#[test]
+fn lido_claim_withdrawal_decodes_request_id() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real mainnet claimWithdrawal tx 0xf2d13664…: _requestId = 125743.
+    const TO: &str = "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1";
+    const CALLDATA: &str =
+        "0xf8444436000000000000000000000000000000000000000000000000000000000001eb2f";
+
+    let env = harness::route::route_calldata(1, TO, "0xf8444436", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    let request_ids =
+        find_object_by_key(&env, "request_ids").expect("claim body carries request_ids");
+    assert_eq!(
+        request_ids
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(serde_json::Value::as_str),
+        Some("0x1eb2f"),
+        "ClaimWithdrawal.request_ids[0] mis-decoded: {env}"
+    );
+}
+
+/// Field-level golden (L3 independence): a real `requestWithdrawalsWstETH` must
+/// decode to a `liquid_staking` `request_withdrawal` whose burned `token` is wstETH
+/// (the `…WstETH` discriminator) and whose `owner` is the NFT beneficiary. Owner +
+/// token reasoned from calldata.
+#[test]
+fn lido_request_withdrawals_wsteth_decodes_wsteth_token_and_owner() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Real mainnet requestWithdrawalsWstETH tx 0x6420f0a2…: owner 0x8e01…62bc, wstETH burned.
+    const TO: &str = "0x889edc2edab5f40e902b864ad4d7ade8e412f9b1";
+    const CALLDATA: &str = "0x19aa625700000000000000000000000000000000000000000000000000000000000000400000000000000000000000008e01dc1a08ddf5a47ca992ba389ae290bc6362bc0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000002b39d1477c3aa0";
+
+    let env = harness::route::route_calldata(1, TO, "0x19aa6257", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "route did not succeed: {env}"
+    );
+    assert_eq!(
+        find_string_field(&env, "owner")
+            .map(|s| s.to_lowercase())
+            .as_deref(),
+        Some("0x8e01dc1a08ddf5a47ca992ba389ae290bc6362bc"),
+        "RequestWithdrawalWstETH.owner mis-decoded: {env}"
+    );
+    let token = find_object_by_key(&env, "token").expect("request_withdrawal body carries token");
+    assert_eq!(
+        find_string_field(token, "address")
+            .map(|s| s.to_lowercase())
+            .as_deref(),
+        Some("0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0"),
+        "requestWithdrawalsWstETH burns wstETH; token must be wstETH: {token}"
     );
 }
 

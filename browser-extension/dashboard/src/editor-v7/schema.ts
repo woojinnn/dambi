@@ -138,6 +138,8 @@ const GLOSS: Record<string, GlossEntry> = {
     desc: { ko: "Intent 주문 타입 (limit 등)",                                          en: "Intent order type (limit, …)" } },
   "context.reduceOnly":                 { en: "Reduce only",            ko: "감소 전용(reduceOnly)",        group: "enum",    fk: "primitive",  type: "Bool",                  derived: false,
     desc: { ko: "기존 포지션을 줄이기만 하는 주문인지",                                en: "Order can only reduce an existing position" } },
+  "context.positionEffect":             { en: "Position effect",        ko: "포지션 효과(open/reduce)",     group: "enum",    fk: "primitive",  type: "String",                derived: false, note: "Perp · open · reduce",
+    desc: { ko: "신규/추가 노출(open) vs 기존 포지션 정리(reduce). 'side==short && positionEffect==open' 으로 신규 숏만 차단(롱 청산은 통과)",  en: "Opening/adding exposure (open) vs closing an existing position (reduce). Use 'side==short && positionEffect==open' to block only NEW shorts (lets long-closes through)" } },
   "context.proof":                      { en: "Merkle proof",           ko: "머클 증명(proof)",             group: "auth",    fk: "collection", type: "Set<String>",           derived: false,
     desc: { ko: "에어드롭/화이트리스트 자격 증명용 머클 proof",                       en: "Merkle proof used to prove eligibility (airdrop, allowlist)" } },
   "context.positionId":                 { en: "Position ID",            ko: "포지션 ID",                    group: "auth",    fk: "primitive",  type: "String",                derived: false, note: "Perp",

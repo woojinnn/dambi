@@ -18,24 +18,6 @@
 use policy_transition::action::Action;
 use serde_json::Value;
 
-/// The valid `ActionBody` domains (serde `domain` tags).
-pub const VALID_DOMAINS: [&str; 14] = [
-    "token",
-    "amm",
-    "lending",
-    "airdrop",
-    "launchpad",
-    "liquid_staking",
-    "perp",
-    "permission",
-    "yield",
-    "restaking",
-    "staking",
-    "hyperliquid_core",
-    "multicall",
-    "unknown",
-];
-
 /// Engine error kinds the harness tolerates (not findings): an unrouted/unknown
 /// key or a strategy that typed-data routing legitimately rejects.
 pub const SOFT_ERROR_KINDS: [&str; 3] = [
@@ -110,6 +92,15 @@ fn is_shape_artifact(kind: &str, msg: &str) -> bool {
         || msg.contains("empty route (no non-zero pool slot)")
         || msg.contains("unknown swap_type")
         || msg.contains("missing swap_params")
+        // A `$fn` that resolves a calldata key against a build-time-baked registry
+        // map (e.g. Balancer V3 `balancer_v3_zip_pool_tokens`, which looks the
+        // `$args.pool` up in the baked `pool_tokens` map): synthetic fuzz emits a
+        // random/zero pool that is not in the map, so the executor fail-closes
+        // (the real fail-safe — an unknown pool must warn, never silently decode).
+        // Real pools are exercised by the corpus expect_body. A STRUCTURAL bug
+        // (wrong arity / non-object map arg) errors with a different message on
+        // every input incl. the golden, so it is NOT masked by this data-only one.
+        || msg.contains("not in baked pool_token_map")
     )
 }
 
@@ -152,20 +143,11 @@ pub fn judge(envelope: &Value) -> Judged {
                 };
             }
 
-            // L3 — domain tag validity (round-trip already guarantees this, but
-            // an explicit check guards against future enum drift / aliasing).
-            for d in &domains {
-                if !VALID_DOMAINS.contains(&d.as_str()) {
-                    return Judged {
-                        verdict: Verdict::Fail {
-                            layer: OracleLayer::Domain,
-                            detail: format!("invalid domain `{d}`"),
-                        },
-                        domains: domains.clone(),
-                        error_kind: None,
-                    };
-                }
-            }
+            // L3 — domain-tag validity needs NO hand-maintained list here: the L2
+            // `Vec<Action>` round-trip above already rejects any unknown
+            // `#[serde(tag = "domain")]` tag (serde errors → TypedRoundTrip Fail).
+            // The former `VALID_DOMAINS` array was a cross-crate drift trap (it
+            // restated the `ActionBody` enum by hand in a different crate); dropped.
 
             Judged {
                 verdict: Verdict::Pass,

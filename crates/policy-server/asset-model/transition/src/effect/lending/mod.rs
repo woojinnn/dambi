@@ -10,6 +10,7 @@ mod borrow;
 mod buy_collateral;
 mod delegate_borrow;
 mod liquidate;
+mod periphery_operation;
 mod repay;
 mod set_authorization;
 mod set_collateral;
@@ -53,6 +54,7 @@ impl Reducer for LendingAction {
             Self::DelegateBorrow(a) => a.apply(state, ctx),
             Self::Liquidate(a) => a.apply(state, ctx),
             Self::SetAuthorization(a) => a.apply(state, ctx),
+            Self::PeripheryOperation(a) => a.apply(state, ctx),
         }
     }
 }
@@ -102,6 +104,9 @@ pub(super) mod position_id {
             LendingVenue::Fluid { chain, vault } => {
                 format!("fluid:{}:{vault:?}", chain.as_str())
             }
+            LendingVenue::MetaMorpho { chain, vault } => {
+                format!("metamorpho:{}:{vault:?}", chain.as_str())
+            }
             LendingVenue::CrvUsd {
                 chain, controller, ..
             } => {
@@ -111,6 +116,9 @@ pub(super) mod position_id {
                 chain, controller, ..
             } => {
                 format!("llama_lend:{}:{controller:?}", chain.as_str())
+            }
+            LendingVenue::AaveV3Periphery { chain, adapter } => {
+                format!("aave_v3_periphery:{}:{adapter:?}", chain.as_str())
             }
         }
     }
@@ -128,8 +136,10 @@ pub(super) const fn venue_tag(venue: &LendingVenue) -> &'static str {
         LendingVenue::MorphoBlue { .. } => "morpho_blue",
         LendingVenue::MorphoOptimizer { .. } => "morpho_optimizer",
         LendingVenue::Fluid { .. } => "fluid",
+        LendingVenue::MetaMorpho { .. } => "metamorpho",
         LendingVenue::CrvUsd { .. } => "crv_usd",
         LendingVenue::LlamaLend { .. } => "llama_lend",
+        LendingVenue::AaveV3Periphery { .. } => "aave_v3_periphery",
     }
 }
 
@@ -147,8 +157,10 @@ pub(super) fn venue_chain(venue: &LendingVenue) -> ChainId {
         | LendingVenue::MorphoBlue { chain, .. }
         | LendingVenue::MorphoOptimizer { chain, .. }
         | LendingVenue::Fluid { chain, .. }
+        | LendingVenue::MetaMorpho { chain, .. }
         | LendingVenue::CrvUsd { chain, .. }
-        | LendingVenue::LlamaLend { chain, .. } => chain.clone(),
+        | LendingVenue::LlamaLend { chain, .. }
+        | LendingVenue::AaveV3Periphery { chain, .. } => chain.clone(),
     }
 }
 

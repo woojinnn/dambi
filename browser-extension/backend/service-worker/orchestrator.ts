@@ -30,7 +30,12 @@ import {
   getDefaultPolicyBundlesV2,
   loadDefaultPolicySetV2,
 } from "./policies-loader-v2";
-import type { MatchedPolicyDto, VerdictDto } from "./wasm-bridge.types";
+import type {
+  ActionBundleInputDto,
+  ActionTxInputDto,
+  MatchedPolicyDto,
+  VerdictDto,
+} from "./wasm-bridge.types";
 import {
   isTransaction,
   isTypedSignature,
@@ -1003,49 +1008,62 @@ async function typedSignatureLifecycle(
   const policyRpcUrl = process.env.POLICY_RPC_URL ?? "http://127.0.0.1:8787";
 
   const verdicts: VerdictDto[] = [];
+  let anyLegThrew = false;
   for (const a of realActions) {
     const action = (a as { body: unknown }).body;
     const meta = (a as { meta?: unknown }).meta;
     try {
-      const planned = await planActionRpcV2({ manifests, action, meta, tx });
-      const results =
-        planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
-      const verdict = await evaluateActionV2({
-        action,
-        meta,
-        tx,
-        bundles,
-        results,
-      });
-      verdicts.push(verdict);
+      // Per-child fan-out: evaluate this body and (if a multicall) each inner
+      // child. No `recordSimulationOnServer` on the sig path (it never recorded).
+      verdicts.push(
+        ...(await evaluateBodyTree(
+          action,
+          meta,
+          tx,
+          bundles,
+          manifests,
+          policyRpcUrl,
+          message.requestId,
+        )),
+      );
     } catch (err) {
-      // A plan/dispatch/evaluate throw is a fault → warn-closed (mirrors tx).
-      console.warn("[Scopeball] typed-sig-verdict threw", {
+      // A plan/dispatch/evaluate throw makes THIS leg unevaluable. Record the
+      // fault but KEEP aggregating siblings — the old early-return discarded
+      // every already-computed verdict and demoted a sibling leg's computed Fail
+      // to an approvable warn (WASM-1). Resolution below honours deny-overrides.
+      console.warn("[Scopeball] typed-sig-verdict leg threw", {
         requestId: message.requestId,
         chainId: message.data.chainId,
         err: err instanceof Error ? err.message : String(err),
       });
-      return {
-        verdict: noDecoderVerdict(),
-        verdictSource: "fail_closed",
-        declarativeV3: { outcome: "fault", nature, reason: "evaluate_failed" },
-      };
+      anyLegThrew = true;
     }
   }
 
-  const verdict = aggregateV2Verdicts(verdicts);
+  // Deny-overrides with a fault floor (mirrors tryV2VerdictPath): a real `fail`
+  // from any leg outranks a sibling fault; otherwise a fault with no computed
+  // deny warn-closes (preserving the fail_closed labeling); otherwise the real
+  // pass/warn aggregate stands.
+  const aggregate = aggregateV2Verdicts(verdicts);
+  if (aggregate.kind !== "fail" && anyLegThrew) {
+    return {
+      verdict: noDecoderVerdict(),
+      verdictSource: "fail_closed",
+      declarativeV3: { outcome: "fault", nature, reason: "evaluate_failed" },
+    };
+  }
   console.info("[Scopeball] typed-sig-verdict", {
     requestId: message.requestId,
     verdictSource: "declarative-v2",
-    verdict: verdict.kind,
+    verdict: aggregate.kind,
     decoderId: routed.decoderId,
     matched:
-      verdict.matched?.map((m) => ({
+      aggregate.matched?.map((m) => ({
         id: m.policy_id,
         severity: m.severity,
       })) ?? [],
   });
-  return { verdict, verdictSource: "declarative-v2", declarativeV3 };
+  return { verdict: aggregate, verdictSource: "declarative-v2", declarativeV3 };
 }
 
 /** Synthetic deny verdict for the venue-order deny-closed paths. */
@@ -1061,6 +1079,91 @@ function venueDenyVerdict(reason: string): VerdictDto {
       },
     ],
   };
+}
+
+/**
+ * Evaluate one decoded `ActionBody` against the installed v2 bundles, then — if
+ * it is a `Multicall` — recurse into each inner child as its own evaluate
+ * envelope. Returns the FLAT list of per-position verdicts (this body's, then
+ * each descendant's) for the caller to aggregate by deny-overrides.
+ *
+ * This is the SW half of the multicall per-child fan-out (mirrors the Rust
+ * `sync::actions::walk::walk_body` recursion). The WASM `evaluate_action_v2`
+ * scope gate decides which bundles fire at each position: `Outer`-scoped
+ * policies fire on the multicall batch here; `Inner`-scoped (default) policies
+ * fire when this function re-enters with each child. Without the recursion an
+ * `Inner` slippage/recipient policy would never see a UR-`execute`-wrapped swap.
+ *
+ * An `unknown`-domain body is skipped (NOT fail-closed) so one undecodable child
+ * never blocks its siblings or the outer batch; the top-level all-unknown case
+ * is still fail-closed by each caller's `realActions` guard. Children share the
+ * parent `meta` (the decoded `Multicall` carries no per-child meta).
+ * `recordSimulationOnServer` is intentionally NOT called here — recording stays
+ * at the top-level caller so its granularity is unchanged.
+ *
+ * Throws only what `planActionRpcV2` / `dispatchCallsV2` throw; the caller's
+ * try/catch turns that into a fail-closed verdict.
+ */
+async function evaluateBodyTree(
+  body: unknown,
+  meta: unknown,
+  tx: ActionTxInputDto,
+  bundles: readonly ActionBundleInputDto[],
+  manifests: readonly unknown[],
+  policyRpcUrl: string,
+  requestId: string,
+): Promise<VerdictDto[]> {
+  const verdicts: VerdictDto[] = [];
+  const domain =
+    typeof body === "object" && body !== null
+      ? (body as { domain?: unknown }).domain
+      : undefined;
+
+  if (domain !== undefined && domain !== "unknown") {
+    // PLAN → DISPATCH (only when something is planned; a shared results map
+    // would clobber since `call_id` repeats across siblings) → EVALUATE.
+    const planned = await planActionRpcV2({ manifests, action: body, meta, tx });
+    const results =
+      planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
+    verdicts.push(
+      await evaluateActionV2({ action: body, meta, tx, bundles, results }),
+    );
+  } else if (domain === "unknown") {
+    // N2: a nested batch position that decoded to NOTHING — the WASM decoder
+    // surfaces an all-empty nested opcode stream as an `Unknown` child (rather
+    // than an empty Multicall that would PASS). Contribute a warn so the parent
+    // batch cannot aggregate to PASS on its legible siblings alone; a sibling
+    // DENY still outranks this warn via deny-overrides. (A single dropped opcode
+    // in an otherwise-decoded stream is NOT surfaced — registry `warn`=skip
+    // intent — so this fires only for the all-empty case.)
+    console.debug("[Scopeball] per-child unknown leg → partial-decode warn", {
+      requestId,
+    });
+    verdicts.push(partialDecodeVerdict());
+  }
+
+  // Recurse into multicall children — each its own envelope, parent meta shared.
+  // A nested multicall is evaluated as a batch (Outer policies) AND recursed.
+  if (domain === "multicall") {
+    const children = (body as { actions?: unknown }).actions;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        verdicts.push(
+          ...(await evaluateBodyTree(
+            child,
+            meta,
+            tx,
+            bundles,
+            manifests,
+            policyRpcUrl,
+            requestId,
+          )),
+        );
+      }
+    }
+  }
+
+  return verdicts;
 }
 
 async function tryV2VerdictPath(
@@ -1081,6 +1184,11 @@ async function tryV2VerdictPath(
   });
   if (realActions.length === 0) return undefined;
 
+  // Warm the v2 bundle cache (idempotent) before reading it — closes the
+  // post-SW-restart boot race where a tx arriving early sees [] and degrades an
+  // enforced deny to an approvable warn (F1-1). Mirrors the venue + typed-sig
+  // paths, which already await the loader.
+  await loadDefaultPolicySetV2();
   const bundles = getDefaultPolicyBundlesV2();
   if (bundles.length === 0) return undefined;
   // The plan phase MUST see the identical manifest set the bundles carry —
@@ -1098,45 +1206,61 @@ async function tryV2VerdictPath(
   const policyRpcUrl = process.env.POLICY_RPC_URL ?? "http://127.0.0.1:8787";
 
   const verdicts: VerdictDto[] = [];
+  let anyLegThrew = false;
   for (const a of realActions) {
     const action = (a as { body: unknown }).body;
     const meta = (a as { meta?: unknown }).meta;
     try {
-      // PLAN: lower the action + plan its v2 policy-RPC calls.
-      const planned = await planActionRpcV2({ manifests, action, meta, tx });
-      // DISPATCH: fresh per-action results map (shared map would clobber:
-      // `call_id` repeats across action elements).
-      const results = await dispatchCallsV2(planned, policyRpcUrl);
-      // EVALUATE: never throws for policy/system faults (always Fail inside).
-      const verdict = await evaluateActionV2({
-        action,
-        meta,
-        tx,
-        bundles,
-        results,
-      });
-      verdicts.push(verdict);
+      // Per-child fan-out: evaluate this action AND, if it is a multicall, each
+      // inner child as its own envelope. The WASM scope gate (A1) decides which
+      // bundles fire at the batch vs the child positions; this supplies both.
+      // `evaluateActionV2` never throws for policy/system faults (Fail inside) —
+      // only plan/dispatch can throw.
+      verdicts.push(
+        ...(await evaluateBodyTree(
+          action,
+          meta,
+          tx,
+          bundles,
+          manifests,
+          policyRpcUrl,
+          message.requestId,
+        )),
+      );
 
-      // RECORD (Phase 8B): replay the simulation against the Scopeball
-      // server so the action + state-delta land in the authenticated
-      // user's server-side state. Best-effort — the verdict above is the source of
+      // RECORD (Phase 8B): replay the simulation against the Scopeball server
+      // so the action + state-delta land in the authenticated user's
+      // server-side state. Best-effort — the verdict above is the source of
       // truth for fail-closed decisions; recording is purely for the
-      // dashboard's history view. Skipped silently when the user isn't
-      // signed in to Scopeball.
+      // dashboard's history view. Skipped silently when the user isn't signed
+      // in to Scopeball. Recorded per TOP-LEVEL action (granularity unchanged).
       void recordSimulationOnServer({ action, meta, tx });
     } catch (err) {
-      // A plan/dispatch throw is a fault, NOT a verdict — the caller fails
-      // closed (a flaky WASM/RPC call must not waive a tx through).
-      console.warn("[Scopeball] declarative-verdict-v2 threw", {
+      // A plan/dispatch throw makes THIS leg unevaluable. Record the fault but
+      // KEEP evaluating siblings — the old `return undefined` here discarded
+      // every already-computed verdict and dropped the whole tx into the warn
+      // tail, silently demoting a sibling leg's computed Fail to an approvable
+      // warn (WASM-1). Resolution below honours deny-overrides.
+      console.warn("[Scopeball] declarative-verdict-v2 leg threw", {
         requestId: message.requestId,
         chainId: message.data.chainId,
         err: err instanceof Error ? err.message : String(err),
       });
-      return undefined;
+      anyLegThrew = true;
     }
   }
 
-  return aggregateV2Verdicts(verdicts);
+  // Deny-overrides resolution with a fault floor:
+  //   - a real `fail` from ANY leg outranks the fault → return it (never let a
+  //     sibling fault demote a computed deny — WASM-1),
+  //   - otherwise a fault with no computed deny falls through to the caller's
+  //     fail-closed WARN tail (`undefined`), preserving the prior fail_closed
+  //     semantics/labeling for a pure plan/dispatch fault,
+  //   - otherwise the real pass/warn aggregate stands.
+  const aggregate = aggregateV2Verdicts(verdicts);
+  if (aggregate.kind === "fail") return aggregate;
+  if (anyLegThrew) return undefined;
+  return aggregate;
 }
 
 /**
@@ -1284,6 +1408,27 @@ function unsupportedUntypedSignatureVerdict(): VerdictDto {
    * rather than silently waiving the request through as the deleted legacy
    * `evaluateWithPolicyRpc` fallback would have.
  */
+/**
+ * N2/N3 — floor for a decoded batch carrying a leg the decoder could not map
+ * (surfaced by the WASM decoder as an `Unknown` child rather than dropped). A
+ * partially-decoded batch must not PASS on its legible siblings alone, so this
+ * warn floors the aggregate; a sibling DENY still outranks it (deny-overrides).
+ */
+function partialDecodeVerdict(): VerdictDto {
+  return {
+    kind: "warn",
+    matched: [
+      {
+        policy_id: "__engine::partial_decode",
+        reason:
+          "Part of this batch could not be decoded — review before signing",
+        severity: "warn",
+        origin: "engine_error",
+      },
+    ],
+  };
+}
+
 function noDecoderVerdict(): VerdictDto {
   return {
     kind: "warn",

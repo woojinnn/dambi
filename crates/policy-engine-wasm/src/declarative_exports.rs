@@ -518,6 +518,12 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                 serde_json::Value::String(asset.to_owned()),
             );
         }
+        if let Some(asset) = compound_v2_underlying(input.chain_id, &key.to) {
+            resolved.insert(
+                "compound_v2_underlying".to_owned(),
+                serde_json::Value::String(asset.to_owned()),
+            );
+        }
 
         // Tier-B synthetic derivations the declarative grammar cannot express
         // (it can index/slice but not hash). Morpho Blue's `market_id` =
@@ -527,6 +533,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
         // 5-tuple). The single_emit analogue of `maybe_inject_v4_pool_id`.
         let mut derived = BTreeMap::new();
         maybe_inject_morpho_market_id(&args_json, &mut derived);
+        maybe_inject_metamorpho_underlying(&args_json, &mut derived);
         maybe_inject_uniswap_v3_path(&args_json, &mut derived);
 
         let ctx = V3MapContext {
@@ -543,6 +550,27 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             derived,
             inputs: None,
         };
+
+        // D-C (generalized): a manifest's `emit.reenter_callback_arg` names the
+        // `bytes` arg carrying an `abi.encode(Call[])` re-entry callback the
+        // `multicall_call_array` caller recurses into — manifest-driven, so the
+        // engine has NO per-protocol callback-selector list.
+        let reenter_callback = emit
+            .get("reenter_callback_arg")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|arg| args_json.get(arg))
+            .and_then(serde_json::Value::as_str)
+            .map(ToOwned::to_owned);
+        // `reenter_only` is a pure re-entry trampoline (e.g. a Morpho flash loan):
+        // it has NO own body — the whole intent is in the callback the caller
+        // recurses into. Emit no action; surface only the callback.
+        if strategy == "reenter_only" {
+            return Ok(DeclarativeRouteRequestV3ResultDto {
+                actions: vec![],
+                decoder_id: bundle_id,
+                reenter_callback,
+            });
+        }
 
         let body = match strategy.as_str() {
             "single_emit" => {
@@ -702,10 +730,18 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                 let per_item_body = emit.get("body").ok_or_else(|| {
                     EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
                 })?;
+                let parallel_sources = emit.get("parallel_sources");
                 let per_item_live_inputs = emit.get("live_inputs");
-                build_array_emit(&ctx, array_source, per_item_body, per_item_live_inputs).map_err(
-                    |error| EngineErrorDto::new("build_array_emit_failed", error.to_string()),
-                )?
+                build_array_emit(
+                    &ctx,
+                    array_source,
+                    parallel_sources,
+                    per_item_body,
+                    per_item_live_inputs,
+                )
+                .map_err(|error| {
+                    EngineErrorDto::new("build_array_emit_failed", error.to_string())
+                })?
             }
             // A-redux.2 — `tagged_dispatch` (HyperLiquid CoreWriter mechanism).
             // ONE action is encoded as `data[0]=version ‖ data[tag..tag+sz]=
@@ -715,6 +751,18 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             // trailing args with that action's `inputs_abi` into the ctx
             // `inputs`, and build that ONE action's `body` (NOT a Multicall).
             "tagged_dispatch" => build_tagged_dispatch(&ctx, emit)?,
+            // Bulker-class parallel-array tagged dispatch (Compound v3
+            // `Bulker.invoke(bytes32[] actions, bytes[] data)`): the two arrays
+            // are index-aligned; each `data[i]` is an action-specific ABI tuple
+            // keyed by the `actions[i]` tag (a `bytes32` ASCII action-name for
+            // Compound). Fans out to a `Multicall` of per-element bodies —
+            // generalises `tagged_dispatch` (ONE tagged action) to an ARRAY and
+            // `array_emit` (one homogeneous body per element) to a
+            // PER-ELEMENT-TAGGED body. Inline decode (per-tag `inputs_abi` in
+            // this one manifest) → no child callkeys, unlike `multicall_recurse`.
+            "parallel_tagged_dispatch" => {
+                build_parallel_tagged_dispatch(&ctx, emit, input.chain_id)?
+            }
             // Cat D — `multicall_recurse` (self-multicall: NFPM / SwapRouter02 /
             // V4 PositionManager `multicall(bytes[])`). The inner sub-calls are
             // the single `bytes[]` argument, each ABI-encoded calldata targeting
@@ -731,6 +779,19 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                 &args_json,
                 emit,
             )?,
+            // Cat D' — `multicall_call_array` (PER-LEG-TO: Bundler3
+            // `multicall(Call[])`, Call = (address to, bytes data, uint256 value,
+            // bool skipRevert, bytes32 callbackHash)). Unlike `multicall_recurse`
+            // (same-`to`, `bytes[]` legs), each leg carries its OWN target `to`, so
+            // we re-route the leg's `data` THERE (e.g. Bundler3 → GeneralAdapter1)
+            // and wrap the mapped legs in one `ActionBody::Multicall`.
+            "multicall_call_array" => build_multicall_call_array_body(
+                input.chain_id,
+                &input.submitter,
+                input.submitted_at,
+                &args_json,
+                emit,
+            )?,
             other => {
                 return Err(EngineErrorDto::new(
                     "unsupported_strategy",
@@ -739,11 +800,31 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             }
         };
 
+        // N2 (catch-all): a decoded body that is an EMPTY Multicall — e.g. an
+        // `array_emit` over a length-0 dynamic array (Permit2 `lockdown([])`,
+        // `permitBatch([])`, …) — must NOT pass through. An empty Multicall has
+        // domain "multicall", survives the orchestrator's realActions filter, and
+        // aggregates to PASS (no children, no policy) — a fail-open. Surface it as
+        // Unknown so it warn-closes. (A strictly-empty batch is an on-chain no-op,
+        // so warn-closing costs the user nothing.) `dispatch_opcode_stream` already
+        // returns Unknown for an empty stream; this is the single chokepoint for
+        // every other strategy.
+        let body = match body {
+            v3_action::ActionBody::Multicall { ref actions } if actions.is_empty() => unknown_leg(
+                ctx.tx_to,
+                ctx.chain.clone(),
+                ctx.raw_calldata.to_string(),
+                ctx.value,
+            ),
+            other => other,
+        };
+
         let action = v3_action::Action { meta, body };
 
         Ok(DeclarativeRouteRequestV3ResultDto {
             actions: vec![action],
             decoder_id: bundle_id,
+            reenter_callback,
         })
     })();
 
@@ -766,6 +847,99 @@ fn aave_weth_gateway_pool(chain_id: u64, target: &str) -> Option<&'static str> {
         }
         (42161, "0x5283beced7adf6d003225c13896e536f2d4264ff") => {
             Some("0x794a61358d6845594f94dc1db02a252b5b4814ad")
+        }
+        _ => None,
+    }
+}
+
+/// Static `$resolved.compound_v2_underlying` — the ERC-20 underlying a Compound
+/// v2 cToken market lends/borrows (cETH → the native sentinel, since `CEther`
+/// has no `underlying()`). Keyed by `(chain_id, cToken)`; mainnet-only because
+/// Compound v2 never multi-chained. Every underlying was verified on-chain via
+/// each market's `underlying()` view. The `compound_v2` analogue of
+/// [`compound_v3_base_asset`]; a no-op for every non-cToken target.
+fn compound_v2_underlying(chain_id: u64, target: &str) -> Option<&'static str> {
+    let target = target.to_ascii_lowercase();
+    match (chain_id, target.as_str()) {
+        // cBAT → BAT
+        (1, "0x6c8c6b02e7b2be14d4fa6022dfd6d75921d90e4e") => {
+            Some("0x0d8775f648430679a709e98d2b0cb6250d2887ef")
+        }
+        // cDAI → DAI
+        (1, "0x5d3a536e4d6dbd6114cc1ead35777bab948e3643") => {
+            Some("0x6b175474e89094c44da98b954eedeac495271d0f")
+        }
+        // cREP → REP
+        (1, "0x158079ee67fce2f58472a96584a73c7ab9ac95c1") => {
+            Some("0x1985365e9f78359a9b6ad760e32412f4a445e862")
+        }
+        // cUSDC → USDC
+        (1, "0x39aa39c021dfbae8fac545936693ac917d5e7563") => {
+            Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+        }
+        // cUSDT → USDT
+        (1, "0xf650c3d88d12db855b8bf7d11be6c55a4e07dcc9") => {
+            Some("0xdac17f958d2ee523a2206206994597c13d831ec7")
+        }
+        // cWBTC (legacy) → WBTC
+        (1, "0xc11b1268c1a384e55c48c2391d8d480264a3a7f4") => {
+            Some("0x2260fac5e5542a773aa44fbcfedf7c193bc2c599")
+        }
+        // cZRX → ZRX
+        (1, "0xb3319f5d18bc0d84dd1b4825dcde5d5f7266d407") => {
+            Some("0xe41d2489571d322189246dafa5ebde1f4699f498")
+        }
+        // cSAI → SAI
+        (1, "0xf5dce57282a584d2746faf1593d3121fcac444dc") => {
+            Some("0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359")
+        }
+        // cUNI → UNI
+        (1, "0x35a18000230da775cac24873d00ff85bccded550") => {
+            Some("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")
+        }
+        // cCOMP → COMP
+        (1, "0x70e36f6bf80a52b3b46b3af8e106cc0ed743e8e4") => {
+            Some("0xc00e94cb662c3520282e6f5717214004a7f26888")
+        }
+        // cWBTC2 → WBTC
+        (1, "0xccf4429db6322d5c611ee964527d42e5d685dd6a") => {
+            Some("0x2260fac5e5542a773aa44fbcfedf7c193bc2c599")
+        }
+        // cTUSD → TUSD
+        (1, "0x12392f67bdf24fae0af363c24ac620a2f67dad86") => {
+            Some("0x0000000000085d4780b73119b644ae5ecd22b376")
+        }
+        // cLINK → LINK
+        (1, "0xface851a4921ce59e912d19329929ce6da6eb0c7") => {
+            Some("0x514910771af9ca656af840dff83e8264ecf986ca")
+        }
+        // cMKR → MKR
+        (1, "0x95b4ef2869ebd94beb4eee400a99824bf5dc325b") => {
+            Some("0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2")
+        }
+        // cSUSHI → SUSHI
+        (1, "0x4b0181102a0112a2ef11abee5563bb4a3176c9d7") => {
+            Some("0x6b3595068778dd592e39a122f4f5a5cf09c90fe2")
+        }
+        // cAAVE → AAVE
+        (1, "0xe65cdb6479bac1e22340e4e755fae7e509ecd06c") => {
+            Some("0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9")
+        }
+        // cYFI → YFI
+        (1, "0x80a2ae356fc9ef4305676f7a3e2ed04e12c33946") => {
+            Some("0x0bc529c00c6401aef6d220be8c6ea1667f6ad93e")
+        }
+        // cUSDP → USDP (Pax Dollar)
+        (1, "0x041171993284df560249b57358f931d9eb7b925d") => {
+            Some("0x8e870d67f660d95d5be530380d0ec0bd388289e1")
+        }
+        // cFEI → FEI
+        (1, "0x7713dd9ca933848f6819f38b8352d9a15ea73f67") => {
+            Some("0x956f47f50a910163d8bf957cf5846d573e7f87ca")
+        }
+        // cETH (CEther) → native ETH sentinel
+        (1, "0x4ddc2d193948926d02f9b1fe9e1daa0718270ed5") => {
+            Some("0x0000000000000000000000000000000000000000")
         }
         _ => None,
     }
@@ -1033,10 +1207,16 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
             let per_item_body = emit.get("body").ok_or_else(|| {
                 EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
             })?;
+            let parallel_sources = emit.get("parallel_sources");
             let per_item_live_inputs = emit.get("live_inputs");
-            build_array_emit(&ctx, array_source, per_item_body, per_item_live_inputs).map_err(
-                |error| EngineErrorDto::new("build_array_emit_failed", error.to_string()),
-            )?
+            build_array_emit(
+                &ctx,
+                array_source,
+                parallel_sources,
+                per_item_body,
+                per_item_live_inputs,
+            )
+            .map_err(|error| EngineErrorDto::new("build_array_emit_failed", error.to_string()))?
         } else {
             let body_template = emit.get("body").ok_or_else(|| {
                 EngineErrorDto::new("invalid_bundle", "missing emit.body".to_string())
@@ -1080,6 +1260,8 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
         Ok(DeclarativeRouteRequestV3ResultDto {
             actions: vec![action],
             decoder_id: bundle_id,
+            // Typed-data signatures carry no calldata, hence no re-entry callback.
+            reenter_callback: None,
         })
     })();
 
@@ -1474,6 +1656,27 @@ fn maybe_normalize_v4_swap_params(decoded: &mut serde_json::Value, opcode_key: &
     }
 }
 
+/// Build an `Unknown` body for a batch that decoded to NOTHING — an opcode
+/// stream whose every opcode was unmapped+dropped, or any other strategy that
+/// yielded an empty `Multicall` (e.g. an `array_emit` over a length-0 array).
+/// Surfacing Unknown (instead of an empty Multicall) makes the route warn-close
+/// rather than PASS (an empty Multicall has no children to evaluate, so it
+/// aggregates to pass — the N2 fail-open). A PARTIAL decode keeps its mapped
+/// legs (the registry `warn`=skip intent for the dropped ones).
+fn unknown_leg(
+    target: V3Address,
+    chain: V3ChainId,
+    calldata: String,
+    value: V3U256,
+) -> v3_action::ActionBody {
+    v3_action::ActionBody::Unknown {
+        target,
+        chain,
+        calldata,
+        value,
+    }
+}
+
 /// B.1.c.2 — recursive opcode-stream → `ActionBody::Multicall` dispatch.
 ///
 /// Loops the masked `commands_bytes` and, per opcode, dispatches the matching
@@ -1539,6 +1742,11 @@ fn dispatch_opcode_stream(
                     ));
                 }
                 V3UnknownOpcodePolicy::Warn => {
+                    // Drop a single unmapped opcode (the registry's `warn` policy
+                    // intentionally skips benign/unmodelled plumbing opcodes). The
+                    // N2 fail-open it could cause — an ALL-dropped stream becoming
+                    // an empty Multicall that aggregates to PASS — is closed at the
+                    // function tail: an empty result surfaces as Unknown (warn).
                     eprintln!(
                         "[declarative_exports] warn: unknown opcode 0x{opcode:02x} at index {i}"
                     );
@@ -1588,6 +1796,18 @@ fn dispatch_opcode_stream(
         actions.push(child_action);
     }
 
+    // N2: an opcode stream that decoded to NOTHING (every opcode unmapped and
+    // dropped above) must NOT become an empty `Multicall` — that aggregates to
+    // PASS (fail-open). Surface a single `Unknown` so it warn-closes. A PARTIAL
+    // decode keeps its mapped legs (honouring `warn`=skip for the rest).
+    if actions.is_empty() {
+        return Ok(unknown_leg(
+            ctx.tx_to,
+            ctx.chain.clone(),
+            ctx.raw_calldata.to_string(),
+            ctx.value,
+        ));
+    }
     Ok(v3_action::ActionBody::Multicall { actions })
 }
 
@@ -1912,6 +2132,311 @@ fn build_tagged_dispatch(
         .map_err(|error| EngineErrorDto::new("build_action_body_failed", error.to_string()))
 }
 
+/// Named static `(chain, address) -> address` resolvers — the SAME helpers the
+/// outer route pre-populates into `$resolved`, re-exposed so
+/// [`build_parallel_tagged_dispatch`] can compute a per-element `$resolved.*`
+/// keyed by a DECODED INPUT address rather than the outer `$to`. Compound v3's
+/// Bulker is the motivating case: `invoke`'s `to` IS the Bulker, but each
+/// action's `comet` (hence its `base_asset`) is a per-element parameter. Returns
+/// `None` for an unknown resolver name or an address the resolver does not
+/// cover (a no-op augmentation, never a fail).
+fn resolve_named(chain_id: u64, name: &str, address: &str) -> Option<&'static str> {
+    match name {
+        "compound_v3_base_asset" => compound_v3_base_asset(chain_id, address),
+        "compound_v2_underlying" => compound_v2_underlying(chain_id, address),
+        _ => None,
+    }
+}
+
+/// Derive the `per_tag` lookup key from one element's tag value under the
+/// declared `tag_encoding`:
+///   * `bytes32_ascii` — the tag is a `bytes32` hex string whose bytes are an
+///     ASCII action name right-zero-padded (Solidity `bytes32` string literal,
+///     e.g. Compound `"ACTION_SUPPLY_ASSET"`). Hex-decode, trim trailing `0x00`,
+///     UTF-8. This is the legible Compound case.
+///   * `bytes32_hex` — the tag is an opaque `bytes32` (e.g. a keccak selector);
+///     normalise to lowercase `0x`-prefixed hex.
+///   * `uint` — a small numeric enum tag; a decimal string passes through, a
+///     `0x` hex string converts to decimal.
+///
+/// Fail-loud on a shape mismatch (the element then surfaces `invalid_tag`).
+fn derive_tag_key(tag: &serde_json::Value, encoding: &str) -> Result<String, String> {
+    match encoding {
+        "bytes32_ascii" => {
+            let s = tag
+                .as_str()
+                .ok_or_else(|| format!("bytes32_ascii tag must be a hex string, got {tag}"))?;
+            let bytes = hex::decode(s.strip_prefix("0x").unwrap_or(s))
+                .map_err(|error| format!("bytes32_ascii tag {s:?} not hex: {error}"))?;
+            let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |p| p + 1);
+            String::from_utf8(bytes[..end].to_vec())
+                .map_err(|error| format!("bytes32_ascii tag {s:?} not UTF-8: {error}"))
+        }
+        "bytes32_hex" => {
+            let s = tag
+                .as_str()
+                .ok_or_else(|| format!("bytes32_hex tag must be a hex string, got {tag}"))?;
+            Ok(format!(
+                "0x{}",
+                s.strip_prefix("0x").unwrap_or(s).to_ascii_lowercase()
+            ))
+        }
+        "uint" => match tag {
+            serde_json::Value::Number(n) => Ok(n.to_string()),
+            serde_json::Value::String(s) => {
+                let s = s.trim();
+                if let Some(hex) = s.strip_prefix("0x") {
+                    u128::from_str_radix(hex, 16)
+                        .map(|v| v.to_string())
+                        .map_err(|error| format!("uint tag {s:?} not hex/in-range: {error}"))
+                } else {
+                    Ok(s.to_owned())
+                }
+            }
+            other => Err(format!("uint tag must be a number or string, got {other}")),
+        },
+        other => Err(format!(
+            "unknown tag_encoding {other:?} (expected bytes32_ascii|bytes32_hex|uint)"
+        )),
+    }
+}
+
+/// `parallel_tagged_dispatch` — decode a parallel-array tagged batch
+/// (`fn(tag[], data[])`) into a `Multicall` of per-element bodies. The
+/// motivating shape is Compound v3 `Bulker.invoke(bytes32[] actions, bytes[]
+/// data)` where `actions[i]` is a `bytes32` ASCII tag selecting how to
+/// ABI-decode `data[i]` (`ACTION_SUPPLY_ASSET` → `(address comet, address to,
+/// address asset, uint256 amount)`, …).
+///
+/// emit shape:
+/// ```json
+/// {
+///   "strategy": "parallel_tagged_dispatch",
+///   "actions_source": "$args.actions",
+///   "data_source":    "$args.data",
+///   "tag_encoding":   "bytes32_ascii",
+///   "max_elements":   32,
+///   "unknown_tag_policy": "warn",
+///   "resolve_from_inputs": { "compound_v3_base_asset": "comet" },
+///   "per_tag": {
+///     "ACTION_SUPPLY_ASSET": { "inputs_abi": "(…)", "body": { … }, "live_inputs": { … } },
+///     "default": { "body": { … } }
+///   }
+/// }
+/// ```
+///
+/// Posture: fail-LOUD on structural faults (length mismatch, element cap,
+/// non-hex data, per-element ABI-decode failure → `$inputs.*`
+/// `UnresolvedPlaceholder`); fail-VISIBLE on an unknown tag (`warn` → a visible
+/// `unknown` body for that element, never a silent drop; `deny` → hard error).
+/// An empty batch decodes to an empty `Multicall` (an on-chain no-op).
+fn build_parallel_tagged_dispatch(
+    ctx: &V3MapContext<'_>,
+    emit: &serde_json::Value,
+    chain_id: u64,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    const DEFAULT_MAX_ELEMENTS: u64 = 32;
+    const HARD_MAX_ELEMENTS: u64 = 64;
+
+    let per_tag = emit
+        .get("per_tag")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| EngineErrorDto::new("invalid_bundle", "missing emit.per_tag".to_string()))?;
+
+    let actions_source = emit
+        .get("actions_source")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            EngineErrorDto::new("invalid_bundle", "missing emit.actions_source".to_string())
+        })?;
+    let data_source = emit
+        .get("data_source")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            EngineErrorDto::new("invalid_bundle", "missing emit.data_source".to_string())
+        })?;
+
+    let tag_encoding = emit
+        .get("tag_encoding")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            EngineErrorDto::new("invalid_bundle", "missing emit.tag_encoding".to_string())
+        })?;
+
+    let max_elements = emit
+        .get("max_elements")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(DEFAULT_MAX_ELEMENTS);
+    if max_elements == 0 || max_elements > HARD_MAX_ELEMENTS {
+        return Err(EngineErrorDto::new(
+            "invalid_bundle",
+            format!("emit.max_elements must be 1..={HARD_MAX_ELEMENTS}, got {max_elements}"),
+        ));
+    }
+
+    let deny_unknown = matches!(
+        emit.get("unknown_tag_policy")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+
+    // `resolve_from_inputs`: resolver name → the `inputs_abi` field whose decoded
+    // address keys that resolver (e.g. `compound_v3_base_asset` ← `comet`).
+    let resolve_from_inputs: Vec<(String, String)> = emit
+        .get("resolve_from_inputs")
+        .and_then(serde_json::Value::as_object)
+        .map(|map| {
+            map.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // ── Resolve the two index-aligned arrays ────────────────────────────────
+    let tags_val = substitute_placeholders(ctx, &serde_json::json!(actions_source))
+        .map_err(|error| EngineErrorDto::new("invalid_actions_source", error.to_string()))?;
+    let tags = tags_val.as_array().ok_or_else(|| {
+        EngineErrorDto::new(
+            "invalid_actions_source",
+            format!("emit.actions_source {actions_source:?} did not resolve to an array"),
+        )
+    })?;
+    let data_val = substitute_placeholders(ctx, &serde_json::json!(data_source))
+        .map_err(|error| EngineErrorDto::new("invalid_data_source", error.to_string()))?;
+    let data = data_val.as_array().ok_or_else(|| {
+        EngineErrorDto::new(
+            "invalid_data_source",
+            format!("emit.data_source {data_source:?} did not resolve to an array"),
+        )
+    })?;
+
+    if tags.len() != data.len() {
+        return Err(EngineErrorDto::new(
+            "invalid_bundle",
+            format!(
+                "parallel_tagged_dispatch: actions[] len {} != data[] len {}",
+                tags.len(),
+                data.len()
+            ),
+        ));
+    }
+    if tags.len() as u64 > max_elements {
+        return Err(EngineErrorDto::new(
+            "invalid_bundle",
+            format!(
+                "parallel_tagged_dispatch: element count {} exceeds cap {max_elements}",
+                tags.len()
+            ),
+        ));
+    }
+
+    let mut actions: Vec<v3_action::ActionBody> = Vec::with_capacity(tags.len());
+    for (index, (tag_val, data_item)) in tags.iter().zip(data.iter()).enumerate() {
+        // 1. tag → per_tag lookup key.
+        let key = derive_tag_key(tag_val, tag_encoding).map_err(|error| {
+            EngineErrorDto::new(
+                "invalid_tag",
+                format!("parallel_tagged_dispatch element #{index}: {error}"),
+            )
+        })?;
+
+        // 2. Per-tag entry, else `default`, else fail-visible Unknown body.
+        let Some(entry) = per_tag.get(&key).or_else(|| per_tag.get("default")) else {
+            if deny_unknown {
+                return Err(EngineErrorDto::new(
+                    "unknown_tag",
+                    format!(
+                        "parallel_tagged_dispatch element #{index}: tag {key:?} absent \
+                         from per_tag (unknown_tag_policy=deny)"
+                    ),
+                ));
+            }
+            eprintln!(
+                "[declarative_exports] parallel_tagged_dispatch element #{index}: tag {key:?} \
+                 absent from per_tag — fail-soft Unknown body"
+            );
+            let unknown = serde_json::json!({
+                "domain": "unknown",
+                "unknown": {
+                    "target": "$to",
+                    "chain": "$chain",
+                    "calldata": "$calldata",
+                    "value": "$tx.value"
+                }
+            });
+            let body = build_action_body(ctx, &unknown, None).map_err(|error| {
+                EngineErrorDto::new("build_action_body_failed", error.to_string())
+            })?;
+            actions.push(body);
+            continue;
+        };
+
+        let body_template = entry.get("body").ok_or_else(|| {
+            EngineErrorDto::new(
+                "invalid_bundle",
+                format!("parallel_tagged_dispatch per_tag {key:?} missing body"),
+            )
+        })?;
+
+        // 3. ABI-decode this element's `data[i]` with the entry's `inputs_abi`.
+        //    A decode failure → `Null`, so a body `$inputs.<x>` ref surfaces a
+        //    precise UnresolvedPlaceholder (no silent bogus default) — same
+        //    best-effort contract as tagged_dispatch / opcode-stream.
+        let data_hex = data_item.as_str().ok_or_else(|| {
+            EngineErrorDto::new(
+                "invalid_data_source",
+                format!("parallel_tagged_dispatch element #{index}: data not a hex string"),
+            )
+        })?;
+        let data_bytes =
+            hex::decode(data_hex.strip_prefix("0x").unwrap_or(data_hex)).map_err(|error| {
+                EngineErrorDto::new(
+                    "invalid_data_source",
+                    format!("parallel_tagged_dispatch element #{index}: data not hex: {error}"),
+                )
+            })?;
+        let decoded = entry
+            .get("inputs_abi")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|sig| decode_inputs_abi_tuple(sig, &data_bytes).ok())
+            .unwrap_or(serde_json::Value::Null);
+
+        // 4. Augment a per-element `$resolved` from decoded inputs (e.g.
+        //    `compound_v3_base_asset` keyed by the decoded `comet`, since `$to`
+        //    is the Bulker, not the market). A no-op when the field is absent or
+        //    the resolver does not cover the address.
+        let mut child_resolved = ctx.resolved.clone();
+        for (resolver_name, field) in &resolve_from_inputs {
+            if let Some(addr) = decoded.get(field).and_then(serde_json::Value::as_str) {
+                if let Some(asset) = resolve_named(chain_id, resolver_name, addr) {
+                    child_resolved.insert(
+                        resolver_name.clone(),
+                        serde_json::Value::String(asset.to_owned()),
+                    );
+                }
+            }
+        }
+
+        let child_ctx = V3MapContext {
+            chain: ctx.chain.clone(),
+            tx_to: ctx.tx_to,
+            tx_from: ctx.tx_from,
+            value: ctx.value,
+            submitted_at: ctx.submitted_at,
+            args_json: ctx.args_json,
+            raw_calldata: ctx.raw_calldata,
+            resolved: child_resolved,
+            derived: ctx.derived.clone(),
+            inputs: Some(&decoded),
+        };
+        let body = build_action_body(&child_ctx, body_template, entry.get("live_inputs"))
+            .map_err(|error| EngineErrorDto::new("build_action_body_failed", error.to_string()))?;
+        actions.push(body);
+    }
+
+    Ok(v3_action::ActionBody::Multicall { actions })
+}
+
 /// Decode a single opcode's `inputs_abi` Solidity tuple signature against a
 /// raw byte buffer, returning a JSON object keyed by the tuple's named
 /// fields.
@@ -2230,6 +2755,29 @@ fn maybe_inject_morpho_market_id(
     }
 }
 
+/// If the decoded top-level args carry a MetaMorpho `vault` argument (a
+/// GeneralAdapter1 `erc4626*` leg — `erc4626Deposit/Mint/Withdraw/Redeem`),
+/// inject `$derived.metamorpho_underlying`: the vault's underlying asset, which
+/// is NOT in the leg calldata (the leg carries only the vault address). Sourced
+/// from the committed mainnet vault→underlying snapshot
+/// ([`crate::metamorpho_underlying`]). A no-op for every non-vault call
+/// (value-gated on a known listed vault). The single_emit analogue of the
+/// per-vault baked `asset` used by the DIRECT metamorpho manifests.
+fn maybe_inject_metamorpho_underlying(
+    args_json: &serde_json::Value,
+    derived: &mut BTreeMap<String, serde_json::Value>,
+) {
+    let Some(vault) = args_json.get("vault").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    if let Some(underlying) = crate::metamorpho_underlying::underlying_of(&vault.to_lowercase()) {
+        derived.insert(
+            "metamorpho_underlying".to_owned(),
+            serde_json::Value::String(underlying.to_owned()),
+        );
+    }
+}
+
 /// Uniswap V3 SwapRouter `exactInput` / `exactOutput` carry a packed `bytes path`
 /// in top-level args. The declarative grammar can reference derived placeholders
 /// but cannot unpack `[token20][fee3]...`; inject the stable endpoints and first
@@ -2472,6 +3020,353 @@ fn build_multicall_recurse_body(
     Ok(v3_action::ActionBody::Multicall { actions })
 }
 
+/// Cat D' — `multicall_call_array`: Bundler3-style `multicall(Call[])` where each
+/// `Call = (address to, bytes data, uint256 value, bool skipRevert, bytes32 callbackHash)`
+/// carries its OWN target. Unlike [`build_multicall_recurse_body`] (same-`to`,
+/// `bytes[]` legs), we read each leg's `to` from the decoded positional tuple and
+/// re-route the leg's `data` THERE (e.g. Bundler3 → GeneralAdapter1), wrapping the
+/// mapped legs in one [`ActionBody::Multicall`]. Unmapped helper legs (no installed
+/// mapper) are skipped; if NO leg resolves we reject (never an empty no-op).
+///
+/// Recursion is bounded: each leg's `data` is a strict sub-slice of the outer
+/// calldata (shrinks every level) and the per-level fan-out is capped at
+/// `MAX_MULTICALL_CHILDREN`.
+fn build_multicall_call_array_body(
+    chain_id: u64,
+    submitter: &str,
+    submitted_at: u64,
+    args_json: &serde_json::Value,
+    emit: &serde_json::Value,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    const MAX_MULTICALL_CHILDREN: usize = 64;
+
+    // Select the `Call[]` argument: an explicit `recurse_arg` name, else the single
+    // array-valued argument (the bundle is the only array for `multicall(Call[])`).
+    let bundle_value =
+        if let Some(recurse_arg) = emit.get("recurse_arg").and_then(serde_json::Value::as_str) {
+            args_json.get(recurse_arg).ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall_call_array: recurse_arg {recurse_arg:?} not found"),
+                )
+            })?
+        } else {
+            let Some(obj) = args_json.as_object() else {
+                return Err(EngineErrorDto::new(
+                    "build_multicall_failed",
+                    "multicall_call_array: no Call[] array argument".to_string(),
+                ));
+            };
+            let mut array_args = obj.values().filter(|v| v.is_array());
+            match (array_args.next(), array_args.next()) {
+                (Some(single), None) => single,
+                (None, _) => {
+                    return Err(EngineErrorDto::new(
+                        "build_multicall_failed",
+                        "multicall_call_array: no Call[] array argument".to_string(),
+                    ));
+                }
+                (Some(_), Some(_)) => {
+                    return Err(EngineErrorDto::new(
+                        "build_multicall_failed",
+                        "multicall_call_array: ambiguous (multiple array arguments)".to_string(),
+                    ));
+                }
+            }
+        };
+    let legs = bundle_value.as_array().ok_or_else(|| {
+        EngineErrorDto::new(
+            "build_multicall_failed",
+            "multicall_call_array: selected argument is not a Call[] array".to_string(),
+        )
+    })?;
+    if legs.len() > MAX_MULTICALL_CHILDREN {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            format!(
+                "multicall_call_array child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
+                legs.len()
+            ),
+        ));
+    }
+
+    // `max_depth` bounds only the `reenter(Call[])` callback recursion (D-C).
+    let max_depth = emit
+        .get("max_depth")
+        .and_then(serde_json::Value::as_u64)
+        .map_or(4, |d| usize::try_from(d).unwrap_or(4));
+
+    let actions = process_call_legs(chain_id, submitter, submitted_at, legs, 0, max_depth)?;
+
+    if actions.is_empty() {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            "multicall_call_array: no inner leg resolved to an installed mapper".to_string(),
+        ));
+    }
+
+    Ok(v3_action::ActionBody::Multicall { actions })
+}
+
+/// Process a decoded `Call[]` (positional `[to,data,value,skipRevert,callbackHash]`
+/// tuples), re-routing each leg AT ITS OWN `to` and folding the mapped legs into a
+/// flat `Vec<ActionBody>`. Shared by the top-level Bundler3 `multicall(Call[])`
+/// decode and the nested `reenter(Call[])` callback recursion (D-C).
+///
+/// LENIENT: returns whatever resolved (possibly EMPTY) so a `reenter` callback
+/// whose legs are all unmapped (e.g. a swap via a deferred adapter) does not fail
+/// the outer bundle — only the TOP-LEVEL caller rejects an all-empty decode.
+/// `depth`/`max_depth` bound the callback recursion (each callback `data` is a
+/// strict sub-slice; the per-level fan-out is capped at `MAX_MULTICALL_CHILDREN`).
+fn process_call_legs(
+    chain_id: u64,
+    submitter: &str,
+    submitted_at: u64,
+    legs: &[serde_json::Value],
+    depth: usize,
+    max_depth: usize,
+) -> Result<Vec<v3_action::ActionBody>, EngineErrorDto> {
+    const MAX_MULTICALL_CHILDREN: usize = 64;
+    if legs.len() > MAX_MULTICALL_CHILDREN {
+        return Err(EngineErrorDto::new(
+            "build_multicall_failed",
+            format!(
+                "multicall_call_array child count {} exceeds cap {MAX_MULTICALL_CHILDREN}",
+                legs.len()
+            ),
+        ));
+    }
+
+    let mut actions: Vec<v3_action::ActionBody> = Vec::new();
+    for (index, leg) in legs.iter().enumerate() {
+        // Each leg is a positional tuple array: [to, data, value, skipRevert, callbackHash].
+        let fields = leg.as_array().ok_or_else(|| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall_call_array leg #{index} is not a Call tuple array"),
+            )
+        })?;
+        let leg_to = fields
+            .first()
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall_call_array leg #{index} missing tuple field 0 (to)"),
+                )
+            })?;
+        let leg_data = fields
+            .get(1)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!("multicall_call_array leg #{index} missing tuple field 1 (data)"),
+                )
+            })?;
+        // Call.value (tuple field 2, uint256 → decimal string) — forward it so a
+        // native-value leg (e.g. wrapNative) sees the right msg.value. Default "0".
+        let leg_value = fields
+            .get(2)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("0");
+
+        let stripped = leg_data.strip_prefix("0x").unwrap_or(leg_data);
+        let data_bytes = hex::decode(stripped).map_err(|error| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall_call_array leg #{index} data not hex: {error}"),
+            )
+        })?;
+        if data_bytes.len() < 4 {
+            // A bare value-transfer leg (empty / `<4B` data) has no selector to
+            // route — skip it; the mapped legs carry the intent.
+            continue;
+        }
+        let leg_selector = format!("0x{}", hex::encode(&data_bytes[0..4]));
+
+        // Re-enter the public entrypoint AT THE LEG'S OWN `to` (the per-leg-to
+        // difference vs `multicall_recurse`).
+        let inner_input = serde_json::json!({
+            "chain_id": chain_id,
+            "to": leg_to,
+            "selector": leg_selector,
+            "calldata": leg_data,
+            "value": leg_value,
+            "submitter": submitter,
+            "submitted_at": submitted_at,
+        });
+        let out = declarative_route_request_v3_json(inner_input.to_string());
+        let parsed: serde_json::Value = serde_json::from_str(&out).map_err(|error| {
+            EngineErrorDto::new(
+                "build_multicall_failed",
+                format!("multicall_call_array leg #{index} result not JSON: {error}"),
+            )
+        })?;
+
+        if parsed.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+            let inner_actions = parsed
+                .pointer("/data/actions")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| {
+                    EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!("multicall_call_array leg #{index} result missing data.actions"),
+                    )
+                })?;
+            for action in inner_actions {
+                let body_json = action.get("body").ok_or_else(|| {
+                    EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!("multicall_call_array leg #{index} action missing body"),
+                    )
+                })?;
+                let body: v3_action::ActionBody = serde_json::from_value(body_json.clone())
+                    .map_err(|error| {
+                        EngineErrorDto::new(
+                            "build_multicall_failed",
+                            format!("multicall_call_array leg #{index} body deserialize: {error}"),
+                        )
+                    })?;
+                // D-A: a GeneralAdapter1 `erc4626*` leg whose MetaMorpho vault is
+                // OUTSIDE the committed `metamorpho_underlying` snapshot could not
+                // resolve its underlying, so the required `asset` fell back to the
+                // zero address — a confidently-WRONG decode. Refuse the WHOLE bundle
+                // (fail loud → warn-closed) rather than silently skip the leg: a
+                // malicious batch could otherwise hide a large unknown-vault deposit
+                // behind a benign known-vault one. (Re-gen the snapshot when the
+                // listed set changes; see `crate::metamorpho_underlying`.)
+                if is_unresolved_metamorpho_underlying(&body) {
+                    return Err(EngineErrorDto::new(
+                        "build_multicall_failed",
+                        format!(
+                            "multicall_call_array leg #{index}: MetaMorpho vault underlying \
+                             unresolved (vault outside the committed snapshot) — refusing a \
+                             0x0-asset decode"
+                        ),
+                    ));
+                }
+                actions.push(body);
+            }
+        } else {
+            let kind = parsed
+                .pointer("/error/kind")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            // Unmapped helper / deferred-adapter leg (no installed mapper, or no
+            // adapter registered for that `to`) — no primary body, but DON'T bail:
+            // a Morpho callback leg (notably the EXCLUDE `morphoFlashLoan`) still
+            // carries a `reenter(Call[])` we want to surface, so fall through to the
+            // callback extraction below. Any OTHER error (a mapped leg that failed
+            // to decode) is surfaced so the batch fails loud, not silently dropped.
+            if kind != "no_declarative_v3_mapper" && kind != "route_failed" {
+                let message = parsed
+                    .pointer("/error/message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                return Err(EngineErrorDto::new(
+                    "build_multicall_failed",
+                    format!(
+                        "multicall_call_array leg #{index} ({leg_selector}): {kind}: {message}"
+                    ),
+                ));
+            }
+        }
+
+        // D-C (generalized): the route surfaces `data.reenter_callback` when the
+        // leg's manifest declares `emit.reenter_callback_arg` — the raw
+        // `abi.encode(Call[])` re-entry callback (Bundler3 re-enters it at the
+        // just-called adapter mid-execution: leverage / flash-loan loops). The
+        // primary body (if any) is already pushed; ALSO decode the callback legs so
+        // they aren't opaque. Bounded by `max_depth`; an all-unmapped callback
+        // contributes nothing. NO per-protocol selector list — fully manifest-driven.
+        if depth < max_depth {
+            if let Some(callback_hex) = parsed
+                .pointer("/data/reenter_callback")
+                .and_then(serde_json::Value::as_str)
+            {
+                if let Some(callback_legs) = decode_reenter_call_array(callback_hex)? {
+                    let nested = process_call_legs(
+                        chain_id,
+                        submitter,
+                        submitted_at,
+                        &callback_legs,
+                        depth + 1,
+                        max_depth,
+                    )?;
+                    actions.extend(nested);
+                }
+            }
+        }
+    }
+
+    Ok(actions)
+}
+
+/// Decode a `reenter(Call[])` callback — the raw `abi.encode(Call[])` bytes a
+/// manifest's `emit.reenter_callback_arg` points at (surfaced by the route as
+/// `data.reenter_callback`) — into its positional `Call[]` legs. `Ok(None)` for an
+/// empty callback. PROTOCOL-AGNOSTIC: the `Call = (address,bytes,uint256,bool,
+/// bytes32)` tuple is the framework's standard re-entry shape, so this carries no
+/// per-protocol knowledge — any bundler-adapter that nests a `Call[]` in a leg arg
+/// reuses it by declaring the arg name in its manifest. (The callback `data` has
+/// NO `reenter` selector prefix — Bundler3's `CoreAdapter.reenterBundler3` does
+/// `bytes.concat(reenter.selector, data)` itself.)
+fn decode_reenter_call_array(
+    callback_hex: &str,
+) -> Result<Option<Vec<serde_json::Value>>, EngineErrorDto> {
+    let stripped = callback_hex.strip_prefix("0x").unwrap_or(callback_hex);
+    if stripped.is_empty() {
+        return Ok(None);
+    }
+    let data_bytes = hex::decode(stripped).map_err(|error| {
+        EngineErrorDto::new(
+            "build_multicall_failed",
+            format!("reenter callback: data not hex: {error}"),
+        )
+    })?;
+    let bundle = decode_inputs_abi_tuple(
+        "((address,bytes,uint256,bool,bytes32)[] bundle)",
+        &data_bytes,
+    )
+    .map_err(|error| {
+        EngineErrorDto::new(
+            "build_multicall_failed",
+            format!("reenter callback: Call[] decode failed: {error}"),
+        )
+    })?;
+    let legs = bundle
+        .get("bundle")
+        .and_then(serde_json::Value::as_array)
+        .filter(|legs| !legs.is_empty());
+    Ok(legs.cloned())
+}
+
+/// D-A guard for [`build_multicall_call_array_body`]: is `body` a GeneralAdapter1
+/// `erc4626*` leg (MetaMorpho `supply`/`withdraw`) whose required `asset` resolved
+/// to the ZERO address? That happens only when the leg's vault is outside the
+/// committed `metamorpho_underlying` snapshot, so `maybe_inject_metamorpho_underlying`
+/// could not fill the underlying and placeholder substitution fell back to `0x0`.
+/// A real MetaMorpho underlying is never the zero address, so `0x0` is an
+/// unambiguous "unresolved" sentinel. (morpho* legs are unaffected — their asset
+/// derives from `MarketParams`, which is always present in the leg calldata.)
+fn is_unresolved_metamorpho_underlying(body: &v3_action::ActionBody) -> bool {
+    use v3_action::lending::{LendingAction, LendingVenue};
+    let v3_action::ActionBody::Lending(action) = body else {
+        return false;
+    };
+    let (venue, asset) = match action {
+        LendingAction::Supply(a) => (&a.venue, &a.asset),
+        LendingAction::Withdraw(a) => (&a.venue, &a.asset),
+        _ => return false,
+    };
+    matches!(venue, LendingVenue::MetaMorpho { .. })
+        && asset
+            .key
+            .contract()
+            .is_some_and(|addr| *addr == alloy_primitives::Address::ZERO)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2559,6 +3454,102 @@ mod tests {
         assert_eq!(
             parsed["error"]["kind"], "no_declarative_v3_mapper",
             "{parsed}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // N2/N3/K3 — a batch leg the decoder cannot map must surface as `Unknown`
+    // (warn-closed downstream), NOT be silently dropped (which let a benign
+    // sibling, or an empty batch, aggregate to PASS).
+    // ──────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn opcode_stream_all_unknown_decodes_to_unknown_not_empty_multicall() {
+        // An opcode stream whose commands are ALL unmapped used to drop every leg
+        // and return an EMPTY Multicall — which aggregates to PASS (N2 fail-open).
+        // It must now surface a single `Unknown` body so it warn-closes. (A single
+        // unmapped opcode in an otherwise-decoded stream is still dropped — the
+        // registry's `warn`=skip intent; only an all-empty result is escalated.)
+        let args = json!({});
+        let ctx = V3MapContext {
+            chain: V3ChainId::new("eip155:1".to_string()),
+            tx_to: parse_v3_address("0x000000000000000000000000000000000000babe", "to").unwrap(),
+            tx_from: parse_v3_address("0x000000000000000000000000000000000000aaaa", "from")
+                .unwrap(),
+            value: V3U256::ZERO,
+            submitted_at: V3Time::from_unix(1_700_000_000),
+            args_json: &args,
+            raw_calldata: "0xabcdef",
+            resolved: std::collections::BTreeMap::new(),
+            derived: std::collections::BTreeMap::new(),
+            inputs: None,
+        };
+        let per_opcode_body = serde_json::Map::new(); // nothing mapped → 0x01 unknown
+        let commands = [0x01u8];
+        let body = dispatch_opcode_stream(
+            &ctx,
+            &per_opcode_body,
+            &commands,
+            &[],
+            0xff,
+            0x00,
+            V3UnknownOpcodePolicy::Warn,
+            0,
+            5,
+        )
+        .unwrap();
+        let body_json = serde_json::to_value(body).unwrap();
+        assert_eq!(
+            body_json["domain"], "unknown",
+            "all-unknown opcode stream must surface Unknown (not an empty Multicall \
+             that aggregates to PASS): {body_json}"
+        );
+    }
+
+    #[test]
+    fn array_emit_empty_array_routes_to_unknown_not_empty_multicall() {
+        // N2 catch-all: an `array_emit` over a length-0 dynamic array (Permit2
+        // lockdown([]) / permitBatch([]) etc.) builds an empty Multicall, which
+        // would aggregate to PASS. The route-level guard must surface it as Unknown
+        // so it warn-closes. (An empty batch is an on-chain no-op — warn-closing
+        // costs the user nothing; it just denies the silent PASS.)
+        let contract = "0x000000000000000000000000000000000000c0de";
+        let batch_fn = Function::parse("batch(uint256[] xs)").unwrap();
+        let calldata = batch_fn
+            .abi_encode_input(&[DynSolValue::Array(vec![])])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&calldata[0..4]));
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+
+        let bundle = json!({
+            "type": "adapter_action", "id": "test/array-emit-empty@1.0.0",
+            "publisher": "test", "schema_version": "3",
+            "match": { "selector": selector, "chain_to_addresses": { "1": [contract] } },
+            "abi_fragment": { "function_name": "batch", "abi": {
+                "name": "batch", "type": "function", "stateMutability": "nonpayable",
+                "inputs": [{ "name": "xs", "type": "uint256[]" }], "outputs": [] } },
+            "emit": { "strategy": "array_emit", "array_source": "$args.xs", "body": {
+                "domain": "token", "token": { "action": "erc20_transfer", "erc20_transfer": {
+                    "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$to" } },
+                    "recipient": "$submitter", "amount": "$inputs" } } } },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1, "to": contract, "selector": selector, "calldata": calldata_hex,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["actions"][0]["body"]["domain"], "unknown",
+            "empty array_emit must route to Unknown, not an empty Multicall (PASS): {parsed}"
         );
     }
 
@@ -2663,6 +3654,487 @@ mod tests {
         assert_eq!(body_json["domain"], "multicall", "{body_json}");
         assert_eq!(body_json["actions"].as_array().unwrap().len(), 1);
         assert_eq!(body_json["actions"][0]["domain"], "unknown", "{body_json}");
+    }
+
+    /// `parallel_tagged_dispatch` end-to-end: a Compound v3
+    /// `Bulker.invoke(bytes32[] actions, bytes[] data)` with two index-aligned
+    /// legs (`ACTION_SUPPLY_ASSET` + `ACTION_CLAIM_REWARD`) decodes — through the
+    /// real install + route path — to a `Multicall` of one `lending::supply` and
+    /// one `airdrop::claim`. Crucially asserts the per-element `resolve_from_inputs`
+    /// mechanism: `base_asset` is resolved from the DECODED `comet` (cUSDCv3 →
+    /// USDC), NOT from `$to` (the Bulker) — the wrinkle that makes the strategy
+    /// necessary.
+    #[test]
+    fn parallel_tagged_dispatch_bulker_invoke_fans_out_to_multicall() {
+        use alloy_primitives::B256;
+
+        let bulker = "0xa397a8c2086c554b531c02e29f3291c9704b00c7";
+        let comet = "0xc3d688b66703497daa19211eedff47f25384cdc3"; // cUSDCv3 → base USDC
+        let usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+        let user = "0x000000000000000000000000000000000000aaaa";
+        let asset = "0x1111111111111111111111111111111111111111";
+        let rewards = "0x1b0e765f6224c21223aea2af16c1c46e38885a40"; // CometRewards mainnet
+        let src = "0x000000000000000000000000000000000000bbbb";
+
+        // bytes32 ASCII tags (right-zero-padded action names).
+        let tag = |name: &str| -> B256 {
+            let mut b = [0u8; 32];
+            b[..name.len()].copy_from_slice(name.as_bytes());
+            B256::from(b)
+        };
+
+        // data[i] = abi.encode(...) — params encoding (selector-stripped).
+        let params_enc = |sig: &str, vals: &[DynSolValue]| -> Vec<u8> {
+            let f = Function::parse(sig).unwrap();
+            f.abi_encode_input(vals).unwrap()[4..].to_vec()
+        };
+        let supply_data = params_enc(
+            "x(address,address,address,uint256)",
+            &[
+                DynSolValue::Address(comet.parse().unwrap()),
+                DynSolValue::Address(user.parse().unwrap()),
+                DynSolValue::Address(asset.parse().unwrap()),
+                DynSolValue::Uint(U256::from(5000_u64), 256),
+            ],
+        );
+        let claim_data = params_enc(
+            "x(address,address,address,bool)",
+            &[
+                DynSolValue::Address(comet.parse().unwrap()),
+                DynSolValue::Address(rewards.parse().unwrap()),
+                DynSolValue::Address(src.parse().unwrap()),
+                DynSolValue::Bool(true),
+            ],
+        );
+
+        // outer invoke(bytes32[],bytes[]) calldata.
+        let invoke_fn = Function::parse("invoke(bytes32[],bytes[])").unwrap();
+        let invoke_cd = invoke_fn
+            .abi_encode_input(&[
+                DynSolValue::Array(vec![
+                    DynSolValue::FixedBytes(tag("ACTION_SUPPLY_ASSET"), 32),
+                    DynSolValue::FixedBytes(tag("ACTION_CLAIM_REWARD"), 32),
+                ]),
+                DynSolValue::Array(vec![
+                    DynSolValue::Bytes(supply_data),
+                    DynSolValue::Bytes(claim_data),
+                ]),
+            ])
+            .unwrap();
+        let invoke_selector = format!("0x{}", hex::encode(&invoke_cd[0..4]));
+        let invoke_hex = format!("0x{}", hex::encode(&invoke_cd));
+
+        let bundle = json!({
+            "type": "adapter_action",
+            "id": "test/bulker-invoke@1.0.0",
+            "publisher": "test",
+            "schema_version": "3",
+            "match": {
+                "selector": invoke_selector,
+                "chain_to_addresses": { "1": [bulker] }
+            },
+            "abi_fragment": {
+                "function_name": "invoke",
+                "abi": {
+                    "name": "invoke",
+                    "type": "function",
+                    "stateMutability": "payable",
+                    "inputs": [
+                        { "name": "actions", "type": "bytes32[]" },
+                        { "name": "data", "type": "bytes[]" }
+                    ],
+                    "outputs": []
+                }
+            },
+            "emit": {
+                "strategy": "parallel_tagged_dispatch",
+                "actions_source": "$args.actions",
+                "data_source": "$args.data",
+                "tag_encoding": "bytes32_ascii",
+                "max_elements": 32,
+                "unknown_tag_policy": "warn",
+                "resolve_from_inputs": { "compound_v3_base_asset": "comet" },
+                "per_tag": {
+                    "ACTION_SUPPLY_ASSET": {
+                        "inputs_abi": "(address comet, address to, address asset, uint256 amount)",
+                        "body": {
+                            "domain": "lending",
+                            "lending": {
+                                "action": "supply",
+                                "supply": {
+                                    "venue": {
+                                        "name": "compound_v3",
+                                        "chain": "$chain",
+                                        "comet": "$inputs.comet",
+                                        "base_asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "$resolved.compound_v3_base_asset" } }
+                                    },
+                                    "asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.asset" } },
+                                    "amount": "$inputs.amount",
+                                    "on_behalf_of": "$inputs.to"
+                                }
+                            }
+                        },
+                        "live_inputs": {
+                            "reserve_state": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_reserve_state" }, "ttl_s": 30 },
+                            "supply_apy": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_supply_apy" }, "ttl_s": 30 },
+                            "a_token_price_usd": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_a_token_price_usd" }, "ttl_s": 60 },
+                            "eligible_as_collat": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_eligible_as_collat" }, "ttl_s": 60 },
+                            "user_state_before": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_user_state_before" }, "ttl_s": 12 }
+                        }
+                    },
+                    "ACTION_CLAIM_REWARD": {
+                        "inputs_abi": "(address comet, address rewards, address src, bool shouldAccrue)",
+                        "body": {
+                            "domain": "airdrop",
+                            "airdrop": {
+                                "action": "claim",
+                                "claim": {
+                                    "source": { "name": "compound" },
+                                    "claim_target": { "kind": "staking_claim", "chain": "$chain", "contract": "$inputs.rewards" },
+                                    "recipient": "$inputs.src",
+                                    "proof": null,
+                                    "sig": null
+                                }
+                            }
+                        },
+                        "live_inputs": {
+                            "is_still_claimable": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_is_still_claimable" }, "ttl_s": 30 },
+                            "actual_amount": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_actual_amount" }, "ttl_s": 60 },
+                            "claim_token": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_claim_token" }, "ttl_s": 60 },
+                            "claim_window": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "compound_v3_claim_window" }, "ttl_s": 60 }
+                        }
+                    }
+                }
+            },
+            "requires": {
+                "imperative": [],
+                "adapter_capabilities": [],
+                "host_capabilities": [],
+                "extension": ">=0.1.0"
+            }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let route_input = json!({
+            "chain_id": 1,
+            "to": bulker,
+            "selector": invoke_selector,
+            "calldata": invoke_hex,
+            "value": "0",
+            "submitter": user,
+            "submitted_at": 1_700_000_000_u64
+        });
+        let out: Value =
+            serde_json::from_str(&declarative_route_request_v3_json(route_input.to_string()))
+                .unwrap();
+        assert_eq!(out["ok"], true, "{out}");
+
+        // One routed Action whose body is a Multicall of the two legs.
+        let routed = out["data"]["actions"].as_array().unwrap();
+        assert_eq!(routed.len(), 1, "{out}");
+        let body = &routed[0]["body"];
+        assert_eq!(body["domain"], "multicall", "{body}");
+        let children = body["actions"].as_array().unwrap();
+        assert_eq!(children.len(), 2, "{body}");
+
+        // Leg 0 — lending::supply, base_asset RESOLVED FROM the decoded comet.
+        // ActionBody serialises internally-tagged (flat): `{domain, action, …}`.
+        let c0 = &children[0];
+        assert_eq!(c0["domain"], "lending", "{c0}");
+        assert_eq!(c0["action"], "supply", "{c0}");
+        assert_eq!(c0["venue"]["name"], "compound_v3", "{c0}");
+        assert_eq!(c0["venue"]["comet"].as_str().unwrap().to_lowercase(), comet);
+        assert_eq!(
+            c0["venue"]["base_asset"]["key"]["address"]
+                .as_str()
+                .unwrap()
+                .to_lowercase(),
+            usdc,
+            "base_asset must resolve from $inputs.comet (cUSDCv3→USDC), not $to (the Bulker): {c0}"
+        );
+        assert_eq!(
+            c0["asset"]["key"]["address"]
+                .as_str()
+                .unwrap()
+                .to_lowercase(),
+            asset
+        );
+        let amount_hex = c0["amount"].as_str().unwrap();
+        let amount = u64::from_str_radix(amount_hex.strip_prefix("0x").unwrap_or(amount_hex), 16)
+            .unwrap_or_else(|_| panic!("amount not hex: {amount_hex}"));
+        assert_eq!(amount, 5000, "{c0}");
+        assert_eq!(c0["on_behalf_of"].as_str().unwrap().to_lowercase(), user);
+
+        // Leg 1 — airdrop::claim, recipient = decoded src, target = decoded rewards.
+        let c1 = &children[1];
+        assert_eq!(c1["domain"], "airdrop", "{c1}");
+        assert_eq!(c1["action"], "claim", "{c1}");
+        assert_eq!(
+            c1["recipient"].as_str().unwrap().to_lowercase(),
+            src,
+            "{c1}"
+        );
+        assert_eq!(
+            c1["claim_target"]["contract"]
+                .as_str()
+                .unwrap()
+                .to_lowercase(),
+            rewards,
+            "{c1}"
+        );
+    }
+
+    #[test]
+    fn multicall_call_array_routes_each_leg_by_its_own_to() {
+        // Per-leg-to: the child mapper is installed ONLY at `adapter`. If the
+        // decode wrongly used a fixed outer `to` it would MISS — so a successful
+        // decode structurally proves each leg is routed at its own `Call.to`.
+        let adapter = "0x000000000000000000000000000000000000ada9";
+        let submitter = "0x000000000000000000000000000000000000aaaa";
+        let zero32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+        let child_fn = Function::parse("foo(uint256)").unwrap();
+        let child_calldata = child_fn
+            .abi_encode_input(&[DynSolValue::Uint(U256::from(777_u64), 256)])
+            .unwrap();
+        let child_selector = format!("0x{}", hex::encode(&child_calldata[0..4]));
+        let child_hex = format!("0x{}", hex::encode(&child_calldata));
+
+        let child_bundle = json!({
+            "type": "adapter_action",
+            "id": "test/mca-child@1.0.0",
+            "publisher": "test",
+            "schema_version": "3",
+            "match": { "selector": child_selector, "chain_to_addresses": { "1": [adapter] } },
+            "abi_fragment": {
+                "function_name": "foo",
+                "abi": {
+                    "name": "foo", "type": "function", "stateMutability": "nonpayable",
+                    "inputs": [{ "name": "amount", "type": "uint256" }], "outputs": []
+                }
+            },
+            "emit": {
+                "strategy": "single_emit",
+                "body": { "domain": "unknown", "unknown": {
+                    "target": "$to", "chain": "$chain", "calldata": "$calldata", "value": "$tx.value"
+                } }
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(child_bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        // Decoded `Call[]` bundle: each leg is a POSITIONAL tuple array
+        // [to, data, value, skipRevert, callbackHash]. One mapped leg → adapter.
+        let args = json!({ "bundle": [[adapter, child_hex, "0", false, zero32]] });
+        let body = build_multicall_call_array_body(
+            1,
+            submitter,
+            1_700_000_000,
+            &args,
+            &json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle", "max_depth": 3 }),
+        )
+        .unwrap();
+        let body_json = serde_json::to_value(body).unwrap();
+        assert_eq!(body_json["domain"], "multicall", "{body_json}");
+        assert_eq!(body_json["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(body_json["actions"][0]["domain"], "unknown", "{body_json}");
+        // (Per-leg-to is proven structurally: the child mapper is installed ONLY at
+        // `adapter`, so a successful decode REQUIRES routing the leg at its own `to`.)
+
+        // A bundle whose ONLY leg targets an uninstalled `to` resolves nothing →
+        // reject (never an empty no-op). The all-empty rejection becomes the
+        // caller's warn-closed fault — the registry's `warn`=skip intent for a
+        // PARTIAL batch is preserved; only an empty result is escalated.
+        let unmapped = "0x000000000000000000000000000000000000dead";
+        let only_unmapped = json!({ "bundle": [[unmapped, child_hex, "0", false, zero32]] });
+        let err = build_multicall_call_array_body(
+            1,
+            submitter,
+            1_700_000_000,
+            &only_unmapped,
+            &json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle" }),
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("no inner leg resolved"),
+            "expected resolved==0 rejection, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn multicall_call_array_unknown_vault_metamorpho_fails_whole_bundle() {
+        // D-A: a GeneralAdapter1 `erc4626*` leg whose vault is OUTSIDE the
+        // committed `metamorpho_underlying` snapshot cannot resolve its required
+        // `asset` (the underlying is a runtime arg, not in calldata) → placeholder
+        // substitution falls back to 0x0. We REFUSE the whole bundle rather than
+        // emit a confidently-wrong 0x0-asset Supply. A KNOWN vault still decodes
+        // with its real underlying (proving the guard is value-gated, not a blanket
+        // metamorpho block).
+        let adapter = "0x4a6c312ec70e8747a587ee860a0353cd42be0ae0"; // GeneralAdapter1
+        let submitter = "0x000000000000000000000000000000000000aaaa";
+        let zero32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+        let erc4626 = Function::parse(
+            "erc4626Deposit(address vault, uint256 assets, uint256 maxSharePriceE27, address receiver)",
+        )
+        .unwrap();
+        let probe = erc4626
+            .abi_encode_input(&[
+                DynSolValue::Address(AlloyAddress::ZERO),
+                DynSolValue::Uint(U256::ZERO, 256),
+                DynSolValue::Uint(U256::ZERO, 256),
+                DynSolValue::Address(AlloyAddress::ZERO),
+            ])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&probe[0..4]));
+
+        // Synthetic copy of the real GA1 erc4626Deposit manifest (body +
+        // live_inputs skeleton); only the `match` is test-local.
+        let manifest = json!({
+            "type": "adapter_action",
+            "id": "test/mca-erc4626@1.0.0",
+            "publisher": "test",
+            "schema_version": "3",
+            "match": { "selector": selector, "chain_to_addresses": { "1": [adapter] } },
+            "abi_fragment": {
+                "function_name": "erc4626Deposit",
+                "abi": {
+                    "name": "erc4626Deposit", "type": "function", "stateMutability": "nonpayable",
+                    "inputs": [
+                        { "name": "vault", "type": "address" },
+                        { "name": "assets", "type": "uint256" },
+                        { "name": "maxSharePriceE27", "type": "uint256" },
+                        { "name": "receiver", "type": "address" }
+                    ],
+                    "outputs": []
+                }
+            },
+            "emit": {
+                "strategy": "single_emit",
+                "body": { "domain": "lending", "lending": { "action": "supply", "supply": {
+                    "venue": { "name": "metamorpho", "chain": "$chain", "vault": "$args.vault" },
+                    "asset": { "key": { "standard": "erc20", "chain": "$chain", "address": "$derived.metamorpho_underlying" } },
+                    "amount": "$args.assets",
+                    "on_behalf_of": "$args.receiver"
+                } } },
+                "live_inputs": {
+                    "reserve_state": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_reserve_state_skeleton" }, "ttl_s": 30 },
+                    "supply_apy": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_supply_apy_skeleton" }, "ttl_s": 30 },
+                    "a_token_price_usd": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_share_price_skeleton" }, "ttl_s": 60 },
+                    "eligible_as_collat": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_collat_flag_skeleton" }, "ttl_s": 60 },
+                    "user_state_before": { "source": { "kind": "derived_from", "inputs": [], "calc_id": "metamorpho_user_state_skeleton" }, "ttl_s": 12 }
+                }
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(manifest.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let receiver: AlloyAddress = submitter.parse().unwrap();
+        let emit =
+            json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle", "max_depth": 3 });
+        let encode_leg = |vault: &str| -> String {
+            let cd = erc4626
+                .abi_encode_input(&[
+                    DynSolValue::Address(vault.parse().unwrap()),
+                    DynSolValue::Uint(U256::from(1_000_000_u64), 256),
+                    DynSolValue::Uint(U256::ZERO, 256),
+                    DynSolValue::Address(receiver),
+                ])
+                .unwrap();
+            format!("0x{}", hex::encode(cd))
+        };
+
+        // KNOWN vault (snapshot[0]) → underlying resolves to USDC, decodes clean.
+        let known_vault = "0x0b2d98bbf3e38df1d1b7be7343732e32e8b1f818";
+        let known_underlying: AlloyAddress = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let known_bundle =
+            json!({ "bundle": [[adapter, encode_leg(known_vault), "0", false, zero32]] });
+        let body =
+            build_multicall_call_array_body(1, submitter, 1_700_000_000, &known_bundle, &emit)
+                .expect("known-vault metamorpho leg should decode");
+        let v3_action::ActionBody::Multicall { actions } = body else {
+            panic!("expected a multicall body");
+        };
+        assert_eq!(actions.len(), 1);
+        let v3_action::ActionBody::Lending(v3_action::lending::LendingAction::Supply(supply)) =
+            &actions[0]
+        else {
+            panic!("expected a metamorpho supply leg, got {:?}", actions[0]);
+        };
+        assert_eq!(
+            supply.asset.key.contract(),
+            Some(&known_underlying),
+            "known vault underlying must resolve from the snapshot"
+        );
+
+        // UNKNOWN vault (not in the snapshot) → underlying unresolved → the whole
+        // bundle is REFUSED (no 0x0-asset Supply leaks through).
+        let unknown_vault = "0x000000000000000000000000000000000000dead";
+        let unknown_bundle =
+            json!({ "bundle": [[adapter, encode_leg(unknown_vault), "0", false, zero32]] });
+        let err =
+            build_multicall_call_array_body(1, submitter, 1_700_000_000, &unknown_bundle, &emit)
+                .unwrap_err();
+        assert!(
+            err.message.contains("underlying unresolved"),
+            "expected a metamorpho-underlying rejection, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn decode_reenter_call_array_decodes_callback_legs() {
+        // The reenter callback is raw abi.encode(Call[]) (the route surfaces it as
+        // `data.reenter_callback` via the manifest's `reenter_callback_arg`). The
+        // decoder is protocol-agnostic — no selector knowledge. Build a 2-leg
+        // callback and assert the positional Call[] decode.
+        let a1 = AlloyAddress::from([0x11; 20]);
+        let a2 = AlloyAddress::from([0x22; 20]);
+        let mk_call = |to: AlloyAddress, sel: u32| {
+            DynSolValue::Tuple(vec![
+                DynSolValue::Address(to),
+                DynSolValue::Bytes(sel.to_be_bytes().to_vec()),
+                DynSolValue::Uint(U256::ZERO, 256),
+                DynSolValue::Bool(false),
+                DynSolValue::FixedBytes(alloy_primitives::B256::ZERO, 32),
+            ])
+        };
+        // abi.encode(Call[]) == the args encoding of `reenter(Call[])` minus its
+        // 4-byte selector.
+        let reenter =
+            Function::parse("reenter((address,bytes,uint256,bool,bytes32)[] bundle)").unwrap();
+        let reenter_calldata = reenter
+            .abi_encode_input(&[DynSolValue::Array(vec![
+                mk_call(a1, 0xaabb_ccdd),
+                mk_call(a2, 0x1122_3344),
+            ])])
+            .unwrap();
+        let callback_hex = format!("0x{}", hex::encode(&reenter_calldata[4..]));
+
+        let legs = decode_reenter_call_array(&callback_hex)
+            .unwrap()
+            .expect("non-empty callback");
+        assert_eq!(legs.len(), 2, "callback Call[] should decode 2 legs");
+        let leg_to = |i: usize| {
+            legs[i].as_array().unwrap()[0]
+                .as_str()
+                .unwrap()
+                .parse::<AlloyAddress>()
+                .unwrap()
+        };
+        assert_eq!(leg_to(0), a1, "leg0 `to`");
+        assert_eq!(leg_to(1), a2, "leg1 `to`");
+
+        // Empty callback → None (a plain leg with no re-entry).
+        assert!(decode_reenter_call_array("0x").unwrap().is_none());
+        assert!(decode_reenter_call_array("").unwrap().is_none());
     }
 
     #[test]
