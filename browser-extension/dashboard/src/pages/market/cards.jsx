@@ -1,8 +1,11 @@
 /* Scopeball Market — 카드 & 배지 컴포넌트 */
-const { useState } = React;
+import React, { useState } from "react";
+import { Market } from "./data";
+import { marketNLG } from "./nlg";
+import { RatingInline } from "./community";
 
 // ── 작은 아이콘들 ──
-function Ico({ d, w = 16 }) {
+export function Ico({ d, w = 16 }) {
   return (
     <svg width={w} height={w} viewBox="0 0 24 24" fill="none" stroke="currentColor"
          strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -10,7 +13,7 @@ function Ico({ d, w = 16 }) {
     </svg>
   );
 }
-const ICONS = {
+export const ICONS = {
   plus: "M12 5v14M5 12h14",
   check: "M20 6 9 17l-5-5",
   bell: "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
@@ -24,12 +27,12 @@ const ICONS = {
 };
 
 // ── 배지 ──
-function SeverityBadge({ sev, locale }) {
+export function SeverityBadge({ sev, locale }) {
   const m = Market.severityMeta(sev);
   const label = locale === "en" ? m.en : m.ko;
   return <span className={"badge sev-" + sev} title={locale === "en" ? m.desc_en : m.desc_ko}>{label}</span>;
 }
-function ReadinessBadge({ rd, locale }) {
+export function ReadinessBadge({ rd, locale }) {
   const m = Market.readinessMeta(rd);
   const label = locale === "en" ? m.en : m.ko;
   return (
@@ -38,13 +41,13 @@ function ReadinessBadge({ rd, locale }) {
     </span>
   );
 }
-function PublisherBadge({ locale }) {
+export function PublisherBadge({ locale }) {
   const m = Market.G.chrome.publisher.official;
   return <span className="badge pub">{m.icon} {locale === "en" ? m.en : m.ko}</span>;
 }
 
 // 버전 태그 (단일 출처 Market.versionFor, 중립색, 예시 배지). 값 없으면 null.
-function VersionTag({ id, locale, variant }) {
+export function VersionTag({ id, locale, variant }) {
   const v = Market.versionFor(id);
   if (!v) return null;
   return (
@@ -56,7 +59,7 @@ function VersionTag({ id, locale, variant }) {
 }
 
 // ── 도메인 칩 ──
-function DomainChip({ domain, locale }) {
+export function DomainChip({ domain, locale }) {
   const c = Market.DOMAIN_COLOR[domain];
   return (
     <span className="dchip" style={{ background: c.soft, color: c.ink }}>
@@ -67,7 +70,7 @@ function DomainChip({ domain, locale }) {
     </span>
   );
 }
-function DomainGlyph({ domain, size = 22 }) {
+export function DomainGlyph({ domain, size = 22 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       {Market.DOMAIN_ICON[domain].split("M").filter(Boolean).map((seg, i) => <path key={i} d={"M" + seg} />)}
@@ -76,7 +79,7 @@ function DomainGlyph({ domain, size = 22 }) {
 }
 
 // ── 해시태그 칩 ──
-function HashTag({ intent, locale, active, onClick }) {
+export function HashTag({ intent, locale, active, onClick }) {
   return (
     <button className={"htag" + (active ? " on" : "")} onClick={onClick}>
       {Market.intentTag(intent, locale)}
@@ -85,7 +88,7 @@ function HashTag({ intent, locale, active, onClick }) {
 }
 
 // ── Add-to-set 버튼 ──
-function AddButton({ readiness, inSet, onToggle, locale, size }) {
+export function AddButton({ readiness, inSet, onToggle, locale, size }) {
   const cls = "addbtn" + (size === "lg" ? " lg" : "");
   if (!Market.canAddToSet(readiness)) {
     return (
@@ -109,7 +112,7 @@ function AddButton({ readiness, inSet, onToggle, locale, size }) {
 }
 
 // ── PolicyCard ──
-function PolicyCard({ policy, locale, inSet, onToggle, onOpen }) {
+export function PolicyCard({ policy, locale, inSet, onToggle, onOpen }) {
   const c = Market.DOMAIN_COLOR[policy.domain];
   const soon = policy.readiness === "soon";
   const ext = policy.readiness === "external";
@@ -132,7 +135,7 @@ function PolicyCard({ policy, locale, inSet, onToggle, onOpen }) {
       </div>
       <div className="reason">
         <span className="tgt">🎯</span>
-        <span>{window.marketNLG(policy, locale)}</span>
+        <span>{marketNLG(policy, locale)}</span>
       </div>
       <div className="tags">
         {policy.intents.slice(0, 3).map((i) => (
@@ -158,8 +161,7 @@ function PolicyCard({ policy, locale, inSet, onToggle, onOpen }) {
 }
 
 // ── PackageCard ──
-function PackageCard({ pkg, locale, inSet, onToggle, onOpen }) {
-  const c = Market.DOMAIN_COLOR[pkg.primaryDomain];
+export function PackageCard({ pkg, locale, inSet, onToggle, onOpen }) {
   return (
     <div className="pkgcard" onClick={() => onOpen(pkg.id)} role="button">
       <div className="ptop">
@@ -194,7 +196,7 @@ function PackageCard({ pkg, locale, inSet, onToggle, onOpen }) {
 }
 
 // ── Mini policy row (패키지 상세) ──
-function MiniRow({ policy, locale, onOpen }) {
+export function MiniRow({ policy, locale, onOpen }) {
   const c = Market.DOMAIN_COLOR[policy.domain];
   return (
     <div className="mrow" style={{ borderLeftColor: c.hex }} onClick={() => onOpen(policy.slug)} role="button">
@@ -211,8 +213,7 @@ function MiniRow({ policy, locale, onOpen }) {
   );
 }
 
-Object.assign(window, {
-  Ico, ICONS, SeverityBadge, ReadinessBadge, PublisherBadge, VersionTag,
-  DomainChip, DomainGlyph, HashTag, AddButton,
-  PolicyCard, PackageCard, MiniRow,
-});
+// Vestigial in original: `useState` was destructured but unused at top scope.
+// Keep import to mirror the original surface (other modules import nothing
+// from cards beyond the components above).
+void useState;

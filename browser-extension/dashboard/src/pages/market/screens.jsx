@@ -1,7 +1,10 @@
-/* Scopeball Market — 화면: Popular / Browse / Detail / SetPanel */
+/* Scopeball Market — 화면: Popular / Browse */
+import React from "react";
+import { Market } from "./data";
+import { Ico, ICONS, DomainGlyph, PackageCard, PolicyCard } from "./cards";
 
 // 공통: 카드 그리드 렌더 (정책 + 패키지 혼합)
-function CardGrid({ items, locale, ctx }) {
+export function CardGrid({ items, locale, ctx }) {
   return (
     <div className="mk-grid">
       {items.map((it) =>
@@ -21,7 +24,7 @@ function CardGrid({ items, locale, ctx }) {
   );
 }
 
-function SecHead({ title, sub, moreLabel, onMore }) {
+export function SecHead({ title, sub, moreLabel, onMore }) {
   return (
     <div className="mk-sec-head">
       <h2>{title}</h2>
@@ -34,7 +37,7 @@ function SecHead({ title, sub, moreLabel, onMore }) {
 }
 
 /* ════════════ POPULAR (홈) ════════════ */
-function PopularScreen({ locale, ctx }) {
+export function PopularScreen({ locale, ctx }) {
   const hero = Market.PKG_BY_ID["liq-pack"] || Market.PACKAGES[1];
   const essentials = Market.PKG_BY_ID["essentials"];
   const top3 = Market.PACKAGES.filter((p) => !p.anchor && p.id !== hero.id)
@@ -144,10 +147,10 @@ function PopularScreen({ locale, ctx }) {
 }
 
 /* ════════════ BROWSE (둘러보기) ════════════ */
-const READINESS_KEYS = ["ready", "external", "soon"];
-const SEVERITY_KEYS = ["deny", "warn"];
+export const READINESS_KEYS = ["ready", "external", "soon"];
+export const SEVERITY_KEYS = ["deny", "warn"];
 
-function FilterRail({ locale, filters, setFilters, activeCount, onClear }) {
+export function FilterRail({ locale, filters, setFilters, activeCount, onClear }) {
   function toggle(axis, val) {
     setFilters((f) => {
       const cur = f[axis] || [];
@@ -198,7 +201,7 @@ function FilterRail({ locale, filters, setFilters, activeCount, onClear }) {
   );
 }
 
-function BrowseScreen({ locale, query, setQuery, filters, setFilters, sort, setSort, ctx }) {
+export function BrowseScreen({ locale, query, setQuery, filters, setFilters, sort, setSort, ctx }) {
   const res = Market.search(query, locale);
   let pols = Market.applyFilters(res.policies, filters);
   pols = Market.sortForDisplay(pols, sort);
@@ -255,5 +258,3 @@ function BrowseScreen({ locale, query, setQuery, filters, setFilters, sort, setS
     </div>
   );
 }
-
-Object.assign(window, { CardGrid, SecHead, PopularScreen, FilterRail, BrowseScreen, READINESS_KEYS, SEVERITY_KEYS });

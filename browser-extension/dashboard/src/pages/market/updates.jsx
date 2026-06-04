@@ -1,6 +1,8 @@
 /* Scopeball Market — Updates (신규 공개 / 버전 갱신 피드)
    버전은 단일 출처 Market.versionFor 에서만 읽음. version_bump.toVersion = 현재 버전(맵)과 일치.
    정직성: 모든 시드 "예시", diff/버전은 플레이스홀더. */
+import { Market } from "./data";
+import { CMTY_NOW } from "./community";
 
 // ── UpdateItem 시드 ── (toVersion은 런타임에 versions 맵에서 주입 → detail과 항상 일치)
 // { id, type, target:{type,ref}, fromVersion?, changelog{ko,en}, diffUrl, publishedAt }
@@ -44,7 +46,7 @@ const SEED_UPDATES_RAW = [
 ];
 
 // 변경 종류 태그 라벨
-const CHANGE_KIND = {
+export const CHANGE_KIND = {
   threshold: { ko: "임계값 조정", en: "Threshold" },
   "field-add": { ko: "필드 추가", en: "Field added" },
   scope: { ko: "적용 범위", en: "Scope" },
@@ -52,7 +54,7 @@ const CHANGE_KIND = {
   new: { ko: "신규", en: "New" },
 };
 // 게시자 등급 메타 (공식 sage / 인증 slate / 커뮤니티 중립)
-const PUBLISHER_META = {
+export const PUBLISHER_META = {
   official: { ko: "공식", en: "Official", tone: "official" },
   verified: { ko: "인증", en: "Verified", tone: "verified" },
   community: { ko: "커뮤니티", en: "Community", tone: "community" },
@@ -92,10 +94,10 @@ function resolveUpdate(u) {
   const meta = UPDATE_META[u.id] || { author: OFFICIAL, publisher: "official", audited: true, changeKind: [] };
   return Object.assign({}, u, meta, { _exists: exists, _name: name, _domain: domain, evalClass: evalClass, toVersion: Market.versionFor(t.ref) });
 }
-const SEED_UPDATES = SEED_UPDATES_RAW.map(resolveUpdate).filter((u) => u._exists && u.toVersion);
+export const SEED_UPDATES = SEED_UPDATES_RAW.map(resolveUpdate).filter((u) => u._exists && u.toVersion);
 
 // 날짜 버킷
-function dateBucket(iso, locale) {
+export function dateBucket(iso, locale) {
   const d = new Date(iso + "T00:00:00Z");
   const days = Math.round((CMTY_NOW - d) / 86400000);
   if (days <= 0) return locale === "en" ? "Today" : "오늘";
@@ -103,11 +105,11 @@ function dateBucket(iso, locale) {
   if (days < 7) return locale === "en" ? "This week" : "이번 주";
   return locale === "en" ? "Earlier" : "이전";
 }
-const BUCKET_ORDER_KO = ["오늘", "어제", "이번 주", "이전"];
-const BUCKET_ORDER_EN = ["Today", "Yesterday", "This week", "Earlier"];
+export const BUCKET_ORDER_KO = ["오늘", "어제", "이번 주", "이전"];
+export const BUCKET_ORDER_EN = ["Today", "Yesterday", "This week", "Earlier"];
 
 // 플레이스홀더 Cedar unified diff 생성
-function makeDiff(u) {
+export function makeDiff(u) {
   const ref = u.target.ref;
   const p = u.target.type === "policy" ? Market.BY_SLUG[ref] : null;
   const intent = p && p.intents[0] ? p.intents[0] : (p ? p.domain : "risk");
@@ -134,5 +136,3 @@ function makeDiff(u) {
     { s: " ", t: "};" },
   ];
 }
-
-Object.assign(window, { SEED_UPDATES, SEED_UPDATES_RAW, dateBucket, BUCKET_ORDER_KO, BUCKET_ORDER_EN, makeDiff, CHANGE_KIND, PUBLISHER_META });
