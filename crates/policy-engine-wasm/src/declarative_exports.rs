@@ -65,6 +65,21 @@ struct BridgeKey {
     selector: String,
 }
 
+/// Selector-only bridge key: `(chain_id, selector_lowercase)`.
+///
+/// Used by the **address-agnostic** route tier (standard NFT
+/// `setApprovalForAll`, selector `0xa22cb465`): the security meaning of granting
+/// an operator control of an entire collection is identical for every contract,
+/// so the route must decode it regardless of whether the collection address was
+/// pre-registered as a per-address [`BridgeKey`]. Manifests opt in via
+/// `match.address_agnostic`; the route consults this map ONLY after the exact
+/// per-address `bridge` lookup misses, so existing routing stays byte-identical.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SelectorKey {
+    chain_id: u64,
+    selector: String,
+}
+
 /// Typed-data bridge key:
 /// `(chain_id, verifying_contract_lowercase, primary_type, witness_type?)`.
 ///
@@ -129,6 +144,12 @@ struct DeclarativeV3State {
     /// empty. [`declarative_route_typed_data_v3_json`] resolves a wallet
     /// `eth_signTypedData` payload through it.
     typed_data_bridge: HashMap<TypedDataBridgeKey, String>,
+    /// `(chain_id, selector_lower)` → `bundle_id`. Populated ONLY for manifests
+    /// with `match.address_agnostic` (standard NFT `setApprovalForAll`).
+    /// [`declarative_route_request_v3_json`] consults it as a FALLBACK after the
+    /// per-address [`Self::bridge`] misses — it never shadows an exact
+    /// per-address hit, so existing per-address routing is unchanged.
+    selector_bridge: HashMap<SelectorKey, String>,
 }
 
 thread_local! {
@@ -258,6 +279,25 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                     };
                     state
                         .typed_data_bridge
+                        .entry(key)
+                        .or_insert_with(|| bundle_id.clone());
+                }
+            }
+            // Address-agnostic (selector-only) tier — standard NFT
+            // `setApprovalForAll`. `bundle_match.entries()` yielded nothing (no
+            // `chain_to_addresses` / `to`), so the per-address `bridge` loop
+            // above registered no callkeys; instead key the bundle by
+            // `(chain_id, selector)` for every declared chain so the route can
+            // decode the call on ANY collection address (the `to` flows from the
+            // live tx via the body's `$to`).
+            if bundle_match.address_agnostic {
+                for &chain_id in &bundle_match.chain_ids {
+                    let key = SelectorKey {
+                        chain_id,
+                        selector: selector.clone(),
+                    };
+                    state
+                        .selector_bridge
                         .entry(key)
                         .or_insert_with(|| bundle_id.clone());
                 }
@@ -415,7 +455,18 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
         let (bundle_id, bundle_value) = DECLARATIVE_V3_STATE
             .with(|state| {
                 let state = state.borrow();
-                state.bridge.get(&key).and_then(|bundle_id| {
+                // 1. Exact per-address callkey (unchanged priority — a registered
+                //    `(chain, to, selector)` always wins). 2. Address-agnostic
+                //    selector-only fallback (standard NFT `setApprovalForAll`):
+                //    consulted ONLY on a per-address miss, so existing routing is
+                //    byte-identical.
+                let bundle_id = state.bridge.get(&key).or_else(|| {
+                    state.selector_bridge.get(&SelectorKey {
+                        chain_id: input.chain_id,
+                        selector: lookup_selector.clone(),
+                    })
+                });
+                bundle_id.and_then(|bundle_id| {
                     state
                         .bundles
                         .get(bundle_id)
@@ -3550,6 +3601,117 @@ mod tests {
         assert_eq!(
             parsed["data"]["actions"][0]["body"]["domain"], "unknown",
             "empty array_emit must route to Unknown, not an empty Multicall (PASS): {parsed}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Address-agnostic (selector-only) route tier — standard NFT
+    // `setApprovalForAll`. Decodes on ANY collection, registered or not, so the
+    // #1 NFT-drain vector is no longer warn-closed for unlisted collections.
+    // ──────────────────────────────────────────────────────────────────────
+
+    fn set_approval_for_all_agnostic_bundle() -> Value {
+        json!({
+            "type": "adapter_action",
+            "id": "standard/nft/set-approval-for-all@1.0.0",
+            "schema_version": "3",
+            "match": { "selector": "0xa22cb465", "address_agnostic": true, "chain_ids": [1] },
+            "abi_fragment": { "function_name": "setApprovalForAll", "abi": {
+                "name": "setApprovalForAll", "type": "function", "stateMutability": "nonpayable",
+                "inputs": [
+                    { "name": "operator", "type": "address" },
+                    { "name": "approved", "type": "bool" }
+                ],
+                "outputs": [] } },
+            "emit": { "strategy": "single_emit", "body": {
+                "domain": "token", "token": {
+                    "action": "nft_set_approval_for_all",
+                    "nft_set_approval_for_all": {
+                        "chain": "$chain", "contract": "$to",
+                        "spender": "$args.operator", "approved": "$args.approved" } } },
+                "live_inputs": {} },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        })
+    }
+
+    #[test]
+    fn address_agnostic_set_approval_for_all_decodes_on_unregistered_collection() {
+        let installed: Value = serde_json::from_str(&declarative_install_v3_json(
+            set_approval_for_all_agnostic_bundle().to_string(),
+        ))
+        .unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        // A collection address NEVER registered as a per-address callkey.
+        let collection = "0x000000000000000000000000000000000000beef";
+        let operator = "0x000000000000000000000000000000000000cafe";
+        // setApprovalForAll(operator, approved=true)
+        let calldata = format!(
+            "0xa22cb465{:0>64}{:0>64}",
+            operator.trim_start_matches("0x"),
+            "1"
+        );
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1, "to": collection, "selector": "0xa22cb465", "calldata": calldata,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            parsed["ok"], true,
+            "address-agnostic decode must hit on an unregistered collection: {parsed}"
+        );
+
+        // ActionBody serializes FLAT (internally tagged on domain + action):
+        // {domain:"token", action:"nft_set_approval_for_all", chain, contract, spender, approved}.
+        let body = &parsed["data"]["actions"][0]["body"];
+        assert_eq!(body["domain"], "token", "{body}");
+        assert_eq!(body["action"], "nft_set_approval_for_all", "{body}");
+        assert_eq!(
+            body["contract"].as_str().unwrap().to_lowercase(),
+            collection,
+            "contract must be the live tx `to` (the collection) — proves address-agnostic routing: {body}"
+        );
+        assert_eq!(
+            body["spender"].as_str().unwrap().to_lowercase(),
+            operator,
+            "{body}"
+        );
+        assert_eq!(body["approved"], true, "{body}");
+    }
+
+    #[test]
+    fn address_agnostic_bridge_is_chain_scoped_not_a_catch_all() {
+        // The selector-only fallback stays keyed by `(chain_id, selector)`: the
+        // same selector on a chain the bundle did NOT declare still misses
+        // (warn-closed), proving the tier is not a blanket selector wildcard.
+        let installed: Value = serde_json::from_str(&declarative_install_v3_json(
+            set_approval_for_all_agnostic_bundle().to_string(),
+        ))
+        .unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let calldata = format!(
+            "0xa22cb465{:0>64}{:0>64}",
+            "000000000000000000000000000000000000cafe", "1"
+        );
+        let out = declarative_route_request_v3_json(
+            json!({
+                // chain 999 is NOT in the bundle's `chain_ids: [1]`.
+                "chain_id": 999, "to": "0x000000000000000000000000000000000000beef",
+                "selector": "0xa22cb465", "calldata": calldata,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(
+            parsed["error"]["kind"], "no_declarative_v3_mapper",
+            "{parsed}"
         );
     }
 
