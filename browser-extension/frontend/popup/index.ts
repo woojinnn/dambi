@@ -144,6 +144,11 @@ function renderScopeballAuthStrip(): HTMLDivElement {
       break;
     }
   }
+  // Always offer a way into the full dashboard (the extension's options
+  // page → chrome-extension://<id>/options.html, opened in a tab).
+  const openDash = el('button', { class: 'open-dashboard', text: 'Open dashboard' });
+  openDash.addEventListener('click', () => void Browser.runtime.openOptionsPage());
+  strip.appendChild(openDash);
   return strip;
 }
 
