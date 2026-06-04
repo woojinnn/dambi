@@ -1,0 +1,38 @@
+# Helm overlay for M3 (fixed HTTPS domain via GCE Ingress + ManagedCertificate + OAuth).
+# Deploy:
+#   helm upgrade --install pasu <chart> -n pasu \
+#     -f <chart>/values-m3.yaml --set image.tag=<git short sha>
+
+image:
+  repository: asia-northeast3-docker.pkg.dev/policy-engine-498313/pasu/pasu-policy-server
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 2
+  publicApiUrl: https://pasu-policy.duckdns.org
+  dashboardUrl: https://pasu-policy.duckdns.org
+  corsAllowedOrigins:
+    - https://pasu-policy.duckdns.org
+
+# GCE Ingress backend → ClusterIP (no external LB on the Service itself).
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  className: gce
+  host: pasu-policy.duckdns.org
+  tls:
+    enabled: false          # ManagedCertificate provides TLS via annotation, not a secret
+  gce:
+    enabled: true
+    staticIpName: pasu-ingress-ip
+    allowHttp: "true"       # keep :80 during cert provisioning; clients use HTTPS once ACTIVE
+  annotations: {}
+
+managedCertificate:
+  enabled: true
+
+backendConfig:
+  enabled: true
+  timeoutSec: 3600
