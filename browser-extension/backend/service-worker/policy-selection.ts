@@ -128,10 +128,25 @@ interface DefaultPolicyEntry {
   text: string;
 }
 
+interface V2DefaultEntry {
+  id: string;
+  /** Cedar policy text with @id/@severity/@reason — same shape parsePolicyMeta
+   * already parses for the v1 catalog. */
+  policy: string;
+}
+
 async function loadDefaults(): Promise<DefaultPolicyEntry[]> {
-  const url = Browser.runtime.getURL('default-policies/policy-set.json');
+  // The baked default set migrated to v2 (`policy-set-v2.json`); the old v1
+  // `policy-set.json` is now an empty `[]`, which is why the popup catalog
+  // showed nothing while v2 evaluation enforced the 9 shipped policies. Read
+  // the v2 asset (baked set only — dashboard/managed policies are listed
+  // separately via listManaged, so going through loadDefaultPolicySetV2 here
+  // would double-count them) and project each `{id, policy}` onto the
+  // v1-shaped `{id, text}` the catalog builder consumes.
+  const url = Browser.runtime.getURL('default-policies/policy-set-v2.json');
   const res = await fetch(url);
-  return (await res.json()) as DefaultPolicyEntry[];
+  const v2 = (await res.json()) as V2DefaultEntry[];
+  return v2.map((b) => ({ id: b.id, text: b.policy }));
 }
 
 function namespaceOf(id: string): string {
