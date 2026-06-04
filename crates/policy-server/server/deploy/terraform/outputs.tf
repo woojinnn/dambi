@@ -34,3 +34,8 @@ output "redis_url" {
   description = "REDIS_URL for the k8s secret."
   value       = "redis://${google_redis_instance.pasu.host}:6379"
 }
+
+output "ingress_ip" {
+  description = "Global static IP for the GCE Ingress (point the DuckDNS A record here)."
+  value       = google_compute_global_address.ingress.address
+}
