@@ -264,8 +264,10 @@ fn plan(
 
 /// Rebuild the EXACT materialized context the evaluate path feeds Cedar:
 /// lower the action, plan from the bundles' manifests, replay `results` into
-/// `context.custom.*`. Shared by `evaluate_action_v2_json` (indirectly) and the
-/// diagnosis export so a probe sees the identical environment as the verdict.
+/// `context.custom.*`. This MIRRORS `evaluate_action_v2_json`'s
+/// lower→plan→materialize sequence (which inlines its own copy — the two are NOT
+/// shared and must be kept in sync) so a diagnosis probe sees the identical
+/// environment as the verdict.
 pub(crate) fn materialized_context(
     action: &ActionBody,
     meta: &ActionMeta,
@@ -1030,7 +1032,7 @@ pub(crate) mod tests {
     /// `browser-extension/public/default-policies/policy-set-v2.json`): an
     /// Inner-scoped (no `trigger.scope` → default Inner) `forbid` on
     /// `Amm::Action::"Swap"` when `slippageBp > 100`.
-    fn shipped_high_slippage_bundle() -> Value {
+    pub(crate) fn shipped_high_slippage_bundle() -> Value {
         json!({
             "policy": "@id(\"high-slippage-warning\")\n@severity(\"warn\")\nforbid(principal, action == Amm::Action::\"Swap\", resource)\nwhen { context.slippageBp > 100 };\n",
             "manifest": { "id": "high-slippage-warning", "schema_version": 2,
