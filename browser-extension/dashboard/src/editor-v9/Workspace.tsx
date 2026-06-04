@@ -35,6 +35,7 @@ import { registerMakeParamContextMenu } from "./Param/make-param";
 import { ParamSidebar } from "./Param/ParamSidebar";
 import { ParamFillPanel } from "./Param/ParamFillPanel";
 import type { PolicyIR } from "../cedar/blocks";
+import "./diagnosis-highlight.css";
 
 Blockly.setLocale(En as unknown as Record<string, string>);
 
