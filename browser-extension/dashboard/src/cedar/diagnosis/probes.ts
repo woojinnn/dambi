@@ -46,8 +46,32 @@ function probePolicy(path: string, body: Expr): PolicyIR {
   };
 }
 
-/** Enumerate every boolean node of `policy` and build one probe each. Subtrees
- *  containing `hole`/`raw` are skipped and flip `diagnosable` to false. */
+/** Whether a child sits in BOOLEAN POSITION given its parent and the path step
+ *  reaching it (plus whether the PARENT is itself in boolean position). Pure
+ *  function of `(parent.kind, step, parentBoolPos)`; the step strings mirror
+ *  `eachChild`'s labels (the sanctioned coupling — paths still come from
+ *  `eachChild`). A node in boolean position is evaluated as a Bool by Cedar's
+ *  grammar even when `isBooleanNode` is false for its kind (a Bool `attr`/`lit`,
+ *  or an `if` whose result is Bool), so it must be probed to give blame a truth. */
+function childBoolPos(parent: Expr, step: string, parentBoolPos: boolean): boolean {
+  switch (parent.kind) {
+    case "binary":
+      return (parent.op === "&&" || parent.op === "||") && (step === "left" || step === "right");
+    case "unary":
+      return parent.op === "!" && step === "operand";
+    case "if":
+      // `cond` is ALWAYS boolean; `then`/`else` are boolean IFF the `if` is.
+      if (step === "cond") return true;
+      if (step === "then" || step === "else") return parentBoolPos;
+      return false;
+    default:
+      return false;
+  }
+}
+
+/** Enumerate every boolean-POSITION node (and every structurally-boolean node)
+ *  of `policy` and build one probe each. Subtrees containing `hole`/`raw` are
+ *  skipped and flip `diagnosable` to false. */
 export function buildProbes(policy: PolicyIR): ProbeSet {
   const probes: Probe[] = [];
   let diagnosable = true;
@@ -58,16 +82,19 @@ export function buildProbes(policy: PolicyIR): ProbeSet {
     return false;
   };
 
-  // `forceBool` is true for a clause body root: a `when`/`unless` body is
-  // boolean by Cedar's grammar even when its root is an `if` (which
-  // `isBooleanNode` returns false for). Probing it ensures blame's clause-entry
-  // `truth["c{i}.body"]` is always defined.
-  const visit = (e: Expr, path: string, forceBool: boolean): void => {
+  // A clause `when`/`unless` body root is in boolean position by Cedar's
+  // grammar. From there boolean position propagates down per `childBoolPos`
+  // (binary connectives, `!`, and `if`). Probing every boolean-position node —
+  // not just the structurally-boolean ones — ensures blame's truth lookup is
+  // defined for Bool `attr`/`lit`/`if` operands too, so they (and their
+  // subtrees) are no longer silently dropped.
+  const visit = (e: Expr, path: string, inBoolPos: boolean): void => {
     if (e.kind === "hole" || e.kind === "raw") { diagnosable = false; return; }
-    if ((forceBool || isBooleanNode(e)) && !hasUninterpretable(e)) {
+    if ((inBoolPos || isBooleanNode(e)) && !hasUninterpretable(e)) {
       probes.push({ id: path, est: blocksToEst(probePolicy(path, e)) });
     }
-    for (const c of eachChild(e)) visit(c.node, `${path}.${c.step}`, false);
+    for (const c of eachChild(e))
+      visit(c.node, `${path}.${c.step}`, childBoolPos(e, c.step, inBoolPos));
   };
 
   policy.conditions.forEach((cond, i) => visit(cond.body, `c${i}.body`, true));

@@ -5,7 +5,11 @@ export type TruthMap = Record<string, boolean>;
 
 /** Return the structural paths of the leaf nodes responsible for the forbid
  *  firing, per the AND/OR/NOT rule. `truth[path]` is the probed truth of the
- *  boolean node at `path`; absent ⇒ not a probed boolean node (transparent).
+ *  boolean node at `path`. Every boolean-POSITION node is now probed (see
+ *  `buildProbes`/`childBoolPos`), so a Bool `attr`/`lit`/`if` operand always has
+ *  a truth here; an absent `truth[path]` means the node is NOT in boolean
+ *  position (e.g. a comparison's Long operand) and is transparent — `walk` never
+ *  descends into such nodes, so it never reads their (absent) truth.
  *  Assumes `policy.effect === "forbid"` (the engine's only user shape).
  *  Paths come exclusively from `pathByNode` (which derives from `eachChild`),
  *  so blame's labels CANNOT drift from the probe builder / editor map. */
@@ -56,8 +60,16 @@ export function blame(policy: PolicyIR, truth: TruthMap): string[] {
       case "ext":
         out.push(path); // boolean leaf
         return;
+      case "attr":
+      case "lit":
+        // A Bool `attr`/`lit` is only ever reached by `walk` when it sits in
+        // boolean position (an `&&`/`||`/`!` operand, an `if` branch, or a
+        // clause body) and is responsible — `walk` never descends into a
+        // comparison's operands, so a Long/String `attr`/`lit` is unreachable.
+        out.push(path); // boolean-position leaf
+        return;
       default:
-        // var/lit/attr/set/record/litEntity/raw/hole — transparent; stop.
+        // var/set/record/litEntity/raw/hole — transparent; stop.
         return;
     }
   };
