@@ -33,6 +33,7 @@ import {
   declarativeV3Cache,
   type DeclarativeV3CacheEntry,
 } from "./declarative-v3-cache";
+import { fetchStarted, fetchEnded } from "../diagnostics";
 
 /**
  * Cached v3 install results keyed by canonical callkey. The process-local map
@@ -141,6 +142,59 @@ const DEFAULT_REGISTRY_BASE_URL =
   typeof process !== "undefined" && process.env && process.env.REGISTRY_BASE_URL
     ? process.env.REGISTRY_BASE_URL
     : "http://localhost:8000";
+
+/**
+ * Wrap a registry `fetch` with sent/received/duration + URL console logging so a
+ * slow registry round-trip — the suspected cause of the `__engine::timeout` 8s
+ * budget overrun — is visible in the SW DevTools: exactly which URL, when it was
+ * sent, when it answered, and how long it took (wall-clock + ms).
+ *
+ * On a hang the "→ sent" line prints but the "← recv" line never does, so the
+ * stuck URL is still identifiable even when no response ever arrives.
+ */
+async function timedRegistryFetch(
+  doFetch: (url: string) => Promise<Response>,
+  url: string,
+  label: string,
+): Promise<Response> {
+  const sentAtMs = Date.now();
+  const startedAt = performance.now();
+  const traceSeq = fetchStarted(label, url);
+  console.info("[Scopeball] registry-fetch → sent", {
+    label,
+    url,
+    sentAt: new Date(sentAtMs).toISOString(),
+  });
+  try {
+    const response = await doFetch(url);
+    const durationMs = Math.round(performance.now() - startedAt);
+    fetchEnded(traceSeq, response.status, durationMs);
+    console.info("[Scopeball] registry-fetch ← recv", {
+      label,
+      url,
+      sentAt: new Date(sentAtMs).toISOString(),
+      receivedAt: new Date().toISOString(),
+      durationMs,
+      status: response.status,
+    });
+    return response;
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - startedAt);
+    fetchEnded(
+      traceSeq,
+      `error:${err instanceof Error ? err.message : String(err)}`,
+      durationMs,
+    );
+    console.warn("[Scopeball] registry-fetch ✗ error", {
+      label,
+      url,
+      sentAt: new Date(sentAtMs).toISOString(),
+      durationMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+}
 
 function v3CallkeyCacheKey(
   chainId: number,
@@ -290,7 +344,7 @@ export async function installDeclarativeBundleV3(
 
   let response: Response;
   try {
-    response = await doFetch(url);
+    response = await timedRegistryFetch(doFetch, url, "callkey");
   } catch (err) {
     throw new InstallDeclarativeV3Error(
       "fetch",
@@ -463,7 +517,7 @@ export async function installDeclarativeBundleV3ByTypedData(
 
   let response: Response;
   try {
-    response = await doFetch(url);
+    response = await timedRegistryFetch(doFetch, url, "typed-data");
   } catch (err) {
     console.warn(
       "[Scopeball] installDeclarativeBundleV3ByTypedData fetch failed",

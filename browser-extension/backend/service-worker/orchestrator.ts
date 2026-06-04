@@ -1,4 +1,5 @@
 import Browser from "webextension-polyfill";
+import { markPhase, captureTimeout } from "./diagnostics";
 import {
   tryDeclarativeRouteV3,
   type DeclarativeRouteV3Outcome,
@@ -168,11 +169,31 @@ export async function decideMessage(
   );
 }
 
+function txSummaryForDiag(message: Message): Record<string, unknown> {
+  const summary: Record<string, unknown> = {
+    requestId: message.requestId,
+    hostname: message.data.hostname,
+    type: message.data.type,
+  };
+  if (isTransaction(message)) {
+    const t = message.data.transaction;
+    summary.chainId = message.data.chainId;
+    summary.to = t.to;
+    summary.from = t.from;
+    if (typeof t.data === "string") {
+      summary.selector = t.data.slice(0, 10);
+      summary.dataLen = Math.max(0, Math.floor((t.data.length - 2) / 2));
+    }
+  }
+  return summary;
+}
+
 async function decideInner(
   message: Message,
   options: DecisionOptions,
 ): Promise<DecisionResult> {
   logIncoming(message);
+  markPhase(message.requestId, "lifecycle_start");
   const pending: PendingRequest = {
     requestId: message.requestId,
     hostname: message.data.hostname,
@@ -184,7 +205,7 @@ async function decideInner(
   await pendingPut(pending);
 
   try {
-    const { result: lifecycle } = await withTimeout(
+    const { result: lifecycle, timedOut } = await withTimeout(
       runLifecycle(message),
       HARD_TIMEOUT_MS,
       {
@@ -196,6 +217,12 @@ async function decideInner(
         verdictSource: "fail_closed" as const,
       },
     );
+    if (timedOut) {
+      // Durably snapshot the in-flight fetches + phase timeline so the
+      // (intermittent, not-reproducible-on-demand) 8s overrun is diagnosable
+      // after the fact — even if no one was watching and the SW later evicts.
+      await captureTimeout(message.requestId, txSummaryForDiag(message));
+    }
     const { verdict } = lifecycle;
 
     let ok = false;
@@ -533,6 +560,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   let v3Outcome: DeclarativeRouteV3Outcome | undefined;
   if (isTransaction(message)) {
     try {
+      markPhase(message.requestId, "route_start");
       v3Outcome = await tryDeclarativeRouteV3({
         chainId: message.data.chainId,
         from: message.data.transaction.from ?? "0x" + "0".repeat(40),
@@ -541,6 +569,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         calldataHex: message.data.transaction.data,
         submittedAt: Math.floor(Date.now() / 1000),
       });
+      markPhase(message.requestId, "route_done", { outcome: v3Outcome.kind });
       declarativeV3Meta = auditFromDeclarativeV3Outcome(v3Outcome, nature);
       // Plan §M4 — DevTools console 검증 entry. PDF FSM hierarchical
       // ActionBody JSON 을 hit 시 dump (Plan 의 narrow scope 의 핵심

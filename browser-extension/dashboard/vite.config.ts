@@ -8,6 +8,14 @@ import path from "node:path";
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Bind to IPv4 127.0.0.1 (not the default `localhost`, which resolves to
+    // IPv6 ::1 on macOS). The Google OAuth flow is pinned to 127.0.0.1
+    // throughout (GOOGLE_REDIRECT_URI + DASHBOARD_URL = http://127.0.0.1:...),
+    // so the post-login callback lands at http://127.0.0.1:5174/auth/callback.
+    // If vite only listened on ::1, that callback hits a dead 127.0.0.1:5174 →
+    // chrome-error → "unsafe attempt to load ... must match" cross-origin block.
+    // Access the dashboard at http://127.0.0.1:5174 (not localhost).
+    host: "127.0.0.1",
     port: 5174,
     strictPort: true,
     fs: {

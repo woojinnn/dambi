@@ -45,6 +45,11 @@ interface WasmExports {
   // every fault becomes a `Fail` verdict (`__system__` / `__engine::*`).
   // (`{ ok, data: { verdict: VerdictDto } }`).
   evaluate_action_v2_json(input_json: string): string;
+  // DEBUG (diagnostic-only) — lower the action and return the exact lowered
+  // Cedar context (camelCase, cedarschema-shaped) + entity uids the engine
+  // evaluates. Reuses the evaluate input shape. No effect on the verdict path.
+  // (`{ ok, data: { principal, actionUid, resource, context } }`).
+  debug_lowered_context_v2_json(input_json: string): string;
   // origin/main — manifest-driven schema preview + alias table.
   preview_custom_schema_json(input_json: string): string;
   preview_installed_schema_json(): string;
@@ -499,6 +504,28 @@ export async function evaluateActionV2(
     exports.evaluate_action_v2_json(JSON.stringify(input)),
   );
   const verdict = parseVerdict(rawVerdict);
+  // DEBUG: surface the exact lowered Cedar context (camelCase, cedarschema-
+  // shaped) the engine evaluated for this node — otherwise hidden inside WASM.
+  // Diagnostic-only; a separate export, no effect on the verdict above.
+  try {
+    const lowered = unwrap<{
+      principal?: unknown;
+      actionUid?: unknown;
+      resource?: unknown;
+      context?: unknown;
+    }>(exports.debug_lowered_context_v2_json(JSON.stringify(input)));
+    const body = input.action as { domain?: unknown; action?: unknown };
+    console.debug("[Scopeball] wasm.lowered-context", {
+      domain: body?.domain,
+      action: body?.action,
+      actionUid: lowered.actionUid,
+      principal: lowered.principal,
+      resource: lowered.resource,
+      context: lowered.context,
+    });
+  } catch (err) {
+    console.debug("[Scopeball] wasm.lowered-context (failed)", err);
+  }
   console.debug("[Scopeball] wasm.evaluate-action-v2", {
     chainId: input.tx.chain_id,
     from: input.tx.from,

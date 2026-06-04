@@ -233,6 +233,46 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
     Envelope::ok(EvaluateActionOutput { verdict: dto }).to_json()
 }
 
+/// DEBUG (diagnostic-only): lower the action and return the exact Cedar entity
+/// uids + context the engine evaluates — base lowering plus the host `results`
+/// replayed into `context.custom.*`.
+///
+/// Reuses the [`evaluate_action_v2_json`] input shape, so the host can pass the
+/// same `{ action, meta, tx, bundles, results }` and see the camelCase,
+/// cedarschema-shaped context (e.g. `direction.amountIn`, `slippageBp`,
+/// `tokenIn`) that Cedar policies actually read — the artifact that otherwise
+/// lives only inside the engine and is never surfaced. Best-effort: a
+/// plan/materialize fault is swallowed so the base lowered context is still
+/// returned. Has NO effect on the verdict path.
+#[wasm_bindgen]
+#[must_use]
+pub fn debug_lowered_context_v2_json(input_json: String) -> String {
+    let result = (|| -> Result<Value, EngineErrorDto> {
+        check_input_size(&input_json, "debug_lowered_context_v2_json")?;
+        let input: EvaluateActionInput =
+            serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
+        let lowered = lower(&input.action, &input.meta, &input.tx)?;
+        let manifests: Vec<ManifestV2> = input.bundles.iter().map(|b| b.manifest.clone()).collect();
+        let mut context = lowered.context.clone();
+        // Best-effort replay so `context.custom.*` shows when enrichment is wired;
+        // ignore a plan/materialize fault and surface the base lowered context.
+        if let Ok(planned) = plan(&manifests, &input.action, &lowered, &input.tx) {
+            let _ = policy_engine::policy_rpc::materialize_v2(&mut context, &planned, &input.results);
+        }
+        Ok(serde_json::json!({
+            "principal": lowered.principal,
+            "actionUid": lowered.action_uid,
+            "resource": lowered.resource,
+            "context": context,
+        }))
+    })();
+
+    match result {
+        Ok(payload) => Envelope::ok(payload).to_json(),
+        Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+    }
+}
+
 // ── shared helpers ───────────────────────────────────────────────────────
 
 /// Lower an [`ActionBody`] + [`ActionMeta`] + tx into a [`LoweredAction`].
