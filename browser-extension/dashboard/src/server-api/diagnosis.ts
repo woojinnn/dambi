@@ -26,8 +26,15 @@ export interface DiagnosisResultDto {
 export async function runDiagnosisProbes(
   input: DiagnosisRequestDto,
 ): Promise<DiagnosisResultDto> {
-  return sendToExtension<DiagnosisResultDto>({
+  const raw = await sendToExtension<string>({
     type: "run-diagnosis-probes",
     input_json: JSON.stringify(input),
   });
+  const envelope = JSON.parse(raw) as
+    | { ok: true; data: DiagnosisResultDto }
+    | { ok: false; error: { kind: string; message: string } };
+  if (!envelope.ok) {
+    throw new Error(envelope.error.message);
+  }
+  return envelope.data;
 }
