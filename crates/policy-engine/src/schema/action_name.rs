@@ -85,18 +85,32 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "add_liquidity",
     "cancel_intent_order",
     "collect_fees",
+    "gsm_swap",
     "pre_sign_intent_order",
     "remove_liquidity",
     "settle_intent_order",
     "sign_intent_order",
     "swap",
-    // Lending (12)
+    // Governance (10) — `delegate` already listed above under Airdrop (dedup;
+    // per-domain disambiguation in per_policy::RESOLVER_TABLE).
+    "activate_voting",
+    "cancel",
+    "close_vote",
+    "execute",
+    "propose",
+    "queue",
+    "redeem_cancellation_fee",
+    "start_vote",
+    "update_representative",
+    "vote",
+    // Lending (13)
     "borrow",
     "buy_collateral",
     "delegate_borrow",
     "disable_collateral",
     "enable_collateral",
     "liquidate",
+    "periphery_operation",
     "repay",
     "set_authorization",
     "set_emode",
@@ -150,13 +164,17 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "redelegate",
     "register_operator",
     "undelegate",
-    // Staking (8)
+    // Staking (10) — `stake` already listed above under LiquidStaking (the
+    // tag set is deduplicated; per-domain disambiguation lives in
+    // per_policy::RESOLVER_TABLE, which keys on (domain, tag)).
     "claim_rewards",
+    "cooldown",
     "gauge_deposit",
     "gauge_withdraw",
     "increase_lock_amount",
     "increase_lock_time",
     "lock",
+    "redeem",
     "unlock",
     "vote_for_gauge",
     // Token (13) — `delegate` already listed above under Airdrop
@@ -252,9 +270,11 @@ mod tests {
         // vault_transfer / sub_account_transfer) + 2 permission (approve_builder_fee
         // / token_delegate) + 2 trading/margin (twap_order / update_isolated_margin)
         // = 98, plus `settle_intent_order` for on-chain intent settlement = 99.
-        // (Prior unaccounted additions bring the base to 103.) Plus
-        // `pre_sign_intent_order` (CoW Swap on-chain SC-wallet pre-signature) = 104.
-        assert_eq!(REGISTERED_ACTIONS.len(), 104);
+        // Union of feat/registry-v2 (incl. weth-wrap `wrap_native`/`unwrap_native`
+        // + CoW Swap `pre_sign_intent_order`) and feat/morpho-onboarding (Compound
+        // + Aave `gsm_swap` + governance + lending periphery + staking
+        // redeem/stake/cooldown) = 118.
+        assert_eq!(REGISTERED_ACTIONS.len(), 118);
     }
 
     #[test]

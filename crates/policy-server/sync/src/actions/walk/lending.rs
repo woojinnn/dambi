@@ -36,6 +36,7 @@ pub(super) fn walk(
         LendingAction::DelegateBorrow(_) => {} // no live_inputs
         LendingAction::SetAuthorization(_) => {} // no live_inputs
         LendingAction::BuyCollateral(_) => {}  // no live_inputs
+        LendingAction::PeripheryOperation(_) => {} // no live_inputs
     }
 }
 
@@ -338,6 +339,7 @@ pub(super) fn apply(la: &mut LendingAction, slot: &ActionSlot, value: Value, now
         LendingAction::DelegateBorrow(_) => {}
         LendingAction::SetAuthorization(_) => {}
         LendingAction::BuyCollateral(_) => {}
+        LendingAction::PeripheryOperation(_) => {}
     }
 }
 

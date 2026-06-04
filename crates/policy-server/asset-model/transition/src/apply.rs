@@ -54,6 +54,7 @@ impl Reducer for ActionBody {
             Self::Yield(a) => a.apply(state, ctx),
             Self::Restaking(a) => a.apply(state, ctx),
             Self::Staking(a) => a.apply(state, ctx),
+            Self::Governance(a) => a.apply(state, ctx),
             // Hyperliquid CORE actions record their effect against the wallet's
             // off-chain Hl account (see effect::hyperliquid_core). No fetch: the
             // reducer reads only state + ctx; Sync populates the base balance.

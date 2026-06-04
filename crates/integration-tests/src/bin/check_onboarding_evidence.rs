@@ -3,7 +3,8 @@
 //! This is intentionally small and markdown-table oriented. The onboarding
 //! framework treats `evidence.md` as a phase gate, so this binary fails when a
 //! mandatory phase row is still pending, marked with an unsupported status, or
-//! claims `done` / `blocked` without an artifact.
+//! claims `done` / `blocked` / `n/a` without an artifact. Valid statuses are
+//! `done`, `blocked`, and `n/a` (each requires a justification cell).
 
 use std::env;
 use std::fs;
@@ -205,6 +206,13 @@ fn usage() {
 
 fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
     let mut section = Section::Other;
+    // Only rows inside a phase STATUS table (its header has a "status" column) are
+    // mandatory evidence rows. Explanatory tables/matrices placed inside a phase
+    // section (e.g. an L3 dropped-field disposition, a coverage matrix) must NOT be
+    // parsed as status rows. This keeps the checker protocol-agnostic to arbitrary
+    // evidence prose/tables: `### subsections` do not reset the `## ` section, so
+    // without this guard any 3-column table under a phase heading was mis-validated.
+    let mut in_status_table = false;
     let mut findings = Vec::new();
     let mut checked_rows = 0usize;
     let mut blocked_rows = 0usize;
@@ -215,13 +223,24 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
         let line_no = idx + 1;
         if let Some(next) = section_from_heading(line) {
             section = next;
+            in_status_table = false;
             continue;
         }
 
         let Some(cells) = parse_table_row(line) else {
+            in_status_table = false;
             continue;
         };
         if is_header_or_separator(&cells) {
+            // Arm validation only inside a status table — detected by a "status"
+            // column in the header row. Separator rows (all dashes) leave the flag
+            // unchanged so the data rows after the header are still validated.
+            if cells
+                .get(1)
+                .is_some_and(|cell| cell.trim().eq_ignore_ascii_case("status"))
+            {
+                in_status_table = true;
+            }
             continue;
         }
 
@@ -247,6 +266,12 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
         }
 
         if !phase.includes(section) {
+            continue;
+        }
+
+        // Skip non-status tables (analysis/matrix) inside a phase section — only
+        // rows under a "status"-column header are mandatory phase evidence rows.
+        if !in_status_table {
             continue;
         }
 
@@ -285,6 +310,21 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
                     });
                 }
             }
+            // `n/a` is a first-class disposition: many rows end "...or explicitly
+            // not applicable", and the template itself authors the no-Codex-lane
+            // rows as `n/a`. Accept it like `done` (a settled row that needs a
+            // justification cell) — but, unlike `blocked`, it is NOT a blocker, so
+            // it does not require a concrete Blockers-table entry.
+            "n/a" | "na" | "notapplicable" => {
+                if artifact.is_empty() {
+                    findings.push(Finding {
+                        line: line_no,
+                        message: format!(
+                            "`{requirement}` is n/a but artifact/summary is empty (justify why it does not apply)"
+                        ),
+                    });
+                }
+            }
             "pending" | "todo" | "skipped" | "" => findings.push(Finding {
                 line: line_no,
                 message: format!("`{requirement}` status `{}` is incomplete", cells[1].trim()),
@@ -292,7 +332,7 @@ fn check_markdown(markdown: &str, phase: Phase) -> (Vec<Finding>, Stats) {
             other => findings.push(Finding {
                 line: line_no,
                 message: format!(
-                    "`{requirement}` has unsupported status `{other}`; use done or blocked"
+                    "`{requirement}` has unsupported status `{other}`; use done, blocked, or n/a"
                 ),
             }),
         }
@@ -502,6 +542,41 @@ mod tests {
     }
 
     #[test]
+    fn accepts_na_with_justification() {
+        // `n/a` is a valid disposition for rows that explicitly do not apply
+        // (e.g. no Codex lane, Dune on a mainnet-only protocol). It counts as a
+        // dispositioned row (like blocked) and must carry a justification.
+        let markdown = completed_template().replacen(
+            "| done | artifact |",
+            "| n/a | mainnet-only protocol; Etherscan sweep sufficient |",
+            1,
+        );
+        let (findings, stats) = check_markdown(&markdown, Phase::P0);
+        assert!(findings.is_empty(), "{findings:#?}");
+        // n/a is settled but NOT a blocker — no Blockers-table row required.
+        assert_eq!(stats.blocked_rows, 0);
+    }
+
+    #[test]
+    fn rejects_na_without_artifact() {
+        let markdown = r#"
+## Run Metadata
+| field | value |
+|---|---|
+| protocol | curve |
+
+## P2 Real-Tx Evidence
+| required evidence | status | artifact / exact command / summary |
+|---|---|---|
+| Dune MCP/API availability checked | n/a | |
+"#;
+        let (findings, _) = check_markdown(markdown, Phase::P2);
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("n/a but artifact/summary is empty")));
+    }
+
+    #[test]
     fn rejects_omitted_template_rows() {
         let markdown = r#"
 ## Run Metadata
@@ -523,5 +598,43 @@ mod tests {
         assert!(findings
             .iter()
             .any(|f| f.message.contains("missing mandatory row")));
+    }
+
+    #[test]
+    fn ignores_non_status_tables_in_phase_sections() {
+        // A protocol may add an explanatory table (e.g. an L3 dropped-field
+        // disposition, a coverage matrix) inside a phase section. `### subsections`
+        // do not reset the `## ` section, so such a table sits "inside" P3; it must
+        // be IGNORED, not validated as status rows.
+        let base = completed_template();
+        let analysis = "### L3 — dropped-field disposition\n\
+| dropped field | scope verdict | rationale |\n\
+|---|---|---|\n\
+| appData | enrichment-only | off-chain hash, not statically decodable |\n\
+| kind | not a scope boundary | worst-case spend already captured |\n\n";
+        let with_analysis = base.replace(
+            "## P4 Land Evidence",
+            &format!("{analysis}## P4 Land Evidence"),
+        );
+        assert_ne!(base, with_analysis, "analysis table was not inserted");
+
+        let (f_base, s_base) = check_markdown(&base, Phase::All);
+        let (f_with, s_with) = check_markdown(&with_analysis, Phase::All);
+
+        assert_eq!(
+            s_base.checked_rows, s_with.checked_rows,
+            "an explanatory table must not add mandatory status rows"
+        );
+        assert_eq!(
+            f_base.len(),
+            f_with.len(),
+            "an explanatory table must not change findings: {f_with:#?}"
+        );
+        assert!(
+            !f_with
+                .iter()
+                .any(|f| f.message.contains("unsupported status")),
+            "explanatory-table cells must not be parsed as statuses: {f_with:#?}"
+        );
     }
 }

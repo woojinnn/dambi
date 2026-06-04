@@ -41,6 +41,8 @@ const AMM_CANCEL_INTENT_ORDER_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/amm/cancel_intent_order.cedarschema");
 const AMM_COLLECT_FEES_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/amm/collect_fees.cedarschema");
+const AMM_GSM_SWAP_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/amm/gsm_swap.cedarschema");
 const AMM_PRE_SIGN_INTENT_ORDER_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/amm/pre_sign_intent_order.cedarschema");
 const AMM_REMOVE_LIQUIDITY_SCHEMA: &str =
@@ -51,6 +53,32 @@ const AMM_SIGN_INTENT_ORDER_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/amm/sign_intent_order.cedarschema");
 const AMM_SWAP_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/amm/swap.cedarschema");
+
+// governance (alphabetical)
+const GOVERNANCE_ACTIVATE_VOTING_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/activate_voting.cedarschema");
+const GOVERNANCE_CANCEL_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/cancel.cedarschema");
+const GOVERNANCE_CLOSE_VOTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/close_vote.cedarschema");
+const GOVERNANCE_DELEGATE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/delegate.cedarschema");
+const GOVERNANCE_EXECUTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/execute.cedarschema");
+const GOVERNANCE_PROPOSE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/propose.cedarschema");
+const GOVERNANCE_QUEUE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/queue.cedarschema");
+const GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/governance/redeem_cancellation_fee.cedarschema"
+);
+const GOVERNANCE_START_VOTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/start_vote.cedarschema");
+const GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/governance/update_representative.cedarschema"
+);
+const GOVERNANCE_VOTE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/governance/vote.cedarschema");
 
 // lending (alphabetical)
 const LENDING_BORROW_SCHEMA: &str =
@@ -65,6 +93,9 @@ const LENDING_ENABLE_COLLATERAL_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/enable_collateral.cedarschema");
 const LENDING_LIQUIDATE_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/liquidate.cedarschema");
+const LENDING_PERIPHERY_OPERATION_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/lending/periphery_operation.cedarschema"
+);
 const LENDING_REPAY_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/lending/repay.cedarschema");
 const LENDING_SET_EMODE_SCHEMA: &str =
@@ -123,6 +154,8 @@ const YIELD_YT_SWAP_SCHEMA: &str =
 // staking (alphabetical)
 const STAKING_CLAIM_REWARDS_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/staking/claim_rewards.cedarschema");
+const STAKING_COOLDOWN_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/staking/cooldown.cedarschema");
 const STAKING_GAUGE_DEPOSIT_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/staking/gauge_deposit.cedarschema");
 const STAKING_GAUGE_WITHDRAW_SCHEMA: &str =
@@ -134,6 +167,10 @@ const STAKING_INCREASE_LOCK_TIME_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/staking/increase_lock_time.cedarschema");
 const STAKING_LOCK_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/staking/lock.cedarschema");
+const STAKING_REDEEM_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/staking/redeem.cedarschema");
+const STAKING_STAKE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/staking/stake.cedarschema");
 const STAKING_UNLOCK_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/staking/unlock.cedarschema");
 const STAKING_VOTE_FOR_GAUGE_SCHEMA: &str =
@@ -292,16 +329,29 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     AMM_ADD_LIQUIDITY_SCHEMA,
     AMM_CANCEL_INTENT_ORDER_SCHEMA,
     AMM_COLLECT_FEES_SCHEMA,
+    AMM_GSM_SWAP_SCHEMA,
     AMM_PRE_SIGN_INTENT_ORDER_SCHEMA,
     AMM_REMOVE_LIQUIDITY_SCHEMA,
     AMM_SETTLE_INTENT_ORDER_SCHEMA,
     AMM_SIGN_INTENT_ORDER_SCHEMA,
     AMM_SWAP_SCHEMA,
+    GOVERNANCE_ACTIVATE_VOTING_SCHEMA,
+    GOVERNANCE_CANCEL_SCHEMA,
+    GOVERNANCE_CLOSE_VOTE_SCHEMA,
+    GOVERNANCE_DELEGATE_SCHEMA,
+    GOVERNANCE_EXECUTE_SCHEMA,
+    GOVERNANCE_PROPOSE_SCHEMA,
+    GOVERNANCE_QUEUE_SCHEMA,
+    GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA,
+    GOVERNANCE_START_VOTE_SCHEMA,
+    GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA,
+    GOVERNANCE_VOTE_SCHEMA,
     LENDING_BORROW_SCHEMA,
     LENDING_DELEGATE_BORROW_SCHEMA,
     LENDING_DISABLE_COLLATERAL_SCHEMA,
     LENDING_ENABLE_COLLATERAL_SCHEMA,
     LENDING_LIQUIDATE_SCHEMA,
+    LENDING_PERIPHERY_OPERATION_SCHEMA,
     LENDING_REPAY_SCHEMA,
     LENDING_SET_EMODE_SCHEMA,
     LENDING_SUPPLY_SCHEMA,
@@ -350,11 +400,14 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     RESTAKING_REGISTER_OPERATOR_SCHEMA,
     RESTAKING_UNDELEGATE_SCHEMA,
     STAKING_CLAIM_REWARDS_SCHEMA,
+    STAKING_COOLDOWN_SCHEMA,
     STAKING_GAUGE_DEPOSIT_SCHEMA,
     STAKING_GAUGE_WITHDRAW_SCHEMA,
     STAKING_INCREASE_LOCK_AMOUNT_SCHEMA,
     STAKING_INCREASE_LOCK_TIME_SCHEMA,
     STAKING_LOCK_SCHEMA,
+    STAKING_REDEEM_SCHEMA,
+    STAKING_STAKE_SCHEMA,
     STAKING_UNLOCK_SCHEMA,
     STAKING_VOTE_FOR_GAUGE_SCHEMA,
     TOKEN_ERC20_APPROVE_SCHEMA,

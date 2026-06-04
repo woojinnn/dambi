@@ -55,6 +55,9 @@ pub const WHITELIST: &[&str] = &[
     "balancer_pool_id_to_address",
     "balancer_v2_userdata_field",
     "balancer_v2_batch_swap_field",
+    "tuple_array_field",
+    "array_len",
+    "u64_saturating",
 ];
 
 /// Dispatch a `$fn` call by name against its already-substituted JSON args.
@@ -78,6 +81,9 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "balancer_pool_id_to_address" => balancer_pool_id_to_address(args),
         "balancer_v2_userdata_field" => balancer_v2_userdata_field(args),
         "balancer_v2_batch_swap_field" => balancer_v2_batch_swap_field(args),
+        "tuple_array_field" => tuple_array_field(args),
+        "array_len" => array_len(args),
+        "u64_saturating" => u64_saturating(args),
         _ => Err(format!(
             "unknown $fn '{name}' (whitelist: {})",
             WHITELIST.join(", ")
@@ -1070,6 +1076,70 @@ fn json_to_u64(v: &JsonValue) -> Option<u64> {
         JsonValue::String(s) => s.parse::<u64>().ok(),
         _ => None,
     }
+}
+
+/// `u64_saturating(uint) -> u64 number`. Clamps a (possibly >u64) uint-like
+/// value to `u64::MAX`. Used by Umbrella batch permit-deadline fields.
+fn u64_saturating(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!("u64_saturating expects 1 arg, got {}", args.len()));
+    }
+    let value = match &args[0] {
+        JsonValue::Number(n) => n.as_u64().unwrap_or(u64::MAX),
+        JsonValue::String(s) => s.parse::<u64>().unwrap_or(u64::MAX),
+        other => {
+            return Err(format!(
+                "u64_saturating: argument is not a uint-like value: {other}"
+            ))
+        }
+    };
+    Ok(JsonValue::Number(serde_json::Number::from(value)))
+}
+
+/// `array_len(array) -> decimal-string length`. Used for proposal payload counts.
+fn array_len(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!("array_len expects 1 arg, got {}", args.len()));
+    }
+    let arr = args[0]
+        .as_array()
+        .ok_or("array_len: argument is not an array")?;
+    Ok(JsonValue::String(arr.len().to_string()))
+}
+
+/// `tuple_array_field(tuple[], index) -> array`.
+///
+/// Solidity tuple arrays decode positionally in this registry path. This helper
+/// projects one tuple slot out of every row, e.g. Aave Governance V3
+/// `Payload[]` slot N into a flat `array`.
+fn tuple_array_field(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "tuple_array_field expects 2 args (array, index), got {}",
+            args.len()
+        ));
+    }
+    let arr = args[0]
+        .as_array()
+        .ok_or("tuple_array_field: first argument is not an array")?;
+    let index = match &args[1] {
+        JsonValue::Number(n) => n.as_u64(),
+        JsonValue::String(s) => s.parse::<u64>().ok(),
+        _ => None,
+    }
+    .and_then(|n| usize::try_from(n).ok())
+    .ok_or("tuple_array_field: index is not a uint")?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (row_idx, row) in arr.iter().enumerate() {
+        let tuple = row
+            .as_array()
+            .ok_or_else(|| format!("tuple_array_field: row {row_idx} is not a tuple array"))?;
+        let value = tuple.get(index).cloned().ok_or_else(|| {
+            format!("tuple_array_field: row {row_idx} index {index} out of bounds")
+        })?;
+        out.push(value);
+    }
+    Ok(JsonValue::Array(out))
 }
 
 #[cfg(test)]

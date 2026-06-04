@@ -30,6 +30,8 @@ pub(super) fn walk(
         AmmAction::SettleIntentOrder(_) => {}
         AmmAction::CancelIntentOrder(_) => {}
         AmmAction::PreSignIntentOrder(_) => {}
+        // GSM swap carries no live inputs (faithful static decode).
+        AmmAction::GsmSwap(_) => {}
     }
 }
 
@@ -168,6 +170,7 @@ pub(super) fn apply(aa: &mut AmmAction, slot: &ActionSlot, value: Value, now: Ti
         AmmAction::SettleIntentOrder(_) => {}
         AmmAction::CancelIntentOrder(_) => {}
         AmmAction::PreSignIntentOrder(_) => {}
+        AmmAction::GsmSwap(_) => {}
     }
 }
 
