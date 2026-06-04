@@ -25,9 +25,19 @@ import { extractSelector } from "./declarative-decode";
 import { type Abi, type Hex, decodeFunctionData } from "viem";
 import {
   installDeclarativeBundleV3,
+  installDeclarativeBundleV3BySelector,
   InstallDeclarativeV3Error,
   type InstallDeclarativeV3Result,
 } from "./declarative-adapter-loader";
+
+/**
+ * Selectors that route address-agnostically — a per-address callkey miss falls
+ * back to the `by-selector/` index (selector-only decoder). Today only standard
+ * NFT `setApprovalForAll` (`0xa22cb465`, erc721+erc1155, erc20-disjoint). MUST
+ * match build-index's `ADDRESS_AGNOSTIC_SELECTORS` allowlist. erc721 single
+ * `approve` (`0x095ea7b3`) is excluded — it collides with erc20 approve.
+ */
+const AGNOSTIC_SELECTORS = new Set<string>(["0xa22cb465"]);
 
 /**
  * v3 outcome shape. The hit payload carries decoded `Action[]` values
@@ -418,20 +428,36 @@ export async function tryDeclarativeRouteV3(args: {
   // returns `null`; we surface that as a clean miss so the orchestrator can
   // produce the fail-closed verdict/audit row.
   try {
-    const installed = await installDeclarativeBundleV3({
+    let installed = await installDeclarativeBundleV3({
       chainId: args.chainId,
       to: args.to,
       selector,
     });
     if (installed === null) {
-      return { kind: "miss", reason: "bundle_not_installed" };
+      // Per-address callkey miss. For an address-agnostic standard selector
+      // (NFT setApprovalForAll) the decoder is keyed by (chain, selector) ONLY,
+      // so fall back to the by-selector index — an UNREGISTERED collection then
+      // still decodes via the WASM selector_bridge. A by-selector miss/fault is
+      // null too → the orchestrator fail-closes to a warn, same as before.
+      if (AGNOSTIC_SELECTORS.has(selector.toLowerCase())) {
+        installed = await installDeclarativeBundleV3BySelector({
+          chainId: args.chainId,
+          selector,
+        });
+      }
+      if (installed === null) {
+        return { kind: "miss", reason: "bundle_not_installed" };
+      }
+      // Address-agnostic bundles are single_emit with no multicall children —
+      // nothing to pre-install.
+    } else {
+      await preinstallMulticallChildren({
+        chainId: args.chainId,
+        to: args.to,
+        calldataHex: args.calldataHex,
+        installedBundle: installed.bundle,
+      });
     }
-    await preinstallMulticallChildren({
-      chainId: args.chainId,
-      to: args.to,
-      calldataHex: args.calldataHex,
-      installedBundle: installed.bundle,
-    });
   } catch (err) {
     if (err instanceof InstallDeclarativeV3Error) {
       return { kind: "fault", reason: "install_failed", cause: err };

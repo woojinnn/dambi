@@ -184,6 +184,24 @@ function v3TypedDataUrl(baseUrl: string, key: TypedDataMatchKey): string {
   return `${base}/index/by-typed-data/${file}.json`;
 }
 
+function v3SelectorCacheKey(chainId: number, selector: string): string {
+  return `sel:${chainId}__${selector.toLowerCase()}`;
+}
+
+/**
+ * Build the `by-selector/` index URL for an address-agnostic adapter. MUST
+ * mirror build-index's `selectorFilename` (`<chainId>__<selector.lower>.json`)
+ * — no address segment.
+ */
+function v3SelectorUrl(
+  baseUrl: string,
+  chainId: number,
+  selector: string,
+): string {
+  const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  return `${base}/index/by-selector/${chainId}__${selector.toLowerCase()}.json`;
+}
+
 /**
  * M3 — hydrate a v3 bundle for `(chainId, to, selector)` from the registry
  * and install it into the WASM engine.
@@ -547,6 +565,119 @@ export async function installDeclarativeBundleV3ByTypedData(
   );
 
   return { ok: true, bundleId: installed.bundle_id };
+}
+
+/**
+ * Address-agnostic (selector-only) hydrate + install — standard NFT
+ * `setApprovalForAll`. Fetches the `by-selector/` index entry for
+ * `(chainId, selector)` and installs it; the WASM route then reaches it via the
+ * `selector_bridge` after a per-address callkey miss.
+ *
+ * Mirrors {@link installDeclarativeBundleV3} but fetches the `by-selector/`
+ * index (URL via {@link v3SelectorUrl}). Returns the install result, or `null`
+ * on ANY miss/fault (404 / parse / install). It NEVER throws: the on-chain tx
+ * flow is warn-closed, so a fault here degrades to the same fail-closed warn as
+ * a plain miss. Memory cache only (re-fetch on SW cold start is cheap; the WASM
+ * install is idempotent) under the `sel:`-prefixed key so it cannot collide
+ * with the `v3:` callkey or `td:` typed-data entries.
+ */
+export async function installDeclarativeBundleV3BySelector(args: {
+  chainId: number;
+  selector: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<InstallDeclarativeV3Result | null> {
+  const cacheKey = v3SelectorCacheKey(args.chainId, args.selector);
+  const cached = v3InstallCache.get(cacheKey);
+  const cachedBundle = v3CachedBundleByCallKey.get(cacheKey);
+  if (cached && cachedBundle) {
+    return {
+      decoderId: cached.decoder_id,
+      bundleId: cached.bundle_id,
+      bundle: cachedBundle,
+    };
+  }
+
+  const baseUrl = args.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
+  const doFetch = args.fetchImpl ?? fetch;
+  const url = v3SelectorUrl(baseUrl, args.chainId, args.selector);
+
+  let response: Response;
+  try {
+    response = await doFetch(url);
+  } catch (err) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector fetch failed", {
+      selectorKey: cacheKey,
+      message: err instanceof Error ? err.message : err,
+    });
+    return null;
+  }
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector fetch_status", {
+      selectorKey: cacheKey,
+      status: response.status,
+    });
+    return null;
+  }
+
+  let parsedResponse: DeclarativeRegistryV3Response;
+  try {
+    parsedResponse = (await response.json()) as DeclarativeRegistryV3Response;
+  } catch (err) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector json parse failed", {
+      selectorKey: cacheKey,
+      message: err instanceof Error ? err.message : err,
+    });
+    return null;
+  }
+
+  if (!parsedResponse || parsedResponse.matched !== true) return null;
+
+  let parsedBundle: V3Bundle | null;
+  try {
+    parsedBundle = parseBundleV3(parsedResponse.bundle);
+  } catch (err) {
+    if (err instanceof BundleParseError) {
+      console.warn("[Scopeball] installDeclarativeBundleV3BySelector parse failed", {
+        selectorKey: cacheKey,
+        message: err.message,
+      });
+      return null;
+    }
+    throw err;
+  }
+  if (parsedBundle === null) return null;
+
+  const bundleJson = JSON.stringify(parsedResponse.bundle);
+  let installed: DeclarativeInstallResult;
+  try {
+    installed = await declarativeInstallV3(bundleJson);
+  } catch (err) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector install failed", {
+      selectorKey: cacheKey,
+      message: err instanceof Error ? err.message : err,
+    });
+    return null;
+  }
+
+  v3InstallCache.set(cacheKey, installed);
+  v3CachedBundleByCallKey.set(cacheKey, parsedBundle);
+  v3InstalledBundleIds.add(installed.bundle_id);
+
+  console.info("[Scopeball] installDeclarativeBundleV3BySelector fresh-install", {
+    selectorKey: cacheKey,
+    url,
+    bundleId: installed.bundle_id,
+    decoderId: installed.decoder_id,
+  });
+
+  return {
+    decoderId: installed.decoder_id,
+    bundleId: installed.bundle_id,
+    bundle: parsedBundle,
+  };
 }
 
 /**
