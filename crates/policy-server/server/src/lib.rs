@@ -39,6 +39,7 @@ pub mod dashboard_handlers;
 pub mod docs;
 pub mod dto;
 pub mod events;
+pub mod facts;
 pub mod handler;
 pub mod market_dto;
 pub mod market_handlers;

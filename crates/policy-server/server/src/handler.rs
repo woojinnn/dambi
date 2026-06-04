@@ -104,10 +104,27 @@ pub async fn evaluate(
         deltas.push(delta);
     }
 
-    // The browser extension owns policy and verdict evaluation. Server-side
-    // enrichment results are intentionally empty until a typed call-spec
-    // executor is introduced at the HTTP boundary.
-    let results = BTreeMap::new();
+    // Execute each planned enrichment call against the predicted `state_after`.
+    // Server stays fail-open: a failed call is surfaced as a diagnostic and is
+    // simply absent from `results`; the extension's materialize layer applies
+    // the v2 fail-open contract (optional → skip, required → SystemFail).
+    let mut results = BTreeMap::new();
+    let mut diagnostics = Vec::new();
+    let fact_ctx = crate::facts::FactCtx { state: &state };
+    for spec in &req.call_specs {
+        match crate::facts::dispatch(&spec.method, &spec.params, &fact_ctx) {
+            Ok(value) => {
+                results.insert(spec.call_id.clone(), value);
+            }
+            Err(err) => {
+                diagnostics.push(Diagnostic {
+                    level: if spec.optional { "warn" } else { "error" }.to_owned(),
+                    message: format!("enrichment call `{}` failed: {err}", spec.call_id),
+                    call_id: Some(spec.call_id.clone()),
+                });
+            }
+        }
+    }
 
     let note = if req.envelopes.is_empty() {
         "simulated 0 envelopes (state echoed)".to_owned()
@@ -123,11 +140,14 @@ pub async fn evaluate(
             state_after: state,
             results,
         },
-        diagnostics: vec![Diagnostic {
-            level: "info".to_owned(),
-            message: note,
-            call_id: None,
-        }],
+        diagnostics: {
+            diagnostics.push(Diagnostic {
+                level: "info".to_owned(),
+                message: note,
+                call_id: None,
+            });
+            diagnostics
+        },
     })
 }
 
