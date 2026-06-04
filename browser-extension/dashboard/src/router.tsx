@@ -11,8 +11,14 @@
  * varies per route).
  */
 
-import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom";
+import {
+  Navigate,
+  RouterProvider,
+  createBrowserRouter,
+  createHashRouter,
+} from "react-router-dom";
 
+import { isExtensionContext } from "./env";
 import { AuthProvider } from "./hooks/useAuth";
 import { RequireAuth } from "./RequireAuth";
 import { AppShell } from "./shell/AppShell";
@@ -32,7 +38,13 @@ import { MarketPage } from "./pages/MarketPage";
 import { MarketDetailPage } from "./pages/MarketDetailPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
-const router = createBrowserRouter([
+// On an extension page the URL is `…/options.html` (a real file, no dev
+// server rewriting unknown paths to index.html), so path-based routing finds
+// no match → blank screen. Hash routing (`…/options.html#/editor`) renders
+// and survives reloads. Standalone dev keeps clean path-based URLs.
+const createRouter = isExtensionContext() ? createHashRouter : createBrowserRouter;
+
+const router = createRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/auth/callback", element: <AuthCallbackPage /> },
   { path: "/settings", element: <SettingsPage /> },
