@@ -8,18 +8,52 @@
  * - Doesn't carry the dashboard's `urlWithTokenQuery` SSE helper —
  *   the extension never opens SSE.
  *
- * The server URL is taken from `SCOPEBALL_SERVER_URL` at build time
- * (webpack DefinePlugin) and falls back to the local-dev
- * default.
+ * The server URL comes from `SCOPEBALL_SERVER_URL` at build time
+ * (webpack DefinePlugin) and can be swapped at runtime via
+ * `chrome.storage.local["scopeball_server_url"]` — the service-worker
+ * mirror of the dashboard's `localStorage["scopeball_server_url"]`
+ * override. Falls back to the local-dev default.
  */
 
 import { getAccessToken, getRefreshToken, setTokens } from "./tokenStore";
 
 declare const SCOPEBALL_SERVER_URL: string | undefined;
 
-export const SERVER_BASE_URL =
+/** Build-time default (webpack DefinePlugin → `SCOPEBALL_SERVER_URL`). */
+const BUILD_BASE_URL =
   (typeof SCOPEBALL_SERVER_URL !== "undefined" && SCOPEBALL_SERVER_URL) ||
   "http://127.0.0.1:8788";
+
+/** Runtime override key — mirrors the dashboard's
+ * `localStorage["scopeball_server_url"]`, in `chrome.storage.local`
+ * (service workers have no `localStorage`). */
+const SERVER_URL_KEY = "scopeball_server_url";
+
+let runtimeBaseUrl: string | null = null;
+
+/** Current server base URL: runtime override (chrome.storage) if set,
+ * else the build-time default. Prefer this over `SERVER_BASE_URL` for
+ * anything that must respect a live server swap. */
+export function getServerBaseUrl(): string {
+  return runtimeBaseUrl || BUILD_BASE_URL;
+}
+
+/** Back-compat snapshot of the base URL at import time. */
+export const SERVER_BASE_URL = BUILD_BASE_URL;
+
+// Load any runtime override once at SW startup, then keep it live.
+if (typeof chrome !== "undefined" && chrome.storage?.local) {
+  void chrome.storage.local.get(SERVER_URL_KEY).then((r) => {
+    const v = r[SERVER_URL_KEY];
+    if (typeof v === "string" && v) runtimeBaseUrl = v;
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes[SERVER_URL_KEY]) {
+      const v = changes[SERVER_URL_KEY].newValue;
+      runtimeBaseUrl = typeof v === "string" && v ? v : null;
+    }
+  });
+}
 
 export class ServerError extends Error {
   public readonly status: number;
@@ -51,7 +85,7 @@ interface RefreshResponse {
 async function refreshAccessToken(): Promise<string | null> {
   const refresh = await getRefreshToken();
   if (!refresh) return null;
-  const res = await fetch(`${SERVER_BASE_URL}/auth/refresh`, {
+  const res = await fetch(`${getServerBaseUrl()}/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: refresh }),
@@ -67,7 +101,7 @@ async function refreshAccessToken(): Promise<string | null> {
 
 /** Core request primitive. Returns parsed JSON. Throws `ServerError`. */
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const url = path.startsWith("http") ? path : `${SERVER_BASE_URL}${path}`;
+  const url = path.startsWith("http") ? path : `${getServerBaseUrl()}${path}`;
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
