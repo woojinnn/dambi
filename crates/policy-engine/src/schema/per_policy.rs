@@ -1336,10 +1336,8 @@ mod tests {
     #[test]
     fn same_stub_actions_compose_with_custom_context() {
         for tag in ["delegate", "stake"] {
-            let trigger = trigger_of(&[(
-                TriggerField::ActionTag,
-                TriggerConstraint::Eq(tag.into()),
-            )]);
+            let trigger =
+                trigger_of(&[(TriggerField::ActionTag, TriggerConstraint::Eq(tag.into()))]);
             let m = manifest(trigger, &[("flagged", "Bool")]);
             let text = compose_per_policy(&m)
                 .unwrap_or_else(|e| panic!("same-stub `{tag}` must compose, got {e:?}"));
