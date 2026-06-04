@@ -110,7 +110,7 @@
         "asset": {
           "type": "AssetRef",
           "required": true,
-          "description": "Token to price (address, symbol, decimals, …).",
+          "description": "Token to price (address, symbol, decimals, \u2026).",
           "defaultSelector": "$.action.inputToken.asset"
         },
         "amount": {
@@ -197,7 +197,7 @@
     },
     "scopeball.evaluate_v3": {
       "name": "scopeball.evaluate_v3",
-      "description": "Phase 5D mock — echo (actions, eval_context, wallet_id) back as policyRequest.actions with empty state_before / deltas / state_after. Real implementation arrives in Phase 6 (reducer + state sync).",
+      "description": "Phase 5D mock \u2014 echo (actions, eval_context, wallet_id) back as policyRequest.actions with empty state_before / deltas / state_after. Real implementation arrives in Phase 6 (reducer + state sync).",
       "params": {
         "wallet_id": {
           "type": "String",
@@ -344,7 +344,7 @@
     "approval.unlimited_over_balance": {
       "name": "approval.unlimited_over_balance",
       "status": "planned",
-      "_structural_flag": "REAL/implemented in crates/simulation/server/src/facts.rs (sim-server fact host), NOT the policy-rpc daemon. It sits in `planned` only because `methods` is byte-coupled to the daemon (catalog.test.ts drift test). Under ADR-009 (policy-rpc retiring, sim-server = fact host) the structural home for sim-server methods is an open question — see catalog_conformance.rs Task-5 flag.",
+      "_structural_flag": "REAL/implemented in crates/simulation/server/src/facts.rs (sim-server fact host), NOT the policy-rpc daemon. It sits in `planned` only because `methods` is byte-coupled to the daemon (catalog.test.ts drift test). Under ADR-009 (policy-rpc retiring, sim-server = fact host) the structural home for sim-server methods is an open question \u2014 see catalog_conformance.rs Task-5 flag.",
       "description": "GEN-01: is the ERC20 approval to `spender` on `token` unlimited, and how many times the wallet's available balance does the approved amount cover? Emits TWO context fields from one call.",
       "readKind": "direct",
       "server": "sim-server",
@@ -438,7 +438,7 @@
     "valuation.asset_usd": {
       "name": "valuation.asset_usd",
       "status": "planned",
-      "description": "USD valuation of a single asset position: token amount × DB price. Replaces the live oracle.usd_value call with a DIRECT read of the refrigerated LiveField (ADR-009).",
+      "description": "USD valuation of a single asset position: token amount \u00d7 DB price. Replaces the live oracle.usd_value call with a DIRECT read of the refrigerated LiveField (ADR-009).",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -472,7 +472,7 @@
     "position.health_factor_after": {
       "name": "position.health_factor_after",
       "status": "planned",
-      "description": "Health factor of a lending position AFTER virtually applying the proposed borrow/withdraw (State₂). Reducer recomputes from refrigerated collaterals/debts/liquidation_threshold + price. Drives AAVE-01 (T3).",
+      "description": "Health factor of a lending position AFTER virtually applying the proposed borrow/withdraw (State\u2082). Reducer recomputes from refrigerated collaterals/debts/liquidation_threshold + price. Drives AAVE-01 (T3).",
       "readKind": "reducer",
       "server": "sim-server",
       "stateDependency": [
@@ -501,7 +501,7 @@
           "type": "Action",
           "required": true,
           "defaultSelector": "$.action",
-          "description": "The proposed borrow/withdraw — applied via the reducer to produce State₂ before recomputing HF. Without it the method cannot compute the AFTER value."
+          "description": "The proposed borrow/withdraw \u2014 applied via the reducer to produce State\u2082 before recomputing HF. Without it the method cannot compute the AFTER value."
         }
       },
       "returns": {
@@ -514,7 +514,7 @@
     "perp.notional_to_collateral": {
       "name": "perp.notional_to_collateral",
       "status": "planned",
-      "description": "Ratio of the proposed order's notional (size × markPrice) to the account's total collateral USD. SELF-VERIFY: on OpenPosition both inputs live in the action's live_inputs (size, markPrice, userAccountState.totalCollateralUsd) → this is a DERIVED read, not a whole-wallet fold. A cross-position collateral fold is a separate variant. Drives PERP-03.",
+      "description": "Ratio of the proposed order's notional (size \u00d7 markPrice) to the account's total collateral USD. SELF-VERIFY: on OpenPosition both inputs live in the action's live_inputs (size, markPrice, userAccountState.totalCollateralUsd) \u2192 this is a DERIVED read, not a whole-wallet fold. A cross-position collateral fold is a separate variant. Drives PERP-03.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -538,7 +538,7 @@
           "type": "Action",
           "required": true,
           "defaultSelector": "$.action",
-          "description": "The proposed perp order: size × markPrice = notional; userAccountState = collateral denominator."
+          "description": "The proposed perp order: size \u00d7 markPrice = notional; userAccountState = collateral denominator."
         }
       },
       "returns": {
@@ -552,7 +552,7 @@
       "name": "portfolio.group_pct",
       "status": "planned",
       "experimental": true,
-      "description": "Whole-wallet fold: percentage of total portfolio USD held in a token/category group AFTER the proposed action (State₂). PortfolioAggregate — gated on ADR-010 (T2). Output flattens per-group scalars into context fields.",
+      "description": "Whole-wallet fold: percentage of total portfolio USD held in a token/category group AFTER the proposed action (State\u2082). PortfolioAggregate \u2014 gated on ADR-010 (T2). Output flattens per-group scalars into context fields.",
       "readKind": "fold",
       "server": "sim-server",
       "stateDependency": [
@@ -607,7 +607,7 @@
     "valuation.tx_total_usd": {
       "name": "valuation.tx_total_usd",
       "status": "planned",
-      "description": "Total USD outflow of the whole transaction (incl. multicall children): sum of net negative balance deltas × price_value. State₂ via reducer. Drives GEN-05.",
+      "description": "Total USD outflow of the whole transaction (incl. multicall children): sum of net negative balance deltas \u00d7 price_value. State\u2082 via reducer. Drives GEN-05.",
       "readKind": "reducer",
       "server": "sim-server",
       "stateDependency": [
@@ -642,7 +642,7 @@
     "valuation.gas_cost_usd": {
       "name": "valuation.gas_cost_usd",
       "status": "planned",
-      "description": "Gas cost in USD = gasEstimate (action field) × native token price_value. Drives GEN-07/08.",
+      "description": "Gas cost in USD = gasEstimate (action field) \u00d7 native token price_value. Drives GEN-07/08.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -756,7 +756,7 @@
     "perp.liq_distance_bp": {
       "name": "perp.liq_distance_bp",
       "status": "planned",
-      "description": "Distance (bp) from the liquidation price to the mark price AFTER opening the position (State₂). Reducer computes the resulting liq_price. Drives PERP-02.",
+      "description": "Distance (bp) from the liquidation price to the mark price AFTER opening the position (State\u2082). Reducer computes the resulting liq_price. Drives PERP-02.",
       "readKind": "reducer",
       "server": "sim-server",
       "stateDependency": [
@@ -895,7 +895,7 @@
     "position.health_factor_with_volatility": {
       "name": "position.health_factor_with_volatility",
       "status": "planned",
-      "description": "AAVE-02: post-trade health factor (State₂, same reducer recompute as position.health_factor_after) PLUS the collateral-volatility class of the position's dominant collateral. Emits TWO context fields from one call so a single policy can gate on 'HF in the warn band AND collateral is volatile'. The volatility class is an ExternalInfo tag (stable/volatile) joined onto the refrigerated collateral set.",
+      "description": "AAVE-02: post-trade health factor (State\u2082, same reducer recompute as position.health_factor_after) PLUS the collateral-volatility class of the position's dominant collateral. Emits TWO context fields from one call so a single policy can gate on 'HF in the warn band AND collateral is volatile'. The volatility class is an ExternalInfo tag (stable/volatile) joined onto the refrigerated collateral set.",
       "readKind": "reducer",
       "server": "sim-server",
       "stateDependency": [
@@ -925,7 +925,7 @@
           "type": "Action",
           "required": true,
           "defaultSelector": "$.action",
-          "description": "The proposed borrow/withdraw — applied via the reducer to produce State₂ before recomputing HF."
+          "description": "The proposed borrow/withdraw \u2014 applied via the reducer to produce State\u2082 before recomputing HF."
         }
       },
       "returns": {
@@ -946,7 +946,7 @@
     "position.ltv_after": {
       "name": "position.ltv_after",
       "status": "planned",
-      "description": "AAVE-06: loan-to-value of a lending position AFTER virtually applying the proposed action (State₂), expressed as a decimal ratio (debt_usd / collateral_usd). Reducer recompute_ltv from refrigerated collaterals/debts + price. For eMode-entry policies this is the effective leverage the new category LTV cap is checked against; the policy reads the category cap from the action's base context (categoryConfig.ltvBp).",
+      "description": "AAVE-06: loan-to-value of a lending position AFTER virtually applying the proposed action (State\u2082), expressed as a decimal ratio (debt_usd / collateral_usd). Reducer recompute_ltv from refrigerated collaterals/debts + price. For eMode-entry policies this is the effective leverage the new category LTV cap is checked against; the policy reads the category cap from the action's base context (categoryConfig.ltvBp).",
       "readKind": "reducer",
       "server": "sim-server",
       "stateDependency": [
@@ -974,7 +974,7 @@
           "type": "Action",
           "required": true,
           "defaultSelector": "$.action",
-          "description": "The proposed eMode/borrow action — applied via the reducer to produce State₂ before recomputing LTV."
+          "description": "The proposed eMode/borrow action \u2014 applied via the reducer to produce State\u2082 before recomputing LTV."
         }
       },
       "returns": {
@@ -987,7 +987,7 @@
     "position.borrow_fraction_bps": {
       "name": "position.borrow_fraction_bps",
       "status": "planned",
-      "description": "AAVE-07: fraction (basis points) of the user's remaining borrow capacity this borrow consumes = borrow_usd / availableBorrowUsd. The base Borrow context carries availableBorrowUsd only as a U256 hex string and amountUsd only as an optional decimal, so the ratio cannot be formed by a pure Cedar action-field read — it needs a derived read that prices the borrow amount and divides by the precomputed UserLendingState.available_borrow_usd.",
+      "description": "AAVE-07: fraction (basis points) of the user's remaining borrow capacity this borrow consumes = borrow_usd / availableBorrowUsd. The base Borrow context carries availableBorrowUsd only as a U256 hex string and amountUsd only as an optional decimal, so the ratio cannot be formed by a pure Cedar action-field read \u2014 it needs a derived read that prices the borrow amount and divides by the precomputed UserLendingState.available_borrow_usd.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -1010,7 +1010,7 @@
           "type": "Action",
           "required": true,
           "defaultSelector": "$.action",
-          "description": "The proposed borrow: amount × price = numerator; userStateBefore.availableBorrowUsd = denominator."
+          "description": "The proposed borrow: amount \u00d7 price = numerator; userStateBefore.availableBorrowUsd = denominator."
         }
       },
       "returns": {
@@ -1056,7 +1056,7 @@
     "reserve.isolation_debt_headroom_bps": {
       "name": "reserve.isolation_debt_headroom_bps",
       "status": "planned",
-      "description": "AAVE-11: how close (basis points of the debt ceiling) the isolation-mode total debt would be AFTER this borrow = (isolationModeTotalDebt + borrow_usd) / debtCeiling. The debt ceiling and the protocol-global isolationModeTotalDebt are NOT base context fields — they are reserve/protocol-global metadata — so this proximity must be derived from those externals plus the proposed borrow.",
+      "description": "AAVE-11: how close (basis points of the debt ceiling) the isolation-mode total debt would be AFTER this borrow = (isolationModeTotalDebt + borrow_usd) / debtCeiling. The debt ceiling and the protocol-global isolationModeTotalDebt are NOT base context fields \u2014 they are reserve/protocol-global metadata \u2014 so this proximity must be derived from those externals plus the proposed borrow.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -1140,7 +1140,7 @@
     "external.lst_price_divergence_bps": {
       "name": "external.lst_price_divergence_bps",
       "status": "planned",
-      "description": "AAVE-09: divergence (basis points) between the Aave oracle's price for an LST/LRT collateral and its true market/backing price, read from an external feed. Pairs with token.peg_ratio (depeg) and the action's eMode category to gate high-LTV LST looping. External — not a wallet-state read.",
+      "description": "AAVE-09: divergence (basis points) between the Aave oracle's price for an LST/LRT collateral and its true market/backing price, read from an external feed. Pairs with token.peg_ratio (depeg) and the action's eMode category to gate high-LTV LST looping. External \u2014 not a wallet-state read.",
       "readKind": "external",
       "server": "external",
       "stateDependency": "external LST oracle-vs-market divergence feed (not state DB)",
@@ -1198,7 +1198,7 @@
     "external.oracle_freshness": {
       "name": "external.oracle_freshness",
       "status": "planned",
-      "description": "AAVE-14: freshness of the borrow asset's price oracle — whether it is stale (ttl/confidence exceeded or L2 sequencer grace) and its age in seconds. Derived from the price LiveField's synced_at/ttl plus the L2 sequencer-uptime sentinel; surfaced as an external freshness signal rather than a base context field.",
+      "description": "AAVE-14: freshness of the borrow asset's price oracle \u2014 whether it is stale (ttl/confidence exceeded or L2 sequencer grace) and its age in seconds. Derived from the price LiveField's synced_at/ttl plus the L2 sequencer-uptime sentinel; surfaced as an external freshness signal rather than a base context field.",
       "readKind": "external",
       "server": "external",
       "stateDependency": "price LiveField synced_at/ttl/confidence + L2 sequencer-uptime sentinel (external freshness signal)",
@@ -1232,7 +1232,7 @@
     "perp.order_leverage": {
       "name": "perp.order_leverage",
       "status": "planned",
-      "description": "PERP-01: the proposed open's EFFECTIVE leverage as a decimal. Resolves the explicit `context.leverage` (Decimal-as-String) OR, when SizeSpec=leverage_implied, the `size.leverage` arm — Cedar cannot read either numerically (both are raw Strings). Servable from the action alone (no wallet read needed): leverage is in the action's own fields / live_inputs. Drives PERP-01.",
+      "description": "PERP-01: the proposed open's EFFECTIVE leverage as a decimal. Resolves the explicit `context.leverage` (Decimal-as-String) OR, when SizeSpec=leverage_implied, the `size.leverage` arm \u2014 Cedar cannot read either numerically (both are raw Strings). Servable from the action alone (no wallet read needed): leverage is in the action's own fields / live_inputs. Drives PERP-01.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -1267,7 +1267,7 @@
     "perp.funding_adverse_rate": {
       "name": "perp.funding_adverse_rate",
       "status": "planned",
-      "description": "PERP-04: funding rate SIGN-ALIGNED to the order side, returned as the adverse magnitude (decimal; >0 means funding works against the entry). The raw `fundingRate` is a Decimal-as-String and only means 'adverse' once folded against `side` (a long pays positive funding, a short receives it) — Cedar can neither sign-flip nor compare the String. Servable from the action's own fields/live_inputs (side + fundingRate). Drives PERP-04.",
+      "description": "PERP-04: funding rate SIGN-ALIGNED to the order side, returned as the adverse magnitude (decimal; >0 means funding works against the entry). The raw `fundingRate` is a Decimal-as-String and only means 'adverse' once folded against `side` (a long pays positive funding, a short receives it) \u2014 Cedar can neither sign-flip nor compare the String. Servable from the action's own fields/live_inputs (side + fundingRate). Drives PERP-04.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -1380,7 +1380,7 @@
     "perp.cross_total_exposure_ratio": {
       "name": "perp.cross_total_exposure_ratio",
       "status": "planned",
-      "description": "PERP-10: (sum of all held cross-margin positions' notional + the new order's notional) / account collateral. A whole-(perp)-account FOLD across positions: each held position's notional = size_base x its mark (State1 + Oracle), summed with the new notional, divided by collateral. Per-position notionals are U256-hex Strings — Cedar can neither sum nor divide them. Drives PERP-10.",
+      "description": "PERP-10: (sum of all held cross-margin positions' notional + the new order's notional) / account collateral. A whole-(perp)-account FOLD across positions: each held position's notional = size_base x its mark (State1 + Oracle), summed with the new notional, divided by collateral. Per-position notionals are U256-hex Strings \u2014 Cedar can neither sum nor divide them. Drives PERP-10.",
       "readKind": "fold",
       "server": "sim-server",
       "stateDependency": [
@@ -1526,7 +1526,7 @@
     "claim.token_unrecognized": {
       "name": "claim.token_unrecognized",
       "status": "planned",
-      "description": "AIR-07: is the claimed token unrecognised on BOTH counts? True iff the token is NOT a key in WalletState.tokens (never held — durable state read) AND NOT present in an external token list. The AND reduces the false positives of held-history alone, which is weak because normal airdrops are first-time tokens.",
+      "description": "AIR-07: is the claimed token unrecognised on BOTH counts? True iff the token is NOT a key in WalletState.tokens (never held \u2014 durable state read) AND NOT present in an external token list. The AND reduces the false positives of held-history alone, which is weak because normal airdrops are first-time tokens.",
       "readKind": "external",
       "server": "sim-server",
       "stateDependency": [
@@ -1544,7 +1544,7 @@
           "type": "String",
           "required": true,
           "defaultSelector": "$.root.from",
-          "description": "Evaluated wallet address — owner of the held-token set checked for membership."
+          "description": "Evaluated wallet address \u2014 owner of the held-token set checked for membership."
         },
         "token": {
           "type": "AssetRef",
@@ -1563,7 +1563,7 @@
     "external.recipient_is_contract": {
       "name": "external.recipient_is_contract",
       "status": "planned",
-      "description": "AIR-08: does `address` have deployed bytecode (non-empty codehash via eth_getCode)? Distinguishes a contract recipient (possible drainer relay/proxy) from a plain EOA. A LIVE on-chain lookup that sits OUTSIDE the wallet snapshot — external info, not wallet state.",
+      "description": "AIR-08: does `address` have deployed bytecode (non-empty codehash via eth_getCode)? Distinguishes a contract recipient (possible drainer relay/proxy) from a plain EOA. A LIVE on-chain lookup that sits OUTSIDE the wallet snapshot \u2014 external info, not wallet state.",
       "readKind": "external",
       "server": "external",
       "stateDependency": "live on-chain codehash (eth_getCode); not the state DB",
@@ -1684,7 +1684,7 @@
     "stake.unlock_eta": {
       "name": "stake.unlock_eta",
       "status": "planned",
-      "description": "STK-02: for an unstake/withdrawal request (decoded as Core::Unknown — no dedicated staking domain), match the target to the wallet's held StakeReceipt and report whether a withdrawal lock applies and the seconds until the funds become withdrawable. Reads TokenKind::StakeReceipt.unlock (Cliff{unlock_at}|Linear{start,end}|Cooldown{cooldown_secs}) plus the receipt's protocol. Lido 1-5d, EigenLayer +7d escrow.",
+      "description": "STK-02: for an unstake/withdrawal request (decoded as Core::Unknown \u2014 no dedicated staking domain), match the target to the wallet's held StakeReceipt and report whether a withdrawal lock applies and the seconds until the funds become withdrawable. Reads TokenKind::StakeReceipt.unlock (Cliff{unlock_at}|Linear{start,end}|Cooldown{cooldown_secs}) plus the receipt's protocol. Lido 1-5d, EigenLayer +7d escrow.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -1729,7 +1729,7 @@
     "valuation.gas_cost_ratio": {
       "name": "valuation.gas_cost_ratio",
       "status": "planned",
-      "description": "GEN-08: ratio of the transaction's gas cost in USD to the USD value the action moves (gas_usd / action_value_usd). Cedar cannot divide two decimals, so the division is done server-side. gas_usd = gas_estimate × native price_value; action_value_usd = value_amount × value_asset price_value.",
+      "description": "GEN-08: ratio of the transaction's gas cost in USD to the USD value the action moves (gas_usd / action_value_usd). Cedar cannot divide two decimals, so the division is done server-side. gas_usd = gas_estimate \u00d7 native price_value; action_value_usd = value_amount \u00d7 value_asset price_value.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -1746,7 +1746,7 @@
           "type": "String",
           "required": true,
           "defaultSelector": "$.action.gasEstimate",
-          "description": "Estimated gas cost (U256 hex / wei-form string) — numerator's gas-units basis."
+          "description": "Estimated gas cost (U256 hex / wei-form string) \u2014 numerator's gas-units basis."
         },
         "value_asset": {
           "type": "AssetRef",
@@ -1771,7 +1771,7 @@
     "token.outflow_pct_of_holding": {
       "name": "token.outflow_pct_of_holding",
       "status": "planned",
-      "description": "GEN-06: the proposed action's amount as a percentage of the wallet's CURRENT holding of that exact token (amount / token_holdings.balance_amount × 100). Single-asset fraction-of-balance — distinct from the whole-portfolio fold portfolio.group_pct (whose denominator is total portfolio USD).",
+      "description": "GEN-06: the proposed action's amount as a percentage of the wallet's CURRENT holding of that exact token (amount / token_holdings.balance_amount \u00d7 100). Single-asset fraction-of-balance \u2014 distinct from the whole-portfolio fold portfolio.group_pct (whose denominator is total portfolio USD).",
       "readKind": "direct",
       "server": "sim-server",
       "stateDependency": [
@@ -1797,7 +1797,7 @@
           "type": "String",
           "required": true,
           "defaultSelector": "$.action.amount",
-          "description": "Proposed outflow amount (U256 hex / wei-form string) — the percentage numerator."
+          "description": "Proposed outflow amount (U256 hex / wei-form string) \u2014 the percentage numerator."
         }
       },
       "returns": {
@@ -1810,7 +1810,7 @@
     "permit.allowance_horizon": {
       "name": "permit.allowance_horizon",
       "status": "planned",
-      "description": "GEN-03: USD valuation of an off-chain permit's allowance and the validity horizon of its deadline, from one call. allowanceUsd = amount × token price_value (state). expiryHorizonSec = deadline − host now (the deadline is a Long action field but the horizon needs the host clock, which Cedar lacks). Emits TWO context fields (record).",
+      "description": "GEN-03: USD valuation of an off-chain permit's allowance and the validity horizon of its deadline, from one call. allowanceUsd = amount \u00d7 token price_value (state). expiryHorizonSec = deadline \u2212 host now (the deadline is a Long action field but the horizon needs the host clock, which Cedar lacks). Emits TWO context fields (record).",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -1832,13 +1832,13 @@
           "type": "String",
           "required": true,
           "defaultSelector": "$.action.amount",
-          "description": "Permit allowance amount (U256 hex / wei-form string) — priced for allowanceUsd."
+          "description": "Permit allowance amount (U256 hex / wei-form string) \u2014 priced for allowanceUsd."
         },
         "deadline": {
           "type": "Long",
           "required": true,
           "defaultSelector": "$.action.deadline",
-          "description": "Signature expiry (unix seconds); horizon = deadline − now."
+          "description": "Signature expiry (unix seconds); horizon = deadline \u2212 now."
         }
       },
       "returns": {
@@ -1859,7 +1859,7 @@
     "external.spender_is_eoa": {
       "name": "external.spender_is_eoa",
       "status": "planned",
-      "description": "GEN-14: is the approve target a plain wallet (EOA) rather than a contract? is_eoa = codehash(address) == empty, via a live eth_getCode view. External/on-chain view — NOT wallet state (codehash is not a durable refrigerated field).",
+      "description": "GEN-14: is the approve target a plain wallet (EOA) rather than a contract? is_eoa = codehash(address) == empty, via a live eth_getCode view. External/on-chain view \u2014 NOT wallet state (codehash is not a durable refrigerated field).",
       "readKind": "external",
       "server": "external",
       "stateDependency": "external on-chain view (eth_getCode); not the wallet-state DB",
@@ -2432,7 +2432,7 @@
     "intent.cancel_target_missing": {
       "name": "intent.cancel_target_missing",
       "status": "planned",
-      "description": "AMMLP-5: is the cancel's orderHash absent from the wallet's active (Active/PartiallyFilled) intent-order set? A reducer State2 membership check. true = cancelling an already-filled/expired/cancelled order — wasted signature or a phishing 'looks-like-cancel' prompt.",
+      "description": "AMMLP-5: is the cancel's orderHash absent from the wallet's active (Active/PartiallyFilled) intent-order set? A reducer State2 membership check. true = cancelling an already-filled/expired/cancelled order \u2014 wasted signature or a phishing 'looks-like-cancel' prompt.",
       "readKind": "reducer",
       "server": "sim-server",
       "stateDependency": [
@@ -2496,7 +2496,7 @@
     "bridge.dest_chain_supported": {
       "name": "bridge.dest_chain_supported",
       "status": "planned",
-      "description": "BRG-04: is the destination chain of a bridge call (the dstChainId — LayerZero EID / CCTP domain / etc. — encoded inside the Unknown calldata) a member of the wallet's tracked chain set (WalletId.chains)? Extracts dstChainId from the calldata then tests set membership. Emits a single Bool so the warn fires when the destination chain is NOT one the wallet uses.",
+      "description": "BRG-04: is the destination chain of a bridge call (the dstChainId \u2014 LayerZero EID / CCTP domain / etc. \u2014 encoded inside the Unknown calldata) a member of the wallet's tracked chain set (WalletId.chains)? Extracts dstChainId from the calldata then tests set membership. Emits a single Bool so the warn fires when the destination chain is NOT one the wallet uses.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -2687,7 +2687,7 @@
           "type": "String",
           "required": true,
           "defaultSelector": "$.root.from",
-          "description": "Wallet owner address — the expected refund destination."
+          "description": "Wallet owner address \u2014 the expected refund destination."
         },
         "target": {
           "type": "String",
@@ -2712,7 +2712,7 @@
     "external.nft_floor": {
       "name": "external.nft_floor",
       "status": "planned",
-      "description": "NFT-01/02/06: decode a marketplace order signature (Seaport/Blur, arriving as ActionBody::Unknown OffchainSig calldata) and value its consideration/offer against the collection floor. Emits the order-vs-floor ratio (Σconsideration ÷ floor, or listing-price ÷ floor, or incoming-offer ÷ floor) plus whether the listed NFT is one the wallet actually owns. Cedar cannot divide and the order body is undecoded, so this fuses order-decode + an external floor feed + a durable token_holdings ownership read into one call.",
+      "description": "NFT-01/02/06: decode a marketplace order signature (Seaport/Blur, arriving as ActionBody::Unknown OffchainSig calldata) and value its consideration/offer against the collection floor. Emits the order-vs-floor ratio (\u03a3consideration \u00f7 floor, or listing-price \u00f7 floor, or incoming-offer \u00f7 floor) plus whether the listed NFT is one the wallet actually owns. Cedar cannot divide and the order body is undecoded, so this fuses order-decode + an external floor feed + a durable token_holdings ownership read into one call.",
       "readKind": "derived",
       "server": "external",
       "stateDependency": [
@@ -2809,7 +2809,7 @@
     "governance.voting_power_at_risk": {
       "name": "governance.voting_power_at_risk",
       "status": "planned",
-      "description": "GOV-02: how much governance voting power this delegate(address) call would re-point, expressed as a comparable decimal magnitude. Reads the durable StakeReceipt.voting_power for the governance `token` in wallet state (raw U256), scaling it to a decimal; when no durable receipt exists it falls back to the action's live `votingPower` live_input. Drives the size half of the re-delegation warn (the re-delegation half — delegatee != currentDelegate — is tested directly in Cedar over the action String fields).",
+      "description": "GOV-02: how much governance voting power this delegate(address) call would re-point, expressed as a comparable decimal magnitude. Reads the durable StakeReceipt.voting_power for the governance `token` in wallet state (raw U256), scaling it to a decimal; when no durable receipt exists it falls back to the action's live `votingPower` live_input. Drives the size half of the re-delegation warn (the re-delegation half \u2014 delegatee != currentDelegate \u2014 is tested directly in Cedar over the action String fields).",
       "readKind": "direct",
       "server": "sim-server",
       "stateDependency": [
@@ -2850,7 +2850,7 @@
     "curve.imbalance_skew": {
       "name": "curve.imbalance_skew",
       "status": "planned",
-      "description": "CURVE-1: how one-sided a Curve stableswap add_liquidity is versus the pool's current composition, as a decimal skew (deposit per-coin ratio vs pool per-coin balance ratio). The pool balances live in the reducer-internal live_inputs.pool_state (PoolState::StableV1 { balances } / Cryptoswap { balances }) which is NOT surfaced on AddLiquidityContext, and the deposit amounts in params.tokens are U256 hex strings Cedar cannot compare numerically — so the skew must be folded over pool balances + deposit amounts rather than read as an action-field. Drives the silent imbalance-fee warning.",
+      "description": "CURVE-1: how one-sided a Curve stableswap add_liquidity is versus the pool's current composition, as a decimal skew (deposit per-coin ratio vs pool per-coin balance ratio). The pool balances live in the reducer-internal live_inputs.pool_state (PoolState::StableV1 { balances } / Cryptoswap { balances }) which is NOT surfaced on AddLiquidityContext, and the deposit amounts in params.tokens are U256 hex strings Cedar cannot compare numerically \u2014 so the skew must be folded over pool balances + deposit amounts rather than read as an action-field. Drives the silent imbalance-fee warning.",
       "readKind": "derived",
       "server": "sim-server",
       "stateDependency": [
@@ -2950,7 +2950,7 @@
     "curve.base_pool_depeg": {
       "name": "curve.base_pool_depeg",
       "status": "planned",
-      "description": "CURVE-5: whether a Curve metapool's underlying base pool (3CRV / crvUSD, …) is depegging — true if ANY base-pool asset (e.g. USDT/USDC/DAI inside 3CRV) is outside its peg band. A recursive, one-level-down check distinct from CURVE-3 (the two visible pool assets): it decodes the target metapool to its base pool, then folds each base asset's peg ref against its live price. The base-pool composition is partial state (sv = PART; pool metadata is part registry feed) and the per-asset peg compare cannot be expressed as a Cedar action-field.",
+      "description": "CURVE-5: whether a Curve metapool's underlying base pool (3CRV / crvUSD, \u2026) is depegging \u2014 true if ANY base-pool asset (e.g. USDT/USDC/DAI inside 3CRV) is outside its peg band. A recursive, one-level-down check distinct from CURVE-3 (the two visible pool assets): it decodes the target metapool to its base pool, then folds each base asset's peg ref against its live price. The base-pool composition is partial state (sv = PART; pool metadata is part registry feed) and the per-asset peg compare cannot be expressed as a Cedar action-field.",
       "readKind": "fold",
       "server": "sim-server",
       "stateDependency": [
@@ -3080,7 +3080,7 @@
     "token.interest_bearing": {
       "name": "token.interest_bearing",
       "status": "planned",
-      "description": "H2: is the acquired token interest/yield-bearing (riba) per its TokenKind? YieldReceipt / DebtReceipt (RateMode) / StakeReceipt variants in the state model structurally identify interest-bearing assets, so this is a DIRECT state read of the token's kind — no external feed needed. The content-screening half of H2 (gambling/adult) needs a separate external classifier and is out of scope for this method.",
+      "description": "H2: is the acquired token interest/yield-bearing (riba) per its TokenKind? YieldReceipt / DebtReceipt (RateMode) / StakeReceipt variants in the state model structurally identify interest-bearing assets, so this is a DIRECT state read of the token's kind \u2014 no external feed needed. The content-screening half of H2 (gambling/adult) needs a separate external classifier and is out of scope for this method.",
       "readKind": "direct",
       "server": "sim-server",
       "stateDependency": [
@@ -3112,17 +3112,17 @@
       "server": "sim-server",
       "readKind": "state",
       "description": "(policy-factory adopted) permit2-unknown-spender-full-balance-warn",
-      "stateDependency": "Reads wallet state: (1) token_holdings balance for the owner+token to form the full-balance ratio denominator; (2) interaction/approval history (and/or user allowlist) for the owner to decide spender familiarity. No new state surface required — both reads exist conceptually in the simulation-state holdings + approval history; this method composes them. If approval/interaction history is not yet materialized in sim-server, spenderIsKnown degrades to allowlist-only until that read lands (call stays optional → fail-open).",
+      "stateDependency": "Reads wallet state: (1) token_holdings balance for the owner+token to form the full-balance ratio denominator; (2) interaction/approval history (and/or user allowlist) for the owner to decide spender familiarity. No new state surface required \u2014 both reads exist conceptually in the simulation-state holdings + approval history; this method composes them. If approval/interaction history is not yet materialized in sim-server, spenderIsKnown degrades to allowlist-only until that read lands (call stays optional \u2192 fail-open).",
       "params": {
-        "chain_id": "Long — EVM chain id (from $.root.chain_id)",
-        "owner": "String — connected wallet address (from $.root.from)",
-        "token": "TokenRef — token whose permit is being signed (from $.action.token)",
-        "amount": "String — raw U256 hex permit allowance amount (from $.action.amount)",
-        "spender": "String — address authorized to spend (from $.action.spender)"
+        "chain_id": "Long \u2014 EVM chain id (from $.root.chain_id)",
+        "owner": "String \u2014 connected wallet address (from $.root.from)",
+        "token": "TokenRef \u2014 token whose permit is being signed (from $.action.token)",
+        "amount": "String \u2014 raw U256 hex permit allowance amount (from $.action.amount)",
+        "spender": "String \u2014 address authorized to spend (from $.action.spender)"
       },
       "returns": {
-        "fullBalancePct": "decimal — permit `amount` / wallet's current balance of `token` × 100, 4dp dotted. Saturates at a large value when amount is U256::MAX / unlimited so the >90 branch fires. Mirrors precedent token.outflow_pct_of_holding.",
-        "spenderIsKnown": "bool — true iff `spender` is an address the wallet has previously approved/interacted with or that sits on the user's known-good/allowlist; false for first-seen / unfamiliar spenders."
+        "fullBalancePct": "decimal \u2014 permit `amount` / wallet's current balance of `token` \u00d7 100, 4dp dotted. Saturates at a large value when amount is U256::MAX / unlimited so the >90 branch fires. Mirrors precedent token.outflow_pct_of_holding.",
+        "spenderIsKnown": "bool \u2014 true iff `spender` is an address the wallet has previously approved/interacted with or that sits on the user's known-good/allowlist; false for first-seen / unfamiliar spenders."
       },
       "origin": "policy-factory"
     },
@@ -3132,14 +3132,14 @@
       "server": "sim-server",
       "readKind": "wallet-send-history",
       "description": "(policy-factory adopted) transfer-recipient-lookalike-poisoning-deny",
-      "stateDependency": "Reads the wallet's prior-recipient set (send history) maintained by the Aggregator/sim-server. The look-alike comparison (configurable prefix/suffix length, e.g. first 4 + last 4 hex chars match, middle mismatch) is performed entirely server-side; only a scalar Bool is projected into Cedar context. No send-history state is introduced into the stateless policy-engine layer — consistent with order.swap_count_24h and intent.near_duplicate_pending. Distinct from external.address_blocklisted: the comparison set is the wallet's OWN private history, not a public registry, hence needs-method (sim-server) rather than needs-external.",
+      "stateDependency": "Reads the wallet's prior-recipient set (send history) maintained by the Aggregator/sim-server. The look-alike comparison (configurable prefix/suffix length, e.g. first 4 + last 4 hex chars match, middle mismatch) is performed entirely server-side; only a scalar Bool is projected into Cedar context. No send-history state is introduced into the stateless policy-engine layer \u2014 consistent with order.swap_count_24h and intent.near_duplicate_pending. Distinct from external.address_blocklisted: the comparison set is the wallet's OWN private history, not a public registry, hence needs-method (sim-server) rather than needs-external.",
       "params": {
-        "chain_id": "String — CAIP-2 chain id from $.root.chain_id",
-        "owner": "String — sending wallet (EOA) from $.root.from",
-        "recipient": "String — candidate destination address (Erc20Transfer.recipient)"
+        "chain_id": "String \u2014 CAIP-2 chain id from $.root.chain_id",
+        "owner": "String \u2014 sending wallet (EOA) from $.root.from",
+        "recipient": "String \u2014 candidate destination address (Erc20Transfer.recipient)"
       },
       "returns": {
-        "lookalike": "Bool — true iff `recipient` matches a prior recipient on prefix AND suffix but differs in the middle, AND `recipient` itself has never been a recipient of `owner` before (a seeded doppelgänger). false otherwise (including when send-history is empty)."
+        "lookalike": "Bool \u2014 true iff `recipient` matches a prior recipient on prefix AND suffix but differs in the middle, AND `recipient` itself has never been a recipient of `owner` before (a seeded doppelg\u00e4nger). false otherwise (including when send-history is empty)."
       },
       "origin": "policy-factory"
     },
@@ -3151,12 +3151,12 @@
       "description": "Returns whether `from` has ever previously sent funds to / interacted with `recipient` on `chain_id`. Host reads the wallet's on-chain counterparty history (explorer / tx index) outside the stateless ",
       "stateDependency": "external-history (wallet on-chain counterparty history). No new in-engine Cedar state surface; engine stays stateless and reads only the Bool. Mirrors external.address_blocklisted host-lookup pattern.",
       "params": {
-        "chain_id": "String — CAIP-2 / numeric chain id of the transfer (from $.root.chain_id)",
-        "from": "String — the sending wallet address (from $.root.from)",
-        "recipient": "String — the ERC20 transfer recipient (from $.action.recipient)"
+        "chain_id": "String \u2014 CAIP-2 / numeric chain id of the transfer (from $.root.chain_id)",
+        "from": "String \u2014 the sending wallet address (from $.root.from)",
+        "recipient": "String \u2014 the ERC20 transfer recipient (from $.action.recipient)"
       },
       "returns": {
-        "first_time": "Bool — true iff `from` has no prior outbound transfer/interaction to `recipient` on `chain_id`. Projected into context.custom.firstTimeRecipient."
+        "first_time": "Bool \u2014 true iff `from` has no prior outbound transfer/interaction to `recipient` on `chain_id`. Projected into context.custom.firstTimeRecipient."
       },
       "origin": "policy-factory"
     },
@@ -3599,6 +3599,48 @@
           }
         }
       }
+    },
+    "lending.health_factor": {
+      "name": "lending.health_factor",
+      "status": "planned",
+      "description": "main-vocab: health factor AFTER virtually applying the proposed borrow/withdraw (State\u2082), computed from the lowered action snapshot (userStateBefore + reserveState). Convergence alias of position.health_factor_after; result key postActionHf.",
+      "readKind": "reducer",
+      "server": "sim-server",
+      "stateDependency": [
+        "positions(lending).data_json.collaterals",
+        "positions(lending).data_json.debts",
+        "positions(lending).data_json.liquidation_threshold",
+        "token_holdings.price_value"
+      ],
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "owner": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.root.from"
+        },
+        "venue": {
+          "type": "String",
+          "required": true,
+          "description": "Lending protocol/venue identifying the position."
+        },
+        "action": {
+          "type": "Action",
+          "required": true,
+          "defaultSelector": "$.action",
+          "description": "The proposed borrow/withdraw \u2014 applied via the reducer to produce State\u2082 before recomputing HF. Without it the method cannot compute the AFTER value."
+        }
+      },
+      "returns": {
+        "from": "$.result.postActionHf",
+        "kind": "scalar",
+        "type": "decimal"
+      },
+      "origin": "bundled"
     }
   }
 }
