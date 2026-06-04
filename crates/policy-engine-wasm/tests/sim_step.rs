@@ -8,8 +8,6 @@
 
 use std::str::FromStr;
 
-use policy_transition::action::token::Erc20TransferAction;
-use policy_transition::action::{Action, ActionBody, ActionMeta, ActionNature, TokenAction};
 use policy_state::delta::TokenChange;
 use policy_state::eval_context::RequestKind;
 use policy_state::live_field::{DataSource, LiveField};
@@ -20,6 +18,8 @@ use policy_state::token::{
 use policy_state::wallet::{WalletId, WalletState};
 use policy_state::EvalContext;
 use policy_state::StateDelta;
+use policy_transition::action::token::Erc20TransferAction;
+use policy_transition::action::{Action, ActionBody, ActionMeta, ActionNature, TokenAction};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -169,10 +169,16 @@ fn happy_path_erc20_transfer_produces_delta_and_decremented_state() {
     // delta carries the negative balance change for the sender's USDC.
     assert_eq!(data.delta.token_changes.len(), 1, "one balance delta");
     let TokenChange::BalanceDelta { key, delta: d } = &data.delta.token_changes[0] else {
-        panic!("expected BalanceDelta, got {:?}", data.delta.token_changes[0]);
+        panic!(
+            "expected BalanceDelta, got {:?}",
+            data.delta.token_changes[0]
+        );
     };
     assert_eq!(*key, usdc_ref().key);
-    assert!(d.is_negative(), "balance delta must be negative on transfer");
+    assert!(
+        d.is_negative(),
+        "balance delta must be negative on transfer"
+    );
 
     // next_state already has the delta composed in: 1_000_000_000 - 250_000_000.
     let holding = data
