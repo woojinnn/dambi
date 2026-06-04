@@ -1,0 +1,35 @@
+# Helm value overrides for GKE (M2 — temporary HTTP via LoadBalancer, managed data).
+# Layered on the chart default values.yaml.
+# Deploy:
+#   helm upgrade --install pasu <chart> -n pasu \
+#     -f <chart>/values-gke.yaml --set image.tag=$(git rev-parse --short HEAD)
+
+image:
+  repository: asia-northeast3-docker.pkg.dev/policy-engine-498313/pasu/pasu-policy-server
+  # tag is supplied at deploy time via --set image.tag=<git short sha>
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 2
+  # M2 has no domain; these only affect OAuth redirects / CORS, not the bind port.
+  publicApiUrl: http://pasu-m2-loadbalancer
+  dashboardUrl: http://localhost:5173
+  corsAllowedOrigins:
+    - http://localhost:5173
+
+# M2: expose the API via an external L4 LoadBalancer (temp HTTP). No ingress/TLS yet.
+service:
+  type: LoadBalancer
+
+ingress:
+  enabled: false
+
+# Fixed 2 replicas guarantees the cross-replica SSE proof; HPA deferred to M3.
+hpa:
+  enabled: false
+
+worker:
+  replicas: 1
+
+# existingSecret stays the chart default (policy-server-secrets); the secret-name
+# rename was explicitly skipped (spec §9). The secret is created via kubectl (Task 12).
