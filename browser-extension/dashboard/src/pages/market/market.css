@@ -1,7 +1,10 @@
 /* ════════════════════════════════════════════════════════════════
    Scopeball Market — Cloudy Pond 토큰 + Market UI
+   SPA 통합 시 dashboard의 디자인 토큰과 충돌하지 않도록 :root 변수는
+   .market-root 컨테이너로 스코프했음. 전역 리셋(html, body, #root)은
+   SPA 측에 맡기고 여기선 .market-root 내부에서만 동작한다.
    ════════════════════════════════════════════════════════════════ */
-:root {
+.market-root {
   --sage-50:#F8F9F6; --sage-100:#EBF3E8; --sage-200:#D9E9D3; --sage-300:#C5DDBD;
   --sage-400:#B0D1A4; --sage-500:#9CC58D; --sage-600:#7FA172; --sage-700:#637E59;
   --sage-800:#44583D; --sage-900:#283523;
@@ -36,28 +39,47 @@
   --dim: 0.5;   /* Readiness 강등 흐림 (tweak) */
 }
 
-* { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
-body {
+/* Box-sizing inherits from SPA's normalize. */
+.market-root, .market-root * { box-sizing: border-box; }
+.market-root {
   background: var(--page);
   color: var(--slate-500);
   font-family: var(--ff-sans);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Originally `.app { display:flex; height:100% }` was the flex parent for
+     `.market-main`. With the in-bundle NavRail stripped, `.market-root` IS
+     the parent. MarketPage skips the SPA Topbar (the market chrome already
+     covers the same surface), so we fill the full viewport. */
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
 }
-::selection { background: var(--sage-200); color: var(--slate-900); }
-button, a, input { font-family: inherit; }
-button { cursor: pointer; border: none; background: none; }
-[lang]:not(:lang(active)) { }  /* locale handled via JS-set body class */
+
+/* SPA's .app-content forces 24/32/32 padding on every routed page, which
+   leaves an uneven stripe to the right of the market chrome (and a smaller
+   one on the left + top). The market is its own full-bleed surface — zero
+   that padding out when it's the page being rendered. Uses :has() which
+   modern Chromium ships natively; the dashboard already targets recent
+   Chrome MV3 + recent Firefox.
+
+   Also clears the top padding so the market header sits flush with the top
+   of the viewport. */
+.app-content:has(> .market-root) {
+  padding: 0;
+}
+.market-root ::selection { background: var(--sage-200); color: var(--slate-900); }
+.market-root button, .market-root a, .market-root input { font-family: inherit; }
+.market-root button { cursor: pointer; border: none; background: none; }
 
 /* locale visibility: body[data-locale="ko"] shows ko, hides en */
-body[data-locale="ko"] [data-lang="en"] { display: none; }
-body[data-locale="en"] [data-lang="ko"] { display: none; }
+.market-root[data-locale="ko"] [data-lang="en"] { display: none; }
+.market-root[data-locale="en"] [data-lang="ko"] { display: none; }
 
 /* ════════════ Shell ════════════ */
-#root { height: 100%; }
-.app { display: flex; height: 100%; overflow: hidden; }
+/* SPA-integrated: #root and .app rules dropped — SPA owns the outermost
+   chrome; MarketApp renders straight into .market-root + .market-main. */
 
 /* ── Nav rail (global app nav, collapsible) ── */
 .nav-rail {

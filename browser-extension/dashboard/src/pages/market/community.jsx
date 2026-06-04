@@ -1,45 +1,18 @@
 /* Scopeball Market — Community (검증된 평가 + 자유 토론)
    기존 자산 재사용: Cloudy Pond 토큰, Market 데이터레이어, 카드/배지/칩, KO-EN.
-   정직성: 모든 시드는 "예시" 배지. 이 별점은 카탈로그 카드 rating으로 역주입하지 않음. */
+   정직성: 모든 시드는 "예시" 배지. 이 별점은 카탈로그 카드 rating으로 역주입하지 않음.
+
+   SEED_REVIEWS는 ES 모듈화하며 data.js로 옮겨 순환 import를 피했다 — 여기선
+   data에서 re-export 하지 않고 필요 곳에서 직접 가져다 쓴다. */
+import React, { useState, Fragment } from "react";
+import { Market } from "./data";
 
 // 프로토타입 기준 시각
-const CMTY_NOW = new Date("2026-06-03T00:00:00Z");
-
-// ── Review 시드 (API 계약 모양) ──
-// { id, kind, verified, rating(1~5, verified만), body{ko,en}, author, policySlug, createdAt, helpful }
-const SEED_REVIEWS = [
-  { id: "r1", kind: "verified", verified: true, rating: 5, author: "vault.eth", policySlug: "aave-hf-floor-warn", createdAt: "2026-05-28", helpful: 24,
-    body: { ko: "HF 바닥 경고 덕분에 변동성 장에서 청산 직전 포지션을 정리했다. 임계값이 보수적이라 안심된다.", en: "The HF-floor warning let me trim a position right before liquidation in a volatile session. Conservative threshold — reassuring." } },
-  { id: "r2", kind: "verified", verified: true, rating: 4, author: "0xharin", policySlug: "aave-hf-floor-warn", createdAt: "2026-05-19", helpful: 11,
-    body: { ko: "유용하지만 가끔 너무 일찍 울린다. 임계값을 직접 조절할 수 있으면 좋겠다.", en: "Useful, though it sometimes fires too early. Wish the threshold were tunable." } },
-  { id: "r3", kind: "verified", verified: true, rating: 5, author: "saltykimchi", policySlug: "air-permit-on-held-token-deny", createdAt: "2026-05-30", helpful: 31,
-    body: { ko: "permit 드레인을 실제로 막아줬다. 서명 직전에 차단돼서 식은땀 흘렸다.", en: "Actually blocked a permit drain for me — stopped right at signing. Cold sweat." } },
-  { id: "r4", kind: "verified", verified: true, rating: 5, author: "node_runner", policySlug: "air-permit-on-held-token-deny", createdAt: "2026-05-12", helpful: 9,
-    body: { ko: "에어드랍 클레임 사칭 사이트에서 바로 작동했다. 필수.", en: "Triggered instantly on a fake claim site. Essential." } },
-  { id: "r5", kind: "verified", verified: true, rating: 4, author: "frog.eth", policySlug: "nft-untrusted-blur-root-deny", createdAt: "2026-05-22", helpful: 7,
-    body: { ko: "위조 마켓 서명을 잘 잡는다. 정상 Blur 거래엔 영향이 없었다.", en: "Catches spoofed market signatures well. No false positives on legit Blur trades." } },
-  { id: "r6", kind: "verified", verified: true, rating: 5, author: "minteddao", policySlug: "unknown-blind-sign-warning", createdAt: "2026-05-26", helpful: 18,
-    body: { ko: "블라인드 서명 경고는 모두가 켜야 한다. 하드웨어 지갑 쓸 때 특히.", en: "Everyone should enable the blind-sign warning, especially on a hardware wallet." } },
-  { id: "r7", kind: "verified", verified: true, rating: 3, author: "lurking_anon", policySlug: "unknown-blind-sign-warning", createdAt: "2026-05-08", helpful: 4,
-    body: { ko: "취지는 좋지만 dApp을 많이 쓰면 경고가 잦아 피로하다.", en: "Good intent, but heavy dApp users will see it a lot — alert fatigue." } },
-  { id: "r8", kind: "verified", verified: true, rating: 4, author: "cowswapper", policySlug: "swap-price-impact-warn", createdAt: "2026-05-24", helpful: 14,
-    body: { ko: "프라이스 임팩트를 서명 전에 숫자로 보여줘서 좋다. 얇은 풀에서 특히 유용.", en: "Shows price impact as a number before signing — great on thin pools." } },
-  { id: "r9", kind: "verified", verified: true, rating: 5, author: "gasfeehater", policySlug: "gas-cost-usd-cap-deny", createdAt: "2026-05-29", helpful: 22,
-    body: { ko: "가스비 상한 덕에 혼잡한 블록에서 말도 안 되는 수수료 트랜잭션을 막았다.", en: "The gas cap saved me from an absurd-fee transaction during a congested block." } },
-  { id: "r10", kind: "verified", verified: true, rating: 4, author: "0xharin", policySlug: "nft-bid-weth-unlimited-warn", createdAt: "2026-05-15", helpful: 6,
-    body: { ko: "무제한 WETH 입찰 승인을 경고해줘서 한도를 다시 설정했다.", en: "Warned me about an unlimited WETH bid approval — re-set it to a cap." } },
-  { id: "r11", kind: "verified", verified: true, rating: 4, author: "merkletree", policySlug: "air-merkle-without-proof-warn", createdAt: "2026-05-10", helpful: 5,
-    body: { ko: "증명 없는 클레임을 잡아낸다. 가끔 정상 클레임도 경고하지만 합리적.", en: "Catches proofless claims. Occasionally flags legit ones, but reasonable." } },
-  { id: "r12", kind: "verified", verified: true, rating: 5, author: "chainhopper", policySlug: "bridge-target-not-allowlisted-deny", createdAt: "2026-05-27", helpful: 12,
-    body: { ko: "허용목록 외 브릿지 타깃을 차단한다. 피싱 브릿지 UI에서 작동 확인.", en: "Blocks non-allowlisted bridge targets. Confirmed it works against a phishing bridge UI." } },
-];
-
-// 평가 작성 모달에서 고를 수 있는 정책(리뷰 없는 것 포함 → 빈 상태 시연)
-const REVIEWABLE_EXTRA = ["aave-emode-leverage-warn", "ammlp-remove-exit-asymmetry-warn"];
+export const CMTY_NOW = new Date("2026-06-03T00:00:00Z");
 
 // ── Discussion 시드 (스레드) ──
 // { id, kind:'discussion', title{ko,en}, target{type,id}, body{ko,en}, author, createdAt, replies[] }
-const SEED_THREADS = [
+export const SEED_THREADS = [
   { id: "t1", kind: "discussion", author: "cowswapper", createdAt: "2026-06-01", target: { type: "policy", id: "swap-price-impact-warn" }, status: "resolved", topics: ["question", "threshold"], helpful: 8,
     title: { ko: "슬리피지 가드, 어느 정도가 적정선일까?", en: "Slippage guard — what's a sane threshold?" },
     body: { ko: "프라이스 임팩트 경고 임계값을 다들 몇 %로 두는지 궁금합니다. 풀 깊이마다 다를 텐데 기준이 있을까요?", en: "Curious what % everyone sets the price-impact warning to. It must vary by pool depth — is there a rule of thumb?" },
@@ -75,8 +48,8 @@ const SEED_THREADS = [
 ];
 
 // ── 헬퍼 ──
-function tt(obj, locale) { return obj ? (locale === "en" ? obj.en : obj.ko) : ""; }
-function relTime(iso, locale) {
+export function tt(obj, locale) { return obj ? (locale === "en" ? obj.en : obj.ko) : ""; }
+export function relTime(iso, locale) {
   const d = new Date(iso + (iso.length <= 10 ? "T00:00:00Z" : ""));
   const days = Math.max(0, Math.round((CMTY_NOW - d) / 86400000));
   if (locale === "en") {
@@ -91,45 +64,45 @@ function relTime(iso, locale) {
   if (days < 30) return Math.floor(days / 7) + "주 전";
   return Math.floor(days / 30) + "개월 전";
 }
-function authorInitial(a) { return (a.replace(/[^a-zA-Z0-9]/g, "")[0] || "?").toUpperCase(); }
+export function authorInitial(a) { return (a.replace(/[^a-zA-Z0-9]/g, "")[0] || "?").toUpperCase(); }
 
 // 표시이름 + @handle (너무 트위터스럽지 않게 절제)
-const AUTHORS = {
+export const AUTHORS = {
   cowswapper: { n: "Cow Swapper" }, "vault.eth": { n: "Vault" }, "0xharin": { n: "Harin" },
   saltykimchi: { n: "Salty Kimchi" }, node_runner: { n: "Node Runner" }, minteddao: { n: "Minted" },
   "frog.eth": { n: "Frog" }, gasfeehater: { n: "Gas Fee Hater" }, merkletree: { n: "Merkle" },
   chainhopper: { n: "Chain Hopper" }, lurking_anon: { n: "Lurker" }, you: { n: "You" },
 };
-function authorName(h) { return (AUTHORS[h] && AUTHORS[h].n) || h; }
-function authorHandle(h) { return "@" + h; }
+export function authorName(h) { return (AUTHORS[h] && AUTHORS[h].n) || h; }
+export function authorHandle(h) { return "@" + h; }
 
 // 아바타 톤 (Cloudy Pond 저채도 — 단색 원, 사진/이모지 없음)
-const AV_TONES = [["#EBF3E8", "#44583D"], ["#DCEAED", "#2B3639"], ["#D7DBDF", "#2A3441"], ["#EDF4F6", "#485A5E"], ["#E4EFE1", "#354E2C"], ["#EFF0F2", "#475569"]];
-function avatarTone(h) { let s = 0; for (let i = 0; i < h.length; i++) s += h.charCodeAt(i); return AV_TONES[s % AV_TONES.length]; }
-function Avatar({ handle, size = 44 }) {
+export const AV_TONES = [["#EBF3E8", "#44583D"], ["#DCEAED", "#2B3639"], ["#D7DBDF", "#2A3441"], ["#EDF4F6", "#485A5E"], ["#E4EFE1", "#354E2C"], ["#EFF0F2", "#475569"]];
+export function avatarTone(h) { let s = 0; for (let i = 0; i < h.length; i++) s += h.charCodeAt(i); return AV_TONES[s % AV_TONES.length]; }
+export function Avatar({ handle, size = 44 }) {
   const [bg, fg] = avatarTone(handle);
   return <span className="cav" style={{ width: size, height: size, fontSize: Math.round(size * 0.4), background: bg, color: fg }}>{authorInitial(handle)}</span>;
 }
-function VerifiedTick() {
+export function VerifiedTick() {
   return <svg className="vtick" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>;
 }
 
 // 리포스트 예시 카운트 (결정적 — 표기는 항상 "예시", 동작 비활성)
-function repostCount(id) { let s = 0; for (let i = 0; i < id.length; i++) s = (s * 31 + id.charCodeAt(i)) % 211; return s % 19; }
+export function repostCount(id) { let s = 0; for (let i = 0; i < id.length; i++) s = (s * 31 + id.charCodeAt(i)) % 211; return s % 19; }
 
 // 로컬 저장 (북마크/도움 토글 — 새로고침 후에도 유지)
-function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
-function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+export function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+export function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } }
 
 // 액션 행 (트위터식 라인 아이콘 — 이모지 금지)
-const ACT_ICONS = {
+export const ACT_ICONS = {
   reply: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   repost: "M17 2l4 4-4 4M21 6H7a4 4 0 0 0-4 4v1M7 22l-4-4 4-4M3 18h14a4 4 0 0 0 4-4v-1",
   like: "M20.8 5.6a5 5 0 0 0-7.1 0L12 7.3l-1.7-1.7a5 5 0 1 0-7.1 7.1L12 21.5l8.8-8.8a5 5 0 0 0 0-7.1z",
   bookmark: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z",
   share: "M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13",
 };
-function ActBtn({ icon, label, count, active, disabled, tone, title, onClick }) {
+export function ActBtn({ icon, label, count, active, disabled, tone, title, onClick }) {
   return (
     <button className={"act act-" + icon + (active ? " on" : "") + (disabled ? " off" : "")} title={title} onClick={(e) => { e.stopPropagation(); if (!disabled && onClick) onClick(); }}>
       <span className="act-ico">
@@ -140,7 +113,7 @@ function ActBtn({ icon, label, count, active, disabled, tone, title, onClick }) 
     </button>
   );
 }
-function ActionRow({ id, replyCount, likeCount, liked, bookmarked, reposted, repostN, locale, onReply, onLike, onBookmark, onRepost, onShare, compact }) {
+export function ActionRow({ id, replyCount, likeCount, liked, bookmarked, reposted, repostN, locale, onReply, onLike, onBookmark, onRepost, onShare, compact }) {
   return (
     <div className={"action-row" + (compact ? " compact" : "")}>
       <ActBtn icon="reply" count={replyCount} title={locale === "en" ? "Reply" : "답글"} onClick={onReply} />
@@ -153,7 +126,7 @@ function ActionRow({ id, replyCount, likeCount, liked, bookmarked, reposted, rep
 }
 
 // 칩 행: 대상 + 주제태그, 최대 max개 + "+N"
-function ChipsRow({ target, topics, locale, ctx, max }) {
+export function ChipsRow({ target, topics, locale, ctx, max }) {
   const chips = [];
   if (target) chips.push({ k: "t" });
   (topics || []).forEach((tp) => chips.push({ k: "tp", tp: tp }));
@@ -172,7 +145,7 @@ function ChipsRow({ target, topics, locale, ctx, max }) {
 }
 
 // 별점 (중립 강조색 — 상태색 사용 금지)
-function Stars({ value, size = 15 }) {
+export function Stars({ value, size = 15 }) {
   const star = "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17.8 6.8 19.2l1-5.8L3.5 9.2l5.9-.9z";
   return (
     <span className="stars" style={{ display: "inline-flex", gap: 1 }}>
@@ -191,22 +164,22 @@ function Stars({ value, size = 15 }) {
   );
 }
 
-function ExampleBadge({ locale }) {
+export function ExampleBadge({ locale }) {
   return <span className="ex-badge"><span data-lang="ko">예시</span><span data-lang="en">sample</span></span>;
 }
 
 // 자유 주제 태그 (무채색 칩)
-const TOPIC = {
+export const TOPIC = {
   question: { ko: "#질문", en: "#question" },
   review: { ko: "#후기", en: "#review" },
   threshold: { ko: "#임계값", en: "#threshold" },
 };
-function TopicTag({ topic, locale }) {
+export function TopicTag({ topic, locale }) {
   const m = TOPIC[topic]; if (!m) return null;
   return <span className="topic-tag">{tt(m, locale)}</span>;
 }
 // 상태 칩 (이모지 금지 · 베이스 팔레트 저채도 · 상태색 금지)
-function StatusChip({ status, locale }) {
+export function StatusChip({ status, locale }) {
   if (!status) return null;
   const lab = status === "pinned" ? { ko: "고정", en: "Pinned" } : { ko: "해결됨", en: "Resolved" };
   return <span className={"status-chip " + status}>{tt(lab, locale)}</span>;
@@ -215,25 +188,25 @@ function StatusChip({ status, locale }) {
 // 공유 별점 표시: agg = {avg,count} 또는 null.
 // 별 색은 중립 강조색(상태색 금지). "★4.x (N)" 동일 표기, 툴팁만 locale.
 // variant: 'card'(컴팩트) | 'bar'(신뢰바). onClick 있으면 버튼.
-function RatingInline({ agg, locale, onClick, variant }) {
+export function RatingInline({ agg, locale, onClick, variant }) {
   if (!agg) return null;
   const tip = locale === "en" ? (agg.count + " reviews") : (agg.count + "개 평가");
   const inner = (
-    <React.Fragment>
+    <Fragment>
       <svg className="ri-star" width={variant === "bar" ? 15 : 13} height={variant === "bar" ? 15 : 13} viewBox="0 0 24 24">
         <path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17.8 6.8 19.2l1-5.8L3.5 9.2l5.9-.9z" fill="currentColor" />
       </svg>
       <b className="ri-num">{agg.avg.toFixed(1)}</b>
       <span className="ri-n">({agg.count})</span>
       <ExampleBadge locale={locale} />
-    </React.Fragment>
+    </Fragment>
   );
   if (onClick) return <button className={"rating-inline " + (variant || "card")} title={tip} onClick={(e) => { e.stopPropagation(); onClick(); }}>{inner}</button>;
   return <span className={"rating-inline " + (variant || "card")} title={tip}>{inner}</span>;
 }
 
 // 대상(정책/패키지) 칩 → 클릭 시 상세로 이동. neutral=무채색(토론용)
-function TargetChip({ target, locale, ctx, neutral }) {
+export function TargetChip({ target, locale, ctx, neutral }) {
   if (!target) return null;
   if (target.type === "package") {
     const pk = Market.PKG_BY_ID[target.id];
@@ -254,7 +227,7 @@ function TargetChip({ target, locale, ctx, neutral }) {
 }
 
 // ── 별점 분포 요약 ──
-function RatingSummary({ reviews, locale, subtitle }) {
+export function RatingSummary({ reviews, locale, subtitle }) {
   const n = reviews.length;
   const avg = n ? reviews.reduce((a, r) => a + r.rating, 0) / n : 0;
   const dist = [5, 4, 3, 2, 1].map((s) => reviews.filter((r) => r.rating === s).length);
@@ -281,7 +254,7 @@ function RatingSummary({ reviews, locale, subtitle }) {
 }
 
 // ── 통합 피드 카드 (검증 평가 / 라운지 글 공용, 트위터형) ──
-function FeedCard({ item, kind, locale, ctx, onOpen, liked, likeCount, bookmarked, replyCount, reposted, repostN, onReply, onLike, onBookmark, onRepost, onShare, expanded }) {
+export function FeedCard({ item, kind, locale, ctx, onOpen, liked, likeCount, bookmarked, replyCount, reposted, repostN, onReply, onLike, onBookmark, onRepost, onShare, expanded }) {
   const isReview = kind === "review";
   const rc = replyCount != null ? replyCount : (item.replies || []).length;
   return (
@@ -309,7 +282,7 @@ function FeedCard({ item, kind, locale, ctx, onOpen, liked, likeCount, bookmarke
 }
 
 // 리포스트 라벨 (피드 상단)
-function RepostLabel({ author, locale }) {
+export function RepostLabel({ author, locale }) {
   return (
     <div className="repost-label">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M17 2l4 4-4 4M21 6H7a4 4 0 0 0-4 4v1M7 22l-4-4 4-4M3 18h14a4 4 0 0 0 4-4v-1"/></svg>
@@ -319,7 +292,7 @@ function RepostLabel({ author, locale }) {
 }
 
 // 인라인 미니 답글 입력
-function MiniComposer({ locale, onSubmit, onCancel }) {
+export function MiniComposer({ locale, onSubmit, onCancel }) {
   const [t, setT] = useState("");
   return (
     <div className="mini-composer">
@@ -334,7 +307,7 @@ function MiniComposer({ locale, onSubmit, onCancel }) {
 }
 
 // 답글 노드 (대댓글 2단계까지)
-function ReplyNode({ reply, depth, childrenOf, locale, replyLikes, onLikeReply, replyingId, setReplyingId, onAddReply }) {
+export function ReplyNode({ reply, depth, childrenOf, locale, replyLikes, onLikeReply, replyingId, setReplyingId, onAddReply }) {
   const kids = depth === 0 ? childrenOf(reply.id) : [];
   const liked = !!replyLikes[reply.id];
   const baseHelp = typeof reply.helpful === "number" ? reply.helpful : 0;
@@ -368,7 +341,7 @@ function ReplyNode({ reply, depth, childrenOf, locale, replyLikes, onLikeReply, 
 }
 
 // 답글 스레드 (베스트 상단 고정)
-function RepliesThread({ replies, locale, replyLikes, onLikeReply, replyingId, setReplyingId, onAddReply }) {
+export function RepliesThread({ replies, locale, replyLikes, onLikeReply, replyingId, setReplyingId, onAddReply }) {
   const childrenOf = (pid) => replies.filter((r) => (r.parentId || null) === (pid || null));
   const top = childrenOf(null).slice().sort((a, b) => (b.best ? 1 : 0) - (a.best ? 1 : 0));
   if (top.length === 0) return <div className="tw-noreply"><span data-lang="ko">아직 답글이 없습니다. 첫 답글을 남겨보세요.</span><span data-lang="en">No replies yet. Be the first to reply.</span></div>;
@@ -378,12 +351,3 @@ function RepliesThread({ replies, locale, replyLikes, onLikeReply, replyingId, s
     </div>
   );
 }
-
-Object.assign(window, {
-  SEED_REVIEWS, SEED_THREADS, REVIEWABLE_EXTRA, CMTY_NOW,
-  tt, relTime, authorInitial, authorName, authorHandle, avatarTone, Avatar, VerifiedTick,
-  repostCount, lsGet, lsSet, ActionRow, ActBtn, ChipsRow,
-  Stars, ExampleBadge, RatingInline, TargetChip,
-  TopicTag, StatusChip, RatingSummary, FeedCard,
-  RepostLabel, MiniComposer, ReplyNode, RepliesThread,
-});

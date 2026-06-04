@@ -1,8 +1,15 @@
 /* Scopeball Market — Updates (시간순 타임라인 로그)
    기여자는 모두 동등하게 크레딧. 안전 신호는 사람 등급이 아니라 '검수 상태'로만. */
+import React, { useState, Fragment } from "react";
+import { Market } from "./data";
+import { Ico, ICONS, DomainGlyph } from "./cards";
+import { Avatar, lsGet, relTime, tt } from "./community";
+import {
+  BUCKET_ORDER_EN, BUCKET_ORDER_KO, CHANGE_KIND, SEED_UPDATES, dateBucket, makeDiff,
+} from "./updates";
 
 // 작성자 크레딧 (모두 동등 — 서열 없음)
-function AuthorCredit({ author, locale, size }) {
+export function AuthorCredit({ author, size }) {
   return (
     <span className="author-credit">
       <Avatar handle={author.handle} size={size || 20} />
@@ -12,7 +19,7 @@ function AuthorCredit({ author, locale, size }) {
   );
 }
 // 검수 상태 칩 (사람을 가르지 않음 · 공식 검수는 긍정, 그 외는 중립 '검토 중')
-function ReviewChip({ audited, locale, compact }) {
+export function ReviewChip({ audited, locale, compact }) {
   return audited
     ? <span className={"rev-chip ok" + (compact ? " cmp" : "")} title={locale === "en" ? "Reviewed by the official team" : "공식 팀 검수 완료"}>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
@@ -21,15 +28,15 @@ function ReviewChip({ audited, locale, compact }) {
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0"/></svg>
         <span data-lang="ko">검토 중</span><span data-lang="en">In review</span></span>;
 }
-function TypeLabel({ type, locale }) {
+export function TypeLabel({ type, locale }) {
   return <span className={"row-type " + type}><span className="rt-dot"></span>{Market.tChrome("updates." + type, locale)}</span>;
 }
-function VersionDelta({ from, to, type }) {
+export function VersionDelta({ from, to, type }) {
   if (type === "new_release") return <span className="vdelta new"><b>{to}</b></span>;
   return <span className="vdelta"><span className="vd-from">{from}</span><span className="vd-arr">→</span><b>{to}</b></span>;
 }
 
-function UpdateRow({ u, locale, ctx, onDiff }) {
+export function UpdateRow({ u, locale, ctx, onDiff }) {
   const c = Market.DOMAIN_COLOR[u._domain] || Market.DOMAIN_COLOR.security;
   const isPkg = u.target.type === "package";
   const kinds = (u.changeKind || []).map((k) => tt(CHANGE_KIND[k], locale)).join(", ");
@@ -54,14 +61,14 @@ function UpdateRow({ u, locale, ctx, onDiff }) {
   );
 }
 
-function DiffPanel({ open, u, locale, onClose, ctx }) {
+export function DiffPanel({ open, u, locale, onClose, ctx }) {
   const lines = u ? makeDiff(u) : [];
   return (
-    <React.Fragment>
+    <Fragment>
       <div className={"diff-scrim" + (open ? " open" : "")} onClick={onClose}></div>
       <aside className={"diff-panel" + (open ? " open" : "")}>
         {u && (
-          <React.Fragment>
+          <Fragment>
             <div className="diff-head">
               <div>
                 <div className="dh-title">{Market.pick(u._name, locale)}</div>
@@ -70,7 +77,7 @@ function DiffPanel({ open, u, locale, onClose, ctx }) {
               <button className="x" onClick={onClose}><Ico d={ICONS.x} w={18} /></button>
             </div>
             <div className="diff-src">
-              <AuthorCredit author={u.author} locale={locale} />
+              <AuthorCredit author={u.author} />
               <VersionDelta from={u.fromVersion} to={u.toVersion} type={u.type} />
               <ReviewChip audited={u.audited} locale={locale} />
             </div>
@@ -92,14 +99,14 @@ function DiffPanel({ open, u, locale, onClose, ctx }) {
               <span className="uc-label">{Market.tChrome("updates.changelog", locale)}</span>
               <span>{tt(u.changelog, locale)}</span>
             </div>
-          </React.Fragment>
+          </Fragment>
         )}
       </aside>
-    </React.Fragment>
+    </Fragment>
   );
 }
 
-function UpdatesScreen({ locale, ctx, fireToast }) {
+export function UpdatesScreen({ locale, ctx }) {
   const [typeFilter, setTypeFilter] = useState("all");
   const [domainFilter, setDomainFilter] = useState("");
   const [reviewFilter, setReviewFilter] = useState("all");
@@ -204,5 +211,3 @@ function UpdatesScreen({ locale, ctx, fireToast }) {
     </div>
   );
 }
-
-Object.assign(window, { AuthorCredit, ReviewChip, TypeLabel, VersionDelta, UpdateRow, DiffPanel, UpdatesScreen });

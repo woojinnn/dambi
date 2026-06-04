@@ -1,7 +1,15 @@
 /* Scopeball Market — 정책/패키지 상세 + 세트 패널 */
+import React, { useState, Fragment } from "react";
+import { Market } from "./data";
+import { marketNLG, marketTrigger } from "./nlg";
+import {
+  Ico, ICONS, DomainChip, DomainGlyph, SeverityBadge, ReadinessBadge,
+  PublisherBadge, VersionTag, AddButton, MiniRow,
+} from "./cards";
+import { RatingInline } from "./community";
 
 // 가짜 Cedar 원문 (플레이스홀더 — 실제 정책 원문은 핸드오프 후 주입)
-function SourceBlock({ policy, locale }) {
+export function SourceBlock({ policy, locale }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="dt-block">
@@ -17,9 +25,9 @@ function SourceBlock({ policy, locale }) {
 <span className="kw">permit</span>{" ("}{"\n"}
 {"  principal, action == Action::"}<span className="st">"signTransaction"</span>{", resource"}{"\n"}
 {")"} <span className="kw">when</span> {"{"}{"\n"}
-{"  resource.domain == "}<span className="st">"{policy.domain}"</span>{"\n"}
+{"  resource.domain == "}<span className="st">{"\"" + policy.domain + "\""}</span>{"\n"}
 {"} "}<span className="kw">unless</span> {"{"}{"\n"}
-{"  context.risk."}<span className="st">"{policy.intents[0] || policy.domain}"</span>{" >= "}<span className="nu">threshold</span>{"\n"}
+{"  context.risk."}<span className="st">{"\"" + (policy.intents[0] || policy.domain) + "\""}</span>{" >= "}<span className="nu">threshold</span>{"\n"}
 {"};"}{"\n"}
 <span className="cm">{"// severity: " + policy.severity + "  ·  evalClass: " + policy.evalClass}</span>
         </code></pre>
@@ -29,7 +37,7 @@ function SourceBlock({ policy, locale }) {
 }
 
 /* ════════════ 정책 상세 ════════════ */
-function PolicyDetail({ slug, locale, ctx }) {
+export function PolicyDetail({ slug, locale, ctx }) {
   const policy = Market.BY_SLUG[slug];
   if (!policy) return <div className="mk-canvas"><div className="empty"><h3>Not found</h3></div></div>;
   const c = Market.DOMAIN_COLOR[policy.domain];
@@ -61,7 +69,7 @@ function PolicyDetail({ slug, locale, ctx }) {
         </div>
 
         {/* 🎯 가치 카피 */}
-        <div className="dt-value"><span className="tgt">🎯</span><span>{window.marketNLG(policy, locale)}</span></div>
+        <div className="dt-value"><span className="tgt">🎯</span><span>{marketNLG(policy, locale)}</span></div>
 
         {/* 신뢰 바 (소셜 지표 없음 — 데이터 있는 것만) */}
         <div className="dt-trust">
@@ -88,7 +96,7 @@ function PolicyDetail({ slug, locale, ctx }) {
           <div className="when-box">
             <span className="wb-ico"><Ico d={ICONS.bolt} w={20} /></span>
             <div>
-              <div className="wb-txt">{window.marketTrigger(policy, locale)}</div>
+              <div className="wb-txt">{marketTrigger(policy, locale)}</div>
               {ext && <div className="wb-sub"><span data-lang="ko">필요 연동: 오라클·블록리스트 피드</span><span data-lang="en">Requires an oracle / blocklist feed</span></div>}
               {soon && <div className="wb-sub"><span data-lang="ko">아직 평가되지 않습니다 — 출시 알림을 받아보세요</span><span data-lang="en">Not evaluated yet — follow for release</span></div>}
             </div>
@@ -128,7 +136,7 @@ function PolicyDetail({ slug, locale, ctx }) {
 }
 
 /* ════════════ 패키지 상세 ════════════ */
-function PackageDetail({ pkgId, locale, ctx }) {
+export function PackageDetail({ pkgId, locale, ctx }) {
   const pkg = Market.PKG_BY_ID[pkgId];
   if (!pkg) return <div className="mk-canvas"><div className="empty"><h3>Not found</h3></div></div>;
   const inSet = ctx.isInSet("package", pkgId);
@@ -190,7 +198,7 @@ function PackageDetail({ pkgId, locale, ctx }) {
 }
 
 /* ════════════ 세트 패널 ════════════ */
-function SetPanel({ open, onClose, locale, items, ctx }) {
+export function SetPanel({ open, onClose, locale, items, ctx }) {
   // items: [{type:'policy'|'package', id}]
   const policies = items.filter((i) => i.type === "policy").map((i) => Market.BY_SLUG[i.id]).filter(Boolean);
   const packages = items.filter((i) => i.type === "package").map((i) => Market.PKG_BY_ID[i.id]).filter(Boolean);
@@ -203,7 +211,7 @@ function SetPanel({ open, onClose, locale, items, ctx }) {
   const totalCount = policies.length + packages.reduce((a, p) => a + p.count, 0);
 
   return (
-    <React.Fragment>
+    <Fragment>
       <div className={"set-scrim" + (open ? " open" : "")} onClick={onClose}></div>
       <aside className={"set-panel" + (open ? " open" : "")}>
         <div className="set-head">
@@ -219,7 +227,7 @@ function SetPanel({ open, onClose, locale, items, ctx }) {
               <div>{Market.tChrome("set_panel.empty", locale)}</div>
             </div>
           ) : (
-            <React.Fragment>
+            <Fragment>
               {dup > 0 && (
                 <div className="set-warn">
                   <Ico d={"M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"} w={16} />
@@ -257,7 +265,7 @@ function SetPanel({ open, onClose, locale, items, ctx }) {
                   <button className="si-x" onClick={() => ctx.toggleItem("policy", p.slug, "remove")}><Ico d={ICONS.x} w={15} /></button>
                 </div>
               ))}
-            </React.Fragment>
+            </Fragment>
           )}
         </div>
 
@@ -275,8 +283,6 @@ function SetPanel({ open, onClose, locale, items, ctx }) {
           </div>
         )}
       </aside>
-    </React.Fragment>
+    </Fragment>
   );
 }
-
-Object.assign(window, { SourceBlock, PolicyDetail, PackageDetail, SetPanel });

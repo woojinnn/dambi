@@ -1,6 +1,13 @@
 /* Scopeball Market — Community (2단: 피드 + 위젯 스택, 인라인 아코디언) */
+import React, { useState, useEffect } from "react";
+import { Market, SEED_REVIEWS } from "./data";
+import { Ico, ICONS } from "./cards";
+import {
+  Avatar, FeedCard, RepliesThread, RepostLabel, SEED_THREADS, Stars,
+  authorName, lsGet, lsSet, repostCount, tt,
+} from "./community";
 
-function WriteModal({ open, locale, onClose, onSubmitThread, fireToast }) {
+export function WriteModal({ open, locale, onClose, onSubmitThread, fireToast }) {
   const [title, setTitle] = useState("");
   const [bodyText, setBodyText] = useState("");
   const [target, setTarget] = useState("");
@@ -47,7 +54,7 @@ function WriteModal({ open, locale, onClose, onSubmitThread, fireToast }) {
   );
 }
 
-function Composer({ locale, onSubmit }) {
+export function Composer({ locale, onSubmit }) {
   const [txt, setTxt] = useState("");
   return (
     <div className="tw-composer inline">
@@ -66,7 +73,7 @@ function Composer({ locale, onSubmit }) {
   );
 }
 
-function CommunityScreen({ locale, ctx, fireToast, initialSlug }) {
+export function CommunityScreen({ locale, ctx, fireToast, initialSlug }) {
   const [cfilter, setCfilter] = useState("all");
   const [csort, setCsort] = useState("recent");
   const [expandedId, setExpandedId] = useState(null);
@@ -111,7 +118,7 @@ function CommunityScreen({ locale, ctx, fireToast, initialSlug }) {
   function toggleExpand(id) { setExpandedId((x) => x === id ? null : id); setReplyingId(null); }
 
   // ── 통합 아이템 ──
-  let all = [];
+  const all = [];
   SEED_REVIEWS.forEach((r) => all.push({ id: r.id, kind: "review", item: r }));
   threads.forEach((t) => all.push({ id: t.id, kind: "post", item: t }));
   function activityAt(e) { if (e.kind === "post") { const rs = repliesOf(e.item); return rs.length ? rs.slice(-1)[0].createdAt : e.item.createdAt; } return e.item.createdAt; }
@@ -289,5 +296,3 @@ function CommunityScreen({ locale, ctx, fireToast, initialSlug }) {
     </div>
   );
 }
-
-Object.assign(window, { WriteModal, Composer, CommunityScreen });

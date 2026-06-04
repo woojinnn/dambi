@@ -1,60 +1,20 @@
-/* Scopeball Market — 앱 셸 + 상태 + 라우팅 + Tweaks */
-const { useEffect, useRef } = React;
-
-const NAV_ICONS = {
-  home: "M3 11.5 12 4l9 7.5 M5 10v10h14V10",
-  editor: ["M3 3h7v7H3z", "M14 3h7v7h-7z", "M14 14h7v7h-7z", "M3 14h7v7H3z"],
-  sim: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18", "M10 8.5 16 12l-6 3.5z"],
-  monitor: "M3 12h4l3 8 4-16 3 8h4",
-  market: ["M3 9h18l-1.5 11H4.5z", "M3 9l2-5h14l2 5", "M9 13a3 3 0 0 0 6 0"],
-  history: ["M3 3v18h18", "M7 14l4-4 4 3 5-7"],
-  gear: ICONS.gear,
-};
-
-function NavRail({ locale }) {
-  const items = [
-    { key: "home", label: { ko: "홈", en: "Home" }, href: "Home.html", icon: NAV_ICONS.home },
-    { key: "editor", label: { ko: "에디터", en: "Editor" }, href: "Editor v7.html", icon: NAV_ICONS.editor },
-    { key: "sim", label: { ko: "시뮬레이션", en: "Simulation" }, href: "Simulation.html", icon: NAV_ICONS.sim },
-    { key: "monitor", label: { ko: "모니터링", en: "Monitoring" }, href: "Monitoring.html", icon: NAV_ICONS.monitor },
-    { key: "market", label: { ko: "마켓", en: "Market" }, href: null, icon: NAV_ICONS.market, active: true, pill: Market.POLICIES.length },
-  ];
-  const lower = [
-    { key: "history", label: { ko: "히스토리", en: "History" }, href: "History.html", icon: NAV_ICONS.history },
-  ];
-  function NavItem({ it }) {
-    const inner = (
-      <React.Fragment>
-        <span className="icon"><Ico d={it.icon} w={19} /></span>
-        <span className="label">{it.label[locale === "en" ? "en" : "ko"]}</span>
-        {it.pill != null && <span className="pill">{it.pill}</span>}
-      </React.Fragment>
-    );
-    if (it.active) return <a className="nav-item active" aria-current="page">{inner}</a>;
-    return <a className="nav-item" href={it.href}>{inner}</a>;
-  }
-  return (
-    <nav className="nav-rail">
-      <div className="nav-logo">
-        <span className="mark">S</span>
-        <span className="word">Scopeball</span>
-      </div>
-      <div className="nav-divider"></div>
-      <div className="nav-group">
-        {items.map((it) => <NavItem key={it.key} it={it} />)}
-      </div>
-      <div className="nav-divider"></div>
-      <div className="nav-group">
-        {lower.map((it) => <NavItem key={it.key} it={it} />)}
-        <a className="nav-item is-disabled" aria-disabled="true">
-          <span className="icon"><Ico d={NAV_ICONS.gear} w={19} /></span>
-          <span className="label">{locale === "en" ? "Settings" : "설정"}</span>
-          <span className="soon">soon</span>
-        </a>
-      </div>
-    </nav>
-  );
-}
+/* Scopeball Market — 앱 셸 + 상태 + 라우팅 + Tweaks
+ *
+ * SPA 통합 버전: 원본 standalone 번들의 NavRail은 dashboard SPA가 이미
+ * 그리므로 제거. body 글로벌 class 조작도 .market-root 컨테이너로 옮겨서
+ * 다른 페이지를 오염시키지 않게 함. 그 외 라우팅·검색·세트·토스트 동작은
+ * 그대로 유지.
+ */
+import React, { useEffect, useRef, useState, Fragment } from "react";
+import { Market } from "./data";
+import { Ico, ICONS } from "./cards";
+import { PolicyDetail, PackageDetail, SetPanel } from "./detail";
+import { PopularScreen, BrowseScreen } from "./screens";
+import { CommunityScreen } from "./community-screen";
+import { UpdatesScreen } from "./updates-screen";
+import {
+  TweaksPanel, TweakSection, TweakRadio, TweakSlider, TweakToggle, useTweaks,
+} from "./tweaks-panel";
 
 const MK_TABS = [
   { key: "popular", label: { ko: "인기", en: "Popular" } },
@@ -84,7 +44,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "packageStack": true
 }/*EDITMODE-END*/;
 
-function App() {
+export function MarketApp() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [locale, setLocale] = useState("ko");
   const [route, setRoute] = useState({ screen: "popular" });
@@ -96,16 +56,26 @@ function App() {
   const [toast, setToast] = useState(null);
   const searchRef = useRef(null);
   const toastTimer = useRef(null);
+  const rootRef = useRef(null);
 
-  // body attrs for locale + tweak classes
-  useEffect(() => { document.body.setAttribute("data-locale", locale); }, [locale]);
+  // 원본은 document.body에 locale/density/dcolor/dimSoon 클래스를 박았다.
+  // dashboard SPA에서 그대로 두면 다른 페이지까지 오염되므로 .market-root
+  // 컨테이너 한정으로 옮긴다.
   useEffect(() => {
-    document.body.className = [
+    const el = rootRef.current;
+    if (!el) return;
+    el.setAttribute("data-locale", locale);
+  }, [locale]);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    el.className = [
+      "market-root",
       "density-" + t.density,
       t.domainColor === "mono" ? "dcolor-mono" : "",
       t.packageStack ? "" : "nostack",
     ].filter(Boolean).join(" ");
-    document.documentElement.style.setProperty("--dim", t.dimSoon);
+    el.style.setProperty("--dim", String(t.dimSoon));
   }, [t.density, t.domainColor, t.packageStack, t.dimSoon]);
 
   // "/" focus search
@@ -145,6 +115,9 @@ function App() {
     }
   }
 
+  const bodyRef = useRef(null);
+  function scrollTop() { setTimeout(() => { bodyRef.current && bodyRef.current.scrollTo({ top: 0 }); }, 0); }
+
   const ctx = {
     isInSet, toggleItem,
     openPolicy: (slug) => { setRoute({ screen: "policy", slug }); scrollTop(); },
@@ -160,8 +133,6 @@ function App() {
     saveSet: () => fireToast(locale === "en" ? "Saved as your set" : "내 세트로 저장했어요"),
     shareSet: () => fireToast(locale === "en" ? "Share link copied" : "공유 링크를 복사했어요"),
   };
-  const bodyRef = useRef(null);
-  function scrollTop() { setTimeout(() => { bodyRef.current && bodyRef.current.scrollTo({ top: 0 }); }, 0); }
 
   // tab → screen sync
   const activeTab = (route.screen === "popular") ? "popular"
@@ -185,8 +156,8 @@ function App() {
   const setCount = items.length;
 
   return (
-    <div className="app">
-      <NavRail locale={locale} />
+    <div ref={rootRef} className="market-root">
+      {/* SPA 통합 본판은 NavRail 없이 시작 — main column만 */}
       <div className="market-main">
         <header className="mk-header">
           <span className="mk-title">Market</span>
@@ -225,7 +196,7 @@ function App() {
       <SetPanel open={setOpen} onClose={() => setSetOpen(false)} locale={locale} items={items} ctx={ctx} />
 
       <div className={"mk-toast" + (toast ? " show" : "")}>
-        {toast && <React.Fragment><Ico d={ICONS.check} w={16} />{toast}</React.Fragment>}
+        {toast && <Fragment><Ico d={ICONS.check} w={16} />{toast}</Fragment>}
       </div>
 
       <TweaksPanel title="Tweaks">
@@ -244,5 +215,3 @@ function App() {
     </div>
   );
 }
-
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
