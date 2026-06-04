@@ -25,14 +25,10 @@ pub(super) fn dispatch(method: &str, params: &Value, ctx: &FactCtx) -> Result<Va
         "approval.unlimited_over_balance" => unlimited_over_balance(params, ctx),
         "approval.set_for_all_state" => set_for_all_state(params, ctx),
         "approval.resulting_allowance_state" => resulting_allowance_state(params, ctx),
-        "approval.already_granted" => already_granted(params, ctx),
-        // CONVERGENCE (option-2 tracer): main's semantic vocab method. Same
-        // state computation as `already_granted`, but in main's CONTRACT —
-        // flat params `{chain_id, owner, asset, spender}` (asset = lowered
-        // TokenRef), result key `hasExisting` (manifest projects it to
-        // `context.custom.hasExistingAllowance`). Pins the convergence convention
-        // for the surface batches; the old `already_granted` is removed once the
-        // approval surface is fully migrated.
+        // CONVERGENCE (option-2): main's semantic-vocab method, replacing the
+        // legacy `approval.already_granted` (removed). Flat params
+        // `{chain_id, owner, asset, spender}` (asset = lowered TokenRef); result
+        // key `hasExisting` (manifest → `context.custom.hasExistingAllowance`).
         "approval.allowance" => allowance(params, ctx),
         _ => Err(FactError::UnknownMethod(method.into())),
     }
@@ -171,43 +167,11 @@ fn resulting_allowance_state(params: &Value, ctx: &FactCtx) -> Result<Value, Fac
     }))
 }
 
-/// `approval.already_granted` (GEN-20) — readKind: direct.
+/// CONVERGENCE — main vocab `approval.allowance` (replaces legacy
+/// `approval.already_granted`).
 ///
-/// Does a non-zero ERC20 allowance for `(token, spender)` already exist in wallet
-/// state (`approvals_erc20.amount > 0`)? Flags redundant / surprise
-/// re-approvals. ERC20-flavored sibling of [`set_for_all_state`] (NFT operator case).
-///
-/// Catalog params:
-///   - `chain_id`: Long (required) — `$.root.chain_id`
-///   - `owner`: String (required) — `$.root.from`
-///   - `token`: `AssetRef` (required) — `$.action.token` (lowered `TokenRef`; use
-///     [`param_token_contract`] to get the ERC20 contract address)
-///   - `spender`: String (required) — `$.action.spender`
-///
-/// Catalog outputs:
-///   - `alreadyGranted`: Bool — `$.result.alreadyGranted`
-///
-/// `WalletState` accessors to call:
-///   - `ApprovalSet::allowance(&self, key: &(ChainId, Address), spender: &Spender) -> Option<&AllowanceSpec>`
-///     then `alreadyGranted = allowance.map_or(false, |a| !a.amount.is_zero())`.
-fn already_granted(params: &Value, ctx: &FactCtx) -> Result<Value, FactError> {
-    let chain = ChainId::new(param_str(params, "chain_id")?);
-    let token_contract = param_token_contract(params)?;
-    let spender = param_addr(params, "spender")?;
-
-    let already_granted = ctx
-        .state
-        .approvals
-        .allowance(&(chain, token_contract), &spender)
-        .is_some_and(|a| !a.amount.is_zero());
-
-    Ok(json!({ "alreadyGranted": already_granted }))
-}
-
-/// CONVERGENCE tracer — main vocab `approval.allowance`.
-///
-/// Same state computation as [`already_granted`] (is there a non-zero ERC20
-/// allowance for `(asset, spender)`?), expressed in main's enrichment CONTRACT:
+/// Non-zero ERC20 allowance check for `(asset, spender)`, in main's enrichment
+/// CONTRACT:
 /// flat params `{chain_id, owner, asset, spender}` where `asset` is the lowered
 /// `TokenRef` (`{ key: { standard, chain, address } }`), and the result key is
 /// `hasExisting` — main manifests project `$.result.hasExisting` onto
@@ -499,42 +463,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(absent["alreadyGranted"], json!(false));
-    }
-
-    #[test]
-    fn already_granted_distinguishes_nonzero_from_zero() {
-        let with_allowance = state_with(1_000, false, 100);
-        let out = dispatch(
-            "approval.already_granted",
-            &params("0x0"),
-            &FactCtx {
-                state: &with_allowance,
-            },
-        )
-        .unwrap();
-        assert_eq!(out["alreadyGranted"], json!(true));
-
-        let zero_allowance = state_with(1_000, false, 0);
-        let out = dispatch(
-            "approval.already_granted",
-            &params("0x0"),
-            &FactCtx {
-                state: &zero_allowance,
-            },
-        )
-        .unwrap();
-        assert_eq!(out["alreadyGranted"], json!(false));
-
-        // Spender with no recorded allowance at all → not granted.
-        let mut no_spender = WalletState::new(wallet_id());
-        no_spender.tokens = with_allowance.tokens.clone();
-        let out = dispatch(
-            "approval.already_granted",
-            &params("0x0"),
-            &FactCtx { state: &no_spender },
-        )
-        .unwrap();
-        assert_eq!(out["alreadyGranted"], json!(false));
     }
 
     #[test]

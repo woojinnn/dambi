@@ -1768,45 +1768,6 @@
       },
       "origin": "bundled"
     },
-    "token.outflow_pct_of_holding": {
-      "name": "token.outflow_pct_of_holding",
-      "status": "planned",
-      "description": "GEN-06: the proposed action's amount as a percentage of the wallet's CURRENT holding of that exact token (amount / token_holdings.balance_amount \u00d7 100). Single-asset fraction-of-balance \u2014 distinct from the whole-portfolio fold portfolio.group_pct (whose denominator is total portfolio USD).",
-      "readKind": "direct",
-      "server": "sim-server",
-      "stateDependency": [
-        "token_holdings.balance_amount"
-      ],
-      "params": {
-        "chain_id": {
-          "type": "Long",
-          "required": true,
-          "defaultSelector": "$.root.chain_id"
-        },
-        "owner": {
-          "type": "String",
-          "required": true,
-          "defaultSelector": "$.root.from"
-        },
-        "token": {
-          "type": "AssetRef",
-          "required": true,
-          "defaultSelector": "$.action.token"
-        },
-        "amount": {
-          "type": "String",
-          "required": true,
-          "defaultSelector": "$.action.amount",
-          "description": "Proposed outflow amount (U256 hex / wei-form string) \u2014 the percentage numerator."
-        }
-      },
-      "returns": {
-        "kind": "scalar",
-        "type": "decimal",
-        "from": "$.result.pct"
-      },
-      "origin": "bundled"
-    },
     "permit.allowance_horizon": {
       "name": "permit.allowance_horizon",
       "status": "planned",
@@ -1962,44 +1923,6 @@
         "kind": "scalar",
         "type": "Bool",
         "from": "$.result.mismatch"
-      },
-      "origin": "bundled"
-    },
-    "approval.already_granted": {
-      "name": "approval.already_granted",
-      "status": "planned",
-      "description": "GEN-20: does a non-zero ERC20 allowance for (token, spender) already exist in wallet state (approvals_erc20.amount > 0)? Flags redundant / surprise re-approvals. ERC20-flavored sibling of approval.set_for_all_state (which covers the NFT operator case).",
-      "readKind": "direct",
-      "server": "sim-server",
-      "stateDependency": [
-        "approvals_erc20.amount"
-      ],
-      "params": {
-        "chain_id": {
-          "type": "Long",
-          "required": true,
-          "defaultSelector": "$.root.chain_id"
-        },
-        "owner": {
-          "type": "String",
-          "required": true,
-          "defaultSelector": "$.root.from"
-        },
-        "token": {
-          "type": "AssetRef",
-          "required": true,
-          "defaultSelector": "$.action.token"
-        },
-        "spender": {
-          "type": "String",
-          "required": true,
-          "defaultSelector": "$.action.spender"
-        }
-      },
-      "returns": {
-        "kind": "scalar",
-        "type": "Bool",
-        "from": "$.result.alreadyGranted"
       },
       "origin": "bundled"
     },

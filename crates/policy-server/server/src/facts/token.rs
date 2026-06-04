@@ -18,7 +18,7 @@ use policy_state::primitives::{Address, ChainId, U256};
 use policy_state::token::holding::TokenHolding;
 use policy_state::token::kind::{PegKind, TokenKind};
 
-use super::params::{param_asset_contract, param_chain_id, param_u256};
+use super::params::{param_asset_contract, param_chain_id};
 use super::FactCtx;
 use super::FactError;
 
@@ -35,7 +35,8 @@ use super::FactError;
 pub(super) fn dispatch(method: &str, params: &Value, ctx: &FactCtx) -> Result<Value, FactError> {
     match method {
         "token.peg_ratio" => peg_ratio(params, ctx),
-        "token.outflow_pct_of_holding" => outflow_pct_of_holding(params, ctx),
+        // NOTE: token.outflow_pct_of_holding removed — superseded by main-vocab
+        // portfolio.input_fraction_bps (basis points instead of percent).
         "token.swap_out_classification" => swap_out_classification(params, ctx),
         "token.swap_special_token" => swap_special_token(params, ctx),
         "token.interest_bearing" => interest_bearing(params, ctx),
@@ -81,33 +82,6 @@ fn holding_for<'a>(
 // until a cross-token (underlying-price) join is available.
 fn peg_ratio(_params: &Value, _ctx: &FactCtx) -> Result<Value, FactError> {
     Err(FactError::NotImplemented("token.peg_ratio".into()))
-}
-
-/// `token.outflow_pct_of_holding` (readKind: direct) — GEN-06.
-///
-/// The proposed action's `amount` as a percentage of the wallet's CURRENT
-/// holding of that exact token (`amount / token_holdings.balance_amount × 100`).
-/// Single-asset fraction-of-balance — distinct from the whole-portfolio fold
-/// `portfolio.group_pct`.
-///
-/// Params:
-/// - `chain_id`: Long (required)
-/// - `owner`: String (required)
-/// - `token`: `AssetRef` (required)
-/// - `amount`: String (required) — proposed outflow (U256 hex), the percentage numerator.
-///
-/// Outputs:
-/// - `pct`: decimal — from `$.result.pct`
-fn outflow_pct_of_holding(params: &Value, ctx: &FactCtx) -> Result<Value, FactError> {
-    let chain = param_chain_id(params, "chain_id")?;
-    let contract = param_asset_contract(params, "token")?;
-    let amount = param_u256(params, "amount")?;
-
-    let held = holding_for(ctx, &chain, &contract)
-        .and_then(|h| h.balance.as_fungible())
-        .unwrap_or(U256::ZERO);
-
-    Ok(json!({ "pct": pct_4dp(amount, held) }))
 }
 
 /// `token.swap_out_classification` (readKind: fold) — UNI-05.
@@ -226,31 +200,6 @@ fn interest_bearing(params: &Value, ctx: &FactCtx) -> Result<Value, FactError> {
     Ok(json!({ "isInterestBearing": is_interest_bearing }))
 }
 
-/// Render `numerator / divisor × 100` to a 4-decimal-place percentage string
-/// using U256 integer math (no float — `numerator` can be `U256::MAX`). Divisor
-/// zero → `"100.0000"` floor for a zero numerator (0% of nothing), else the
-/// over-balance sentinel scale (a positive spend against a zero holding is an
-/// unbounded percentage). Mirrors the `over_balance_4dp` idiom but scales by
-/// 100 × `10_000` for a percentage at 4dp.
-fn pct_4dp(numerator: U256, divisor: U256) -> String {
-    if divisor.is_zero() {
-        // No holding to take a percentage of: 0% if nothing is moving, else a
-        // deliberately huge value so a `.greaterThan(threshold)` policy trips.
-        return if numerator.is_zero() {
-            "0.0000".to_owned()
-        } else {
-            "100000000.0000".to_owned()
-        };
-    }
-    // scaled = numerator * 100 * 10_000 / divisor, then split into whole.frac4.
-    let pct_scale = U256::from(1_000_000u64);
-    let scale = U256::from(10_000u64);
-    let scaled = numerator.saturating_mul(pct_scale) / divisor;
-    let whole = scaled / scale;
-    let frac = scaled % scale;
-    format!("{whole}.{frac:04}")
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -339,42 +288,6 @@ mod tests {
             category: BaseCategory::Stable,
             peg_to,
         }
-    }
-
-    #[test]
-    fn outflow_pct_half_of_holding_is_50pct() {
-        let state = state_with(2_000, base_kind(None), None);
-        let params = json!({
-            "chain_id": chain().to_string(),
-            "owner": "0x000000000000000000000000000000000000a01c",
-            "token": asset_param(),
-            "amount": format!("{:#x}", U256::from(1_000u64)),
-        });
-        let out = dispatch(
-            "token.outflow_pct_of_holding",
-            &params,
-            &FactCtx { state: &state },
-        )
-        .unwrap();
-        assert_eq!(out["pct"], json!("50.0000"));
-    }
-
-    #[test]
-    fn outflow_pct_unheld_token_is_sentinel() {
-        let state = WalletState::new(wallet_id());
-        let params = json!({
-            "chain_id": chain().to_string(),
-            "owner": "0x000000000000000000000000000000000000a01c",
-            "token": asset_param(),
-            "amount": format!("{:#x}", U256::from(1u64)),
-        });
-        let out = dispatch(
-            "token.outflow_pct_of_holding",
-            &params,
-            &FactCtx { state: &state },
-        )
-        .unwrap();
-        assert_eq!(out["pct"], json!("100000000.0000"));
     }
 
     #[test]
