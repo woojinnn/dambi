@@ -45,6 +45,7 @@ import {
   type Message,
 } from "@lib/types";
 import { hlOrderToAction, HL_TO_SENTINEL } from "./hl-order-to-action";
+import { collectTokenDecimals } from "./registry/collect-token-decimals";
 import {
   normalizeTypedDataPayload,
   routeTypedSignaturePayload,
@@ -1054,6 +1055,13 @@ async function typedSignatureLifecycle(
     try {
       // Per-child fan-out: evaluate this body and (if a multicall) each inner
       // child. No `recordSimulationOnServer` on the sig path (it never recorded).
+      // Resolve token decimals once for the whole (possibly multicall) body so
+      // each fungible amount gets its `amountNano` Long sibling (registry
+      // lookups; non-fatal — a miss just omits that token's nano).
+      const tokenDecimals = await collectTokenDecimals(
+        action,
+        message.data.chainId,
+      );
       verdicts.push(
         ...(await evaluateBodyTree(
           action,
@@ -1063,6 +1071,7 @@ async function typedSignatureLifecycle(
           manifests,
           policyRpcUrl,
           message.requestId,
+          tokenDecimals,
         )),
       );
     } catch (err) {
@@ -1151,6 +1160,10 @@ async function evaluateBodyTree(
   manifests: readonly unknown[],
   policyRpcUrl: string,
   requestId: string,
+  // Host-resolved per-token decimals for the WHOLE top-level body (collected
+  // once by the caller, then threaded through every child position) so each
+  // fungible amount's `amountNano` Long sibling is filled in the lowering.
+  tokenDecimals: Readonly<Record<string, number>>,
 ): Promise<VerdictDto[]> {
   const verdicts: VerdictDto[] = [];
   const domain =
@@ -1161,11 +1174,24 @@ async function evaluateBodyTree(
   if (domain !== undefined && domain !== "unknown") {
     // PLAN → DISPATCH (only when something is planned; a shared results map
     // would clobber since `call_id` repeats across siblings) → EVALUATE.
-    const planned = await planActionRpcV2({ manifests, action: body, meta, tx });
+    const planned = await planActionRpcV2({
+      manifests,
+      action: body,
+      meta,
+      tx,
+      token_decimals: tokenDecimals,
+    });
     const results =
       planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
     verdicts.push(
-      await evaluateActionV2({ action: body, meta, tx, bundles, results }),
+      await evaluateActionV2({
+        action: body,
+        meta,
+        tx,
+        bundles,
+        results,
+        token_decimals: tokenDecimals,
+      }),
     );
   } else if (domain === "unknown") {
     // N2: a nested batch position that decoded to NOTHING — the WASM decoder
@@ -1196,6 +1222,7 @@ async function evaluateBodyTree(
             manifests,
             policyRpcUrl,
             requestId,
+            tokenDecimals,
           )),
         );
       }
@@ -1255,6 +1282,13 @@ async function tryV2VerdictPath(
       // bundles fire at the batch vs the child positions; this supplies both.
       // `evaluateActionV2` never throws for policy/system faults (Fail inside) —
       // only plan/dispatch can throw.
+      // Resolve token decimals once for the whole (possibly multicall) body so
+      // each fungible amount gets its `amountNano` Long sibling (registry
+      // lookups; non-fatal — a miss just omits that token's nano).
+      const tokenDecimals = await collectTokenDecimals(
+        action,
+        message.data.chainId,
+      );
       verdicts.push(
         ...(await evaluateBodyTree(
           action,
@@ -1264,6 +1298,7 @@ async function tryV2VerdictPath(
           manifests,
           policyRpcUrl,
           message.requestId,
+          tokenDecimals,
         )),
       );
 

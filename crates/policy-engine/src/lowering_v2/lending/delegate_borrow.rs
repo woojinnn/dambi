@@ -27,7 +27,10 @@ pub(crate) fn lower(
     m.insert("asset".into(), lower_token_ref(&action.asset));
     m.insert("delegatee".into(), Value::String(addr(&action.delegatee)));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
-    // `amountNano` / `amountUsd` are host-populated → omitted.
+    if let Some(nano) = ctx.amount_nano(&action.asset, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
+    // `amountUsd` is host-populated → omitted.
     m.insert(
         "rateMode".into(),
         Value::String(rate_mode_str(&action.rate_mode).into()),

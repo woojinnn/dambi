@@ -43,7 +43,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use policy_engine::lowering_v2::{lower_action, LoweredAction, TxMeta};
+use policy_engine::lowering_v2::{
+    lower_action_with_decimals, LoweredAction, TokenDecimals, TxMeta,
+};
 use policy_engine::policy::{MatchedPolicy, PolicyEngine, Severity, Verdict};
 use policy_engine::policy_rpc::{
     plan_policy_rpc_v2, system_fail_verdict, ManifestV2, PlannedCallV2, TriggerScope, TxView,
@@ -77,6 +79,11 @@ struct PlanActionInput {
     action: ActionBody,
     meta: ActionMeta,
     tx: TxInput,
+    /// Host-injected per-token decimals (lowercase `0x` address → decimals),
+    /// used to fill each fungible amount's `amountNano` `Long` sibling. Absent
+    /// ⇒ no nano fields are emitted (the lowering omits the optional sibling).
+    #[serde(default)]
+    token_decimals: BTreeMap<String, u8>,
 }
 
 /// One installed bundle: the user's Cedar policy text paired with the manifest
@@ -109,6 +116,9 @@ struct EvaluateActionInput {
     /// Raw host results keyed by `call_id` (the unwrapped `$.result` payload).
     #[serde(default)]
     results: BTreeMap<String, Value>,
+    /// Host-injected per-token decimals (see [`PlanActionInput::token_decimals`]).
+    #[serde(default)]
+    token_decimals: BTreeMap<String, u8>,
 }
 
 // ── output DTOs ──────────────────────────────────────────────────────────
@@ -161,7 +171,8 @@ pub fn plan_action_rpc_v2_json(input_json: String) -> String {
         check_input_size(&input_json, "plan_action_rpc_v2_json")?;
         let input: PlanActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
-        let lowered = lower(&input.action, &input.meta, &input.tx)?;
+        let decimals = TokenDecimals::new(input.token_decimals.clone());
+        let lowered = lower(&input.action, &input.meta, &input.tx, &decimals)?;
         let planned = plan(&input.manifests, &input.action, &lowered, &input.tx)?;
         Ok(PlanActionOutput {
             planned: planned.iter().map(planned_to_dto).collect(),
@@ -199,7 +210,8 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
         let input: EvaluateActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
 
-        let lowered = lower(&input.action, &input.meta, &input.tx)?;
+        let decimals = TokenDecimals::new(input.token_decimals.clone());
+        let lowered = lower(&input.action, &input.meta, &input.tx, &decimals)?;
 
         // Boundary invariant: PLAN over the bundles' own manifests, never a
         // host-supplied side list. This ties the `SystemFail` gate (driven by
@@ -251,13 +263,15 @@ pub fn debug_lowered_context_v2_json(input_json: String) -> String {
         check_input_size(&input_json, "debug_lowered_context_v2_json")?;
         let input: EvaluateActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
-        let lowered = lower(&input.action, &input.meta, &input.tx)?;
+        let decimals = TokenDecimals::new(input.token_decimals.clone());
+        let lowered = lower(&input.action, &input.meta, &input.tx, &decimals)?;
         let manifests: Vec<ManifestV2> = input.bundles.iter().map(|b| b.manifest.clone()).collect();
         let mut context = lowered.context.clone();
         // Best-effort replay so `context.custom.*` shows when enrichment is wired;
         // ignore a plan/materialize fault and surface the base lowered context.
         if let Ok(planned) = plan(&manifests, &input.action, &lowered, &input.tx) {
-            let _ = policy_engine::policy_rpc::materialize_v2(&mut context, &planned, &input.results);
+            let _ =
+                policy_engine::policy_rpc::materialize_v2(&mut context, &planned, &input.results);
         }
         Ok(serde_json::json!({
             "principal": lowered.principal,
@@ -280,12 +294,13 @@ fn lower(
     action: &ActionBody,
     meta: &ActionMeta,
     tx: &TxInput,
+    decimals: &TokenDecimals,
 ) -> Result<LoweredAction, EngineErrorDto> {
     let tx_meta = TxMeta {
         from: &tx.from,
         to: &tx.to,
     };
-    lower_action(action, meta, &tx_meta)
+    lower_action_with_decimals(action, meta, &tx_meta, decimals)
         .map_err(|error| EngineErrorDto::new("unsupported_action", error.to_string()))
 }
 
@@ -1107,6 +1122,65 @@ mod tests {
             verdict_kind(&out),
             "pass",
             "Inner swap policy must be SKIPPED on the multicall batch (fires per-child): {out}"
+        );
+    }
+
+    // ── token_decimals → amountNano quantity-cap (the nano feature) ──────────
+    //
+    // With host-injected `token_decimals`, the lowering fills the base
+    // `direction.amountInNano` Long sibling, so a quantity-cap Cedar policy
+    // (`amountInNano >= N`) fires. Without decimals the field is omitted, so the
+    // `has`-guarded cap short-circuits to Pass (dormant) — proving the cap is
+    // driven by the injected decimals, not firing unconditionally.
+
+    /// The `swap_sample` sells 1_000_000_000 raw USDC (6dp) → nano 1e12. A cap
+    /// at 1e12 fires WITH decimals and is dormant WITHOUT them.
+    #[test]
+    fn evaluate_action_v2_amount_in_nano_cap_driven_by_token_decimals() {
+        // `swap_sample`'s tokenIn is Arbitrum USDC (6 decimals).
+        let usdc = "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+        let policy = "@id(\"in-cap\")\n@severity(\"warn\")\n@reason(\"input amount cap\")\n\
+             forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
+             when { context.direction has amountInNano \
+             && context.direction.amountInNano >= 1000000000000 };\n";
+        let manifest = json!({
+            "id": "in-cap", "schema_version": 2,
+            "trigger": { "where": { "action.tag": { "eq": "swap" } } }
+        });
+
+        // WITH decimals → amountInNano = 1e12 → cap (>= 1e12) → warn.
+        let (body, meta) = swap_sample();
+        let mut decimals = serde_json::Map::new();
+        decimals.insert(usdc.to_owned(), json!(6));
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{ "policy": policy, "manifest": manifest }],
+                "results": {},
+                "token_decimals": Value::Object(decimals),
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            verdict_kind(&out),
+            "warn",
+            "amountInNano cap must fire when token_decimals are injected: {out}"
+        );
+
+        // WITHOUT decimals → amountInNano omitted → has-guard false → pass.
+        let (body, meta) = swap_sample();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{ "policy": policy, "manifest": manifest }],
+                "results": {},
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            verdict_kind(&out),
+            "pass",
+            "nano cap must be dormant without token_decimals: {out}"
         );
     }
 }

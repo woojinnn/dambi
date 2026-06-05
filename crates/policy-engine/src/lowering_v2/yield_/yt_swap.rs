@@ -2,7 +2,7 @@
 
 use serde_json::{Map, Value};
 
-use policy_transition::action::yield_::YtSwapAction;
+use policy_transition::action::yield_::{YtSwapAction, YtSwapDirection};
 
 use super::super::common::cedar::{addr, u256_hex};
 use super::super::common::token::lower_token_ref;
@@ -32,6 +32,23 @@ pub(crate) fn lower(
         "exactAmountIn".into(),
         Value::String(u256_hex(action.exact_amount_in)),
     );
+    // See `pt_swap`: nano is denominated in the INPUT instrument (`TokenForYt` →
+    // external token; `YtForToken` / `YtForSy` → YT, 18-decimal; `SyForYt` → SY,
+    // left to enrichment), NOT `external_token` (the OUTPUT for the YT-as-input
+    // arms).
+    let exact_in_nano = match action.direction {
+        YtSwapDirection::TokenForYt => action
+            .external_token
+            .as_ref()
+            .and_then(|t| ctx.amount_nano(t, action.exact_amount_in)),
+        YtSwapDirection::YtForToken | YtSwapDirection::YtForSy => {
+            Some(ctx.amount_nano_native18(action.exact_amount_in))
+        }
+        YtSwapDirection::SyForYt => None,
+    };
+    if let Some(nano) = exact_in_nano {
+        m.insert("exactAmountInNano".into(), Value::from(nano));
+    }
     m.insert(
         "minAmountOut".into(),
         Value::String(u256_hex(action.min_amount_out)),

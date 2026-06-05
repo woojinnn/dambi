@@ -15,7 +15,11 @@ namespace Lending {
     assetIn?: Core::TokenRef,
     assetOut?: Core::TokenRef,
     amount?: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
     limitAmount?: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    limitAmountNano?: Long,
     user?: String,
     recipient?: String,
     calldata: String,

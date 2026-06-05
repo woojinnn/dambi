@@ -24,7 +24,10 @@ pub(crate) fn lower(
     m.insert("token".into(), lower_token_ref(&action.token));
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
-    // `amountNano` / `amountUsd` / `custom` are host-populated — OMITTED here.
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
+    // `amountUsd` / `custom` are host-populated — OMITTED here.
 
     Ok(ctx.lowered(r#"Token::Action::"Erc20Transfer""#, Value::Object(m)))
 }
@@ -80,5 +83,55 @@ mod tests {
     #[test]
     fn erc20_transfer_erc1155_token_key_conforms() {
         assert_transfer_token_conforms(sample_erc1155_token());
+    }
+
+    /// With injected `decimals`, the lowering fills `amountNano` (the
+    /// token-native `Long` sibling the quantity-cap policies read); without
+    /// them it is omitted. 1000 USDC (6dp) raw `1_000_000_000` → nano `1e12`.
+    #[test]
+    fn erc20_transfer_fills_amount_nano_only_when_decimals_known() {
+        use std::collections::BTreeMap;
+        use std::str::FromStr;
+
+        use policy_state::primitives::{Address, ChainId, U256};
+        use policy_state::token::{TokenKey, TokenRef};
+
+        use crate::lowering_v2::{lower_action_with_decimals, TokenDecimals, TxMeta};
+
+        const FROM: &str = "0x1111111111111111111111111111111111111111";
+        const TO: &str = "0x2222222222222222222222222222222222222222";
+        let usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+
+        let body = ActionBody::Token(TokenAction::Erc20Transfer(Erc20TransferAction {
+            token: TokenRef {
+                key: TokenKey::Erc20 {
+                    chain: ChainId::ethereum_mainnet(),
+                    address: Address::from_str(usdc).unwrap(),
+                },
+            },
+            recipient: recipient(),
+            amount: U256::from(1_000_000_000u64),
+        }));
+        let meta = onchain_meta();
+        let tx = TxMeta { from: FROM, to: TO };
+
+        // WITH decimals → amountNano present and correct.
+        let mut map = BTreeMap::new();
+        map.insert(usdc.to_owned(), 6u8);
+        let lowered =
+            lower_action_with_decimals(&body, &meta, &tx, &TokenDecimals::new(map)).unwrap();
+        assert_eq!(
+            lowered.context["amountNano"],
+            serde_json::json!(1_000_000_000_000i64),
+            "1000 USDC (6dp) → 1e12 nano"
+        );
+
+        // WITHOUT decimals (the default-empty map, e.g. `lower_action`) → omitted.
+        let bare =
+            lower_action_with_decimals(&body, &meta, &tx, &TokenDecimals::default()).unwrap();
+        assert!(
+            bare.context.get("amountNano").is_none(),
+            "amountNano must be omitted when decimals are unknown"
+        );
     }
 }

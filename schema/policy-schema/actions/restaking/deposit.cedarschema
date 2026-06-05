@@ -14,6 +14,8 @@ namespace Restaking {
     token: Core::TokenRef,
     // Amount deposited, in token units (U256 hex).
     amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
     // Staker on whose behalf the deposit is made (signature variant); omitted ⇒ the submitter.
     staker?: String,
     custom?: DepositCustomContext,

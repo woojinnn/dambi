@@ -13,6 +13,8 @@ namespace LiquidStaking {
     venue: StakingVenue,
     // Native ETH staked (`msg.value`), U256 hex.
     amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
     // Optional referral address.
     referral?: String,
     // Manifest-extensible slot.

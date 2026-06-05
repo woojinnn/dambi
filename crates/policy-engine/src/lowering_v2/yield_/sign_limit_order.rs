@@ -2,7 +2,7 @@
 
 use serde_json::{Map, Value};
 
-use policy_transition::action::yield_::SignLimitOrderAction;
+use policy_transition::action::yield_::{LimitOrderType, SignLimitOrderAction};
 
 use super::super::common::cedar::{addr, u256_hex};
 use super::super::common::token::lower_token_ref;
@@ -32,6 +32,20 @@ pub(crate) fn lower(
         "makingAmount".into(),
         Value::String(u256_hex(action.making_amount)),
     );
+    // `making_amount` is denominated in what the MAKER gives: `SyFor*` → the SY
+    // `token`; `*ForSy` → PT/YT (18-decimal), for which `token` (the SY side) is
+    // the wrong instrument.
+    let making_nano = match action.order_type {
+        LimitOrderType::SyForPt | LimitOrderType::SyForYt => {
+            ctx.amount_nano(&action.token, action.making_amount)
+        }
+        LimitOrderType::PtForSy | LimitOrderType::YtForSy => {
+            Some(ctx.amount_nano_native18(action.making_amount))
+        }
+    };
+    if let Some(nano) = making_nano {
+        m.insert("makingAmountNano".into(), Value::from(nano));
+    }
     m.insert("expiry".into(), Value::String(u256_hex(action.expiry)));
 
     Ok(ctx.lowered(r#"Yield::Action::"SignLimitOrder""#, Value::Object(m)))

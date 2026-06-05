@@ -16,8 +16,12 @@ namespace Lending {
     baseAsset: Core::TokenRef,
     // Minimum acceptable collateral amount (U256 hex).
     minCollateralAmount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    minCollateralAmountNano?: Long,
     // Base amount paid (U256 hex).
     baseAmount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    baseAmountNano?: Long,
     // Recipient of bought collateral.
     recipient: String,
     custom?: BuyCollateralCustomContext,

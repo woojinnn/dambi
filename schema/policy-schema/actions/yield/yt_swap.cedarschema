@@ -20,6 +20,8 @@ namespace Yield {
     externalToken?: Core::TokenRef,
     // Exact input amount (U256 hex).
     exactAmountIn: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    exactAmountInNano?: Long,
     // Minimum output amount / slippage floor (U256 hex).
     minAmountOut: String,
     // Output recipient (address).

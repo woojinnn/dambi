@@ -25,6 +25,13 @@ pub(crate) fn lower(action: &StakeAction, ctx: &LowerCtx<'_>) -> Result<LoweredA
         m.insert("asset".into(), lower_token_ref(asset));
     }
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = action
+        .asset
+        .as_ref()
+        .and_then(|t| ctx.amount_nano(t, action.amount))
+    {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     if let Some(on_behalf_of) = &action.on_behalf_of {
         m.insert("onBehalfOf".into(), Value::String(addr(on_behalf_of)));
     }

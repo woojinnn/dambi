@@ -52,6 +52,12 @@ export interface PlanActionRpcV2InputDto {
   readonly action: unknown;
   readonly meta: unknown;
   readonly tx: ActionTxInputDto;
+  /**
+   * Host-resolved per-token decimals (lowercase `0x` address → decimals), used
+   * by the WASM lowering to fill each fungible amount's `amountNano` `Long`
+   * sibling. Omitted ⇒ no nano fields are emitted.
+   */
+  readonly token_decimals?: Readonly<Record<string, number>>;
 }
 
 /**
@@ -92,6 +98,11 @@ export interface EvaluateActionV2InputDto {
   readonly tx: ActionTxInputDto;
   readonly bundles: readonly ActionBundleInputDto[];
   readonly results: Readonly<Record<string, unknown>>;
+  /**
+   * Host-resolved per-token decimals (see
+   * {@link PlanActionRpcV2InputDto.token_decimals}).
+   */
+  readonly token_decimals?: Readonly<Record<string, number>>;
 }
 
 export interface PassVerdictDto {

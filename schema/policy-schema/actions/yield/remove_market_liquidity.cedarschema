@@ -22,6 +22,8 @@ namespace Yield {
     netLpIn: String,
     // Minimum external-token out (U256 hex; 0 if not a token kind).
     minTokenOut: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    minTokenOutNano?: Long,
     // Minimum PT out (U256 hex; 0 if PT not returned).
     minPtOut: String,
     // Minimum SY out (U256 hex; 0 if SY not returned).

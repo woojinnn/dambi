@@ -53,8 +53,13 @@ pub(crate) fn lower(
         "actualAmount".into(),
         Value::String(u256_hex(action.live_inputs.actual_amount.value)),
     );
-    // `actualAmountNano` / `actualAmountUsd` are host-populated 3-layer
-    // siblings — always omitted here.
+    if let Some(nano) = ctx.amount_nano(
+        &action.live_inputs.claim_token.value,
+        action.live_inputs.actual_amount.value,
+    ) {
+        m.insert("actualAmountNano".into(), Value::from(nano));
+    }
+    // `actualAmountUsd` is a host-populated 3-layer sibling — omitted here.
     m.insert(
         "claimToken".into(),
         lower_token_ref(&action.live_inputs.claim_token.value),

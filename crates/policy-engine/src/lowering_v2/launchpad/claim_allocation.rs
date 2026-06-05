@@ -35,7 +35,10 @@ pub(crate) fn lower(
         "allocatedAmount".into(),
         Value::String(u256_hex(*allocated_amount)),
     );
-    // `allocatedAmountNano` / `allocatedAmountUsd` are host-populated — OMITTED.
+    if let Some(nano) = ctx.amount_nano(allocated_token, *allocated_amount) {
+        m.insert("allocatedAmountNano".into(), Value::from(nano));
+    }
+    // `allocatedAmountUsd` is host-populated — OMITTED.
     m.insert(
         "refundDue".into(),
         Value::String(u256_hex(action.live_inputs.refund_due.value)),

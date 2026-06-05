@@ -25,7 +25,10 @@ pub(crate) fn lower(
     m.insert("venue".into(), lower_lending_venue(&action.venue));
     m.insert("asset".into(), lower_token_ref(&action.asset));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
-    // `amountNano` / `amountUsd` are host-populated → omitted.
+    if let Some(nano) = ctx.amount_nano(&action.asset, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
+    // `amountUsd` is host-populated → omitted.
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
     m.insert(
         "reserveState".into(),

@@ -12,6 +12,8 @@ namespace Staking {
     token: Core::TokenRef,
     // Amount added (`_value`), U256 hex.
     amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
     // Beneficiary whose lock is increased (`deposit_for._addr`); omitted ⇒ submitter.
     onBehalfOf?: String,
     custom?: IncreaseLockAmountCustomContext,
