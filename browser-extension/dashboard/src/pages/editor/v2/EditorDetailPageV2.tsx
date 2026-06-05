@@ -161,9 +161,23 @@ function EditorBody({
         name.trim() || "untitled",
         severity,
       );
+      // The manifest is generated from the policy IR. The Block tab keeps `ir`
+      // live, but the Cedar tab edits text directly — so when `ir` is null we
+      // parse the text here. Otherwise a `context.custom.*` policy authored in
+      // the Cedar tab saves WITHOUT a manifest, the enrichment is never planned,
+      // its `has` guards short-circuit to false, and the policy silently never
+      // fires.
+      let effectiveIr = ir;
+      if (!effectiveIr && cedarText.trim()) {
+        try {
+          effectiveIr = (await textToBlocks(cedarText))[0] ?? null;
+        } catch {
+          effectiveIr = null; // unparseable in-progress text → save w/o manifest
+        }
+      }
       let manifest: unknown;
-      if (ir) {
-        const gen = generateManifest(ir, undefined, {
+      if (effectiveIr) {
+        const gen = generateManifest(effectiveIr, undefined, {
           id: policy.id,
           severity,
         });

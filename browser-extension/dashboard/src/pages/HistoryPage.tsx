@@ -183,20 +183,19 @@ export function HistoryPage() {
     queryFn: listManagedPolicies,
     staleTime: 60_000,
   });
-  const policyBundleById = useMemo(() => {
-    const m: Record<string, { text: string; manifest: unknown }> = {};
-    for (const p of managedQ.data ?? []) {
-      const id = p.text.match(/@id\("([^"]+)"\)/)?.[1];
-      if (id) {
-        const manifest =
+  const managedPolicies = useMemo<ManagedPolicyEntry[]>(
+    () =>
+      (managedQ.data ?? []).map((p) => ({
+        dashId: p.id,
+        cedarId: p.text.match(/@id\("([^"]+)"\)/)?.[1] ?? null,
+        text: p.text,
+        manifest:
           p.manifest && typeof p.manifest === "object"
             ? p.manifest
-            : { id: p.id, schema_version: 2 };
-        m[id] = { text: p.text, manifest };
-      }
-    }
-    return m;
-  }, [managedQ.data]);
+            : { id: p.id, schema_version: 2 },
+      })),
+    [managedQ.data],
+  );
 
   const counts = useMemo(() => {
     let pass = 0;
@@ -307,7 +306,7 @@ export function HistoryPage() {
                         v={v}
                         open={openId === v.id}
                         onToggle={() => setOpenId(openId === v.id ? null : v.id)}
-                        policyBundleById={policyBundleById}
+                        managedPolicies={managedPolicies}
                       />
                     ))}
                 </Fragment>
@@ -603,18 +602,27 @@ function buildGroups(rows: VerdictDto[], mode: GroupMode): RenderGroup[] {
 
 // ── Row + detail ────────────────────────────────────────────────────────
 
-type PolicyBundleMap = Record<string, { text: string; manifest: unknown }>;
+/** A managed policy keyed by BOTH its unique dashboard id and its (possibly
+ *  duplicated) Cedar `@id`, so a deny row can resolve the policy that actually
+ *  fired — via the manifest id in the captured results — even when two policies
+ *  share an `@id`. */
+interface ManagedPolicyEntry {
+  dashId: string;
+  cedarId: string | null;
+  text: string;
+  manifest: unknown;
+}
 
 function HistoryRow({
   v,
   open,
   onToggle,
-  policyBundleById,
+  managedPolicies,
 }: {
   v: VerdictDto;
   open: boolean;
   onToggle: () => void;
-  policyBundleById: PolicyBundleMap;
+  managedPolicies: ManagedPolicyEntry[];
 }) {
   const fn = v.decoded_fn ?? v.method ?? "—";
   const origin = v.dapp_origin ?? "—";
@@ -679,7 +687,7 @@ function HistoryRow({
       {open && (
         <tr className="v-detail-row">
           <td colSpan={9}>
-            <HistoryDetail v={v} policyBundleById={policyBundleById} />
+            <HistoryDetail v={v} managedPolicies={managedPolicies} />
           </td>
         </tr>
       )}
@@ -689,10 +697,10 @@ function HistoryRow({
 
 function HistoryDetail({
   v,
-  policyBundleById,
+  managedPolicies,
 }: {
   v: VerdictDto;
-  policyBundleById: PolicyBundleMap;
+  managedPolicies: ManagedPolicyEntry[];
 }) {
   const reason = v.reason?.ko ?? v.reason?.en ?? null;
   const contractAddr = v.contract?.addr ?? null;
@@ -788,30 +796,48 @@ function HistoryDetail({
           link. The fetch is lazy (only fires when the row is expanded). */}
       <StateDeltaSection v={v} />
 
-      {/* Policy structure + denial diagnosis: only for a deny whose policy we
-          can resolve back to its Cedar source (by @id). */}
-      {v.verdict === "fail" &&
-        v.policy?.name &&
-        policyBundleById[v.policy.name] && (
-          <PolicyStructureSection
-            bundle={policyBundleById[v.policy.name]}
-            deltaId={v.delta_id}
-          />
-        )}
+      {/* Policy structure + denial diagnosis: for a deny whose policy we can
+          resolve back to its Cedar source. */}
+      {v.verdict === "fail" && v.policy?.name && (
+        <PolicyStructureSection
+          cedarId={v.policy.name}
+          deltaId={v.delta_id}
+          managedPolicies={managedPolicies}
+        />
+      )}
     </div>
   );
+}
+
+/** The manifest id embedded in a captured-results key (`<manifestId>::<callId>`),
+ *  i.e. the dashboard id of the policy that produced that enrichment value. */
+function manifestIdsOf(results: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  for (const k of Object.keys(results)) {
+    const parts = k.split("::");
+    if (parts.length >= 2) out.add(parts.slice(0, -1).join("::"));
+  }
+  return out;
 }
 
 /** Collapsible policy structure diagram + "where it's blocked" diagnosis for a
  *  history deny row. When the live deny's context was captured (keyed by
  *  delta_id), the diagnosis auto-runs against that REAL context — reproducing
- *  the actual blocked clause; otherwise it falls back to an on-demand SAMPLE. */
+ *  the actual blocked clause; otherwise it falls back to the structure only.
+ *
+ *  Resolving the policy by its (possibly duplicated) Cedar `@id` alone is
+ *  ambiguous — two policies can share an `@id`. So when context exists we first
+ *  pick the policy whose DASHBOARD id appears in the captured results (the one
+ *  that actually enriched this deny), falling back to the `@id` match. This is
+ *  why a USD deny no longer renders a same-`@id` nano policy's diagram. */
 function PolicyStructureSection({
-  bundle,
+  cedarId,
   deltaId,
+  managedPolicies,
 }: {
-  bundle: { text: string; manifest: unknown };
+  cedarId: string;
   deltaId: string | null;
+  managedPolicies: ManagedPolicyEntry[];
 }) {
   const [open, setOpen] = useState(false);
   const ctxQ = useQuery({
@@ -822,15 +848,30 @@ function PolicyStructureSection({
     retry: false,
   });
   const ctx = ctxQ.data ?? null;
-  const request = ctx
-    ? {
-        action: ctx.action,
-        meta: ctx.meta,
-        tx: ctx.tx,
-        bundles: [{ policy: bundle.text, manifest: bundle.manifest }],
-        results: ctx.results,
-      }
-    : undefined;
+
+  const byCedarId = managedPolicies.filter((p) => p.cedarId === cedarId);
+  // Prefer the policy that actually enriched this deny (its dashboard id is in
+  // the captured results), disambiguating a shared @id; else the @id match.
+  const resolved =
+    (ctx &&
+      byCedarId.find((p) => manifestIdsOf(ctx.results).has(p.dashId))) ||
+    byCedarId[0] ||
+    null;
+
+  const request =
+    ctx && resolved
+      ? {
+          action: ctx.action,
+          meta: ctx.meta,
+          tx: ctx.tx,
+          bundles: [{ policy: resolved.text, manifest: resolved.manifest }],
+          results: ctx.results,
+        }
+      : undefined;
+
+  if (!resolved && !ctxQ.isLoading) {
+    return null; // can't resolve the policy back to source — nothing to draw
+  }
 
   return (
     <div className="v-struct-section">
@@ -852,17 +893,21 @@ function PolicyStructureSection({
             </div>
           )}
           <div className="v-struct-body">
-            {ctxQ.isLoading ? (
+            {ctxQ.isLoading || !resolved ? (
               <div className="pdiagram-empty">불러오는 중…</div>
             ) : ctx ? (
               <PolicyDiagnosisByText
-                cedarText={bundle.text}
+                cedarText={resolved.text}
                 compact
                 request={request}
                 autoRun
               />
             ) : (
-              <PolicyDiagnosisByText cedarText={bundle.text} compact structureOnly />
+              <PolicyDiagnosisByText
+                cedarText={resolved.text}
+                compact
+                structureOnly
+              />
             )}
           </div>
         </>
