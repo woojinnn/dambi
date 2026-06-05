@@ -44,7 +44,7 @@ const DECIMALS: Record<string, number> = { [USDC]: 6, [WETH]: 18, [DAI]: 18 };
 
 function meta(address: string): TokenMetadata {
   return {
-    kind: "erc20",
+    erc_kind: "erc20",
     chainId: 1,
     address,
     symbol: "TKN",

@@ -38,7 +38,12 @@ import { fetchStarted, fetchEnded } from "../diagnostics";
  * other token kinds without changing the cache layout.
  */
 export interface TokenMetadata {
-  kind: "erc20";
+  // Wire field is `erc_kind` (the registry source files + the deployed
+  // `/tokens/<chain>/<addr>.json` object use `erc_kind`, reserving `kind` for
+  // the nested `token_kind.kind`). Mirror it exactly so `isTokenMetadata`
+  // accepts the real payload — a `kind`-named field silently rejected every
+  // live token (integrity_failed → null), leaving `amountNano` unpopulated.
+  erc_kind: "erc20";
   chainId: number;
   /** Lowercased EVM address — guaranteed by `normaliseAddress`. */
   address: string;
@@ -94,7 +99,7 @@ function isTokenMetadata(v: unknown): v is TokenMetadata {
   if (!v || typeof v !== "object") return false;
   const o = v as Record<string, unknown>;
   return (
-    o.kind === "erc20" &&
+    o.erc_kind === "erc20" &&
     typeof o.chainId === "number" &&
     typeof o.address === "string" &&
     typeof o.symbol === "string" &&
