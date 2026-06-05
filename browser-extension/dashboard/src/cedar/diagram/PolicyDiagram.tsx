@@ -19,7 +19,7 @@
 import { useMemo } from "react";
 
 import type { ActionScope, Expr, PolicyIR } from "../blocks/ir";
-import { pathByNode } from "../diagnosis/path";
+import { eachChild, pathByNode } from "../diagnosis/path";
 
 import "./policy-diagram.css";
 
@@ -60,6 +60,49 @@ function flatten(e: Expr, op: "&&" | "||"): Expr[] {
   return [e];
 }
 
+/** Dotted access path of a `var`/`attr` chain (e.g. `context.custom.amount`),
+ *  or null for anything else. */
+function attrPath(e: Expr): string | null {
+  if (e.kind === "var") return e.name;
+  if (e.kind === "attr") {
+    const p = attrPath(e.of);
+    return p ? `${p}.${e.attr}` : null;
+  }
+  return null;
+}
+
+/** Every access path read anywhere inside `e` (each `attr` node's dotted path). */
+function collectAccessed(e: Expr, out: Set<string>): void {
+  if (e.kind === "attr") {
+    const p = attrPath(e);
+    if (p) out.add(p);
+  }
+  for (const c of eachChild(e)) collectAccessed(c.node, out);
+}
+
+/**
+ * Drop `has` presence-guards from an AND group when the path they guard is
+ * actually read by a sibling. `context has custom && context.custom has amount
+ * && context.custom.amount < 5` carries the first two clauses only to safely
+ * reach `context.custom.amount` — they're scaffolding, not conditions, so the
+ * diagram hides them and shows just the real comparison. Never hides everything
+ * (a group of only-guards keeps them).
+ */
+function dropHasGuards(operands: Expr[]): Expr[] {
+  const accessed = new Set<string>();
+  for (const op of operands) {
+    if (op.kind === "has") continue; // a guard's own `of` is scaffolding too
+    collectAccessed(op, accessed);
+  }
+  const kept = operands.filter((op) => {
+    if (op.kind !== "has") return true;
+    const base = attrPath(op.of);
+    const guarded = base ? `${base}.${op.attr}` : null;
+    return !(guarded && accessed.has(guarded));
+  });
+  return kept.length > 0 ? kept : operands;
+}
+
 /**
  * Convert an Expr to a diagram node. Node paths come from {@link pathByNode}
  * (the diagnosis module's single path producer), so they are byte-identical to
@@ -70,11 +113,15 @@ function flatten(e: Expr, op: "&&" | "||"): Expr[] {
 function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
   const path = pathOf.get(e) ?? "?";
   if (e.kind === "binary" && (e.op === "&&" || e.op === "||")) {
+    let operands = flatten(e, e.op);
+    if (e.op === "&&") operands = dropHasGuards(operands);
+    // A gate with one surviving operand adds no information — show it directly.
+    if (operands.length === 1) return exprToNode(operands[0], pathOf);
     return {
       path,
       kind: e.op === "&&" ? "and" : "or",
       title: e.op === "&&" ? "AND" : "OR",
-      children: flatten(e, e.op).map((c) => exprToNode(c, pathOf)),
+      children: operands.map((c) => exprToNode(c, pathOf)),
     };
   }
   if (e.kind === "unary" && e.op === "!") {
@@ -145,7 +192,7 @@ function exprToText(e: Expr): string {
       return `${exprToText(e.left)} ${e.op} ${exprToText(e.right)}`;
     case "unary":
       return e.op === "!"
-        ? `!${exprToText(e.operand)}`
+        ? `!${e.operand.kind === "binary" ? `(${exprToText(e.operand)})` : exprToText(e.operand)}`
         : e.op === "neg"
           ? `-${exprToText(e.operand)}`
           : `${exprToText(e.operand)}.isEmpty()`;
@@ -178,10 +225,10 @@ const NODE_H = 40;
 const V_GAP = 28;
 const H_GAP = 18;
 const CHAR_W = 7.2;
-const PAD_X = 22;
+const PAD_X = 24;
 const MIN_W = 64;
-const MAX_W = 240;
-const LABEL_CAP = 30;
+const MAX_W = 380;
+const LABEL_CAP = 48;
 
 interface Placed extends DNode {
   x: number; // center x

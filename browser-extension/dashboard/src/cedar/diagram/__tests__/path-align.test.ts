@@ -66,4 +66,45 @@ describe("PolicyDiagram path alignment", () => {
     // `!D`'s operand.
     expect(paths.has("c0.body.right.operand")).toBe(true);
   });
+
+  it("hides has-guards that only scaffold a path read by a sibling", () => {
+    // Fresh objects per occurrence (parsed IR never shares node identity, which
+    // `pathByNode` relies on).
+    const ctx = (): Expr => ({ kind: "var", name: "context" });
+    const custom = (): Expr => ({ kind: "attr", of: ctx(), attr: "custom" });
+    const amount = (): Expr => ({ kind: "attr", of: custom(), attr: "amount" });
+    // forbid Swap when { context has custom && context.custom has amount
+    //                    && context.custom.amount < 5 }
+    const guarded: PolicyIR = {
+      ...policy,
+      conditions: [
+        {
+          kind: "when",
+          body: {
+            kind: "binary",
+            op: "&&",
+            left: {
+              kind: "binary",
+              op: "&&",
+              left: { kind: "has", of: ctx(), attr: "custom" },
+              right: { kind: "has", of: custom(), attr: "amount" },
+            },
+            right: {
+              kind: "binary",
+              op: "<",
+              left: amount(),
+              right: { kind: "lit", litType: "long", value: 5 },
+            },
+          },
+        },
+      ],
+    };
+
+    const paths = new Set(policyDiagramPaths(guarded));
+    // Both has-guards are scaffolding for context.custom.amount → hidden.
+    expect(paths.has("c0.body.left.left")).toBe(false); // context has custom
+    expect(paths.has("c0.body.left.right")).toBe(false); // context.custom has amount
+    // The real comparison survives (and the now-single-operand AND collapses).
+    expect(paths.has("c0.body.right")).toBe(true);
+  });
 });
