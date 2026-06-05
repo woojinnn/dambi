@@ -49,6 +49,7 @@ mod hyperliquid_core;
 mod launchpad;
 mod lending;
 mod liquid_staking;
+mod marketplace;
 mod multicall;
 mod permission;
 mod perp;

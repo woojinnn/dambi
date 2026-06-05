@@ -101,6 +101,13 @@ fn is_shape_artifact(kind: &str, msg: &str) -> bool {
         // (wrong arity / non-object map arg) errors with a different message on
         // every input incl. the golden, so it is NOT masked by this data-only one.
         || msg.contains("not in baked pool_token_map")
+        // Seaport `$fn` (seaport_items / seaport_aggregate_items / seaport_basic_order)
+        // over synthetic fuzz: a random uint8 yields an out-of-enum Seaport ItemType
+        // (>5) or BasicOrderType route (>5) — a would-revert order Seaport itself
+        // rejects. Real enums (0..=5) are exercised by the corpus expect_body; a
+        // STRUCTURAL $fn bug errors on the golden too, so it is NOT masked here.
+        || msg.contains("seaport: unknown ItemType")
+        || msg.contains("seaport_basic_order: invalid route")
     )
 }
 

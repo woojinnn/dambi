@@ -1,0 +1,369 @@
+{
+  "type": "adapter_action",
+  "id": "seaport/order/fulfillAvailableAdvancedOrders@1.0.0",
+  "publisher": "opensea",
+  "schema_version": "3",
+  "note": "Seaport 1.6 fulfillAvailableAdvancedOrders -> marketplace. 1st-party ProjectOpenSea/seaport. tuple params named so args key by name; fulfillBasicOrder single-tuple spreads flat.",
+  "match": {
+    "selector": "0x87201b41",
+    "chain_to_addresses": {
+      "1": [
+        "0x0000000000000068f116a894984e2db1123eb395"
+      ]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "fulfillAvailableAdvancedOrders",
+    "abi": {
+      "inputs": [
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "offerer",
+                  "type": "address"
+                },
+                {
+                  "internalType": "address",
+                  "name": "zone",
+                  "type": "address"
+                },
+                {
+                  "components": [
+                    {
+                      "internalType": "enum ItemType",
+                      "name": "itemType",
+                      "type": "uint8"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "token",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "identifierOrCriteria",
+                      "type": "uint256"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "startAmount",
+                      "type": "uint256"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "endAmount",
+                      "type": "uint256"
+                    }
+                  ],
+                  "internalType": "struct OfferItem[]",
+                  "name": "offer",
+                  "type": "tuple[]"
+                },
+                {
+                  "components": [
+                    {
+                      "internalType": "enum ItemType",
+                      "name": "itemType",
+                      "type": "uint8"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "token",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "identifierOrCriteria",
+                      "type": "uint256"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "startAmount",
+                      "type": "uint256"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "endAmount",
+                      "type": "uint256"
+                    },
+                    {
+                      "internalType": "address payable",
+                      "name": "recipient",
+                      "type": "address"
+                    }
+                  ],
+                  "internalType": "struct ConsiderationItem[]",
+                  "name": "consideration",
+                  "type": "tuple[]"
+                },
+                {
+                  "internalType": "enum OrderType",
+                  "name": "orderType",
+                  "type": "uint8"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "startTime",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "endTime",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "bytes32",
+                  "name": "zoneHash",
+                  "type": "bytes32"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "salt",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "bytes32",
+                  "name": "conduitKey",
+                  "type": "bytes32"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "totalOriginalConsiderationItems",
+                  "type": "uint256"
+                }
+              ],
+              "internalType": "struct OrderParameters",
+              "name": "parameters",
+              "type": "tuple"
+            },
+            {
+              "internalType": "uint120",
+              "name": "numerator",
+              "type": "uint120"
+            },
+            {
+              "internalType": "uint120",
+              "name": "denominator",
+              "type": "uint120"
+            },
+            {
+              "internalType": "bytes",
+              "name": "signature",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes",
+              "name": "extraData",
+              "type": "bytes"
+            }
+          ],
+          "internalType": "struct AdvancedOrder[]",
+          "name": "advancedOrders",
+          "type": "tuple[]"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "orderIndex",
+              "type": "uint256"
+            },
+            {
+              "internalType": "enum Side",
+              "name": "side",
+              "type": "uint8"
+            },
+            {
+              "internalType": "uint256",
+              "name": "index",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "identifier",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes32[]",
+              "name": "criteriaProof",
+              "type": "bytes32[]"
+            }
+          ],
+          "internalType": "struct CriteriaResolver[]",
+          "name": "criteriaResolvers",
+          "type": "tuple[]"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "orderIndex",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "itemIndex",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct FulfillmentComponent[][]",
+          "name": "offerFulfillments",
+          "type": "tuple[][]"
+        },
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "orderIndex",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "itemIndex",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct FulfillmentComponent[][]",
+          "name": "considerationFulfillments",
+          "type": "tuple[][]"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "fulfillerConduitKey",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maximumFulfilled",
+          "type": "uint256"
+        }
+      ],
+      "name": "fulfillAvailableAdvancedOrders",
+      "outputs": [
+        {
+          "internalType": "bool[]",
+          "name": "",
+          "type": "bool[]"
+        },
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "enum ItemType",
+                  "name": "itemType",
+                  "type": "uint8"
+                },
+                {
+                  "internalType": "address",
+                  "name": "token",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "identifier",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "amount",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "address payable",
+                  "name": "recipient",
+                  "type": "address"
+                }
+              ],
+              "internalType": "struct ReceivedItem",
+              "name": "item",
+              "type": "tuple"
+            },
+            {
+              "internalType": "address",
+              "name": "offerer",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "conduitKey",
+              "type": "bytes32"
+            }
+          ],
+          "internalType": "struct Execution[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "payable",
+      "type": "function"
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "marketplace",
+      "marketplace": {
+        "action": "fulfill_order",
+        "fulfill_order": {
+          "venue": {
+            "name": "seaport",
+            "chain": "$chain",
+            "settlement": "$tx.to"
+          },
+          "offer": {
+            "$fn": "seaport_aggregate_items",
+            "$args": [
+              "$args.advancedOrders",
+              "offer"
+            ]
+          },
+          "consideration": {
+            "$fn": "seaport_aggregate_items",
+            "$args": [
+              "$args.advancedOrders",
+              "consideration"
+            ]
+          },
+          "recipient": {
+            "$fn": "coalesce_address",
+            "$args": [
+              "$args.recipient",
+              "$tx.from"
+            ]
+          },
+          "order_count": {
+            "$fn": "u64_saturating",
+            "$args": [
+              {
+                "$fn": "array_len",
+                "$args": [
+                  "$args.advancedOrders"
+                ]
+              }
+            ]
+          },
+          "is_batch": true,
+          "fulfiller_conduit_key": "$args.fulfillerConduitKey"
+        }
+      }
+    },
+    "live_inputs": {}
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [
+      "token_metadata"
+    ],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}
