@@ -87,29 +87,57 @@ pub async fn evaluate(
     let state_before = store.load(&req.wallet_id).await?;
 
     // Running state, folded forward one envelope at a time.
+    //
+    // A reducer rejection is NON-FATAL. Enrichment below sources its facts from
+    // `state_before` (the synced price/decimals), NOT from the simulated state —
+    // so a USD/nano cap still evaluates even for an action the reducer can't
+    // simulate (e.g. a Uniswap v4 multicall whose pool state isn't modelled).
+    // We keep the partial deltas + a diagnostic and fall through to enrichment;
+    // the recording path already treats deltas as best-effort.
     let mut state = state_before.clone();
     let mut deltas = Vec::with_capacity(req.envelopes.len());
+    let mut sim_diagnostics: Vec<Diagnostic> = Vec::new();
+
+    // Diagnostic for an envelope the reducer can't simulate — stop folding but
+    // keep going to enrichment.
+    let sim_skip = |i: usize, err: &dyn fmt::Display| Diagnostic {
+        level: "warn".to_owned(),
+        message: format!(
+            "simulate envelope {i} not reducible; enrichment still served from \
+             synced state: {err}"
+        ),
+        call_id: None,
+    };
 
     for (i, action) in req.envelopes.iter().enumerate() {
         // The reducer is pure: it reads only `(state, action, ctx)`. The
         // per-envelope index lets the reducer disambiguate intra-batch effects.
         let ctx = req.eval_context.clone().with_action_index(i);
-
-        // `evaluate` applies the action as supplied by the caller. Canonical
-        // state freshness is handled by wallet sync/reconciliation endpoints;
-        // action-scoped network refresh belongs at the HTTP layer before this
-        // pure reducer boundary.
-
-        let delta = apply(&state, action, &ctx)?;
-        state = apply_delta(&state, &delta)?;
-        deltas.push(delta);
+        match apply(&state, action, &ctx) {
+            Ok(delta) => match apply_delta(&state, &delta) {
+                Ok(next) => {
+                    state = next;
+                    deltas.push(delta);
+                }
+                Err(err) => {
+                    sim_diagnostics.push(sim_skip(i, &err));
+                    break;
+                }
+            },
+            Err(err) => {
+                sim_diagnostics.push(sim_skip(i, &err));
+                break;
+            }
+        }
     }
 
     // Execute the manifest-planned enrichment calls server-side, sourcing facts
-    // from the wallet state we just loaded/simulated. `oracle.usd_value` reads the
-    // synced `price_usd` on the held token — no live network call — so a USD-cap
-    // policy's `context.custom.*Usd` field is populated from canonical state.
+    // from the wallet state we LOADED (`state_before`), independent of whether the
+    // action could be simulated. `oracle.usd_value` reads the synced `price_usd`
+    // on the held token — no live network call — so a USD-cap policy's
+    // `context.custom.*Usd` field is populated from canonical state.
     let (results, mut diagnostics) = execute_call_specs(&state_before, &req.call_specs);
+    diagnostics.append(&mut sim_diagnostics);
 
     let note = if req.envelopes.is_empty() {
         "simulated 0 envelopes (state echoed)".to_owned()
@@ -223,9 +251,10 @@ mod tests {
     use policy_state::primitives::{Address, BlockHeight, ChainId, Decimal, Time};
     use policy_state::{
         Balance, BaseCategory, DataSource, FiatCurrency, LiveField, OracleProvider, PegTarget,
-        RequestKind, TokenHolding, TokenKey, TokenKind, WalletId, WalletState, U256,
+        RequestKind, TokenHolding, TokenKey, TokenKind, TokenRef, WalletId, WalletState, U256,
     };
     use policy_transition::action::hyperliquid_core::{HlOrderAction, HyperliquidCoreAction};
+    use policy_transition::action::token::{Erc20PermitAction, TokenAction};
     use policy_transition::{Action, ActionBody, ActionMeta, ActionNature, Eip712Domain};
 
     use crate::dto::{CallSpec, EvaluateRequest};
@@ -283,6 +312,48 @@ mod tests {
             }),
             outputs: Vec::new(),
             optional: false,
+        }
+    }
+
+    /// An action the reducer REJECTS: an `Erc20Permit` whose token key is Native
+    /// (the reducer raises `Invariant` before touching state). Stands in for any
+    /// un-simulatable action — e.g. a Uniswap v4 multicall whose pool isn't
+    /// modelled — so we can assert enrichment survives a simulation failure.
+    fn unreducible_action() -> Action {
+        Action {
+            meta: ActionMeta {
+                submitted_at: Time::from_unix(1_700_000_000),
+                submitter: sample_wallet_id().address,
+                nature: ActionNature::OffchainSig {
+                    domain: Eip712Domain {
+                        name: "Permit".to_owned(),
+                        version: None,
+                        chain_id: None,
+                        verifying_contract: None,
+                        salt: None,
+                    },
+                    deadline: Time::from_unix(1_700_000_600),
+                    nonce_key: None,
+                },
+            },
+            body: ActionBody::Token(TokenAction::Erc20Permit(Erc20PermitAction {
+                token: TokenRef {
+                    key: TokenKey::Native {
+                        chain: ChainId::ethereum_mainnet(),
+                    },
+                },
+                spender: Address::from_str("0x000000000000000000000000000000000000dead").unwrap(),
+                amount: U256::from(1u64),
+                deadline: Time::from_unix(1_700_000_600),
+                nonce: LiveField::new(
+                    U256::ZERO,
+                    DataSource::OracleFeed {
+                        provider: OracleProvider::Chainlink,
+                        feed_id: "nonce".into(),
+                    },
+                    Time::from_unix(1_700_000_000),
+                ),
+            })),
         }
     }
 
@@ -442,6 +513,42 @@ mod tests {
             resp.policy_request.results["swap-usdc-usd-cap-deny::usd"],
             serde_json::json!({ "usd": "100.0100" })
         );
+    }
+
+    /// Enrichment is served from synced state even when the action itself can't
+    /// be simulated (the reducer rejects it). This is what lets a USD-cap policy
+    /// evaluate a Uniswap v4 multicall, whose `/evaluate` simulation 422s.
+    #[tokio::test]
+    async fn enrichment_served_even_when_action_is_not_reducible() {
+        let store = InMemoryWalletStore::new();
+        let (state, _) = state_with_usdc_price();
+        store.seed(state);
+
+        let mut req = empty_envelope_request();
+        req.envelopes.push(unreducible_action());
+        req.call_specs.push(usd_call_spec(
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "0x5f5e100",
+        ));
+
+        let resp = evaluate(&store, req)
+            .await
+            .expect("a non-reducible action must NOT fail the request");
+
+        // The USD value was still computed from the synced price.
+        assert_eq!(
+            resp.policy_request.results["swap-usdc-usd-cap-deny::usd"],
+            serde_json::json!({ "usd": "100.0100" })
+        );
+        // The simulation failure is surfaced as a non-fatal diagnostic, and no
+        // delta was produced for the rejected action.
+        assert!(
+            resp.diagnostics
+                .iter()
+                .any(|d| d.level == "warn" && d.message.contains("not reducible")),
+            "expected a 'not reducible' diagnostic"
+        );
+        assert!(resp.policy_request.deltas.is_empty());
     }
 
     /// A token the wallet does not hold (no synced price) yields no result — the
