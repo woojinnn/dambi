@@ -3,8 +3,8 @@
  * `browser-extension/backend/content-scripts/dashboard-bridge.ts`.
  *
  * Sends one request through `window.postMessage` (tagged
- * `source: "scopeball-dashboard"`), waits for the matching response (tagged
- * `source: "scopeball-extension"` with the same `id`), and resolves with the
+ * `source: "pasu-dashboard"`), waits for the matching response (tagged
+ * `source: "pasu-extension"` with the same `id`), and resolves with the
  * SW handler's `{ ok, data | error }` envelope.
  *
  * Why a thin module?
@@ -18,15 +18,15 @@
  *   `sendToExtension({ type: "verdicts:list", opts })`.
  *
  * Protocol (matches `dashboard-bridge.ts`):
- *   request  → `{ source: "scopeball-dashboard", id, payload }`
- *   response ← `{ source: "scopeball-extension",  id, response }`
- *   broadcast ← `{ source: "scopeball-extension", id: "__broadcast__", … }`
+ *   request  → `{ source: "pasu-dashboard", id, payload }`
+ *   response ← `{ source: "pasu-extension",  id, response }`
+ *   broadcast ← `{ source: "pasu-extension", id: "__broadcast__", … }`
  *
  * Broadcasts are filtered out; only matching `id`s resolve a pending call.
  */
 
-const REQ_TAG = "scopeball-dashboard" as const;
-const RES_TAG = "scopeball-extension" as const;
+const REQ_TAG = "pasu-dashboard" as const;
+const RES_TAG = "pasu-extension" as const;
 const BROADCAST_ID = "__broadcast__";
 
 /** Surfaced when the SW returns `{ ok: false, error }`. */
