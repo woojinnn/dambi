@@ -279,9 +279,7 @@ pub(crate) fn materialized_context(
     let manifests: Vec<ManifestV2> = bundles.iter().map(|b| b.manifest.clone()).collect();
     let planned = plan(&manifests, action, &lowered, tx)?;
     let mut context = lowered.context.clone();
-    if let Err(error) =
-        policy_engine::policy_rpc::materialize_v2(&mut context, &planned, results)
-    {
+    if let Err(error) = policy_engine::policy_rpc::materialize_v2(&mut context, &planned, results) {
         if system_fail_verdict(&error).is_some() {
             return Err(EngineErrorDto::new("system_fail", error.to_string()));
         }

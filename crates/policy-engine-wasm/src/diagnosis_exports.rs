@@ -93,7 +93,11 @@ pub fn run_diagnosis_probes_v2_json(input_json: String) -> String {
             .map_err(|e| EngineErrorDto::new("invalid_input_json", e.to_string()))?;
 
         let (lowered, context) = materialized_context(
-            &input.action, &input.meta, &input.tx, &input.bundles, &input.results,
+            &input.action,
+            &input.meta,
+            &input.tx,
+            &input.bundles,
+            &input.results,
         )?;
 
         run_probes(&lowered, context, &input.probes)
@@ -110,11 +114,17 @@ fn run_probes(
     context: Value,
     probes: &[ProbeInput],
 ) -> Result<DiagnosisOutput, EngineErrorDto> {
-    let principal: EntityUid = lowered.principal.parse()
+    let principal: EntityUid = lowered
+        .principal
+        .parse()
         .map_err(|e: cedar_policy::ParseErrors| EngineErrorDto::new("principal", e.to_string()))?;
-    let action: EntityUid = lowered.action_uid.parse()
+    let action: EntityUid = lowered
+        .action_uid
+        .parse()
         .map_err(|e: cedar_policy::ParseErrors| EngineErrorDto::new("action", e.to_string()))?;
-    let resource: EntityUid = lowered.resource.parse()
+    let resource: EntityUid = lowered
+        .resource
+        .parse()
         .map_err(|e: cedar_policy::ParseErrors| EngineErrorDto::new("resource", e.to_string()))?;
 
     // Schema-less, empty entities — mirrors the per-policy eval path (engine.rs:227-236, :318).
@@ -135,7 +145,11 @@ fn run_probes(
     }
 
     let resp = Authorizer::new().is_authorized(&request, &set, &entities);
-    let true_ids: Vec<String> = resp.diagnostics().reason().map(ToString::to_string).collect();
+    let true_ids: Vec<String> = resp
+        .diagnostics()
+        .reason()
+        .map(ToString::to_string)
+        .collect();
     // cedar 4.10: `AuthorizationError` is an enum (no `.id()`); its single
     // `PolicyEvaluationError` variant carries `policy_id()` (pinned in Task 1's spike).
     let error_ids: Vec<String> = resp
@@ -146,7 +160,10 @@ fn run_probes(
         })
         .collect();
 
-    Ok(DiagnosisOutput { true_ids, error_ids })
+    Ok(DiagnosisOutput {
+        true_ids,
+        error_ids,
+    })
 }
 
 #[cfg(test)]
@@ -164,13 +181,11 @@ mod spike {
     #[test]
     fn probe_oracle_apis_behave() {
         // context: { "slippageBp": 150 }
-        let context =
-            Context::from_json_value(json!({ "slippageBp": 150 }), None).expect("ctx");
+        let context = Context::from_json_value(json!({ "slippageBp": 150 }), None).expect("ctx");
         let principal: EntityUid = "Wallet::\"w\"".parse().unwrap();
         let action: EntityUid = "Amm::Action::\"Swap\"".parse().unwrap();
         let resource: EntityUid = "Protocol::\"p\"".parse().unwrap();
-        let request =
-            Request::new(principal, action, resource, context, None).expect("request");
+        let request = Request::new(principal, action, resource, context, None).expect("request");
         let entities = Entities::from_json_value(json!([]), None).expect("entities");
 
         // Two probes built FROM EST (the shape blocksToEst emits):
@@ -197,16 +212,32 @@ mod spike {
         });
 
         let mut set = PolicySet::new();
-        set.add(Policy::from_json(Some(PolicyId::from_str("c0_true").unwrap()), est_gt(100)).unwrap()).unwrap();
-        set.add(Policy::from_json(Some(PolicyId::from_str("c0_false").unwrap()), est_gt(1000)).unwrap()).unwrap();
-        set.add(Policy::from_json(Some(PolicyId::from_str("c0_err").unwrap()), est_err).unwrap()).unwrap();
+        set.add(
+            Policy::from_json(Some(PolicyId::from_str("c0_true").unwrap()), est_gt(100)).unwrap(),
+        )
+        .unwrap();
+        set.add(
+            Policy::from_json(Some(PolicyId::from_str("c0_false").unwrap()), est_gt(1000)).unwrap(),
+        )
+        .unwrap();
+        set.add(Policy::from_json(Some(PolicyId::from_str("c0_err").unwrap()), est_err).unwrap())
+            .unwrap();
 
         let resp = Authorizer::new().is_authorized(&request, &set, &entities);
 
-        let true_ids: Vec<String> =
-            resp.diagnostics().reason().map(ToString::to_string).collect();
-        assert!(true_ids.contains(&"c0_true".to_string()), "true probe in reason()");
-        assert!(!true_ids.contains(&"c0_false".to_string()), "false probe NOT in reason()");
+        let true_ids: Vec<String> = resp
+            .diagnostics()
+            .reason()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            true_ids.contains(&"c0_true".to_string()),
+            "true probe in reason()"
+        );
+        assert!(
+            !true_ids.contains(&"c0_false".to_string()),
+            "false probe NOT in reason()"
+        );
 
         // S2: the errored probe is reported, not fatal. cedar 4.10's
         // `AuthorizationError` is an enum (no `.id()` accessor); its single
@@ -218,7 +249,10 @@ mod spike {
                 AuthorizationError::PolicyEvaluationError(pe) => pe.policy_id().to_string(),
             })
             .collect();
-        assert!(error_ids.contains(&"c0_err".to_string()), "errored probe id in errors()");
+        assert!(
+            error_ids.contains(&"c0_err".to_string()),
+            "errored probe id in errors()"
+        );
     }
 }
 
@@ -233,7 +267,8 @@ mod tests {
     fn swap_input(slippage_bp: u32, probes: Value) -> String {
         // The action/meta come from action_eval_exports' swap_sample via a tiny
         // JSON mirror is brittle; instead drive through the public builder.
-        let (body, meta) = crate::action_eval_exports::tests::swap_sample_with_slippage(slippage_bp);
+        let (body, meta) =
+            crate::action_eval_exports::tests::swap_sample_with_slippage(slippage_bp);
         json!({
             "action": body,
             "meta": meta,
@@ -262,11 +297,19 @@ mod tests {
         let out = run_diagnosis_probes_v2_json(swap_input(150, probes.clone()));
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["ok"], true, "{parsed}");
-        assert_eq!(parsed["data"]["true_ids"], json!(["c0"]), "150 > 100 is true: {parsed}");
+        assert_eq!(
+            parsed["data"]["true_ids"],
+            json!(["c0"]),
+            "150 > 100 is true: {parsed}"
+        );
 
         let out2 = run_diagnosis_probes_v2_json(swap_input(50, probes));
         let parsed2: Value = serde_json::from_str(&out2).unwrap();
-        assert_eq!(parsed2["data"]["true_ids"], json!([]), "50 > 100 is false: {parsed2}");
+        assert_eq!(
+            parsed2["data"]["true_ids"],
+            json!([]),
+            "50 > 100 is false: {parsed2}"
+        );
     }
 
     #[test]
@@ -308,11 +351,12 @@ mod tests {
         });
 
         // 1. REAL verdict: the shipped forbid fires (severity warn → kind warn).
-        let eval_out =
-            crate::action_eval_exports::evaluate_action_v2_json(base.to_string());
+        let eval_out = crate::action_eval_exports::evaluate_action_v2_json(base.to_string());
         let eval_parsed: Value = serde_json::from_str(&eval_out).unwrap();
-        assert_eq!(eval_parsed["data"]["verdict"]["kind"], "warn",
-            "shipped high-slippage forbid must fire at slippage 150: {eval_parsed}");
+        assert_eq!(
+            eval_parsed["data"]["verdict"]["kind"], "warn",
+            "shipped high-slippage forbid must fire at slippage 150: {eval_parsed}"
+        );
 
         // 2. PROBE the forbid's single `when` body against the SAME input. It must
         //    be TRUE — the diagnosis agrees the forbid fired on this context.
@@ -327,8 +371,11 @@ mod tests {
         ]);
         let out = run_diagnosis_probes_v2_json(diag.to_string());
         let parsed: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(parsed["data"]["true_ids"], json!(["c0.body"]),
-            "the when-body the forbid fired on must probe TRUE: {parsed}");
+        assert_eq!(
+            parsed["data"]["true_ids"],
+            json!(["c0.body"]),
+            "the when-body the forbid fired on must probe TRUE: {parsed}"
+        );
     }
 
     #[test]
@@ -350,7 +397,10 @@ mod tests {
         ]);
         let out = run_diagnosis_probes_v2_json(swap_input(150, probes));
         let parsed: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(parsed["ok"], true, "annotated unconstrained-permit EST must parse: {parsed}");
+        assert_eq!(
+            parsed["ok"], true,
+            "annotated unconstrained-permit EST must parse: {parsed}"
+        );
         assert_eq!(parsed["data"]["true_ids"], json!(["c0.body"]), "{parsed}");
     }
 
@@ -367,12 +417,14 @@ mod tests {
     fn duplicate_probe_ids_error_on_add() {
         // Two valid permits sharing one id: the second `PolicySet::add` rejects
         // the duplicate, surfacing the `probe_add` error envelope.
-        let probe = |id: &str| json!({ "id": id, "est": {
+        let probe = |id: &str| {
+            json!({ "id": id, "est": {
             "effect": "permit",
             "principal": { "op": "All" }, "action": { "op": "All" }, "resource": { "op": "All" },
             "conditions": [{ "kind": "when", "body":
                 { ">": { "left": { ".": { "left": { "Var": "context" }, "attr": "slippageBp" } },
-                         "right": { "Value": 100 } } } }] } });
+                         "right": { "Value": 100 } } } }] } })
+        };
         let probes = json!([probe("dup"), probe("dup")]);
         let out = run_diagnosis_probes_v2_json(swap_input(150, probes));
         let parsed: Value = serde_json::from_str(&out).unwrap();
