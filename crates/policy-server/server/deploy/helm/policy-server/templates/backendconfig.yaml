@@ -1,0 +1,14 @@
+{{- if .Values.backendConfig.enabled }}
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: {{ printf "%s-backendconfig" (include "policy-server.fullname" .) }}
+  labels:
+    {{- include "policy-server.labels" . | nindent 4 }}
+spec:
+  timeoutSec: {{ .Values.backendConfig.timeoutSec }}
+  healthCheck:
+    type: HTTP
+    requestPath: /readyz
+    port: {{ .Values.api.port }}
+{{- end }}

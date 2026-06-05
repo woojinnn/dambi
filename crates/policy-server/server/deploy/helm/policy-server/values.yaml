@@ -1,15 +1,25 @@
 image:
-  repository: ghcr.io/woojinnn/scopeball-policy-server
+  repository: ghcr.io/woojinnn/pasu-policy-server
   tag: ""
   pullPolicy: IfNotPresent
 
 existingSecret: policy-server-secrets
 
+service:
+  type: ClusterIP
+
 api:
   replicas: 1
   port: 8788
+  # preStop sleep + grace period → zero-downtime rollouts on GKE L7 (NEG drain race)
+  preStopSleepSeconds: 15
+  terminationGracePeriodSeconds: 30
   publicApiUrl: https://api.scopeball.dev
   dashboardUrl: https://app.scopeball.dev
+  # Exact-match allowlist (comma-separated) of non-default OAuth redirect
+  # targets — e.g. a browser extension's https://<id>.chromiumapp.org/.
+  # Empty = only the default DASHBOARD_URL flow is allowed (fail-closed).
+  oauthAllowedRedirectUris: ""
   corsAllowedOrigins:
     - https://app.scopeball.dev
     - chrome-extension://<published-extension-id>
@@ -49,6 +59,10 @@ ingress:
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  gce:
+    enabled: false
+    staticIpName: ""
+    allowHttp: "true"
 
 serviceAccount:
   create: true
@@ -75,7 +89,7 @@ networkPolicy:
   enabled: false
 
 syncConfig: |-
-  # Override this value with the production scopeball-sync.toml.
+  # Override this value with the production pasu-sync.toml.
   [rpc.failover]
   strategy = "priority"
   retry_attempts = 3
@@ -85,3 +99,10 @@ syncConfig: |-
 
   [venues.hyperliquid]
   endpoint = "https://api.hyperliquid.xyz"
+
+managedCertificate:
+  enabled: false
+
+backendConfig:
+  enabled: false
+  timeoutSec: 3600
