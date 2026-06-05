@@ -685,6 +685,29 @@ fn build_surface(options: LoadOptions) -> Result<CachedSurface> {
         }
     }
 
+    // by-selector surface — address-agnostic (selector-only) bundles (standard
+    // NFT setApprovalForAll). They carry NO per-address callkey, so fold them
+    // into the unique-bundle set here purely so they get installed (registering
+    // the WASM `selector_bridge`) and replayed onto every thread. The corpus/
+    // route path reaches them via the route's selector-only fallback after a
+    // per-address miss — no entry in the per-callkey routable surface is needed.
+    let by_selector = index_root.join("by-selector");
+    if by_selector.is_dir() {
+        for path in sorted_json_files(&by_selector)? {
+            let raw =
+                fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+            let entry: Value =
+                serde_json::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
+            let bundle = bundle_from_index_entry(&index_root, &entry, &path)?;
+            let bundle_id = bundle
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            bundles.entry(bundle_id).or_insert(bundle);
+        }
+    }
+
     // Build per-bundle decode fields once (shared by every callkey of the bundle).
     let bundle_fields: HashMap<String, BundleFields> = bundles
         .iter()

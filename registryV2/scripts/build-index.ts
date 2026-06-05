@@ -155,7 +155,21 @@ interface BundleMatchSourced {
   typed_data?: V3TypedData;
 }
 
-type BundleMatch = BundleMatchSpecific | BundleMatchSourced;
+/**
+ * Address-agnostic (selector-only) match. The bundle is keyed by
+ * `(chain_id, selector)` ALONE — NO per-address callkeys — so the route decodes
+ * the call on ANY contract address. Restricted by `ADDRESS_AGNOSTIC_SELECTORS`
+ * to setApprovalForAll (`0xa22cb465`), whose security meaning is identical for
+ * every NFT collection and which never collides with a fungible-token selector.
+ * Emits `index/by-selector/<chainId>__<selector>.json`.
+ */
+interface BundleMatchAgnostic {
+  selector: Hex;
+  address_agnostic: true;
+  chain_ids: ChainId[];
+}
+
+type BundleMatch = BundleMatchSpecific | BundleMatchSourced | BundleMatchAgnostic;
 
 /** ERC contract kind (registry-level, distinct from semantic TokenKind).
  *  `native` = chain native asset (ETH / OP / ARB gas token) — uses sentinel
@@ -274,6 +288,17 @@ const MANIFESTS_DIR = join(REGISTRY_ROOT, "manifests");
 const TOKENS_DIR = join(REGISTRY_ROOT, "tokens");
 const INDEX_BY_CALLKEY_DIR = join(REGISTRY_ROOT, "index", "by-callkey");
 const INDEX_BY_TYPED_DATA_DIR = join(REGISTRY_ROOT, "index", "by-typed-data");
+const INDEX_BY_SELECTOR_DIR = join(REGISTRY_ROOT, "index", "by-selector");
+
+/**
+ * Selectors permitted to use `match.address_agnostic` (selector-only routing).
+ * Restricted to `setApprovalForAll` (`0xa22cb465`) — erc721+erc1155, and
+ * erc20-disjoint, so it cannot collide with a fungible-token selector. erc721
+ * single `approve` (`0x095ea7b3`) is deliberately EXCLUDED: it shares the
+ * 4-byte selector with erc20 `approve`, so address-agnostic routing could not
+ * tell the two apart.
+ */
+const ADDRESS_AGNOSTIC_SELECTORS: ReadonlySet<string> = new Set(["0xa22cb465"]);
 const GENERATED_BUNDLES_DIR = join(REGISTRY_ROOT, "bundles");
 const GENERATED_CONTEXTS_DIR = join(REGISTRY_ROOT, "contexts");
 
@@ -480,6 +505,44 @@ function validateMatchShape(path: string, match: unknown): asserts match is Bund
     throw new Error(
       `manifests/: ${path} match.selector expected "0x" + 8 hex, got ${JSON.stringify(m.selector)}`,
     );
+  }
+
+  // Address-agnostic (selector-only) mode — a third match shape alongside
+  // chain_to_addresses (v2) and chain_to_addresses_source (sourced). Keyed by
+  // (chain_id, selector) only; the route supplies the address from the live tx.
+  if ("address_agnostic" in m) {
+    if (m.address_agnostic !== true) {
+      throw new Error(
+        `manifests/: ${path} match.address_agnostic, when present, must be the literal true`,
+      );
+    }
+    if (!ADDRESS_AGNOSTIC_SELECTORS.has(m.selector.toLowerCase())) {
+      throw new Error(
+        `manifests/: ${path} match.address_agnostic is permitted only for selector(s) ${[...ADDRESS_AGNOSTIC_SELECTORS].join(", ")} (setApprovalForAll) — got ${m.selector}. ` +
+          `erc721 approve (0x095ea7b3) is excluded: it collides with erc20 approve.`,
+      );
+    }
+    if ("chain_to_addresses" in m || "chain_to_addresses_source" in m || "to" in m) {
+      throw new Error(
+        `manifests/: ${path} match.address_agnostic forbids chain_to_addresses / chain_to_addresses_source / to (selector-only routing)`,
+      );
+    }
+    if ("typed_data" in m) {
+      throw new Error(`manifests/: ${path} match.address_agnostic + typed_data is unsupported`);
+    }
+    if (!Array.isArray(m.chain_ids) || m.chain_ids.length === 0) {
+      throw new Error(
+        `manifests/: ${path} match.address_agnostic requires a non-empty "chain_ids" array`,
+      );
+    }
+    for (const [i, cid] of m.chain_ids.entries()) {
+      if (typeof cid !== "number" || !Number.isInteger(cid) || cid < 1) {
+        throw new Error(
+          `manifests/: ${path} match.chain_ids[${i}] must be a positive integer, got ${JSON.stringify(cid)}`,
+        );
+      }
+    }
+    return;
   }
 
   const hasMap = "chain_to_addresses" in m;
@@ -929,6 +992,11 @@ async function resolveBundle(
   manifestPath: string,
   forceRefresh: boolean,
 ): Promise<ResolvedOutput[]> {
+  if ("address_agnostic" in bundle.match && bundle.match.address_agnostic === true) {
+    // Selector-only manifest (standard NFT setApprovalForAll) — no per-address
+    // expansion. Passes through unchanged; the emit loop writes by-selector/.
+    return [{ kind: "bundle", bundle: bundle as unknown as ResolvedBundle }];
+  }
   if ("chain_to_addresses" in bundle.match) {
     // already concrete
     return [{ kind: "bundle", bundle: bundle as ResolvedBundle }];
@@ -1051,6 +1119,11 @@ function callkeyFilename(chainId: ChainId, to: Hex, selector: Hex): string {
   return `${chainId}__${to.toLowerCase()}__${selector.toLowerCase()}.json`;
 }
 
+/** by-selector index filename — `<chainId>__<selector>.json` (address-agnostic). */
+function selectorFilename(chainId: ChainId, selector: Hex): string {
+  return `${chainId}__${selector.toLowerCase()}.json`;
+}
+
 function typedDataFilename(
   chainId: ChainId,
   verifyingContract: Hex,
@@ -1098,6 +1171,7 @@ async function main(): Promise<void> {
     // recreated empty, ready for Phase 3C-F manifest authoring.
     wipeDir(INDEX_BY_CALLKEY_DIR);
     wipeDir(INDEX_BY_TYPED_DATA_DIR);
+    wipeDir(INDEX_BY_SELECTOR_DIR);
     wipeDir(GENERATED_BUNDLES_DIR);
     wipeDir(GENERATED_CONTEXTS_DIR);
     return;
@@ -1117,11 +1191,13 @@ async function main(): Promise<void> {
   // orphan 방지
   wipeDir(INDEX_BY_CALLKEY_DIR);
   wipeDir(INDEX_BY_TYPED_DATA_DIR);
+  wipeDir(INDEX_BY_SELECTOR_DIR);
   wipeDir(GENERATED_BUNDLES_DIR);
   wipeDir(GENERATED_CONTEXTS_DIR);
 
   let totalCallkeys = 0;
   let totalTypedDataEntries = 0;
+  let totalSelectorEntries = 0;
   let totalErrors = 0;
   let duplicateSourcedCallkeys = 0;
   let skippedRepresentativeSourcedCallkeys = 0;
@@ -1143,6 +1219,47 @@ async function main(): Promise<void> {
       for (const output of resolvedOutputs) {
         const resolved = output.kind === "bundle" ? output.bundle : output.materialized;
         const bundleSha256 = computeBundleSha256(resolved);
+
+        // Address-agnostic (selector-only) manifests — standard NFT
+        // setApprovalForAll. No per-address callkeys; emit ONE by-selector entry
+        // per declared chain so the WASM `selector_bridge` routes any collection.
+        const agnosticMatch = resolved.match as unknown as {
+          address_agnostic?: boolean;
+          selector: Hex;
+          chain_ids?: ChainId[];
+        };
+        if (agnosticMatch.address_agnostic === true) {
+          const selector = agnosticMatch.selector.toLowerCase() as Hex;
+          const chainIds = agnosticMatch.chain_ids ?? [];
+          if (!summaryOnly) {
+            console.error(
+              `[build-index] ${resolved.id}\n` +
+                `              manifest:    ${manifestPath}\n` +
+                `              sha256:      ${bundleSha256}\n` +
+                `              by-selector: ${chainIds.length} chain(s)`,
+            );
+          }
+          for (const chainId of chainIds) {
+            const fname = selectorFilename(chainId, selector);
+            const outPath = join(INDEX_BY_SELECTOR_DIR, fname);
+            if (safeExists(outPath)) {
+              throw new Error(
+                `manifests/: ${manifestPath} duplicate by-selector index key ${fname} — only one address-agnostic manifest may own a (chain, selector)`,
+              );
+            }
+            const entry: IndexEntry = {
+              matched: true,
+              bundle_id: resolved.id,
+              manifest_path: manifestPath,
+              bundle_sha256: bundleSha256,
+              bundle: resolved,
+            };
+            writeFileSync(outPath, JSON.stringify(entry, null, 2) + "\n", "utf8");
+            totalSelectorEntries++;
+          }
+          continue;
+        }
+
         const isSourcedManifest = "chain_to_addresses_source" in bundle.match;
         const representativeSourcedKey = isSourcedManifest
           ? `${(bundle.match as BundleMatchSourced).chain_to_addresses_source}|${manifestPath}`
@@ -1319,7 +1436,7 @@ async function main(): Promise<void> {
     );
   }
   console.error(
-    `[build-index] done — ${totalCallkeys} callkey(s) + ${totalTypedDataEntries} typed-data entry(ies) written across ${manifestFiles.length} manifest(s)`,
+    `[build-index] done — ${totalCallkeys} callkey(s) + ${totalTypedDataEntries} typed-data entry(ies) + ${totalSelectorEntries} by-selector entry(ies) written across ${manifestFiles.length} manifest(s)`,
   );
 }
 

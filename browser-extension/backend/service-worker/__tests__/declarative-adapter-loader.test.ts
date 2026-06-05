@@ -37,6 +37,7 @@ vi.mock("../wasm-bridge", () => ({
 import {
   __resetDeclarativeV3CacheForTest,
   installDeclarativeBundleV3,
+  installDeclarativeBundleV3BySelector,
   InstallDeclarativeV3Error,
 } from "../adapter-loader/declarative-adapter-loader";
 
@@ -388,5 +389,85 @@ describe("installDeclarativeBundleV3", () => {
     expect(mocks.declarativeInstallV3).toHaveBeenCalledWith(
       JSON.stringify(v3Bundle),
     );
+  });
+});
+
+describe("installDeclarativeBundleV3BySelector", () => {
+  const fetchMock = vi.fn();
+  // Address-agnostic bundle: match keyed by (chain, selector) ONLY, no `to`.
+  // This is exactly the shape parseMatch must accept (chain_ids present, no
+  // chain_to_addresses / to) — a v1-legacy parse would reject it on `to`.
+  const agnosticBundle = {
+    type: "adapter_action",
+    id: "standard/nft/set-approval-for-all@1.0.0",
+    schema_version: "3",
+    match: {
+      selector: "0xa22cb465",
+      address_agnostic: true,
+      chain_ids: [1, 10, 8453, 42161],
+    },
+    abi_fragment: {
+      function_name: "setApprovalForAll",
+      abi: { name: "setApprovalForAll", type: "function", inputs: [] },
+    },
+    emit: {
+      strategy: "single_emit",
+      body: {
+        domain: "token",
+        token: { action: "nft_set_approval_for_all" },
+      },
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.localStore.clear();
+    __resetDeclarativeV3CacheForTest();
+    fetchMock.mockReset();
+  });
+
+  it("fetches by-selector, parses the address-agnostic bundle, installs via WASM", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          matched: true,
+          bundle_id: agnosticBundle.id,
+          bundle: agnosticBundle,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    mocks.declarativeInstallV3.mockResolvedValueOnce({
+      decoder_id: agnosticBundle.id,
+      bundle_id: agnosticBundle.id,
+    });
+
+    const result = await installDeclarativeBundleV3BySelector({
+      chainId: 1,
+      selector: "0xa22cb465",
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.bundleId).toBe(agnosticBundle.id);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.invalid/index/by-selector/1__0xa22cb465.json",
+    );
+    expect(mocks.declarativeInstallV3).toHaveBeenCalledWith(
+      JSON.stringify(agnosticBundle),
+    );
+  });
+
+  it("returns null on a 404 by-selector miss without installing", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 404 }));
+    const result = await installDeclarativeBundleV3BySelector({
+      chainId: 1,
+      selector: "0xa22cb465",
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    expect(result).toBeNull();
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 });
