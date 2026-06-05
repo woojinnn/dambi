@@ -30,6 +30,7 @@
  *     add it later.
  */
 import Browser from "webextension-polyfill";
+import { fetchStarted, fetchEnded } from "../diagnostics";
 
 /**
  * Tagged metadata record returned for a registered token. `kind` is a
@@ -37,7 +38,12 @@ import Browser from "webextension-polyfill";
  * other token kinds without changing the cache layout.
  */
 export interface TokenMetadata {
-  kind: "erc20";
+  // Wire field is `erc_kind` (the registry source files + the deployed
+  // `/tokens/<chain>/<addr>.json` object use `erc_kind`, reserving `kind` for
+  // the nested `token_kind.kind`). Mirror it exactly so `isTokenMetadata`
+  // accepts the real payload — a `kind`-named field silently rejected every
+  // live token (integrity_failed → null), leaving `amountNano` unpopulated.
+  erc_kind: "erc20";
   chainId: number;
   /** Lowercased EVM address — guaranteed by `normaliseAddress`. */
   address: string;
@@ -93,7 +99,7 @@ function isTokenMetadata(v: unknown): v is TokenMetadata {
   if (!v || typeof v !== "object") return false;
   const o = v as Record<string, unknown>;
   return (
-    o.kind === "erc20" &&
+    o.erc_kind === "erc20" &&
     typeof o.chainId === "number" &&
     typeof o.address === "string" &&
     typeof o.symbol === "string" &&
@@ -287,11 +293,45 @@ class TokenRegistryClientImpl implements TokenRegistryClient {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
+    const sentAtMs = Date.now();
+    const startedAt = performance.now();
+    const traceSeq = fetchStarted("token", url);
+    console.info("[Scopeball] registry-fetch → sent", {
+      label: "token",
+      url,
+      sentAt: new Date(sentAtMs).toISOString(),
+    });
+
     let response: Response;
     try {
       response = await doFetch(url, { signal: controller.signal });
+      fetchEnded(
+        traceSeq,
+        response.status,
+        Math.round(performance.now() - startedAt),
+      );
+      console.info("[Scopeball] registry-fetch ← recv", {
+        label: "token",
+        url,
+        sentAt: new Date(sentAtMs).toISOString(),
+        receivedAt: new Date().toISOString(),
+        durationMs: Math.round(performance.now() - startedAt),
+        status: response.status,
+      });
     } catch (err) {
       clearTimeout(timeoutHandle);
+      fetchEnded(
+        traceSeq,
+        `error:${err instanceof Error ? err.message : String(err)}`,
+        Math.round(performance.now() - startedAt),
+      );
+      console.warn("[Scopeball] registry-fetch ✗ error", {
+        label: "token",
+        url,
+        sentAt: new Date(sentAtMs).toISOString(),
+        durationMs: Math.round(performance.now() - startedAt),
+        error: err instanceof Error ? err.message : String(err),
+      });
       // AbortError and any other network error → 30 s self-healing cool-down.
       // (We intentionally don't distinguish — a stuck endpoint and a
       // genuinely-aborted timeout both deserve the same retry window.)

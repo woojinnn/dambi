@@ -32,6 +32,13 @@ pub(crate) fn lower(
         "netTokenIn".into(),
         Value::String(u256_hex(action.net_token_in)),
     );
+    if let Some(nano) = action
+        .external_token
+        .as_ref()
+        .and_then(|t| ctx.amount_nano(t, action.net_token_in))
+    {
+        m.insert("netTokenInNano".into(), Value::from(nano));
+    }
     m.insert("netPtIn".into(), Value::String(u256_hex(action.net_pt_in)));
     m.insert("netSyIn".into(), Value::String(u256_hex(action.net_sy_in)));
     m.insert(

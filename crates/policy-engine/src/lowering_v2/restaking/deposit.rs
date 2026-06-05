@@ -26,6 +26,9 @@ pub(crate) fn lower(
     m.insert("strategy".into(), Value::String(addr(&action.strategy)));
     m.insert("token".into(), lower_token_ref(&action.token));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     if let Some(staker) = &action.staker {
         m.insert("staker".into(), Value::String(addr(staker)));
     }

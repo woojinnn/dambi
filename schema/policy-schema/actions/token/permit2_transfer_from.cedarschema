@@ -27,6 +27,8 @@ namespace Token {
     // Amount permitted by the signed message (U256 hex).
     permittedAmount: String,
     // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    permittedAmountNano?: Long,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
     amountNano?: Long,
     // USD estimate at submission time. Host-populated.
     amountUsd?: decimal,

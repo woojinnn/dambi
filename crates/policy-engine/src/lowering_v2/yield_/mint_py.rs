@@ -28,6 +28,13 @@ pub(crate) fn lower(
         m.insert("externalToken".into(), lower_token_ref(token));
     }
     m.insert("netInput".into(), Value::String(u256_hex(action.net_input)));
+    if let Some(nano) = action
+        .external_token
+        .as_ref()
+        .and_then(|t| ctx.amount_nano(t, action.net_input))
+    {
+        m.insert("netInputNano".into(), Value::from(nano));
+    }
     m.insert(
         "minPyOut".into(),
         Value::String(u256_hex(action.min_py_out)),

@@ -21,6 +21,9 @@ pub(crate) fn lower(
     m.insert("owner".into(), Value::String(addr(&action.owner)));
     m.insert("spender".into(), Value::String(addr(&action.spender)));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     m.insert(
         "sigDeadline".into(),
         Value::from(action.sig_deadline.as_unix()),

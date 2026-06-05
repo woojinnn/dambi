@@ -43,7 +43,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use policy_engine::lowering_v2::{lower_action, LoweredAction, TxMeta};
+use policy_engine::lowering_v2::{
+    lower_action_enriched, AccountLeverage, LoweredAction, TokenDecimals, TxMeta,
+};
 use policy_engine::policy::{MatchedPolicy, PolicyEngine, Severity, Verdict};
 use policy_engine::policy_rpc::{
     plan_policy_rpc_v2, system_fail_verdict, ManifestV2, PlannedCallV2, TriggerScope, TxView,
@@ -77,6 +79,16 @@ struct PlanActionInput {
     action: ActionBody,
     meta: ActionMeta,
     tx: TxInput,
+    /// Host-injected per-token decimals (lowercase `0x` address → decimals),
+    /// used to fill each fungible amount's `amountNano` `Long` sibling. Absent
+    /// ⇒ no nano fields are emitted (the lowering omits the optional sibling).
+    #[serde(default)]
+    token_decimals: BTreeMap<String, u8>,
+    /// Host-injected per-asset venue leverage (decimal-string `asset_index` →
+    /// leverage), used to fill the HL order `leverage` `Long` field from the
+    /// SW's `activeAssetData` lookup. Absent ⇒ the field is omitted.
+    #[serde(default)]
+    account_leverage: BTreeMap<String, i64>,
 }
 
 /// One installed bundle: the user's Cedar policy text paired with the manifest
@@ -109,6 +121,13 @@ struct EvaluateActionInput {
     /// Raw host results keyed by `call_id` (the unwrapped `$.result` payload).
     #[serde(default)]
     results: BTreeMap<String, Value>,
+    /// Host-injected per-token decimals (see [`PlanActionInput::token_decimals`]).
+    #[serde(default)]
+    token_decimals: BTreeMap<String, u8>,
+    /// Host-injected per-asset venue leverage (see
+    /// [`PlanActionInput::account_leverage`]).
+    #[serde(default)]
+    account_leverage: BTreeMap<String, i64>,
 }
 
 // ── output DTOs ──────────────────────────────────────────────────────────
@@ -161,7 +180,9 @@ pub fn plan_action_rpc_v2_json(input_json: String) -> String {
         check_input_size(&input_json, "plan_action_rpc_v2_json")?;
         let input: PlanActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
-        let lowered = lower(&input.action, &input.meta, &input.tx)?;
+        let decimals = TokenDecimals::new(input.token_decimals.clone());
+        let leverage = AccountLeverage::new(input.account_leverage.clone());
+        let lowered = lower(&input.action, &input.meta, &input.tx, &decimals, &leverage)?;
         let planned = plan(&input.manifests, &input.action, &lowered, &input.tx)?;
         Ok(PlanActionOutput {
             planned: planned.iter().map(planned_to_dto).collect(),
@@ -199,7 +220,9 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
         let input: EvaluateActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
 
-        let lowered = lower(&input.action, &input.meta, &input.tx)?;
+        let decimals = TokenDecimals::new(input.token_decimals.clone());
+        let leverage = AccountLeverage::new(input.account_leverage.clone());
+        let lowered = lower(&input.action, &input.meta, &input.tx, &decimals, &leverage)?;
 
         // Boundary invariant: PLAN over the bundles' own manifests, never a
         // host-supplied side list. This ties the `SystemFail` gate (driven by
@@ -233,19 +256,66 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
     Envelope::ok(EvaluateActionOutput { verdict: dto }).to_json()
 }
 
+/// DEBUG (diagnostic-only): lower the action and return the exact Cedar entity
+/// uids + context the engine evaluates — base lowering plus the host `results`
+/// replayed into `context.custom.*`.
+///
+/// Reuses the [`evaluate_action_v2_json`] input shape, so the host can pass the
+/// same `{ action, meta, tx, bundles, results }` and see the camelCase,
+/// cedarschema-shaped context (e.g. `direction.amountIn`, `slippageBp`,
+/// `tokenIn`) that Cedar policies actually read — the artifact that otherwise
+/// lives only inside the engine and is never surfaced. Best-effort: a
+/// plan/materialize fault is swallowed so the base lowered context is still
+/// returned. Has NO effect on the verdict path.
+#[wasm_bindgen]
+#[must_use]
+pub fn debug_lowered_context_v2_json(input_json: String) -> String {
+    let result = (|| -> Result<Value, EngineErrorDto> {
+        check_input_size(&input_json, "debug_lowered_context_v2_json")?;
+        let input: EvaluateActionInput =
+            serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
+        let decimals = TokenDecimals::new(input.token_decimals.clone());
+        let leverage = AccountLeverage::new(input.account_leverage.clone());
+        let lowered = lower(&input.action, &input.meta, &input.tx, &decimals, &leverage)?;
+        let manifests: Vec<ManifestV2> = input.bundles.iter().map(|b| b.manifest.clone()).collect();
+        let mut context = lowered.context.clone();
+        // Best-effort replay so `context.custom.*` shows when enrichment is wired;
+        // ignore a plan/materialize fault and surface the base lowered context.
+        if let Ok(planned) = plan(&manifests, &input.action, &lowered, &input.tx) {
+            let _ =
+                policy_engine::policy_rpc::materialize_v2(&mut context, &planned, &input.results);
+        }
+        Ok(serde_json::json!({
+            "principal": lowered.principal,
+            "actionUid": lowered.action_uid,
+            "resource": lowered.resource,
+            "context": context,
+        }))
+    })();
+
+    match result {
+        Ok(payload) => Envelope::ok(payload).to_json(),
+        Err(error) => Envelope::<()>::err(error.kind, error.message).to_json(),
+    }
+}
+
 // ── shared helpers ───────────────────────────────────────────────────────
 
-/// Lower an [`ActionBody`] + [`ActionMeta`] + tx into a [`LoweredAction`].
+/// Lower an [`ActionBody`] + [`ActionMeta`] + tx into a [`LoweredAction`], with
+/// the host-injected `decimals` (for `amountNano` siblings) and `leverage` (for
+/// the HL order `leverage` field).
 fn lower(
     action: &ActionBody,
     meta: &ActionMeta,
     tx: &TxInput,
+    decimals: &TokenDecimals,
+    leverage: &AccountLeverage,
 ) -> Result<LoweredAction, EngineErrorDto> {
     let tx_meta = TxMeta {
         from: &tx.from,
         to: &tx.to,
     };
-    lower_action(action, meta, &tx_meta)
+    lower_action_enriched(action, meta, &tx_meta, decimals, leverage)
         .map_err(|error| EngineErrorDto::new("unsupported_action", error.to_string()))
 }
 
@@ -275,7 +345,20 @@ pub(crate) fn materialized_context(
     bundles: &[BundleInput],
     results: &BTreeMap<String, Value>,
 ) -> Result<(LoweredAction, Value), EngineErrorDto> {
-    let lowered = lower(action, meta, tx)?;
+    // The diagnosis input (`DiagnosisInput`) does not carry the host-injected
+    // enrichment maps (`token_decimals` / `account_leverage`), so the probe
+    // lowers with empty maps: the `amountNano` siblings and the HL order
+    // `leverage` field are omitted from the probe context. A clause that denied
+    // purely on those enrichment-only fields is therefore diagnosed best-effort
+    // — the verdict itself is unaffected (this rebuilds context only for the
+    // dashboard's post-hoc "which clause blocked this" explainer).
+    let lowered = lower(
+        action,
+        meta,
+        tx,
+        &TokenDecimals::default(),
+        &AccountLeverage::default(),
+    )?;
     let manifests: Vec<ManifestV2> = bundles.iter().map(|b| b.manifest.clone()).collect();
     let planned = plan(&manifests, action, &lowered, tx)?;
     let mut context = lowered.context.clone();
@@ -1126,6 +1209,65 @@ pub(crate) mod tests {
             verdict_kind(&out),
             "pass",
             "Inner swap policy must be SKIPPED on the multicall batch (fires per-child): {out}"
+        );
+    }
+
+    // ── token_decimals → amountNano quantity-cap (the nano feature) ──────────
+    //
+    // With host-injected `token_decimals`, the lowering fills the base
+    // `direction.amountInNano` Long sibling, so a quantity-cap Cedar policy
+    // (`amountInNano >= N`) fires. Without decimals the field is omitted, so the
+    // `has`-guarded cap short-circuits to Pass (dormant) — proving the cap is
+    // driven by the injected decimals, not firing unconditionally.
+
+    /// The `swap_sample` sells 1_000_000_000 raw USDC (6dp) → nano 1e12. A cap
+    /// at 1e12 fires WITH decimals and is dormant WITHOUT them.
+    #[test]
+    fn evaluate_action_v2_amount_in_nano_cap_driven_by_token_decimals() {
+        // `swap_sample`'s tokenIn is Arbitrum USDC (6 decimals).
+        let usdc = "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+        let policy = "@id(\"in-cap\")\n@severity(\"warn\")\n@reason(\"input amount cap\")\n\
+             forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
+             when { context.direction has amountInNano \
+             && context.direction.amountInNano >= 1000000000000 };\n";
+        let manifest = json!({
+            "id": "in-cap", "schema_version": 2,
+            "trigger": { "where": { "action.tag": { "eq": "swap" } } }
+        });
+
+        // WITH decimals → amountInNano = 1e12 → cap (>= 1e12) → warn.
+        let (body, meta) = swap_sample();
+        let mut decimals = serde_json::Map::new();
+        decimals.insert(usdc.to_owned(), json!(6));
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{ "policy": policy, "manifest": manifest }],
+                "results": {},
+                "token_decimals": Value::Object(decimals),
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            verdict_kind(&out),
+            "warn",
+            "amountInNano cap must fire when token_decimals are injected: {out}"
+        );
+
+        // WITHOUT decimals → amountInNano omitted → has-guard false → pass.
+        let (body, meta) = swap_sample();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{ "policy": policy, "manifest": manifest }],
+                "results": {},
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            verdict_kind(&out),
+            "pass",
+            "nano cap must be dormant without token_decimals: {out}"
         );
     }
 }

@@ -11,6 +11,8 @@ namespace LiquidStaking {
     venue: StakingVenue,
     // Amount of the rebasing token to wrap (stETH units), U256 hex.
     amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
     // wstETH the wrap is expected to mint (getWstETHByStETH), U256 hex.
     // Host-populated live field.
     expectedWsteth: String,

@@ -65,6 +65,21 @@ struct BridgeKey {
     selector: String,
 }
 
+/// Selector-only bridge key: `(chain_id, selector_lowercase)`.
+///
+/// Used by the **address-agnostic** route tier (standard NFT
+/// `setApprovalForAll`, selector `0xa22cb465`): the security meaning of granting
+/// an operator control of an entire collection is identical for every contract,
+/// so the route must decode it regardless of whether the collection address was
+/// pre-registered as a per-address [`BridgeKey`]. Manifests opt in via
+/// `match.address_agnostic`; the route consults this map ONLY after the exact
+/// per-address `bridge` lookup misses, so existing routing stays byte-identical.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SelectorKey {
+    chain_id: u64,
+    selector: String,
+}
+
 /// Typed-data bridge key:
 /// `(chain_id, verifying_contract_lowercase, primary_type, witness_type?)`.
 ///
@@ -129,6 +144,12 @@ struct DeclarativeV3State {
     /// empty. [`declarative_route_typed_data_v3_json`] resolves a wallet
     /// `eth_signTypedData` payload through it.
     typed_data_bridge: HashMap<TypedDataBridgeKey, String>,
+    /// `(chain_id, selector_lower)` → `bundle_id`. Populated ONLY for manifests
+    /// with `match.address_agnostic` (standard NFT `setApprovalForAll`).
+    /// [`declarative_route_request_v3_json`] consults it as a FALLBACK after the
+    /// per-address [`Self::bridge`] misses — it never shadows an exact
+    /// per-address hit, so existing per-address routing is unchanged.
+    selector_bridge: HashMap<SelectorKey, String>,
 }
 
 thread_local! {
@@ -148,9 +169,8 @@ thread_local! {
 //
 // The v3 install validates only the structural envelope:
 //   * `bundle.id`         — required, non-empty string. Used as decoder_id.
-//   * `bundle.match`      — parsed via `BundleMatch` so v1 (`chain_ids × to`)
-//                           and v2 (`chain_to_addresses`) bundles both yield
-//                           `(chain_id, address)` pairs.
+//   * `bundle.match`      — parsed via `BundleMatch` so supported address
+//                           layouts yield `(chain_id, address)` pairs.
 //   * `bundle.match.selector` — required (carried inside `BundleMatch`).
 // `emit.strategy` / `emit.body` / `emit.per_opcode_body` are NOT validated
 // at install — they flow through `action_builder` at route time, which
@@ -171,8 +191,8 @@ thread_local! {
 /// v3 does not mint a separate `declarative.<path>` decoder id — the bundle_id
 /// itself is the canonical key (it already disambiguates publisher / contract /
 /// function / version, matching how the registry indexes manifests). Both
-/// `decoder_id` and `bundle_id` are populated to the same value so the wire
-/// shape stays identical to v1 [`DeclarativeInstallResultDto`].
+/// `decoder_id` and `bundle_id` are populated to the same value to preserve the
+/// existing [`DeclarativeInstallResultDto`] wire shape.
 #[wasm_bindgen]
 pub fn declarative_install_v3_json(bundle_json: String) -> String {
     let result = (|| -> Result<DeclarativeInstallResultDto, EngineErrorDto> {
@@ -258,6 +278,25 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                     };
                     state
                         .typed_data_bridge
+                        .entry(key)
+                        .or_insert_with(|| bundle_id.clone());
+                }
+            }
+            // Address-agnostic (selector-only) tier — standard NFT
+            // `setApprovalForAll`. `bundle_match.entries()` yielded nothing (no
+            // `chain_to_addresses` / `to`), so the per-address `bridge` loop
+            // above registered no callkeys; instead key the bundle by
+            // `(chain_id, selector)` for every declared chain so the route can
+            // decode the call on ANY collection address (the `to` flows from the
+            // live tx via the body's `$to`).
+            if bundle_match.address_agnostic {
+                for &chain_id in &bundle_match.chain_ids {
+                    let key = SelectorKey {
+                        chain_id,
+                        selector: selector.clone(),
+                    };
+                    state
+                        .selector_bridge
                         .entry(key)
                         .or_insert_with(|| bundle_id.clone());
                 }
@@ -415,7 +454,18 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
         let (bundle_id, bundle_value) = DECLARATIVE_V3_STATE
             .with(|state| {
                 let state = state.borrow();
-                state.bridge.get(&key).and_then(|bundle_id| {
+                // 1. Exact per-address callkey (unchanged priority — a registered
+                //    `(chain, to, selector)` always wins). 2. Address-agnostic
+                //    selector-only fallback (standard NFT `setApprovalForAll`):
+                //    consulted ONLY on a per-address miss, so existing routing is
+                //    byte-identical.
+                let bundle_id = state.bridge.get(&key).or_else(|| {
+                    state.selector_bridge.get(&SelectorKey {
+                        chain_id: input.chain_id,
+                        selector: lookup_selector.clone(),
+                    })
+                });
+                bundle_id.and_then(|bundle_id| {
                     state
                         .bundles
                         .get(bundle_id)
@@ -433,7 +483,7 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                 )
             })?;
 
-        // Decode calldata against the manifest ABI (same pattern as v1). A bare
+        // Decode calldata against the manifest ABI. A bare
         // native transfer has NO calldata to decode against a function ABI
         // (the byte vec is empty, and `decode_with_json_abi` requires ≥4 bytes
         // for a selector), so the args object is simply empty — the
@@ -463,11 +513,11 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             })?
             .to_owned();
 
-        // Plan §M5 — chain 별 well-known token addresses pre-populate.
-        // Sync orchestrator (별 plan) 가 채울 동적 resolved (pool / factory
-        // 등) 외에, chain ID 만으로 결정되는 정적 token address (WETH 등) 는
-        // 본 layer 에서 미리 채워 manifest 의 `$resolved.weth` 같은 placeholder
-        // 가 zero address fallback 대신 정확한 값으로 substitute 되도록 함.
+        // Pre-populate well-known chain-scoped token addresses. Dynamic
+        // resolved values such as pool/factory addresses are supplied by
+        // higher-level sync, but static token addresses like WETH can be
+        // resolved here so `$resolved.weth` placeholders avoid zero-address
+        // fallback.
         let mut resolved = BTreeMap::new();
         let weth_address: Option<&'static str> = match input.chain_id {
             1 => Some("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
@@ -1156,8 +1206,8 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
         );
 
         // ── V3MapContext (same resolved/derived population as calldata) ─────
-        // Plan §M5 — static WETH-by-chain pre-populate (mirrors the calldata
-        // route path so `$resolved.weth` substitutes the correct address).
+        // Static WETH-by-chain pre-populate mirrors the calldata route path so
+        // `$resolved.weth` substitutes the correct address.
         let mut resolved = BTreeMap::new();
         let weth_address: Option<&'static str> = match input.chain_id {
             1 => Some("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
@@ -1788,7 +1838,11 @@ fn dispatch_opcode_stream(
             args_json: ctx.args_json,
             raw_calldata: ctx.raw_calldata,
             resolved: ctx.resolved.clone(),
-            derived: ctx.derived.clone(),
+            // Re-derive $derived.* from THIS opcode's decoded inputs (it carries
+            // its own `path`/`marketParams`/`vault`); the route-level pass only
+            // saw the outer execute(commands, inputs) args. Fixes UR V3 swap
+            // token_in/out == 0x0.
+            derived: rederive_for_child(&ctx.derived, inputs_for_this),
             inputs: inputs_for_this,
         };
         let child_action = build_action_body(&child_ctx, body_template, None)
@@ -2125,7 +2179,11 @@ fn build_tagged_dispatch(
         args_json: ctx.args_json,
         raw_calldata: ctx.raw_calldata,
         resolved: ctx.resolved.clone(),
-        derived: ctx.derived.clone(),
+        // Defense-in-depth: today's one tagged manifest (HL core-writer) emits no
+        // $derived references, so re-deriving here is inert on the body (any stray
+        // injection is value-gated + unread); it pre-resolves $derived.* for a
+        // future tagged body that does reference it.
+        derived: rederive_for_child(&ctx.derived, Some(&decoded)),
         inputs: Some(&decoded),
     };
     build_action_body(&child_ctx, body_template, action_entry.get("live_inputs"))
@@ -2426,7 +2484,11 @@ fn build_parallel_tagged_dispatch(
             args_json: ctx.args_json,
             raw_calldata: ctx.raw_calldata,
             resolved: child_resolved,
-            derived: ctx.derived.clone(),
+            // Defense-in-depth: today's one parallel-tagged manifest (Compound
+            // Bulker) emits no $derived references, so re-deriving here is inert on
+            // the body; it pre-closes the same clone-without-re-derive footgun that
+            // hit the opcode-stream path for any future element body that uses $derived.*.
+            derived: rederive_for_child(&ctx.derived, Some(&decoded)),
             inputs: Some(&decoded),
         };
         let body = build_action_body(&child_ctx, body_template, entry.get("live_inputs"))
@@ -2441,22 +2503,19 @@ fn build_parallel_tagged_dispatch(
 /// raw byte buffer, returning a JSON object keyed by the tuple's named
 /// fields.
 ///
-/// M2 narrow scope (per plan §3 "본 wire-up 만, 실제 inputs_abi decode
-/// logic 은 M5 의 manual e2e 시 첫 raw Tx 로 검증"):
-///   * Reuse [`abi_resolver::decode::decode_with_function`] so we do not
-///     pull `alloy_json_abi` / `alloy_dyn_abi` symbols into the WASM
-///     surface beyond what abi-resolver already links.
-///   * The signature is wrapped into a synthetic `step<sig>` function so
-///     alloy can parse it (mirrors `subdecode::opcode_stream`'s pattern).
-///     Selector is recomputed from that function so `decode_with_function`'s
-///     selector-equality guard always passes — opcode dispatch already
-///     verified the outer call site, we are only re-decoding the inner
-///     tuple here.
-///   * Each `DecodedArg.value` (a `DynSolValue`) routes through the same
-///     `bridge::convert_value` → `eval::decoded_value_to_json` chain v1
-///     uses, so the resulting `$inputs.<name>` JSON shape matches the v1
-///     `$args.<name>` view the action_builder's placeholder walker already
-///     understands.
+/// Implementation notes:
+///   * Reuse [`abi_resolver::decode::decode_with_function`] so we do not pull
+///     `alloy_json_abi` / `alloy_dyn_abi` symbols into the WASM surface beyond
+///     what abi-resolver already links.
+///   * The signature is wrapped into a synthetic `step<sig>` function so alloy
+///     can parse it (mirrors `subdecode::opcode_stream`'s pattern). Selector is
+///     recomputed from that function so `decode_with_function`'s
+///     selector-equality guard always passes; opcode dispatch already verified
+///     the outer call site, and this helper only re-decodes the inner tuple.
+///   * Each `DecodedArg.value` (a `DynSolValue`) routes through the shared
+///     `bridge::convert_value` -> `eval::decoded_value_to_json` chain, so the
+///     resulting `$inputs.<name>` JSON shape matches the `$args.<name>` view the
+///     action_builder's placeholder walker already understands.
 ///   * Best-effort: any parse / decode / convert failure returns `Err` and
 ///     the caller substitutes `Value::Null`. The action_builder then
 ///     surfaces a precise `UnresolvedPlaceholder` for `$inputs.<x>`
@@ -2814,6 +2873,39 @@ fn maybe_inject_uniswap_v3_path(
             serde_json::Value::Number(serde_json::Number::from(*fee)),
         );
     }
+}
+
+/// Re-derive the shape-gated `$derived.*` endpoints for a NESTED child leg.
+///
+/// The route-level injection (the `maybe_inject_*` calls in
+/// `declarative_route_request_v3_json`) only sees the OUTER call's decoded args.
+/// A nested leg (an opcode-stream opcode, a tagged sub-action) carries its own
+/// `path` / `marketParams` / `vault` in its OWN decoded inputs, so a child body
+/// that references `$derived.v3_path_first_token` / `$derived.morpho_market_id` /
+/// `$derived.metamorpho_underlying` would otherwise resolve against the parent's
+/// (often empty) `derived` map — that was the Universal Router V3 swap leg
+/// `token_in/out == 0x0` bug (the outer `execute(commands, inputs)` args have no
+/// `path`, and the per-opcode child merely cloned the empty parent `derived`).
+///
+/// Mirrors the per-opcode `maybe_inject_v4_pool_id` precedent: clone the parent
+/// `derived`, then re-run each injector against the child's inputs. Every
+/// injector keys off a UNIQUE argument name and early-returns (no mutation) on a
+/// shape mismatch, so calling all three is a safe no-op for any leg whose inputs
+/// don't carry the matching key (the three trigger keys are disjoint, so they
+/// cannot cross-fire). NOTE: `maybe_inject_uniswap_v3_path` gates on a `bytes`
+/// arg literally named `path` — a V2 `address[] path` fails its `as_str` gate, so
+/// `bytes path` is effectively reserved for V3 packed paths.
+fn rederive_for_child(
+    parent: &BTreeMap<String, serde_json::Value>,
+    inputs: Option<&serde_json::Value>,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut derived = parent.clone();
+    if let Some(inputs) = inputs {
+        maybe_inject_morpho_market_id(inputs, &mut derived);
+        maybe_inject_metamorpho_underlying(inputs, &mut derived);
+        maybe_inject_uniswap_v3_path(inputs, &mut derived);
+    }
+    derived
 }
 
 /// `multicall_recurse` (Cat D) — flatten a self-`multicall(bytes[])` into one
@@ -3550,6 +3642,117 @@ mod tests {
         assert_eq!(
             parsed["data"]["actions"][0]["body"]["domain"], "unknown",
             "empty array_emit must route to Unknown, not an empty Multicall (PASS): {parsed}"
+        );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Address-agnostic (selector-only) route tier — standard NFT
+    // `setApprovalForAll`. Decodes on ANY collection, registered or not, so the
+    // #1 NFT-drain vector is no longer warn-closed for unlisted collections.
+    // ──────────────────────────────────────────────────────────────────────
+
+    fn set_approval_for_all_agnostic_bundle() -> Value {
+        json!({
+            "type": "adapter_action",
+            "id": "standard/nft/set-approval-for-all@1.0.0",
+            "schema_version": "3",
+            "match": { "selector": "0xa22cb465", "address_agnostic": true, "chain_ids": [1] },
+            "abi_fragment": { "function_name": "setApprovalForAll", "abi": {
+                "name": "setApprovalForAll", "type": "function", "stateMutability": "nonpayable",
+                "inputs": [
+                    { "name": "operator", "type": "address" },
+                    { "name": "approved", "type": "bool" }
+                ],
+                "outputs": [] } },
+            "emit": { "strategy": "single_emit", "body": {
+                "domain": "token", "token": {
+                    "action": "nft_set_approval_for_all",
+                    "nft_set_approval_for_all": {
+                        "chain": "$chain", "contract": "$to",
+                        "spender": "$args.operator", "approved": "$args.approved" } } },
+                "live_inputs": {} },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        })
+    }
+
+    #[test]
+    fn address_agnostic_set_approval_for_all_decodes_on_unregistered_collection() {
+        let installed: Value = serde_json::from_str(&declarative_install_v3_json(
+            set_approval_for_all_agnostic_bundle().to_string(),
+        ))
+        .unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        // A collection address NEVER registered as a per-address callkey.
+        let collection = "0x000000000000000000000000000000000000beef";
+        let operator = "0x000000000000000000000000000000000000cafe";
+        // setApprovalForAll(operator, approved=true)
+        let calldata = format!(
+            "0xa22cb465{:0>64}{:0>64}",
+            operator.trim_start_matches("0x"),
+            "1"
+        );
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1, "to": collection, "selector": "0xa22cb465", "calldata": calldata,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            parsed["ok"], true,
+            "address-agnostic decode must hit on an unregistered collection: {parsed}"
+        );
+
+        // ActionBody serializes FLAT (internally tagged on domain + action):
+        // {domain:"token", action:"nft_set_approval_for_all", chain, contract, spender, approved}.
+        let body = &parsed["data"]["actions"][0]["body"];
+        assert_eq!(body["domain"], "token", "{body}");
+        assert_eq!(body["action"], "nft_set_approval_for_all", "{body}");
+        assert_eq!(
+            body["contract"].as_str().unwrap().to_lowercase(),
+            collection,
+            "contract must be the live tx `to` (the collection) — proves address-agnostic routing: {body}"
+        );
+        assert_eq!(
+            body["spender"].as_str().unwrap().to_lowercase(),
+            operator,
+            "{body}"
+        );
+        assert_eq!(body["approved"], true, "{body}");
+    }
+
+    #[test]
+    fn address_agnostic_bridge_is_chain_scoped_not_a_catch_all() {
+        // The selector-only fallback stays keyed by `(chain_id, selector)`: the
+        // same selector on a chain the bundle did NOT declare still misses
+        // (warn-closed), proving the tier is not a blanket selector wildcard.
+        let installed: Value = serde_json::from_str(&declarative_install_v3_json(
+            set_approval_for_all_agnostic_bundle().to_string(),
+        ))
+        .unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let calldata = format!(
+            "0xa22cb465{:0>64}{:0>64}",
+            "000000000000000000000000000000000000cafe", "1"
+        );
+        let out = declarative_route_request_v3_json(
+            json!({
+                // chain 999 is NOT in the bundle's `chain_ids: [1]`.
+                "chain_id": 999, "to": "0x000000000000000000000000000000000000beef",
+                "selector": "0xa22cb465", "calldata": calldata,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(
+            parsed["error"]["kind"], "no_declarative_v3_mapper",
+            "{parsed}"
         );
     }
 

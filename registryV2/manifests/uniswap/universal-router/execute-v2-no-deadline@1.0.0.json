@@ -60,7 +60,7 @@
                 "name": "uniswap_v3",
                 "chain": "$chain",
                 "pool": "$resolved.pool",
-                "fee_tier_bp": "$resolved.fee_tier_bp"
+                "fee_tier_bp": "$derived.fee_tier_bp"
               },
               "params": {
                 "token_in": {
@@ -142,7 +142,7 @@
                 "name": "uniswap_v3",
                 "chain": "$chain",
                 "pool": "$resolved.pool",
-                "fee_tier_bp": "$resolved.fee_tier_bp"
+                "fee_tier_bp": "$derived.fee_tier_bp"
               },
               "params": {
                 "token_in": {
@@ -1020,6 +1020,72 @@
                   }
                 }
               }
+            },
+            "0x0b": {
+              "name": "SETTLE",
+              "inputs_abi": "(address currency, uint256 amount, bool payerIsUser)",
+              "body": {
+                "domain": "token",
+                "token": {
+                  "action": "erc20_transfer",
+                  "erc20_transfer": {
+                    "token": {
+                      "key": {
+                        "standard": "erc20",
+                        "chain": "$chain",
+                        "address": "$inputs.currency"
+                      }
+                    },
+                    "recipient": "$resolved.pool_manager",
+                    "amount": "$inputs.amount"
+                  }
+                }
+              },
+              "_note": "SETTLE pays `amount` of `currency` owed to the PoolManager (payerIsUser flag elided). Modelled as an erc20_transfer to pool_manager, mirroring SETTLE_ALL."
+            },
+            "0x0e": {
+              "name": "TAKE",
+              "inputs_abi": "(address currency, address recipient, uint256 amount)",
+              "body": {
+                "domain": "token",
+                "token": {
+                  "action": "erc20_transfer",
+                  "erc20_transfer": {
+                    "token": {
+                      "key": {
+                        "standard": "erc20",
+                        "chain": "$chain",
+                        "address": "$inputs.currency"
+                      }
+                    },
+                    "recipient": "$inputs.recipient",
+                    "amount": "$inputs.amount"
+                  }
+                }
+              },
+              "_note": "TAKE withdraws `amount` of `currency` to an EXPLICIT recipient — the policy-relevant field. Unlike TAKE_ALL (always the submitter), TAKE can redirect output to any address, so the recipient is now visible to policy."
+            },
+            "0x10": {
+              "name": "TAKE_PORTION",
+              "inputs_abi": "(address currency, address recipient, uint256 bips)",
+              "body": {
+                "domain": "token",
+                "token": {
+                  "action": "erc20_transfer",
+                  "erc20_transfer": {
+                    "token": {
+                      "key": {
+                        "standard": "erc20",
+                        "chain": "$chain",
+                        "address": "$inputs.currency"
+                      }
+                    },
+                    "recipient": "$inputs.recipient",
+                    "amount": "$inputs.bips"
+                  }
+                }
+              },
+              "_note": "TAKE_PORTION sends a fraction (`bips`, /10000) of `currency` to `recipient` — typically a fee skim. NOTE: `amount` carries the bips value, NOT an absolute token amount; the policy-relevant signal is the fee recipient + currency."
             }
           }
         }

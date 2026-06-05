@@ -31,13 +31,16 @@ pub(crate) fn lower(
     );
     m.insert("size".into(), lower_size_spec(&action.size));
     // Optional collateral top-up: split the (TokenRef, U256) pair. Both keys are
-    // omitted when absent; `addCollateralAmountNano` is host-populated — OMITTED.
+    // omitted when absent.
     if let Some((token, amount)) = &action.add_collateral {
         m.insert("addCollateralToken".into(), lower_token_ref(token));
         m.insert(
             "addCollateralAmount".into(),
             Value::String(u256_hex(*amount)),
         );
+        if let Some(nano) = ctx.amount_nano(token, *amount) {
+            m.insert("addCollateralAmountNano".into(), Value::from(nano));
+        }
     }
     m.insert(
         "slippageBp".into(),

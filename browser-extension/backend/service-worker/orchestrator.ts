@@ -1,4 +1,5 @@
 import Browser from "webextension-polyfill";
+import { markPhase, captureTimeout } from "./diagnostics";
 import {
   tryDeclarativeRouteV3,
   type DeclarativeRouteV3Outcome,
@@ -46,6 +47,11 @@ import {
   type Message,
 } from "@lib/types";
 import { hlOrderToAction, HL_TO_SENTINEL } from "./hl-order-to-action";
+import { collectTokenDecimals } from "./registry/collect-token-decimals";
+import {
+  collectHlLeverage,
+  noteHlLeverageUpdate,
+} from "./venue/collect-hl-leverage";
 import {
   normalizeTypedDataPayload,
   routeTypedSignaturePayload,
@@ -170,11 +176,31 @@ export async function decideMessage(
   );
 }
 
+function txSummaryForDiag(message: Message): Record<string, unknown> {
+  const summary: Record<string, unknown> = {
+    requestId: message.requestId,
+    hostname: message.data.hostname,
+    type: message.data.type,
+  };
+  if (isTransaction(message)) {
+    const t = message.data.transaction;
+    summary.chainId = message.data.chainId;
+    summary.to = t.to;
+    summary.from = t.from;
+    if (typeof t.data === "string") {
+      summary.selector = t.data.slice(0, 10);
+      summary.dataLen = Math.max(0, Math.floor((t.data.length - 2) / 2));
+    }
+  }
+  return summary;
+}
+
 async function decideInner(
   message: Message,
   options: DecisionOptions,
 ): Promise<DecisionResult> {
   logIncoming(message);
+  markPhase(message.requestId, "lifecycle_start");
   const pending: PendingRequest = {
     requestId: message.requestId,
     hostname: message.data.hostname,
@@ -186,7 +212,7 @@ async function decideInner(
   await pendingPut(pending);
 
   try {
-    const { result: lifecycle } = await withTimeout(
+    const { result: lifecycle, timedOut } = await withTimeout(
       runLifecycle(message),
       HARD_TIMEOUT_MS,
       {
@@ -198,6 +224,12 @@ async function decideInner(
         verdictSource: "fail_closed" as const,
       },
     );
+    if (timedOut) {
+      // Durably snapshot the in-flight fetches + phase timeline so the
+      // (intermittent, not-reproducible-on-demand) 8s overrun is diagnosable
+      // after the fact — even if no one was watching and the SW later evicts.
+      await captureTimeout(message.requestId, txSummaryForDiag(message));
+    }
     const { verdict } = lifecycle;
 
     let ok = false;
@@ -504,10 +536,11 @@ function logDecision(message: Message, verdict: VerdictDto): void {
 }
 
 async function runLifecycle(message: Message): Promise<LifecycleResult> {
-  // Venue order (Hyperliquid `/exchange`, …) — its own v2 path. It never
-  // carries EVM calldata, so it does NOT go through the `tryDeclarativeRouteV3`
-  // (calldata-decode) branch below; instead the order JSON is converted to an
-  // `ActionBody::Perp` directly and evaluated by the same stateless v2 pipeline.
+  // Venue request (Hyperliquid `/exchange`, ...) — its own v2 path. It never
+  // carries EVM calldata, so it does not go through the `tryDeclarativeRouteV3`
+  // calldata branch below; instead the JSON intent is converted to
+  // `ActionBody::HyperliquidCore` and evaluated by the same stateless v2
+  // pipeline.
   if (isVenueOrder(message)) {
     return venueOrderLifecycle(message);
   }
@@ -552,6 +585,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   let v3Outcome: DeclarativeRouteV3Outcome | undefined;
   if (isTransaction(message)) {
     try {
+      markPhase(message.requestId, "route_start");
       v3Outcome = await tryDeclarativeRouteV3({
         chainId: message.data.chainId,
         from: message.data.transaction.from ?? "0x" + "0".repeat(40),
@@ -560,12 +594,11 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         calldataHex: message.data.transaction.data,
         submittedAt: Math.floor(Date.now() / 1000),
       });
+      markPhase(message.requestId, "route_done", { outcome: v3Outcome.kind });
       declarativeV3Meta = auditFromDeclarativeV3Outcome(v3Outcome, nature);
-      // Plan §M4 — DevTools console 검증 entry. PDF FSM hierarchical
-      // ActionBody JSON 을 hit 시 dump (Plan 의 narrow scope 의 핵심
-      // deliverable: SW DevTools 에서 actions[] shape 정확히 출력).
-      // JSON.stringify with pretty-print so users can visually inspect
-      // each ActionBody's `domain` / `action` / payload / live_inputs.
+      // DevTools audit log for the v3 route outcome. On route hits this includes
+      // the decoded ActionBody tree so the service-worker log shows each
+      // action's domain, tag, payload, and live_inputs.
       console.info("[Scopeball] declarative-route-v3", {
         requestId: message.requestId,
         chainId: message.data.chainId,
@@ -581,10 +614,9 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
             ? { reason: v3Outcome.reason }
             : {
                 reason: v3Outcome.reason,
-                // Plan §M5 — e2e 진단용 cause exposure. fault 발생 시
-                // WASM EngineError 의 kind / message + stack 가 console 에
-                // 보여야 어떤 opcode / placeholder / serde 가 실패했는지
-                // 추적 가능.
+                // Include fault details so decode/install errors can be traced
+                // to the failing opcode, placeholder, serde path, or engine
+                // error kind.
                 cause:
                   v3Outcome.cause instanceof Error
                     ? {
@@ -786,20 +818,46 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
   } as const;
   const policyRpcUrl = process.env.POLICY_RPC_URL ?? "http://127.0.0.1:8787";
 
+  // Best-effort venue account-state enrichment: resolve this order's effective
+  // leverage (HL `activeAssetData`) so an order-leverage policy can fire — the
+  // order wire carries none. `collectHlLeverage` NEVER throws and is NOT part of
+  // the deny-closed fault surface below: a miss / timeout / unknown master just
+  // omits the leverage (a `context has leverage` policy stays dormant) rather
+  // than blocking the order. When this IS an `updateLeverage`, refresh the cache
+  // (fire-and-forget) so the next order on that asset sees the just-set value.
+  const account_leverage = await collectHlLeverage(action, message.data);
+  void noteHlLeverageUpdate(action, message.data);
+
   try {
     // PLAN: HL deny conditions read base context, so the planned set is usually
     // empty (no policy-RPC). Only dispatch when there is something to fetch, so
     // the common case needs no policy-rpc server.
-    const planned = await planActionRpcV2({ manifests, action, meta, tx });
+    const planned = await planActionRpcV2({
+      manifests,
+      action,
+      meta,
+      tx,
+      account_leverage,
+    });
     const results =
       planned.length > 0
         ? await dispatchCallsV2(planned, policyRpcUrl, { action, meta, tx })
         : {};
-    const verdict = await evaluateActionV2({ action, meta, tx, bundles, results });
+    const verdict = await evaluateActionV2({
+      action,
+      meta,
+      tx,
+      bundles,
+      results,
+      account_leverage,
+    });
     console.info("[Scopeball] venue-order-verdict", {
       requestId: message.requestId,
       venue: message.data.venue,
       verdict: verdict.kind,
+      // Injected order-time leverage (empty `{}` ⇒ enrichment dormant for this
+      // order — see the `[Scopeball] HL order-leverage ...` line for why).
+      account_leverage,
       matched: verdict.matched?.map((m) => ({ id: m.policy_id, severity: m.severity })) ?? [],
     });
     return {
@@ -1036,6 +1094,13 @@ async function typedSignatureLifecycle(
     try {
       // Per-child fan-out: evaluate this body and (if a multicall) each inner
       // child. No `recordSimulationOnServer` on the sig path (it never recorded).
+      // Resolve token decimals once for the whole (possibly multicall) body so
+      // each fungible amount gets its `amountNano` Long sibling (registry
+      // lookups; non-fatal — a miss just omits that token's nano).
+      const tokenDecimals = await collectTokenDecimals(
+        action,
+        message.data.chainId,
+      );
       verdicts.push(
         ...(await evaluateBodyTree(
           action,
@@ -1045,6 +1110,7 @@ async function typedSignatureLifecycle(
           manifests,
           policyRpcUrl,
           message.requestId,
+          tokenDecimals,
         )),
       );
     } catch (err) {
@@ -1133,6 +1199,10 @@ async function evaluateBodyTree(
   manifests: readonly unknown[],
   policyRpcUrl: string,
   requestId: string,
+  // Host-resolved per-token decimals for the WHOLE top-level body (collected
+  // once by the caller, then threaded through every child position) so each
+  // fungible amount's `amountNano` Long sibling is filled in the lowering.
+  tokenDecimals: Readonly<Record<string, number>>,
 ): Promise<VerdictDto[]> {
   const verdicts: VerdictDto[] = [];
   const domain =
@@ -1143,12 +1213,25 @@ async function evaluateBodyTree(
   if (domain !== undefined && domain !== "unknown") {
     // PLAN → DISPATCH (only when something is planned; a shared results map
     // would clobber since `call_id` repeats across siblings) → EVALUATE.
-    const planned = await planActionRpcV2({ manifests, action: body, meta, tx });
+    const planned = await planActionRpcV2({
+      manifests,
+      action: body,
+      meta,
+      tx,
+      token_decimals: tokenDecimals,
+    });
     const results =
       planned.length > 0
         ? await dispatchCallsV2(planned, policyRpcUrl, { action: body, meta, tx })
         : {};
-    const verdict = await evaluateActionV2({ action: body, meta, tx, bundles, results });
+    const verdict = await evaluateActionV2({
+      action: body,
+      meta,
+      tx,
+      bundles,
+      results,
+      token_decimals: tokenDecimals,
+    });
     verdicts.push(verdict);
     // DENY → capture the exact diagnosis context (action + materialized
     // enrichment results) so the dashboard can re-run "which clause blocked
@@ -1198,6 +1281,7 @@ async function evaluateBodyTree(
             manifests,
             policyRpcUrl,
             requestId,
+            tokenDecimals,
           )),
         );
       }
@@ -1257,6 +1341,13 @@ async function tryV2VerdictPath(
       // bundles fire at the batch vs the child positions; this supplies both.
       // `evaluateActionV2` never throws for policy/system faults (Fail inside) —
       // only plan/dispatch can throw.
+      // Resolve token decimals once for the whole (possibly multicall) body so
+      // each fungible amount gets its `amountNano` Long sibling (registry
+      // lookups; non-fatal — a miss just omits that token's nano).
+      const tokenDecimals = await collectTokenDecimals(
+        action,
+        message.data.chainId,
+      );
       verdicts.push(
         ...(await evaluateBodyTree(
           action,
@@ -1266,6 +1357,7 @@ async function tryV2VerdictPath(
           manifests,
           policyRpcUrl,
           message.requestId,
+          tokenDecimals,
         )),
       );
 

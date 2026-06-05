@@ -43,9 +43,23 @@ pub(crate) fn lower(
     }
     if let Some(amount) = action.amount {
         m.insert("amount".into(), Value::String(u256_hex(amount)));
+        if let Some(nano) = action
+            .asset_in
+            .as_ref()
+            .and_then(|t| ctx.amount_nano(t, amount))
+        {
+            m.insert("amountNano".into(), Value::from(nano));
+        }
     }
     if let Some(limit_amount) = action.limit_amount {
         m.insert("limitAmount".into(), Value::String(u256_hex(limit_amount)));
+        if let Some(nano) = action
+            .asset_out
+            .as_ref()
+            .and_then(|t| ctx.amount_nano(t, limit_amount))
+        {
+            m.insert("limitAmountNano".into(), Value::from(nano));
+        }
     }
     if let Some(user) = &action.user {
         m.insert("user".into(), Value::String(addr(user)));

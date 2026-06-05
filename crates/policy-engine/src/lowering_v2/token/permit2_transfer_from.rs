@@ -22,10 +22,16 @@ pub(crate) fn lower(
     m.insert("spender".into(), Value::String(addr(&action.spender)));
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     m.insert(
         "permittedAmount".into(),
         Value::String(u256_hex(action.permitted_amount)),
     );
+    if let Some(nano) = ctx.amount_nano(&action.token, action.permitted_amount) {
+        m.insert("permittedAmountNano".into(), Value::from(nano));
+    }
     m.insert(
         "sigDeadline".into(),
         Value::from(action.sig_deadline.as_unix()),

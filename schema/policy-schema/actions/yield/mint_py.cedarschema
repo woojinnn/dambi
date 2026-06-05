@@ -16,6 +16,8 @@ namespace Yield {
     externalToken?: Core::TokenRef,
     // Input amount — external token, or SY when externalToken absent (U256 hex).
     netInput: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    netInputNano?: Long,
     // Minimum PY (PT=YT) minted / slippage floor (U256 hex).
     minPyOut: String,
     // PT+YT recipient (address).

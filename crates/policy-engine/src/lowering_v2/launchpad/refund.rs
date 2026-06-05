@@ -29,7 +29,13 @@ pub(crate) fn lower(
         "refundAmount".into(),
         Value::String(u256_hex(action.live_inputs.refund_amount.value)),
     );
-    // `refundAmountNano` / `refundAmountUsd` are host-populated — OMITTED.
+    if let Some(nano) = ctx.amount_nano(
+        &action.live_inputs.refund_token.value,
+        action.live_inputs.refund_amount.value,
+    ) {
+        m.insert("refundAmountNano".into(), Value::from(nano));
+    }
+    // `refundAmountUsd` is host-populated — OMITTED.
     m.insert(
         "refundToken".into(),
         lower_token_ref(&action.live_inputs.refund_token.value),

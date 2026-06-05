@@ -8,7 +8,7 @@
  *
  *   `installDeclarativeBundleV3({ chainId, to, selector })` — fetches the
  *   matching v3 manifest from the registry, shape-validates it via
- *   `parseBundleV3` (Phase 0 hand-written validator), then forwards the
+ *   `parseBundleV3`, then forwards the
  *   *raw* JSON text to `declarativeInstallV3`. We deliberately do NOT
  *   re-stringify the parsed bundle: the parser is shape-only and could drop
  *   fields (or alter ordering) that the Rust deserializer depends on for
@@ -33,6 +33,7 @@ import {
   declarativeV3Cache,
   type DeclarativeV3CacheEntry,
 } from "./declarative-v3-cache";
+import { fetchStarted, fetchEnded } from "../diagnostics";
 
 /**
  * Cached v3 install results keyed by canonical callkey. The process-local map
@@ -88,8 +89,7 @@ export interface InstallDeclarativeBundleV3Args {
   selector: string;
   /**
    * Base URL of the registry. Defaults to the build-time
-   * `REGISTRY_BASE_URL`; M3 in-SW callers use the production Cloud Run
-   * URL injected via webpack.
+   * `REGISTRY_BASE_URL`; in-SW callers use the URL injected via webpack.
    */
   baseUrl?: string;
   /** Injected for tests — defaults to global `fetch`. */
@@ -109,7 +109,7 @@ export interface InstallDeclarativeV3Result {
 }
 
 /**
- * Phase A.1 — EIP-712 typed-data routing key. The 3-tuple
+ * EIP-712 typed-data routing key. The 3-tuple
  * `(chainId, verifyingContract, primaryType)` selects a manifest in the
  * `by-typed-data/` index; the optional `witnessType` is the 4th routing-key
  * segment that de-collides Permit2 `permitWitnessTransferFrom` orders
@@ -141,6 +141,59 @@ const DEFAULT_REGISTRY_BASE_URL =
   typeof process !== "undefined" && process.env && process.env.REGISTRY_BASE_URL
     ? process.env.REGISTRY_BASE_URL
     : "http://localhost:8000";
+
+/**
+ * Wrap a registry `fetch` with sent/received/duration + URL console logging so a
+ * slow registry round-trip — the suspected cause of the `__engine::timeout` 8s
+ * budget overrun — is visible in the SW DevTools: exactly which URL, when it was
+ * sent, when it answered, and how long it took (wall-clock + ms).
+ *
+ * On a hang the "→ sent" line prints but the "← recv" line never does, so the
+ * stuck URL is still identifiable even when no response ever arrives.
+ */
+async function timedRegistryFetch(
+  doFetch: (url: string) => Promise<Response>,
+  url: string,
+  label: string,
+): Promise<Response> {
+  const sentAtMs = Date.now();
+  const startedAt = performance.now();
+  const traceSeq = fetchStarted(label, url);
+  console.info("[Scopeball] registry-fetch → sent", {
+    label,
+    url,
+    sentAt: new Date(sentAtMs).toISOString(),
+  });
+  try {
+    const response = await doFetch(url);
+    const durationMs = Math.round(performance.now() - startedAt);
+    fetchEnded(traceSeq, response.status, durationMs);
+    console.info("[Scopeball] registry-fetch ← recv", {
+      label,
+      url,
+      sentAt: new Date(sentAtMs).toISOString(),
+      receivedAt: new Date().toISOString(),
+      durationMs,
+      status: response.status,
+    });
+    return response;
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - startedAt);
+    fetchEnded(
+      traceSeq,
+      `error:${err instanceof Error ? err.message : String(err)}`,
+      durationMs,
+    );
+    console.warn("[Scopeball] registry-fetch ✗ error", {
+      label,
+      url,
+      sentAt: new Date(sentAtMs).toISOString(),
+      durationMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+}
 
 function v3CallkeyCacheKey(
   chainId: number,
@@ -184,9 +237,27 @@ function v3TypedDataUrl(baseUrl: string, key: TypedDataMatchKey): string {
   return `${base}/index/by-typed-data/${file}.json`;
 }
 
+function v3SelectorCacheKey(chainId: number, selector: string): string {
+  return `sel:${chainId}__${selector.toLowerCase()}`;
+}
+
 /**
- * M3 — hydrate a v3 bundle for `(chainId, to, selector)` from the registry
- * and install it into the WASM engine.
+ * Build the `by-selector/` index URL for an address-agnostic adapter. MUST
+ * mirror build-index's `selectorFilename` (`<chainId>__<selector.lower>.json`)
+ * — no address segment.
+ */
+function v3SelectorUrl(
+  baseUrl: string,
+  chainId: number,
+  selector: string,
+): string {
+  const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  return `${base}/index/by-selector/${chainId}__${selector.toLowerCase()}.json`;
+}
+
+/**
+ * Hydrate a v3 bundle for `(chainId, to, selector)` from the registry and
+ * install it into the WASM engine.
  *
  * Pipeline:
  *   1. Cache lookup — return the prior `DeclarativeInstallResult` when the
@@ -221,13 +292,12 @@ export async function installDeclarativeBundleV3(
     // `decoderId` / `bundleId` for telemetry, but exposing the parsed
     // bundle keeps the API uniform with the cold path. We re-parse the
     // raw text we still hold via the WASM-side state map; since the SW
-    // does not have direct access to that map, M3 carries `bundle`
+    // does not have direct access to that map, this loader carries `bundle`
     // alongside the cache.
     const parsedBundle = v3CachedBundleByCallKey.get(cacheKey);
     if (parsedBundle) {
-      // Plan §M5 — 사용자 시각 확인용 console marker. cache hit path =
-      // 같은 callkey 두 번째+ 호출. WASM in-memory `DECLARATIVE_V3_STATE`
-      // thread_local 에는 이미 등록된 상태 (= chrome.storage 와 별개).
+      // Cache-hit marker for repeat calls in the same service-worker lifetime;
+      // WASM already has this bundle installed in its in-memory v3 state.
       console.info("[Scopeball] installDeclarativeBundleV3 cache-hit", {
         callkey: cacheKey,
         bundleId: cached.bundle_id,
@@ -242,10 +312,10 @@ export async function installDeclarativeBundleV3(
     // Cache desync — fall through to a full re-hydration.
   }
 
-  // Layer 2 — chrome.storage.local mirror (plan §M3 SW restart 영속화).
-  // SW cold start 후 in-memory v3InstallCache 는 비어있지만 chrome.storage
-  // 에 직전 lifetime 의 bundle 이 남아있을 수 있음. hit 시 WASM 에 다시
-  // install 하고 in-memory cache 도 재구성 — registry-api-v3 round-trip 없음.
+  // chrome.storage.local mirror. After a service-worker cold start the
+  // process-local cache is empty, but a prior lifetime may have persisted the
+  // bundle. On hit, reinstall into WASM and rebuild the in-memory cache without
+  // a registry round-trip.
   try {
     const storageEntry = await declarativeV3Cache.get(cacheKey);
     if (storageEntry) {
@@ -290,7 +360,7 @@ export async function installDeclarativeBundleV3(
 
   let response: Response;
   try {
-    response = await doFetch(url);
+    response = await timedRegistryFetch(doFetch, url, "callkey");
   } catch (err) {
     throw new InstallDeclarativeV3Error(
       "fetch",
@@ -368,13 +438,23 @@ export async function installDeclarativeBundleV3(
     v3CachedBundleByCallKey.set(k, parsedBundle);
   }
 
-  // Layer 2 persist — mirror the fresh install into chrome.storage.local
-  // so the next SW cold-start can rehydrate without another
-  // registry-api-v3 fetch. We mirror EVERY callkey the bundle covers
-  // (chain_to_addresses cartesian) under the same entry shape; the
-  // serialized payload is small (single shared bundle reference per
-  // record on disk after JSON serialize-deserialize) and the cap of 256
-  // entries gates DoS.
+  // Layer 2 persist — mirror the fresh install into chrome.storage.local so
+  // the next SW cold-start can rehydrate THIS callkey without another
+  // registry-api-v3 fetch. We persist ONLY the requested callkey, NOT the
+  // bundle's full `chain_to_addresses` cartesian. Rationale: every
+  // `declarativeV3Cache.put` re-serializes the ENTIRE growing record and
+  // does a full `storage.local.set` (see declarative-v3-cache.ts), so the
+  // old fan-out — one awaited put per address — was O(N²) writes. A
+  // large-match bundle (e.g. `standard/erc20/approve`, ~3891 token
+  // addresses) spent ~7.7s in this loop on first install, blowing the
+  // `HARD_TIMEOUT_MS = 8000` decision budget (the `__engine::timeout`
+  // 8s overrun). Coverage is unaffected: siblings stay routable for THIS SW
+  // lifetime via the in-memory mirror above + the WASM bridge (one install
+  // bridges every address in the served match); on a cold SW restart an
+  // as-yet-unseen sibling token simply re-fetches its own tiny by-callkey
+  // file on demand — a cache-warmth trade, never a route miss. (The old
+  // `MAX_CALLKEYS = 256` cap already evicted all but the last 256 fanned-out
+  // entries anyway, so almost no durable warmth is lost.)
   const fetchedAtMs = Date.now();
   const sha256 = parsedResponse.bundle_sha256 ?? "";
   const persistEntry: DeclarativeV3CacheEntry = {
@@ -386,11 +466,6 @@ export async function installDeclarativeBundleV3(
   };
   try {
     await declarativeV3Cache.put(cacheKey, persistEntry);
-    for (const [cid, addr] of matchEntriesV3(parsedBundle.match)) {
-      const k = v3CallkeyCacheKey(cid, addr, sel);
-      if (k === cacheKey) continue; // already persisted above
-      await declarativeV3Cache.put(k, persistEntry);
-    }
   } catch (err) {
     // Persisting is best-effort — degrade gracefully so a storage fault
     // (quota exceeded etc.) cannot block the v3 install path itself.
@@ -400,10 +475,8 @@ export async function installDeclarativeBundleV3(
     );
   }
 
-  // Plan §M5 — 사용자 시각 확인용 console marker. fresh install path =
-  // registry-api-v3 fetch + parseBundleV3 + WASM declarative_install_v3
-  // 까지 통과 + chrome.storage.local mirror 완료. SW restart 후 같은
-  // callkey 재진입 시 storage-hit 으로 떨어짐.
+  // Fresh-install marker: registry fetch, parseBundleV3, WASM install, and
+  // best-effort chrome.storage mirroring all completed for this callkey.
   console.info("[Scopeball] installDeclarativeBundleV3 fresh-install", {
     callkey: cacheKey,
     url,
@@ -423,7 +496,7 @@ export async function installDeclarativeBundleV3(
 const v3CachedBundleByCallKey = new Map<string, V3Bundle>();
 
 /**
- * Phase A.1 — hydrate + install the v3 bundle for an EIP-712 typed-data key
+ * Hydrate and install the v3 bundle for an EIP-712 typed-data key
  * `(chainId, verifyingContract, primaryType[, witnessType])` so a subsequent
  * `declarative_route_typed_data_v3_json` finds it. The install populates the
  * WASM typed_data bridge the same `declarative_install_v3_json` call backs for
@@ -463,7 +536,7 @@ export async function installDeclarativeBundleV3ByTypedData(
 
   let response: Response;
   try {
-    response = await doFetch(url);
+    response = await timedRegistryFetch(doFetch, url, "typed-data");
   } catch (err) {
     console.warn(
       "[Scopeball] installDeclarativeBundleV3ByTypedData fetch failed",
@@ -547,6 +620,119 @@ export async function installDeclarativeBundleV3ByTypedData(
   );
 
   return { ok: true, bundleId: installed.bundle_id };
+}
+
+/**
+ * Address-agnostic (selector-only) hydrate + install — standard NFT
+ * `setApprovalForAll`. Fetches the `by-selector/` index entry for
+ * `(chainId, selector)` and installs it; the WASM route then reaches it via the
+ * `selector_bridge` after a per-address callkey miss.
+ *
+ * Mirrors {@link installDeclarativeBundleV3} but fetches the `by-selector/`
+ * index (URL via {@link v3SelectorUrl}). Returns the install result, or `null`
+ * on ANY miss/fault (404 / parse / install). It NEVER throws: the on-chain tx
+ * flow is warn-closed, so a fault here degrades to the same fail-closed warn as
+ * a plain miss. Memory cache only (re-fetch on SW cold start is cheap; the WASM
+ * install is idempotent) under the `sel:`-prefixed key so it cannot collide
+ * with the `v3:` callkey or `td:` typed-data entries.
+ */
+export async function installDeclarativeBundleV3BySelector(args: {
+  chainId: number;
+  selector: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<InstallDeclarativeV3Result | null> {
+  const cacheKey = v3SelectorCacheKey(args.chainId, args.selector);
+  const cached = v3InstallCache.get(cacheKey);
+  const cachedBundle = v3CachedBundleByCallKey.get(cacheKey);
+  if (cached && cachedBundle) {
+    return {
+      decoderId: cached.decoder_id,
+      bundleId: cached.bundle_id,
+      bundle: cachedBundle,
+    };
+  }
+
+  const baseUrl = args.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
+  const doFetch = args.fetchImpl ?? fetch;
+  const url = v3SelectorUrl(baseUrl, args.chainId, args.selector);
+
+  let response: Response;
+  try {
+    response = await doFetch(url);
+  } catch (err) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector fetch failed", {
+      selectorKey: cacheKey,
+      message: err instanceof Error ? err.message : err,
+    });
+    return null;
+  }
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector fetch_status", {
+      selectorKey: cacheKey,
+      status: response.status,
+    });
+    return null;
+  }
+
+  let parsedResponse: DeclarativeRegistryV3Response;
+  try {
+    parsedResponse = (await response.json()) as DeclarativeRegistryV3Response;
+  } catch (err) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector json parse failed", {
+      selectorKey: cacheKey,
+      message: err instanceof Error ? err.message : err,
+    });
+    return null;
+  }
+
+  if (!parsedResponse || parsedResponse.matched !== true) return null;
+
+  let parsedBundle: V3Bundle | null;
+  try {
+    parsedBundle = parseBundleV3(parsedResponse.bundle);
+  } catch (err) {
+    if (err instanceof BundleParseError) {
+      console.warn("[Scopeball] installDeclarativeBundleV3BySelector parse failed", {
+        selectorKey: cacheKey,
+        message: err.message,
+      });
+      return null;
+    }
+    throw err;
+  }
+  if (parsedBundle === null) return null;
+
+  const bundleJson = JSON.stringify(parsedResponse.bundle);
+  let installed: DeclarativeInstallResult;
+  try {
+    installed = await declarativeInstallV3(bundleJson);
+  } catch (err) {
+    console.warn("[Scopeball] installDeclarativeBundleV3BySelector install failed", {
+      selectorKey: cacheKey,
+      message: err instanceof Error ? err.message : err,
+    });
+    return null;
+  }
+
+  v3InstallCache.set(cacheKey, installed);
+  v3CachedBundleByCallKey.set(cacheKey, parsedBundle);
+  v3InstalledBundleIds.add(installed.bundle_id);
+
+  console.info("[Scopeball] installDeclarativeBundleV3BySelector fresh-install", {
+    selectorKey: cacheKey,
+    url,
+    bundleId: installed.bundle_id,
+    decoderId: installed.decoder_id,
+  });
+
+  return {
+    decoderId: installed.decoder_id,
+    bundleId: installed.bundle_id,
+    bundle: parsedBundle,
+  };
 }
 
 /**

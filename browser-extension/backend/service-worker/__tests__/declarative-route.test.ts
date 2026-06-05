@@ -3,11 +3,14 @@ import { encodeAbiParameters, encodeFunctionData, type Hex } from "viem";
 
 const mocks = vi.hoisted(() => ({
   installDeclarativeBundleV3: vi.fn(),
+  installDeclarativeBundleV3BySelector: vi.fn(),
   declarativeRouteRequestV3: vi.fn(),
 }));
 
 vi.mock("../adapter-loader/declarative-adapter-loader", () => ({
   installDeclarativeBundleV3: mocks.installDeclarativeBundleV3,
+  installDeclarativeBundleV3BySelector:
+    mocks.installDeclarativeBundleV3BySelector,
   InstallDeclarativeV3Error: class InstallDeclarativeV3Error extends Error {},
 }));
 
@@ -163,6 +166,107 @@ describe("tryDeclarativeRouteV3", () => {
       ),
     ).toEqual(["0xac9650d8", "0xfc6f7865", "0x49404b7c", "0xdf2ab5bb"]);
     expect(mocks.declarativeRouteRequestV3).toHaveBeenCalledOnce();
+  });
+
+  const setApprovalForAllAbi = [
+    {
+      name: "setApprovalForAll",
+      type: "function",
+      stateMutability: "nonpayable",
+      inputs: [
+        { name: "operator", type: "address" },
+        { name: "approved", type: "bool" },
+      ],
+    },
+  ] as const;
+  const BAYC = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d"; // unregistered erc721
+  const setApprovalCalldata = encodeFunctionData({
+    abi: setApprovalForAllAbi,
+    functionName: "setApprovalForAll",
+    args: ["0x1e0049783f008a0085193e00003d00cd54003c71", true],
+  });
+
+  it("falls back to by-selector for setApprovalForAll on an unregistered collection", async () => {
+    // Per-address callkey MISSES (BAYC is not in the token registry) ...
+    mocks.installDeclarativeBundleV3.mockResolvedValue(null);
+    // ... but the address-agnostic by-selector index has the decoder.
+    mocks.installDeclarativeBundleV3BySelector.mockResolvedValue(
+      installed(childBundle),
+    );
+    mocks.declarativeRouteRequestV3.mockResolvedValue({
+      decoder_id: "standard/nft/set-approval-for-all@1.0.0",
+      actions: [
+        {
+          body: {
+            domain: "token",
+            action: "nft_set_approval_for_all",
+            contract: BAYC,
+            spender: "0x1e0049783f008a0085193e00003d00cd54003c71",
+            approved: true,
+          },
+        },
+      ],
+    });
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0xf7c57e015b57e2b58949353599e1a7a1e5e7fc01",
+      to: BAYC,
+      calldataHex: setApprovalCalldata,
+    });
+
+    expect(outcome.kind).toBe("hit");
+    expect(mocks.installDeclarativeBundleV3BySelector).toHaveBeenCalledWith({
+      chainId: 1,
+      selector: "0xa22cb465",
+    });
+    expect(mocks.declarativeRouteRequestV3).toHaveBeenCalledOnce();
+  });
+
+  it("warn-closes (miss) when BOTH per-address and by-selector miss", async () => {
+    mocks.installDeclarativeBundleV3.mockResolvedValue(null);
+    mocks.installDeclarativeBundleV3BySelector.mockResolvedValue(null);
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0xf7c57e015b57e2b58949353599e1a7a1e5e7fc01",
+      to: BAYC,
+      calldataHex: setApprovalCalldata,
+    });
+
+    expect(outcome.kind).toBe("miss");
+    expect(mocks.declarativeRouteRequestV3).not.toHaveBeenCalled();
+  });
+
+  it("does NOT use the by-selector fallback for a non-agnostic selector miss", async () => {
+    // erc20 approve (0x095ea7b3) shares no selector with the agnostic allowlist,
+    // so a per-address miss must stay a miss — never the NFT fallback.
+    const approveCalldata = encodeFunctionData({
+      abi: [
+        {
+          name: "approve",
+          type: "function",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "spender", type: "address" },
+            { name: "amount", type: "uint256" },
+          ],
+        },
+      ],
+      functionName: "approve",
+      args: ["0x1111111111111111111111111111111111111111", 1n],
+    });
+    mocks.installDeclarativeBundleV3.mockResolvedValue(null);
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0xf7c57e015b57e2b58949353599e1a7a1e5e7fc01",
+      to: "0x2222222222222222222222222222222222222222",
+      calldataHex: approveCalldata,
+    });
+
+    expect(outcome.kind).toBe("miss");
+    expect(mocks.installDeclarativeBundleV3BySelector).not.toHaveBeenCalled();
   });
 
   it("preinstalls Bundler3 per-leg-to children at each leg's OWN `to`", async () => {

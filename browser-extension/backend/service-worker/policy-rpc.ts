@@ -1,4 +1,5 @@
 import { tryHandleLocally } from "./local-method-handlers";
+import { fetchStarted, fetchEnded } from "./diagnostics";
 // `./scopeball-auth/*` is imported LAZILY inside the authenticated dispatch path
 // only — it pulls `webextension-polyfill` (browser-only), which would otherwise
 // break every (test) importer of this module at load time.
@@ -473,11 +474,26 @@ async function postPolicyRpc(
 ): Promise<PolicyRpcResponseDto> {
   const url = `${policyRpcUrl.replace(/\/+$/, "")}/v1/rpc`;
   const startedAtMs = Date.now();
+  const traceSeq = fetchStarted("dispatch", url);
+  console.info("[Scopeball] registry-fetch → sent", {
+    label: "dispatch",
+    url,
+    sentAt: new Date(startedAtMs).toISOString(),
+  });
   try {
     const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(plan),
+    });
+    fetchEnded(traceSeq, response.status, Date.now() - startedAtMs);
+    console.info("[Scopeball] registry-fetch ← recv", {
+      label: "dispatch",
+      url,
+      sentAt: new Date(startedAtMs).toISOString(),
+      receivedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAtMs,
+      status: response.status,
     });
     if (!response.ok) {
       throw new Error(`policy-rpc returned HTTP ${response.status}`);
@@ -497,6 +513,11 @@ async function postPolicyRpc(
     });
     return body;
   } catch (err) {
+    fetchEnded(
+      traceSeq,
+      `error:${err instanceof Error ? err.message : String(err)}`,
+      Date.now() - startedAtMs,
+    );
     console.error("[Scopeball] policy-rpc failed", {
       requestId: plan.request_id,
       url,

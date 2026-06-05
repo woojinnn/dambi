@@ -37,6 +37,7 @@ vi.mock("../wasm-bridge", () => ({
 import {
   __resetDeclarativeV3CacheForTest,
   installDeclarativeBundleV3,
+  installDeclarativeBundleV3BySelector,
   InstallDeclarativeV3Error,
 } from "../adapter-loader/declarative-adapter-loader";
 
@@ -285,7 +286,7 @@ describe("installDeclarativeBundleV3", () => {
   // Layer 2 — chrome.storage.local mirror (plan §M3 SW restart 영속화)
   // ---------------------------------------------------------------------------
 
-  it("persists the fresh install into chrome.storage.local (one entry per chain_to_addresses pair)", async () => {
+  it("persists ONLY the requested callkey — no chain_to_addresses fan-out (8s install fix)", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -323,21 +324,26 @@ describe("installDeclarativeBundleV3", () => {
       | undefined;
     expect(stored).toBeTruthy();
     expect(stored!.schemaVersion).toBe(2);
-    // Bundle body is deduped: one V3Bundle even though 2 callkeys reach it.
     expect(Object.keys(stored!.bundles)).toEqual([v3Bundle.id]);
     const keys = Object.keys(stored!.callkeys);
-    // chain_to_addresses 가 2 chain (1 + 8453) × 1 addr/chain = 2 callkey.
-    expect(keys.length).toBe(2);
-    expect(keys).toContain(
+    // Regression guard for the `__engine::timeout` 8s overrun: installing a
+    // large-match bundle used to persist ONE chrome.storage.local record per
+    // chain_to_addresses pair, and every `put` re-serializes the whole record
+    // (O(N²) writes — ~7.7s for the ~3891-address standard/erc20/approve
+    // bundle, blowing HARD_TIMEOUT_MS=8000). We now persist ONLY the requested
+    // callkey; the sibling (chain 8453) is NOT mirrored to disk — it re-fetches
+    // its own tiny by-callkey file on demand after a cold SW restart. In-session
+    // sibling routing is unaffected (one WASM install bridges every address in
+    // the served match + the in-memory mirror covers it). Do NOT reintroduce
+    // the per-address persist fan-out.
+    expect(keys).toEqual([
       "v3:1__0x7a250d5630b4cf539739df2c5dacb4c659f2488d__0x18cbafe5",
-    );
-    expect(keys).toContain(
+    ]);
+    expect(keys).not.toContain(
       "v3:8453__0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24__0x18cbafe5",
     );
-    for (const k of keys) {
-      expect(stored!.callkeys[k].bundleId).toBe(v3Bundle.id);
-      expect(stored!.callkeys[k].bundleSha256).toBe("0x" + "a".repeat(64));
-    }
+    expect(stored!.callkeys[keys[0]].bundleId).toBe(v3Bundle.id);
+    expect(stored!.callkeys[keys[0]].bundleSha256).toBe("0x" + "a".repeat(64));
   });
 
   it("rehydrates from chrome.storage.local on a cold SW (storage-hit path)", async () => {
@@ -383,5 +389,85 @@ describe("installDeclarativeBundleV3", () => {
     expect(mocks.declarativeInstallV3).toHaveBeenCalledWith(
       JSON.stringify(v3Bundle),
     );
+  });
+});
+
+describe("installDeclarativeBundleV3BySelector", () => {
+  const fetchMock = vi.fn();
+  // Address-agnostic bundle: match keyed by (chain, selector) ONLY, no `to`.
+  // This is exactly the shape parseMatch must accept (chain_ids present, no
+  // chain_to_addresses / to) — a v1-legacy parse would reject it on `to`.
+  const agnosticBundle = {
+    type: "adapter_action",
+    id: "standard/nft/set-approval-for-all@1.0.0",
+    schema_version: "3",
+    match: {
+      selector: "0xa22cb465",
+      address_agnostic: true,
+      chain_ids: [1, 10, 8453, 42161],
+    },
+    abi_fragment: {
+      function_name: "setApprovalForAll",
+      abi: { name: "setApprovalForAll", type: "function", inputs: [] },
+    },
+    emit: {
+      strategy: "single_emit",
+      body: {
+        domain: "token",
+        token: { action: "nft_set_approval_for_all" },
+      },
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.localStore.clear();
+    __resetDeclarativeV3CacheForTest();
+    fetchMock.mockReset();
+  });
+
+  it("fetches by-selector, parses the address-agnostic bundle, installs via WASM", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          matched: true,
+          bundle_id: agnosticBundle.id,
+          bundle: agnosticBundle,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    mocks.declarativeInstallV3.mockResolvedValueOnce({
+      decoder_id: agnosticBundle.id,
+      bundle_id: agnosticBundle.id,
+    });
+
+    const result = await installDeclarativeBundleV3BySelector({
+      chainId: 1,
+      selector: "0xa22cb465",
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.bundleId).toBe(agnosticBundle.id);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.invalid/index/by-selector/1__0xa22cb465.json",
+    );
+    expect(mocks.declarativeInstallV3).toHaveBeenCalledWith(
+      JSON.stringify(agnosticBundle),
+    );
+  });
+
+  it("returns null on a 404 by-selector miss without installing", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 404 }));
+    const result = await installDeclarativeBundleV3BySelector({
+      chainId: 1,
+      selector: "0xa22cb465",
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    expect(result).toBeNull();
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 });

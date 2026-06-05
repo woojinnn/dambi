@@ -25,6 +25,9 @@ pub(crate) fn lower(
     m.insert("venue".into(), lower_stake_venue(&action.venue));
     m.insert("token".into(), lower_token_ref(&action.token));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     if let Some(on_behalf_of) = &action.on_behalf_of {
         m.insert("onBehalfOf".into(), Value::String(addr(on_behalf_of)));
     }

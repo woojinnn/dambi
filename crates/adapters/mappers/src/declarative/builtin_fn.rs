@@ -57,6 +57,9 @@ pub const WHITELIST: &[&str] = &[
     "balancer_v2_batch_swap_field",
     "balancer_v3_zip_pool_tokens",
     "balancer_v3_swap_path_field",
+    "seaport_items",
+    "seaport_aggregate_items",
+    "seaport_basic_order",
     "tuple_array_field",
     "array_len",
     "u64_saturating",
@@ -85,6 +88,9 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "balancer_v2_batch_swap_field" => balancer_v2_batch_swap_field(args),
         "balancer_v3_zip_pool_tokens" => balancer_v3_zip_pool_tokens(args),
         "balancer_v3_swap_path_field" => balancer_v3_swap_path_field(args),
+        "seaport_items" => seaport_items(args),
+        "seaport_aggregate_items" => seaport_aggregate_items(args),
+        "seaport_basic_order" => seaport_basic_order(args),
         "tuple_array_field" => tuple_array_field(args),
         "array_len" => array_len(args),
         "u64_saturating" => u64_saturating(args),
@@ -1290,6 +1296,329 @@ fn tuple_array_field(args: &[JsonValue]) -> Result<JsonValue, String> {
     Ok(JsonValue::Array(out))
 }
 
+// ── Seaport (NFT marketplace) item decoders ──────────────────────────────────
+//
+// Seaport orders carry `offer[]` / `consideration[]` arrays of items. From
+// CALLDATA they decode POSITIONALLY (`[itemType, token, identifierOrCriteria,
+// startAmount, endAmount, (recipient)]`); from a TYPED-DATA signature they
+// arrive as NAMED objects (`{itemType, token, …}`, the WRAP RULE). These
+// executors normalize either shape into the `marketplace::MarketItem` JSON the
+// ActionBody consumes, applying the criteria relabel (concrete `token_id` vs a
+// Merkle `criteria_root`). `anyToken` itself is derived later in lowering.
+
+/// Read item field `pos` (calldata positional) or `name` (typed-data named).
+fn seaport_item_field<'a>(elem: &'a JsonValue, pos: usize, name: &str) -> Option<&'a JsonValue> {
+    match elem {
+        JsonValue::Array(a) => a.get(pos),
+        JsonValue::Object(o) => o.get(name),
+        _ => None,
+    }
+}
+
+/// Map a Seaport `ItemType` (0..=5) to `(kind, carries_token_id, is_criteria)`.
+fn seaport_item_kind(item_type: u64) -> Result<(&'static str, bool, bool), String> {
+    Ok(match item_type {
+        0 => ("native", false, false),
+        1 => ("erc20", false, false),
+        2 => ("erc721", true, false),
+        3 => ("erc1155", true, false),
+        4 => ("erc721_criteria", false, true),
+        5 => ("erc1155_criteria", false, true),
+        other => return Err(format!("seaport: unknown ItemType {other}")),
+    })
+}
+
+/// Build one `MarketItem` JSON from a decoded Seaport offer/consideration item.
+/// `read_recipient` ⇒ a consideration leg (positional index 5 / `"recipient"`).
+fn seaport_build_item(
+    elem: &JsonValue,
+    idx: usize,
+    read_recipient: bool,
+    label: &str,
+) -> Result<JsonValue, String> {
+    let item_type = seaport_item_field(elem, 0, "itemType")
+        .and_then(json_to_u64)
+        .ok_or_else(|| format!("{label}: missing/non-uint itemType"))?;
+    let (kind, carries_token_id, is_criteria) = seaport_item_kind(item_type)?;
+
+    let mut m = serde_json::Map::new();
+    m.insert("idx".to_owned(), JsonValue::Number(idx.into()));
+    m.insert("kind".to_owned(), JsonValue::String(kind.to_owned()));
+
+    if item_type != 0 {
+        let token = seaport_item_field(elem, 1, "token")
+            .ok_or_else(|| format!("{label}: missing token"))?;
+        let addr = json_address(token, &format!("{label}: token"))?;
+        m.insert("token".to_owned(), JsonValue::String(format!("{addr:#x}")));
+    }
+
+    let identifier = seaport_item_field(elem, 2, "identifierOrCriteria")
+        .ok_or_else(|| format!("{label}: missing identifierOrCriteria"))?;
+    let id_u256 = json_u256(identifier, &format!("{label}: identifierOrCriteria"))?;
+    if is_criteria {
+        // identifierOrCriteria is a Merkle root, NOT a tokenId → 32-byte hex.
+        m.insert(
+            "criteria_root".to_owned(),
+            JsonValue::String(format!("0x{}", hex::encode(id_u256.to_be_bytes::<32>()))),
+        );
+    } else if carries_token_id {
+        m.insert(
+            "token_id".to_owned(),
+            JsonValue::String(id_u256.to_string()),
+        );
+    }
+
+    let start = seaport_item_field(elem, 3, "startAmount")
+        .ok_or_else(|| format!("{label}: missing startAmount"))?;
+    m.insert(
+        "start_amount".to_owned(),
+        JsonValue::String(json_u256(start, &format!("{label}: startAmount"))?.to_string()),
+    );
+    let end = seaport_item_field(elem, 4, "endAmount")
+        .ok_or_else(|| format!("{label}: missing endAmount"))?;
+    m.insert(
+        "end_amount".to_owned(),
+        JsonValue::String(json_u256(end, &format!("{label}: endAmount"))?.to_string()),
+    );
+
+    if read_recipient {
+        let recipient = seaport_item_field(elem, 5, "recipient")
+            .ok_or_else(|| format!("{label}: consideration item missing recipient"))?;
+        let addr = json_address(recipient, &format!("{label}: recipient"))?;
+        m.insert(
+            "recipient".to_owned(),
+            JsonValue::String(format!("{addr:#x}")),
+        );
+    }
+
+    Ok(JsonValue::Object(m))
+}
+
+/// `seaport_items(items, role) -> [MarketItem]` — normalize ONE order's
+/// `offer[]` / `consideration[]`. `role ∈ {"offer","consideration"}`. Handles
+/// both calldata-positional and typed-data-named element shapes.
+fn seaport_items(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "seaport_items expects 2 args (items, role), got {}",
+            args.len()
+        ));
+    }
+    let items = args[0]
+        .as_array()
+        .ok_or("seaport_items: items arg is not an array")?;
+    let read_recipient = seaport_role(&args[1], "seaport_items")?;
+    let mut out = Vec::with_capacity(items.len());
+    for (i, elem) in items.iter().enumerate() {
+        out.push(seaport_build_item(
+            elem,
+            i,
+            read_recipient,
+            &format!("seaport_items[{i}]"),
+        )?);
+    }
+    Ok(JsonValue::Array(out))
+}
+
+/// `seaport_aggregate_items(orders, role) -> [MarketItem]` — COARSE concat of
+/// every order's `offer[]` / `consideration[]` across a batch fulfill/match
+/// (Seaport `fulfillments` netting is NOT applied — gross legs, conservative).
+/// Each order element's first slot is `OrderParameters` (positional [2]=offer,
+/// [3]=consideration); this holds for both `Order` and `AdvancedOrder` shapes.
+fn seaport_aggregate_items(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "seaport_aggregate_items expects 2 args (orders, role), got {}",
+            args.len()
+        ));
+    }
+    let orders = args[0]
+        .as_array()
+        .ok_or("seaport_aggregate_items: orders arg is not an array")?;
+    let read_recipient = seaport_role(&args[1], "seaport_aggregate_items")?;
+    let slot = if read_recipient { 3usize } else { 2usize };
+    let mut out = Vec::new();
+    let mut idx = 0usize;
+    for (oi, order) in orders.iter().enumerate() {
+        let params = order
+            .as_array()
+            .and_then(|o| o.first())
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| {
+                format!("seaport_aggregate_items: order[{oi}] has no OrderParameters tuple")
+            })?;
+        let items = params
+            .get(slot)
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| {
+                format!("seaport_aggregate_items: order[{oi}].parameters[{slot}] not an array")
+            })?;
+        for elem in items {
+            out.push(seaport_build_item(
+                elem,
+                idx,
+                read_recipient,
+                &format!("seaport_aggregate_items: order[{oi}]"),
+            )?);
+            idx += 1;
+        }
+    }
+    Ok(JsonValue::Array(out))
+}
+
+/// `seaport_basic_order(basicParams, field) -> [MarketItem]` — reconstruct the
+/// offer / consideration item arrays from a flattened `BasicOrderParameters`
+/// (fulfillBasicOrder / _efficient). `basicOrderType` (positional slot 8)
+/// encodes the route (`/4`, 0..=5) → item types. `field ∈ {"offer",
+/// "consideration"}`; consideration folds `additionalRecipients` (fees /
+/// royalties) after the primary leg.
+fn seaport_basic_order(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "seaport_basic_order expects 2 args (basicParams, field), got {}",
+            args.len()
+        ));
+    }
+    let p = args[0]
+        .as_array()
+        .ok_or("seaport_basic_order: basicParams is not a tuple array")?;
+    let field = args[1]
+        .as_str()
+        .ok_or("seaport_basic_order: field is not a string")?;
+    let get = |i: usize, what: &str| -> Result<&JsonValue, String> {
+        p.get(i)
+            .ok_or_else(|| format!("seaport_basic_order: missing basicParams[{i}] ({what})"))
+    };
+    let basic_order_type = json_to_u64(get(8, "basicOrderType")?)
+        .ok_or("seaport_basic_order: basicOrderType is not a uint")?;
+    let route = basic_order_type / 4; // 0..=5
+
+    match field {
+        "offer" => {
+            let kind = match route {
+                0 | 2 => "erc721",
+                1 | 3 => "erc1155",
+                4 | 5 => "erc20",
+                other => return Err(format!("seaport_basic_order: invalid route {other}")),
+            };
+            let token_id = if route <= 3 {
+                Some(get(6, "offerIdentifier")?)
+            } else {
+                None
+            };
+            Ok(JsonValue::Array(vec![seaport_basic_item(
+                0,
+                kind,
+                Some(get(5, "offerToken")?),
+                token_id,
+                get(7, "offerAmount")?,
+                None,
+            )?]))
+        }
+        "consideration" => {
+            let cons_token = get(0, "considerationToken")?;
+            let (primary_kind, primary_token, primary_token_id) = match route {
+                0 | 1 => ("native", None, None),
+                2 | 3 => ("erc20", Some(cons_token), None),
+                4 => (
+                    "erc721",
+                    Some(cons_token),
+                    Some(get(1, "considerationIdentifier")?),
+                ),
+                5 => (
+                    "erc1155",
+                    Some(cons_token),
+                    Some(get(1, "considerationIdentifier")?),
+                ),
+                other => return Err(format!("seaport_basic_order: invalid route {other}")),
+            };
+            let mut out = vec![seaport_basic_item(
+                0,
+                primary_kind,
+                primary_token,
+                primary_token_id,
+                get(2, "considerationAmount")?,
+                Some(get(3, "offerer")?),
+            )?];
+            // additionalRecipients (fees/royalties) are paid in: routes 0,1 →
+            // native; routes 2,3 → considerationToken (ERC20); routes 4,5 →
+            // offerToken (ERC20 the taker receives).
+            let (add_kind, add_token) = match route {
+                0 | 1 => ("native", None),
+                2 | 3 => ("erc20", Some(cons_token)),
+                4 | 5 => ("erc20", Some(get(5, "offerToken")?)),
+                other => return Err(format!("seaport_basic_order: invalid route {other}")),
+            };
+            let additional = get(16, "additionalRecipients")?
+                .as_array()
+                .ok_or("seaport_basic_order: additionalRecipients is not an array")?;
+            for (i, ar) in additional.iter().enumerate() {
+                let amount = seaport_item_field(ar, 0, "amount")
+                    .ok_or("seaport_basic_order: additionalRecipient missing amount")?;
+                let recipient = seaport_item_field(ar, 1, "recipient")
+                    .ok_or("seaport_basic_order: additionalRecipient missing recipient")?;
+                out.push(seaport_basic_item(
+                    i + 1,
+                    add_kind,
+                    add_token,
+                    None,
+                    amount,
+                    Some(recipient),
+                )?);
+            }
+            Ok(JsonValue::Array(out))
+        }
+        other => Err(format!(
+            "seaport_basic_order: field must be offer|consideration, got {other}"
+        )),
+    }
+}
+
+/// `role` arg → `read_recipient` (`"consideration"` ⇒ true, `"offer"` ⇒ false).
+fn seaport_role(value: &JsonValue, label: &str) -> Result<bool, String> {
+    match value.as_str() {
+        Some("consideration") => Ok(true),
+        Some("offer") => Ok(false),
+        other => Err(format!(
+            "{label}: role must be offer|consideration, got {other:?}"
+        )),
+    }
+}
+
+/// Build a single fixed-price `MarketItem` JSON for the flattened basic-order
+/// path (start==end amount; no Dutch auction; criteria never appear in basic).
+fn seaport_basic_item(
+    idx: usize,
+    kind: &str,
+    token: Option<&JsonValue>,
+    token_id: Option<&JsonValue>,
+    amount: &JsonValue,
+    recipient: Option<&JsonValue>,
+) -> Result<JsonValue, String> {
+    let mut m = serde_json::Map::new();
+    m.insert("idx".to_owned(), JsonValue::Number(idx.into()));
+    m.insert("kind".to_owned(), JsonValue::String(kind.to_owned()));
+    if let Some(t) = token {
+        let a = json_address(t, "seaport_basic_order: token")?;
+        m.insert("token".to_owned(), JsonValue::String(format!("{a:#x}")));
+    }
+    if let Some(tid) = token_id {
+        let u = json_u256(tid, "seaport_basic_order: tokenId")?;
+        m.insert("token_id".to_owned(), JsonValue::String(u.to_string()));
+    }
+    let amt = json_u256(amount, "seaport_basic_order: amount")?;
+    m.insert(
+        "start_amount".to_owned(),
+        JsonValue::String(amt.to_string()),
+    );
+    m.insert("end_amount".to_owned(), JsonValue::String(amt.to_string()));
+    if let Some(r) = recipient {
+        let a = json_address(r, "seaport_basic_order: recipient")?;
+        m.insert("recipient".to_owned(), JsonValue::String(format!("{a:#x}")));
+    }
+    Ok(JsonValue::Object(m))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1917,5 +2246,169 @@ mod tests {
 
     fn uint(value: u64) -> DynSolValue {
         DynSolValue::Uint(U256::from(value), 256)
+    }
+
+    // ── Seaport item decoders ────────────────────────────────────────────────
+    const NFT: &str = "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d";
+    const ERC20: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const ZERO_ADDR: &str = "0x0000000000000000000000000000000000000000";
+    const ZERO32: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    const OFFERER: &str = "0x0000000000000000000000000000000000000abc";
+    const FEE_RECIP: &str = "0x0000a26b00c1f0df003000390027140000faa719";
+    const ALICE: &str = "0x000000000000000000000000000000000000a01c";
+
+    #[test]
+    fn seaport_items_positional_offer_erc721() {
+        // calldata positional: [itemType, token, identifierOrCriteria, start, end]
+        let items = json!([[2, NFT, "1234", "1", "1"]]);
+        let out = seaport_items(&[items, json!("offer")]).unwrap();
+        let item = &out.as_array().unwrap()[0];
+        assert_eq!(item["kind"], json!("erc721"));
+        assert_eq!(item["token_id"], json!("1234"));
+        assert_eq!(item["idx"], json!(0));
+        assert!(item.get("recipient").is_none());
+        assert!(item.get("criteria_root").is_none());
+    }
+
+    #[test]
+    fn seaport_items_named_consideration_native_with_recipient() {
+        // typed-data named element, native consideration leg w/ recipient
+        let items = json!([{
+            "itemType": 0, "token": ZERO_ADDR, "identifierOrCriteria": "0",
+            "startAmount": "1000000000000000000", "endAmount": "1000000000000000000",
+            "recipient": ALICE
+        }]);
+        let out = seaport_items(&[items, json!("consideration")]).unwrap();
+        let item = &out.as_array().unwrap()[0];
+        assert_eq!(item["kind"], json!("native"));
+        assert!(item.get("token").is_none());
+        assert_eq!(item["recipient"], json!(ALICE));
+        assert_eq!(item["start_amount"], json!("1000000000000000000"));
+    }
+
+    #[test]
+    fn seaport_items_criteria_relabels_root_not_tokenid() {
+        // itemType=4: identifierOrCriteria is a Merkle root → criteria_root, NOT token_id
+        let items = json!([[4, NFT, "0", "1", "1"]]);
+        let out = seaport_items(&[items, json!("offer")]).unwrap();
+        let item = &out.as_array().unwrap()[0];
+        assert_eq!(item["kind"], json!("erc721_criteria"));
+        assert!(item.get("token_id").is_none());
+        assert_eq!(item["criteria_root"], json!(ZERO32));
+    }
+
+    #[test]
+    fn seaport_aggregate_items_concats_orders_with_global_idx() {
+        // 2 orders; each order[0] = OrderParameters [offerer, zone, offer[], consideration[], …]
+        let order = |id: &str| {
+            json!([[
+                OFFERER,
+                ZERO_ADDR,
+                [[2, NFT, id, "1", "1"]],
+                [[0, ZERO_ADDR, "0", "1", "1", ALICE]]
+            ]])
+        };
+        let orders = json!([order("1"), order("2")]);
+        let out = seaport_aggregate_items(&[orders, json!("offer")]).unwrap();
+        let arr = out.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["idx"], json!(0));
+        assert_eq!(arr[0]["token_id"], json!("1"));
+        assert_eq!(arr[1]["idx"], json!(1));
+        assert_eq!(arr[1]["token_id"], json!("2"));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn basic_params(
+        cons_token: &str,
+        cons_id: &str,
+        cons_amount: &str,
+        offer_token: &str,
+        offer_id: &str,
+        offer_amount: &str,
+        basic_order_type: u64,
+        add: serde_json::Value,
+    ) -> JsonValue {
+        json!([
+            cons_token,
+            cons_id,
+            cons_amount,
+            OFFERER,
+            ZERO_ADDR,
+            offer_token,
+            offer_id,
+            offer_amount,
+            basic_order_type,
+            "0",
+            "0",
+            ZERO32,
+            "0",
+            ZERO32,
+            ZERO32,
+            1,
+            add,
+            "0xab"
+        ])
+    }
+
+    #[test]
+    fn seaport_basic_order_route0_eth_buy() {
+        // basicOrderType=0 (route 0: ETH→ERC721, taker buys NFT with ETH)
+        let p = basic_params(
+            ZERO_ADDR,
+            "0",
+            "1000000000000000000",
+            NFT,
+            "1234",
+            "1",
+            0,
+            json!([["50000000000000000", FEE_RECIP]]),
+        );
+        let offer = seaport_basic_order(&[p.clone(), json!("offer")]).unwrap();
+        let offer_arr = offer.as_array().unwrap();
+        assert_eq!(offer_arr.len(), 1);
+        assert_eq!(offer_arr[0]["kind"], json!("erc721"));
+        assert_eq!(offer_arr[0]["token_id"], json!("1234"));
+        // consideration: primary native to offerer + 1 native fee leg
+        let cons = seaport_basic_order(&[p, json!("consideration")]).unwrap();
+        let c = cons.as_array().unwrap();
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0]["kind"], json!("native"));
+        assert_eq!(c[0]["recipient"], json!(OFFERER));
+        assert_eq!(c[0]["start_amount"], json!("1000000000000000000"));
+        assert!(c[0].get("token").is_none());
+        assert_eq!(c[1]["kind"], json!("native"));
+        assert_eq!(c[1]["recipient"], json!(FEE_RECIP));
+        assert_eq!(c[1]["start_amount"], json!("50000000000000000"));
+    }
+
+    #[test]
+    fn seaport_basic_order_route4_sell_nft_for_erc20() {
+        // basicOrderType=16 (route 4: ERC721→ERC20, taker sells NFT, gets ERC20)
+        let p = basic_params(
+            NFT,
+            "777",
+            "1",
+            ERC20,
+            "0",
+            "1000000",
+            16,
+            json!([["25000", FEE_RECIP]]),
+        );
+        let offer = seaport_basic_order(&[p.clone(), json!("offer")]).unwrap();
+        let o = offer.as_array().unwrap();
+        assert_eq!(o[0]["kind"], json!("erc20"));
+        assert!(o[0].get("token_id").is_none());
+        assert_eq!(o[0]["token"], json!(ERC20));
+        let cons = seaport_basic_order(&[p, json!("consideration")]).unwrap();
+        let c = cons.as_array().unwrap();
+        // primary consideration = the NFT the taker hands over
+        assert_eq!(c[0]["kind"], json!("erc721"));
+        assert_eq!(c[0]["token_id"], json!("777"));
+        assert_eq!(c[0]["recipient"], json!(OFFERER));
+        // fee leg paid in the offer token (ERC20)
+        assert_eq!(c[1]["kind"], json!("erc20"));
+        assert_eq!(c[1]["token"], json!(ERC20));
+        assert_eq!(c[1]["recipient"], json!(FEE_RECIP));
     }
 }

@@ -24,6 +24,8 @@ namespace Amm {
     side: String,
     // User-signed bound (`minAmount` on buy / `maxAmount` on sell), U256 hex.
     amount: String,
+    // Token-native nano of `amount` (raw × 10^(9 − asset.decimals)). Host-populated.
+    amountNano?: Long,
     // Recipient of the bought asset / received GHO (Address).
     recipient: String,
     // Manifest-extensible slot.

@@ -27,6 +27,9 @@ pub(crate) fn lower(
     m.insert("gho".into(), lower_token_ref(&action.gho));
     m.insert("side".into(), Value::String(action.side.as_str().into()));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = ctx.amount_nano(&action.asset, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
 
     Ok(ctx.lowered(r#"Amm::Action::"GsmSwap""#, Value::Object(m)))

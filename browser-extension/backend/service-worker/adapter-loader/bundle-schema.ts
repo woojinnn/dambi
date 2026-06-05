@@ -38,6 +38,13 @@ export interface BundleMatch {
   chain_ids?: number[];
   /** v1 legacy — contract addresses. Absent when v2 shape used. Cartesian with `chain_ids`. */
   to?: string[];
+  /**
+   * Address-agnostic (selector-only) match — the bundle is keyed by
+   * `(chain_id, selector)` ALONE (no per-address callkey), so it routes on ANY
+   * contract address. Used for standard NFT `setApprovalForAll`. Requires
+   * `chain_ids` and forbids `chain_to_addresses` / `to`.
+   */
+  address_agnostic?: true;
   /** "0x" + 8 hex chars. */
   selector: string;
 }
@@ -663,11 +670,21 @@ function parseMatch(v: unknown, path: string): BundleMatch {
     );
   }
 
+  // Address-agnostic (selector-only) match — keyed by (chain_id, selector) with
+  // NO per-address `to`. Standard NFT setApprovalForAll. Handled first because
+  // it carries `chain_ids` but (unlike the v1 legacy shape) no `to`, so the v1
+  // branch's `reqAddressArray(obj.to)` would otherwise reject it.
+  if (obj.address_agnostic === true) {
+    const result: BundleMatch = { selector, address_agnostic: true };
+    result.chain_ids = reqChainIdArray(obj.chain_ids, `${path}.chain_ids`);
+    return result;
+  }
+
   const hasV2 = obj.chain_to_addresses !== undefined;
   const hasV1 = obj.chain_ids !== undefined || obj.to !== undefined;
   if (!hasV2 && !hasV1) {
     throw new BundleParseError(
-      `${path}: must have "chain_to_addresses" (v2) or "chain_ids"+"to" (v1 legacy)`,
+      `${path}: must have "chain_to_addresses" (v2), "chain_ids"+"to" (v1 legacy), or "address_agnostic"`,
     );
   }
 
@@ -787,6 +804,12 @@ export interface V3BundleMatch {
   chain_to_addresses_source?: string;
   /** Companion to `chain_to_addresses_source`. */
   chain_ids?: number[];
+  /**
+   * Address-agnostic (selector-only) match — keyed by (chain_id, selector)
+   * ALONE, no per-address callkey. Standard NFT setApprovalForAll. Requires
+   * `chain_ids`; mutually exclusive with chain_to_addresses(_source).
+   */
+  address_agnostic?: true;
   /** Optional EIP-712 typed-data section for sign-only bundles (Permit2 et al). */
   typed_data?: V3TypedData;
 }
@@ -854,13 +877,23 @@ function parseV3Match(v: unknown, path: string): V3BundleMatch {
 
   const hasExplicit = obj.chain_to_addresses !== undefined;
   const hasSource = obj.chain_to_addresses_source !== undefined;
-  if (!hasExplicit && !hasSource) {
+  const isAgnostic = obj.address_agnostic === true;
+  if (!hasExplicit && !hasSource && !isAgnostic) {
     throw new BundleParseError(
-      `${path}: must have "chain_to_addresses" or "chain_to_addresses_source"`,
+      `${path}: must have "chain_to_addresses", "chain_to_addresses_source", or "address_agnostic"`,
     );
   }
 
   const result: V3BundleMatch = { selector };
+
+  // Address-agnostic (selector-only) — standard NFT setApprovalForAll. Keyed by
+  // (chain_id, selector); carries chain_ids but NO per-address `to`, so return
+  // early before the explicit / source branches.
+  if (isAgnostic) {
+    result.address_agnostic = true;
+    result.chain_ids = reqChainIdArray(obj.chain_ids, `${path}.chain_ids`);
+    return result;
+  }
 
   if (hasExplicit) {
     const m = reqObj(obj.chain_to_addresses, `${path}.chain_to_addresses`);

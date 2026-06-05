@@ -15,6 +15,8 @@ namespace Staking {
     token: Core::TokenRef,
     // Amount locked (`_value`), U256 hex.
     amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
     // Lock expiry, unix seconds (`_unlock_time`), U256 hex.
     unlockTime: String,
     // Manifest-extensible slot.
