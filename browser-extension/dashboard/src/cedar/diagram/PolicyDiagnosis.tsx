@@ -93,13 +93,22 @@ export function PolicyDiagnosis({
         result,
       );
       setDiag({ culprits: d.culprits, errored: d.errored });
-      setMsg(
-        d.culprits.length > 0
-          ? `차단 조건 ${d.culprits.length}개를 빨갛게 표시했어요`
-          : request
+      if (d.culprits.length > 0) {
+        setMsg(`차단 조건 ${d.culprits.length}개를 빨갛게 표시했어요`);
+      } else if (d.errored.length > 0) {
+        // Every probe touching an absent field errored — typical when an
+        // enrichment (context.custom.*) policy is run on a SAMPLE without those
+        // results. Not "passed"; just unevaluable here.
+        setMsg(
+          `이 컨텍스트로는 평가할 수 없는 조건이 있어요 (enrichment 필드 미제공 — 노란 점선 ${d.errored.length}개)`,
+        );
+      } else {
+        setMsg(
+          request
             ? "이 거래에선 차단 조건이 없었어요"
-            : "이 샘플 거래는 차단되지 않았어요 (빨간 조건 없음)",
-      );
+            : "이 샘플 거래는 차단되지 않았어요",
+        );
+      }
     } catch (e) {
       setMsg(`진단 실패: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

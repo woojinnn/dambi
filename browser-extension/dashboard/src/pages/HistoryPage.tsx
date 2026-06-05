@@ -843,18 +843,29 @@ function PolicyStructureSection({
         {open ? "정책 구조 숨기기 ▲" : "정책 구조 보기 ▼"}
       </button>
       {open && (
-        <div className="v-struct-body">
-          {ctxQ.isLoading ? (
-            <div className="pdiagram-empty">불러오는 중…</div>
-          ) : (
-            <PolicyDiagnosisByText
-              cedarText={bundle.text}
-              compact
-              request={request}
-              autoRun={!!request}
-            />
+        <>
+          {!ctxQ.isLoading && !ctx && (
+            <div className="v-struct-note">
+              이전 거래라 진단 컨텍스트가 저장되지 않아 실제 막힌 조건은 표시할 수
+              없어요. 구조만 보여드립니다 — 이후 거래의 deny부터 실제 차단 조건이
+              빨갛게 표시됩니다.
+            </div>
           )}
-        </div>
+          <div className="v-struct-body">
+            {ctxQ.isLoading ? (
+              <div className="pdiagram-empty">불러오는 중…</div>
+            ) : ctx ? (
+              <PolicyDiagnosisByText
+                cedarText={bundle.text}
+                compact
+                request={request}
+                autoRun
+              />
+            ) : (
+              <PolicyDiagnosisByText cedarText={bundle.text} compact structureOnly />
+            )}
+          </div>
+        </>
       )}
     </div>
   );
