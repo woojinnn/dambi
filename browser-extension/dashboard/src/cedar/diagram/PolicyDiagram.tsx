@@ -124,6 +124,25 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
       children: operands.map((c) => exprToNode(c, pathOf)),
     };
   }
+  // Fold `!(a < b)` → a single `a ≥ b` leaf: the negated comparison reads far
+  // cleaner than a NOT gate over a `<`. The leaf carries the INNER comparison's
+  // canonical path (what the diagnosis blames), so highlight still lines up.
+  if (
+    e.kind === "unary" &&
+    e.op === "!" &&
+    e.operand.kind === "binary" &&
+    NEGATE_BINARY[e.operand.op]
+  ) {
+    const inner = e.operand;
+    return {
+      path: pathOf.get(inner) ?? path,
+      kind: "leaf",
+      title: `${exprToText(inner.left)} ${NEGATE_BINARY[inner.op]} ${exprToText(
+        inner.right,
+      )}`,
+      children: [],
+    };
+  }
   if (e.kind === "unary" && e.op === "!") {
     return { path, kind: "not", title: "NOT", children: [exprToNode(e.operand, pathOf)] };
   }
@@ -182,6 +201,16 @@ const EXT_OP: Record<string, string> = {
   greaterThanOrEqual: "≥",
   lessThan: "<",
   lessThanOrEqual: "≤",
+};
+
+/** Comparison operator → its negation, so `!(a < b)` folds to `a ≥ b`. */
+const NEGATE_BINARY: Record<string, string> = {
+  "<": "≥",
+  "<=": ">",
+  ">": "≤",
+  ">=": "<",
+  "==": "≠",
+  "!=": "==",
 };
 
 /** `decimal("0.05")` / `ip("…")` used as a value → just its inner literal text. */

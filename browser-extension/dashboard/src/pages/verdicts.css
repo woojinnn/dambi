@@ -181,6 +181,15 @@
   background: none; border: none; cursor: pointer; padding: 2px 0;
 }
 .v-struct-toggle:hover { color: var(--slate-900); }
+.v-struct-note {
+  margin-top: 8px;
+  font: 500 11.5px/1.5 var(--ff-sans, inherit);
+  color: var(--slate-600);
+  background: var(--surface);
+  border: 1px dashed var(--hairline);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
 .v-struct-body {
   margin-top: 8px;
   height: 420px;

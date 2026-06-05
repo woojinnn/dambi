@@ -108,6 +108,36 @@ describe("PolicyDiagram path alignment", () => {
     expect(paths.has("c0.body.right")).toBe(true);
   });
 
+  it("folds !(a < b) into one negated-comparison leaf with the inner path", () => {
+    const xAttr = (): Expr => ({
+      kind: "attr",
+      of: { kind: "attr", of: { kind: "var", name: "context" }, attr: "custom" },
+      attr: "x",
+    });
+    // forbid Swap when { !(context.custom.x < 50000000) }
+    const p: PolicyIR = {
+      ...policy,
+      conditions: [
+        {
+          kind: "when",
+          body: {
+            kind: "unary",
+            op: "!",
+            operand: {
+              kind: "binary",
+              op: "<",
+              left: xAttr(),
+              right: { kind: "lit", litType: "long", value: 50_000_000 },
+            },
+          },
+        },
+      ],
+    };
+    // The NOT gate is gone; one leaf remains, carrying the INNER comparison's
+    // canonical path (what the diagnosis blames).
+    expect(policyDiagramPaths(p)).toEqual(["c0.body.operand"]);
+  });
+
   it("renders decimal/ext comparisons in operator form", () => {
     const inputUsd: Expr = {
       kind: "attr",

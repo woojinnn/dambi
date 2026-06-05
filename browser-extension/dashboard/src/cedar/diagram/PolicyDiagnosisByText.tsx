@@ -8,6 +8,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { textToBlocks } from "..";
+import { PolicyDiagram } from "./PolicyDiagram";
 import { PolicyDiagnosis, type DiagnosisContext } from "./PolicyDiagnosis";
 
 export interface PolicyDiagnosisByTextProps {
@@ -17,6 +18,10 @@ export interface PolicyDiagnosisByTextProps {
   request?: DiagnosisContext;
   /** Auto-run the diagnosis on mount (for a real captured context). */
   autoRun?: boolean;
+  /** Render the structure ONLY — no diagnosis runner. Used when a sample
+   *  diagnosis would be misleading (e.g. an enrichment policy with no captured
+   *  context, where every `context.custom.*` probe just errors). */
+  structureOnly?: boolean;
 }
 
 export function PolicyDiagnosisByText({
@@ -24,6 +29,7 @@ export function PolicyDiagnosisByText({
   compact,
   request,
   autoRun,
+  structureOnly,
 }: PolicyDiagnosisByTextProps) {
   const q = useQuery({
     queryKey: ["policy-diagram-ir-by-text", cedarText],
@@ -35,6 +41,9 @@ export function PolicyDiagnosisByText({
     return (
       <div className="pdiagram-empty">정책을 파싱할 수 없어 다이어그램을 못 그려요</div>
     );
+  }
+  if (structureOnly) {
+    return <PolicyDiagram ir={q.data ?? null} compact={compact} />;
   }
   return (
     <PolicyDiagnosis
