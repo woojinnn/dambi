@@ -40,27 +40,14 @@ env:
   CHART_PATH: crates/policy-server/server/deploy/helm/policy-server
 
 jobs:
+  # Rust fmt/clippy/test for these packages already run in the workspace `rust`
+  # job in ci.yml; `verify` here only covers the Helm chart.
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-
       - uses: azure/setup-helm@v4
-
-      - name: Format
-        run: cargo fmt --all -- --check
-
-      - name: Test policy-server packages
-        run: cargo test -p policy-server -p policy-db -p policy-sync
-
-      - name: Clippy policy-server packages
-        run: cargo clippy -p policy-server -p policy-db -p policy-sync --all-targets -- -D warnings
 
       - name: Helm lint
         run: helm lint "$CHART_PATH"
