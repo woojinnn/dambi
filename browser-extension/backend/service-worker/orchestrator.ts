@@ -791,7 +791,9 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
     // the common case needs no policy-rpc server.
     const planned = await planActionRpcV2({ manifests, action, meta, tx });
     const results =
-      planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
+      planned.length > 0
+        ? await dispatchCallsV2(planned, policyRpcUrl, { action, meta, tx })
+        : {};
     const verdict = await evaluateActionV2({ action, meta, tx, bundles, results });
     console.info("[Scopeball] venue-order-verdict", {
       requestId: message.requestId,
@@ -1142,7 +1144,9 @@ async function evaluateBodyTree(
     // would clobber since `call_id` repeats across siblings) → EVALUATE.
     const planned = await planActionRpcV2({ manifests, action: body, meta, tx });
     const results =
-      planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
+      planned.length > 0
+        ? await dispatchCallsV2(planned, policyRpcUrl, { action: body, meta, tx })
+        : {};
     verdicts.push(
       await evaluateActionV2({ action: body, meta, tx, bundles, results }),
     );
