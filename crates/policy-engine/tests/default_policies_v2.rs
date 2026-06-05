@@ -166,13 +166,13 @@ fn deny_optional_violations(manifest: &ManifestV2, policy: &str) -> Vec<String> 
 /// enrichment field (it would silently skip → never deny → fail-open).
 #[test]
 fn no_default_deny_policy_depends_only_on_optional_enrichment() {
-    // Only SHIPPED bundles (phase1/A) must be fail-closed. Staged phase1/B /
-    // phase2 / phase3 denies are intentionally fail-open until their enrichment
-    // is wired — that gap is *why* they are not in phase1/A — so the fail-closed
-    // guarantee is scoped to what actually ships. `collect_bundles` recurses per
-    // the loader convention (the flat read_dir variant panicked on grouping dirs
-    // like phase3/manifest.json).
-    let dir = default_policies_dir().join("phase1").join("A");
+    // Only SHIPPED bundles (phase1) must be fail-closed. Staged phase2/* /
+    // phase3 denies are intentionally fail-open until their enrichment is wired
+    // — that gap is *why* they are not in phase1 — so the fail-closed guarantee
+    // is scoped to what actually ships. `collect_bundles` recurses per the loader
+    // convention (the flat read_dir variant panicked on grouping dirs like
+    // phase3/manifest.json).
+    let dir = default_policies_dir().join("phase1");
     for bundle in collect_bundles(&dir) {
         let id = bundle
             .file_name()
