@@ -36,18 +36,30 @@ fn mint_token(user_id: &str) -> String {
     issue(user_id, "x@e.com", TokenType::Access, None).unwrap()
 }
 
-async fn spawn_server() -> (std::net::SocketAddr, MultiUserStore, String) {
+async fn spawn_server() -> (std::net::SocketAddr, MultiUserStore, String, String) {
     spawn_server_with_orchestrator(Orchestrator::from_sync_config(&SyncConfig::default()).unwrap())
         .await
 }
 
 async fn spawn_server_with_orchestrator(
     orchestrator: Orchestrator,
-) -> (std::net::SocketAddr, MultiUserStore, String) {
+) -> (std::net::SocketAddr, MultiUserStore, String, String) {
     ensure_jwt_secret();
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.keep();
     let global_db = GlobalDb::open(path.join("global.db")).unwrap();
+    // Seed the user so wallet writes (POST /wallets, direct store.save) satisfy
+    // `wallets_user_id_fkey` (enforced by the Postgres backend). Each spawn gets
+    // a UNIQUE email so the derived id is distinct per test on the shared
+    // integration DB; reuse it for both the token and store lookups so they
+    // match. The `write-endpoints-` prefix keeps these ids disjoint from other
+    // test files sharing the same DB.
+    static USER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = USER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let user_id = global_db
+        .upsert_user(&format!("write-endpoints-{n}@example.com"), "test")
+        .await
+        .unwrap();
     let multi_user = MultiUserStore::new(path.join("users"));
     let event_bus = EventBus::new();
     let state = AppState {
@@ -67,8 +79,8 @@ async fn spawn_server_with_orchestrator(
     tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
-    let token = mint_token("u_write_alice");
-    (addr, multi_user, token)
+    let token = mint_token(&user_id);
+    (addr, multi_user, token, user_id)
 }
 
 async fn spawn_hyperliquid_info_server(withdrawable: &'static str) -> String {
@@ -143,7 +155,7 @@ fn hyperliquid_perp_usdc(state: &WalletState) -> Option<Decimal> {
 
 async fn spawn_server_with_hyperliquid(
     withdrawable: &'static str,
-) -> (std::net::SocketAddr, MultiUserStore, String) {
+) -> (std::net::SocketAddr, MultiUserStore, String, String) {
     let endpoint = spawn_hyperliquid_info_server(withdrawable).await;
     let mut sync_config = SyncConfig::default();
     sync_config.venues.hyperliquid = Some(HyperliquidConfig {
@@ -157,7 +169,7 @@ async fn spawn_server_with_hyperliquid(
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn post_wallets_persists_and_returns_id() {
-    let (addr, mu, token) = spawn_server().await;
+    let (addr, mu, token, user_id) = spawn_server().await;
     let body = serde_json::json!({
         "address": "0x000000000000000000000000000000000000a01c",
         "chains": ["eip155:1"],
@@ -182,7 +194,7 @@ async fn post_wallets_persists_and_returns_id() {
     );
 
     // Direct store check — the wallet row landed in the user's DB.
-    let store = mu.for_user("u_write_alice").unwrap();
+    let store = mu.for_user(&user_id).unwrap();
     let wallets = store.list_wallets().await.unwrap();
     assert_eq!(wallets.len(), 1);
 }
@@ -190,7 +202,7 @@ async fn post_wallets_persists_and_returns_id() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn post_wallets_runs_hyperliquid_account_sync() {
-    let (addr, mu, token) = spawn_server_with_hyperliquid("123.45").await;
+    let (addr, mu, token, user_id) = spawn_server_with_hyperliquid("123.45").await;
     let body = serde_json::json!({
         "address": "0x000000000000000000000000000000000000a01c",
         "chains": ["eip155:1"],
@@ -206,7 +218,7 @@ async fn post_wallets_runs_hyperliquid_account_sync() {
         .unwrap();
     assert_eq!(resp.status(), 200);
 
-    let store = mu.for_user("u_write_alice").unwrap();
+    let store = mu.for_user(&user_id).unwrap();
     let wallets = store.list_wallets().await.unwrap();
     let state = store.load(&wallets[0]).await.unwrap();
     assert_eq!(hyperliquid_perp_usdc(&state), Some(Decimal::new("123.45")));
@@ -220,7 +232,7 @@ async fn post_wallets_rejects_when_no_chains_configurable() {
     // which also yields zero chains here, so we expect 400 with a
     // clear error rather than a silent successful add against
     // nothing.
-    let (addr, _mu, token) = spawn_server().await;
+    let (addr, _mu, token, _user_id) = spawn_server().await;
     let body = serde_json::json!({
         "address": "0x000000000000000000000000000000000000a01c",
         "chains": [],
@@ -238,7 +250,7 @@ async fn post_wallets_rejects_when_no_chains_configurable() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn post_wallets_rejects_bad_address() {
-    let (addr, _mu, token) = spawn_server().await;
+    let (addr, _mu, token, _user_id) = spawn_server().await;
     let body = serde_json::json!({
         "address": "not-an-address",
         "chains": ["eip155:1"],
@@ -256,7 +268,7 @@ async fn post_wallets_rejects_bad_address() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn sync_unknown_wallet_returns_404() {
-    let (addr, _mu, token) = spawn_server().await;
+    let (addr, _mu, token, _user_id) = spawn_server().await;
     let other = "0x0000000000000000000000000000000000001111";
     let resp = reqwest::Client::new()
         .post(format!("http://{addr}/wallets/{other}/sync"))
@@ -270,9 +282,9 @@ async fn sync_unknown_wallet_returns_404() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn sync_known_wallet_returns_204() {
-    let (addr, mu, token) = spawn_server().await;
+    let (addr, mu, token, user_id) = spawn_server().await;
     // Pre-seed a wallet so /sync has something to refresh.
-    let store = mu.for_user("u_write_alice").unwrap();
+    let store = mu.for_user(&user_id).unwrap();
     let id = WalletId::new(
         std::str::FromStr::from_str("0x000000000000000000000000000000000000a01c").unwrap(),
         [policy_state::primitives::ChainId::ethereum_mainnet()],
@@ -295,8 +307,8 @@ async fn sync_known_wallet_returns_204() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn sync_known_wallet_runs_hyperliquid_account_sync() {
-    let (addr, mu, token) = spawn_server_with_hyperliquid("456.78").await;
-    let store = mu.for_user("u_write_alice").unwrap();
+    let (addr, mu, token, user_id) = spawn_server_with_hyperliquid("456.78").await;
+    let store = mu.for_user(&user_id).unwrap();
     let id = WalletId::new(
         std::str::FromStr::from_str("0x000000000000000000000000000000000000a01c").unwrap(),
         [policy_state::primitives::ChainId::ethereum_mainnet()],
@@ -322,7 +334,7 @@ async fn sync_known_wallet_runs_hyperliquid_account_sync() {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn evaluate_serves_oracle_usd_value_from_synced_price() {
-    let (addr, mu, token) = spawn_server().await;
+    let (addr, mu, token, user_id) = spawn_server().await;
 
     // Seed the signed-in user's wallet with 100 USDC @ $1.0001 (synced price).
     let usdc = Address::from_str("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap();
@@ -363,11 +375,7 @@ async fn evaluate_serves_oracle_usd_value_from_synced_price() {
             primitives_source: oracle,
         },
     );
-    mu.for_user("u_write_alice")
-        .unwrap()
-        .save(&state)
-        .await
-        .unwrap();
+    mu.for_user(&user_id).unwrap().save(&state).await.unwrap();
 
     // Concrete-param call-spec, exactly as the extension sends after resolving
     // `$.action.*` selectors. 100 USDC = 0x5f5e100 raw (6 decimals).
