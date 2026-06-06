@@ -18,5 +18,6 @@
   "tuple_array_field",
   "array_len",
   "u64_saturating",
-  "bytes_nonempty"
+  "bytes_nonempty",
+  "token_key_or_native_zero"
 ]

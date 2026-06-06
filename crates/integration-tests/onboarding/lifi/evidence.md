@@ -56,14 +56,14 @@ evidence; the phase tables below are the mandatory gate.
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| every COVER selector mapped to existing ActionBody or Tier3 requirement | pending | |
-| permission/fund-movement/red-flag selector review recorded | pending | |
-| manifest files added/changed listed | pending | |
-| enrichment/live_field decision recorded for every COVER action | pending | |
-| required remote policy-RPC/live/enrichment methods have local handler, configured endpoint test, or explicit blocker | pending | |
-| Tier3 not needed or full Tier3 downstream contract completed | pending | |
-| Tier3 files listed if applicable: ActionBody/effect/view/sync/lowering_v2/cedarschema/schema registration/conformance test | pending | |
-| `npm run check:manifest` or protocol-filtered validate output recorded | pending | |
+| every COVER selector mapped to existing ActionBody or Tier3 requirement | done | 51 cover → reuse: 7 swap-only (GenericSwapFacet/V3) → `amm::Swap{aggregator_route}` (Single=single_emit, Multiple/Generic=array_emit per leg); 22 `startBridge` → `bridge::send` (from ILiFi.BridgeData param 0); 22 `swapAndStartBridge` → **`composite_emit` Multicall[ amm::Swap per SwapData[] leg, bridge::send ]**. No new ActionBody domain (bridge+amm both pre-existing). |
+| permission/fund-movement/red-flag selector review recorded | done | All 51 covered = fund-movement (bridge/swap). NO user permission-grant selector in the covered set; `setApprovalForBridges`/`setApprovalForHopBridges`/`addDex`/`registerBridge` are OWNER-only config → excluded (coverage.json). Red-flags captured: cross-chain mis-send (`dst_recipient`+`dst_chain_id`), destination compose/arbitrary-call (`has_message`=hasDestinationCall), swap-then-bridge real input asset (composite shows SwapData[0] token/amount, not just the bridged intermediate). |
+| manifest files added/changed listed | done | 51 new manifests under `registryV2/manifests/lifi/<facet>/<fn>@1.0.0.json` (22 startBridge + 22 swapAndStartBridge + 7 GenericSwap). full verified ABI (getabi) per selector; cast-verified selector match. |
+| enrichment/live_field decision recorded for every COVER action | done | amm::Swap requires 4 live fields (route/expected_amount_out/price_impact_bp/gas_estimate) → set to `source:{kind:user_supplied}` = **dormant** (Li.Fi route is opaque `SwapData.callData`; no registered route calc; value=defaults). bridge::send has no required live field. Quantity caps via existing SW `amountNano` token-client (no new enrichment). No new policy-RPC/live method. |
+| required remote policy-RPC/live/enrichment methods have local handler, configured endpoint test, or explicit blocker | done | None required — static decode only; enrichment dormant (production ships empty policies). No new remote method introduced. |
+| Tier3 not needed or full Tier3 downstream contract completed | done | No new ActionBody **domain**. Additive engine changes: (1) `BridgeVenue::LiFiDiamond` variant (Cedar `BridgeVenue={name:String}` → NO schema/registration change); (2) new **`composite_emit`** emit-strategy in the WASM route (`declarative_route_request_v3_json`), reusing `build_array_emit`+`build_action_body`, flattening into one heterogeneous Multicall; (3) new `$fn` `token_key_or_native_zero` (0x0 ∨ 0xEeee → native, Li.Fi `LibAsset` convention). |
+| Tier3 files listed if applicable: ActionBody/effect/view/sync/lowering_v2/cedarschema/schema registration/conformance test | done | No new-domain edit-sites (no effect/view/sync/cedarschema/schema-registration/conformance change — additive venue + reuse). Engine files changed: `crates/policy-server/asset-model/action/src/bridge/mod.rs` (BridgeVenue), `crates/policy-engine-wasm/src/declarative_exports.rs` (composite_emit arm), `crates/adapters/mappers/src/declarative/builtin_fn.rs` + `fn_whitelist.json` (new $fn + unit test). |
+| `npm run check:manifest` or protocol-filtered validate output recorded | done | `validate (all): 2076 single_emit manifest(s) OK, 0 structural errors`; build-index `done — 2275 callkey(s) ... across 1064 manifest(s)` (lifi = 51 callkeys). `check:surface ✓ LiFiDiamond [1]: 128 surface · 51 cover · 77 exclude · 51 on-chain manifests`. Affected-crate tests: mappers 62 / policy-engine 352+ / policy-action 420 / 0 failed. |
 
 ## P2 Synthetic Evidence
 

@@ -46,6 +46,13 @@ impl BridgeAction {
 pub enum BridgeVenue {
     /// Across Protocol `SpokePool` (intent / relayer-filled liquidity bridge).
     AcrossSpokePool,
+    /// Li.Fi `LiFiDiamond` (EIP-2535) bridge+swap aggregator — the user signs to
+    /// the diamond; the underlying bridge (Across / Mayan / Stargate / …) is the
+    /// `bridge` string in the decoded `BridgeData`, not differentiated here in V1.
+    /// `rename` pins the wire tag to `lifi_diamond` (the default snake_case of
+    /// `LiFiDiamond` would be the awkward `li_fi_diamond`).
+    #[serde(rename = "lifi_diamond")]
+    LiFiDiamond,
 }
 
 impl BridgeVenue {
@@ -54,6 +61,7 @@ impl BridgeVenue {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::AcrossSpokePool => "across_spoke_pool",
+            Self::LiFiDiamond => "lifi_diamond",
         }
     }
 }

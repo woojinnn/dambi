@@ -61,6 +61,7 @@ pub const WHITELIST: &[&str] = &[
     "array_len",
     "u64_saturating",
     "bytes_nonempty",
+    "token_key_or_native_zero",
 ];
 
 /// Dispatch a `$fn` call by name against its already-substituted JSON args.
@@ -90,6 +91,7 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "array_len" => array_len(args),
         "u64_saturating" => u64_saturating(args),
         "bytes_nonempty" => bytes_nonempty(args),
+        "token_key_or_native_zero" => token_key_or_native_zero(args),
         _ => Err(format!(
             "unknown $fn '{name}' (whitelist: {})",
             WHITELIST.join(", ")
@@ -305,6 +307,42 @@ fn token_key_or_native(args: &[JsonValue]) -> Result<JsonValue, String> {
     const NATIVE_SENTINEL: &str = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
     let mut key = serde_json::Map::new();
     if format!("{address:#x}") == NATIVE_SENTINEL {
+        key.insert(
+            "standard".to_owned(),
+            JsonValue::String("native".to_owned()),
+        );
+        key.insert("chain".to_owned(), JsonValue::String(chain.to_owned()));
+    } else {
+        key.insert("standard".to_owned(), JsonValue::String("erc20".to_owned()));
+        key.insert("chain".to_owned(), JsonValue::String(chain.to_owned()));
+        key.insert(
+            "address".to_owned(),
+            JsonValue::String(format!("{address:#x}")),
+        );
+    }
+    Ok(JsonValue::Object(key))
+}
+
+/// `token_key_or_native_zero(address, chain) -> TokenKey` — like
+/// [`token_key_or_native`], but treats **both** the 1inch sentinel
+/// (`0xEeee…`) **and** the zero address (`0x0`) as the native gas asset.
+/// Li.Fi's `LibAsset.isNativeAsset` uses `address(0)` for native, so a
+/// Li.Fi `sendingAssetId` / `SwapData.sendingAssetId` of `0x0` means native
+/// ETH, not an `erc20` at the zero address (which is never a real token).
+fn token_key_or_native_zero(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "token_key_or_native_zero expects 2 args (address, chain), got {}",
+            args.len()
+        ));
+    }
+    let address = json_address(&args[0], "token_key_or_native_zero: address")?;
+    let chain = args[1]
+        .as_str()
+        .ok_or("token_key_or_native_zero: chain arg is not a string")?;
+    const NATIVE_SENTINEL: &str = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    let mut key = serde_json::Map::new();
+    if address.is_zero() || format!("{address:#x}") == NATIVE_SENTINEL {
         key.insert(
             "standard".to_owned(),
             JsonValue::String("native".to_owned()),
@@ -1536,6 +1574,34 @@ mod tests {
         );
         // arity + bad address error out.
         assert!(token_key_or_native(&[json!("0x0")]).is_err());
+    }
+
+    #[test]
+    fn token_key_or_native_zero_maps_zero_and_sentinel_to_native() {
+        let chain = "eip155:1";
+        // Li.Fi native convention: the ZERO address -> native (unlike the plain
+        // token_key_or_native, which would map 0x0 to erc20{0x0}).
+        for native_addr in [
+            "0x0000000000000000000000000000000000000000",
+            "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        ] {
+            let k = token_key_or_native_zero(&[json!(native_addr), json!(chain)]).unwrap();
+            assert_eq!(k["standard"], json!("native"), "addr={native_addr}");
+            assert_eq!(k["chain"], json!(chain));
+            assert!(k.get("address").is_none());
+        }
+        // A real ERC-20 stays erc20 with its lowercase address.
+        let erc20 = token_key_or_native_zero(&[
+            json!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+            json!(chain),
+        ])
+        .unwrap();
+        assert_eq!(erc20["standard"], json!("erc20"));
+        assert_eq!(
+            erc20["address"],
+            json!("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+        );
+        assert!(token_key_or_native_zero(&[json!("0x0")]).is_err());
     }
 
     #[test]
