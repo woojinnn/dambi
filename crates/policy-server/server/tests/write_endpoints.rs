@@ -375,11 +375,7 @@ async fn evaluate_serves_oracle_usd_value_from_synced_price() {
             primitives_source: oracle,
         },
     );
-    mu.for_user(&user_id)
-        .unwrap()
-        .save(&state)
-        .await
-        .unwrap();
+    mu.for_user(&user_id).unwrap().save(&state).await.unwrap();
 
     // Concrete-param call-spec, exactly as the extension sends after resolving
     // `$.action.*` selectors. 100 USDC = 0x5f5e100 raw (6 decimals).
