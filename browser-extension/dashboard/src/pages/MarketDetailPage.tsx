@@ -4,14 +4,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import {
   createReview,
-  dashboardId,
-  dashboardSetId,
   getListing,
-  installListing,
-  listManagedPolicies,
   pickI18n,
-  putPolicy,
-  putPolicySet,
   type ListingDetail,
   type SetMember,
 } from "../server-api";
@@ -27,6 +21,7 @@ import {
 } from "./market-domain";
 import { CodeTabs, leadingComment } from "./market-code";
 import { policyCopy } from "./market-copy";
+import { installListingToEditor } from "./market-install";
 import { severityFromCedar } from "./editor/policy-meta";
 import { useMarketLocale, type MarketLocale } from "./market-locale";
 
@@ -60,73 +55,7 @@ export function MarketDetailPage() {
   const [installMsg, setInstallMsg] = useState<string | null>(null);
 
   const installMut = useMutation({
-    mutationFn: async (detail: ListingDetail) => {
-      if (!detail.latest_version || !detail.current_version) {
-        throw new Error(
-          locale === "ko"
-            ? "이 listing에는 발행된 버전이 없습니다."
-            : "This listing has no published version.",
-        );
-      }
-      const body = await installListing(detail.id, detail.current_version);
-      const existing = await listManagedPolicies();
-      const existingIds = new Set(existing.map((p) => p.id));
-
-      if (detail.kind === "policy") {
-        if (!body.cedar_text) {
-          throw new Error("server returned policy version without cedar_text");
-        }
-        const id = freshLocalId(detail.slug, existingIds, "policy");
-        await putPolicy({
-          id,
-          cedarText: body.cedar_text,
-          manifest: body.manifest,
-          displayName: pickI18n(detail.display_name, locale) || detail.slug,
-          source: "market",
-          sourceListingId: detail.id,
-          sourceVersion: detail.current_version,
-          cat: detail.domain ?? undefined,
-          life: "publish",
-        });
-        return { kind: "policy" as const, id };
-      }
-
-      // kind === 'set'
-      const members = body.members ?? [];
-      if (members.length === 0) {
-        throw new Error("server returned set version without members");
-      }
-      const memberIds: string[] = [];
-      for (const m of members) {
-        const id = freshLocalId(m.slug, existingIds, "policy");
-        await putPolicy({
-          id,
-          cedarText: m.cedar_text,
-          manifest: m.manifest,
-          displayName: m.display_name || m.slug,
-          source: "market",
-          sourceListingId: detail.id,
-          sourceVersion: detail.current_version,
-          cat: detail.domain ?? undefined,
-          life: "publish",
-        });
-        existingIds.add(id);
-        memberIds.push(id);
-      }
-      const setId = freshLocalId(detail.slug, new Set(), "set");
-      await putPolicySet({
-        id: setId,
-        displayName: pickI18n(detail.display_name, locale) || detail.slug,
-        description: pickI18n(detail.description, locale) || undefined,
-        memberIds,
-        source: "market",
-        readOnly: true,
-        sourceListingId: detail.id,
-        sourceVersion: detail.current_version,
-        cat: detail.domain ?? undefined,
-      });
-      return { kind: "set" as const, id: setId };
-    },
+    mutationFn: (detail: ListingDetail) => installListingToEditor(detail, locale),
     onSuccess: async (result) => {
       await qc.invalidateQueries({ queryKey: ["managed-policies"] });
       await qc.invalidateQueries({ queryKey: ["policy-sets"] });
@@ -218,16 +147,15 @@ function DetailBody({
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1>{name}</h1>
           <div className="md-publisher-line">
-            <span className={`mc-tier tier-${detail.publisher_tier}`}>
-              {detail.publisher_tier === "official"
-                ? ko ? "공식" : "Official"
-                : detail.publisher_tier === "verified"
-                  ? ko ? "검증" : "Verified"
-                  : ko ? "커뮤니티" : "Community"}
-            </span>
             <span className="md-publisher-name">
               {publisherDisplay(detail.publisher_tier, detail.publisher_email, locale)}
+              {detail.publisher_tier === "official" && (
+                <span className="mc-verified" title="Verified" aria-label="verified">✓</span>
+              )}
             </span>
+            {detail.publisher_tier === "verified" && (
+              <span className="mc-tier tier-verified">{ko ? "검증" : "Verified"}</span>
+            )}
             <span className="md-publisher-dot">·</span>
             <span className="md-publisher-date">
               {ko ? `${formatYmd(detail.created_at)} 발행` : `Published ${formatYmd(detail.created_at)}`}
@@ -605,22 +533,4 @@ const PROTOCOL: Record<string, string> = {
 };
 function protocolOf(slug: string): string | undefined {
   return PROTOCOL[slug.split("-")[0]];
-}
-
-/** Find an unused local dashboard id by suffixing `-2`, `-3`, … when the
- *  preferred slug already exists. Returns the full `dashboard::…` or
- *  `dashboard-set::…` id ready to pass to the SW bridge. */
-function freshLocalId(
-  preferredSlug: string,
-  existing: Set<string>,
-  kind: "policy" | "set",
-): string {
-  const make = kind === "policy" ? dashboardId : dashboardSetId;
-  const sanitized = preferredSlug.replace(/[^A-Za-z0-9_./()-]/g, "-").slice(0, 96);
-  if (!existing.has(make(sanitized))) return make(sanitized);
-  for (let i = 2; i < 1000; i++) {
-    const candidate = `${sanitized}-${i}`;
-    if (!existing.has(make(candidate))) return make(candidate);
-  }
-  return make(`${sanitized}-${Date.now()}`);
 }

@@ -1,16 +1,19 @@
 import { useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
+  getListing,
   listListings,
   pickI18n,
+  type ListingDetail,
   type ListingKind,
   type ListingSort,
   type ListingSummary,
 } from "../server-api";
-import { formatYmd, publisherDisplay } from "../server-api/market";
+import { publisherDisplay } from "../server-api/market";
 import { Topbar } from "../shell/Topbar";
+import { installListingToEditor } from "./market-install";
 
 import {
   CATEGORY_COLOR,
@@ -19,10 +22,10 @@ import {
   CategoryGlyph,
   categoryNameOf,
   categoryOf,
-  domainNameOf,
   isCategoryKey,
   type CategoryKey,
 } from "./market-domain";
+import { policyCopy } from "./market-copy";
 import { useMarketLocale, type MarketLocale } from "./market-locale";
 
 import "./market.css";
@@ -398,6 +401,7 @@ function RankingSidebar({ locale }: { locale: MarketLocale }) {
                   <div className="rs-name">{pickI18n(l.display_name, locale) || l.slug}</div>
                   <div className="rs-sub">
                     {publisherDisplay(l.publisher_tier, l.publisher_email, locale)}
+                    {l.publisher_tier === "official" && <span className="mc-verified"> ✓</span>}
                   </div>
                 </div>
                 <div className="rs-count">
@@ -431,81 +435,112 @@ function ListView({
   locale: MarketLocale;
   initialParams: URLSearchParams;
 }) {
-  const initialKind = parseKindParam(initialParams.get("kind"));
-  const initialDomain = initialParams.get("domain") ?? "";
+  const ko = locale === "ko";
   const initialCategory = initialParams.get("category") ?? "";
   const initialSort = parseSortParam(initialParams.get("sort"));
   const initialQ = initialParams.get("q") ?? "";
 
-  const [kind, setKind] = useState<ListingKind | "all">(initialKind);
-  const [domain, setDomain] = useState<string>(initialDomain);
-  const [category, setCategory] = useState<string>(initialCategory);
+  const [cats, setCats] = useState<Set<CategoryKey>>(
+    () => new Set(isCategoryKey(initialCategory) ? [initialCategory] : []),
+  );
   const [sort, setSort] = useState<ListingSort>(initialSort);
   const [q, setQ] = useState(initialQ);
   const [search, setSearch] = useState(initialQ);
+  const [pkgAll, setPkgAll] = useState(false);
+  const [polAll, setPolAll] = useState(false);
+  const [installTarget, setInstallTarget] = useState<ListingSummary | null>(null);
 
-  const listingsQ = useQuery({
-    queryKey: ["market-listings", { kind, domain, category, sort, q: search }],
+  const selected = [...cats];
+  const toggleCat = (c: CategoryKey) =>
+    setCats((prev) => {
+      const n = new Set(prev);
+      if (n.has(c)) n.delete(c);
+      else n.add(c);
+      return n;
+    });
+
+  // All policies — multi-category filtering is client-side (union of selected).
+  const policiesQ = useQuery({
+    queryKey: ["market-listings", { kind: "policy", sort, q: search }],
     queryFn: () =>
-      listListings({
-        kind: kind === "all" ? undefined : kind,
-        domain: domain || undefined,
-        category: isCategoryKey(category) ? category : undefined,
-        sort,
-        q: search.trim() || undefined,
-        limit: 60,
-      }),
+      listListings({ kind: "policy", sort, q: search.trim() || undefined, limit: 100 }),
   });
+  const allPolicies = policiesQ.data ?? [];
+  const polCatCounts = useMemo(() => {
+    const m = new Map<CategoryKey, number>();
+    allPolicies.forEach((p) => {
+      const c = listingCategoryKey(p);
+      if (c) m.set(c, (m.get(c) ?? 0) + 1);
+    });
+    return m;
+  }, [allPolicies]);
 
-  // `category` is now a real server column (migration 0003) — filtered DB-side.
-  const visible = listingsQ.data ?? [];
+  const setsQ = useQuery({
+    queryKey: ["market-sets-list", { sort, q: search }],
+    queryFn: () =>
+      listListings({ kind: "set", sort, q: search.trim() || undefined, limit: 50 }),
+  });
+  const sets = setsQ.data ?? [];
+  const setDetailQs = useQueries({
+    queries: sets.map((s) => ({
+      queryKey: ["market-listing", s.slug],
+      queryFn: () => getListing(s.slug),
+      staleTime: 60_000,
+    })),
+  });
+  const metaFor = (i: number) => {
+    const members = setDetailQs[i]?.data?.latest_version?.members ?? [];
+    const catCount = new Map<CategoryKey, number>();
+    members.forEach((m) => {
+      const c = categoryOf(m.slug);
+      catCount.set(c, (catCount.get(c) ?? 0) + 1);
+    });
+    return { count: members.length, catCount, ready: members.length > 0 };
+  };
+
+  const polList =
+    selected.length === 0
+      ? allPolicies
+      : allPolicies.filter((p) => {
+          const c = listingCategoryKey(p);
+          return c != null && cats.has(c);
+        });
+  // A package surfaces if any member is in any selected category.
+  const pkgList =
+    selected.length === 0
+      ? sets
+      : sets.filter((_, i) => {
+          const cc = metaFor(i).catCount;
+          return selected.some((c) => cc.has(c));
+        });
+  const pkgShown = pkgAll ? pkgList : pkgList.slice(0, 8);
+  const polShown = polAll ? polList : polList.slice(0, 12);
+  const loading = policiesQ.isLoading || setsQ.isLoading;
 
   return (
     <div className="market-wrap">
+      {/* Category rail — multi-select, above the search bar */}
+      <div className="lv-catrail">
+        {CATEGORY_ORDER.map((c) => {
+          const on = cats.has(c);
+          const col = CATEGORY_COLOR[c];
+          const n = polCatCounts.get(c) ?? 0;
+          return (
+            <button
+              key={c}
+              type="button"
+              className={`lv-catrail-chip${on ? " on" : ""}`}
+              onClick={() => toggleCat(c)}
+              style={on ? { color: col.hex, borderBottomColor: col.hex, background: col.soft } : undefined}
+            >
+              {categoryNameOf(c, locale)}
+              {n > 0 && <span className="lv-catrail-n">{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+
       <header className="market-controls">
-        <div className="market-tabs">
-          <KindTab active={kind === "all"} onClick={() => setKind("all")}>
-            {locale === "ko" ? "전체" : "All"}
-          </KindTab>
-          <KindTab active={kind === "policy"} onClick={() => setKind("policy")}>
-            {locale === "ko" ? "정책" : "Policy"}
-          </KindTab>
-          <KindTab active={kind === "set"} onClick={() => setKind("set")}>
-            {locale === "ko" ? "패키지" : "Package"}
-          </KindTab>
-        </div>
-        {isCategoryKey(category) && (
-          <div className="market-active-filter">
-            <span className="map-label">
-              {locale === "ko" ? "카테고리" : "Category"}:
-            </span>
-            <span className="map-value">{categoryNameOf(category, locale)}</span>
-            <button
-              type="button"
-              className="map-clear"
-              onClick={() => setCategory("")}
-              aria-label="clear category"
-            >
-              ×
-            </button>
-          </div>
-        )}
-        {domain && (
-          <div className="market-active-filter">
-            <span className="map-label">
-              {locale === "ko" ? "도메인" : "Domain"}:
-            </span>
-            <span className="map-value">{domainNameOf(domain, locale)}</span>
-            <button
-              type="button"
-              className="map-clear"
-              onClick={() => setDomain("")}
-              aria-label="clear domain"
-            >
-              ×
-            </button>
-          </div>
-        )}
         <form
           className="market-search"
           onSubmit={(e) => {
@@ -515,7 +550,7 @@ function ListView({
         >
           <input
             type="text"
-            placeholder={locale === "ko" ? "정책 이름으로 검색" : "Search by name"}
+            placeholder={ko ? "정책·패키지 검색" : "Search policies & packages"}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -538,140 +573,381 @@ function ListView({
           onChange={(e) => setSort(e.target.value as ListingSort)}
           aria-label="sort"
         >
-          <option value="popular">{locale === "ko" ? "인기순" : "Most popular"}</option>
-          <option value="new">{locale === "ko" ? "신규순" : "Newest"}</option>
-          <option value="rating">{locale === "ko" ? "별점순" : "Top rated"}</option>
+          <option value="popular">{ko ? "인기순" : "Most popular"}</option>
+          <option value="new">{ko ? "신규순" : "Newest"}</option>
+          <option value="rating">{ko ? "별점순" : "Top rated"}</option>
         </select>
       </header>
 
-      {listingsQ.isLoading && (
-        <div className="market-status">{locale === "ko" ? "불러오는 중…" : "Loading…"}</div>
-      )}
-
-      {listingsQ.isError && (
-        <div className="market-status market-error">
-          {locale === "ko" ? "마켓 로드 실패" : "Market load failed"}:{" "}
-          {(listingsQ.error as Error).message}
-        </div>
-      )}
-
-      {!listingsQ.isLoading && !listingsQ.isError && visible.length === 0 && (
-        <div className="market-empty">
-          <h2>{locale === "ko" ? "결과가 없습니다" : "No matches"}</h2>
-          <p>
-            {locale === "ko"
-              ? "필터 조건을 바꾸거나 검색어를 비워보세요."
-              : "Try a different filter or clear the search."}
-          </p>
-        </div>
-      )}
-
-      {visible.length > 0 && (
-        <div className="market-grid">
-          {visible.map((l) => (
-            <ListingCard key={l.id} listing={l} locale={locale} />
+      {/* Selected category chips — below the search bar */}
+      {selected.length > 0 && (
+        <div className="lv-selected">
+          {selected.map((c) => (
+            <span
+              key={c}
+              className="lv-sel-chip"
+              style={{ background: CATEGORY_COLOR[c].soft, color: CATEGORY_COLOR[c].ink }}
+            >
+              {ko ? "카테고리: " : ""}
+              {categoryNameOf(c, locale)}
+              <button type="button" onClick={() => toggleCat(c)} aria-label="remove">
+                ×
+              </button>
+            </span>
           ))}
+          <button type="button" className="lv-sel-clear" onClick={() => setCats(new Set())}>
+            {ko ? "모두 해제" : "Clear all"}
+          </button>
         </div>
+      )}
+
+      {loading && <div className="market-status">{ko ? "불러오는 중…" : "Loading…"}</div>}
+      {policiesQ.isError && (
+        <div className="market-status market-error">
+          {ko ? "마켓 로드 실패" : "Market load failed"}
+        </div>
+      )}
+
+      {!loading && (
+        <>
+          <section className="lv-section">
+            <div className="lv-section-head">
+              <h2>
+                {ko ? "패키지" : "Packages"} <span className="lv-count">{pkgList.length}</span>
+              </h2>
+              <p className="lv-section-sub">
+                {ko ? "여러 정책을 한 번에 켜는 묶음" : "Bundles that switch on many policies at once"}
+              </p>
+            </div>
+            {pkgList.length === 0 ? (
+              <p className="lv-empty">{ko ? "해당하는 패키지가 없습니다." : "No packages."}</p>
+            ) : (
+              <>
+                <div className="lv-grid">
+                  {pkgShown.map((l) => (
+                    <PackageListCard
+                      key={l.id}
+                      listing={l}
+                      meta={metaFor(sets.indexOf(l))}
+                      categories={selected}
+                      locale={locale}
+                      onInstall={setInstallTarget}
+                    />
+                  ))}
+                </div>
+                {pkgList.length > 8 && (
+                  <button type="button" className="lv-more" onClick={() => setPkgAll((v) => !v)}>
+                    {pkgAll
+                      ? ko ? "접기" : "Show less"
+                      : ko ? `더보기 (+${pkgList.length - 8})` : `Show more (+${pkgList.length - 8})`}
+                  </button>
+                )}
+              </>
+            )}
+          </section>
+
+          <section className="lv-section">
+            <div className="lv-section-head">
+              <h2>
+                {ko ? "정책" : "Policies"} <span className="lv-count">{polList.length}</span>
+              </h2>
+              <p className="lv-section-sub">
+                {ko ? "개별 정책 — 직접 골라 설치" : "Individual policies"}
+              </p>
+            </div>
+            {polList.length === 0 ? (
+              <p className="lv-empty">{ko ? "해당하는 정책이 없습니다." : "No policies."}</p>
+            ) : (
+              <>
+                <div className="lv-grid">
+                  {polShown.map((l) => (
+                    <PolicyListCard key={l.id} listing={l} locale={locale} onInstall={setInstallTarget} />
+                  ))}
+                </div>
+                {polList.length > 12 && (
+                  <button type="button" className="lv-more" onClick={() => setPolAll((v) => !v)}>
+                    {polAll
+                      ? ko ? "접기" : "Show less"
+                      : ko ? `더보기 (+${polList.length - 12})` : `Show more (+${polList.length - 12})`}
+                  </button>
+                )}
+              </>
+            )}
+          </section>
+        </>
+      )}
+
+      {installTarget && (
+        <InstallModal
+          listing={installTarget}
+          locale={locale}
+          onClose={() => setInstallTarget(null)}
+        />
       )}
     </div>
   );
 }
 
-function KindTab({
-  active,
+/** Severity as a colored symbol (top-right of policy cards): deny = red
+ * no-entry, warn = amber triangle. Replaces the "차단"/"경고" text label. */
+function SeveritySymbol({ sev, locale }: { sev: "deny" | "warn"; locale: MarketLocale }) {
+  const ko = locale === "ko";
+  const label = sev === "deny" ? (ko ? "차단" : "Deny") : ko ? "경고" : "Warn";
+  return (
+    <span className={`lv-sev-sym sev-${sev}`} title={label} aria-label={label}>
+      {sev === "deny" ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round">
+          <circle cx="12" cy="12" r="9" />
+          <line x1="6.6" y1="6.6" x2="17.4" y2="17.4" />
+        </svg>
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3.2 21 19H3z" />
+          <line x1="12" y1="10" x2="12" y2="14" />
+          <circle cx="12" cy="16.6" r="0.7" fill="currentColor" stroke="none" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+/** Install count as a download glyph + number (replaces "설치 N" text). */
+function InstallCount({ n }: { n: number }) {
+  return (
+    <span className="lv-installs" title="installs">
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+      </svg>
+      {n}
+    </span>
+  );
+}
+
+function InstallBadge({
+  installed,
+  locale,
   onClick,
-  children,
 }: {
-  active: boolean;
+  installed: boolean;
+  locale: MarketLocale;
   onClick: () => void;
-  children: React.ReactNode;
 }) {
+  const ko = locale === "ko";
   return (
     <button
       type="button"
-      className={`market-tab${active ? " is-active" : ""}`}
-      onClick={onClick}
+      className={`mc-install-badge mc-install-btn${installed ? " is-installed" : ""}`}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
     >
-      {children}
+      {ko ? "받기" : "Install"}
     </button>
   );
 }
 
-function ListingCard({
+/** "받기" popup — copies the listing into the local Editor (copy-to-editor). */
+function InstallModal({
   listing,
   locale,
+  onClose,
 }: {
   listing: ListingSummary;
   locale: MarketLocale;
+  onClose: () => void;
 }) {
-  const name = pickI18n(listing.display_name, locale);
-  const desc = pickI18n(listing.description, locale);
+  const ko = locale === "ko";
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const detailQ = useQuery({
+    queryKey: ["market-listing", listing.slug],
+    queryFn: () => getListing(listing.slug),
+  });
+  const [done, setDone] = useState(false);
+  const mut = useMutation({
+    mutationFn: () => installListingToEditor(detailQ.data as ListingDetail, locale),
+    onSuccess: async () => {
+      setDone(true);
+      await qc.invalidateQueries({ queryKey: ["managed-policies"] });
+      await qc.invalidateQueries({ queryKey: ["policy-sets"] });
+    },
+  });
+  const isSet = listing.kind === "set";
+  const name = pickI18n(listing.display_name, locale) || listing.slug;
+  const memberCount = detailQ.data?.latest_version?.members?.length ?? 0;
+
+  return (
+    <div className="im-overlay" onClick={onClose}>
+      <div className="im-box" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="im-x" onClick={onClose} aria-label="close">
+          ×
+        </button>
+        {!done ? (
+          <>
+            <div className="im-kind">{isSet ? (ko ? "패키지" : "Package") : ko ? "정책" : "Policy"}</div>
+            <h3 className="im-title">{name}</h3>
+            <p className="im-sub">
+              {ko
+                ? isSet
+                  ? `이 패키지${memberCount ? ` (정책 ${memberCount}개)` : ""}를 내 Editor로 내려받습니다.`
+                  : "이 정책을 내 Editor로 내려받습니다."
+                : isSet
+                  ? `Copy this package${memberCount ? ` (${memberCount} policies)` : ""} into your Editor.`
+                  : "Copy this policy into your Editor."}
+            </p>
+            <p className="im-note">
+              {ko
+                ? "Editor에서 편집·활성화할 수 있는 복사본으로 받습니다(원본과 분리)."
+                : "Installed as an editable copy, independent of the source."}
+            </p>
+            {mut.isError && <div className="publish-error">{(mut.error as Error).message}</div>}
+            <div className="im-actions">
+              <button type="button" className="btn-secondary" onClick={onClose}>
+                {ko ? "취소" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!detailQ.data || mut.isPending}
+                onClick={() => mut.mutate()}
+              >
+                {mut.isPending ? (ko ? "받는 중…" : "Installing…") : ko ? "Editor로 받기" : "Install to Editor"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="im-ok">✓</div>
+            <h3 className="im-title">{ko ? "받았어요" : "Installed"}</h3>
+            <p className="im-sub">
+              {ko ? `"${name}"을(를) Editor에 추가했습니다.` : `Added "${name}" to your Editor.`}
+            </p>
+            <div className="im-actions">
+              <button type="button" className="btn-secondary" onClick={onClose}>
+                {ko ? "계속 둘러보기" : "Keep browsing"}
+              </button>
+              <button type="button" className="btn-primary" onClick={() => navigate("/editor")}>
+                {ko ? "Editor로 이동" : "Open Editor"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Policy card — leads with what it does (Korean one-liner), severity, category. */
+function PolicyListCard({
+  listing,
+  locale,
+  onInstall,
+}: {
+  listing: ListingSummary;
+  locale: MarketLocale;
+  onInstall: (l: ListingSummary) => void;
+}) {
+  const name = pickI18n(listing.display_name, locale) || listing.slug;
   const cat = listingCategoryKey(listing);
   const color = listingColor(listing);
-  const categoryLabel = cat ? categoryNameOf(cat, locale) : null;
-
-  const accentStyle: React.CSSProperties = color
-    ? { borderLeft: `3px solid ${color.hex}` }
-    : {};
-
+  const sev = listing.severity;
+  const oneLine = policyCopy(listing.slug)?.title || pickI18n(listing.description, locale) || "";
   return (
     <Link
       to={`/market/${encodeURIComponent(listing.slug)}`}
-      className={`market-card kind-${listing.kind}${color ? ` family-${color.family}` : ""}`}
-      style={accentStyle}
+      className="market-card lv-card"
+      style={color ? { borderLeft: `3px solid ${color.hex}` } : undefined}
     >
-      <div className="mc-head">
-        <div className="mc-icon-wrap" style={color ? { background: color.soft } : undefined}>
-          <ListingIcon listing={listing} size={18} />
+      <div className="lv-card-top">
+        {cat && (
+          <span
+            className="lv-cat-chip"
+            style={{ background: CATEGORY_COLOR[cat].soft, color: CATEGORY_COLOR[cat].ink }}
+          >
+            {categoryNameOf(cat, locale)}
+          </span>
+        )}
+        {sev && <SeveritySymbol sev={sev} locale={locale} />}
+      </div>
+      <h3 className="lv-card-name">{name}</h3>
+      {oneLine && <p className="lv-card-line">{oneLine}</p>}
+      <div className="lv-card-foot">
+        <InstallCount n={listing.install_count} />
+        <InstallBadge installed={listing.is_installed} locale={locale} onClick={() => onInstall(listing)} />
+      </div>
+    </Link>
+  );
+}
+
+/** Package card — leads with policy count + (in a category view) how many of
+ * its policies belong to the active category (why it surfaced). */
+function PackageListCard({
+  listing,
+  meta,
+  categories,
+  locale,
+  onInstall,
+}: {
+  listing: ListingSummary;
+  meta: { count: number; catCount: Map<CategoryKey, number>; ready: boolean };
+  categories: CategoryKey[];
+  locale: MarketLocale;
+  onInstall: (l: ListingSummary) => void;
+}) {
+  const ko = locale === "ko";
+  const name = pickI18n(listing.display_name, locale) || listing.slug;
+  const desc = pickI18n(listing.description, locale);
+  // How many of this package's policies match the active category filter.
+  const match = categories.reduce((s, c) => s + (meta.catCount.get(c) ?? 0), 0);
+  const matchColor = categories.length === 1 ? CATEGORY_COLOR[categories[0]] : null;
+  const matchLabel =
+    categories.length === 1
+      ? `${categoryNameOf(categories[0], locale)} ${match}${ko ? "개 포함" : ""}`
+      : ko ? `관련 ${match}개 포함` : `${match} matching`;
+  return (
+    <Link
+      to={`/market/${encodeURIComponent(listing.slug)}`}
+      className="market-card lv-card lv-pkg-card"
+    >
+      <div className="lv-card-top">
+        <span className="lv-kind">{ko ? "패키지" : "Package"}</span>
+        {match > 0 && (
+          <span
+            className="lv-match"
+            style={
+              matchColor
+                ? { background: matchColor.soft, color: matchColor.ink }
+                : { background: "var(--sage-50, #f1f6ee)", color: "var(--sage-700, #44583d)" }
+            }
+          >
+            {matchLabel}
+          </span>
+        )}
+      </div>
+      <h3 className="lv-card-name">{name}</h3>
+      {desc && <p className="lv-card-line">{desc}</p>}
+      {meta.ready && (
+        <div className="lv-compose">
+          <span>
+            <strong>{meta.count}</strong> {ko ? "개 정책" : "policies"}
+          </span>
         </div>
-        <span className={`mc-kind kind-${listing.kind}`}>
-          {listing.kind === "set"
-            ? locale === "ko" ? "패키지" : "Package"
-            : locale === "ko" ? "정책" : "Policy"}
-        </span>
-        {listing.severity && (
-          <span className={`mc-sev sev-${listing.severity}`}>
-            {listing.severity === "deny"
-              ? locale === "ko" ? "차단" : "Block"
-              : locale === "ko" ? "경고" : "Warn"}
-          </span>
-        )}
-        {listing.publisher_tier !== "community" && (
-          <span className={`mc-tier tier-${listing.publisher_tier}`}>
-            {listing.publisher_tier === "official"
-              ? locale === "ko" ? "공식" : "Official"
-              : locale === "ko" ? "검증" : "Verified"}
-          </span>
-        )}
-      </div>
-      <h3 className="mc-name">{name || listing.slug}</h3>
-      {desc && <p className="mc-desc">{desc}</p>}
-      <div className="mc-publisher">
-        <span className="mc-publisher-name">
-          {publisherDisplay(listing.publisher_tier, listing.publisher_email, locale)}
-        </span>
-        <span className="mc-publisher-dot">·</span>
-        <span className="mc-publisher-date">{formatYmd(listing.created_at)}</span>
-      </div>
-      {categoryLabel && <div className="mc-domain">{categoryLabel}</div>}
-      <div className="mc-foot">
-        <span className="mc-stat">
-          <span className="mc-stat-num">{listing.install_count}</span>{" "}
-          {locale === "ko" ? "설치" : "installs"}
-        </span>
-        {listing.rating_count > 0 && listing.rating_avg != null && (
-          <span className="mc-stat">
-            ★ {listing.rating_avg.toFixed(1)}
-            <span className="mc-stat-mute"> ({listing.rating_count})</span>
-          </span>
-        )}
-        <span
-          className={`mc-install-badge${listing.is_installed ? " is-installed" : ""}`}
-        >
-          {listing.is_installed
-            ? locale === "ko" ? "설치됨" : "Installed"
-            : locale === "ko" ? "설치" : "Install"}
-        </span>
+      )}
+      <div className="lv-card-foot">
+        <InstallCount n={listing.install_count} />
+        <InstallBadge installed={listing.is_installed} locale={locale} onClick={() => onInstall(listing)} />
       </div>
     </Link>
   );
@@ -718,11 +994,6 @@ function ListingIcon({ listing, size = 18 }: { listing: ListingSummary; size?: n
   const cat = listingCategoryKey(listing);
   if (cat) return <CategoryGlyph category={cat} size={size} color={CATEGORY_COLOR[cat].hex} />;
   return <PackageGlyph size={size} />;
-}
-
-function parseKindParam(raw: string | null): ListingKind | "all" {
-  if (raw === "policy" || raw === "set") return raw;
-  return "all";
 }
 
 function parseSortParam(raw: string | null): ListingSort {

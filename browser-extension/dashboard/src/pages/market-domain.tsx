@@ -179,18 +179,18 @@ export const CATEGORY_ICON: Record<CategoryKey, string> = {
 };
 
 export const CATEGORY_NAME: Record<CategoryKey, { en: string; ko: string }> = {
-  swap:        { en: "Swap",        ko: "스왑" },
-  approvals:   { en: "Approvals",   ko: "승인" },
-  signing:     { en: "Signing",     ko: "오프체인 서명" },
-  transfer:    { en: "Transfer",    ko: "전송" },
-  derivatives: { en: "Perp Trading", ko: "파생·선물" },
-  perps:       { en: "Perp Account", ko: "선물 계정" },
-  liquidity:   { en: "Liquidity",   ko: "유동성" },
-  lending:     { en: "Lending",     ko: "렌딩" },
-  rewards:     { en: "Rewards",     ko: "리워드" },
-  governance:  { en: "Governance",  ko: "거버넌스" },
-  intents:     { en: "Intents",     ko: "인텐트" },
-  others:      { en: "Others",      ko: "기타" },
+  swap:        { en: "Swap",            ko: "스왑(교환)" },
+  approvals:   { en: "Token Approval",  ko: "토큰 사용 승인" },
+  signing:     { en: "Off-chain Sign",  ko: "오프체인 서명" },
+  transfer:    { en: "Transfer",        ko: "송금·전송" },
+  derivatives: { en: "Perp Trading",    ko: "선물 거래" },
+  perps:       { en: "Perp Account",    ko: "선물 계정·입출금" },
+  liquidity:   { en: "Liquidity",       ko: "유동성 공급" },
+  lending:     { en: "Lending",         ko: "예치·대출" },
+  rewards:     { en: "Airdrop/Rewards", ko: "에어드랍·보상" },
+  governance:  { en: "Governance",      ko: "거버넌스 위임" },
+  intents:     { en: "Blind Signing",   ko: "블라인드 서명" },
+  others:      { en: "Others",          ko: "기타" },
 };
 
 /**

@@ -267,7 +267,7 @@ export function publisherDisplay(
   locale: "ko" | "en" = "ko",
 ): string {
   if (tier === "official") {
-    return locale === "ko" ? "지갑방위대 공식" : "Wallet Defense Force";
+    return "Wallet Guardians";
   }
   if (!email) return locale === "ko" ? "익명" : "anonymous";
   const at = email.indexOf("@");
