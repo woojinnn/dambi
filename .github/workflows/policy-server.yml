@@ -42,3 +42,69 @@ jobs:
           helm template policy-server "$CHART_PATH" \
             --set image.repository="$IMAGE_REPOSITORY" \
             --set image.tag="${GITHUB_SHA}"
+
+  # Postgres-backed integration tests. The policy-server integration suite is
+  # gated behind `#[ignore]` (it needs a real Postgres via TEST_DATABASE_URL)
+  # and the policy-db `postgres_store` tests no-op unless TEST_DATABASE_URL is
+  # set — so neither ran in any workflow. This job runs them against a real
+  # `postgres:16` service container.
+  #
+  # Schema is created by the app's OWN `migrate` binary (the same one the Helm
+  # pre-install Job runs in prod), not by a test side effect — so CI exercises
+  # the real migration path. `migrate` reads DATABASE_URL (via
+  # ServerConfig::from_env); the tests read TEST_DATABASE_URL. Both point at the
+  # one service DB. The server integration tests use the test-compat
+  # GlobalDb::open / MultiUserStore::new constructors, which build a lazy pool
+  # from TEST_DATABASE_URL but do NOT migrate — so the migrate step must run
+  # first to create the tables they read/write.
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pasu
+          POSTGRES_PASSWORD: pasu
+          POSTGRES_DB: pasu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pasu -d pasu_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The job runs on the host (not in a container), so it reaches the service
+      # via the mapped localhost port. Both URLs point at the same DB: migrate
+      # reads DATABASE_URL, the tests read TEST_DATABASE_URL.
+      DATABASE_URL: postgres://pasu:pasu@127.0.0.1:5432/pasu_test
+      TEST_DATABASE_URL: postgres://pasu:pasu@127.0.0.1:5432/pasu_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ws"
+
+      # Create the schema with the app's real migration binary (reads
+      # DATABASE_URL). Same sqlx Migrator + runtime migrations dir the prod
+      # pre-install Job uses, so there is no sqlx-cli / version-skew risk.
+      - name: Apply schema (migrate binary)
+        run: cargo run -p policy-server --bin migrate
+
+      # policy-db direct-Postgres tests (round-trip + concurrent-login
+      # idempotency). Env-gated, not #[ignore]: they no-op without
+      # TEST_DATABASE_URL, so they only execute here.
+      - name: Run policy-db Postgres tests
+        run: cargo test -p policy-db
+
+      # The #[ignore]-gated policy-server integration suite against the migrated
+      # DB. --test-threads=1: cargo serializes across test binaries, but tests
+      # within one binary run in parallel by default; these share one Postgres
+      # that is not reset between binaries, so serialize within-binary too.
+      # --no-fail-fast: report every failure in one run instead of stopping at
+      # the first failing binary.
+      - name: Run ignored policy-server integration tests
+        run: cargo test -p policy-server --no-fail-fast -- --ignored --test-threads=1
