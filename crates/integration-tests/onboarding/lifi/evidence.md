@@ -115,20 +115,20 @@ evidence; the phase tables below are the mandatory gate.
 
 | required evidence | status | artifact / exact command / summary |
 |---|---|---|
-| `registryV2 npm run build` output recorded | pending | |
-| registryV2 build-index vitest output recorded | pending | |
-| `npm run check:manifest` output recorded | pending | |
-| `npm run check:surface` output recorded | pending | |
-| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | pending | |
-| v3-harness coverage/fuzz/corpus outputs recorded | pending | |
-| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | pending | |
-| `cargo test --workspace` output recorded | pending | |
-| wasm build output recorded if runtime/wasm/schema changed | pending | |
-| fmt/clippy/typecheck output recorded for changed crates/packages | pending | |
-| exact staged files and commit hash recorded | pending | |
-| remaining WARNs/deferred selectors/actions listed with reason | pending | |
-| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | pending | |
-| no base/worktree merge performed unless user explicitly requested it | pending | |
+| `registryV2 npm run build` output recorded | done | `[build-index] done — 53856 callkey(s) + 88 typed-data entry(ies) written across 1064 manifest(s)` (lifi = 51 callkeys). |
+| registryV2 build-index vitest output recorded | done | N/A — registryV2 has no `test`/vitest script (`npm run` = build, check:universe, check:surface, check:tokens, check:manifest, check:manifest:full, typecheck, serve). Gate = build + check:* + typecheck. `npm run typecheck` (tsc --noEmit) clean. `npm run check:tokens` PASS (0 errors, 1338 pre-existing warns). |
+| `npm run check:manifest` output recorded | done | `validate (all): 2076 single_emit manifest(s) OK, 0 structural errors`. |
+| `npm run check:surface` output recorded | done | `PASS — every gated contract's external surface is fully triaged and consistent.` ✓ LiFiDiamond [1]: 128 surface · 51 cover · 77 exclude · 51 on-chain manifests; ✓ I0 lifi 1 cover. |
+| `npm run check:universe -- --protocol <protocol> --require-cover-linkage` output recorded for pool/factory/vault-heavy protocols, or explicitly not applicable | done | N/A — not pool/factory/vault-heavy (single diamond entry). |
+| v3-harness coverage/fuzz/corpus outputs recorded | done | coverage: `callkeys=2275 ... unique_bundles=1064 install_failures=0` (composite_emit bundles install clean). fuzz: 150,000 / HARD_fail 0 / panicked 0. corpus: 16/16 matched. |
+| protocol-filtered strict corpus output recorded: `v3-harness corpus --filter <protocol> --require-expect-body` | done | `v3-harness corpus --filter lifi --require-expect-body` → 16/16 matched · semantic expect_body 16/16 pinned (159 assertions). |
+| `cargo test --workspace` output recorded | done | `passed=1476 failed=0` (exit 0). |
+| wasm build output recorded if runtime/wasm/schema changed | done | `./scripts/wasm-build.sh` → `✨ Done`, wasm copied to browser-extension/backend/wasm/ + public/wasm/. `.d.ts` includes `lifi_diamond`. (runtime change: composite_emit strategy + BridgeVenue variant.) |
+| fmt/clippy/typecheck output recorded for changed crates/packages | done | `cargo clippy -p policy-action -p policy-engine-wasm -p mappers --all-targets` → Finished, 0 warnings. `cargo fmt -p … -- --check` exit 0. Extension `tsc --noEmit` exit 0; extension vitest 586 passed / 1 skipped / 0 failed (58 files). |
+| exact staged files and commit hash recorded | done | P0 `459bcbb1` (surface 3 files + evidence). P1 `712ab430` (bridge/mod.rs + declarative_exports.rs + builtin_fn.rs + fn_whitelist.json + 51 manifests + evidence). P2+P3 `d111a08b` (manifests map/single-tuple fix + corpus.json + evidence). P4 = this evidence commit (see `git log feat/bridge-onboarding`). NO `git add -A` used. |
+| remaining WARNs/deferred selectors/actions listed with reason | done | **Deferred:** 48 inactive bridge/swap selectors (0 tx/30d); non-EVM bridge destinations (7.6% of 10k — Bitcoin/Solana/Sui, warn-close, need facet nonEVMReceiver + non-eip155 CAIP-2); facet-specific dst_token/output_amount/exclusiveRelayer enrichment; `*Packed` calldata variants; LiFiDEXAggregator periphery; multichain. **Pre-existing WARNs (not lifi):** check:tokens 1338 warns/0 errors; build-index "skipped 239 sourced duplicate callkey"; check:surface I0' aave/morpho stale-deployment notes. |
+| final completion label recorded without overclaiming wallet-facing/full-universe/multichain scope | done | "Li.Fi LiFiDiamond, Ethereum mainnet — routing 100% of 30d/10k top-level function-tx → a bridge::send / amm::Swap / composite decoder; ~92.4% fully decode (swap + EVM-dest bridge incl. source-swap legs); ~7.6% non-EVM bridge destinations warn-close (deferred). Facet enrichment + *Packed + multichain deferred. NOT full-universe, NOT multichain." |
+| no base/worktree merge performed unless user explicitly requested it | done | No merge/push. 4 commits on `feat/bridge-onboarding` (local only), on top of the Across work. Awaiting explicit user request to push/merge. |
 
 ## Blockers
 
