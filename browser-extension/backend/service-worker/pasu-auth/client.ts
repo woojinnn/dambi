@@ -207,3 +207,64 @@ export async function evaluate(req: EvaluateRequestDto): Promise<EvaluateRespons
     body: req,
   });
 }
+
+/**
+ * `POST /wallets/:address/permits` body — a decoded off-chain permit/permit2
+ * signature. Mirrors the server's `IngestPermitReq` tagged union
+ * (`crates/policy-server/server/src/write_handlers.rs`). Decoded params only;
+ * the raw EIP-712 signature is intentionally NOT sent (less sensitive — the
+ * reconciler needs nonce/deadline, not the sig).
+ */
+export type IngestPermitReq =
+  | {
+      kind: "eip2612";
+      token: string;
+      spender: string;
+      amount: string;
+      deadline: number;
+      nonce: string;
+      chain_id: string;
+    }
+  | {
+      kind: "permit2_allowance";
+      token: string;
+      spender: string;
+      amount: string;
+      expires_at: number;
+      sig_deadline: number;
+      nonce_word: string;
+      nonce_bit: number;
+      chain_id: string;
+    }
+  | {
+      kind: "permit2_transfer";
+      token: string;
+      owner: string;
+      spender: string;
+      amount: string;
+      sig_deadline: number;
+      nonce_word: string;
+      nonce_bit: number;
+      witness_type?: string | null;
+      chain_id: string;
+    };
+
+export interface IngestPermitResp {
+  pending_ids: string[];
+}
+
+/**
+ * `POST /wallets/:address/permits` — record a signed permit/permit2 the
+ * extension just observed, so the server tracks it as a `PendingTx` (and the
+ * sync reconciler later closes its lifecycle). Best-effort at the call site;
+ * errors surface as `ServerError` for the caller to swallow.
+ */
+export async function ingestPermit(
+  address: string,
+  req: IngestPermitReq,
+): Promise<IngestPermitResp> {
+  return request<IngestPermitResp>(`/wallets/${address}/permits`, {
+    method: "POST",
+    body: req,
+  });
+}
