@@ -31,7 +31,10 @@ pub(crate) fn lower(
         "debtToCover".into(),
         Value::String(u256_hex(action.debt_to_cover)),
     );
-    // `debtToCoverNano` / `debtToCoverUsd` are host-populated → omitted.
+    if let Some(nano) = ctx.amount_nano(&action.debt_asset, action.debt_to_cover) {
+        m.insert("debtToCoverNano".into(), Value::from(nano));
+    }
+    // `debtToCoverUsd` is host-populated → omitted.
     m.insert("receiveAToken".into(), Value::Bool(action.receive_a_token));
     m.insert(
         "victimState".into(),

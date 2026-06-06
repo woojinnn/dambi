@@ -85,6 +85,17 @@ pub struct BundleMatch {
     #[serde(default)]
     pub to: Vec<String>,
 
+    /// Address-agnostic (selector-only) match. When `true` the bundle is keyed
+    /// by `(chain_id, selector)` ALONE — the contract address flows from the
+    /// live tx (`$to`), and [`Self::entries`] yields NO per-address callkeys.
+    /// Used for standard NFT `setApprovalForAll`, whose security semantics are
+    /// identical for every collection, so per-address registration (a curated
+    /// token list) would only shrink coverage. build-index allowlists which
+    /// selectors may set this (only `0xa22cb465` today); it requires
+    /// [`Self::chain_ids`] and forbids `chain_to_addresses` / `to`.
+    #[serde(default)]
+    pub address_agnostic: bool,
+
     /// 4-byte function selector as `"0x" + 8 hex chars`.
     pub selector: String,
 }

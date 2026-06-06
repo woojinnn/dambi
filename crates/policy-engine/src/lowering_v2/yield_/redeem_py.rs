@@ -32,6 +32,13 @@ pub(crate) fn lower(
         "minOutput".into(),
         Value::String(u256_hex(action.min_output)),
     );
+    if let Some(nano) = action
+        .external_token
+        .as_ref()
+        .and_then(|t| ctx.amount_nano(t, action.min_output))
+    {
+        m.insert("minOutputNano".into(), Value::from(nano));
+    }
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
 
     Ok(ctx.lowered(r#"Yield::Action::"RedeemPy""#, Value::Object(m)))

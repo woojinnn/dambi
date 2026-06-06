@@ -23,6 +23,8 @@ namespace Yield {
     receiver: String,
     // Amount the maker commits (Order.makingAmount), U256 hex.
     makingAmount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    makingAmountNano?: Long,
     // Order expiry as a unix timestamp (Order.expiry), U256 hex.
     expiry: String,
     // Manifest-extensible slot.

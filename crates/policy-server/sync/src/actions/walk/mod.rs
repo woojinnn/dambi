@@ -58,6 +58,8 @@ fn walk_body(
         ActionBody::HyperliquidCore(_) => {}
         // bridge actions carry no live inputs — nothing to walk.
         ActionBody::Bridge(_) => {}
+        // Marketplace (Seaport) actions carry no live inputs — nothing to walk.
+        ActionBody::Marketplace(_) => {}
         ActionBody::Multicall { actions } => {
             for (i, child) in actions.iter().enumerate() {
                 walk_body(child, i, now, stale, stats);
@@ -99,6 +101,7 @@ pub fn apply_value_to_action(
         | ActionBody::Governance(_)
         | ActionBody::HyperliquidCore(_)
         | ActionBody::Bridge(_)
+        | ActionBody::Marketplace(_)
         | ActionBody::Multicall { .. }
         | ActionBody::Unknown { .. } => {}
     }

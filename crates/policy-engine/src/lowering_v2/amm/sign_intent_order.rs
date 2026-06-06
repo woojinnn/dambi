@@ -30,10 +30,13 @@ pub(crate) fn lower(
         "sellAmount".into(),
         Value::String(u256_hex(action.sell_amount)),
     );
-    // `sellAmountNano` / `sellAmountUsd` are host-populated 3-layer siblings —
-    // always omitted here.
+    if let Some(nano) = ctx.amount_nano(&action.sell, action.sell_amount) {
+        m.insert("sellAmountNano".into(), Value::from(nano));
+    }
     m.insert("buyMin".into(), Value::String(u256_hex(action.buy_min)));
-    // `buyMinNano` / `buyMinUsd` are host-populated — always omitted.
+    if let Some(nano) = ctx.amount_nano(&action.buy, action.buy_min) {
+        m.insert("buyMinNano".into(), Value::from(nano));
+    }
     m.insert(
         "orderKind".into(),
         Value::String(intent_order_kind(&action.order_kind).into()),

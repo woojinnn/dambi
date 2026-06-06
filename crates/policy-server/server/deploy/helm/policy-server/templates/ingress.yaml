@@ -6,7 +6,15 @@ metadata:
   labels:
     {{- include "policy-server.labels" . | nindent 4 }}
   annotations:
-    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- if .Values.ingress.gce.enabled }}
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.gce.staticIpName | quote }}
+    networking.gke.io/managed-certificates: {{ printf "%s-cert" (include "policy-server.fullname" .) | quote }}
+    kubernetes.io/ingress.allow-http: {{ .Values.ingress.gce.allowHttp | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}

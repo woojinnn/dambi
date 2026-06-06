@@ -91,6 +91,11 @@ impl ActionBody {
                 action_tag: Some(a.action_tag()),
                 venue_name: a.venue_name(),
             },
+            Self::Marketplace(a) => ActionView {
+                domain: "marketplace",
+                action_tag: Some(a.action_tag()),
+                venue_name: a.venue_name(),
+            },
             Self::Multicall { .. } => ActionView {
                 domain: "multicall",
                 action_tag: None,

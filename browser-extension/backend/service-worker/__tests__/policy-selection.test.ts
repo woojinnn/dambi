@@ -44,7 +44,7 @@ vi.mock('@background/dashboard/storage', () => ({
 }));
 
 const fetchMock = vi.fn(async (url: string) => {
-  if (url.endsWith('policy-set.json')) return new Response(mocks.fetched.defaults);
+  if (url.endsWith('policy-set-v2.json')) return new Response(mocks.fetched.defaults);
   return new Response(mocks.fetched.schema);
 });
 vi.stubGlobal('fetch', fetchMock);
@@ -67,9 +67,13 @@ describe('policy-selection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.localStore.clear();
+    // Per-user policy selection namespaces every enabled/applied-id key under
+    // the current user. Sign a user in so the persisted-selection path is
+    // exercised (logged-out behavior is `[]` / no-op by design).
+    mocks.localStore.set('dashboard:current-user-id', 'test-user');
     mocks.fetched.defaults = JSON.stringify([
-      { id: 'default::dex/a', text: POLICY_A },
-      { id: 'default::dex/b', text: POLICY_B },
+      { id: 'default::dex/a', policy: POLICY_A },
+      { id: 'default::dex/b', policy: POLICY_B },
     ]);
     mocks.listInstalled.mockResolvedValue([]);
   });

@@ -19,6 +19,7 @@ pub mod hyperliquid_core;
 pub mod launchpad;
 pub mod lending;
 pub mod liquid_staking;
+pub mod marketplace;
 pub mod order_intent;
 pub mod permission;
 pub mod perp;
@@ -36,6 +37,7 @@ pub use hyperliquid_core::HyperliquidCoreAction;
 pub use launchpad::LaunchpadAction;
 pub use lending::LendingAction;
 pub use liquid_staking::LiquidStakingAction;
+pub use marketplace::MarketplaceAction;
 pub use order_intent::OrderIntent;
 pub use permission::PermissionAction;
 pub use perp::PerpAction;
@@ -178,6 +180,8 @@ pub enum ActionBody {
     /// Hyperliquid CORE action (off-chain L1 order / leverage / fund movement),
     /// intercepted from a `/exchange` POST rather than `window.ethereum`.
     HyperliquidCore(HyperliquidCoreAction),
+    /// NFT-marketplace action (Seaport order sign / fulfill / cancel).
+    Marketplace(MarketplaceAction),
 
     /// Cross-chain bridge action (the source-chain deposit/send leg the user signs).
     Bridge(BridgeAction),

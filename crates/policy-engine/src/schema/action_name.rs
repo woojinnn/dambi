@@ -179,6 +179,11 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "redeem",
     "unlock",
     "vote_for_gauge",
+    // Marketplace (2) — `cancel_order` already listed above under Perp, so the
+    // tag set adds only `fulfill_order` + `sign_order` (per-domain
+    // disambiguation lives in per_policy::RESOLVER_TABLE, keyed on (domain, tag)).
+    "fulfill_order",
+    "sign_order",
     // Token (13) — `delegate` already listed above under Airdrop
     "erc20_approve",
     "erc20_permit",
@@ -275,8 +280,10 @@ mod tests {
         // Union of feat/registry-v2 (incl. weth-wrap `wrap_native`/`unwrap_native`
         // + CoW Swap `pre_sign_intent_order`) and feat/morpho-onboarding (Compound
         // + Aave `gsm_swap` + governance + lending periphery + staking
-        // redeem/stake/cooldown) = 118, plus bridge `send` = 119.
-        assert_eq!(REGISTERED_ACTIONS.len(), 119);
+        // redeem/stake/cooldown) = 118, plus Marketplace (Seaport) sign_order +
+        // fulfill_order (cancel_order dedups against Perp) = 120, plus bridge
+        // `send` = 121.
+        assert_eq!(REGISTERED_ACTIONS.len(), 121);
     }
 
     #[test]

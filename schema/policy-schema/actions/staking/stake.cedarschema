@@ -17,6 +17,8 @@ namespace Staking {
     asset?: Core::TokenRef,
     // Amount of the underlying staked (`amount`), U256 hex.
     amount: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    amountNano?: Long,
     // Account staked on behalf of (Umbrella). Absent ⇒ submitter.
     onBehalfOf?: String,
     // Recipient of the staked-derivative shares (`to`). Absent ⇒ submitter.

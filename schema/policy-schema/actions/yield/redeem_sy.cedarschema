@@ -17,6 +17,8 @@ namespace Yield {
     netSyIn: String,
     // Minimum external-token out / slippage floor (U256 hex).
     minTokenOut: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    minTokenOutNano?: Long,
     // Output recipient (address).
     recipient: String,
     // Manifest-extensible slot.

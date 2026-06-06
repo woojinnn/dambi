@@ -26,7 +26,10 @@ pub(crate) fn lower(
     m.insert("saleId".into(), Value::String(action.sale_id.clone()));
     m.insert("payToken".into(), lower_token_ref(&action.pay_token));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
-    // `amountNano` / `amountUsd` are host-populated 3-layer slots — OMITTED.
+    if let Some(nano) = ctx.amount_nano(&action.pay_token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
+    // `amountUsd` is a host-populated 3-layer slot — OMITTED.
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
     m.insert(
         "saleState".into(),

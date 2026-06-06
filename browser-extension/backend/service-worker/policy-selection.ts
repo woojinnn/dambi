@@ -1,10 +1,19 @@
 import Browser from 'webextension-polyfill';
 import { parsePolicyMeta, type Severity } from '@lib/policy-meta';
 import { listManaged } from './dashboard/storage';
+import { getCurrentUserId } from './dashboard/current-user';
 import { listInstalled } from './adapter-loader/storage';
 
-const ENABLED_KEY = 'policy-selection:enabled-ids';
-const APPLIED_KEY = 'policy-selection:applied-ids';
+const ENABLED_KEY_PREFIX = 'policy-selection:enabled-ids';
+const APPLIED_KEY_PREFIX = 'policy-selection:applied-ids';
+export const ENABLED_KEY_PREFIX_WITH_SEP = `${ENABLED_KEY_PREFIX}:`;
+export const APPLIED_KEY_PREFIX_WITH_SEP = `${APPLIED_KEY_PREFIX}:`;
+function enabledKey(uid: string): string {
+  return `${ENABLED_KEY_PREFIX}:${uid}`;
+}
+function appliedKey(uid: string): string {
+  return `${APPLIED_KEY_PREFIX}:${uid}`;
+}
 
 export interface CatalogPolicy {
   id: string;
@@ -36,11 +45,15 @@ async function writeStringArray(key: string, ids: string[]): Promise<void> {
 }
 
 export async function getEnabledIds(): Promise<string[]> {
-  return readStringArray(ENABLED_KEY);
+  const uid = await getCurrentUserId();
+  if (!uid) return [];
+  return readStringArray(enabledKey(uid));
 }
 
 export async function getAppliedIds(): Promise<string[]> {
-  return readStringArray(APPLIED_KEY);
+  const uid = await getCurrentUserId();
+  if (!uid) return [];
+  return readStringArray(appliedKey(uid));
 }
 
 let inflight: Promise<ApplyResult> | null = null;
@@ -61,11 +74,22 @@ function normalizeIds(ids: string[]): string[] {
 }
 
 async function runApply(ids: string[], reinstall: ReinstallFn): Promise<ApplyResult> {
+  const uid = await getCurrentUserId();
+  if (!uid) {
+    // No active user → no per-user enabled-ids namespace. Treat as a no-op
+    // success: the engine has nothing dashboard-specific to install.
+    try {
+      await reinstall([]);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: classifyError(err) };
+    }
+  }
   const sorted = normalizeIds(ids);
   try {
-    await writeStringArray(ENABLED_KEY, sorted);
+    await writeStringArray(enabledKey(uid), sorted);
     await reinstall(sorted);
-    await writeStringArray(APPLIED_KEY, sorted);
+    await writeStringArray(appliedKey(uid), sorted);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: classifyError(err) };
@@ -128,10 +152,25 @@ interface DefaultPolicyEntry {
   text: string;
 }
 
+interface V2DefaultEntry {
+  id: string;
+  /** Cedar policy text with @id/@severity/@reason — same shape parsePolicyMeta
+   * already parses for the v1 catalog. */
+  policy: string;
+}
+
 async function loadDefaults(): Promise<DefaultPolicyEntry[]> {
-  const url = Browser.runtime.getURL('default-policies/policy-set.json');
+  // The baked default set migrated to v2 (`policy-set-v2.json`); the old v1
+  // `policy-set.json` is now an empty `[]`, which is why the popup catalog
+  // showed nothing while v2 evaluation enforced the 9 shipped policies. Read
+  // the v2 asset (baked set only — dashboard/managed policies are listed
+  // separately via listManaged, so going through loadDefaultPolicySetV2 here
+  // would double-count them) and project each `{id, policy}` onto the
+  // v1-shaped `{id, text}` the catalog builder consumes.
+  const url = Browser.runtime.getURL('default-policies/policy-set-v2.json');
   const res = await fetch(url);
-  return (await res.json()) as DefaultPolicyEntry[];
+  const v2 = (await res.json()) as V2DefaultEntry[];
+  return v2.map((b) => ({ id: b.id, text: b.policy }));
 }
 
 function namespaceOf(id: string): string {

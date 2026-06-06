@@ -38,13 +38,24 @@ export interface VerdictRow {
   reason: { ko?: string | null; en?: string | null };
   user_decision: "trusted" | "cancelled" | null;
   decided_at: number | null;
-  delta_id: number | null;
+  /** Decision-level UUID linking this verdict row to a state-delta row
+   *  in `state-delta-storage`. N verdict rows (one per matched policy)
+   *  share the same delta_id when they came from the same decision. The
+   *  type widened from `number` to `string` to accommodate UUIDs; legacy
+   *  rows persisted before this change carry `null` and surface as
+   *  "no delta data" in the dashboard's HistoryPage detail. */
+  delta_id: string | null;
 }
 
 export type VerdictInsert = Omit<
   VerdictRow,
   "id" | "user_decision" | "decided_at"
->;
+> & {
+  /** Set when the row is inserted with a decision already known (e.g.,
+   *  a WARN verdict whose confirm-popup just resolved). Defaults to
+   *  null — pass-through inserts stay undecided. */
+  user_decision?: "trusted" | "cancelled" | null;
+};
 
 export interface VerdictFilter {
   range?: "1h" | "6h" | "24h" | "7d";
@@ -163,11 +174,12 @@ export async function countVerdicts(
 }
 
 export async function appendVerdict(insert: VerdictInsert): Promise<VerdictRow> {
+  const decision = insert.user_decision ?? null;
   const row: VerdictRow = {
     ...insert,
     id: crypto.randomUUID(),
-    user_decision: null,
-    decided_at: null,
+    user_decision: decision,
+    decided_at: decision !== null ? Math.floor(Date.now() / 1000) : null,
   };
   const rows = await listAllVerdicts();
   rows.unshift(row);

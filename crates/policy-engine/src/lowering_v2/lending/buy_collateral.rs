@@ -32,10 +32,16 @@ pub(crate) fn lower(
         "minCollateralAmount".into(),
         Value::String(u256_hex(action.min_collateral_amount)),
     );
+    if let Some(nano) = ctx.amount_nano(&action.collateral_asset, action.min_collateral_amount) {
+        m.insert("minCollateralAmountNano".into(), Value::from(nano));
+    }
     m.insert(
         "baseAmount".into(),
         Value::String(u256_hex(action.base_amount)),
     );
+    if let Some(nano) = ctx.amount_nano(&action.base_asset, action.base_amount) {
+        m.insert("baseAmountNano".into(), Value::from(nano));
+    }
     m.insert("recipient".into(), Value::String(addr(&action.recipient)));
 
     Ok(ctx.lowered(r#"Lending::Action::"BuyCollateral""#, Value::Object(m)))

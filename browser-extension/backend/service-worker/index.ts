@@ -12,6 +12,11 @@ import {
   reinstallAllPolicies,
 } from "./policies-loader";
 import { loadDefaultPolicySetV2 } from "./policies-loader-v2";
+import {
+  ensureDefaultV3BundlesInstalled,
+  getInstalledV3BundleCount,
+  v3BundleBootCompleted,
+} from "./v3-bundle-loader";
 import { applyEnabledIds, getCatalog, getEnabledIds } from "./policy-selection";
 import {
   isExecutionReport,
@@ -23,16 +28,27 @@ import {
   clearTokens,
   fetchMe,
   listWallets,
+  setTokens,
   startGoogleLogin,
   type Me,
   type WalletId,
 } from "./scopeball-auth";
 import {
+  declarativeRouteRequestV3,
   estToPolicyText,
+  evaluateActionV2,
   policyTextToEst,
+  runDiagnosisProbesV2,
   simulatePolicySequence,
+  simulateStep,
   testPolicyText,
   validatePolicyText,
+  type DeclarativeRouteRequestV3Input,
+  type DeclarativeRouteRequestV3Result,
+  type EvaluateActionV2InputDto,
+  type VerdictDto,
+  type SimulateStepInput,
+  type SimulateStepOutput,
 } from "./wasm-bridge";
 import {
   clearExecutionReports,
@@ -48,6 +64,15 @@ import {
   setVerdictDecision as setStoredVerdictDecision,
   type VerdictFilter,
 } from "./verdict-storage";
+import {
+  clearStateDeltas,
+  getStateDelta,
+  type StateDeltaRow,
+} from "./state-delta-storage";
+import {
+  getDiagnosisContext,
+  type DiagnosisContextRow,
+} from "./diagnosis-context-storage";
 
 const WALLET_ACTION_TYPES = new Set<string>([
   RequestType.TRANSACTION,
@@ -151,6 +176,21 @@ async function bootSequence(): Promise<void> {
     console.warn("[Scopeball] manifest hydration failed:", err);
   }
 
+  // Default v3 decoder bundles — used by the simulation page so the
+  // `declarative_route_request_v3_json` decoder has something to look up
+  // (without this it falls through to `ActionBody::Unknown` for every
+  // calldata, even canonical ERC20 transfer/approve). Production
+  // enforcement still uses the registry-api JIT path; this is a
+  // simulator-friendly cold-start seed. Best-effort like the other stages.
+  // Runs AFTER hydrateManifests so any per-bundle install errors don't
+  // leave the engine in a half-installed manifest state.
+  try {
+    const v3Count = await ensureDefaultV3BundlesInstalled();
+    console.log(`[Scopeball] v3 default bundles installed (${v3Count})`);
+  } catch (err) {
+    console.warn("[Scopeball] v3 default bundle install failed:", err);
+  }
+
   // Phase 1 / P2: warm the in-memory default v2 policy set so the first
   // decision doesn't pay the fetch. v2 evaluation is STATELESS — this is a
   // pure asset fetch + module-level cache, with NO WASM state to push, so
@@ -251,6 +291,18 @@ interface ScopeballAuthSignInRequest {
 interface ScopeballAuthSignOutRequest {
   type: "scopeball-auth-sign-out";
 }
+/** Dashboard → SW token mirror. The dashboard's OAuth flow lands tokens in
+ *  page `localStorage`; the SW reads tokens from `chrome.storage.local`.
+ *  Without this sync the SW thinks the user is signed out even after a
+ *  successful dashboard sign-in, and `recordSimulationOnServer` returns
+ *  silently at its `hasToken` guard — leaving the HistoryPage's state-diff
+ *  panel permanently empty. The dashboard calls this after every
+ *  `fetchMe()` that resolves to a real user, so the sync is idempotent. */
+interface ScopeballAuthSyncTokensRequest {
+  type: "scopeball-auth-sync-tokens";
+  access: string;
+  refresh: string | null;
+}
 interface ScopeballListWalletsRequest {
   type: "scopeball-list-wallets";
 }
@@ -275,6 +327,10 @@ interface CedarSimulateRequest {
   steps_json: string;
   policies_json: string;
 }
+interface RunDiagnosisProbesRequest {
+  type: "run-diagnosis-probes";
+  input_json: string;
+}
 interface CedarTextToEstRequest {
   type: "cedar-text-to-est";
   text: string;
@@ -283,6 +339,38 @@ interface CedarEstToTextRequest {
   type: "cedar-est-to-text";
   // Pre-serialized EST JSON (a single policy's EST object).
   est_json: string;
+}
+/** Simulation page: one (state, action, ctx) → (delta, next_state).
+ *  Dashboard owns the per-tx loop; SW just forwards to the wasm bridge.
+ *  Contract: `crates/policy-engine-wasm/src/sim_step_exports.rs`. */
+interface SimStepRequest {
+  type: "sim-step";
+  input: SimulateStepInput;
+}
+/** Simulation page: decode a raw tx (chain_id, to, calldata, …) into the
+ *  typed `Action[]` tree the v3 route engine emits. Same wasm entry the SW
+ *  orchestrator uses for live wallet flows — exposed here so the dashboard
+ *  can drive the same decode → simulate pipeline from user-pasted calldata. */
+interface SimDecodeRequest {
+  type: "sim-decode";
+  input: DeclarativeRouteRequestV3Input;
+}
+/** Simulation page: evaluate one (action, meta, tx, bundles, results) →
+ *  `VerdictDto`. Pairs with `sim-step` so the dashboard's per-tx loop can
+ *  compute BOTH the post-state AND the policy verdict at every step.
+ *  Contract: `crates/policy-engine-wasm/src/action_eval_exports.rs`. */
+interface SimEvaluateRequest {
+  type: "sim-evaluate";
+  input: EvaluateActionV2InputDto;
+}
+/** Simulation page: how many default v3 decoder bundles did this SW
+ *  lifetime manage to install at boot? The probe surfaces a warning when
+ *  this returns 0 (the decoder will return `Unknown` for everything in
+ *  that case). Returns `{count, bootCompleted}` — `bootCompleted = false`
+ *  means the install pass is still in-flight; the probe shows "warming up"
+ *  instead of "no bundles". */
+interface SimV3BundleCountRequest {
+  type: "sim-v3-bundle-count";
 }
 interface ExecutionReportsListRequest {
   type: "execution-reports:list";
@@ -315,6 +403,25 @@ interface VerdictsExportCsvRequest {
 interface VerdictsClearRequest {
   type: "verdicts:clear";
 }
+/** HistoryPage detail panel: fetch the state-delta row that a verdict's
+ *  `delta_id` points at. Returns `null` for missing ids (legacy rows or
+ *  decisions whose `recordSimulationOnServer` couldn't reach the policy
+ *  server). */
+interface StateDeltasGetRequest {
+  type: "state-deltas:get";
+  id: string;
+}
+interface StateDeltasClearRequest {
+  type: "state-deltas:clear";
+}
+/** HistoryPage / confirm-popup denial diagnosis: fetch the captured context
+ *  (action + materialized enrichment results) a deny's `delta_id` points at, so
+ *  the dashboard can re-run "which clause blocked this" against the real
+ *  context. `null` for non-deny / legacy rows. */
+interface DiagnosisContextGetRequest {
+  type: "diagnosis-context:get";
+  id: string;
+}
 /** Read just the enabled-policy id list. The dashboard's policy list
  *  uses this for the checkbox state; the popup also uses it indirectly
  *  via `policy-catalog`. Keeping a dedicated `:get` lets the dashboard
@@ -329,12 +436,18 @@ type PopupRequest =
   | ScopeballAuthStatusRequest
   | ScopeballAuthSignInRequest
   | ScopeballAuthSignOutRequest
+  | ScopeballAuthSyncTokensRequest
   | ScopeballListWalletsRequest
   | CedarValidateRequest
   | CedarTestRequest
   | CedarSimulateRequest
+  | RunDiagnosisProbesRequest
   | CedarTextToEstRequest
   | CedarEstToTextRequest
+  | SimStepRequest
+  | SimDecodeRequest
+  | SimEvaluateRequest
+  | SimV3BundleCountRequest
   | ExecutionReportsListRequest
   | ExecutionReportsCountRequest
   | ExecutionReportsClearRequest
@@ -342,7 +455,10 @@ type PopupRequest =
   | VerdictsCountRequest
   | VerdictsSetDecisionRequest
   | VerdictsExportCsvRequest
-  | VerdictsClearRequest;
+  | VerdictsClearRequest
+  | StateDeltasGetRequest
+  | StateDeltasClearRequest
+  | DiagnosisContextGetRequest;
 
 // webextension-polyfill's listener type accepts `true | void | Promise<any>`,
 // not `boolean`. Returning `undefined` (bare `return;`) closes the channel
@@ -402,6 +518,21 @@ Browser.runtime.onMessage.addListener(
         );
       return true;
     }
+    if (req.type === "run-diagnosis-probes") {
+      // Denial-diagnosis oracle. `input_json` is built by the dashboard's
+      // `runDiagnosisProbes` and forwarded verbatim to WASM; `json` is the raw
+      // WASM `{ ok, data }` envelope STRING, which the dashboard re-parses (see
+      // dashboard `server-api/diagnosis.ts`). Guide: `cedar/diagnosis/README.md`.
+      void runDiagnosisProbesV2((req as RunDiagnosisProbesRequest).input_json)
+        .then((json) => sendResponse({ ok: true, data: json }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "run_diagnosis_probes_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
     if (req.type === "cedar-text-to-est") {
       void policyTextToEst((req as CedarTextToEstRequest).text)
         .then((json) => sendResponse({ ok: true, data: json }))
@@ -422,6 +553,53 @@ Browser.runtime.onMessage.addListener(
             error: { kind: "cedar_est_to_text_failed", message: String(err) },
           }),
         );
+      return true;
+    }
+    if (req.type === "sim-step") {
+      void simulateStep((req as SimStepRequest).input)
+        .then((data: SimulateStepOutput) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "sim_step_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "sim-decode") {
+      void declarativeRouteRequestV3((req as SimDecodeRequest).input)
+        .then((data: DeclarativeRouteRequestV3Result) =>
+          sendResponse({ ok: true, data }),
+        )
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "sim_decode_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "sim-evaluate") {
+      void evaluateActionV2((req as SimEvaluateRequest).input)
+        .then((data: VerdictDto) => sendResponse({ ok: true, data }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "sim_evaluate_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "sim-v3-bundle-count") {
+      // Synchronous module-level counters — no await needed, but we keep
+      // the async response shape for consistency with the other handlers.
+      sendResponse({
+        ok: true,
+        data: {
+          count: getInstalledV3BundleCount(),
+          bootCompleted: v3BundleBootCompleted(),
+        },
+      });
       return true;
     }
 
@@ -487,6 +665,19 @@ Browser.runtime.onMessage.addListener(
           sendResponse({
             ok: false,
             error: { kind: "scopeball_sign_out_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "scopeball-auth-sync-tokens") {
+      const r = req as ScopeballAuthSyncTokensRequest;
+      void setTokens(r.access, r.refresh)
+        .then(() => sendResponse({ ok: true, data: null }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "scopeball_sync_tokens_failed", message: String(err) },
           }),
         );
       return true;
@@ -623,6 +814,43 @@ Browser.runtime.onMessage.addListener(
           sendResponse({
             ok: false,
             error: { kind: "verdicts_clear_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "state-deltas:get") {
+      void getStateDelta((req as StateDeltasGetRequest).id)
+        .then((row: StateDeltaRow | null) => sendResponse({ ok: true, data: row }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "state_deltas_get_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+    if (req.type === "diagnosis-context:get") {
+      void getDiagnosisContext((req as DiagnosisContextGetRequest).id)
+        .then((row: DiagnosisContextRow | null) =>
+          sendResponse({ ok: true, data: row }),
+        )
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "diagnosis_context_get_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    if (req.type === "state-deltas:clear") {
+      void clearStateDeltas()
+        .then(() => sendResponse({ ok: true, data: { cleared: true } }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "state_deltas_clear_failed", message: String(err) },
           }),
         );
       return true;

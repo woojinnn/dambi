@@ -45,7 +45,7 @@ import {
 
 const WETH_MAINNET = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const WETH_PAYLOAD: TokenMetadata = {
-  kind: "erc20",
+  erc_kind: "erc20",
   chainId: 1,
   address: WETH_MAINNET,
   symbol: "WETH",
@@ -54,7 +54,7 @@ const WETH_PAYLOAD: TokenMetadata = {
 };
 const USDC_MAINNET = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDC_PAYLOAD: TokenMetadata = {
-  kind: "erc20",
+  erc_kind: "erc20",
   chainId: 1,
   address: USDC_MAINNET,
   symbol: "USDC",
@@ -172,8 +172,8 @@ describe("TokenRegistryClient.lookup", () => {
   it("schema invalid → null + integrity_failed (5 min)", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        // Missing `decimals` (required field), wrong `kind`.
-        kind: "not-erc20",
+        // Missing `decimals` (required field), wrong `erc_kind`.
+        erc_kind: "not-erc20",
         chainId: 1,
         address: WETH_MAINNET,
         symbol: "WETH",

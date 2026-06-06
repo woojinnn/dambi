@@ -8,6 +8,7 @@
 use serde_json::{Map, Value};
 
 use policy_state::primitives::U256;
+use policy_state::token::TokenRef;
 use policy_transition::action::amm::{SwapAction, SwapDirection};
 
 use super::super::common::cedar::{addr, u256_hex};
@@ -44,7 +45,12 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
     }
     m.insert(
         "direction".into(),
-        lower_swap_direction(&swap.params.direction),
+        lower_swap_direction(
+            &swap.params.direction,
+            ctx,
+            &swap.params.token_in,
+            swap.params.token_out.as_ref(),
+        ),
     );
     m.insert(
         "recipient".into(),
@@ -76,7 +82,18 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
 }
 
 /// Lower a [`SwapDirection`] → discriminated `{ kind, … }` (`Amm::SwapDirection`).
-fn lower_swap_direction(direction: &SwapDirection) -> Value {
+///
+/// Each raw hex amount also emits its token-native `Long` nano sibling when the
+/// relevant token's decimals are known: input amounts (`amountIn` /
+/// `maxAmountIn`) use `token_in`; output amounts (`minAmountOut` / `amountOut`)
+/// use `token_out` (absent for pool-read-required swaps, so those nano fields
+/// are simply omitted). See [`LowerCtx::amount_nano`].
+fn lower_swap_direction(
+    direction: &SwapDirection,
+    ctx: &LowerCtx<'_>,
+    token_in: &TokenRef,
+    token_out: Option<&TokenRef>,
+) -> Value {
     let mut m = Map::new();
     match direction {
         SwapDirection::ExactInput {
@@ -85,10 +102,16 @@ fn lower_swap_direction(direction: &SwapDirection) -> Value {
         } => {
             m.insert("kind".into(), Value::String("exact_input".into()));
             m.insert("amountIn".into(), Value::String(u256_hex(*amount_in)));
+            if let Some(nano) = ctx.amount_nano(token_in, *amount_in) {
+                m.insert("amountInNano".into(), Value::from(nano));
+            }
             m.insert(
                 "minAmountOut".into(),
                 Value::String(u256_hex(*min_amount_out)),
             );
+            if let Some(nano) = token_out.and_then(|t| ctx.amount_nano(t, *min_amount_out)) {
+                m.insert("minAmountOutNano".into(), Value::from(nano));
+            }
         }
         SwapDirection::ExactOutput {
             max_amount_in,
@@ -99,7 +122,13 @@ fn lower_swap_direction(direction: &SwapDirection) -> Value {
                 "maxAmountIn".into(),
                 Value::String(u256_hex(*max_amount_in)),
             );
+            if let Some(nano) = ctx.amount_nano(token_in, *max_amount_in) {
+                m.insert("maxAmountInNano".into(), Value::from(nano));
+            }
             m.insert("amountOut".into(), Value::String(u256_hex(*amount_out)));
+            if let Some(nano) = token_out.and_then(|t| ctx.amount_nano(t, *amount_out)) {
+                m.insert("amountOutNano".into(), Value::from(nano));
+            }
         }
     }
     Value::Object(m)

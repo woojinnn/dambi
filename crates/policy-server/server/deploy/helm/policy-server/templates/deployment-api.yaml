@@ -38,12 +38,14 @@ spec:
               value: {{ .Values.api.publicApiUrl | quote }}
             - name: DASHBOARD_URL
               value: {{ .Values.api.dashboardUrl | quote }}
+            - name: OAUTH_ALLOWED_REDIRECT_URIS
+              value: {{ .Values.api.oauthAllowedRedirectUris | quote }}
             - name: CORS_ALLOWED_ORIGINS
               value: {{ join "," .Values.api.corsAllowedOrigins | quote }}
             - name: CORS_ALLOW_PRIVATE_NETWORK
-              value: "false"
-            - name: SCOPEBALL_SYNC_CONFIG
-              value: /app/scopeball-sync.toml
+              value: {{ .Values.api.corsAllowPrivateNetwork | quote }}
+            - name: PASU_SYNC_CONFIG
+              value: /app/pasu-sync.toml
             - name: REQUIRE_SYNC_CONFIG
               value: {{ .Values.runtime.requireSyncConfig | quote }}
             - name: RUN_MIGRATIONS_ON_STARTUP
@@ -101,8 +103,8 @@ spec:
                   optional: true
           volumeMounts:
             - name: sync-config
-              mountPath: /app/scopeball-sync.toml
-              subPath: scopeball-sync.toml
+              mountPath: /app/pasu-sync.toml
+              subPath: pasu-sync.toml
               readOnly: true
           livenessProbe:
             httpGet:
@@ -120,6 +122,14 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+          # Zero-downtime on GKE L7: keep serving for a few seconds after SIGTERM
+          # so the GCLB drops this pod from the NEG before it stops accepting
+          # connections (avoids 502s during rollouts). Graceful drain runs after.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ .Values.api.preStopSleepSeconds }}"]
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
       volumes:
         - name: sync-config
           configMap:

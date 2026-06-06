@@ -1,0 +1,45 @@
+{
+  "type": "adapter_action",
+  "id": "standard/nft/set-approval-for-all@1.0.0",
+  "schema_version": "3",
+  "match": {
+    "selector": "0xa22cb465",
+    "address_agnostic": true,
+    "chain_ids": [1, 10, 8453, 42161]
+  },
+  "abi_fragment": {
+    "function_name": "setApprovalForAll",
+    "abi": {
+      "name": "setApprovalForAll",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "operator", "type": "address" },
+        { "name": "approved", "type": "bool" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "nft_set_approval_for_all",
+        "nft_set_approval_for_all": {
+          "chain": "$chain",
+          "contract": "$to",
+          "spender": "$args.operator",
+          "approved": "$args.approved"
+        }
+      }
+    },
+    "live_inputs": {}
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

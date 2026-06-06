@@ -23,7 +23,10 @@ pub(crate) fn lower(
     m.insert("meta".into(), ctx.meta());
     m.insert("token".into(), lower_token_ref(&action.token));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
-    // `amountNano` / `amountUsd` / `custom` are host-populated — OMITTED here.
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
+    // `amountUsd` / `custom` are host-populated — OMITTED here.
 
     Ok(ctx.lowered(r#"Token::Action::"WrapNative""#, Value::Object(m)))
 }

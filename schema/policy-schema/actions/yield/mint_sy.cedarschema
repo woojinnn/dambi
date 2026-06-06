@@ -15,6 +15,8 @@ namespace Yield {
     externalToken: Core::TokenRef,
     // External-token amount deposited (U256 hex).
     netTokenIn: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    netTokenInNano?: Long,
     // Minimum SY shares minted / slippage floor (U256 hex).
     minSyOut: String,
     // SY recipient (address).

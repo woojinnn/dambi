@@ -1,0 +1,11 @@
+{{- if .Values.managedCertificate.enabled }}
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ printf "%s-cert" (include "policy-server.fullname" .) }}
+  labels:
+    {{- include "policy-server.labels" . | nindent 4 }}
+spec:
+  domains:
+    - {{ .Values.ingress.host | quote }}
+{{- end }}

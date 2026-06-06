@@ -40,9 +40,12 @@ target/web-server.pid
 .claude/
 
 # Secret env vars (OAuth, JWT) — NEVER commit. See .env.example for layout.
+# Profile files (.env.local, .env.sim, .env.ext, …) feed
+# scripts/start-policy-server.sh and carry the same secrets as .env.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 
 # wasm-pack artifacts (produced by scripts/wasm-build*.sh and copied into consumers).
 crates/*-wasm/pkg/
@@ -61,9 +64,14 @@ browser-extension/public/wasm/
 /registryV2/bundles/
 /registryV2/contexts/
 
+# Local scratch copies of policy-server k8s manifests. The tracked local
+# self-service path is crates/policy-server/server/deploy/local/.
+/deploy-local/
+
 # Markdown docs, research + audit notes — only README.md stays tracked.
 *.md
 !README.md
+!crates/policy-server/server/deploy/local/README.md
 # Policy-catalog shared aggregator-method impl-spec library — tracked so the RPC
 # server implementer (and auditors) get each method's spec alongside the policies.
 !**/policy_catalog_v2/_methods/*.md
@@ -89,3 +97,6 @@ AGENTS.md
 
 # Server runtime scratch dir (SQLite stores, per-user pools) — origin/main.
 .scopeball-runtime/
+
+# Extension signing key — never commit
+*.pem

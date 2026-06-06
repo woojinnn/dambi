@@ -1,0 +1,57 @@
+{
+  "type": "adapter_action",
+  "id": "seaport/order/incrementCounter@1.0.0",
+  "publisher": "opensea",
+  "schema_version": "3",
+  "note": "Seaport 1.6 incrementCounter -> marketplace. 1st-party ProjectOpenSea/seaport. tuple params named so args key by name; fulfillBasicOrder single-tuple spreads flat.",
+  "match": {
+    "selector": "0x5b34b966",
+    "chain_to_addresses": {
+      "1": [
+        "0x0000000000000068f116a894984e2db1123eb395"
+      ]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "incrementCounter",
+    "abi": {
+      "inputs": [],
+      "name": "incrementCounter",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "newCounter",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "marketplace",
+      "marketplace": {
+        "action": "cancel_order",
+        "cancel_order": {
+          "venue": {
+            "name": "seaport",
+            "chain": "$chain",
+            "settlement": "$tx.to"
+          },
+          "scope": "all"
+        }
+      }
+    },
+    "live_inputs": {}
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [
+      "token_metadata"
+    ],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

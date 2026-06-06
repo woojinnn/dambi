@@ -38,7 +38,10 @@ pub(crate) fn lower(
         "collateralAmount".into(),
         Value::String(u256_hex(*collateral_amount)),
     );
-    // `collateralAmountNano` / `collateralAmountUsd` are host-populated — OMITTED.
+    if let Some(nano) = ctx.amount_nano(collateral_token, *collateral_amount) {
+        m.insert("collateralAmountNano".into(), Value::from(nano));
+    }
+    // `collateralAmountUsd` is host-populated — OMITTED.
     m.insert(
         "marginMode".into(),
         Value::String(margin_mode(&action.margin_mode).into()),

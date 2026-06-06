@@ -24,6 +24,9 @@ pub(crate) fn lower(
     m.insert("token".into(), lower_token_ref(&action.token));
     m.insert("spender".into(), Value::String(addr(&action.spender)));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     // `deadline` is a unix-seconds Long (JSON number).
     m.insert("deadline".into(), Value::from(action.deadline.as_unix()));
     // `nonce` is a `LiveField<U256>`; inline its inner value as U256 hex.

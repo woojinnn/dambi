@@ -11,8 +11,14 @@
  * varies per route).
  */
 
-import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom";
+import {
+  Navigate,
+  RouterProvider,
+  createBrowserRouter,
+  createHashRouter,
+} from "react-router-dom";
 
+import { isExtensionContext } from "./env";
 import { AuthProvider } from "./hooks/useAuth";
 import { RequireAuth } from "./RequireAuth";
 import { AppShell } from "./shell/AppShell";
@@ -23,14 +29,25 @@ import { HomePage } from "./pages/HomePage";
 import { EditorListPage } from "./pages/editor/EditorListPage";
 import { EditorNewPage } from "./pages/editor/EditorNewPage";
 import { EditorDetailPage } from "./pages/editor/EditorDetailPage";
+import { EditorSetNewPage } from "./pages/editor/EditorSetNewPage";
+import { EditorSetDetailPage } from "./pages/editor/EditorSetDetailPage";
 import { SimulationPage } from "./pages/SimulationPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
-import { AuditPage } from "./pages/AuditPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { MarketPage } from "./pages/MarketPage";
+import { MarketDetailPage } from "./pages/MarketDetailPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
-const router = createBrowserRouter([
+// On an extension page the URL is `…/options.html` (a real file, no dev
+// server rewriting unknown paths to index.html), so path-based routing finds
+// no match → blank screen. Hash routing (`…/options.html#/editor`) renders
+// and survives reloads. Standalone dev keeps clean path-based URLs.
+const createRouter = isExtensionContext() ? createHashRouter : createBrowserRouter;
+
+const router = createRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/auth/callback", element: <AuthCallbackPage /> },
+  { path: "/settings", element: <SettingsPage /> },
   {
     path: "/",
     element: <RequireAuth />,
@@ -42,11 +59,14 @@ const router = createBrowserRouter([
           { index: true, element: <HomePage /> },
           { path: "editor", element: <EditorListPage /> },
           { path: "editor/new", element: <EditorNewPage /> },
+          { path: "editor/sets/new", element: <EditorSetNewPage /> },
+          { path: "editor/sets/:setId", element: <EditorSetDetailPage /> },
           { path: "editor/:id", element: <EditorDetailPage /> },
           { path: "simulation", element: <SimulationPage /> },
           { path: "monitoring", element: <MonitoringPage /> },
-          { path: "audit", element: <AuditPage /> },
           { path: "history", element: <HistoryPage /> },
+          { path: "market", element: <MarketPage /> },
+          { path: "market/:slug", element: <MarketDetailPage /> },
           { path: "*", element: <Navigate to="/" replace /> },
         ],
       },

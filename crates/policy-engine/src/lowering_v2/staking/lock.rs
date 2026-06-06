@@ -22,6 +22,9 @@ pub(crate) fn lower(action: &LockAction, ctx: &LowerCtx<'_>) -> Result<LoweredAc
     m.insert("venue".into(), lower_stake_venue(&action.venue));
     m.insert("token".into(), lower_token_ref(&action.token));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    if let Some(nano) = ctx.amount_nano(&action.token, action.amount) {
+        m.insert("amountNano".into(), Value::from(nano));
+    }
     m.insert(
         "unlockTime".into(),
         Value::String(u256_hex(action.unlock_time)),

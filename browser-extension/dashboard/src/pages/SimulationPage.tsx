@@ -1,405 +1,726 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+/**
+ * Simulation page — integrated WASM simulator over the user's registered
+ * wallets.
+ *
+ * Pipeline:
+ *   1. Auth gate — only logged-in users see the simulator.
+ *   2. Pull `listWallets()` (auth-scoped). User picks ≥1 wallet via the
+ *      selector panel. Each selected wallet's state is fetched separately
+ *      and threaded through the simulation.
+ *   3. TX queue rows each carry a `fromWallet` discriminator — the row's
+ *      `(decode → evaluate → simulate_step)` chain runs against THAT
+ *      wallet's threaded state and produces THAT wallet's next state.
+ *      Other wallets' states are unchanged at that step.
+ *   4. `histories[addr][i] = wallet's state after step i` derives from the
+ *      initial query data plus the run output, so the scrubber and the
+ *      account-level aggregate both index the same axis.
+ *
+ * Layout:
+ *   ┌──────────────────────┬──────────────────────┐
+ *   │ Wallet selector      │ Account-level state  │
+ *   │ (+ chain picker)     │ (aggregate)          │
+ *   └──────────────────────┴──────────────────────┘
+ *   ┌──────────────┬──────────────────┬──────────┐
+ *   │ TX queue     │ Per-wallet state │ Verdicts │
+ *   │ (per-row     │ (scrubber +      │ + policy │
+ *   │  fromWallet) │  delta diff)     │  on/off  │
+ *   └──────────────┴──────────────────┴──────────┘
+ *
+ * Base state input field is gone — wallets come from the server-backed
+ * list, not an arbitrary address paste.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
-  getExampleTransactions,
-  listPolicies,
-  type ExampleTransaction,
-  type InstalledPolicy,
+  getEnabledPolicyIds,
+  getWalletState,
+  listManagedPolicies,
+  listWallets,
+  startGoogleLogin,
+  type ManagedPolicy,
 } from "../server-api";
+import { Topbar } from "../shell/Topbar";
+import { useAuth } from "../hooks/useAuth";
 
 import {
-  simulateSequenceLocal,
-  type SequenceResp,
-  type SequenceStepInput,
-  type SequenceStepResult,
-} from "../cedar";
-import { decodeTxLocal } from "../tools/tx-decode";
-import { Topbar } from "../shell/Topbar";
+  CalldataTxBuilder,
+  MAX_TX,
+  blankCalldataRow,
+  type CalldataTxRow,
+} from "./simulation/CalldataTxBuilder";
+import { WalletSelectorPanel } from "./simulation/WalletSelectorPanel";
+import { AccountStatePanel } from "./simulation/AccountStatePanel";
+import {
+  WalletsStatePanel,
+  type SimStepDelta,
+} from "./simulation/WalletsStatePanel";
+import { VerdictPanel } from "./simulation/VerdictPanel";
+import { PolicyTogglePanel } from "./simulation/PolicyTogglePanel";
+import {
+  decodeCalldataLocal,
+  evaluateActionLocal,
+  getV3BundleStatus,
+  simulateStepLocal,
+  type EvaluateActionVerdict,
+  type OpaqueAction,
+  type OpaqueStateDelta,
+  type OpaqueWalletState,
+} from "./simulation/sim-bridge";
+import { SAMPLE_ERC20_TRANSFER_PROBE } from "./simulation/wasm-probe-fixture";
 
 import "./simulation.css";
 
-/**
- * Simulation page — author a sequence of Cedar requests, run them all
- * at once via `/simulate/sequence`, see per-step verdicts + overall.
- *
- * This is a manual step builder and runner. Provenance maps,
- * counterfactuals, and reducer-state diffs require live chain state plus the
- * policy-state reducer path.
- *
- * Useful test loops it enables today:
- *   1. Load any example tx → derive a Cedar request → see which of
- *      your installed policies fire (allow/deny per policy).
- *   2. Chain N steps to ask "if I do this and then that, am I still
- *      compliant?" — the overall verdict rolls up worst-of-N.
- */
+/** Mirror of the SW's `managedToV2Bundle` synth: honour an explicit
+ *  manifest when present, fall back to a minimal one. */
+function managedToBundle(p: ManagedPolicy): { policy: string; manifest: unknown } {
+  const manifest =
+    p.manifest && typeof p.manifest === "object"
+      ? p.manifest
+      : { id: p.id, schema_version: 2 };
+  return { policy: p.text, manifest };
+}
+
+interface StepOutput {
+  rowId: string;
+  /** Lowercase wallet addr — the wallet that ran this step. */
+  fromWallet: string;
+  verdict: EvaluateActionVerdict | null;
+  delta: OpaqueStateDelta;
+  /** Wallet state AFTER this step. Equal to `preState` when an engine
+   *  error prevented the step from running. */
+  postState: OpaqueWalletState;
+  /** Per-row error surfaced from the WASM engine (e.g. `token not found`,
+   *  `balance underflow`). When present, the row's TX card renders a
+   *  banner instead of a verdict pill. `null` on success. */
+  error: string | null;
+}
+
 export function SimulationPage() {
-  const [steps, setSteps] = useState<SequenceStepInput[]>([blankStep(0)]);
-  const [policyFilter, setPolicyFilter] = useState<Set<number>>(new Set());
-  const [result, setResult] = useState<SequenceResp | null>(null);
-  const [pickedStep, setPickedStep] = useState<number>(0);
+  const auth = useAuth();
 
-  const policiesQ = useQuery({ queryKey: ["policies"], queryFn: listPolicies });
-  const examplesQ = useQuery({ queryKey: ["example-transactions"], queryFn: getExampleTransactions });
+  // Login gate: bail early when we're sure there is no user. We don't
+  // bail during the initial `/auth/me` round-trip — that would briefly
+  // flash the login prompt for already-signed-in users.
+  if (!auth.isLoading && !auth.user) {
+    return <LoginGate onLogin={() => auth.login()} />;
+  }
 
-  const runMut = useMutation({
-    mutationFn: () => {
-      const all = policiesQ.data ?? [];
-      const enabled = all.filter((p) => p.enabled);
-      const chosen =
-        policyFilter.size === 0 ? enabled : enabled.filter((p) => policyFilter.has(p.id));
-      // Map InstalledPolicy → wasm PolicyInput shape (snake_case fields).
-      const policies = chosen.map((p) => ({
-        policy_id: p.id,
-        policy_name: p.name,
-        severity: p.severity,
-        cedar_text: p.cedar_text,
-      }));
-      return simulateSequenceLocal(steps, policies);
-    },
-    onSuccess: (resp) => {
-      setResult(resp);
-      setPickedStep(0);
-    },
+  return <SimulationPageInner />;
+}
+
+function SimulationPageInner() {
+  // ── wallets ────────────────────────────────────────────────────────────
+  const walletsQ = useQuery({
+    queryKey: ["wallets"],
+    queryFn: listWallets,
   });
+  const wallets = walletsQ.data ?? [];
 
-  const addStep = () => {
-    setSteps((prev) => [...prev, blankStep(prev.length)]);
-  };
-  const removeStep = (idx: number) => {
-    if (steps.length === 1) return;
-    setSteps((prev) => prev.filter((_, i) => i !== idx));
-    if (result) setResult(null);
-  };
-  const updateStep = (idx: number, patch: Partial<SequenceStepInput>) => {
-    setSteps((prev) => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
-  };
-  const updateContext = (idx: number, raw: string) => {
-    try {
-      const parsed = raw.trim() === "" ? {} : (JSON.parse(raw) as Record<string, unknown>);
-      updateStep(idx, { context: parsed });
-    } catch {
-      // Keep last-good context but flag visually via title attr (handled inline).
+  // Selected wallets — addresses kept lowercased. Auto-select the first
+  // wallet once the list arrives so the page doesn't open empty.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (selected.size === 0 && wallets.length > 0) {
+      setSelected(new Set([wallets[0].address.toLowerCase()]));
     }
-  };
+    // Intentionally exclude `selected` from deps to avoid resetting after
+    // the user clears everything. We only auto-select on the FIRST landing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallets.length]);
+  const toggleWallet = (addr: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(addr)) next.delete(addr);
+      else next.add(addr);
+      return next;
+    });
+  const selectAll = () =>
+    setSelected(new Set(wallets.map((w) => w.address.toLowerCase())));
+  const clearAll = () => setSelected(new Set());
 
-  const togglePolicy = (id: number) => {
-    setPolicyFilter((prev) => {
+  // ── chain ──────────────────────────────────────────────────────────────
+  const [chain, setChain] = useState("eip155:1");
+
+  // ── wallet states (one query per REGISTERED wallet — not just selected) ──
+  //
+  // The account-level rollup is independent of the selection UI: it always
+  // sums every registered wallet, so we have to keep their states cached
+  // regardless of which ones are currently checked. Selection only affects
+  // the per-wallet panel and the TX builder's "from" dropdown.
+  const allWalletAddrs = useMemo(
+    () => wallets.map((w) => w.address.toLowerCase()),
+    [wallets],
+  );
+  const selectedArr = useMemo(() => [...selected], [selected]);
+  const stateQueries = useQueries({
+    queries: allWalletAddrs.map((addr) => ({
+      queryKey: ["wallet-state", addr],
+      queryFn: () =>
+        getWalletState(addr).then((s) => s as unknown as OpaqueWalletState),
+    })),
+  });
+  const initialStates = useMemo(() => {
+    const m = new Map<string, OpaqueWalletState>();
+    allWalletAddrs.forEach((addr, i) => {
+      const data = stateQueries[i]?.data;
+      if (data) m.set(addr, data);
+    });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- allWalletAddrs+queries
+  }, [allWalletAddrs, stateQueries.map((q) => q.dataUpdatedAt).join("|")]);
+
+  // ── policies ────────────────────────────────────────────────────────────
+  const managedQ = useQuery({
+    queryKey: ["managed-policies"],
+    queryFn: listManagedPolicies,
+  });
+  const liveEnabledQ = useQuery({
+    queryKey: ["enabled-policy-ids"],
+    queryFn: getEnabledPolicyIds,
+  });
+  const v3Q = useQuery({
+    queryKey: ["sim-v3-bundle-count"],
+    queryFn: getV3BundleStatus,
+    refetchInterval: (q) => (q.state.data?.bootCompleted ? false : 1500),
+  });
+  const policies: ReadonlyArray<ManagedPolicy> = managedQ.data ?? [];
+
+  // Cedar `@id` → policy text, so the verdict panel can resolve a matched
+  // deny back to its source for the structure diagram + diagnosis.
+  const policyTextById = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const p of policies) {
+      const id = p.text.match(/@id\("([^"]+)"\)/)?.[1];
+      if (id) m[id] = p.text;
+    }
+    return m;
+  }, [policies]);
+
+  const [enabledIds, setEnabledIds] = useState<Set<string>>(new Set());
+  // Seed once when both queries land.
+  useEffect(() => {
+    if (
+      enabledIds.size === 0 &&
+      policies.length > 0 &&
+      (liveEnabledQ.data ?? []).length > 0
+    ) {
+      setEnabledIds(new Set(liveEnabledQ.data));
+    }
+    // Intentionally only seed once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policies.length, liveEnabledQ.data?.length]);
+  const togglePolicy = (id: string) =>
+    setEnabledIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  const enableAll = () => setEnabledIds(new Set(policies.map((p) => p.id)));
+  const disableAll = () => setEnabledIds(new Set());
 
-  const loadExampleAsNewStep = async (ex: ExampleTransaction) => {
-    const meta = (ex.meta as Record<string, unknown>) ?? {};
-    const action = (ex.action as Record<string, unknown>) ?? {};
-    const from = (meta.from as string) ?? "0x0000000000000000000000000000000000000000";
-    const to = (meta.to as string) ?? "0x0000000000000000000000000000000000000000";
-    const domain = String(action.domain ?? "Generic");
-    const kind = String(action.kind ?? "Tx");
-    const label = ex.label.ko || ex.label.en;
-    // Best-effort: ask /tx/decode for a function-name suffix if there's calldata.
-    let envelopeKind = `${cap(domain)}::${cap(kind)}`;
-    const data = (meta.data as string) ?? "0x";
-    if (data && data !== "0x") {
-      try {
-        const dec = decodeTxLocal({ chain: meta.chainId as string, to, data });
-        if (dec.action_envelope) {
-          envelopeKind = `${cap(dec.action_envelope.domain)}::${cap(dec.action_envelope.kind)}`;
+  // ── TX queue ───────────────────────────────────────────────────────────
+  const [rows, setRows] = useState<CalldataTxRow[]>(() => [
+    blankCalldataRow(0),
+  ]);
+  const safeSetRows = (next: CalldataTxRow[]) => setRows(next.slice(0, MAX_TX));
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(
+    rows[0]?.id ?? null,
+  );
+
+  // ── URL query-param hydration (HistoryPage "다시 시뮬" entry point) ────
+  //
+  // History row → `<Link to="/simulation?from=…&to=…&calldata=…&value=…&chain=…">`.
+  // When we mount with those params present, replace the (still-blank) first
+  // row with the encoded tx, set the chain selector to match, auto-select the
+  // matching registered wallet when there is one, and STRIP the params from
+  // the URL so a casual refresh doesn't re-trigger the hydration.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  void navigate; // imported for future "지금 시뮬" CTA wiring; harmless otherwise.
+  const hydratedFromUrlRef = useMemo(() => ({ current: false }), []);
+  useEffect(() => {
+    if (hydratedFromUrlRef.current) return;
+    const urlFrom = searchParams.get("from") ?? "";
+    const urlTo = searchParams.get("to") ?? "";
+    const urlCalldata = searchParams.get("calldata") ?? "";
+    const urlValue = searchParams.get("value") ?? "";
+    const urlChain = searchParams.get("chain") ?? "";
+    if (!urlFrom && !urlTo && !urlCalldata) return; // no hydration intent
+    hydratedFromUrlRef.current = true;
+    // Wait for wallets to land before deciding whether the URL `from` is
+    // already registered (and therefore selectable in the chain-shared
+    // wallet picker). If it isn't, the user can still run the row — the
+    // CalldataTxBuilder's from input accepts arbitrary addresses.
+    if (urlChain) setChain(urlChain);
+    setRows([
+      {
+        id: rows[0]?.id ?? blankCalldataRow(0).id,
+        label: "history → 다시 시뮬",
+        fromWallet: urlFrom.toLowerCase(),
+        to: urlTo,
+        calldata: urlCalldata || "0x",
+        value: urlValue || "0",
+      },
+    ]);
+    if (urlFrom) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.add(urlFrom.toLowerCase());
+        return next;
+      });
+    }
+    // Strip the params so a refresh doesn't keep re-hydrating an
+    // already-edited row. `setSearchParams({})` rewrites the location
+    // without bouncing the user.
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams, rows, hydratedFromUrlRef]);
+
+  // ── run ────────────────────────────────────────────────────────────────
+  const [stepsOut, setStepsOut] = useState<StepOutput[]>([]);
+  const [cursorIdx, setCursorIdx] = useState(0);
+
+  // Histories derived from initialStates + stepsOut. Every selected wallet
+  // gets the SAME length (= 1 + stepsOut.length) so the cursor indexes the
+  // same axis across wallets / aggregate / verdict panel.
+  const histories = useMemo(() => {
+    const m = new Map<string, OpaqueWalletState[]>();
+    for (const [addr, init] of initialStates) {
+      m.set(addr, [init]);
+    }
+    for (const step of stepsOut) {
+      for (const addr of m.keys()) {
+        const hist = m.get(addr)!;
+        if (addr === step.fromWallet) {
+          hist.push(step.postState);
+        } else {
+          hist.push(hist[hist.length - 1]);
         }
-      } catch {
-        /* keep best-effort envelopeKind */
       }
     }
-    const ctx = { ...(ex.context ?? {}), ...((ex.enrichment as Record<string, unknown>) ?? {}) };
-    const newStep: SequenceStepInput = {
-      label,
-      principal: `Wallet::"${from}"`,
-      action: `Action::"${envelopeKind}"`,
-      resource: `Protocol::"${to}"`,
-      entities: [],
-      context: ctx,
-    };
-    setSteps((prev) => [...prev, newStep]);
-  };
+    return m;
+  }, [initialStates, stepsOut]);
 
-  const stepCount = steps.length;
-  const verdictByIdx = useMemo(() => {
-    const map = new Map<number, SequenceStepResult>();
-    result?.steps.forEach((r, i) => map.set(i, r));
-    return map;
-  }, [result]);
+  // Per-step delta + owner, used by the WalletsStatePanel scrubber.
+  const stepDeltas: SimStepDelta[] = useMemo(
+    () =>
+      stepsOut.map((s) => ({ walletAddr: s.fromWallet, delta: s.delta })),
+    [stepsOut],
+  );
+
+  // Reset run output when the inputs change in a way that invalidates it.
+  const inputsSig = JSON.stringify({
+    rows: rows.map((r) => ({
+      from: r.fromWallet,
+      to: r.to,
+      data: r.calldata,
+      v: r.value,
+    })),
+    selected: [...selected].sort(),
+    enabled: [...enabledIds].sort(),
+    chain,
+  });
+  useEffect(() => {
+    if (stepsOut.length > 0) {
+      setStepsOut([]);
+      setCursorIdx(0);
+    }
+    // We INTENTIONALLY don't depend on stepsOut here — the guard inside
+    // already short-circuits when it's already empty, and including it
+    // would invert the effect's intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputsSig]);
+
+  const runMut = useMutation({
+    mutationFn: async () => {
+      const enabled = policies.filter((p) => enabledIds.has(p.id));
+      const bundles = enabled.map(managedToBundle);
+      const submittedAt = Math.floor(Date.now() / 1000);
+      const caipChain = chain;
+      const chainIdNum = caipToChainId(chain);
+
+      // Threaded pre-states per wallet. Each row reads from this and
+      // writes back at the end. Wallets that don't run any step retain
+      // their initial state — that's fine; the histories memo handles the
+      // axis alignment.
+      const walletCur = new Map<string, OpaqueWalletState>(initialStates);
+
+      const out: StepOutput[] = [];
+      let nonce = 0;
+
+      for (const row of rows) {
+        const fromAddr = row.fromWallet.toLowerCase();
+        if (!fromAddr) {
+          throw new Error("from 지갑 주소가 비어있습니다");
+        }
+        // Non-registered addresses are allowed: the engine just needs a
+        // string for the principal entity, and an empty wallet state lets
+        // sim-step run without crashing. The state panel won't render
+        // ad-hoc addresses (they don't appear in `histories`), but the
+        // verdict path is fully functional.
+        let preState = walletCur.get(fromAddr);
+        if (!preState) {
+          preState = emptyWalletState(fromAddr, caipChain);
+          walletCur.set(fromAddr, preState);
+        }
+
+        let rowVerdict: EvaluateActionVerdict | null = null;
+        let lastDelta: OpaqueStateDelta = {};
+        let lastNext: OpaqueWalletState = preState;
+        let rowError: string | null = null;
+
+        // Per-row try/catch: an engine error (token not found, balance
+        // underflow, decode failure, …) becomes a row-scoped banner
+        // instead of poisoning the rest of the batch. State threading
+        // sticks at `preState` for that row so subsequent rows on the
+        // same wallet see the last-good snapshot.
+        try {
+          const decoded = await decodeCalldataLocal({
+            chain_id: chainIdNum,
+            to: row.to.trim(),
+            selector: selectorOf(row.calldata),
+            calldata: row.calldata.trim(),
+            value: row.value.trim() || "0",
+            submitter: fromAddr,
+            submitted_at: submittedAt + out.length,
+            nonce: nonce++,
+          });
+
+          for (const action of decoded.actions as OpaqueAction[]) {
+            const meta =
+              (action as { meta?: Record<string, unknown> }).meta ?? {};
+            const body =
+              (action as { body?: Record<string, unknown> }).body ?? action;
+
+            let stepVerdict: EvaluateActionVerdict | null = null;
+            if (bundles.length > 0) {
+              stepVerdict = await evaluateActionLocal({
+                action: body,
+                meta,
+                tx: { chain_id: caipChain, from: fromAddr, to: row.to.trim() },
+                bundles,
+                results: {},
+              });
+            }
+            rowVerdict = worsen(rowVerdict, stepVerdict);
+
+            const stepOut = await simulateStepLocal({
+              state: lastNext,
+              action,
+              ctx: SAMPLE_ERC20_TRANSFER_PROBE.ctx,
+            });
+            lastNext = stepOut.next_state;
+            lastDelta = stepOut.delta;
+          }
+        } catch (err) {
+          const raw = err instanceof Error ? err.message : String(err);
+          rowError = explainEngineError(raw);
+        }
+
+        walletCur.set(fromAddr, lastNext);
+        out.push({
+          rowId: row.id,
+          fromWallet: fromAddr,
+          verdict: rowVerdict,
+          delta: lastDelta,
+          postState: lastNext,
+          error: rowError,
+        });
+      }
+      return out;
+    },
+    onSuccess: (out) => {
+      setStepsOut(out);
+      const firstBad = out.findIndex(
+        (o) => o.verdict && o.verdict.kind !== "pass",
+      );
+      setCursorIdx(firstBad === -1 ? out.length : firstBad + 1);
+    },
+  });
+
+  // ── derived ─────────────────────────────────────────────────────────────
+  const verdictByRowId = useMemo(() => {
+    const m = new Map<string, EvaluateActionVerdict>();
+    for (const o of stepsOut) {
+      if (o.verdict) m.set(o.rowId, o.verdict);
+    }
+    return m;
+  }, [stepsOut]);
+
+  const errorByRowId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of stepsOut) {
+      if (o.error) m.set(o.rowId, o.error);
+    }
+    return m;
+  }, [stepsOut]);
+
+  const currentVerdict =
+    cursorIdx === 0 ? undefined : stepsOut[cursorIdx - 1]?.verdict ?? undefined;
+
+  const overallVerdict: "pass" | "warn" | "fail" | null = useMemo(() => {
+    if (stepsOut.length === 0) return null;
+    let kind: "pass" | "warn" | "fail" = "pass";
+    for (const o of stepsOut) {
+      if (!o.verdict) continue;
+      if (o.verdict.kind === "fail") {
+        kind = "fail";
+        break;
+      }
+      if (o.verdict.kind === "warn") kind = "warn";
+    }
+    return kind;
+  }, [stepsOut]);
+
+  const [changedOnly, setChangedOnly] = useState(false);
+
+  const anyStateLoading = stateQueries.some((q) => q.isLoading);
 
   return (
     <>
       <Topbar
         here="Simulation"
-        subtitle={`${stepCount} step${stepCount === 1 ? "" : "s"}`}
+        subtitle={`${rows.length} / ${MAX_TX} TX`}
       />
-      <div className="sim-layout">
-        {/* Left column — step builder + run trigger area */}
-        <div className="sim-main">
-          <div className="sim-card">
-            <div className="tools-row">
-              <h3 style={{ margin: 0, flex: 1 }}>Steps</h3>
-              <select
-                onChange={(e) => {
-                  const ex = examplesQ.data?.find((x) => x.id === e.target.value);
-                  if (ex) loadExampleAsNewStep(ex);
-                  e.target.value = "";
-                }}
-                defaultValue=""
-              >
-                <option value="" disabled>🧪 예시에서 step 추가…</option>
-                {examplesQ.data?.map((ex) => (
-                  <option key={ex.id} value={ex.id}>{ex.label.ko || ex.label.en}</option>
-                ))}
-              </select>
-            </div>
 
-            <div className="step-list">
-              {steps.map((s, idx) => {
-                const rs = verdictByIdx.get(idx);
-                const verdictClass = rs ? `verdict-${rs.verdict}` : "";
-                return (
-                  <div className={`step-row ${verdictClass}`} key={idx}>
-                    <div className="step-n">{String(idx + 1).padStart(2, "0")}</div>
-                    <div className="step-body">
-                      <div className="step-label-row">
-                        <input
-                          type="text"
-                          placeholder="step label"
-                          value={s.label ?? ""}
-                          onChange={(e) => updateStep(idx, { label: e.target.value })}
-                        />
-                      </div>
-                      <div className="step-detail">
-                        <input
-                          type="text"
-                          placeholder='principal — Wallet::"0x…"'
-                          value={s.principal}
-                          onChange={(e) => updateStep(idx, { principal: e.target.value })}
-                        />
-                        <input
-                          type="text"
-                          placeholder='action — Action::"Amm::Swap"'
-                          value={s.action}
-                          onChange={(e) => updateStep(idx, { action: e.target.value })}
-                        />
-                        <input
-                          type="text"
-                          placeholder='resource — Protocol::"0x…"'
-                          value={s.resource}
-                          onChange={(e) => updateStep(idx, { resource: e.target.value })}
-                        />
-                      </div>
-                      <textarea
-                        placeholder='context JSON — { "slippageBp": 30 }'
-                        defaultValue={JSON.stringify(s.context ?? {}, null, 2)}
-                        onBlur={(e) => updateContext(idx, e.target.value)}
-                      />
-                    </div>
-                    <div className="step-actions">
-                      <button
-                        className="btn"
-                        onClick={() => removeStep(idx)}
-                        disabled={stepCount === 1}
-                        title="이 step 제거"
-                      >
-                        ✕
-                      </button>
-                      {rs && (
-                        <span className={`step-verdict-pill ${rs.verdict}`}>
-                          {rs.verdict.toUpperCase()}
-                        </span>
-                      )}
-                      {rs && (
-                        <button
-                          className="btn"
-                          onClick={() => setPickedStep(idx)}
-                          title="우측 패널에 상세"
-                        >
-                          상세
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="add-step-row">
-              <button className="btn" onClick={addStep}>+ 빈 step 추가</button>
-            </div>
-          </div>
-        </div>
-
-        {/* Right rail — run + policy filter + overall + drilldown */}
-        <div className="sim-side">
-          <div className="sim-card run-card">
-            <h3>실행</h3>
-            <div className="run-controls">
-              <button
-                className="btn primary"
-                onClick={() => runMut.mutate()}
-                disabled={runMut.isPending || steps.length === 0}
-              >
-                {runMut.isPending ? "실행 중…" : `시뮬레이션 실행 (${steps.length} step)`}
-              </button>
-              <div className="meta">
-                정책 필터:&nbsp;
-                {policyFilter.size === 0 ? "활성화된 전체" : `${policyFilter.size}개 선택`}
-              </div>
-              {runMut.error && (
-                <div className="err-banner">{String(runMut.error)}</div>
-              )}
-            </div>
-
-            {result && (
-              <div className={`overall ${result.overall}`}>
-                <div className="v">{result.overall}</div>
-                <div className="sub">
-                  {result.steps.filter((s) => s.verdict === "pass").length} pass /&nbsp;
-                  {result.steps.filter((s) => s.verdict === "warn").length} warn /&nbsp;
-                  {result.steps.filter((s) => s.verdict === "fail").length} fail
-                </div>
-              </div>
-            )}
-          </div>
-
-          <PolicyFilter
-            policies={policiesQ.data ?? []}
-            picked={policyFilter}
-            toggle={togglePolicy}
-          />
-
-          {result && (
-            <StepDetail
-              idx={pickedStep}
-              total={result.steps.length}
-              step={result.steps[pickedStep]}
-              setIdx={setPickedStep}
-            />
+      <div className="sim-runstrip">
+        <button
+          className="btn primary"
+          onClick={() => runMut.mutate()}
+          disabled={
+            runMut.isPending ||
+            rows.length === 0 ||
+            anyStateLoading ||
+            // Each row's `from` must be set — registered wallet OR any
+            // typed 0x address. Empty string is the only blocker.
+            rows.some((r) => !r.fromWallet.trim())
+          }
+        >
+          {runMut.isPending
+            ? "실행 중…"
+            : `시뮬레이션 실행 (${rows.length})`}
+        </button>
+        <div className="rs-meta">
+          정책: <strong>{enabledIds.size}</strong> 활성
+          <span className="sep">·</span>
+          TX: <strong>{rows.length}</strong>
+          <span className="sep">·</span>
+          지갑: <strong>{selected.size}</strong>
+          {v3Q.data && v3Q.data.bootCompleted && v3Q.data.count === 0 && (
+            <>
+              <span className="sep">·</span>
+              <span className="rs-warn">
+                v3 bundles 0개 — 디코드 결과 Unknown만 나옴
+              </span>
+            </>
+          )}
+          {v3Q.data && v3Q.data.bootCompleted && v3Q.data.count > 0 && (
+            <>
+              <span className="sep">·</span>
+              v3 bundles: <strong>{v3Q.data.count}</strong>
+            </>
           )}
         </div>
+        {overallVerdict && (
+          <div className={`rs-overall ${overallVerdict}`}>
+            <span className="ov-pill">{overallVerdict.toUpperCase()}</span>
+            <span className="ov-sub">
+              {stepsOut.filter((s) => s.verdict?.kind === "pass").length} pass ·{" "}
+              {stepsOut.filter((s) => s.verdict?.kind === "warn").length} warn ·{" "}
+              {stepsOut.filter((s) => s.verdict?.kind === "fail").length} fail
+            </span>
+          </div>
+        )}
+        {runMut.error && (
+          <div className="rs-err">{String(runMut.error)}</div>
+        )}
+      </div>
+
+      {/* 2×3 grid:
+              row 1: WalletSelector | AccountState | Verdict
+              row 2: TxBuilder       | WalletsState | PolicyToggle
+          The right column's two rows share a single grid track so the
+          verdict box is shorter and the policy toggles take the rest. */}
+      <div className="sim-grid">
+        <WalletSelectorPanel
+          wallets={wallets}
+          selected={selected}
+          toggle={toggleWallet}
+          selectAll={selectAll}
+          clearAll={clearAll}
+          chain={chain}
+          setChain={setChain}
+          isRunning={runMut.isPending}
+        />
+        <AccountStatePanel
+          histories={histories}
+          cursorIdx={cursorIdx}
+          setCursorIdx={setCursorIdx}
+          totalSteps={stepsOut.length}
+          chain={chain}
+        />
+        <VerdictPanel
+          currentVerdict={currentVerdict}
+          policyTextById={policyTextById}
+        />
+
+        <CalldataTxBuilder
+          rows={rows}
+          setRows={safeSetRows}
+          verdictByRowId={verdictByRowId}
+          errorByRowId={errorByRowId}
+          selectedId={selectedRowId}
+          onSelect={setSelectedRowId}
+          isRunning={runMut.isPending}
+          availableWallets={selectedArr}
+        />
+
+        <WalletsStatePanel
+          selected={selectedArr}
+          histories={histories}
+          deltas={stepDeltas}
+          cursorIdx={cursorIdx}
+          setCursorIdx={setCursorIdx}
+          changedOnly={changedOnly}
+          setChangedOnly={setChangedOnly}
+          chain={chain}
+        />
+
+        <PolicyTogglePanel
+          policies={policies}
+          enabledIds={enabledIds}
+          toggle={togglePolicy}
+          enableAll={enableAll}
+          disableAll={disableAll}
+          currentVerdict={currentVerdict}
+          flashPolicyId={null}
+        />
       </div>
     </>
   );
 }
 
-// ── helpers / sub-components ────────────────────────────────────────────
+// ── helpers ────────────────────────────────────────────────────────────────
 
-function blankStep(idx: number): SequenceStepInput {
+function LoginGate({ onLogin }: { onLogin: () => void }) {
+  return (
+    <div className="sim-login-gate">
+      <h2>로그인이 필요합니다</h2>
+      <p>
+        시뮬레이터는 등록된 지갑들의 실제 state를 기반으로 동작합니다.
+        Google 계정으로 로그인하면 지갑 목록이 자동으로 불러와집니다.
+      </p>
+      <button className="btn primary" onClick={onLogin}>
+        Google로 로그인
+      </button>
+    </div>
+  );
+}
+
+function selectorOf(calldata: string): string {
+  const cd = calldata.trim();
+  if (cd.startsWith("0x") && cd.length >= 10) {
+    return cd.slice(0, 10).toLowerCase();
+  }
+  return "0x00000000";
+}
+
+/** CAIP-2 string → decimal chain id. The route decoder takes a numeric
+ *  `chain_id` (legacy v3 wire shape); we synthesise it from the active
+ *  CAIP-2 selection so the page-level chain selector is the single
+ *  source of truth. */
+function caipToChainId(caip: string): number {
+  const m = caip.match(/^eip155:(\d+)$/);
+  if (!m) return 1;
+  return Number(m[1]);
+}
+
+/** Minimal `WalletState` shape for the WASM reducer — used when the user
+ *  types an unregistered address into the `from` field. The state has no
+ *  tokens / positions / approvals; the simulator still runs (most simple
+ *  actions like ERC20 approve don't need pre-existing balances), and the
+ *  verdict path is fully exercised against the synthesized principal
+ *  entity the engine builds from `tx.from`. */
+function emptyWalletState(
+  addr: string,
+  chain: string,
+): OpaqueWalletState {
   return {
-    label: `step ${idx + 1}`,
-    principal: 'Wallet::"0x0000000000000000000000000000000000000000"',
-    action: 'Action::"Amm::Swap"',
-    resource: 'Protocol::"0x0000000000000000000000000000000000000000"',
-    entities: [],
-    context: {},
+    wallet_id: { address: addr, chains: [chain] },
+    tokens: [],
+    approvals: { erc20: [], set_for_all: [], permit2: [] },
+    positions: [],
+    pending: [],
+    block_heights: {},
   };
 }
 
-function cap(s: string): string {
-  return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
+/** Lowercase contract address → display symbol for well-known mainnet
+ *  tokens. Used when surfacing `token not found` errors so the user sees
+ *  "USDT" instead of a raw `0xdac17f9…` hex. Extend as needed; an unknown
+ *  address simply renders the short hex form. */
+const KNOWN_TOKEN_LABELS: Record<string, string> = {
+  "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "USDC",
+  "0xdac17f958d2ee523a2206206994597c13d831ec7": "USDT",
+  "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH",
+  "0x6b175474e89094c44da98b954eedeac495271d0f": "DAI",
+  "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9": "AAVE",
+};
+
+function shortAddrInline(addr: string): string {
+  if (!addr || addr.length < 10) return addr;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-function PolicyFilter({
-  policies,
-  picked,
-  toggle,
-}: {
-  policies: InstalledPolicy[];
-  picked: Set<number>;
-  toggle: (id: number) => void;
-}) {
-  return (
-    <div className="sim-card">
-      <h3>정책 필터</h3>
-      <div className="meta" style={{ fontSize: 12, color: "var(--slate-500)", marginBottom: 8 }}>
-        체크 안 하면 활성화된 모든 정책이 평가됩니다.
-      </div>
-      {policies.length === 0 && (
-        <div style={{ fontSize: 12, color: "var(--slate-400)" }}>
-          설치된 정책이 없습니다. Editor에서 먼저 만드세요.
-        </div>
-      )}
-      {policies.map((p) => (
-        <label
-          key={p.id}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 12.5,
-            padding: "4px 0",
-            color: "var(--slate-700)",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={picked.has(p.id)}
-            onChange={() => toggle(p.id)}
-          />
-          {p.name}{" "}
-          <span
-            style={{
-              fontFamily: "var(--ff-mono)",
-              fontSize: 10,
-              padding: "1px 6px",
-              borderRadius: 999,
-              background: p.severity === "deny" ? "var(--fail-100)" : p.severity === "warn" ? "var(--warn-100)" : "var(--cyan-100)",
-              color: p.severity === "deny" ? "var(--fail-800)" : p.severity === "warn" ? "var(--warn-800)" : "var(--cyan-800)",
-            }}
-          >
-            {p.severity}
-          </span>
-        </label>
-      ))}
-    </div>
-  );
+function tokenLabel(addr: string): string {
+  const lower = addr.toLowerCase();
+  return KNOWN_TOKEN_LABELS[lower] ?? shortAddrInline(addr);
 }
 
-function StepDetail({
-  idx,
-  total,
-  step,
-  setIdx,
-}: {
-  idx: number;
-  total: number;
-  step: SequenceStepResult | undefined;
-  setIdx: (n: number) => void;
-}) {
-  if (!step) return null;
-  return (
-    <div className="sim-card outcomes">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <button className="btn" onClick={() => setIdx(Math.max(0, idx - 1))} disabled={idx === 0}>‹</button>
-        <h4 style={{ flex: 1, margin: 0 }}>
-          Step {idx + 1} / {total}
-          {step.label ? ` — ${step.label}` : ""}
-        </h4>
-        <button className="btn" onClick={() => setIdx(Math.min(total - 1, idx + 1))} disabled={idx >= total - 1}>›</button>
-      </div>
-      <span className={`step-verdict-pill ${step.verdict}`} style={{ display: "inline-block", marginBottom: 8 }}>
-        {step.verdict.toUpperCase()}
-      </span>
-      {step.policy_results.length === 0 && (
-        <div style={{ fontSize: 12, color: "var(--slate-400)" }}>
-          평가된 정책 없음 (정책 필터를 다시 확인하세요)
-        </div>
-      )}
-      {step.policy_results.map((o) => (
-        <div key={o.policy_id} className="outcome-row">
-          <span className={`sev ${o.severity}`}>{o.severity}</span>
-          <span className="pname">{o.policy_name}</span>
-          <span style={{ flex: 1 }} />
-          <span className={o.decision}>{o.decision}</span>
-        </div>
-      ))}
-    </div>
+/** Translate raw engine error messages into actionable hints.
+ *
+ * The WASM engine surfaces low-level errors verbatim (e.g.
+ * `apply_failed: token not found: Erc20 { chain: ChainId("eip155:1"),
+ * address: 0xdac17f9… }`). They're precise but the user has to mentally
+ * map "address 0xdac17f9…" to "USDT" and "token not found" to "this
+ * wallet doesn't track USDT". This helper does both mappings, falling
+ * through to the raw message when no pattern matches. */
+function explainEngineError(raw: string): string {
+  // `token not found: Erc20 { ..., address: 0x... }` — wallet's token list
+  // doesn't include the token the action is trying to debit/credit.
+  const notFound = raw.match(/token not found:.*address:\s*(0x[a-fA-F0-9]+)/);
+  if (notFound) {
+    const label = tokenLabel(notFound[1]);
+    return `이 지갑은 ${label}을(를) 추적하지 않습니다. 지갑 페이지에서 ${label}을(를) 추가하거나, 등록된 다른 토큰의 TX로 시뮬해주세요.`;
+  }
+  // `balance underflow ... address: 0x... ... debit X` — token exists but
+  // the wallet doesn't have enough to spend.
+  const underflow = raw.match(
+    /balance underflow.*address:\s*(0x[a-fA-F0-9]+).*debit\s+(\d+)/,
   );
+  if (underflow) {
+    const label = tokenLabel(underflow[1]);
+    return `${label} 잔액 부족 — ${underflow[2]} 만큼 차감하려는데 가용 잔액이 적습니다.`;
+  }
+  return raw;
 }
+
+/** Worst-case verdict aggregator: `fail` > `warn` > `pass` > `null`. */
+function worsen(
+  prev: EvaluateActionVerdict | null,
+  next: EvaluateActionVerdict | null,
+): EvaluateActionVerdict | null {
+  if (!next) return prev;
+  if (!prev) return next;
+  const order = { pass: 0, warn: 1, fail: 2 } as const;
+  return order[next.kind] > order[prev.kind] ? next : prev;
+}
+
+// Suppress an unused-import lint if `startGoogleLogin` reads as unused —
+// it's reached via `auth.login()` in the gate's button handler indirectly
+// (useAuth proxies to it), but the explicit type import keeps the auth
+// surface visible to readers.
+void startGoogleLogin;

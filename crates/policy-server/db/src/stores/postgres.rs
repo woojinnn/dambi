@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use sqlx_core::error::Error as SqlxError;
@@ -24,8 +25,12 @@ use crate::error::{DbError, DbResult};
 /// Keep migrations as runtime files instead of using `sqlx::migrate!()`.
 /// The macro pulls in `SQLx`'s macro crate, which currently exposes optional
 /// `MySQL` dependencies to `cargo audit` even though this server is Postgres-only.
+fn migrations_dir(override_dir: Option<PathBuf>) -> PathBuf {
+    override_dir.unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+}
+
 fn postgres_migrations_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations")
+    migrations_dir(std::env::var_os("POLICY_DB_MIGRATIONS_DIR").map(PathBuf::from))
 }
 
 /// A row from the `users` table.
@@ -106,7 +111,7 @@ impl PostgresGlobalDb {
     ///
     /// Returns the underlying `SQLx` error if the connection or migration fails.
     pub async fn connect(database_url: &str) -> Result<Self, SqlxError> {
-        let pool = connect_pool(database_url).await?;
+        let pool = connect_pool(database_url, 10, Duration::from_secs(10)).await?;
         let db = Self::new(pool);
         db.migrate().await?;
         Ok(db)
@@ -153,10 +158,19 @@ impl PostgresGlobalDb {
         let email = email.to_lowercase();
         let user_id = derive_user_id(&email);
         let now = unix_now_or_default();
+        // `users` has two unique constraints — users_pkey (user_id) and
+        // users_email_key (email) — and user_id is derived 1:1 from email, so a
+        // same-email insert collides on both at once. `ON CONFLICT ... DO UPDATE`
+        // names only one arbiter, leaving the other unguarded: concurrent
+        // first-time logins then raced to insert the non-arbiter index and failed
+        // with a duplicate-key 500. `ON CONFLICT DO NOTHING` (no target) makes
+        // every unique index an arbiter, so the insert never hard-errors; the
+        // follow-up UPDATE refreshes last_login_at on the now-committed row
+        // (created_at and provider are intentionally left untouched).
         query(
             "INSERT INTO users (user_id, email, provider, created_at, last_login_at)
              VALUES ($1, $2, $3, $4, $4)
-             ON CONFLICT(email) DO UPDATE SET last_login_at = excluded.last_login_at",
+             ON CONFLICT DO NOTHING",
         )
         .bind(&user_id)
         .bind(&email)
@@ -165,6 +179,12 @@ impl PostgresGlobalDb {
         .execute(&self.pool)
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
+        query("UPDATE users SET last_login_at = $1 WHERE user_id = $2")
+            .bind(now)
+            .bind(&user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
         Ok(user_id)
     }
 
@@ -237,6 +257,106 @@ impl PostgresGlobalDb {
     pub const fn pool(&self) -> &PgPool {
         &self.pool
     }
+
+    /// Latest synced USD price + decimals for `(chain, address)` across EVERY
+    /// wallet's holdings — a market-global fact that does not depend on the
+    /// requesting wallet being registered.
+    ///
+    /// The price of a `(chain, contract)` token is identical across wallets, so
+    /// this reuses the most-recently-synced holding that carries a price. Lets
+    /// `oracle.usd_value` value a swap even when the *specific* wallet has never
+    /// been synced, as long as the token's price has been synced anywhere.
+    /// `address` is matched case-insensitively; returns `None` when no synced
+    /// holding carries a price for that token yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] if the lookup query fails.
+    pub async fn latest_token_price(
+        &self,
+        chain: &str,
+        address: &str,
+    ) -> DbResult<Option<TokenPriceFact>> {
+        let address_lc = address.to_lowercase();
+        // `tokens` is a JSONB array of `[key, holding]` pairs; `t->1` is the
+        // holding. Native tokens carry no `key.address`, so the address filter
+        // also excludes them. Most-recently-synced wallet wins on ties.
+        let row = query(
+            "SELECT (t->1->>'decimals')::int AS decimals, \
+                    (t->1->'price_usd'->>'value') AS price \
+             FROM wallet_states w, jsonb_array_elements(w.state_json->'tokens') AS t \
+             WHERE lower(t->1->'key'->>'address') = $1 \
+               AND (t->1->'key'->>'chain') = $2 \
+               AND (t->1->'price_usd'->>'value') IS NOT NULL \
+             ORDER BY w.updated_at DESC \
+             LIMIT 1",
+        )
+        .bind(&address_lc)
+        .bind(chain)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+        let Some(row) = row else { return Ok(None) };
+        let decimals: i32 = row
+            .try_get("decimals")
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        let price_usd: String = row
+            .try_get("price")
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        let decimals = u8::try_from(decimals)
+            .map_err(|_| DbError::Invariant(format!("token decimals out of range: {decimals}")))?;
+        Ok(Some(TokenPriceFact {
+            price_usd,
+            decimals,
+        }))
+    }
+
+    /// Latest synced `decimals` for `(chain, address)` across EVERY wallet's
+    /// holdings — a token-global fact independent of price. Lets
+    /// `token.normalize_to_nano` rescale a swap amount with the token's REAL
+    /// decimals instead of a hard-coded literal, so a token-amount cap works for
+    /// any token (not just 6-decimals USDC). `address` is matched
+    /// case-insensitively; returns `None` when the token has never been synced.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] if the lookup query fails.
+    pub async fn latest_token_decimals(&self, chain: &str, address: &str) -> DbResult<Option<u8>> {
+        let address_lc = address.to_lowercase();
+        let row = query(
+            "SELECT (t->1->>'decimals')::int AS decimals \
+             FROM wallet_states w, jsonb_array_elements(w.state_json->'tokens') AS t \
+             WHERE lower(t->1->'key'->>'address') = $1 \
+               AND (t->1->'key'->>'chain') = $2 \
+               AND (t->1->>'decimals') IS NOT NULL \
+             ORDER BY w.updated_at DESC \
+             LIMIT 1",
+        )
+        .bind(&address_lc)
+        .bind(chain)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+        let Some(row) = row else { return Ok(None) };
+        let decimals: i32 = row
+            .try_get("decimals")
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        u8::try_from(decimals)
+            .map(Some)
+            .map_err(|_| DbError::Invariant(format!("token decimals out of range: {decimals}")))
+    }
+}
+
+/// A market-global price fact: USD price (decimal string) + token decimals.
+/// Sourced from synced holdings via [`PostgresGlobalDb::latest_token_price`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TokenPriceFact {
+    /// USD price as a decimal string (e.g. `"0.99959644"`).
+    pub price_usd: String,
+    /// Token decimals (e.g. `6` for USDC).
+    pub decimals: u8,
 }
 
 impl PostgresMultiUserStore {
@@ -505,9 +625,14 @@ fn unix_now_or_default() -> i64 {
 /// # Errors
 ///
 /// Returns the underlying `SQLx` error if the pool cannot connect.
-pub async fn connect_pool(database_url: &str) -> Result<PgPool, SqlxError> {
+pub async fn connect_pool(
+    database_url: &str,
+    max_connections: u32,
+    acquire_timeout: Duration,
+) -> Result<PgPool, SqlxError> {
     PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(max_connections)
+        .acquire_timeout(acquire_timeout)
         .connect(database_url)
         .await
 }
@@ -541,7 +666,8 @@ pub fn derive_user_id(email_lower: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{derive_user_id, postgres_migrations_path};
+    use super::{derive_user_id, migrations_dir, postgres_migrations_path};
+    use std::path::PathBuf;
 
     #[test]
     fn derive_user_id_is_deterministic_and_canonical() {
@@ -557,5 +683,19 @@ mod tests {
         let initial = postgres_migrations_path().join("0001_initial.sql");
         let sql = std::fs::read_to_string(initial).expect("initial migration exists");
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS users"));
+    }
+
+    #[test]
+    fn migrations_dir_uses_override_when_present() {
+        assert_eq!(
+            migrations_dir(Some(PathBuf::from("/srv/app/migrations"))),
+            PathBuf::from("/srv/app/migrations")
+        );
+    }
+
+    #[test]
+    fn migrations_dir_falls_back_to_manifest_dir() {
+        let p = migrations_dir(None);
+        assert!(p.ends_with("migrations"));
     }
 }

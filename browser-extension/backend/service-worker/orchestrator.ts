@@ -1,4 +1,5 @@
 import Browser from "webextension-polyfill";
+import { markPhase, captureTimeout } from "./diagnostics";
 import {
   tryDeclarativeRouteV3,
   type DeclarativeRouteV3Outcome,
@@ -11,6 +12,8 @@ import {
   type PendingRequest,
 } from "./storage";
 import { appendVerdict, type VerdictInsert } from "./verdict-storage";
+import { appendStateDelta } from "./state-delta-storage";
+import { appendDiagnosisContext } from "./diagnosis-context-storage";
 import {
   EngineError,
   evaluateActionV2,
@@ -44,6 +47,11 @@ import {
   type Message,
 } from "@lib/types";
 import { hlOrderToAction, HL_TO_SENTINEL } from "./hl-order-to-action";
+import { collectTokenDecimals } from "./registry/collect-token-decimals";
+import {
+  collectHlLeverage,
+  noteHlLeverageUpdate,
+} from "./venue/collect-hl-leverage";
 import {
   normalizeTypedDataPayload,
   routeTypedSignaturePayload,
@@ -168,11 +176,31 @@ export async function decideMessage(
   );
 }
 
+function txSummaryForDiag(message: Message): Record<string, unknown> {
+  const summary: Record<string, unknown> = {
+    requestId: message.requestId,
+    hostname: message.data.hostname,
+    type: message.data.type,
+  };
+  if (isTransaction(message)) {
+    const t = message.data.transaction;
+    summary.chainId = message.data.chainId;
+    summary.to = t.to;
+    summary.from = t.from;
+    if (typeof t.data === "string") {
+      summary.selector = t.data.slice(0, 10);
+      summary.dataLen = Math.max(0, Math.floor((t.data.length - 2) / 2));
+    }
+  }
+  return summary;
+}
+
 async function decideInner(
   message: Message,
   options: DecisionOptions,
 ): Promise<DecisionResult> {
   logIncoming(message);
+  markPhase(message.requestId, "lifecycle_start");
   const pending: PendingRequest = {
     requestId: message.requestId,
     hostname: message.data.hostname,
@@ -184,7 +212,7 @@ async function decideInner(
   await pendingPut(pending);
 
   try {
-    const { result: lifecycle } = await withTimeout(
+    const { result: lifecycle, timedOut } = await withTimeout(
       runLifecycle(message),
       HARD_TIMEOUT_MS,
       {
@@ -196,9 +224,20 @@ async function decideInner(
         verdictSource: "fail_closed" as const,
       },
     );
+    if (timedOut) {
+      // Durably snapshot the in-flight fetches + phase timeline so the
+      // (intermittent, not-reproducible-on-demand) 8s overrun is diagnosable
+      // after the fact — even if no one was watching and the SW later evicts.
+      await captureTimeout(message.requestId, txSummaryForDiag(message));
+    }
     const { verdict } = lifecycle;
 
     let ok = false;
+    // user_decision is only meaningful for WARN — PASS auto-passes and FAIL's
+    // popup is informational only. WARN's `ok` boolean (trust vs. cancel/X)
+    // is mapped to the storage enum and persisted on the audit row so the
+    // history view can render agree/deny without round-tripping.
+    let userDecision: "trusted" | "cancelled" | null = null;
     if (verdict.kind === "pass") {
       ok = true;
     } else if (verdict.kind === "fail") {
@@ -218,6 +257,7 @@ async function decideInner(
         verdict,
         options.onAwaitingUser,
       );
+      userDecision = ok ? "trusted" : "cancelled";
     }
 
     await appendAudit(
@@ -227,6 +267,7 @@ async function decideInner(
       lifecycle.verdictSource,
       lifecycle.policyRpc,
       lifecycle.declarativeV3,
+      userDecision,
     );
     return { ok, verdict };
   } catch (err) {
@@ -294,6 +335,7 @@ async function appendAudit(
   verdictSource?: VerdictSource,
   policyRpc?: PolicyRpcAuditMeta,
   declarativeV3?: DeclarativeV3AuditMeta,
+  userDecision: "trusted" | "cancelled" | null = null,
 ): Promise<void> {
   logDecision(message, verdict);
   await auditAppend({
@@ -315,7 +357,7 @@ async function appendAudit(
   // Keep the user-facing verdict log on-device. The server returns simulated
   // state for policy evaluation; the extension owns policy verdicts and audit
   // history, so this replaces the old server `/verdicts` write path.
-  void appendVerdictsForMessage(message, verdict).catch((err) => {
+  void appendVerdictsForMessage(message, verdict, userDecision).catch((err) => {
     console.warn("[Scopeball] verdict-storage append failed", err);
   });
 }
@@ -323,6 +365,7 @@ async function appendAudit(
 async function appendVerdictsForMessage(
   message: Message,
   verdict: VerdictDto,
+  userDecision: "trusted" | "cancelled" | null = null,
 ): Promise<void> {
   const ts = Math.floor(Date.now() / 1000);
   const { contract, selector } = inferContractSelector(message);
@@ -335,7 +378,15 @@ async function appendVerdictsForMessage(
     dapp_origin: message.data.hostname ?? null,
     ...(contract ? { contract } : {}),
     ...(selector ? { selector } : {}),
-    delta_id: null,
+    // Per-decision id linking N verdict rows (one per matched policy) to a
+    // single row in `state-deltas:log`. We reuse `message.requestId` (already
+    // a unique UUID per request, threaded through `pendingPut` and audit) so
+    // we don't generate a parallel identifier. The state-delta row is
+    // populated by `recordSimulationOnServer` keyed by the same requestId;
+    // rows that miss the server roundtrip leave `delta_id` set but the
+    // lookup returns null — dashboard renders "no delta data" in that case.
+    delta_id: message.requestId,
+    ...(userDecision !== null ? { user_decision: userDecision } : {}),
   };
 
   if (verdict.kind === "pass" || !verdict.matched?.length) {
@@ -485,10 +536,11 @@ function logDecision(message: Message, verdict: VerdictDto): void {
 }
 
 async function runLifecycle(message: Message): Promise<LifecycleResult> {
-  // Venue order (Hyperliquid `/exchange`, …) — its own v2 path. It never
-  // carries EVM calldata, so it does NOT go through the `tryDeclarativeRouteV3`
-  // (calldata-decode) branch below; instead the order JSON is converted to an
-  // `ActionBody::Perp` directly and evaluated by the same stateless v2 pipeline.
+  // Venue request (Hyperliquid `/exchange`, ...) — its own v2 path. It never
+  // carries EVM calldata, so it does not go through the `tryDeclarativeRouteV3`
+  // calldata branch below; instead the JSON intent is converted to
+  // `ActionBody::HyperliquidCore` and evaluated by the same stateless v2
+  // pipeline.
   if (isVenueOrder(message)) {
     return venueOrderLifecycle(message);
   }
@@ -533,6 +585,7 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
   let v3Outcome: DeclarativeRouteV3Outcome | undefined;
   if (isTransaction(message)) {
     try {
+      markPhase(message.requestId, "route_start");
       v3Outcome = await tryDeclarativeRouteV3({
         chainId: message.data.chainId,
         from: message.data.transaction.from ?? "0x" + "0".repeat(40),
@@ -541,12 +594,11 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
         calldataHex: message.data.transaction.data,
         submittedAt: Math.floor(Date.now() / 1000),
       });
+      markPhase(message.requestId, "route_done", { outcome: v3Outcome.kind });
       declarativeV3Meta = auditFromDeclarativeV3Outcome(v3Outcome, nature);
-      // Plan §M4 — DevTools console 검증 entry. PDF FSM hierarchical
-      // ActionBody JSON 을 hit 시 dump (Plan 의 narrow scope 의 핵심
-      // deliverable: SW DevTools 에서 actions[] shape 정확히 출력).
-      // JSON.stringify with pretty-print so users can visually inspect
-      // each ActionBody's `domain` / `action` / payload / live_inputs.
+      // DevTools audit log for the v3 route outcome. On route hits this includes
+      // the decoded ActionBody tree so the service-worker log shows each
+      // action's domain, tag, payload, and live_inputs.
       console.info("[Scopeball] declarative-route-v3", {
         requestId: message.requestId,
         chainId: message.data.chainId,
@@ -562,10 +614,9 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
             ? { reason: v3Outcome.reason }
             : {
                 reason: v3Outcome.reason,
-                // Plan §M5 — e2e 진단용 cause exposure. fault 발생 시
-                // WASM EngineError 의 kind / message + stack 가 console 에
-                // 보여야 어떤 opcode / placeholder / serde 가 실패했는지
-                // 추적 가능.
+                // Include fault details so decode/install errors can be traced
+                // to the failing opcode, placeholder, serde path, or engine
+                // error kind.
                 cause:
                   v3Outcome.cause instanceof Error
                     ? {
@@ -767,18 +818,46 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
   } as const;
   const policyRpcUrl = process.env.POLICY_RPC_URL ?? "http://127.0.0.1:8787";
 
+  // Best-effort venue account-state enrichment: resolve this order's effective
+  // leverage (HL `activeAssetData`) so an order-leverage policy can fire — the
+  // order wire carries none. `collectHlLeverage` NEVER throws and is NOT part of
+  // the deny-closed fault surface below: a miss / timeout / unknown master just
+  // omits the leverage (a `context has leverage` policy stays dormant) rather
+  // than blocking the order. When this IS an `updateLeverage`, refresh the cache
+  // (fire-and-forget) so the next order on that asset sees the just-set value.
+  const account_leverage = await collectHlLeverage(action, message.data);
+  void noteHlLeverageUpdate(action, message.data);
+
   try {
     // PLAN: HL deny conditions read base context, so the planned set is usually
     // empty (no policy-RPC). Only dispatch when there is something to fetch, so
     // the common case needs no policy-rpc server.
-    const planned = await planActionRpcV2({ manifests, action, meta, tx });
+    const planned = await planActionRpcV2({
+      manifests,
+      action,
+      meta,
+      tx,
+      account_leverage,
+    });
     const results =
-      planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
-    const verdict = await evaluateActionV2({ action, meta, tx, bundles, results });
+      planned.length > 0
+        ? await dispatchCallsV2(planned, policyRpcUrl, { action, meta, tx })
+        : {};
+    const verdict = await evaluateActionV2({
+      action,
+      meta,
+      tx,
+      bundles,
+      results,
+      account_leverage,
+    });
     console.info("[Scopeball] venue-order-verdict", {
       requestId: message.requestId,
       venue: message.data.venue,
       verdict: verdict.kind,
+      // Injected order-time leverage (empty `{}` ⇒ enrichment dormant for this
+      // order — see the `[Scopeball] HL order-leverage ...` line for why).
+      account_leverage,
       matched: verdict.matched?.map((m) => ({ id: m.policy_id, severity: m.severity })) ?? [],
     });
     return {
@@ -1015,6 +1094,13 @@ async function typedSignatureLifecycle(
     try {
       // Per-child fan-out: evaluate this body and (if a multicall) each inner
       // child. No `recordSimulationOnServer` on the sig path (it never recorded).
+      // Resolve token decimals once for the whole (possibly multicall) body so
+      // each fungible amount gets its `amountNano` Long sibling (registry
+      // lookups; non-fatal — a miss just omits that token's nano).
+      const tokenDecimals = await collectTokenDecimals(
+        action,
+        message.data.chainId,
+      );
       verdicts.push(
         ...(await evaluateBodyTree(
           action,
@@ -1024,6 +1110,7 @@ async function typedSignatureLifecycle(
           manifests,
           policyRpcUrl,
           message.requestId,
+          tokenDecimals,
         )),
       );
     } catch (err) {
@@ -1112,6 +1199,10 @@ async function evaluateBodyTree(
   manifests: readonly unknown[],
   policyRpcUrl: string,
   requestId: string,
+  // Host-resolved per-token decimals for the WHOLE top-level body (collected
+  // once by the caller, then threaded through every child position) so each
+  // fungible amount's `amountNano` Long sibling is filled in the lowering.
+  tokenDecimals: Readonly<Record<string, number>>,
 ): Promise<VerdictDto[]> {
   const verdicts: VerdictDto[] = [];
   const domain =
@@ -1122,12 +1213,45 @@ async function evaluateBodyTree(
   if (domain !== undefined && domain !== "unknown") {
     // PLAN → DISPATCH (only when something is planned; a shared results map
     // would clobber since `call_id` repeats across siblings) → EVALUATE.
-    const planned = await planActionRpcV2({ manifests, action: body, meta, tx });
+    const planned = await planActionRpcV2({
+      manifests,
+      action: body,
+      meta,
+      tx,
+      token_decimals: tokenDecimals,
+    });
     const results =
-      planned.length > 0 ? await dispatchCallsV2(planned, policyRpcUrl) : {};
-    verdicts.push(
-      await evaluateActionV2({ action: body, meta, tx, bundles, results }),
-    );
+      planned.length > 0
+        ? await dispatchCallsV2(planned, policyRpcUrl, { action: body, meta, tx })
+        : {};
+    const verdict = await evaluateActionV2({
+      action: body,
+      meta,
+      tx,
+      bundles,
+      results,
+      token_decimals: tokenDecimals,
+    });
+    verdicts.push(verdict);
+    // DENY → capture the exact diagnosis context (action + materialized
+    // enrichment results) so the dashboard can re-run "which clause blocked
+    // this" against the real context (Option B). Best-effort, keyed by
+    // requestId (= the verdict log's delta_id). Last denying leg wins.
+    if (verdict.kind === "fail") {
+      void appendDiagnosisContext({
+        id: requestId,
+        ts: Math.floor(Date.now() / 1000),
+        action: body,
+        meta,
+        tx,
+        results,
+      }).catch((err) =>
+        console.warn(
+          "[Scopeball] diagnosis-context append failed",
+          err instanceof Error ? err.message : err,
+        ),
+      );
+    }
   } else if (domain === "unknown") {
     // N2: a nested batch position that decoded to NOTHING — the WASM decoder
     // surfaces an all-empty nested opcode stream as an `Unknown` child (rather
@@ -1157,6 +1281,7 @@ async function evaluateBodyTree(
             manifests,
             policyRpcUrl,
             requestId,
+            tokenDecimals,
           )),
         );
       }
@@ -1216,6 +1341,13 @@ async function tryV2VerdictPath(
       // bundles fire at the batch vs the child positions; this supplies both.
       // `evaluateActionV2` never throws for policy/system faults (Fail inside) —
       // only plan/dispatch can throw.
+      // Resolve token decimals once for the whole (possibly multicall) body so
+      // each fungible amount gets its `amountNano` Long sibling (registry
+      // lookups; non-fatal — a miss just omits that token's nano).
+      const tokenDecimals = await collectTokenDecimals(
+        action,
+        message.data.chainId,
+      );
       verdicts.push(
         ...(await evaluateBodyTree(
           action,
@@ -1225,16 +1357,32 @@ async function tryV2VerdictPath(
           manifests,
           policyRpcUrl,
           message.requestId,
+          tokenDecimals,
         )),
       );
 
-      // RECORD (Phase 8B): replay the simulation against the Scopeball server
-      // so the action + state-delta land in the authenticated user's
+      // RECORD (Phase 8B/8C): replay the simulation against the Scopeball
+      // server so the action + state-delta land in the authenticated user's
       // server-side state. Best-effort — the verdict above is the source of
       // truth for fail-closed decisions; recording is purely for the
       // dashboard's history view. Skipped silently when the user isn't signed
       // in to Scopeball. Recorded per TOP-LEVEL action (granularity unchanged).
-      void recordSimulationOnServer({ action, meta, tx });
+      // Phase 8C also captures the server's `deltas[0]` onto the SW's
+      // `state-deltas:log` keyed by `message.requestId` so the verdict log's
+      // `delta_id` joins without a server round-trip on the HistoryPage.
+      // Calldata / value come straight off the originating tx envelope (only
+      // present on transaction messages; signature paths have neither).
+      const tx0 = isTransaction(message)
+        ? message.data.transaction
+        : undefined;
+      void recordSimulationOnServer({
+        action,
+        meta,
+        tx,
+        decisionId: message.requestId,
+        calldata: tx0?.data ?? "",
+        value: tx0?.value ?? "0",
+      });
     } catch (err) {
       // A plan/dispatch throw makes THIS leg unevaluable. Record the fault but
       // KEEP evaluating siblings — the old `return undefined` here discarded
@@ -1649,6 +1797,17 @@ async function recordSimulationOnServer(input: {
     readonly from: string;
     readonly to: string;
   };
+  /** `message.requestId` — re-used as both the server's idempotency key
+   *  and as the local state-delta row id (so the verdict log's
+   *  `delta_id` joins cleanly). When `undefined`, no local capture
+   *  happens (the only existing call site already passes it). */
+  readonly decisionId?: string;
+  /** Raw `0x`-prefixed calldata from the originating tx. Persisted on
+   *  the local state-delta row so the HistoryPage's "다시 시뮬"
+   *  button can hand it to `/simulation?…calldata=…` without re-decoding. */
+  readonly calldata?: string;
+  /** `msg.value` as a base-10 decimal string. Optional same as calldata. */
+  readonly value?: string;
 }): Promise<void> {
   // Skip silently for signed-out users — recording is opt-in via login.
   const hasToken = await scopeballGetAccessToken().catch(() => null);
@@ -1658,7 +1817,10 @@ async function recordSimulationOnServer(input: {
   //   - wallet_id: from tx.from + tx.chain_id
   //   - envelopes: the typed action wrapped as { meta, body } (server
   //                accepts an opaque array; reducer dispatches on body.domain)
-  //   - eval_context: minimal — chain + now + RequestKind::Transaction
+  //   - eval_context: minimal — must match the server's `EvalContext` field
+  //                names + enum variants (camelCase `request_kind`, snake_case
+  //                `simulation`, REQUIRED `action_index`); a mismatch makes the
+  //                server reject with 422 and the record silently no-ops.
   //   - call_specs: empty (enrichment is rewritten LiveField-first per
   //                Phase 8B; server-side dispatcher remains intentionally
   //                unimplemented)
@@ -1666,8 +1828,9 @@ async function recordSimulationOnServer(input: {
   const evalContext = {
     chain: input.tx.chain_id,
     now: Math.floor(Date.now() / 1000),
-    request_kind: "Transaction",
-    simulation_mode: "Predicted",
+    action_index: 0,
+    request_kind: "transaction",
+    simulation: "preview",
   };
   const walletId = {
     address: input.tx.from,
@@ -1675,12 +1838,53 @@ async function recordSimulationOnServer(input: {
   };
 
   try {
-    await scopeballEvaluate({
+    const response = await scopeballEvaluate({
       wallet_id: walletId,
       envelopes: [envelope as unknown as Record<string, unknown>],
       eval_context: evalContext,
       call_specs: [],
     });
+
+    // Local capture (Phase 8C): the server already folded the reducer
+    // delta into `policyRequest.deltas`; we lift the first one onto the
+    // SW's `state-deltas:log` ring buffer so the dashboard's HistoryPage
+    // can render it without an extra server round-trip. Single-action
+    // txs (the common case) produce one delta; multi-action multicall
+    // batches surface only the FIRST action's delta here — fuller
+    // per-leg storage lands when the verdict log carries an action index.
+    if (input.decisionId) {
+      try {
+        const policyRequest = (response as { policyRequest?: unknown })
+          .policyRequest;
+        const deltasRaw =
+          policyRequest &&
+          typeof policyRequest === "object" &&
+          !Array.isArray(policyRequest)
+            ? (policyRequest as { deltas?: unknown }).deltas
+            : undefined;
+        const firstDelta = Array.isArray(deltasRaw) ? deltasRaw[0] : undefined;
+        if (firstDelta !== undefined) {
+          await appendStateDelta({
+            id: input.decisionId,
+            ts: Math.floor(Date.now() / 1000),
+            chain: input.tx.chain_id,
+            from: input.tx.from,
+            to: input.tx.to,
+            calldata: input.calldata ?? "",
+            value: input.value ?? "0",
+            delta: firstDelta,
+          });
+        }
+      } catch (storageErr) {
+        // Local storage failure shouldn't poison the audit/verdict path
+        // — the server has the canonical delta, dashboard just won't
+        // join until a future record succeeds.
+        console.warn(
+          "[Scopeball] state-delta local append failed",
+          storageErr instanceof Error ? storageErr.message : storageErr,
+        );
+      }
+    }
   } catch (err) {
     if (err instanceof ScopeballServerError && err.isUnauthorized) {
       // Token expired between getAccessToken() and the call — swallow.

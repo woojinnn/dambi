@@ -19,6 +19,18 @@ import {
   listManaged,
   upsertManaged,
 } from "./storage";
+import {
+  DASHBOARD_SET_ID_PREFIX,
+  type PolicySet,
+  deleteSet,
+  listSets,
+  upsertSet,
+} from "./sets-storage";
+import {
+  clearCurrentUserId,
+  getCurrentUserId,
+  setCurrentUserId,
+} from "./current-user";
 
 // Hard ceiling for audit-log responses so a wedged dashboard can't pull
 // the entire ring buffer in one shot. The underlying buffer is capped at
@@ -42,6 +54,16 @@ export type DashboardRequest =
       policyTree?: string;
       /** Human-readable label; shown in popup + dashboard. */
       displayName?: string;
+      /** Lifecycle stage. Defaults to `publish` when omitted. */
+      life?: "draft" | "publish";
+      /** Provenance. Defaults to `mine` when omitted. */
+      source?: "mine" | "market";
+      cat?: string;
+      method?: "form" | "block" | "cedar";
+      dupKey?: string;
+      memo?: string;
+      sourceListingId?: string;
+      sourceVersion?: string;
     }
   | {
       type: "dashboard:put-template";
@@ -60,7 +82,24 @@ export type DashboardRequest =
         limit?: number;
         since?: number;
       };
-    };
+    }
+  | { type: "dashboard:list-sets" }
+  | {
+      type: "dashboard:put-set";
+      id: string;
+      displayName: string;
+      description?: string;
+      memberIds: readonly string[];
+      source?: "mine" | "market";
+      readOnly?: boolean;
+      cat?: string;
+      sourceListingId?: string;
+      sourceVersion?: string;
+    }
+  | { type: "dashboard:delete-set"; id: string }
+  | { type: "dashboard:get-current-user" }
+  | { type: "dashboard:set-current-user"; userId: string }
+  | { type: "dashboard:clear-current-user" };
 
 export type DashboardResponse<T = unknown> =
   | { ok: true; data: T }
@@ -192,6 +231,20 @@ export async function handleDashboardRequest(
           ...(req.manifests !== undefined ? { manifests: req.manifests } : {}),
           ...(typeof req.policyTree === "string" ? { policyTree: req.policyTree } : {}),
           ...(typeof req.displayName === "string" ? { displayName: req.displayName } : {}),
+          ...(req.life === "draft" || req.life === "publish" ? { life: req.life } : {}),
+          ...(req.source === "mine" || req.source === "market" ? { source: req.source } : {}),
+          ...(typeof req.cat === "string" ? { cat: req.cat } : {}),
+          ...(req.method === "form" || req.method === "block" || req.method === "cedar"
+            ? { method: req.method }
+            : {}),
+          ...(typeof req.dupKey === "string" ? { dupKey: req.dupKey } : {}),
+          ...(typeof req.memo === "string" ? { memo: req.memo } : {}),
+          ...(typeof req.sourceListingId === "string"
+            ? { sourceListingId: req.sourceListingId }
+            : {}),
+          ...(typeof req.sourceVersion === "string"
+            ? { sourceVersion: req.sourceVersion }
+            : {}),
           updatedAtMs: Date.now(),
           schemaVersion: 1,
         };
@@ -277,6 +330,86 @@ export async function handleDashboardRequest(
             ? Math.min(opts.limit, AUDIT_MAX_LIMIT)
             : AUDIT_DEFAULT_LIMIT;
         return { ok: true, data: entries.slice(0, requested) };
+      }
+
+      case "dashboard:list-sets": {
+        const list = await listSets();
+        return { ok: true, data: list };
+      }
+
+      case "dashboard:put-set": {
+        if (
+          typeof req.id !== "string" ||
+          typeof req.displayName !== "string" ||
+          !Array.isArray(req.memberIds) ||
+          !req.memberIds.every((m) => typeof m === "string")
+        ) {
+          return fail(
+            "invalid_request",
+            "id, displayName, memberIds[] required",
+          );
+        }
+        const set: PolicySet = {
+          id: req.id,
+          displayName: req.displayName,
+          ...(typeof req.description === "string"
+            ? { description: req.description }
+            : {}),
+          memberIds: req.memberIds.slice(),
+          ...(req.source === "mine" || req.source === "market"
+            ? { source: req.source }
+            : {}),
+          ...(typeof req.readOnly === "boolean" ? { readOnly: req.readOnly } : {}),
+          ...(typeof req.cat === "string" ? { cat: req.cat } : {}),
+          ...(typeof req.sourceListingId === "string"
+            ? { sourceListingId: req.sourceListingId }
+            : {}),
+          ...(typeof req.sourceVersion === "string"
+            ? { sourceVersion: req.sourceVersion }
+            : {}),
+          updatedAtMs: Date.now(),
+          schemaVersion: 1,
+        };
+        await upsertSet(set);
+        return { ok: true, data: set };
+      }
+
+      case "dashboard:delete-set": {
+        if (typeof req.id !== "string" || !req.id.startsWith(DASHBOARD_SET_ID_PREFIX)) {
+          return fail("invalid_request", "id must be a dashboard-set:: id");
+        }
+        await deleteSet(req.id);
+        return { ok: true, data: { id: req.id } };
+      }
+
+      case "dashboard:get-current-user": {
+        const userId = await getCurrentUserId();
+        return { ok: true, data: { userId } };
+      }
+
+      case "dashboard:set-current-user": {
+        if (typeof req.userId !== "string" || req.userId.length === 0) {
+          return fail("invalid_request", "userId must be a non-empty string");
+        }
+        const prior = await getCurrentUserId();
+        await setCurrentUserId(req.userId);
+        // Re-apply the new user's enabled set so the engine snaps to the
+        // freshly-active namespace. If the user just logged in for the first
+        // time, this collapses to "install zero managed policies".
+        if (prior !== req.userId) {
+          await applyEnabledIds(await getEnabledIds(), reinstallAllPolicies).catch(
+            () => undefined,
+          );
+        }
+        return { ok: true, data: { userId: req.userId } };
+      }
+
+      case "dashboard:clear-current-user": {
+        await clearCurrentUserId();
+        // Drop dashboard policies from the engine — the per-user namespace
+        // is no longer reachable. Baked policies keep applying.
+        await applyEnabledIds([], reinstallAllPolicies).catch(() => undefined);
+        return { ok: true, data: null };
       }
 
       default: {

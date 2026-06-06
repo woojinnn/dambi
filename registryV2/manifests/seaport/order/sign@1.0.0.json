@@ -1,0 +1,135 @@
+{
+  "type": "adapter_action",
+  "id": "seaport/order/sign@1.0.0",
+  "publisher": "opensea",
+  "schema_version": "3",
+  "note": "Seaport 1.6 off-chain EIP-712 order signature (the maker's listing/offer — the key drainer surface). domain name='Seaport' version='1.6', verifying_contract=Seaport 1.6 0x0000000000000068F116a894984e2DB1123eB395 (mainnet), primary_type=OrderComponents. ORDER_TYPEHASH 0xfa445660b7e21515a59617fcd68910b487aa5808b8abda3d78bc85df364b2c2f (verified by on-chain domainSeparator recompute). selector 0x00000011 is a sign-only placeholder (no on-chain call); routing is by (chain, verifying_contract, primary_type) via the typed-data bridge. itemType/orderType are EIP-712 uint8 enums. -> marketplace sign_order. offer/consideration via $fn seaport_items (criteria items relabel identifierOrCriteria->criteria_root; anyToken derived in lowering). startTime/endTime u64_saturating (uint256 -> Time u64). 1st-party: github.com/ProjectOpenSea/seaport-types ConsiderationStructs.sol/ConsiderationConstants.sol.",
+  "match": {
+    "selector": "0x00000011",
+    "chain_to_addresses": {
+      "1": ["0x0000000000000068f116a894984e2db1123eb395"]
+    },
+    "typed_data": {
+      "domain_name": "Seaport",
+      "verifying_contract": "0x0000000000000068f116a894984e2db1123eb395",
+      "primary_type": "OrderComponents",
+      "types": {
+        "OrderComponents": [
+          { "name": "offerer", "type": "address" },
+          { "name": "zone", "type": "address" },
+          { "name": "offer", "type": "OfferItem[]" },
+          { "name": "consideration", "type": "ConsiderationItem[]" },
+          { "name": "orderType", "type": "uint8" },
+          { "name": "startTime", "type": "uint256" },
+          { "name": "endTime", "type": "uint256" },
+          { "name": "zoneHash", "type": "bytes32" },
+          { "name": "salt", "type": "uint256" },
+          { "name": "conduitKey", "type": "bytes32" },
+          { "name": "counter", "type": "uint256" }
+        ],
+        "OfferItem": [
+          { "name": "itemType", "type": "uint8" },
+          { "name": "token", "type": "address" },
+          { "name": "identifierOrCriteria", "type": "uint256" },
+          { "name": "startAmount", "type": "uint256" },
+          { "name": "endAmount", "type": "uint256" }
+        ],
+        "ConsiderationItem": [
+          { "name": "itemType", "type": "uint8" },
+          { "name": "token", "type": "address" },
+          { "name": "identifierOrCriteria", "type": "uint256" },
+          { "name": "startAmount", "type": "uint256" },
+          { "name": "endAmount", "type": "uint256" },
+          { "name": "recipient", "type": "address" }
+        ]
+      }
+    }
+  },
+  "abi_fragment": {
+    "function_name": "signOrder",
+    "abi": {
+      "name": "signOrder",
+      "type": "function",
+      "inputs": [
+        {
+          "name": "order",
+          "type": "tuple",
+          "components": [
+            { "name": "offerer", "type": "address" },
+            { "name": "zone", "type": "address" },
+            {
+              "name": "offer",
+              "type": "tuple[]",
+              "components": [
+                { "name": "itemType", "type": "uint8" },
+                { "name": "token", "type": "address" },
+                { "name": "identifierOrCriteria", "type": "uint256" },
+                { "name": "startAmount", "type": "uint256" },
+                { "name": "endAmount", "type": "uint256" }
+              ]
+            },
+            {
+              "name": "consideration",
+              "type": "tuple[]",
+              "components": [
+                { "name": "itemType", "type": "uint8" },
+                { "name": "token", "type": "address" },
+                { "name": "identifierOrCriteria", "type": "uint256" },
+                { "name": "startAmount", "type": "uint256" },
+                { "name": "endAmount", "type": "uint256" },
+                { "name": "recipient", "type": "address" }
+              ]
+            },
+            { "name": "orderType", "type": "uint8" },
+            { "name": "startTime", "type": "uint256" },
+            { "name": "endTime", "type": "uint256" },
+            { "name": "zoneHash", "type": "bytes32" },
+            { "name": "salt", "type": "uint256" },
+            { "name": "conduitKey", "type": "bytes32" },
+            { "name": "counter", "type": "uint256" }
+          ]
+        },
+        { "name": "signature", "type": "bytes" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "marketplace",
+      "marketplace": {
+        "action": "sign_order",
+        "sign_order": {
+          "venue": { "name": "seaport", "chain": "$chain", "settlement": "$tx.to" },
+          "offerer": "$args.order.offerer",
+          "zone": "$args.order.zone",
+          "offer": { "$fn": "seaport_items", "$args": ["$args.order.offer", "offer"] },
+          "consideration": { "$fn": "seaport_items", "$args": ["$args.order.consideration", "consideration"] },
+          "order_type": {
+            "$match": "$args.order.orderType",
+            "$cases": {
+              "0": "full_open",
+              "1": "partial_open",
+              "2": "full_restricted",
+              "3": "partial_restricted",
+              "4": "contract"
+            },
+            "$default": "unknown"
+          },
+          "start_time": { "$fn": "u64_saturating", "$args": ["$args.order.startTime"] },
+          "end_time": { "$fn": "u64_saturating", "$args": ["$args.order.endTime"] },
+          "conduit_key": "$args.order.conduitKey",
+          "counter": "$args.order.counter"
+        }
+      }
+    },
+    "live_inputs": {}
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": ["token_metadata"],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

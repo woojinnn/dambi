@@ -33,6 +33,13 @@ pub(crate) fn lower(
         "minTokenOut".into(),
         Value::String(u256_hex(action.min_token_out)),
     );
+    if let Some(nano) = action
+        .external_token
+        .as_ref()
+        .and_then(|t| ctx.amount_nano(t, action.min_token_out))
+    {
+        m.insert("minTokenOutNano".into(), Value::from(nano));
+    }
     m.insert(
         "minPtOut".into(),
         Value::String(u256_hex(action.min_pt_out)),

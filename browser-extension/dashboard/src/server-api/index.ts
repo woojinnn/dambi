@@ -122,9 +122,67 @@ export {
   dashboardId,
   stripDashboardId,
   type ManagedPolicy,
+  type PolicyLife,
+  type PolicySource,
+  type PolicyMethod,
+  listPolicySets,
+  putPolicySet,
+  deletePolicySet,
+  dashboardSetId,
+  stripDashboardSetId,
+  type PolicySet,
+  type PutPolicySetOpts,
+  // Per-user namespacing handshake — call setCurrentUser after fetchMe()
+  // resolves so the SW scopes every subsequent storage op to the right user.
+  setCurrentUser,
+  clearCurrentUser,
+  getCurrentUser,
 } from "./extension-sync";
 
 export { subscribeToBroadcast } from "./extension-bridge";
+
+export {
+  getStateDeltaRow,
+  clearStateDeltas,
+  type StateDeltaRow,
+} from "./state-deltas";
+export {
+  getDiagnosisContextRow,
+  type DiagnosisContextRow,
+} from "./diagnosis-context";
+
+export {
+  listListings,
+  getListing,
+  getListingVersion,
+  createListing,
+  createVersion,
+  installListing,
+  listReviews,
+  createReview,
+  voteHelpful,
+  watchListing,
+  unwatchListing,
+  listWatches,
+  pickI18n,
+  type ListingKind,
+  type PublisherTier,
+  type ListingStatus,
+  type Severity as MarketSeverity,
+  type ListingSort,
+  type I18nText,
+  type SetMember,
+  type ListingSummary,
+  type ListingVersion,
+  type ListingDetail,
+  type Review,
+  type ListListingsParams,
+  type CreatePolicyListingBody,
+  type CreateSetListingBody,
+  type CreateListingBody,
+  type CreateVersionBody,
+  type CreateReviewBody,
+} from "./market";
 
 // Shared primitive types — kept in one file (./types) to mirror the
 // Rust DTOs. Re-exported here so consumer pages can

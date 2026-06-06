@@ -37,12 +37,12 @@ export function NavRail() {
         <RailItem to="/editor" label="Editor" icon={<EditorIcon />} />
         <RailItem to="/simulation" label="Simulation" icon={<SimIcon />} />
         <RailItem to="/monitoring" label="Monitoring" icon={<MonIcon />} />
+        <RailItem to="/market" label="Market" icon={<MarketIcon />} />
       </div>
 
       <div className="nav-divider" />
 
       <div className="nav-group">
-        <RailItem to="/audit" label="Audit" icon={<AuditIcon />} />
         <RailItem
           to="/history"
           label="History"
@@ -50,6 +50,7 @@ export function NavRail() {
           badge={pendingCount > 0 ? String(pendingCount) : undefined}
           showDot={pendingCount > 0}
         />
+        <RailItem to="/settings" label="Settings" icon={<SettingsIcon />} />
       </div>
 
       <div className="nav-bottom">
@@ -127,10 +128,15 @@ const HistoryIcon = () => (
     <path d="m7 14 4-4 4 3 5-7" />
   </svg>
 );
-const AuditIcon = () => (
+const MarketIcon = () => (
   <svg viewBox="0 0 24 24" {...stroke}>
-    <path d="M4 4h12l4 4v12H4z" />
-    <path d="M16 4v4h4" />
-    <path d="M8 12h8M8 16h6" />
+    <path d="M3 8h18l-2 12H5z" />
+    <path d="M8 8V5a4 4 0 0 1 8 0v3" />
+  </svg>
+);
+const SettingsIcon = () => (
+  <svg viewBox="0 0 24 24" {...stroke}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" />
   </svg>
 );

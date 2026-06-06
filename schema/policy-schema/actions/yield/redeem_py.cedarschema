@@ -18,6 +18,8 @@ namespace Yield {
     netPyIn: String,
     // Minimum output amount (token or SY) / slippage floor (U256 hex).
     minOutput: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    minOutputNano?: Long,
     // Output recipient (address).
     recipient: String,
     // Manifest-extensible slot.

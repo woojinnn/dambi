@@ -21,6 +21,8 @@ namespace Yield {
     externalToken?: Core::TokenRef,
     // External-token amount supplied (U256 hex; 0 if not a token kind).
     netTokenIn: String,
+    // Token-native nano (raw × 10^(9 − decimals)). Host-populated.
+    netTokenInNano?: Long,
     // PT amount supplied (U256 hex; 0 if not supplied).
     netPtIn: String,
     // SY amount supplied (U256 hex; 0 if not supplied).

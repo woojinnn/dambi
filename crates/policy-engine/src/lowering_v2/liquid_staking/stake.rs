@@ -20,6 +20,10 @@ pub(crate) fn lower(action: &StakeAction, ctx: &LowerCtx<'_>) -> Result<LoweredA
     m.insert("meta".into(), ctx.meta());
     m.insert("venue".into(), lower_staking_venue(&action.venue));
     m.insert("amount".into(), Value::String(u256_hex(action.amount)));
+    m.insert(
+        "amountNano".into(),
+        Value::from(ctx.amount_nano_native18(action.amount)),
+    );
     if let Some(referral) = &action.referral {
         m.insert("referral".into(), Value::String(addr(referral)));
     }
