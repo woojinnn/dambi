@@ -211,3 +211,24 @@ jobs:
 
       - name: Dependency policy
         run: cargo deny check
+
+  # Secret scanning over the full git history. Tuned via .gitleaks.toml, which
+  # allowlists known non-secret high-entropy data (blockchain fixtures/ABIs,
+  # the Chrome extension public key, vendored deps) so only real secrets fail.
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          VERSION=8.30.1
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o gitleaks.tgz
+          tar -xzf gitleaks.tgz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan git history for secrets
+        run: gitleaks detect --source . --config .gitleaks.toml --log-opts="--all" --redact --no-banner
