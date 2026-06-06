@@ -50,6 +50,7 @@ pub async fn list_listings(
     let filter = ListingFilter {
         kind: q.kind.map(|k| serde_kind(k).to_owned()),
         domain: q.domain,
+        category: q.category,
         publisher_id: q.publisher_id,
         publisher_tier: q.publisher_tier.map(|t| serde_tier(t).to_owned()),
         q: q.q,
@@ -197,6 +198,7 @@ pub async fn create_listing(
         display_name,
         description,
         domain: req.domain.clone(),
+        category: req.category.clone(),
         intents,
         severity: req.severity.map(|s| serde_severity(s).to_owned()),
         forked_from: req.forked_from,
@@ -448,6 +450,7 @@ fn listing_row_to_summary(r: &ListingRow) -> ListingSummary {
         display_name: json_to_i18n(&r.display_name),
         description: r.description.as_ref().map(json_to_i18n),
         domain: r.domain.clone(),
+        category: r.category.clone(),
         intents: r.intents.as_ref().and_then(json_to_string_array),
         severity: r.severity.as_deref().and_then(parse_severity),
         status: parse_status(&r.status),
