@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use policy_state::pending::PendingTx;
 use policy_state::{
     Confidence, DataSource, LiveField, Position, PositionKind, Price, ProtocolRef, SignedI256,
     Time, WalletState, U256,
@@ -21,8 +22,8 @@ use crate::error::SyncError;
 use crate::fetchers::onchain::OnchainCall;
 use crate::fetchers::oracle::{provider_key, PriceFetcher, RestJsonOracleFetcher};
 use crate::fetchers::{
-    ChainlinkFetcher, HyperliquidFetcher, OnchainViewFetcher, RegistryFetcher, UniswapFetcher,
-    UniswapXFetcher, UniswapXOrder,
+    ChainlinkFetcher, CowSwapFetcher, HyperliquidFetcher, IntentFetcher, OnchainViewFetcher,
+    OneInchFusionFetcher, RegistryFetcher, UniswapFetcher, UniswapXFetcher,
 };
 use crate::walker::{walk_stale, ActionSlot, FieldLocation, WalkStats};
 
@@ -55,6 +56,8 @@ pub struct Orchestrator {
     hyperliquid: Option<HyperliquidFetcher>,
     uniswap: Option<UniswapFetcher>,
     uniswap_x: Option<UniswapXFetcher>,
+    cow_swap: Option<CowSwapFetcher>,
+    one_inch_fusion: Option<OneInchFusionFetcher>,
     calc: CalcRegistry,
     // Global values used by derived live-field inputs.
     globals: crate::resolver::GlobalValues,
@@ -72,6 +75,8 @@ impl Orchestrator {
             hyperliquid: None,
             uniswap: Some(UniswapFetcher::new()),
             uniswap_x: None,
+            cow_swap: None,
+            one_inch_fusion: None,
             calc: CalcRegistry::with_builtins(),
             globals: crate::resolver::GlobalValues::new(),
             router: None,
@@ -130,6 +135,35 @@ impl Orchestrator {
     }
 
     #[must_use]
+    pub fn with_cowswap(mut self, cow: CowSwapFetcher) -> Self {
+        self.cow_swap = Some(cow);
+        self
+    }
+
+    #[must_use]
+    pub fn with_one_inch_fusion(mut self, fusion: OneInchFusionFetcher) -> Self {
+        self.one_inch_fusion = Some(fusion);
+        self
+    }
+
+    /// Collect every configured intent-order fetcher as `&dyn IntentFetcher`.
+    /// An unconfigured venue (`None` Option) is simply absent from the list, so
+    /// `sync_intent_orders` polls exactly the venues that are wired.
+    fn intent_fetchers(&self) -> Vec<&dyn IntentFetcher> {
+        let mut fetchers: Vec<&dyn IntentFetcher> = Vec::new();
+        if let Some(f) = self.uniswap_x.as_ref() {
+            fetchers.push(f);
+        }
+        if let Some(f) = self.cow_swap.as_ref() {
+            fetchers.push(f);
+        }
+        if let Some(f) = self.one_inch_fusion.as_ref() {
+            fetchers.push(f);
+        }
+        fetchers
+    }
+
+    #[must_use]
     pub fn with_calc(mut self, calc: CalcRegistry) -> Self {
         self.calc = calc;
         self
@@ -148,6 +182,8 @@ impl Orchestrator {
             hyperliquid: Some(HyperliquidFetcher::new()),
             uniswap: Some(UniswapFetcher::new()),
             uniswap_x: None,
+            cow_swap: None,
+            one_inch_fusion: None,
             calc: CalcRegistry::with_builtins(),
             globals: crate::resolver::GlobalValues::new(),
             router: Some(router),
@@ -180,6 +216,16 @@ impl Orchestrator {
             .uniswap
             .as_ref()
             .map(UniswapXFetcher::from_sync_config);
+        let cow_swap = cfg
+            .venues
+            .cowswap
+            .as_ref()
+            .map(CowSwapFetcher::from_sync_config);
+        let one_inch_fusion = cfg
+            .venues
+            .one_inch_fusion
+            .as_ref()
+            .map(OneInchFusionFetcher::from_sync_config);
         Ok(Self {
             onchain,
             price_fetchers,
@@ -187,6 +233,8 @@ impl Orchestrator {
             hyperliquid,
             uniswap: Some(UniswapFetcher::new()),
             uniswap_x,
+            cow_swap,
+            one_inch_fusion,
             calc: CalcRegistry::with_builtins(),
             globals: crate::resolver::GlobalValues::new(),
             router: Some(router),
@@ -261,31 +309,28 @@ impl Orchestrator {
         })
     }
 
-    /// Discover and reconcile `UniswapX` (intent) order status for this wallet.
-    /// Venue is the source of truth: each configured chain is polled and the
-    /// returned orders are upserted into `state.pending` (keyed by `orderHash`).
+    /// Discover and reconcile off-chain intent-order status for this wallet
+    /// across every configured venue (`UniswapX` / `CowSwap` / `1inch Fusion`).
+    /// Each fetcher is the source of truth for its venue: it is polled and the
+    /// returned orders are upserted into `state.pending` (keyed by the venue
+    /// order id embedded in `PendingTx.id`). A single fetcher error is recorded
+    /// in `report.errors` and the tick continues — one dead venue never aborts
+    /// the others.
     pub async fn sync_intent_orders(
         &self,
         state: &mut WalletState,
         now: Time,
     ) -> Result<IntentOrdersReport, SyncError> {
-        let Some(uni) = self.uniswap_x.as_ref() else {
-            return Ok(IntentOrdersReport {
-                orders_updated: 0,
-                errors: vec!["uniswap_x fetcher is not configured".into()],
-            });
-        };
         let swapper = state.wallet_id.address;
         let mut report = IntentOrdersReport::default();
-        let reactor = uniswap_x_reactor();
-        // v2 lists by swapper across all chains in one call; each order carries
-        // its own chainId, so there is no per-chain loop.
-        match uni.fetch_orders(&swapper).await {
-            Ok(orders) => {
-                report.orders_updated = orders.len();
-                upsert_intent_orders(state, &orders, reactor, &swapper, now);
+        for fetcher in self.intent_fetchers() {
+            match fetcher.fetch_orders(&swapper, now).await {
+                Ok(orders) => {
+                    report.orders_updated += orders.len();
+                    upsert_intent_orders(state, &orders);
+                }
+                Err(e) => report.errors.push(format!("{e}")),
             }
-            Err(e) => report.errors.push(format!("uniswap_x: {e}")),
         }
         Ok(report)
     }
@@ -869,30 +914,16 @@ fn upsert_hyperliquid_account(
     Ok(())
 }
 
-/// `UniswapX` V2 reactor on Ethereum mainnet (the permit-cap spender). Per-chain
-/// reactors can be threaded through config later (spec §12).
-fn uniswap_x_reactor() -> policy_state::Address {
-    use std::str::FromStr;
-    policy_state::Address::from_str("0x00000011f84b9aa48e5f8aa8b9897600006289be")
-        .unwrap_or(policy_state::Address::ZERO)
-}
-
-/// Upsert discovered `UniswapX` orders into `state.pending`, keyed by the venue
-/// `orderHash` embedded in `PendingTx.id`. Existing entries are replaced in
-/// place (status transitions); new ones are appended.
-pub(crate) fn upsert_intent_orders(
-    state: &mut WalletState,
-    orders: &[UniswapXOrder],
-    reactor: policy_state::Address,
-    swapper: &policy_state::Address,
-    now: Time,
-) {
+/// Upsert discovered intent orders into `state.pending`, keyed by the venue
+/// order id embedded in `PendingTx.id`. Existing entries are replaced in place
+/// (status transitions); new ones are appended. Each fetcher has already
+/// projected its venue's orders into the canonical `PendingTx` shape.
+pub(crate) fn upsert_intent_orders(state: &mut WalletState, orders: &[PendingTx]) {
     use policy_state::pending::PendingStatus;
-    for order in orders {
-        let pending = order.to_pending_tx(reactor, swapper, now);
+    for pending in orders {
         // Terminal orders are pruned from `pending` — filled / cancelled /
-        // expired / failed no longer need tracking. Active ones are upserted in
-        // place (status transitions) or appended.
+        // expired / failed no longer need tracking. Active / partially-filled
+        // ones are upserted in place (status transitions) or appended.
         let terminal = matches!(
             pending.lifecycle.status,
             PendingStatus::Filled
@@ -903,9 +934,9 @@ pub(crate) fn upsert_intent_orders(
         if terminal {
             state.pending.retain(|p| p.id != pending.id);
         } else if let Some(existing) = state.pending.iter_mut().find(|p| p.id == pending.id) {
-            *existing = pending;
+            *existing = pending.clone();
         } else {
-            state.pending.push(pending);
+            state.pending.push(pending.clone());
         }
     }
 }
@@ -1129,13 +1160,7 @@ mod tests {
             buy_token: Address::ZERO,
             buy_min: U256::from(1u64),
         };
-        super::upsert_intent_orders(
-            &mut state,
-            std::slice::from_ref(&open),
-            reactor,
-            &swapper,
-            now,
-        );
+        super::upsert_intent_orders(&mut state, &[open.to_pending_tx(reactor, &swapper, now)]);
         assert_eq!(state.pending.len(), 1);
         assert_eq!(state.pending[0].id, "intent:uniswap_x:0xhash1");
         assert_eq!(state.pending[0].lifecycle.status, PendingStatus::Active);
@@ -1145,11 +1170,89 @@ mod tests {
             order_status: "filled".into(),
             ..open
         };
-        super::upsert_intent_orders(&mut state, &[filled], reactor, &swapper, now);
+        super::upsert_intent_orders(&mut state, &[filled.to_pending_tx(reactor, &swapper, now)]);
         assert!(
             state.pending.is_empty(),
             "terminal order pruned from pending"
         );
+    }
+
+    #[tokio::test]
+    async fn intent_fetcher_trait_dispatch_persists_orders() {
+        use crate::fetchers::IntentFetcher;
+        use async_trait::async_trait;
+        use policy_state::pending::{
+            AssetCommitment, OrderKind, PendingKind, PendingLifecycle, PendingStatus, PendingTx,
+        };
+        use policy_state::primitives::{Address, ChainId, Time, VenueRef, U256};
+        use policy_state::token::{TokenKey, TokenRef};
+        use policy_state::{DataSource, StateDelta, WalletId};
+
+        fn make_pending(id: &str) -> PendingTx {
+            let token = TokenRef {
+                key: TokenKey::Native {
+                    chain: ChainId::ethereum_mainnet(),
+                },
+            };
+            PendingTx {
+                id: id.into(),
+                kind: PendingKind::OffchainLimitOrder {
+                    venue: VenueRef {
+                        name: "stub".into(),
+                        chain: Some(ChainId::ethereum_mainnet()),
+                    },
+                    sell: token.clone(),
+                    buy: token.clone(),
+                    sell_max: U256::from(1u64),
+                    buy_min: U256::from(1u64),
+                    order_kind: OrderKind::Limit,
+                },
+                commitment: AssetCommitment::PermitCap {
+                    token,
+                    spender: Address::ZERO,
+                    max_out: U256::from(1u64),
+                },
+                fill_effect: Box::new(StateDelta::new()),
+                lifecycle: PendingLifecycle {
+                    status: PendingStatus::Active,
+                    valid_until: None,
+                    nonce: None,
+                    on_chain_tx: None,
+                    raw_status: None,
+                },
+                sync: DataSource::UserSupplied,
+                signed_at: Time::from_unix(0),
+                signature_payload: Vec::new(),
+            }
+        }
+
+        struct StubFetcher;
+        #[async_trait]
+        impl IntentFetcher for StubFetcher {
+            async fn fetch_orders(
+                &self,
+                _swapper: &Address,
+                _now: Time,
+            ) -> Result<Vec<PendingTx>, SyncError> {
+                Ok(vec![
+                    make_pending("intent:stub:a"),
+                    make_pending("intent:stub:b"),
+                ])
+            }
+        }
+
+        let mut state =
+            WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        let orders = StubFetcher
+            .fetch_orders(&Address::ZERO, Time::from_unix(0))
+            .await
+            .unwrap();
+        assert_eq!(orders.len(), 2);
+        super::upsert_intent_orders(&mut state, &orders);
+
+        assert_eq!(state.pending.len(), 2);
+        assert!(state.pending.iter().any(|p| p.id == "intent:stub:a"));
+        assert!(state.pending.iter().any(|p| p.id == "intent:stub:b"));
     }
 
     #[tokio::test]
