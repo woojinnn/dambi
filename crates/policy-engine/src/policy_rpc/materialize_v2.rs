@@ -650,6 +650,23 @@ mod tests {
         .unwrap();
         assert_eq!(planned.len(), 1);
 
+        // Producer-side seam guard: the planned params MUST carry the lowered shape
+        // the policy-server `pending_cap_over_balance` method reads
+        // (`action.sell.key.address` + `action.sellAmount` + top-level `chain_id`).
+        // This crate can't depend on policy-server, so the input seam is pinned by
+        // asserting the producer output here; a lowering rename breaks this test
+        // while a method-read change breaks the policy-server tests.
+        let pp = &planned[0].params;
+        assert!(
+            pp["action"]["sell"]["key"]["address"].is_string(),
+            "planned params must expose action.sell.key.address; got {pp}"
+        );
+        assert!(
+            pp["action"]["sellAmount"].is_string(),
+            "planned params must expose action.sellAmount; got {pp}"
+        );
+        assert_eq!(pp["chain_id"].as_str(), Some("eip155:1"));
+
         // The server-side method returned capSumOverBalance: true (the Task 2 seam
         // contract `{ "capSumOverBalance": bool }`).
         let mut context = lowered.context.clone();

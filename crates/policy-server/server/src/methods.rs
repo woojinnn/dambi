@@ -33,13 +33,25 @@ fn parse_hex_u256(v: &Value) -> Option<U256> {
 ///
 /// Pure fold over the loaded `WalletState`. Sums `PermitCap.max_out` of every
 /// active/partially-filled `OffchainLimitOrder` whose sell token matches the new
-/// order's `(chain, sell_asset)`, adds `sell_amount`, and compares to the synced
-/// balance of that token. Returns `None` (fail-open) when the params don't parse
-/// or the sell token has no synced holding.
+/// order's sell token, adds the new order's sell amount, and compares to the
+/// synced balance of that token. Returns `None` (fail-open) when the params don't
+/// parse or the sell token has no synced holding.
+///
+/// Params are exactly what the manifest projects (`{ chain_id, owner, action }`):
+/// `action` is the lowered `SignIntentOrder` context, so the sell token lives at
+/// `action.sell.key.address` and the amount at `action.sellAmount` (camelCase
+/// `0x`-hex). A native sell (the token key carries no `address`) yields `None`,
+/// the documented v1 limitation. `chain_id` is the CAIP-2 string, matching a
+/// `TokenKey`'s `chain().as_str()`.
 pub(crate) fn pending_cap_over_balance(state: &WalletState, params: &Value) -> Option<Value> {
     let chain = params.get("chain_id").and_then(Value::as_str)?;
-    let sell = params.get("sell_asset").and_then(asset_hex)?;
-    let sell_amount = params.get("sell_amount").and_then(parse_hex_u256)?;
+    let action = params.get("action")?;
+    let sell = action
+        .get("sell")
+        .and_then(|s| s.get("key"))
+        .and_then(|k| k.get("address"))
+        .and_then(asset_hex)?;
+    let sell_amount = action.get("sellAmount").and_then(parse_hex_u256)?;
 
     let matches_sell = |k: &policy_state::token::TokenKey| -> bool {
         k.chain().as_str() == chain
@@ -156,11 +168,18 @@ mod tests {
         s
     }
 
+    /// The exact shape the manifest + lowering produce: `{chain_id, owner,
+    /// action}` where `action` is the lowered `SignIntentOrder` (sell token nested
+    /// at `action.sell.key.address`, amount at camelCase `action.sellAmount`).
+    /// Mirrors `lower_token_ref`/`sign_intent_order::lower` in policy-engine.
     fn params(sell: &str, amount: u64) -> Value {
         serde_json::json!({
             "chain_id": "eip155:1",
-            "sell_asset": sell,
-            "sell_amount": format!("0x{amount:x}"),
+            "owner": "0x0000000000000000000000000000000000000000",
+            "action": {
+                "sell": { "key": { "standard": "erc20", "chain": "eip155:1", "address": sell } },
+                "sellAmount": format!("0x{amount:x}"),
+            }
         })
     }
 
@@ -219,8 +238,24 @@ mod tests {
     #[test]
     fn unparseable_params_is_none() {
         let st = state(vec![holding(SELL, 100)], vec![]);
+        // No `action` → cannot find the sell token/amount → fail-open.
         let bad = serde_json::json!({ "chain_id": "eip155:1" });
         assert!(super::pending_cap_over_balance(&st, &bad).is_none());
+    }
+
+    #[test]
+    fn native_sell_token_is_none() {
+        // A native sell (key has no `address`, only `standard:"native"`) cannot be
+        // matched by (chain, contract) → None (documented v1 limitation).
+        let st = state(vec![holding(SELL, 100)], vec![]);
+        let native = serde_json::json!({
+            "chain_id": "eip155:1",
+            "action": {
+                "sell": { "key": { "standard": "native", "chain": "eip155:1" } },
+                "sellAmount": "0x14",
+            }
+        });
+        assert!(super::pending_cap_over_balance(&st, &native).is_none());
     }
 
     #[test]

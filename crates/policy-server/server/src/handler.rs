@@ -904,10 +904,19 @@ mod tests {
             manifest_id: "ammlp-intent-cap-over-balance-warn".into(),
             call_id: "ammlp-intent-cap-over-balance-warn::pending-cap-over-balance".into(),
             method: "intent.pending_cap_over_balance".into(),
+            // The exact params shape the manifest + lowering emit: the sell token
+            // nested under `action.sell.key.address`, amount at `action.sellAmount`.
             params: serde_json::json!({
                 "chain_id": "eip155:1",
-                "sell_asset": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                "sell_amount": "0x1e"
+                "owner": "0x0000000000000000000000000000000000000000",
+                "action": {
+                    "sell": { "key": {
+                        "standard": "erc20",
+                        "chain": "eip155:1",
+                        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    } },
+                    "sellAmount": "0x1e"
+                }
             }),
             outputs: Vec::new(),
             optional: true,
