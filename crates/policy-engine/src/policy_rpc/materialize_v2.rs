@@ -755,6 +755,7 @@ mod tests {
             pp["action"]["buy"]["key"]["address"].is_string(),
             "need action.buy.key.address"
         );
+        assert_eq!(pp["chain_id"].as_str(), Some("eip155:1"));
 
         let mut context = lowered.context.clone();
         let mut results = BTreeMap::new();

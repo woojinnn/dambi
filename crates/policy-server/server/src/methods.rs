@@ -99,8 +99,17 @@ fn action_token_address(action: &Value, field: &str) -> Option<String> {
 ///
 /// Params are the manifest's `{ chain_id, owner, action }`. Reads the venue name
 /// (`action.venue.name`) and the sell/buy token addresses (`action.<>.key.address`)
-/// and tests membership against the active `OffchainLimitOrder` set. Matches tokens
-/// by `(chain_id, address)`; a native token (no address) yields `None` → fail-open.
+/// and tests membership against the live `OffchainLimitOrder` set. Matches tokens
+/// by `(chain_id, address)` — a native sell OR buy (no `address`) yields `None` →
+/// fail-open (the native-leg limitation is wider than just the sell side). Both
+/// legs are matched against the single top-level `chain_id`; correct for today's
+/// same-chain `IntentVenue`s (a per-leg cross-chain match is a follow-up).
+///
+/// The live set is `Active | PartiallyFilled | Unknown`. `Unknown` ("venue did not
+/// respond / reconciliation failed") is INCLUDED — unlike the cap method, where it
+/// is excluded to avoid double-counting a possibly-failed order: for duplicate
+/// detection the risk polarity is reversed, and an `Unknown` order is exactly the
+/// "did it go through?" state where re-signing the same order is most likely.
 pub(crate) fn near_duplicate_pending(state: &WalletState, params: &Value) -> Option<Value> {
     let chain = params.get("chain_id").and_then(Value::as_str)?;
     let action = params.get("action")?;
@@ -119,7 +128,7 @@ pub(crate) fn near_duplicate_pending(state: &WalletState, params: &Value) -> Opt
     let duplicate = state.pending.iter().any(|p| {
         matches!(
             p.lifecycle.status,
-            PendingStatus::Active | PendingStatus::PartiallyFilled
+            PendingStatus::Active | PendingStatus::PartiallyFilled | PendingStatus::Unknown
         ) && match &p.kind {
             PendingKind::OffchainLimitOrder {
                 venue: pv,
@@ -453,6 +462,26 @@ mod tests {
         assert_eq!(
             dup(&st, &dup_params("one_inch_fusion", SELL, OTHER)),
             Some(false)
+        );
+    }
+
+    #[test]
+    fn unknown_status_pending_is_duplicate() {
+        // Unknown ("did it go through?" reconciliation failure) is the prime
+        // re-sign candidate → must be in the live set for duplicate detection.
+        let st = state(
+            vec![],
+            vec![dup_pending(
+                "a",
+                "one_inch_fusion",
+                SELL,
+                OTHER,
+                PendingStatus::Unknown,
+            )],
+        );
+        assert_eq!(
+            dup(&st, &dup_params("one_inch_fusion", SELL, OTHER)),
+            Some(true)
         );
     }
 
