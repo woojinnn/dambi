@@ -305,10 +305,13 @@ pub async fn create_install(
         Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
         Err(e) => return server_error(&e.to_string()),
     };
+    // Recording the install event (popularity counts) is non-critical
+    // telemetry. Never fail the actual download because of it — e.g. a user
+    // row missing from `users` (FK) must not block copy-to-editor.
     if let Err(e) =
         db_record_install(pool, listing_id, &req.version, &user.user_id, now_secs()).await
     {
-        return server_error(&e.to_string());
+        tracing::warn!(error = %e, user_id = %user.user_id, "market install record failed; returning body anyway");
     }
     Json(version_row_to_dto(version)).into_response()
 }
