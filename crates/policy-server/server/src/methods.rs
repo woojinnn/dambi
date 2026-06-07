@@ -113,9 +113,11 @@ mod tests {
         }
     }
 
-    /// An OffchainLimitOrder selling `sell_addr` with a PermitCap of `cap`.
+    /// An `OffchainLimitOrder` selling `sell_addr` with a `PermitCap` of `cap`.
     fn intent_pending(id: &str, sell_addr: &str, cap: u64, status: PendingStatus) -> PendingTx {
-        let token = TokenRef { key: key(sell_addr) };
+        let token = TokenRef {
+            key: key(sell_addr),
+        };
         PendingTx {
             id: id.into(),
             kind: PendingKind::OffchainLimitOrder {

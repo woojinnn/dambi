@@ -542,7 +542,8 @@ mod tests {
         use policy_state::token::{TokenKey, TokenRef};
         use policy_state::LiveField;
         use policy_transition::action::amm::{
-            AmmAction, IntentOrderKind, IntentVenue, SignIntentOrderAction, SignIntentOrderLiveInputs,
+            AmmAction, IntentOrderKind, IntentVenue, SignIntentOrderAction,
+            SignIntentOrderLiveInputs,
         };
         use policy_transition::action::{ActionBody, ActionMeta, ActionNature, Eip712Domain};
 
@@ -640,16 +641,23 @@ mod tests {
         };
         let manifest = cap_over_balance_manifest();
 
-        let planned =
-            plan_policy_rpc_v2(std::slice::from_ref(&manifest), &view, &lowered.context, &tx)
-                .unwrap();
+        let planned = plan_policy_rpc_v2(
+            std::slice::from_ref(&manifest),
+            &view,
+            &lowered.context,
+            &tx,
+        )
+        .unwrap();
         assert_eq!(planned.len(), 1);
 
         // The server-side method returned capSumOverBalance: true (the Task 2 seam
         // contract `{ "capSumOverBalance": bool }`).
         let mut context = lowered.context.clone();
         let mut results = BTreeMap::new();
-        results.insert(planned[0].call_id.clone(), json!({ "capSumOverBalance": true }));
+        results.insert(
+            planned[0].call_id.clone(),
+            json!({ "capSumOverBalance": true }),
+        );
         materialize_v2(&mut context, &planned, &results).unwrap();
         assert_eq!(context["custom"]["capSumOverBalance"], json!(true));
 
