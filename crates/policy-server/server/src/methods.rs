@@ -71,12 +71,13 @@ pub(crate) fn pending_cap_over_balance(state: &WalletState, params: &Value) -> O
         })
         .fold(U256::ZERO, U256::saturating_add);
 
-    let balance = state
-        .tokens
-        .values()
-        .find(|h| matches_sell(&h.key))?
-        .balance
-        .as_fungible()?;
+    // First matching holding with a fungible balance (skips a non-fungible
+    // holding — e.g. an ERC721 — that happens to share the contract address).
+    let balance = state.tokens.values().find_map(|h| {
+        matches_sell(&h.key)
+            .then(|| h.balance.as_fungible())
+            .flatten()
+    })?;
 
     let over = cap_sum.saturating_add(sell_amount) > balance;
     Some(json!({ "capSumOverBalance": over }))
