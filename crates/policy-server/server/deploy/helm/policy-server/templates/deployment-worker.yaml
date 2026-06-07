@@ -59,6 +59,15 @@ spec:
                   name: {{ .Values.existingSecret }}
                   key: COINGECKO_API_KEY
                   optional: true
+            # Dev Portal Bearer key shared by all 1inch venues (Fusion, Fusion+,
+            # LOP). Optional: ${ONEINCH_KEY} expands to "" when the secret key is
+            # absent, so the (commented) 1inch venues stay disabled until set.
+            - name: ONEINCH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: ONEINCH_KEY
+                  optional: true
           volumeMounts:
             - name: sync-config
               mountPath: /app/pasu-sync.toml
