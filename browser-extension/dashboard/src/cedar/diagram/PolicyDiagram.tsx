@@ -19,6 +19,7 @@
 import { useMemo } from "react";
 
 import type { ActionScope, Expr, PolicyIR } from "../blocks/ir";
+import { isAllOf, setLiteralOperand } from "../diagnosis/membership";
 import { eachChild, pathByNode } from "../diagnosis/path";
 
 import "./policy-diagram.css";
@@ -157,6 +158,28 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
       title: "IF",
       children: [branch(e.cond, "조건"), branch(e.then, "then"), branch(e.else, "else")],
     };
+  }
+  // `[..] contains x` / `x in [..]` / `set containsAny [..]` over a LITERAL set →
+  // fan out one leaf per member, so the user sees WHICH entry is at play (and the
+  // diagnosis can red-trace the single matched one). Members keep their canonical
+  // `…elements[i]` path (via pathOf), so highlight lines up. A scalar membership
+  // (no literal set) falls through to a single leaf.
+  if (e.kind === "binary") {
+    const mem = setLiteralOperand(e);
+    if (mem) {
+      return {
+        path,
+        kind: "or", // alternation styling — "any of these members"
+        title: isAllOf(e.op) ? "다음 전부" : "다음 중 하나",
+        detail: exprToText(mem.other),
+        children: mem.set.elements.map((m) => ({
+          path: pathOf.get(m) ?? "?",
+          kind: "leaf",
+          title: exprToText(m),
+          children: [],
+        })),
+      };
+    }
   }
   return { path, kind: "leaf", title: exprToText(e), children: [] };
 }

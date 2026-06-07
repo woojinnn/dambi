@@ -1,5 +1,6 @@
 import type { PolicyIR, Expr } from "../blocks/ir";
 import { blocksToEst } from "../blocks/blocksToEst";
+import { memberTestExpr, setLiteralOperand } from "./membership";
 import { eachChild } from "./path";
 
 /** Boolean-valued extension functions (from spike S3). */
@@ -98,6 +99,20 @@ export function buildProbes(policy: PolicyIR): ProbeSet {
     if (e.kind === "hole" || e.kind === "raw") { diagnosable = false; return; }
     if ((inBoolPos || isBooleanNode(e)) && !hasUninterpretable(e)) {
       probes.push({ id: path, est: blocksToEst(probePolicy(path, e)) });
+    }
+    // Membership over a literal set: also probe each member individually
+    // (`other == member` / `other contains member`) so blame can name the single
+    // matched entry. Each member probe is keyed by the member's canonical
+    // `…elements[i]` path — byte-identical to `enumeratePaths`, so the diagram's
+    // per-member leaf and the blame culprit line up.
+    const mem = setLiteralOperand(e);
+    if (mem && !hasUninterpretable(e)) {
+      mem.set.elements.forEach((member, i) => {
+        if (hasUninterpretable(member)) return;
+        const mpath = `${path}.${mem.step}.elements[${i}]`;
+        const test = memberTestExpr((e as { op: string }).op, mem.other, member);
+        probes.push({ id: mpath, est: blocksToEst(probePolicy(mpath, test)) });
+      });
     }
     for (const c of eachChild(e))
       visit(c.node, `${path}.${c.step}`, childBoolPos(e, c.step, inBoolPos));

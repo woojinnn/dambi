@@ -1,4 +1,5 @@
 import type { PolicyIR, Expr } from "../blocks/ir";
+import { setLiteralOperand } from "./membership";
 import { eachChild, nodeAtPath, pathByNode } from "./path";
 
 export type TruthMap = Record<string, boolean>;
@@ -44,7 +45,21 @@ export function blame(policy: PolicyIR, truth: TruthMap): string[] {
           } else { walk(node.left, false); walk(node.right, false); }
           return;
         }
-        out.push(path); // comparison leaf
+        // Membership over a literal set: blame the specific member(s) whose
+        // per-member probe matches `target`, not the whole `contains`/`in` node —
+        // the diagram itemises members, so the red trace lands on the exact entry.
+        // (`target` true → the matched member(s); false → the non-matching ones.)
+        // Falls back to the node path if member probes weren't recorded.
+        const mem = setLiteralOperand(node);
+        if (mem) {
+          let seen = false;
+          for (const member of mem.set.elements) {
+            const mp = P(member);
+            if (mp in truth) { seen = true; if (truth[mp] === target) out.push(mp); }
+          }
+          if (seen) return;
+        }
+        out.push(path); // comparison / scalar-membership leaf
         return;
       }
       case "unary": {
