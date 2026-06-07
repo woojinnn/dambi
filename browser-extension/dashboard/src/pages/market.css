@@ -1580,3 +1580,39 @@
 .lv-sev-sym { margin-left: auto; display: inline-flex; line-height: 0; }
 .lv-sev-sym.sev-deny { color: #dc2626; }
 .lv-sev-sym.sev-warn { color: #d97706; }
+
+/* Detail header install count (download glyph + number) */
+.md-installs { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Package summary: "what this blocks" threat list */
+.md-blocklist {
+  list-style: none;
+  margin: 14px 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.md-block {
+  display: flex;
+  gap: 9px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--slate-700);
+}
+.md-block-x {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fde8e8;
+  color: #b91c1c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 1px;
+}
+.md-block strong { color: var(--slate-800); font-weight: 600; }
+.md-block-d { color: var(--slate-600); }

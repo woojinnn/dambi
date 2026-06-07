@@ -21,6 +21,7 @@ import {
 } from "./market-domain";
 import { CodeTabs, leadingComment } from "./market-code";
 import { policyCopy } from "./market-copy";
+import { packageCopy } from "./market-package-copy";
 import { installListingToEditor } from "./market-install";
 import { severityFromCedar } from "./editor/policy-meta";
 import { useMarketLocale, type MarketLocale } from "./market-locale";
@@ -173,7 +174,22 @@ function DetailBody({
             <span>{isSet ? (ko ? "패키지" : "Package") : ko ? "정책" : "Policy"}</span>
             {!isSet && cat && <span>{categoryNameOf(cat, locale)}</span>}
             {detail.current_version && <span>v{detail.current_version}</span>}
-            <span>{ko ? `설치 ${detail.install_count}` : `${detail.install_count} installs`}</span>
+            <span className="md-installs">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+              </svg>
+              {detail.install_count}
+            </span>
             {detail.rating_count > 0 && detail.rating_avg != null && (
               <span>★ {detail.rating_avg.toFixed(1)} ({detail.rating_count})</span>
             )}
@@ -342,26 +358,28 @@ function SetSummary({
 }) {
   const ko = locale === "ko";
   const why = pickI18n(detail.description, locale);
-  const deny = members.filter((m) => severityFromCedar(m.cedar_text) === "deny").length;
-  const warn = members.filter((m) => severityFromCedar(m.cedar_text) === "warn").length;
+  const copy = packageCopy(detail.slug);
   return (
     <div className="md-summary">
       <span className="md-summary-eyebrow">{ko ? "이 패키지가 막는 것" : "What this package blocks"}</span>
-      {why && <p className="md-summary-why">{why}</p>}
+      {(copy?.intro || why) && <p className="md-summary-why">{copy?.intro || why}</p>}
+      {copy && copy.blocks.length > 0 && (
+        <ul className="md-blocklist">
+          {copy.blocks.map((b, i) => (
+            <li key={i} className="md-block">
+              <span className="md-block-x" aria-hidden="true">✕</span>
+              <span>
+                <strong>{b.t}</strong>
+                {b.d && <span className="md-block-d"> — {b.d}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="md-summary-stats">
         <span className="md-stat">
-          <strong>{members.length}</strong> {ko ? "정책" : "policies"}
+          <strong>{members.length}</strong> {ko ? "개 정책" : "policies"}
         </span>
-        {deny > 0 && (
-          <span className="md-stat deny">
-            <strong>{deny}</strong> {ko ? "차단" : "block"}
-          </span>
-        )}
-        {warn > 0 && (
-          <span className="md-stat warn">
-            <strong>{warn}</strong> {ko ? "경고" : "warn"}
-          </span>
-        )}
       </div>
     </div>
   );

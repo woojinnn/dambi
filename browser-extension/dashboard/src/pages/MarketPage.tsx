@@ -291,9 +291,7 @@ function PackageCard({ listing, locale }: { listing: ListingSummary; locale: Mar
         <h3 className="featured-card-name">{name}</h3>
         {desc && <p className="featured-card-desc">{desc}</p>}
         <div className="featured-card-foot">
-          <span className="featured-card-stat">
-            <strong>{listing.install_count}</strong> {locale === "ko" ? "설치" : "installs"}
-          </span>
+          <InstallCount n={listing.install_count} />
           <span className={`mc-install-badge featured-card-cta${listing.is_installed ? " is-installed" : ""}`}>
             {listing.is_installed
               ? locale === "ko" ? "설치됨" : "Installed"
@@ -405,10 +403,7 @@ function RankingSidebar({ locale }: { locale: MarketLocale }) {
                   </div>
                 </div>
                 <div className="rs-count">
-                  <span className="rs-count-num">{l.install_count}</span>
-                  <span className="rs-count-label">
-                    {locale === "ko" ? "설치" : "inst."}
-                  </span>
+                  <InstallCount n={l.install_count} />
                 </div>
               </Link>
             </li>
