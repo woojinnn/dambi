@@ -16,6 +16,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -65,12 +66,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Me | null>(null);
   const [isLoading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  // 동시 다발 refresh 의 out-of-order 경쟁 방어: 토큰 변경 한 번에도 storage
+  // 이벤트로 refresh 가 여러 번 겹친다. 매 호출에 세대 번호를 부여해 가장 최근
+  // 호출만 user/loading 을 확정하게 한다. 없으면 늦게 끝난 옛 호출이 최신 결과를
+  // 덮어써 user 가 null↔me 로 튀고(창 튕김), stale 토큰을 읽은 호출이 "다른
+  // 계정"으로 확정되기도 한다.
+  const refreshGen = useRef(0);
 
   const refresh = useCallback(async () => {
+    const gen = ++refreshGen.current;
+    const isLatest = () => gen === refreshGen.current;
     setLoading(true);
     setError(null);
     try {
+      // 확장 컨텍스트에서는 SW 의 chrome.storage 토큰을 localStorage 로 먼저
+      // 동기화한 뒤 /auth/me 를 호출한다. 안 그러면 새 토큰이 mirror 되기 전에
+      // fetchMe 가 옛 토큰을 읽어 "다른 계정"으로 확정되는 race 가 난다.
+      if (isExtensionContext()) {
+        try {
+          await syncTokensFromExtensionStorage();
+        } catch {
+          /* 동기화 실패 시 기존 localStorage 토큰으로 진행 */
+        }
+      }
       const me = await fetchMe();
+      if (!isLatest()) return; // 더 최신 refresh 가 떴으면 이 결과는 버린다
       setUser(me);
       // Sync the SW's active-user discriminator so every per-user storage
       // key (`dashboard:policies:<id>`, `policy-selection:enabled-ids:<id>`,
@@ -82,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void clearCurrentUser().catch(logCurrentUserSyncFailure);
       }
     } catch (e) {
+      if (!isLatest()) return;
       if (e instanceof ServerError && e.isUnauthorized) {
         // fetchMe already cleared the token.
         setUser(null);
@@ -90,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError(e instanceof Error ? e : new Error(String(e)));
       }
     } finally {
-      setLoading(false);
+      if (isLatest()) setLoading(false);
     }
   }, []);
 

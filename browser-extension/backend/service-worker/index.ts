@@ -29,10 +29,16 @@ import {
   clearTokens,
   fetchMe,
   listWallets,
+  listWalletSummaries,
+  addWallet,
+  updateWallet,
+  deleteWallet,
   setTokens,
   startGoogleLogin,
   type Me,
   type WalletId,
+  type WalletSummary,
+  type AddWalletResp,
 } from "./pasu-auth";
 import {
   declarativeRouteRequestV3,
@@ -327,6 +333,25 @@ interface PasuAuthSyncTokensRequest {
 interface PasuListWalletsRequest {
   type: "pasu-list-wallets";
 }
+/** Wallet 관리 — 팝업이 서버(GET/POST/PATCH/DELETE /wallets)를 단일 소스로
+ *  쓰도록 SW 가 대리한다. 대시보드도 같은 서버를 읽어 일관성 유지. */
+interface PasuListWalletSummariesRequest {
+  type: "pasu-list-wallet-summaries";
+}
+interface PasuAddWalletRequest {
+  type: "pasu-add-wallet";
+  address: string;
+  label?: string;
+}
+interface PasuUpdateWalletRequest {
+  type: "pasu-update-wallet";
+  address: string;
+  label?: string;
+}
+interface PasuDeleteWalletRequest {
+  type: "pasu-delete-wallet";
+  address: string;
+}
 /** apps/web Editor + Simulation pages route Cedar through the
  *  service worker rather than bundling wasm themselves. Three
  *  request variants map 1-1 to the new exports in
@@ -459,6 +484,10 @@ type PopupRequest =
   | PasuAuthSignOutRequest
   | PasuAuthSyncTokensRequest
   | PasuListWalletsRequest
+  | PasuListWalletSummariesRequest
+  | PasuAddWalletRequest
+  | PasuUpdateWalletRequest
+  | PasuDeleteWalletRequest
   | CedarValidateRequest
   | CedarTestRequest
   | CedarSimulateRequest
@@ -673,6 +702,11 @@ Browser.runtime.onMessage.addListener(
       // Await boot before the sign-in flow so its post-login `fetchMe()`
       // token read sees the migrated key (see `pasu-auth-status`).
       void bootReady
+        // 새 로그인 전에 이전 계정 토큰을 먼저 비운다. 그래야 OAuth 진행 중
+        // 같은 storage 를 공유하는 대시보드(options.html)가 옛 계정으로 잠깐
+        // 인증되거나, 계정 전환 시 stale 토큰이 남는 race 를 막는다. 새 토큰은
+        // startGoogleLogin 성공 시에만 기록된다.
+        .then(() => clearTokens())
         .then(() => startGoogleLogin())
         .then(async () => {
           const me = await fetchMe();
@@ -729,6 +763,82 @@ Browser.runtime.onMessage.addListener(
           sendResponse({
             ok: false,
             error: { kind: "pasu_list_wallets_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    // 지갑 요약(라벨+잔액) — 서버 GET /dashboard/summary. 팝업이 별칭(label)을
+    // 서버 단일 소스에서 읽는 경로.
+    if (req.type === "pasu-list-wallet-summaries") {
+      void bootReady
+        .then(() => listWalletSummaries())
+        .then((wallets: WalletSummary[]) =>
+          sendResponse({ ok: true, data: wallets }),
+        )
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: {
+              kind: "pasu_list_wallet_summaries_failed",
+              message: String(err),
+            },
+          }),
+        );
+      return true;
+    }
+
+    // 지갑 등록(POST /wallets). `chains` 를 명시해 "no chains configured" 400 을
+    // 우회한다 — 서버 pasu-sync.toml 에 RPC 가 설정된 체인만(eth/arbitrum/base).
+    // 미설정 체인을 포함하면 그 체인 native 조회 실패가 디스커버리 전체를
+    // 중단시켜 잔액이 0 으로 남는다.
+    if (req.type === "pasu-add-wallet") {
+      const r = req as PasuAddWalletRequest;
+      const addBody: { address: string; chains: string[]; label?: string } = {
+        address: r.address.toLowerCase(),
+        chains: ["eip155:1", "eip155:42161", "eip155:8453"],
+      };
+      if (r.label) addBody.label = r.label;
+      void bootReady
+        .then(() => addWallet(addBody))
+        .then((resp: AddWalletResp) => sendResponse({ ok: true, data: resp }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "pasu_add_wallet_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    // 별칭 변경(PATCH /wallets/:addr) — 서버 라벨을 팝업과 동기화. 빈 문자열은
+    // 라벨 제거(null)로 보낸다.
+    if (req.type === "pasu-update-wallet") {
+      const r = req as PasuUpdateWalletRequest;
+      const patch: { label?: string | null } = {};
+      if (r.label !== undefined) patch.label = r.label === "" ? null : r.label;
+      void bootReady
+        .then(() => updateWallet(r.address.toLowerCase(), patch))
+        .then(() => sendResponse({ ok: true, data: null }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "pasu_update_wallet_failed", message: String(err) },
+          }),
+        );
+      return true;
+    }
+
+    // 지갑 삭제(DELETE /wallets/:addr) — 서버에서 제거해 대시보드·팝업 일관성.
+    if (req.type === "pasu-delete-wallet") {
+      const r = req as PasuDeleteWalletRequest;
+      void bootReady
+        .then(() => deleteWallet(r.address.toLowerCase()))
+        .then(() => sendResponse({ ok: true, data: null }))
+        .catch((err: unknown) =>
+          sendResponse({
+            ok: false,
+            error: { kind: "pasu_delete_wallet_failed", message: String(err) },
           }),
         );
       return true;

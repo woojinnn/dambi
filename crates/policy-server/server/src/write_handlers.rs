@@ -116,15 +116,31 @@ pub async fn add_wallet(
         }
         n
     } else {
+        // Re-adding a previously deleted (soft-archived) wallet. `load` reads
+        // `wallet_states`, which has no archived filter, so an archived row
+        // looks "not new" here. Persist the existing state to flip the
+        // `wallets` row back to `archived = FALSE` *before* the label write —
+        // otherwise `update_wallet_metadata` (WHERE archived = FALSE) silently
+        // no-ops and the stale label from before deletion survives.
+        if let Err(e) = store.save(&existing).await {
+            return internal(&format!("save: {e}"));
+        }
         0
     };
 
     if req.label.is_some() {
-        if let Err(e) = store
+        match store
             .update_wallet_metadata(&format!("{:#x}", id.address), Some(req.label.clone()), None)
             .await
         {
-            return internal(&format!("update wallet metadata: {e}"));
+            Ok(true) => {}
+            // The row was just saved/un-archived above, so a `false` here means
+            // the wallet genuinely isn't present — surface it instead of
+            // silently keeping a stale label.
+            Ok(false) => {
+                return internal("update wallet metadata: wallet not found after save");
+            }
+            Err(e) => return internal(&format!("update wallet metadata: {e}")),
         }
     }
 
