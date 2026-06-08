@@ -147,6 +147,24 @@ describe("formToIr / irToForm", () => {
     expect(est.effect).toBe("forbid");
   });
 
+  it("skips an empty group box (no crash on fold of empty)", () => {
+    const m: FormModel = {
+      trigger: { kind: "any" },
+      when: [
+        cond("context.a", "==", { kind: "long", value: 1 }),
+        { kind: "group", joiner: "and", conds: [] },
+      ],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    };
+    expect(() => formToIr(m)).not.toThrow();
+    expect(formToIr(m).conditions).toHaveLength(1); // empty box dropped
+    // a clause that is ONLY an empty box → no when clause
+    expect(formToIr({ ...m, when: [{ kind: "group", joiner: "and", conds: [] }] }).conditions).toEqual([]);
+  });
+
   it("an empty model is a forbid with no when clause", () => {
     const empty: FormModel = {
       trigger: { kind: "any" },

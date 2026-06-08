@@ -450,7 +450,11 @@ function GroupBox({
           onField={(p) => updateCond(i, pickFieldCond(c, p, ctx.fieldByPath))}
           onOp={(op) => updateCond(i, pickOpCond(c, op, ctx.fieldByPath))}
           onValue={(value) => updateCond(i, { ...c, value })}
-          onRemove={() => onConds(conds.filter((_, j) => j !== i))}
+          onRemove={() => {
+            const next = conds.filter((_, j) => j !== i);
+            if (next.length === 0) onRemove(); // emptying the box removes it
+            else onConds(next);
+          }}
         />
       ))}
       <button type="button" className="pf-or-btn" onClick={() => onConds([...conds, newCond(ctx.fields)])}>

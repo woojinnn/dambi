@@ -244,9 +244,12 @@ function allLeaves(nodes: FormNode[]): FormCondition[] {
  * empty.
  */
 function clauseBody(nodes: FormNode[]): Expr | null {
-  if (nodes.length === 0) return null;
-  const body = fold("||", splitRuns(nodes).map((run) => fold("&&", run.map(nodeExpr))));
-  const guards = customGuards(allLeaves(nodes));
+  // Drop empty group boxes (a box the user emptied) so `fold` never sees an
+  // empty list.
+  const present = nodes.filter((n) => !isGroupNode(n) || n.conds.length > 0);
+  if (present.length === 0) return null;
+  const body = fold("||", splitRuns(present).map((run) => fold("&&", run.map(nodeExpr))));
+  const guards = customGuards(allLeaves(present));
   return guards.length > 0 ? fold("&&", [...guards, body]) : body;
 }
 
