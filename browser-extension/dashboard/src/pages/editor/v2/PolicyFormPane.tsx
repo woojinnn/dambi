@@ -31,6 +31,8 @@ import {
 } from "../../../cedar/form";
 import { generateManifest } from "../../../editor-v9/manifest-gen";
 
+import { FieldCombobox } from "./FieldCombobox";
+
 import "./policy-form.css";
 
 export interface PolicyFormPaneProps {
@@ -318,17 +320,7 @@ function LeafRow({
   return (
     <div className="pf-leaf">
       {showOr && <span className="pf-or-tag">또는</span>}
-      <select className="pf-leaf-field" value={leaf.fieldPath} onChange={(e) => onField(e.target.value)}>
-        <option value="" disabled>
-          필드 선택…
-        </option>
-        {fields.map((f) => (
-          <option key={f.path} value={f.path}>
-            {f.label}
-            {f.source === "custom" ? " ·보강" : ""}
-          </option>
-        ))}
-      </select>
+      <FieldCombobox value={leaf.fieldPath} fields={fields} onChange={onField} />
       <select className="pf-leaf-op" value={leaf.op} onChange={(e) => onOp(e.target.value as FormOp)}>
         {ops.map((op) => (
           <option key={op} value={op}>

@@ -10,7 +10,7 @@
  * ({@link operatorsFor}, {@link valueKindForField}).
  */
 
-import { allGloss, type FieldKind } from "../../editor-v9/gloss/paths";
+import { allGloss, type FieldKind, type Role } from "../../editor-v9/gloss/paths";
 import { ENRICHMENT_FIELDS } from "../../editor-v9/manifest-gen/registry";
 
 import type { FormOp, FormTrigger, FormValue } from "./model";
@@ -23,9 +23,13 @@ export interface FieldOption {
   /** Korean display label shown in the dropdown. */
   label: string;
   fieldKind: FieldKind;
+  /** Category — drives grouping + the colour dot in the picker. */
+  role: Role;
   source: "base" | "custom";
   /** Optional unit suffix (e.g. "USD", "bp", "초"). */
   unit?: string;
+  /** One-line plain-language hint shown under the label. */
+  desc?: string;
 }
 
 /** The `action.tag` an enrichment field's `appliesTo` is keyed by; null = "any"
@@ -44,12 +48,20 @@ export function fieldsForTrigger(trigger: FormTrigger): FieldOption[] {
     const customName = g.path.startsWith(CUSTOM_PREFIX)
       ? g.path.slice(CUSTOM_PREFIX.length)
       : null;
+    const common = {
+      path: g.path,
+      label: g.ko,
+      fieldKind: g.fieldKind,
+      role: g.role,
+      unit: g.unit?.ko,
+      desc: g.desc?.ko,
+    };
     if (customName) {
       const def = ENRICHMENT_FIELDS[customName];
       if (tag !== null && def && !def.appliesTo.includes(tag)) continue;
-      out.push({ path: g.path, label: g.ko, fieldKind: g.fieldKind, source: "custom", unit: g.unit?.ko });
+      out.push({ ...common, source: "custom" });
     } else {
-      out.push({ path: g.path, label: g.ko, fieldKind: g.fieldKind, source: "base", unit: g.unit?.ko });
+      out.push({ ...common, source: "base" });
     }
   }
   return out;
