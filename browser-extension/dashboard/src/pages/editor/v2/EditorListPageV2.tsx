@@ -57,8 +57,11 @@ import {
 
 import "./editor-v2.css";
 
-type Density = "cozy" | "compact";
 type StatusFilter = "all" | "on" | "draft" | "off";
+
+/** dataTransfer MIME for dragging policy rows onto a package. Carries a JSON
+ *  array of policy ids (one, or the whole selection when a selected row drags). */
+const DRAG_MIME = "application/x-policy-ids";
 type CatFilter = "all" | CategoryKey;
 
 interface ToastMsg {
@@ -156,6 +159,38 @@ export function EditorListPageV2() {
   const policies = listQ.data ?? [];
   const sets = setsQ.data ?? [];
   const setMembership = useMemo(() => buildSetMembership(sets), [sets]);
+  const policyById = useMemo(
+    () => new Map(policies.map((p) => [p.id, p])),
+    [policies],
+  );
+  // How many packages each policy belongs to — drives the "N개 패키지" badge
+  // (many-to-many: a policy can live in several packages).
+  const pkgCountByPolicy = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const ids of setMembership.values()) {
+      for (const id of ids) m.set(id, (m.get(id) ?? 0) + 1);
+    }
+    return m;
+  }, [setMembership]);
+  // Packages whose every (non-draft) member is currently ON. Used by the
+  // "ON wins" rule: turning a package OFF keeps a shared member enabled when
+  // another fully-on package still needs it.
+  const onSetIds = useMemo(() => {
+    const out = new Set<string>();
+    for (const s of sets) {
+      const live = s.memberIds.filter((id) => {
+        const p = policyById.get(id);
+        return p && !isDraft(p);
+      });
+      if (
+        live.length > 0 &&
+        live.every((id) => rowOn(policyById.get(id)!, enabledSet.has(id)))
+      ) {
+        out.add(s.id);
+      }
+    }
+    return out;
+  }, [sets, policyById, enabledSet]);
 
   /** Map listing_id → current_version for stale-install detection.
    *  We pull one batch of listings (kind-agnostic, up to 200) and build
@@ -182,7 +217,6 @@ export function EditorListPageV2() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [catFilter, setCatFilter] = useState<CatFilter>("all");
-  const [density, setDensity] = useState<Density>("cozy");
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [chooserOpen, setChooserOpen] = useState(false);
@@ -265,6 +299,100 @@ export function EditorListPageV2() {
     }
   };
 
+  // Build a full `putPolicySet` payload from an existing set, applying a patch.
+  // `putPolicySet` is a full overwrite, so we must echo every preserved field.
+  const setToOpts = (s: PolicySet, patch: Partial<PolicySet>) => ({
+    id: s.id,
+    displayName: patch.displayName ?? s.displayName,
+    memberIds: patch.memberIds ?? s.memberIds,
+    ...(s.description != null ? { description: s.description } : {}),
+    ...(s.source ? { source: s.source } : {}),
+    ...(s.readOnly !== undefined ? { readOnly: s.readOnly } : {}),
+    ...(s.cat ? { cat: s.cat } : {}),
+    ...(s.sourceListingId ? { sourceListingId: s.sourceListingId } : {}),
+    ...(s.sourceVersion ? { sourceVersion: s.sourceVersion } : {}),
+  });
+
+  const createEmptyPackage = async () => {
+    const stamp = Date.now().toString(36);
+    const setId = dashboardSetId(`pkg-${stamp}`);
+    try {
+      await putPolicySet({
+        id: setId,
+        displayName: "새 패키지",
+        memberIds: [],
+        source: "mine",
+      });
+      await qc.invalidateQueries({ queryKey: ["policy-sets"] });
+      setScope({ type: "pkg", id: setId });
+      pushToast("빈 패키지를 만들었어요 — 정책을 끌어다 넣어보세요");
+    } catch (err) {
+      console.error("[v2 list] createEmptyPackage failed:", err);
+      pushToast("패키지를 만들지 못했어요");
+    }
+  };
+
+  const renamePackage = async (s: PolicySet, name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === s.displayName) return;
+    try {
+      await putPolicySet(setToOpts(s, { displayName: trimmed }));
+      await qc.invalidateQueries({ queryKey: ["policy-sets"] });
+    } catch (err) {
+      console.error("[v2 list] renamePackage failed:", err);
+      pushToast("이름을 바꾸지 못했어요");
+    }
+  };
+
+  // Drop policies onto a package → union into its members (dedup; a policy may
+  // belong to many packages).
+  const addToPackage = async (setId: string, ids: string[]) => {
+    const s = sets.find((x) => x.id === setId);
+    if (!s || s.readOnly) return;
+    const merged = new Set([...s.memberIds, ...ids]);
+    const added = merged.size - s.memberIds.length;
+    if (added === 0) {
+      pushToast("이미 패키지에 들어있어요");
+      return;
+    }
+    try {
+      await putPolicySet(setToOpts(s, { memberIds: [...merged] }));
+      await qc.invalidateQueries({ queryKey: ["policy-sets"] });
+      pushToast(`${s.displayName}에 ${added}개 추가했어요`);
+    } catch (err) {
+      console.error("[v2 list] addToPackage failed:", err);
+      pushToast("패키지에 넣지 못했어요");
+    }
+  };
+
+  // Package on/off, with "ON wins": turning a package off leaves a member
+  // enabled when another fully-on package still contains it.
+  const togglePackage = (s: PolicySet, on: boolean) => {
+    const live = s.memberIds.filter((id) => {
+      const p = policyById.get(id);
+      return p && !isDraft(p);
+    });
+    if (live.length === 0) return;
+    if (on) {
+      setManyEnabled(live, true);
+      pushToast(`${s.displayName} 켰어요`);
+      return;
+    }
+    const keep = new Set<string>();
+    for (const other of sets) {
+      if (other.id === s.id || !onSetIds.has(other.id)) continue;
+      for (const id of other.memberIds) keep.add(id);
+    }
+    const toDisable = live.filter((id) => !keep.has(id));
+    setManyEnabled(toDisable, false);
+    const kept = live.length - toDisable.length;
+    pushToast(
+      kept > 0
+        ? `${s.displayName} 껐어요 (공유 ${kept}개는 유지)`
+        : `${s.displayName} 껐어요`,
+    );
+  };
+
   const activePkg =
     scope.type === "pkg" ? sets.find((s) => s.id === scope.id) ?? null : null;
 
@@ -308,6 +436,10 @@ export function EditorListPageV2() {
             enabledSet={enabledSet}
             totalRules={totalRules}
             looseCount={looseCount}
+            onCreate={() => void createEmptyPackage()}
+            onTogglePackage={togglePackage}
+            onDropPolicies={(setId, ids) => void addToPackage(setId, ids)}
+            onRename={(s, name) => void renamePackage(s, name)}
           />
 
           <section className="ev2-right">
@@ -340,22 +472,6 @@ export function EditorListPageV2() {
                   </button>
                 ))}
               </div>
-              <div className="ev2-density" title="행 밀도">
-                <button
-                  type="button"
-                  className={density === "cozy" ? "on" : ""}
-                  onClick={() => setDensity("cozy")}
-                >
-                  여유
-                </button>
-                <button
-                  type="button"
-                  className={density === "compact" ? "on" : ""}
-                  onClick={() => setDensity("compact")}
-                >
-                  촘촘
-                </button>
-              </div>
             </div>
 
             {presentCats.length > 0 && (
@@ -386,6 +502,9 @@ export function EditorListPageV2() {
               activePkg={activePkg}
               rowCount={filteredRows.length}
               onClearScope={() => setScope({ type: "all" })}
+              onRename={(name) => {
+                if (activePkg) void renamePackage(activePkg, name);
+              }}
             />
 
             <div className="ev2-scroll">
@@ -403,7 +522,7 @@ export function EditorListPageV2() {
               )}
 
               {policies.length > 0 && (
-                <div className={`ev2-table ${density}`}>
+                <div className="ev2-table compact">
                   <div className="ev2-thead">
                     <div className="ev2-c-sel">
                       <button
@@ -443,6 +562,12 @@ export function EditorListPageV2() {
                         selected={selection.has(p.id)}
                         updateAvailable={updateAvailable}
                         upstreamVersion={upstream}
+                        packageCount={pkgCountByPolicy.get(p.id) ?? 0}
+                        dragIds={
+                          selection.has(p.id) && selection.size > 1
+                            ? [...selection]
+                            : [p.id]
+                        }
                         onSelect={() => onSelect(p.id)}
                         onToggle={(on) => togglePolicy(p.id, on)}
                         onOpen={() =>
@@ -571,6 +696,10 @@ function PackagePanel(props: {
   enabledSet: Set<string>;
   totalRules: number;
   looseCount: number;
+  onCreate: () => void;
+  onTogglePackage: (s: PolicySet, on: boolean) => void;
+  onDropPolicies: (setId: string, ids: string[]) => void;
+  onRename: (s: PolicySet, name: string) => void;
 }) {
   const {
     scope,
@@ -581,6 +710,10 @@ function PackagePanel(props: {
     enabledSet,
     totalRules,
     looseCount,
+    onCreate,
+    onTogglePackage,
+    onDropPolicies,
+    onRename,
   } = props;
 
   const policyById = useMemo(
@@ -612,15 +745,35 @@ function PackagePanel(props: {
         <div className="ev2-left-sec">
           <span className="t">내 패키지</span>
           <span className="ct">{sets.length}</span>
+          <span className="ev2-spc" />
+          <button
+            type="button"
+            className="ev2-pkg-add"
+            onClick={onCreate}
+            title="빈 패키지 만들기"
+          >
+            <PlusIcon />새 패키지
+          </button>
         </div>
 
         <div className="ev2-left-grp">
           {sets.map((s) => {
             const memberIds = setMembership.get(s.id) ?? new Set<string>();
-            const onCount = [...memberIds].filter((id) => {
+            const live = [...memberIds].filter((id) => {
               const m = policyById.get(id);
-              return m ? rowOn(m, enabledSet.has(id)) : false;
-            }).length;
+              return m && !isDraft(m);
+            });
+            const onCount = live.filter((id) =>
+              rowOn(policyById.get(id)!, enabledSet.has(id)),
+            ).length;
+            const pkgState =
+              live.length === 0
+                ? "empty"
+                : onCount === 0
+                  ? "off"
+                  : onCount === live.length
+                    ? "on"
+                    : "partial";
             const market = isMarketSource(s);
             const cstyle = catStyle(s.cat);
             return (
@@ -654,6 +807,20 @@ function PackagePanel(props: {
                   )
                 }
                 badge={s.readOnly ? <LockIcon /> : null}
+                pkgState={pkgState}
+                onTogglePkg={
+                  pkgState === "empty"
+                    ? undefined
+                    : (on) => onTogglePackage(s, on)
+                }
+                onRename={
+                  s.readOnly ? undefined : (name) => onRename(s, name)
+                }
+                onDropPolicies={
+                  s.readOnly
+                    ? undefined
+                    : (ids) => onDropPolicies(s.id, ids)
+                }
               />
             );
           })}
@@ -678,25 +845,131 @@ function PackBtn(props: {
   source?: React.ReactNode;
   right?: React.ReactNode;
   badge?: React.ReactNode;
+  pkgState?: "on" | "off" | "partial" | "empty";
+  onTogglePkg?: (on: boolean) => void;
+  onRename?: (name: string) => void;
+  onDropPolicies?: (ids: string[]) => void;
 }) {
-  const { active, onClick, icon, name, sub, source, right, badge } = props;
+  const {
+    active,
+    onClick,
+    icon,
+    name,
+    sub,
+    source,
+    right,
+    badge,
+    pkgState,
+    onTogglePkg,
+    onRename,
+    onDropPolicies,
+  } = props;
+  const [dragOver, setDragOver] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState("");
+
+  const dropProps = onDropPolicies
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setDragOver(true);
+        },
+        onDragLeave: () => setDragOver(false),
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault();
+          setDragOver(false);
+          const raw = e.dataTransfer.getData(DRAG_MIME);
+          if (!raw) return;
+          try {
+            const ids = JSON.parse(raw);
+            if (Array.isArray(ids) && ids.length > 0) onDropPolicies(ids);
+          } catch {
+            /* ignore malformed payload */
+          }
+        },
+      }
+    : {};
+
+  const commitRename = () => {
+    if (onRename) onRename(draftName);
+    setEditing(false);
+  };
+
   return (
-    <button
-      type="button"
-      className={`ev2-pk${active ? " active" : ""}`}
-      onClick={onClick}
+    <div
+      className={`ev2-pk${active ? " active" : ""}${dragOver ? " dragover" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        if (!editing) onClick();
+      }}
+      onKeyDown={(e) => {
+        if (editing) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      {...dropProps}
     >
       <span className="ev2-pk-ic">{icon}</span>
       <span className="ev2-pk-body">
         <span className="ev2-pk-nm">
-          <span>{name}</span>
+          {editing && onRename ? (
+            <input
+              className="ev2-pk-rename"
+              autoFocus
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commitRename();
+                else if (e.key === "Escape") setEditing(false);
+              }}
+            />
+          ) : (
+            <span
+              onDoubleClick={
+                onRename
+                  ? (e) => {
+                      e.stopPropagation();
+                      setDraftName(typeof name === "string" ? name : "");
+                      setEditing(true);
+                    }
+                  : undefined
+              }
+              title={onRename ? "더블클릭으로 이름 변경" : undefined}
+            >
+              {name}
+            </span>
+          )}
           {badge}
         </span>
         {sub && <span className="ev2-pk-sub">{sub}</span>}
         {source && <span className="ev2-pk-src">{source}</span>}
       </span>
-      {right && <span className="ev2-pk-right">{right}</span>}
-    </button>
+      {onTogglePkg && pkgState && pkgState !== "empty" ? (
+        <span className="ev2-pk-right">
+          <button
+            type="button"
+            className={`ev2-pk-tg ${pkgState}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePkg(pkgState !== "on");
+            }}
+            title={pkgState === "on" ? "패키지 끄기" : "패키지 켜기"}
+          >
+            <span className="sw" />
+          </button>
+        </span>
+      ) : right ? (
+        <span className="ev2-pk-right">{right}</span>
+      ) : null}
+    </div>
   );
 }
 
@@ -706,18 +979,53 @@ function ScopeHeader(props: {
   activePkg: PolicySet | null;
   rowCount: number;
   onClearScope: () => void;
+  onRename: (name: string) => void;
 }) {
-  const { scope, activePkg, rowCount, onClearScope } = props;
+  const { scope, activePkg, rowCount, onClearScope, onRename } = props;
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState("");
   const title =
     scope.type === "all"
       ? "전체"
       : scope.type === "loose"
         ? "단일 정책"
         : activePkg?.displayName ?? "";
+  const canRename = !!activePkg && !activePkg.readOnly;
+  const commit = () => {
+    onRename(draftName);
+    setEditing(false);
+  };
   return (
     <div className="ev2-scopehd">
       <div className="ev2-scope-title">
-        <span className="t">{title}</span>
+        {editing && canRename ? (
+          <input
+            className="ev2-scope-rename"
+            autoFocus
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              else if (e.key === "Escape") setEditing(false);
+            }}
+          />
+        ) : (
+          <span
+            className="t"
+            onDoubleClick={
+              canRename
+                ? () => {
+                    setDraftName(title);
+                    setEditing(true);
+                  }
+                : undefined
+            }
+            title={canRename ? "더블클릭으로 이름 변경" : undefined}
+          >
+            {title}
+          </span>
+        )}
         <span className="ct">{rowCount}개</span>
         {activePkg && isMarketSource(activePkg) && (
           <span className="ev2-scope-prov">
@@ -748,6 +1056,8 @@ function PolicyRow(props: {
   selected: boolean;
   updateAvailable?: boolean;
   upstreamVersion?: string;
+  packageCount: number;
+  dragIds: string[];
   onSelect: () => void;
   onToggle: (on: boolean) => void;
   onOpen: () => void;
@@ -758,6 +1068,8 @@ function PolicyRow(props: {
     selected,
     updateAvailable,
     upstreamVersion,
+    packageCount,
+    dragIds,
     onSelect,
     onToggle,
     onOpen,
@@ -784,6 +1096,11 @@ function PolicyRow(props: {
   return (
     <div
       className={cls}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(DRAG_MIME, JSON.stringify(dragIds));
+        e.dataTransfer.effectAllowed = "copy";
+      }}
       onClick={(e) => {
         const target = e.target as HTMLElement;
         if (target.closest("button,.ev2-selbox,.ev2-tg,.ev2-grip")) return;
@@ -803,7 +1120,14 @@ function PolicyRow(props: {
         >
           {selected && <CheckIcon />}
         </button>
-        <span className="ev2-grip" title="드래그(곧 추가)">
+        <span
+          className="ev2-grip"
+          title={
+            dragIds.length > 1
+              ? `드래그해서 패키지에 넣기 (${dragIds.length}개)`
+              : "드래그해서 패키지에 넣기"
+          }
+        >
           <GripIcon />
         </span>
       </div>
@@ -822,6 +1146,15 @@ function PolicyRow(props: {
               >
                 <PencilIcon />
                 수정중
+              </span>
+            )}
+            {packageCount > 1 && (
+              <span
+                className="ev2-badge-pkg"
+                title={`${packageCount}개 패키지에 포함됨`}
+              >
+                <FolderIcon />
+                {packageCount}개 패키지
               </span>
             )}
           </div>
