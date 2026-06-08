@@ -652,9 +652,14 @@ pub(crate) fn parse_account_snapshot(
     let perp_usdc = value_at(clearinghouse, &["withdrawable"])
         .map(state_decimal_from_value)
         .transpose()?;
+    let perp_account_value_usd = value_at(clearinghouse, &["marginSummary", "accountValue"])
+        .or_else(|| value_at(clearinghouse, &["crossMarginSummary", "accountValue"]))
+        .map(state_decimal_from_value)
+        .transpose()?;
 
     Ok(HlAccount {
         perp_usdc,
+        perp_account_value_usd,
         pending_outflow: Decimal::new("0"),
         positions,
         open_orders,
@@ -670,6 +675,11 @@ pub(crate) fn parse_account_snapshot(
 fn merge_hl_account(target: &mut HlAccount, extra: HlAccount) {
     target.perp_usdc = add_optional_decimals(target.perp_usdc.take(), extra.perp_usdc)
         .or_else(|| Some(Decimal::new("0")));
+    target.perp_account_value_usd = add_optional_decimals(
+        target.perp_account_value_usd.take(),
+        extra.perp_account_value_usd,
+    )
+    .or_else(|| Some(Decimal::new("0")));
     target.positions.extend(extra.positions);
     target.open_orders.extend(extra.open_orders);
     target.spot_balances.extend(extra.spot_balances);
@@ -1778,6 +1788,7 @@ mod tests {
         let acct = parse_account_snapshot(&clearinghouse, &open_orders, &agents, &meta).unwrap();
 
         assert_eq!(acct.perp_usdc, Some(Decimal::new("600.5")));
+        assert_eq!(acct.perp_account_value_usd, Some(Decimal::new("1000.5")));
         assert_eq!(acct.pending_outflow, Decimal::new("0"));
         assert_eq!(acct.positions.len(), 1);
         assert_eq!(acct.positions[0].asset_index, 0);

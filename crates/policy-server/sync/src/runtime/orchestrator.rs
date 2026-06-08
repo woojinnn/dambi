@@ -2253,6 +2253,10 @@ priority = 1
             })
             .unwrap();
         assert_eq!(account.perp_usdc, Some(Decimal::new("800")));
+        assert_eq!(
+            account.perp_account_value_usd,
+            Some(Decimal::new("2077.754757"))
+        );
         assert_eq!(account.pending_outflow, Decimal::new("0"));
         assert_eq!(account.positions.len(), 2);
         assert_eq!(account.positions[0].symbol.as_deref(), Some("BTC"));
