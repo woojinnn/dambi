@@ -174,6 +174,9 @@ export interface PolicySet {
   displayName: string;
   description?: string;
   memberIds: readonly string[];
+  /** Members excluded from package activation (present in `memberIds` but not
+   *  enabled/disabled when the package is toggled). Absent = all members armed. */
+  mutedMemberIds?: readonly string[];
   source?: PolicySource;
   readOnly?: boolean;
   cat?: string;
@@ -205,6 +208,7 @@ export interface PutPolicySetOpts {
   displayName: string;
   description?: string;
   memberIds: readonly string[];
+  mutedMemberIds?: readonly string[];
   source?: PolicySource;
   readOnly?: boolean;
   cat?: string;
@@ -219,6 +223,7 @@ export async function putPolicySet(opts: PutPolicySetOpts): Promise<void> {
       id: opts.id,
       displayName: opts.displayName,
       memberIds: opts.memberIds,
+      ...(opts.mutedMemberIds ? { mutedMemberIds: opts.mutedMemberIds } : {}),
       ...(opts.description != null ? { description: opts.description } : {}),
       ...(opts.source ? { source: opts.source } : {}),
       ...(opts.readOnly !== undefined ? { readOnly: opts.readOnly } : {}),

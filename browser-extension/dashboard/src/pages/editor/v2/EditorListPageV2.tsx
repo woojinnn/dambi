@@ -172,16 +172,30 @@ export function EditorListPageV2() {
     }
     return m;
   }, [setMembership]);
-  // Packages whose every (non-draft) member is currently ON. Used by the
-  // "ON wins" rule: turning a package OFF keeps a shared member enabled when
+  // "Armed live" members of each package: in `memberIds`, not muted, a real
+  // non-draft policy. Package on/off acts ONLY on these — a muted member is
+  // along for the ride but untouched by activation.
+  const armedLiveBySet = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const s of sets) {
+      const muted = new Set(s.mutedMemberIds ?? []);
+      m.set(
+        s.id,
+        s.memberIds.filter((id) => {
+          const p = policyById.get(id);
+          return p && !isDraft(p) && !muted.has(id);
+        }),
+      );
+    }
+    return m;
+  }, [sets, policyById]);
+  // Packages whose every armed member is currently ON. Used by the "ON wins"
+  // rule: turning a package OFF keeps a shared armed member enabled when
   // another fully-on package still needs it.
   const onSetIds = useMemo(() => {
     const out = new Set<string>();
     for (const s of sets) {
-      const live = s.memberIds.filter((id) => {
-        const p = policyById.get(id);
-        return p && !isDraft(p);
-      });
+      const live = armedLiveBySet.get(s.id) ?? [];
       if (
         live.length > 0 &&
         live.every((id) => rowOn(policyById.get(id)!, enabledSet.has(id)))
@@ -190,7 +204,7 @@ export function EditorListPageV2() {
       }
     }
     return out;
-  }, [sets, policyById, enabledSet]);
+  }, [sets, armedLiveBySet, policyById, enabledSet]);
 
   /** Map listing_id → current_version for stale-install detection.
    *  We pull one batch of listings (kind-agnostic, up to 200) and build
@@ -313,17 +327,21 @@ export function EditorListPageV2() {
 
   // Build a full `putPolicySet` payload from an existing set, applying a patch.
   // `putPolicySet` is a full overwrite, so we must echo every preserved field.
-  const setToOpts = (s: PolicySet, patch: Partial<PolicySet>) => ({
-    id: s.id,
-    displayName: patch.displayName ?? s.displayName,
-    memberIds: patch.memberIds ?? s.memberIds,
-    ...(s.description != null ? { description: s.description } : {}),
-    ...(s.source ? { source: s.source } : {}),
-    ...(s.readOnly !== undefined ? { readOnly: s.readOnly } : {}),
-    ...(s.cat ? { cat: s.cat } : {}),
-    ...(s.sourceListingId ? { sourceListingId: s.sourceListingId } : {}),
-    ...(s.sourceVersion ? { sourceVersion: s.sourceVersion } : {}),
-  });
+  const setToOpts = (s: PolicySet, patch: Partial<PolicySet>) => {
+    const muted = patch.mutedMemberIds ?? s.mutedMemberIds;
+    return {
+      id: s.id,
+      displayName: patch.displayName ?? s.displayName,
+      memberIds: patch.memberIds ?? s.memberIds,
+      ...(muted ? { mutedMemberIds: muted } : {}),
+      ...(s.description != null ? { description: s.description } : {}),
+      ...(s.source ? { source: s.source } : {}),
+      ...(s.readOnly !== undefined ? { readOnly: s.readOnly } : {}),
+      ...(s.cat ? { cat: s.cat } : {}),
+      ...(s.sourceListingId ? { sourceListingId: s.sourceListingId } : {}),
+      ...(s.sourceVersion ? { sourceVersion: s.sourceVersion } : {}),
+    };
+  };
 
   const createEmptyPackage = async () => {
     const stamp = Date.now().toString(36);
@@ -384,8 +402,9 @@ export function EditorListPageV2() {
     if (!s || s.readOnly) return;
     const next = s.memberIds.filter((id) => id !== policyId);
     if (next.length === s.memberIds.length) return;
+    const muted = (s.mutedMemberIds ?? []).filter((id) => id !== policyId);
     try {
-      await putPolicySet(setToOpts(s, { memberIds: next }));
+      await putPolicySet(setToOpts(s, { memberIds: next, mutedMemberIds: muted }));
       await qc.invalidateQueries({ queryKey: ["policy-sets"] });
       pushToast(`${s.displayName}에서 뺐어요`);
     } catch (err) {
@@ -394,13 +413,11 @@ export function EditorListPageV2() {
     }
   };
 
-  // Package on/off, with "ON wins": turning a package off leaves a member
-  // enabled when another fully-on package still contains it.
+  // Package on/off — acts ONLY on ARMED members (muted ones are untouched),
+  // with "ON wins": turning a package off leaves an armed member enabled when
+  // another fully-on package still arms it.
   const togglePackage = (s: PolicySet, on: boolean) => {
-    const live = s.memberIds.filter((id) => {
-      const p = policyById.get(id);
-      return p && !isDraft(p);
-    });
+    const live = armedLiveBySet.get(s.id) ?? [];
     if (live.length === 0) return;
     if (on) {
       setManyEnabled(live, true);
@@ -410,7 +427,7 @@ export function EditorListPageV2() {
     const keep = new Set<string>();
     for (const other of sets) {
       if (other.id === s.id || !onSetIds.has(other.id)) continue;
-      for (const id of other.memberIds) keep.add(id);
+      for (const id of armedLiveBySet.get(other.id) ?? []) keep.add(id);
     }
     const toDisable = live.filter((id) => !keep.has(id));
     setManyEnabled(toDisable, false);
@@ -420,6 +437,23 @@ export function EditorListPageV2() {
         ? `${s.displayName} 껐어요 (공유 ${kept}개는 유지)`
         : `${s.displayName} 껐어요`,
     );
+  };
+
+  // Per-member "armed" flag inside a package (the dropdown toggle): decides
+  // whether activating the package turns this policy on. Independent of the
+  // policy's global enabled bit; muting does NOT change the policy's state.
+  const toggleArmed = async (s: PolicySet, policyId: string, armed: boolean) => {
+    if (s.readOnly) return;
+    const muted = new Set(s.mutedMemberIds ?? []);
+    if (armed) muted.delete(policyId);
+    else muted.add(policyId);
+    try {
+      await putPolicySet(setToOpts(s, { mutedMemberIds: [...muted] }));
+      await qc.invalidateQueries({ queryKey: ["policy-sets"] });
+    } catch (err) {
+      console.error("[v2 list] toggleArmed failed:", err);
+      pushToast("바꾸지 못했어요");
+    }
   };
 
   const activePkg =
@@ -472,6 +506,7 @@ export function EditorListPageV2() {
             expandedPkgs={expandedPkgs}
             onToggleExpand={toggleExpand}
             onRemoveFromPackage={(setId, pid) => void removeFromPackage(setId, pid)}
+            onToggleArmed={(s, pid, armed) => void toggleArmed(s, pid, armed)}
             onOpenPolicy={(id) => navigate(`/editor/${encodeURIComponent(id)}`)}
           />
 
@@ -736,6 +771,7 @@ function PackagePanel(props: {
   expandedPkgs: Set<string>;
   onToggleExpand: (id: string) => void;
   onRemoveFromPackage: (setId: string, policyId: string) => void;
+  onToggleArmed: (s: PolicySet, policyId: string, armed: boolean) => void;
   onOpenPolicy: (id: string) => void;
 }) {
   const {
@@ -754,6 +790,7 @@ function PackagePanel(props: {
     expandedPkgs,
     onToggleExpand,
     onRemoveFromPackage,
+    onToggleArmed,
     onOpenPolicy,
   } = props;
 
@@ -800,21 +837,24 @@ function PackagePanel(props: {
         <div className="ev2-left-grp">
           {sets.map((s) => {
             const memberIds = setMembership.get(s.id) ?? new Set<string>();
-            const live = [...memberIds].filter((id) => {
+            const muted = new Set(s.mutedMemberIds ?? []);
+            // Package state reflects only ARMED members (memberIds − muted).
+            const armedLive = [...memberIds].filter((id) => {
               const m = policyById.get(id);
-              return m && !isDraft(m);
+              return m && !isDraft(m) && !muted.has(id);
             });
-            const onCount = live.filter((id) =>
+            const onCount = armedLive.filter((id) =>
               rowOn(policyById.get(id)!, enabledSet.has(id)),
             ).length;
             const pkgState =
-              live.length === 0
+              armedLive.length === 0
                 ? "empty"
                 : onCount === 0
                   ? "off"
-                  : onCount === live.length
+                  : onCount === armedLive.length
                     ? "on"
                     : "partial";
+            const mutedCount = [...memberIds].filter((id) => muted.has(id)).length;
             const market = isMarketSource(s);
             const cstyle = catStyle(s.cat);
             const expanded = expandedPkgs.has(s.id);
@@ -835,7 +875,10 @@ function PackagePanel(props: {
                   name={s.displayName}
                   sub={
                     <>
-                      <b>{onCount}</b>/{memberIds.size} 켜짐
+                      <b>{onCount}</b>/{armedLive.length} 켜짐
+                      {mutedCount > 0 && (
+                        <span className="ev2-pk-muted"> · {mutedCount} 제외</span>
+                      )}
                     </>
                   }
                   source={
@@ -873,34 +916,52 @@ function PackagePanel(props: {
                         비어 있어요 — 오른쪽에서 정책을 끌어다 넣으세요
                       </div>
                     ) : (
-                      members.map((m) => (
-                        <div
-                          key={m.id}
-                          className="ev2-pkg-mrow"
-                          onClick={() => onOpenPolicy(m.id)}
-                          title="에디터 열기"
-                        >
-                          <span
-                            className={`ev2-pkg-mdot ${
-                              rowOn(m, enabledSet.has(m.id)) ? "on" : "off"
-                            }`}
-                          />
-                          <span className="ev2-pkg-mnm">{nameFromPolicy(m)}</span>
-                          {!s.readOnly && (
+                      members.map((m) => {
+                        const armed = !muted.has(m.id);
+                        return (
+                          <div
+                            key={m.id}
+                            className={`ev2-pkg-mrow${armed ? "" : " muted"}`}
+                          >
                             <button
                               type="button"
-                              className="ev2-pkg-mrm"
+                              className={`ev2-pkg-mtg${armed ? " on" : ""}`}
+                              disabled={s.readOnly}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onRemoveFromPackage(s.id, m.id);
+                                if (!s.readOnly) onToggleArmed(s, m.id, !armed);
                               }}
-                              title="패키지에서 빼기"
+                              title={
+                                armed
+                                  ? "패키지를 켤 때 이 정책 포함 (끄면 제외)"
+                                  : "제외됨 — 켜면 패키지 활성화 시 포함"
+                              }
                             >
-                              <XIcon />
+                              <span className="sw" />
                             </button>
-                          )}
-                        </div>
-                      ))
+                            <span
+                              className="ev2-pkg-mnm"
+                              onClick={() => onOpenPolicy(m.id)}
+                              title="에디터 열기"
+                            >
+                              {nameFromPolicy(m)}
+                            </span>
+                            {!s.readOnly && (
+                              <button
+                                type="button"
+                                className="ev2-pkg-mrm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRemoveFromPackage(s.id, m.id);
+                                }}
+                                title="패키지에서 빼기"
+                              >
+                                <XIcon />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 )}
