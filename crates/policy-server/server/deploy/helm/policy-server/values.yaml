@@ -115,9 +115,23 @@ syncConfig: |-
   base_url = "https://api.cow.fi"
   chains = ["eip155:1"]
 
-  # TODO(1inch prod): add [venues.one_inch_fusion] once ONEINCH_KEY is wired as a
-  # k8s secret. The fetcher code is fully there, but a keyless config would 401
-  # every tick — enable only after the Bearer key is available in the env.
+  # 1inch venues — all share the one Dev Portal Bearer key (ONEINCH_KEY, wired as
+  # an optional secretKeyRef on the worker). REQUIRES the ONEINCH_KEY secret value:
+  # a keyless ${ONEINCH_KEY} expands to "" and 401s every tick. NOTE: prod deploys
+  # the values-m3.yaml overlay, whose syncConfig OVERRIDES this one — enable there.
+  [venues.one_inch_fusion]
+  base_url = "https://api.1inch.dev/fusion"
+  api_key = "${ONEINCH_KEY}"
+  chains = ["eip155:1"]
+
+  [venues.one_inch_fusion_plus]   # cross-chain; queried globally by maker
+  base_url = "https://api.1inch.dev/fusion-plus"
+  api_key = "${ONEINCH_KEY}"
+
+  [venues.one_inch_lop]           # Limit Order Protocol v4 orderbook
+  base_url = "https://api.1inch.dev/orderbook"
+  api_key = "${ONEINCH_KEY}"
+  chains = ["eip155:1"]
 
 managedCertificate:
   enabled: false

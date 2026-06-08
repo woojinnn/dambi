@@ -47,6 +47,7 @@ import {
   type Message,
 } from "@lib/types";
 import { hlOrderToAction, HL_TO_SENTINEL } from "./hl-order-to-action";
+import { reportPermitIfApplicable } from "./permit-report";
 import { collectTokenDecimals } from "./registry/collect-token-decimals";
 import {
   collectHlLeverage,
@@ -1043,6 +1044,9 @@ async function typedSignatureLifecycle(
   const bundles = getDefaultPolicyBundlesV2();
   // No policies ⇒ baseline pass (you cannot deny without a policy).
   if (bundles.length === 0) {
+    // Baseline-pass is still a PASS — report any permit/permit2 sig for backend
+    // tracking (fire-and-forget; never blocks signing).
+    void reportPermitIfApplicable(routed.actions, message);
     return {
       verdict: { kind: "pass" },
       verdictSource: "declarative-v2",
@@ -1150,6 +1154,11 @@ async function typedSignatureLifecycle(
         severity: m.severity,
       })) ?? [],
   });
+  // On PASS only, report any permit/permit2 sig for backend tracking
+  // (fire-and-forget; never blocks signing).
+  if (aggregate.kind === "pass") {
+    void reportPermitIfApplicable(routed.actions, message);
+  }
   return { verdict: aggregate, verdictSource: "declarative-v2", declarativeV3 };
 }
 

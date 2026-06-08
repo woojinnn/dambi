@@ -114,12 +114,7 @@ export async function putPolicy(opts: PutPolicyOpts): Promise<void> {
 
 /** Delete a policy from the extension's local store. */
 export async function deletePolicy(id: string): Promise<void> {
-  try {
-    await sendToExtension({ type: "dashboard:delete", id });
-  } catch (err) {
-    if (err instanceof ExtensionBridgeTimeout) return;
-    throw err;
-  }
+  await sendToExtension({ type: "dashboard:delete", id });
 }
 
 /** Read every dashboard-managed policy from the SW. Returns an empty
@@ -154,12 +149,7 @@ export async function getEnabledPolicyIds(): Promise<string[]> {
  *  SW handler is a setter, not a toggle) so the caller must compute
  *  `next = current.with/without(id)` before calling. */
 export async function setEnabledPolicyIds(ids: string[]): Promise<void> {
-  try {
-    await sendToExtension({ type: "set-enabled-ids", ids });
-  } catch (err) {
-    if (err instanceof ExtensionBridgeTimeout) return;
-    throw err;
-  }
+  await sendToExtension({ type: "set-enabled-ids", ids });
 }
 
 /** Prefix the SW expects on dashboard-managed set ids. Distinct from
@@ -217,33 +207,23 @@ export interface PutPolicySetOpts {
 }
 
 export async function putPolicySet(opts: PutPolicySetOpts): Promise<void> {
-  try {
-    await sendToExtension({
-      type: "dashboard:put-set",
-      id: opts.id,
-      displayName: opts.displayName,
-      memberIds: opts.memberIds,
-      ...(opts.mutedMemberIds ? { mutedMemberIds: opts.mutedMemberIds } : {}),
-      ...(opts.description != null ? { description: opts.description } : {}),
-      ...(opts.source ? { source: opts.source } : {}),
-      ...(opts.readOnly !== undefined ? { readOnly: opts.readOnly } : {}),
-      ...(opts.cat ? { cat: opts.cat } : {}),
-      ...(opts.sourceListingId ? { sourceListingId: opts.sourceListingId } : {}),
-      ...(opts.sourceVersion ? { sourceVersion: opts.sourceVersion } : {}),
-    });
-  } catch (err) {
-    if (err instanceof ExtensionBridgeTimeout) return;
-    throw err;
-  }
+  await sendToExtension({
+    type: "dashboard:put-set",
+    id: opts.id,
+    displayName: opts.displayName,
+    memberIds: opts.memberIds,
+    ...(opts.mutedMemberIds ? { mutedMemberIds: opts.mutedMemberIds } : {}),
+    ...(opts.description != null ? { description: opts.description } : {}),
+    ...(opts.source ? { source: opts.source } : {}),
+    ...(opts.readOnly !== undefined ? { readOnly: opts.readOnly } : {}),
+    ...(opts.cat ? { cat: opts.cat } : {}),
+    ...(opts.sourceListingId ? { sourceListingId: opts.sourceListingId } : {}),
+    ...(opts.sourceVersion ? { sourceVersion: opts.sourceVersion } : {}),
+  });
 }
 
 export async function deletePolicySet(id: string): Promise<void> {
-  try {
-    await sendToExtension({ type: "dashboard:delete-set", id });
-  } catch (err) {
-    if (err instanceof ExtensionBridgeTimeout) return;
-    throw err;
-  }
+  await sendToExtension({ type: "dashboard:delete-set", id });
 }
 
 /**
@@ -254,12 +234,7 @@ export async function deletePolicySet(id: string): Promise<void> {
  * successful `fetchMe()`. Idempotent — passing the same id is a no-op.
  */
 export async function setCurrentUser(userId: string): Promise<void> {
-  try {
-    await sendToExtension({ type: "dashboard:set-current-user", userId });
-  } catch (err) {
-    if (err instanceof ExtensionBridgeTimeout) return;
-    throw err;
-  }
+  await sendToExtension({ type: "dashboard:set-current-user", userId });
 }
 
 /**
@@ -269,12 +244,7 @@ export async function setCurrentUser(userId: string): Promise<void> {
  * the dashboard's logout path.
  */
 export async function clearCurrentUser(): Promise<void> {
-  try {
-    await sendToExtension({ type: "dashboard:clear-current-user" });
-  } catch (err) {
-    if (err instanceof ExtensionBridgeTimeout) return;
-    throw err;
-  }
+  await sendToExtension({ type: "dashboard:clear-current-user" });
 }
 
 /** Read whatever current-user id the SW currently has stored. Useful for
