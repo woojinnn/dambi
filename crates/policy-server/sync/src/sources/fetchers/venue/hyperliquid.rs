@@ -163,7 +163,8 @@ impl HyperliquidFetcher {
         let clearinghouse = self.fetch_clearinghouse_state(endpoint, user).await;
         let spot = self.fetch_spot_clearinghouse_state(endpoint, user).await;
         let open_orders = self.fetch_open_orders(endpoint, user).await;
-        let (mut account, fresh, mut errors) = assemble_core(clearinghouse, spot, open_orders, &meta);
+        let (mut account, fresh, mut errors) =
+            assemble_core(clearinghouse, spot, open_orders, &meta);
 
         // Fan out to builder-deployed perp-dexs (HIP-3), exactly like
         // `fetch_account_snapshot`. The native clearinghouse only reports
@@ -179,7 +180,12 @@ impl HyperliquidFetcher {
                 Ok(dexs) => {
                     for dex in dexs {
                         match self
-                            .fetch_account_snapshot_for_dex(endpoint, user, Some(&dex), &empty_agents)
+                            .fetch_account_snapshot_for_dex(
+                                endpoint,
+                                user,
+                                Some(&dex),
+                                &empty_agents,
+                            )
                             .await
                         {
                             Ok(extra) => merge_hl_account(&mut account, extra),
