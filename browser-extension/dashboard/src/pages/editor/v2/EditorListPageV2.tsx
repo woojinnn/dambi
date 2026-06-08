@@ -9,6 +9,7 @@ import {
   deleteManagedPolicy,
   deletePolicySet,
   getEnabledPolicyIds,
+  getPolicyCatalog,
   listListings,
   listManagedPolicies,
   listPolicySets,
@@ -20,6 +21,12 @@ import {
   type ManagedPolicy,
   type PolicySet,
 } from "../../../server-api";
+import {
+  DAY1_SET_ID,
+  buildDay1Policies,
+  buildDay1Set,
+  isDay1Id,
+} from "./day1-baseline";
 import { Topbar } from "../../../shell/Topbar";
 import { FEATURES } from "../../../features";
 import { nameFromPolicy, severityFromCedar } from "../policy-meta";
@@ -99,6 +106,11 @@ export function EditorListPageV2() {
     queryKey: ["enabled-policy-ids"],
     queryFn: getEnabledPolicyIds,
   });
+  // baked day1 베이스라인은 managed 목록이 아니라 catalog 에만 있다.
+  const catalogQ = useQuery({
+    queryKey: ["policy-catalog"],
+    queryFn: getPolicyCatalog,
+  });
 
   useEffect(() => {
     const unsubscribe = subscribeToBroadcast((keys) => {
@@ -114,6 +126,7 @@ export function EditorListPageV2() {
       if (userSwitched) {
         void qc.invalidateQueries({ queryKey: ["managed-policies"] });
         void qc.invalidateQueries({ queryKey: ["policy-sets"] });
+        void qc.invalidateQueries({ queryKey: ["policy-catalog"] });
       }
     });
     return unsubscribe;
@@ -159,8 +172,20 @@ export function EditorListPageV2() {
     toggleMut.mutate([...next]);
   };
 
-  const policies = listQ.data ?? [];
-  const sets = setsQ.data ?? [];
+  // day1 베이스라인(읽기전용)을 managed 목록 앞에 합성 주입한다. 그러면 scope
+  // 패널·테이블·토글이 별도 분기 없이 그대로 처리한다. day1 패키지는 항상 맨 위.
+  const day1Policies = useMemo(
+    () => buildDay1Policies(catalogQ.data),
+    [catalogQ.data],
+  );
+  const policies = useMemo(
+    () => [...day1Policies, ...(listQ.data ?? [])],
+    [day1Policies, listQ.data],
+  );
+  const sets = useMemo(() => {
+    const day1Set = buildDay1Set(day1Policies);
+    return day1Set ? [day1Set, ...(setsQ.data ?? [])] : (setsQ.data ?? []);
+  }, [day1Policies, setsQ.data]);
   const setMembership = useMemo(() => buildSetMembership(sets), [sets]);
   const policyById = useMemo(
     () => new Map(policies.map((p) => [p.id, p])),
@@ -640,7 +665,15 @@ export function EditorListPageV2() {
                         className={`ev2-selbox head${selection.size > 0 ? " on" : ""}`}
                         onClick={() => {
                           if (selection.size > 0) clearSel();
-                          else setSelection(new Set(filteredRows.map((r) => r.id)));
+                          // day1 베이스라인(읽기전용)은 전체선택에서 제외.
+                          else
+                            setSelection(
+                              new Set(
+                                filteredRows
+                                  .filter((r) => !isDay1Id(r.id))
+                                  .map((r) => r.id),
+                              ),
+                            );
                         }}
                         title="보이는 항목 전체 선택"
                       >
@@ -678,11 +711,14 @@ export function EditorListPageV2() {
                             ? [...selection]
                             : [p.id]
                         }
+                        readOnly={isDay1Id(p.id)}
                         onSelect={() => onSelect(p.id)}
                         onToggle={(on) => togglePolicy(p.id, on)}
-                        onOpen={() =>
-                          navigate(`/editor/${encodeURIComponent(p.id)}`)
-                        }
+                        onOpen={() => {
+                          // baked day1 정책은 편집 페이지가 없다 — 열기 무시.
+                          if (isDay1Id(p.id)) return;
+                          navigate(`/editor/${encodeURIComponent(p.id)}`);
+                        }}
                         onDelete={() => void deletePolicyById(p)}
                       />
                     );
@@ -905,6 +941,7 @@ function PackagePanel(props: {
             // Turn the package off first to re-pick included policies.
             const armedLocked = s.readOnly || pkgState === "on";
             const market = isMarketSource(s);
+            const isDay1 = s.id === DAY1_SET_ID;
             const cstyle = catStyle(s.cat);
             const expanded = expandedPkgs.has(s.id);
             const members = [...memberIds]
@@ -918,7 +955,7 @@ function PackagePanel(props: {
                   onClick={() => onToggleExpand(s.id)}
                   icon={
                     <span style={{ color: cstyle.hex, display: "grid", placeItems: "center" }}>
-                      <FolderIcon />
+                      {isDay1 ? <ShieldIcon /> : <FolderIcon />}
                     </span>
                   }
                   name={s.displayName}
@@ -931,7 +968,12 @@ function PackagePanel(props: {
                     </>
                   }
                   source={
-                    market ? (
+                    isDay1 ? (
+                      <>
+                        <ShieldIcon />
+                        기본 제공
+                      </>
+                    ) : market ? (
                       <>
                         <ShieldIcon />
                         마켓에서 가져옴
@@ -1241,13 +1283,18 @@ function ScopeHeader(props: {
           </span>
         )}
         <span className="ct">{rowCount}개</span>
-        {activePkg && isMarketSource(activePkg) && (
+        {activePkg && activePkg.id === DAY1_SET_ID && (
+          <span className="ev2-scope-prov">
+            <ShieldIcon /> 기본 제공
+          </span>
+        )}
+        {activePkg && activePkg.id !== DAY1_SET_ID && isMarketSource(activePkg) && (
           <span className="ev2-scope-prov">
             <ShieldIcon /> 마켓에서 가져옴
             {activePkg.sourceVersion ? ` · ${activePkg.sourceVersion}` : ""}
           </span>
         )}
-        {activePkg && !isMarketSource(activePkg) && (
+        {activePkg && activePkg.id !== DAY1_SET_ID && !isMarketSource(activePkg) && (
           <span className="ev2-scope-prov mine">
             <PencilIcon /> 내가 만듦
           </span>
@@ -1272,6 +1319,7 @@ function PolicyRow(props: {
   upstreamVersion?: string;
   packageCount: number;
   dragIds: string[];
+  readOnly?: boolean;
   onSelect: () => void;
   onToggle: (on: boolean) => void;
   onOpen: () => void;
@@ -1285,6 +1333,7 @@ function PolicyRow(props: {
     upstreamVersion,
     packageCount,
     dragIds,
+    readOnly,
     onSelect,
     onToggle,
     onOpen,
@@ -1320,32 +1369,40 @@ function PolicyRow(props: {
       onClick={(e) => {
         const target = e.target as HTMLElement;
         if (target.closest("button,.ev2-selbox,.ev2-tg,.ev2-grip")) return;
+        // day1 베이스라인(읽기전용)은 shift-click 선택도 막는다 — 선택되면
+        // 벌크 토글/패키지 묶기로 baked 정책이 사용자 set 에 섞일 수 있다.
+        if (readOnly) return;
         if (e.shiftKey) onSelect();
         else onOpen();
       }}
     >
       <div className="ev2-c-sel">
-        <button
-          type="button"
-          className={`ev2-selbox${selected ? " on" : ""}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect();
-          }}
-          title="선택"
-        >
-          {selected && <CheckIcon />}
-        </button>
-        <span
-          className="ev2-grip"
-          title={
-            dragIds.length > 1
-              ? `드래그해서 패키지에 넣기 (${dragIds.length}개)`
-              : "드래그해서 패키지에 넣기"
-          }
-        >
-          <GripIcon />
-        </span>
+        {/* day1 베이스라인은 읽기전용 — 선택/패키지 묶기 대상에서 제외. */}
+        {!readOnly && (
+          <>
+            <button
+              type="button"
+              className={`ev2-selbox${selected ? " on" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect();
+              }}
+              title="선택"
+            >
+              {selected && <CheckIcon />}
+            </button>
+            <span
+              className="ev2-grip"
+              title={
+                dragIds.length > 1
+                  ? `드래그해서 패키지에 넣기 (${dragIds.length}개)`
+                  : "드래그해서 패키지에 넣기"
+              }
+            >
+              <GripIcon />
+            </span>
+          </>
+        )}
       </div>
 
       <div className="ev2-c-name">
@@ -1422,28 +1479,32 @@ function PolicyRow(props: {
         >
           <span className="sw" />
         </button>
-        <button
-          type="button"
-          className="ev2-del"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          title="정책 삭제"
-        >
-          <TrashIcon />
-        </button>
-        <button
-          type="button"
-          className="ev2-open"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen();
-          }}
-          title="에디터 열기"
-        >
-          <CaretRightIcon />
-        </button>
+        {!readOnly && (
+          <>
+            <button
+              type="button"
+              className="ev2-del"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              title="정책 삭제"
+            >
+              <TrashIcon />
+            </button>
+            <button
+              type="button"
+              className="ev2-open"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpen();
+              }}
+              title="에디터 열기"
+            >
+              <CaretRightIcon />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

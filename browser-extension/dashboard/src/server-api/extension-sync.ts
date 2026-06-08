@@ -128,6 +128,39 @@ export async function listManagedPolicies(): Promise<ManagedPolicy[]> {
   }
 }
 
+/** One policy row as the SW's catalog exposes it. Mirror of
+ *  `CatalogPolicy` in `policy-selection.ts`. */
+export interface CatalogPolicy {
+  id: string;
+  rules: { severity: string; reason: string }[];
+  dominantSeverity: string;
+  sourceLabel: string;
+}
+
+/** The full policy catalog: every installed policy (baked day1 baseline +
+ *  dashboard-managed) plus the enabled/applied id sets. Same payload the
+ *  popup reads via `policy-catalog`. */
+export interface PolicyCatalog {
+  policies: CatalogPolicy[];
+  enabled: string[];
+  applied: string[];
+}
+
+/** Read the SW's policy catalog. The baked day1 baseline policies live here
+ *  (they are NOT dashboard-managed, so they never appear in
+ *  `listManagedPolicies`). Returns an empty catalog when the extension isn't
+ *  installed. */
+export async function getPolicyCatalog(): Promise<PolicyCatalog> {
+  try {
+    return await sendToExtension<PolicyCatalog>({ type: "dashboard:get-catalog" });
+  } catch (err) {
+    if (err instanceof ExtensionBridgeTimeout) {
+      return { policies: [], enabled: [], applied: [] };
+    }
+    throw err;
+  }
+}
+
 /** Storage key the SW writes when the popup or dashboard toggles a
  *  policy on/off. Exposed so the dashboard can scope its React Query
  *  invalidation to broadcasts that touch this key. */

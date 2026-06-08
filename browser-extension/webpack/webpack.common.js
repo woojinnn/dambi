@@ -136,6 +136,7 @@ const pageConfig = {
     ),
     "confirm/index": path.join(frontendDir, "confirm", "index.ts"),
     "popup/index": path.join(frontendDir, "popup", "index.ts"),
+    "onboarding/index": path.join(frontendDir, "onboarding", "index.ts"),
     manifest: path.join(backendDir, "manifest.json"),
   },
   output: {

@@ -86,6 +86,10 @@ const WATCHED_KEYS = new Set([
   "migration:pending",
   // Active-user discriminator — when this flips, all per-user reads change.
   "dashboard:current-user-id",
+  // 익스텐션 로그인 토큰 — 계정 전환/로그아웃을 대시보드가 실시간 감지해
+  // 계정 불일치 시 자동 로그아웃하도록(useAuth) broadcast 한다.
+  // (키 이름은 main 마이그레이션 후 scopeball_jwt → pasu_jwt)
+  "pasu_jwt",
 ]);
 
 /**
