@@ -10,7 +10,6 @@ import {
   getEnabledPolicyIds,
   listAuditVerdicts,
   listManagedPolicies,
-  listPolicySets,
   subscribeToBroadcast,
   syncWallet,
   type DashboardSummary,
@@ -54,10 +53,6 @@ export function HomePage() {
   const enabledQ = useQuery({
     queryKey: ["enabled-policy-ids"],
     queryFn: getEnabledPolicyIds,
-  });
-  const setsQ = useQuery({
-    queryKey: ["policy-sets"],
-    queryFn: listPolicySets,
   });
 
   // Refetch the enabled set when the popup writes it behind our back.
@@ -108,20 +103,10 @@ export function HomePage() {
   const todayTotal = countsQ.data ? countsQ.data.pass + countsQ.data.warn + countsQ.data.fail : null;
 
   const managed = managedQ.data ?? [];
-  const sets = setsQ.data ?? [];
   const enabledSet = useMemo(() => new Set(enabledQ.data ?? []), [enabledQ.data]);
   const enabledPolicyCount = managed.filter((p) => enabledSet.has(p.id)).length;
   const totalManagedCount = managed.length;
   const policiesLoading = managedQ.isLoading || enabledQ.isLoading;
-  // A package counts as "active" only when every member id is enabled and
-  // the package has at least one member. Empty packages stay inactive.
-  const activePackageCount = sets.filter(
-    (s) =>
-      s.memberIds.length > 0 &&
-      s.memberIds.every((id) => enabledSet.has(id)),
-  ).length;
-  const totalPackageCount = sets.length;
-  const packagesLoading = setsQ.isLoading || enabledQ.isLoading;
 
   return (
     <>
@@ -143,12 +128,6 @@ export function HomePage() {
           enabledCount={enabledPolicyCount}
           totalCount={totalManagedCount}
           loading={policiesLoading}
-        />
-        <ActivePoliciesCard
-          label="활성 패키지"
-          enabledCount={activePackageCount}
-          totalCount={totalPackageCount}
-          loading={packagesLoading}
         />
       </div>
 
@@ -334,6 +313,8 @@ function WalletCard({
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["holdings", w.address] });
       qc.invalidateQueries({ queryKey: ["approvals", w.address, "with_risk"] });
+      qc.invalidateQueries({ queryKey: ["positions", w.address] });
+      qc.invalidateQueries({ queryKey: ["pending", w.address] });
       qc.invalidateQueries({ queryKey: ["wallet-verdicts", w.address] });
     },
   });
