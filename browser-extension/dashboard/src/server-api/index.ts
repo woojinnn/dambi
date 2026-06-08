@@ -48,6 +48,20 @@ export {
 } from "./wallets";
 
 export {
+  getWalletPositions,
+  getWalletPending,
+  hlAccountOf,
+  type Position,
+  type PositionKind,
+  type HlAccount,
+  type HlPosition,
+  type HlOpenOrder,
+  type HlLeverageSetting,
+  type PendingTx,
+  type PendingKind,
+} from "./positions";
+
+export {
   listPolicies,
   createPolicy,
   patchPolicy,
@@ -118,6 +132,9 @@ export {
   listManagedPolicies,
   getEnabledPolicyIds,
   setEnabledPolicyIds,
+  getPolicyCatalog,
+  type PolicyCatalog,
+  type CatalogPolicy,
   ENABLED_IDS_STORAGE_KEY,
   dashboardId,
   stripDashboardId,

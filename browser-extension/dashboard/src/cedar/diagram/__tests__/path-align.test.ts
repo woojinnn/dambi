@@ -138,6 +138,34 @@ describe("PolicyDiagram path alignment", () => {
     expect(policyDiagramPaths(p)).toEqual(["c0.body.operand"]);
   });
 
+  it("fans a `contains` over a literal set into one canonical leaf per member", () => {
+    const s = (v: string): Expr => ({ kind: "lit", litType: "string", value: v });
+    // forbid Swap when { ["a","b","c"] contains context.x }
+    const p: PolicyIR = {
+      ...policy,
+      conditions: [
+        {
+          kind: "when",
+          body: {
+            kind: "binary",
+            op: "contains",
+            left: { kind: "set", elements: [s("a"), s("b"), s("c")] },
+            right: { kind: "attr", of: { kind: "var", name: "context" }, attr: "x" },
+          },
+        },
+      ],
+    };
+    const canonical = new Set(enumeratePaths(p).map((q) => q.path));
+    const paths = new Set(policyDiagramPaths(p));
+    // The gate sits at the membership node; each member is its own canonical leaf.
+    expect(paths.has("c0.body")).toBe(true);
+    expect(paths.has("c0.body.left.elements[0]")).toBe(true);
+    expect(paths.has("c0.body.left.elements[1]")).toBe(true);
+    expect(paths.has("c0.body.left.elements[2]")).toBe(true);
+    // …and every diagram path stays a real diagnosis path (no drift).
+    for (const q of paths) expect(canonical.has(q)).toBe(true);
+  });
+
   it("renders decimal/ext comparisons in operator form", () => {
     const inputUsd: Expr = {
       kind: "attr",

@@ -14,6 +14,7 @@
  * a policy was saved when the extension never accepted it.
  */
 
+import { lowercaseAddressLiterals } from "../editor-v9/annotations";
 import { sendToExtension, ExtensionBridgeTimeout } from "./extension-bridge";
 
 /** Prefix the SW expects on dashboard-managed policy ids. */
@@ -91,7 +92,12 @@ export async function putPolicy(opts: PutPolicyOpts): Promise<void> {
   await sendToExtension({
     type: "dashboard:put-raw",
     id: opts.id,
-    text: opts.cedarText,
+    // Canonicalise address literals to lowercase before install: the engine's
+    // tx-derived addresses are always lowercase, and Cedar `==`/`contains` is
+    // case-sensitive, so a checksum-cased address a user typed would never
+    // match. This is the single install chokepoint, so every save path
+    // (editor, market adoption, list, new-policy) is covered here.
+    text: lowercaseAddressLiterals(opts.cedarText),
     ...(opts.policyTree != null ? { policyTree: opts.policyTree } : {}),
     ...(opts.displayName ? { displayName: opts.displayName } : {}),
     ...(opts.manifest !== undefined ? { manifest: opts.manifest } : {}),
@@ -118,6 +124,39 @@ export async function listManagedPolicies(): Promise<ManagedPolicy[]> {
     return await sendToExtension<ManagedPolicy[]>({ type: "dashboard:list-managed" });
   } catch (err) {
     if (err instanceof ExtensionBridgeTimeout) return [];
+    throw err;
+  }
+}
+
+/** One policy row as the SW's catalog exposes it. Mirror of
+ *  `CatalogPolicy` in `policy-selection.ts`. */
+export interface CatalogPolicy {
+  id: string;
+  rules: { severity: string; reason: string }[];
+  dominantSeverity: string;
+  sourceLabel: string;
+}
+
+/** The full policy catalog: every installed policy (baked day1 baseline +
+ *  dashboard-managed) plus the enabled/applied id sets. Same payload the
+ *  popup reads via `policy-catalog`. */
+export interface PolicyCatalog {
+  policies: CatalogPolicy[];
+  enabled: string[];
+  applied: string[];
+}
+
+/** Read the SW's policy catalog. The baked day1 baseline policies live here
+ *  (they are NOT dashboard-managed, so they never appear in
+ *  `listManagedPolicies`). Returns an empty catalog when the extension isn't
+ *  installed. */
+export async function getPolicyCatalog(): Promise<PolicyCatalog> {
+  try {
+    return await sendToExtension<PolicyCatalog>({ type: "dashboard:get-catalog" });
+  } catch (err) {
+    if (err instanceof ExtensionBridgeTimeout) {
+      return { policies: [], enabled: [], applied: [] };
+    }
     throw err;
   }
 }
@@ -158,6 +197,9 @@ export interface PolicySet {
   displayName: string;
   description?: string;
   memberIds: readonly string[];
+  /** Members excluded from package activation (present in `memberIds` but not
+   *  enabled/disabled when the package is toggled). Absent = all members armed. */
+  mutedMemberIds?: readonly string[];
   source?: PolicySource;
   readOnly?: boolean;
   cat?: string;
@@ -189,6 +231,7 @@ export interface PutPolicySetOpts {
   displayName: string;
   description?: string;
   memberIds: readonly string[];
+  mutedMemberIds?: readonly string[];
   source?: PolicySource;
   readOnly?: boolean;
   cat?: string;
@@ -202,6 +245,7 @@ export async function putPolicySet(opts: PutPolicySetOpts): Promise<void> {
     id: opts.id,
     displayName: opts.displayName,
     memberIds: opts.memberIds,
+    ...(opts.mutedMemberIds ? { mutedMemberIds: opts.mutedMemberIds } : {}),
     ...(opts.description != null ? { description: opts.description } : {}),
     ...(opts.source ? { source: opts.source } : {}),
     ...(opts.readOnly !== undefined ? { readOnly: opts.readOnly } : {}),

@@ -89,6 +89,38 @@ describe("blame walker", () => {
     expect(blame(policy, truth).sort()).toEqual(["c0.body.left", "c0.body.right"]);
   });
 
+  // ── membership over a literal set → blame the matched member ──
+
+  it("membership(true): blames only the matched member, not the whole node", () => {
+    const s = (v: string): Expr => ({ kind: "lit", litType: "string", value: v });
+    // forbid when { ["a","b","c"] contains context.x } with x === "b"
+    const body: Expr = {
+      kind: "binary", op: "contains",
+      left: { kind: "set", elements: [s("a"), s("b"), s("c")] },
+      right: attr("x"),
+    };
+    const policy = forbidWhen(body);
+    const truth: TruthMap = {
+      "c0.body": true,
+      "c0.body.left.elements[0]": false,
+      "c0.body.left.elements[1]": true, // "b" matched
+      "c0.body.left.elements[2]": false,
+    };
+    expect(blame(policy, truth)).toEqual(["c0.body.left.elements[1]"]);
+  });
+
+  it("membership without member probes falls back to the node path", () => {
+    const s = (v: string): Expr => ({ kind: "lit", litType: "string", value: v });
+    const body: Expr = {
+      kind: "binary", op: "contains",
+      left: { kind: "set", elements: [s("a"), s("b")] },
+      right: attr("x"),
+    };
+    const policy = forbidWhen(body);
+    const truth: TruthMap = { "c0.body": true }; // no per-member truths recorded
+    expect(blame(policy, truth)).toEqual(["c0.body"]);
+  });
+
   it("case 4 — if in boolean position: blames cond + taken branch, excludes the other disjunct", () => {
     // forbid when {
     //   (if context.k == "x" then context.p else context.q) || (context.amount > 100)

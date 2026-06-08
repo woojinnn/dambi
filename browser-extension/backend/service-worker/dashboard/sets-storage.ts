@@ -23,6 +23,12 @@ export interface PolicySet {
    *  policy. Stale references are tolerated; the dashboard filters them
    *  when rendering. */
   memberIds: readonly string[];
+  /** Members the user "muted" inside this package: present in `memberIds` but
+   *  EXCLUDED from package activation. Package on/off only enables/disables the
+   *  ARMED members (`memberIds` minus `mutedMemberIds`); a muted member is
+   *  unaffected when the package is toggled. Absent = none muted (all armed).
+   *  This is package-local intent, distinct from a policy's global enabled bit. */
+  mutedMemberIds?: readonly string[];
   /** Provenance. Absent = `mine` (legacy). `market` sets are installed
    *  from the marketplace and treated as read-only in the list view. */
   source?: "mine" | "market";

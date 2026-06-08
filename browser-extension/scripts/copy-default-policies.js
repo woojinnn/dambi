@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const EXT_ROOT = path.resolve(__dirname, "..");
 const DEST = path.resolve(__dirname, "..", "public", "default-policies");
 
 function listFilesWithExtension(dir, extension) {
@@ -51,15 +52,41 @@ function listSchemaFiles() {
 function copyDefaultPoliciesV2() {
   const destPath = path.join(DEST, "policy-set-v2.json");
 
-  // Default v2 policies are intentionally NOT shipped to the extension — it
-  // starts with NO baked policies; users add their own via the dashboard.
-  // The Rust fixtures under
-  // `crates/policy-engine/tests/fixtures/default_policies_v2/` and their
-  // `default_policies_v2.rs` gate stay the engine's source of truth and are
-  // untouched. To restore shipping the baked set, restore this function's
-  // fixture-enumeration body from git history.
-  fs.writeFileSync(destPath, "[]");
-  console.log("Wrote empty policy-set-v2.json (default v2 policies not shipped to the extension)");
+  // Ship the "day1-safety" bundle as the baked default v2 set. The bundle lives
+  // under `default-bundles/day1-safety/` (package.json + policies/<id>/{policy.cedar,
+  // manifest.json}); we project each policy onto the `{id, policy}` shape that
+  // `loadDefaults()` in policy-selection.ts consumes for the popup catalog.
+  // Enumerate via package.json's `policies[]` so order + id match the bundle's
+  // canonical manifest; fall back to dir-scan if package.json is absent.
+  const bundleDir = path.join(EXT_ROOT, "default-bundles", "day1-safety");
+  if (!fs.existsSync(bundleDir)) {
+    fs.writeFileSync(destPath, "[]");
+    console.log("Wrote empty policy-set-v2.json (default-bundles/day1-safety not found)");
+    return;
+  }
+
+  const pkgPath = path.join(bundleDir, "package.json");
+  let ids;
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    ids = (pkg.policies || []).map((p) => p.id);
+  } else {
+    ids = fs
+      .readdirSync(path.join(bundleDir, "policies"), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  }
+
+  const policySet = ids.map((id) => {
+    const cedarPath = path.join(bundleDir, "policies", id, "policy.cedar");
+    return { id, policy: fs.readFileSync(cedarPath, "utf8") };
+  });
+
+  fs.writeFileSync(destPath, JSON.stringify(policySet, null, 2));
+  console.log(
+    `Wrote policy-set-v2.json with ${policySet.length} day1-safety policies → ${destPath}`,
+  );
 }
 
 function main() {

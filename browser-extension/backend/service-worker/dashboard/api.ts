@@ -90,6 +90,7 @@ export type DashboardRequest =
       displayName: string;
       description?: string;
       memberIds: readonly string[];
+      mutedMemberIds?: readonly string[];
       source?: "mine" | "market";
       readOnly?: boolean;
       cat?: string;
@@ -361,6 +362,10 @@ export async function handleDashboardRequest(
             ? { description: req.description }
             : {}),
           memberIds: req.memberIds.slice(),
+          ...(Array.isArray(req.mutedMemberIds) &&
+          req.mutedMemberIds.every((m) => typeof m === "string")
+            ? { mutedMemberIds: req.mutedMemberIds.slice() }
+            : {}),
           ...(req.source === "mine" || req.source === "market"
             ? { source: req.source }
             : {}),

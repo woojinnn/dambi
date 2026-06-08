@@ -36,6 +36,25 @@ export function policyIdFromName(name: string): string {
   return sanitized;
 }
 
+/**
+ * Lowercase every EVM-address string literal in `cedarText`.
+ *
+ * WHY: the engine normalises all addresses it derives from a transaction to
+ * lowercase (Rust hex-formats lower; the token registry lowercases too), so
+ * `context.tokenIn.key.address` is always lowercase. Cedar string comparison
+ * is case-SENSITIVE, so a checksum-cased literal a user typed (e.g. WETH
+ * `0xC02aaA39…`) can never equal the lowercase context value — the policy
+ * silently never fires. Normalising address literals to lowercase here makes
+ * the stored/installed policy canonical and symmetric with the context.
+ *
+ * Matches exactly a quoted `0x` + 40 hex digits + quote, so a 32-byte hash
+ * (64 hex) or a 4-byte selector (8 hex) is left untouched. Lowercasing only
+ * drops the optional EIP-55 checksum casing — the address VALUE is unchanged.
+ */
+export function lowercaseAddressLiterals(cedarText: string): string {
+  return cedarText.replace(/"0[xX][0-9a-fA-F]{40}"/g, (m) => m.toLowerCase());
+}
+
 /** Re-stamp `@id` + `@severity` + `@reason` annotations onto the head of
  *  `cedarText`. The reason is the human-readable name so the extension
  *  popup can surface "this policy fired because of <name>" — without a

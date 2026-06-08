@@ -1,0 +1,135 @@
+/* Pasu onboarding — 익스텐션 셋업 (4-step · 다크 글래스모픽) */
+html, body { margin: 0; height: 100%; }
+body { font-family: var(--ff-sans); }
+
+.ob { min-height: 100vh; display: grid; place-items: center; padding: 32px 20px;
+  background: radial-gradient(130% 90% at 50% -10%, var(--brand-700) 0%, var(--brand-800) 42%, #0B1422 100%); }
+
+/* popup(380px)과 동일 폭의 카드를 다크 배경 위 중앙에 — popup 과 같은 표면 인지 */
+.ob-panel { width: 380px; max-width: 100%; box-sizing: border-box;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 22px; padding: 22px 24px 24px; backdrop-filter: blur(8px); box-shadow: 0 30px 80px -30px rgba(0,0,0,0.6); }
+
+/* top: back + brand + dots */
+.ob-top { display: flex; align-items: center; gap: 9px; min-height: 30px; }
+.ob-back { appearance: none; width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; cursor: pointer;
+  border-radius: 9px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: #fff; transition: background .12s; }
+.ob-back:hover { background: rgba(255,255,255,0.14); }
+.ob-back[hidden] { display: none; }
+.ob-brand { display: flex; align-items: center; gap: 9px; }
+.ob-brand .mk { width: 24px; height: 24px; }
+.ob-brand .wd { font-size: 13px; font-weight: 700; letter-spacing: 0.16em; color: #fff; }
+.ob-dots { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.ob-dots .dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.22); transition: background .2s, box-shadow .2s; }
+.ob-dots .dot.on { background: #6FE0AC; box-shadow: 0 0 0 3px rgba(111,224,172,0.16); }
+
+.ob-eyebrow { font-family: var(--ff-mono); font-size: 11px; letter-spacing: 0.16em; color: #6FE0AC; text-transform: uppercase; margin-top: 22px; transition: color .2s; }
+.ob h1 { font-size: 24px; font-weight: 700; color: #fff; letter-spacing: -0.02em; line-height: 1.2; margin: 10px 0 0; text-wrap: balance; }
+.ob-lede { font-size: 13.5px; color: var(--brand-200); line-height: 1.55; margin: 10px 0 0; text-wrap: pretty; }
+
+/* shared card */
+.ob-card { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.11); border-radius: 16px; padding: 20px 18px; margin-top: 20px; }
+
+/* guardian hero (steps 1 & 4) */
+.ob-guard { position: relative; width: 60px; height: 60px; margin: 0 auto; }
+.ob-guard .ring { position: absolute; inset: 0; border-radius: 50%; border: 2.5px solid var(--pass-500); box-shadow: 0 0 0 5px rgba(34,160,107,0.14); }
+.ob-guard.idle .ring { border-color: var(--brand-300); box-shadow: 0 0 0 5px rgba(133,151,183,0.12); }
+.ob-guard .face { position: absolute; inset: 6px; border-radius: 50%; background: #fff; display: grid; place-items: center; overflow: hidden; }
+.ob-guard .face img { width: 40px; height: 40px; object-fit: contain; margin-top: 2px; }
+.ob-guard .badge { position: absolute; right: -2px; bottom: -2px; width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid #15233c; background: var(--pass-500); color: #fff; display: grid; place-items: center; }
+.ob-guard.idle .badge { display: none; }
+
+.ob-ghead { text-align: center; }
+.ob-ghead.tight { margin-bottom: 4px; }
+.ob-ghead .gt { font-size: 15.5px; font-weight: 700; color: #fff; margin-top: 12px; }
+.ob-ghead .gs { font-size: 12px; color: var(--brand-200); margin-top: 5px; line-height: 1.5; }
+
+/* compact step header (steps 2 & 3, no guardian) */
+.ob-shead { margin-bottom: 14px; }
+.ob-shead .st { font-size: 15px; font-weight: 700; color: #fff; }
+.ob-shead .ss { font-size: 12px; color: var(--brand-200); margin-top: 5px; line-height: 1.5; text-wrap: pretty; }
+
+/* ---------- Google login (step 1) ---------- */
+.ob-google { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; margin-top: 18px; cursor: pointer;
+  font-family: var(--ff-sans); font-size: 14px; font-weight: 600; color: #1f2937; padding: 12px; border-radius: 12px; border: 0; background: #fff; transition: filter .12s, background .12s; }
+.ob-google:hover { background: #F3F5F9; }
+.ob-google span { white-space: nowrap; }
+.ob-google .gg { width: 19px; height: 19px; flex: 0 0 auto; }
+.ob-google.loading { color: var(--slate-500); pointer-events: none; }
+.ob-google .spin { width: 17px; height: 17px; border-radius: 50%; border: 2.5px solid var(--mist-200); border-top-color: var(--brand-500); animation: obspin .7s linear infinite; }
+@keyframes obspin { to { transform: rotate(360deg); } }
+
+.ob-authed { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 11px 13px; border-radius: 12px;
+  background: rgba(34,160,107,0.12); border: 1px solid rgba(34,160,107,0.32); }
+.ob-authed .chk { width: 22px; height: 22px; border-radius: 50%; background: var(--pass-500); color: #fff; display: grid; place-items: center; flex: 0 0 auto; }
+.ob-authed > div:last-child { flex: 1; min-width: 0; }
+.ob-authed .at { font-size: 12.5px; font-weight: 700; color: #DFF5EA; white-space: nowrap; }
+.ob-authed .ae { font-family: var(--ff-mono); font-size: 11px; color: #A9DEC6; margin-top: 1px; }
+.ob-note { font-size: 11px; color: var(--brand-300); margin-top: 12px; line-height: 1.5; }
+
+/* ---------- wallet registration (step 2) ---------- */
+.ob-walform { display: flex; flex-direction: column; gap: 8px; }
+.ob-walrow { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.ob-field { display: flex; flex-direction: column; gap: 5px; }
+.ob-field label { font-size: 10.5px; font-weight: 700; color: var(--brand-300); letter-spacing: 0.02em; }
+.ob-field label .opt { color: var(--slate-400); font-weight: 500; margin-left: 5px; }
+.ob-input { width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
+  padding: 10px 12px; font-size: 12.5px; color: #fff; font-family: var(--ff-sans); transition: border-color .12s, background .12s; }
+.ob-input::placeholder { color: var(--slate-400); }
+.ob-input.mono { font-family: var(--ff-mono); letter-spacing: -0.01em; }
+.ob-input:focus { outline: none; border-color: rgba(111,224,172,0.6); background: rgba(255,255,255,0.09); }
+.ob-input.err { border-color: var(--fail-400); background: rgba(221,74,60,0.08); }
+.ob-add { appearance: none; cursor: pointer; font-family: var(--ff-sans); font-size: 13px; font-weight: 700; color: var(--brand-800);
+  background: #fff; border: 0; border-radius: 10px; padding: 11px 14px; flex: 0 0 auto; transition: background .12s; }
+.ob-add:hover { background: #EEF1F7; }
+.ob-msg { font-size: 11px; line-height: 1.45; min-height: 0; }
+.ob-msg.err { color: #F2A89F; }
+.ob-msg.warn { color: var(--warn-300); }
+
+.ob-wallets-list { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
+.ob-wlist-empty { font-size: 11.5px; color: var(--slate-400); text-align: center; padding: 14px 0; border: 1px dashed rgba(255,255,255,0.14); border-radius: 10px; }
+.ob-witem { display: flex; align-items: center; gap: 11px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 11px; padding: 9px 11px; }
+.ob-witem .av { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; flex: 0 0 auto; display: block; }
+.ob-witem .av svg { display: block; border-radius: 8px; }
+.ob-witem .wtext { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ob-witem .wn { font-size: 13px; font-weight: 700; color: #fff; }
+.ob-witem .wa { font-family: var(--ff-mono); font-size: 11px; color: var(--brand-300); margin-top: 1px; }
+.ob-witem .wa.only { color: #E7ECF5; font-size: 12px; }
+.ob-witem .wx { appearance: none; width: 26px; height: 26px; flex: 0 0 auto; display: grid; place-items: center; cursor: pointer;
+  border-radius: 7px; background: transparent; border: 0; color: var(--slate-400); font-size: 16px; transition: background .12s, color .12s; }
+.ob-witem .wx:hover { background: rgba(221,74,60,0.16); color: #F2A89F; }
+
+/* ---------- baseline checklist (step 3) ---------- */
+.ob-checks { display: flex; flex-direction: column; gap: 8px; }
+.ob-check { display: flex; align-items: center; gap: 11px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 11px; padding: 12px 13px; cursor: pointer; transition: background .12s, border-color .12s; }
+.ob-check:hover { background: rgba(255,255,255,0.1); }
+.ob-check .box { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 auto; border: 1.5px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.04); display: grid; place-items: center; color: transparent; transition: background .12s, border-color .12s, color .12s; }
+.ob-check.on .box { background: var(--pass-500); border-color: var(--pass-500); color: #fff; }
+.ob-check .cmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ob-check .cn { font-size: 13px; font-weight: 700; color: #fff; }
+.ob-check .cd { font-family: var(--ff-mono); font-size: 10.5px; color: var(--brand-300); margin-top: 2px; }
+.ob-check .sev { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.ob-check .sev.deny { background: var(--fail-500); } .ob-check .sev.warn { background: var(--warn-500); } .ob-check .sev.unknown { background: var(--slate-300); }
+
+/* ---------- completion summary (step 4) ---------- */
+.ob-summary { display: flex; gap: 9px; margin-top: 18px; }
+.ob-sumcard { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 13px 14px; text-align: center; }
+.ob-sumcard .n { font-family: var(--ff-mono); font-size: 24px; font-weight: 700; color: #fff; line-height: 1; }
+.ob-sumcard .l { font-size: 11px; color: var(--brand-200); margin-top: 6px; }
+
+/* ---------- CTA ---------- */
+.ob-cta { width: 100%; margin-top: 18px; cursor: pointer; font-family: var(--ff-sans); font-size: 14.5px; font-weight: 700;
+  padding: 13px; border-radius: 12px; border: 0; background: #fff; color: var(--brand-800); transition: background .12s, opacity .12s; }
+.ob-cta:hover { background: #EEF1F7; }
+.ob-cta:disabled { background: rgba(255,255,255,0.12); color: var(--slate-400); cursor: not-allowed; }
+.ob-cta-help { font-size: 11px; color: var(--warn-300); margin-top: 9px; text-align: center; min-height: 0; }
+
+/* labeled steps */
+.ob-steps { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-top: 20px; }
+.ob-st { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ob-st .num { width: 22px; height: 22px; border-radius: 50%; flex: 0 0 auto; font-family: var(--ff-mono); font-size: 10.5px; font-weight: 700;
+  display: grid; place-items: center; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16); color: var(--brand-100); transition: all .2s; }
+.ob-st.done .num { background: var(--pass-500); border-color: var(--pass-500); color: #fff; }
+.ob-st.cur .num { background: #fff; border-color: #fff; color: var(--brand-800); }
+.ob-st .lb { font-size: 11px; font-weight: 600; color: #DCE3F0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-st.pend .lb { color: var(--brand-300); font-weight: 500; }

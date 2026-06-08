@@ -169,9 +169,74 @@ export async function fetchMe(): Promise<Me | null> {
   }
 }
 
-/** `GET /wallets` — user's tracked wallets. */
+/** `GET /wallets` — user's tracked wallets (address + chains only; no label). */
 export async function listWallets(): Promise<WalletId[]> {
   return request<WalletId[]>("/wallets");
+}
+
+/** One wallet row from `GET /dashboard/summary` — includes the human label
+ *  (nickname) and portfolio total, which `GET /wallets` does NOT return. */
+export interface WalletSummary {
+  address: string;
+  label: string | null;
+  total_usd?: string;
+}
+interface DashboardSummaryDto {
+  wallets: WalletSummary[];
+}
+/** `GET /dashboard/summary` — wallets WITH label. Used by the popup so the
+ *  nickname has a single source of truth (the server), matching the dashboard. */
+export async function listWalletSummaries(): Promise<WalletSummary[]> {
+  const d = await request<DashboardSummaryDto>("/dashboard/summary");
+  return Array.isArray(d?.wallets) ? d.wallets : [];
+}
+
+/** `PATCH /wallets/:address` — update label (nickname). `label: null` clears. */
+export async function updateWallet(
+  address: string,
+  patch: { label?: string | null },
+): Promise<void> {
+  await request<void>(`/wallets/${address}`, { method: "PATCH", body: patch });
+}
+
+/** `DELETE /wallets/:address` — soft delete (archive) the wallet. */
+export async function deleteWallet(address: string): Promise<void> {
+  await request<void>(`/wallets/${address}`, { method: "DELETE" });
+}
+
+export interface AddWalletBody {
+  /** 0x address (case-insensitive). */
+  address: string;
+  /** CAIP-2 list (e.g. `["eip155:1"]`). Omit to track every configured chain. */
+  chains?: string[];
+  label?: string;
+}
+export interface AddWalletResp {
+  wallet_id: WalletId;
+  synced: boolean;
+  discovered: number;
+  error?: string;
+}
+
+/** `POST /wallets` — start tracking a new wallet for the authenticated user.
+ *  On failure, surface the server's reason text (ServerError.body) so callers
+ *  can see WHY (e.g. "no chains configured", "invalid address") instead of a
+ *  bare "400 Bad Request". */
+export async function addWallet(body: AddWalletBody): Promise<AddWalletResp> {
+  try {
+    return await request<AddWalletResp>("/wallets", { method: "POST", body });
+  } catch (e) {
+    if (e instanceof ServerError) {
+      const reason =
+        typeof e.body === "string"
+          ? e.body
+          : e.body && typeof e.body === "object"
+            ? JSON.stringify(e.body)
+            : "";
+      throw new Error(`${e.message}${reason ? " — " + reason : ""}`);
+    }
+    throw e;
+  }
 }
 
 /**
