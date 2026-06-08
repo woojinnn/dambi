@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   ENABLED_IDS_STORAGE_KEY,
@@ -295,7 +295,13 @@ function WalletCard({
   verdicts: VerdictDto[];
 }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [renameOpen, setRenameOpen] = useState(false);
+
+  // Click the wallet identity row → open this wallet in the Assets tab,
+  // pre-selected (`?wallet=`). The action buttons below sit in a separate row
+  // so they don't trigger navigation.
+  const openInAssets = () => navigate(`/monitoring?wallet=${w.address}`);
 
   const tone = worstToneOf(verdicts);
   const cardTone =
@@ -331,7 +337,20 @@ function WalletCard({
 
   return (
     <article className={`wallet-card ${cardTone}`}>
-      <header className="wallet-head">
+      <header
+        className="wallet-head"
+        role="button"
+        tabIndex={0}
+        style={{ cursor: "pointer" }}
+        title="Assets 탭에서 이 지갑 열기"
+        onClick={openInAssets}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openInAssets();
+          }
+        }}
+      >
         <span className="w-icon">{initial}</span>
         <div className="w-id">
           <span className="name">{w.label ?? "—"}</span>

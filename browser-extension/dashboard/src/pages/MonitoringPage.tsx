@@ -172,7 +172,7 @@ export function MonitoringPage() {
   return (
     <>
       <Topbar
-        here="Monitoring"
+        here="Assets"
         subtitle={
           isL2
             ? `${selectedWallet?.label ?? shortAddr(sel)}`
@@ -826,6 +826,13 @@ function riskTagsFor(h: TokenHolding, idx?: ApprovalIndex): RiskTag[] {
   return [...tags];
 }
 
+/** Raw on-chain integer amount (`balance.amount`, approval allowances) → human
+ *  token units. The server stores amounts in base units (wei-like); the UI must
+ *  divide by 10^decimals before display or USD/VaR math. */
+function toHuman(rawUnits: number, decimals: number): number {
+  return decimals > 0 ? rawUnits / 10 ** decimals : rawUnits;
+}
+
 function varOfHolding(h: TokenHolding, idx?: ApprovalIndex): number {
   if (!idx) return 0;
   const chain = chainOf(h);
@@ -839,10 +846,12 @@ function varOfHolding(h: TokenHolding, idx?: ApprovalIndex): number {
   if (price === 0) return 0;
   // VaR = sum over distinct spenders of min(allowance, balance) × price.
   // Sum is bounded by balance × price (an attacker can't move more than
-  // the wallet holds, even across many spenders).
+  // the wallet holds, even across many spenders). `balance` and the approval
+  // `allowance` are both raw base units (same decimals), so the min/cap is done
+  // in base units and converted to human units once before applying the price.
   const exposureUnits = entries.reduce((s, e) => s + Math.min(e.allowance, balance), 0);
   const cappedUnits = Math.min(exposureUnits, balance);
-  return cappedUnits * price;
+  return toHuman(cappedUnits, h.decimals) * price;
 }
 
 // ── Holdings table ──────────────────────────────────────────────────────
@@ -937,7 +946,7 @@ function HoldingsTable({
     const map = new Map<string, AggregatedRow>();
     for (const r of rows) {
       const key = groupKeyOf(r.h);
-      const balance = Number(r.h.balance.amount ?? "0");
+      const balance = toHuman(Number(r.h.balance.amount ?? "0"), r.h.decimals);
       const idx = indexes.get(r.walletAddr);
       const tags = riskTagsFor(r.h, idx);
       const v = varOfHolding(r.h, idx);
@@ -1177,9 +1186,9 @@ function WalletChips({
 function fmtBalance(h: TokenHolding): string {
   const amt = h.balance.amount;
   if (!amt) return "—";
-  const n = Number(amt);
-  if (!isFinite(n)) return amt;
-  return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
+  const raw = Number(amt);
+  if (!isFinite(raw)) return amt;
+  return toHuman(raw, h.decimals).toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
 // ── Approvals table ─────────────────────────────────────────────────────
