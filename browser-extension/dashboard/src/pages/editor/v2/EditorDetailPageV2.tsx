@@ -274,8 +274,17 @@ function EditorBody({
       if (!effectiveIr && cedarText.trim()) {
         effectiveIr = (await textToBlocks(cedarText))[0] ?? null;
       }
-      const model = effectiveIr ? irToForm(effectiveIr) : emptyFormModel(stripDashboardId(policy.id));
-      setFormEntry(model ? { kind: "ok", model } : { kind: "closed" });
+      const parsed = effectiveIr ? irToForm(effectiveIr) : emptyFormModel(stripDashboardId(policy.id));
+      if (!parsed) {
+        setFormEntry({ kind: "closed" });
+        return;
+      }
+      // The editor header owns the policy id (slug) + severity; mirror them into
+      // the form so its section-3 matches what save will stamp.
+      setFormEntry({
+        kind: "ok",
+        model: { ...parsed, id: stripDashboardId(policy.id), severity: severity as FormModel["severity"] },
+      });
       setFormKey((k) => k + 1);
     } catch {
       setFormEntry({ kind: "closed" });
@@ -446,9 +455,11 @@ function EditorBody({
             <PolicyFormPane
               key={formKey}
               initialModel={formEntry.model}
-              onChange={({ cedarText: c, ir: nextIr }) => {
+              onChange={({ cedarText: c, ir: nextIr, model }) => {
                 setCedarText(c);
                 setIr(nextIr);
+                // Keep the header severity in sync so save stamps it correctly.
+                setSeverity(model.severity as PolicySeverity);
                 // The form doesn't produce a Blockly tree; drop the snapshot so
                 // a later Block-tab visit re-parses from the new cedar.
                 setTreeJson(null);

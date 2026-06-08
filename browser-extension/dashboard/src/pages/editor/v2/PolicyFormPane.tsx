@@ -18,6 +18,7 @@ import {
   emptyFormModel,
   fieldsForTrigger,
   formToIr,
+  irToForm,
   KNOWN_ACTIONS,
   leafToExpr,
   operatorsFor,
@@ -28,6 +29,7 @@ import {
   type FormOp,
   type FormValue,
 } from "../../../cedar/form";
+import { generateManifest } from "../../../editor-v9/manifest-gen";
 
 import "./policy-form.css";
 
@@ -81,6 +83,26 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
   }, [fields]);
 
   const ir = useMemo(() => formToIr(model), [model]);
+
+  // Validity badge: cedar rendered + manifest generates cleanly + the IR is
+  // still form-representable (round-trips). Manifest gen is pure/sync.
+  const manifestErrors = useMemo(
+    () => generateManifest(ir, undefined, { id: model.id, severity: model.severity }).errors,
+    [ir, model.id, model.severity],
+  );
+  const roundTrips = useMemo(() => irToForm(ir) !== null, [ir]);
+  const valid = !cedarError && manifestErrors.length === 0;
+  const enrichCount = useMemo(
+    () =>
+      new Set(
+        model.groups
+          .flatMap((g) => g.leaves)
+          .map((l) => l.fieldPath)
+          .filter((p) => p.startsWith("context.custom.")),
+      ).size,
+    [model.groups],
+  );
+  const triggerText = model.trigger.kind === "actionEq" ? model.trigger.id : "모든 동작";
 
   // Keep onChange in a ref so the sync effect depends only on `ir`.
   const onChangeRef = useRef(onChange);
@@ -246,6 +268,16 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
             <input className="pf-input" value={model.reason} onChange={(e) => patch({ reason: e.target.value })} placeholder="예: 고위험 동작 차단" />
           </div>
         </section>
+
+        <div className={`pf-status${valid ? " ok" : " bad"}`}>
+          <span className="pf-status-main">
+            {valid ? "✓ 유효한 정책 · .cedar와 manifest 짝 맞음" : "⚠ " + (cedarError ?? manifestErrors[0]?.message ?? "유효하지 않음")}
+          </span>
+          <span className="pf-status-meta">
+            trigger: {triggerText} · 보강필드: {enrichCount > 0 ? `${enrichCount}개` : "없음"} ·
+            round-trip: {roundTrips ? "통과" : "불가"}
+          </span>
+        </div>
       </div>
 
       {/* 우측 라이브 Cedar */}

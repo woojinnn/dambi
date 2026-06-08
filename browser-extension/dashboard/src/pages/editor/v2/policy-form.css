@@ -194,6 +194,34 @@
   color: #b91c1c;
 }
 
+/* validity badge */
+.pf-status {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pf-status.ok {
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  color: #15803d;
+}
+.pf-status.bad {
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #b91c1c;
+}
+.pf-status-main {
+  font-weight: 600;
+}
+.pf-status-meta {
+  color: var(--muted, #6b7280);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+
 /* live cedar */
 .pf-cedar {
   position: sticky;
