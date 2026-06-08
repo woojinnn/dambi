@@ -104,7 +104,9 @@ function exprToValue(e: Expr): FormValue | null {
 
 // ── leaf ⇄ Expr ───────────────────────────────────────────────────────────
 
-function leafToExpr(leaf: FormLeaf): Expr {
+/** Build the Cedar Expr for one leaf — exported so the form UI can render an
+ *  inline preview chip via `exprToText`. */
+export function leafToExpr(leaf: FormLeaf): Expr {
   const attr = pathToExpr(leaf.fieldPath);
   const rhs = valueToExpr(leaf.value);
   // Decimal comparisons (< <= > >=) use the extension-method form.

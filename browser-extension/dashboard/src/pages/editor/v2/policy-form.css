@@ -1,0 +1,236 @@
+/* PolicyFormPane — two-column form (left) + live cedar (right). */
+
+.pf-pane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.pf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.pf-section {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: var(--surface, #fff);
+}
+
+.pf-h {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pf-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #111827;
+  color: #fff;
+  font-size: 13px;
+}
+.pf-sub {
+  font-weight: 400;
+  font-size: 12.5px;
+  color: var(--muted, #6b7280);
+}
+
+.pf-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+}
+.pf-label {
+  width: 88px;
+  flex: none;
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+}
+.pf-input,
+.pf-select {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+}
+
+/* conditions */
+.pf-empty-cond {
+  font-size: 12.5px;
+  color: var(--muted, #9ca3af);
+  padding: 8px 2px;
+}
+.pf-group {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fafafa;
+}
+.pf-leaf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  flex-wrap: wrap;
+}
+.pf-or-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #eff6ff;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.pf-leaf-field {
+  min-width: 150px;
+  padding: 7px 9px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.pf-leaf-op {
+  width: 64px;
+  padding: 7px 6px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.pf-val {
+  width: 130px;
+  padding: 7px 9px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.pf-val.wide {
+  width: 220px;
+}
+.pf-leaf-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  border-radius: 6px;
+  padding: 2px 7px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-x {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: #9ca3af;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.pf-x:hover {
+  color: #ef4444;
+}
+.pf-or-btn,
+.pf-add-cond {
+  border: 1px dashed var(--border, #d1d5db);
+  background: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.pf-or-btn {
+  margin-top: 4px;
+}
+.pf-add-cond {
+  margin-top: 4px;
+}
+.pf-or-btn:hover,
+.pf-add-cond:hover {
+  border-color: #9ca3af;
+  color: #374151;
+}
+
+/* severity toggle */
+.pf-sev {
+  display: flex;
+  gap: 8px;
+}
+.pf-sev-btn {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  color: var(--muted, #6b7280);
+}
+.pf-sev-btn.warn.on {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #b45309;
+}
+.pf-sev-btn.deny.on {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* live cedar */
+.pf-cedar {
+  position: sticky;
+  top: 8px;
+  border-radius: 12px;
+  background: #0b1020;
+  color: #e5e7eb;
+  overflow: hidden;
+  min-height: 220px;
+}
+.pf-cedar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-sync {
+  font-size: 11px;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.pf-sync.err {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+.pf-cedar-body {
+  margin: 0;
+  padding: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c7d2fe;
+}

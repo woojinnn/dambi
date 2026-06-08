@@ -75,6 +75,24 @@ export function operatorsFor(kind: FieldKind): FormOp[] {
   }
 }
 
+/** A selectable action for the trigger (검사 대상) dropdown. `entityType`/`id`
+ *  map to `action == entityType::"id"`. v1 ships a curated list of the common
+ *  actions; "any action" is offered separately by the UI. */
+export interface KnownAction {
+  entityType: string;
+  id: string;
+  label: string;
+}
+
+export const KNOWN_ACTIONS: readonly KnownAction[] = [
+  { entityType: "Amm::Action", id: "Swap", label: "스왑" },
+  { entityType: "Amm::Action", id: "RemoveLiquidity", label: "유동성 제거" },
+  { entityType: "Token::Action", id: "Erc20Approve", label: "토큰 승인" },
+  { entityType: "Token::Action", id: "Erc20Transfer", label: "토큰 전송" },
+  { entityType: "Airdrop::Action", id: "Claim", label: "에어드랍 청구" },
+  { entityType: "Core::Action", id: "Unknown", label: "알 수 없는 거래" },
+];
+
 /** The value-widget kind for a field. NOTE: when the chosen operator is `in`,
  *  the value is always a `set` regardless of field kind — the UI overrides. */
 export function valueKindForField(kind: FieldKind): FormValue["kind"] {

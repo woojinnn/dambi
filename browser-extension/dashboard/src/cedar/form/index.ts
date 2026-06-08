@@ -12,4 +12,12 @@ export type {
   FormOp,
 } from "./model";
 export { emptyFormModel } from "./model";
-export { formToIr, irToForm } from "./convert";
+export { formToIr, irToForm, leafToExpr } from "./convert";
+export {
+  fieldsForTrigger,
+  operatorsFor,
+  valueKindForField,
+  KNOWN_ACTIONS,
+  type FieldOption,
+  type KnownAction,
+} from "./field-catalog";
