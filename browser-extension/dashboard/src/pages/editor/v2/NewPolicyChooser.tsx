@@ -34,8 +34,6 @@ const CARDS: CardDef[] = [
     pros: ["round-trip 안전망", "cedar·manifest 자동", "인라인 값 편집"],
     cons: ["복잡한 정책(OR·중첩 등)은 폼으로 안 열릴 수 있어요"],
     preview: "form",
-    disabled: true,
-    disabledNote: "준비 중 — 곧 추가됩니다",
   },
   {
     key: "block",
