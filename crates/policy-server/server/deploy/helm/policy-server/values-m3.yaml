@@ -15,6 +15,7 @@ api:
   # through chrome.identity.launchWebAuthFlow. Must EQUAL getRedirectURL()
   # byte-for-byte (trailing slash included).
   oauthAllowedRedirectUris: "https://fbadoakiikjmgdpdhpcohaddifhaggki.chromiumapp.org/"
+  marketAdminEmails: "dandi@upside.center"
   corsAllowedOrigins:
     - https://pasu-policy.duckdns.org
     - chrome-extension://fbadoakiikjmgdpdhpcohaddifhaggki

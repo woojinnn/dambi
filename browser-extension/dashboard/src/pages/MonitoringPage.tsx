@@ -591,11 +591,23 @@ const CHAIN_NAMES: Record<string, string> = {
   "eip155:137": "Polygon",
   "eip155:56": "BNB",
 };
+const VENUE_COLORS: Record<string, string> = {
+  hyperliquid: "#0EA5A6",
+};
+const VENUE_NAMES: Record<string, string> = {
+  hyperliquid: "Hyperliquid",
+};
 function chainColor(chain: string): string {
   return CHAIN_COLORS[chain] ?? "#9099A5";
 }
 function chainName(chain: string): string {
   return CHAIN_NAMES[chain] ?? chain;
+}
+function venueColor(venue: string): string {
+  return VENUE_COLORS[venue] ?? "#6366F1";
+}
+function venueName(venue: string): string {
+  return VENUE_NAMES[venue] ?? venue;
 }
 
 function ChainPill({ chain }: { chain: string | null }) {
@@ -612,11 +624,28 @@ function ChainBreakdown({ summary, loading }: { summary?: DashboardSummary; load
   if (loading || !summary) {
     return <div className="chain-card"><div className="skeleton-row" style={{ width: "100%" }} /></div>;
   }
-  if (summary.chain_breakdown.length === 0) {
+  const venueBreakdown = summary.venue_breakdown ?? [];
+  const rows = [
+    ...summary.chain_breakdown.map((c) => ({
+      key: `chain:${c.chain}`,
+      label: chainName(c.chain),
+      usd: c.usd,
+      pct: c.pct,
+      color: chainColor(c.chain),
+    })),
+    ...venueBreakdown.map((v) => ({
+      key: `venue:${v.venue}`,
+      label: venueName(v.venue),
+      usd: v.usd,
+      pct: v.pct,
+      color: venueColor(v.venue),
+    })),
+  ];
+  if (rows.length === 0) {
     return (
       <div className="chain-card">
         <div className="cc-head">
-          <span className="cc-ttl">체인별 분포</span>
+          <span className="cc-ttl">자산 분포</span>
           <span className="cc-meta">잔고 없음</span>
         </div>
       </div>
@@ -625,26 +654,26 @@ function ChainBreakdown({ summary, loading }: { summary?: DashboardSummary; load
   return (
     <div className="chain-card">
       <div className="cc-head">
-        <span className="cc-ttl">체인별 분포</span>
-        <span className="cc-meta">{summary.chain_breakdown.length} chains</span>
+        <span className="cc-ttl">자산 분포</span>
+        <span className="cc-meta">{rows.length} sources</span>
       </div>
       <div className="chain-bar">
-        {summary.chain_breakdown.map((c) => (
+        {rows.map((r) => (
           <div
-            key={c.chain}
+            key={r.key}
             className="chain-seg"
-            style={{ width: `${c.pct}%`, background: chainColor(c.chain) }}
-            title={`${chainName(c.chain)} · ${c.pct.toFixed(2)}%`}
+            style={{ width: `${r.pct}%`, background: r.color }}
+            title={`${r.label} · ${r.pct.toFixed(2)}%`}
           />
         ))}
       </div>
       <div className="chain-legend">
-        {summary.chain_breakdown.map((c) => (
-          <span key={c.chain} className="chain-leg">
-            <span className="cl-dot" style={{ background: chainColor(c.chain) }} />
-            <span className="cl-name">{chainName(c.chain)}</span>
+        {rows.map((r) => (
+          <span key={r.key} className="chain-leg">
+            <span className="cl-dot" style={{ background: r.color }} />
+            <span className="cl-name">{r.label}</span>
             <span className="cl-pct">
-              ${Number(c.usd).toLocaleString("en-US", { maximumFractionDigits: 0 })} · {c.pct.toFixed(2)}%
+              ${Number(r.usd).toLocaleString("en-US", { maximumFractionDigits: 0 })} · {r.pct.toFixed(2)}%
             </span>
           </span>
         ))}
@@ -1359,18 +1388,35 @@ function tpSlOf(
   return pos.is_long ? (trig >= entry ? "tp" : "sl") : trig <= entry ? "tp" : "sl";
 }
 
+function hlStableSpotUsd(acct: HlAccount): number {
+  return (acct.spot_balances ?? []).reduce((sum, balance) => {
+    const coin = balance.coin.toUpperCase();
+    if (!["USDC", "USDT", "USDT0", "USDE", "USDH", "USDXL"].includes(coin)) return sum;
+    return sum + Number(balance.total ?? "0");
+  }, 0);
+}
+
+function hlVaultUsd(acct: HlAccount): number {
+  return (acct.vault_equities ?? []).reduce((sum, vault) => sum + Number(vault.equity ?? "0"), 0);
+}
+
 function HlAccountCard({ wallet, acct }: { wallet: DashboardWalletSummary; acct: HlAccount }) {
   const levByAsset = new Map(acct.leverage_settings.map((s) => [s.asset_index, s]));
   const posByAsset = new Map(acct.positions.map((p) => [p.asset_index, p]));
   const label = wallet.label ?? shortAddr(wallet.address);
   const empty = acct.positions.length === 0 && acct.open_orders.length === 0;
+  const perpValue = acct.perp_account_value_usd ?? acct.perp_usdc;
+  const spotUsd = hlStableSpotUsd(acct);
+  const vaultUsd = hlVaultUsd(acct);
 
   return (
     <div className="hl-card">
       <div className="hl-card-head">
         <span className="hl-wallet">{label}</span>
         <div className="hl-meta">
-          <span className="hl-chip muted">마진 {acct.perp_usdc ? fmtUsd(acct.perp_usdc, 2) : "$0"}</span>
+          <span className="hl-chip muted">Perp {perpValue ? fmtUsd(perpValue, 2) : "$0"}</span>
+          {spotUsd > 0 && <span className="hl-chip muted">Spot {fmtUsd(String(spotUsd), 2)}</span>}
+          {vaultUsd > 0 && <span className="hl-chip muted">Vault {fmtUsd(String(vaultUsd), 2)}</span>}
           {Number(acct.pending_outflow) > 0 && (
             <span className="hl-chip danger">출금대기 {fmtUsd(acct.pending_outflow, 2)}</span>
           )}
