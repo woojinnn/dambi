@@ -821,6 +821,10 @@ impl Orchestrator {
                 let mut fail = 0;
                 for item in batch.items {
                     let Some(fetcher) = self.price_fetcher_for(&item.source) else {
+                        // No fetcher registered for this provider — price can never
+                        // populate. Log it: this is otherwise an invisible cause of
+                        // an empty USD column.
+                        tracing::warn!(source = ?item.source, "oracle price fetch skipped: no fetcher for provider");
                         fail += 1;
                         continue;
                     };
@@ -834,7 +838,12 @@ impl Orchestrator {
                             );
                             ok += 1;
                         }
-                        Err(_) => fail += 1,
+                        Err(e) => {
+                            // Previously swallowed silently — a missing feed / RPC
+                            // failure left the price stale with no trace.
+                            tracing::warn!(source = ?item.source, error = %e, "oracle price fetch failed");
+                            fail += 1;
+                        }
                     }
                 }
                 Ok((ok, fail))
