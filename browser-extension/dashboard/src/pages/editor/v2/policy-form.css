@@ -1,0 +1,563 @@
+/* PolicyFormPane — two-column form (left) + live cedar (right). Clean, uniform
+ * controls (32px tall), subtle separators, and the Cedar preview on its own
+ * muted line under each condition row. */
+
+.pf-pane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+.pf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ── sections ───────────────────────────────────────────────────────────── */
+.pf-section {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: var(--surface, #fff);
+}
+.pf-h {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pf-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #111827;
+  color: #fff;
+  font-size: 13px;
+}
+.pf-sub {
+  font-weight: 400;
+  font-size: 12.5px;
+  color: var(--muted, #6b7280);
+}
+
+/* label + control rows (trigger / notify) */
+.pf-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+}
+.pf-label {
+  width: 88px;
+  flex: none;
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+}
+.pf-input,
+.pf-select {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+}
+.pf-readonly {
+  background: #f3f4f6;
+  color: var(--muted, #6b7280);
+  cursor: not-allowed;
+}
+
+/* severity toggle */
+.pf-sev {
+  display: flex;
+  gap: 8px;
+}
+.pf-sev-btn {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  color: var(--muted, #6b7280);
+}
+.pf-sev-btn.warn.on {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #b45309;
+}
+.pf-sev-btn.deny.on {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* ── condition list ─────────────────────────────────────────────────────── */
+.pf-empty-cond {
+  font-size: 12.5px;
+  color: var(--muted, #9ca3af);
+  padding: 6px 2px;
+}
+.pf-precedence {
+  font-size: 11px;
+  color: var(--muted, #9ca3af);
+  margin: 6px 0 8px;
+}
+.pf-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pf-add-cond {
+  border: 1px dashed var(--border, #d1d5db);
+  background: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.pf-add-cond:hover {
+  border-color: #9ca3af;
+  color: #374151;
+}
+
+/* a single condition row: a control line + a muted cedar line */
+.pf-cond {
+  padding: 4px 0;
+}
+.pf-cond + .pf-cond {
+  border-top: 1px solid #f3f4f6;
+}
+.pf-cond-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pf-cond-chip {
+  margin: 3px 0 0 26px;
+  font-size: 12px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-cond-chip::before {
+  content: "↳ ";
+  color: #cbd5e1;
+}
+.pf-grow {
+  flex: 1;
+}
+
+/* uniform 32px controls */
+.pf-ctl,
+.pf-val,
+.fc-btn {
+  height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+}
+.pf-ctl {
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.pf-drag {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  cursor: grab;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1;
+  user-select: none;
+}
+.pf-drag:hover {
+  color: #94a3b8;
+}
+.pf-drag:active {
+  cursor: grabbing;
+}
+
+.pf-join-tag {
+  width: 88px;
+  flex: none;
+  font-size: 12px;
+  color: var(--muted, #9ca3af);
+  padding-left: 2px;
+}
+.pf-join {
+  width: 88px;
+  flex: none;
+  font-weight: 600;
+}
+.pf-join.and {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.pf-join.or {
+  color: #a16207;
+  background: #fefce8;
+  border-color: #fde68a;
+}
+
+.pf-not {
+  flex: none;
+  color: var(--muted, #9ca3af);
+}
+.pf-not.on {
+  border-color: #ef4444;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 600;
+}
+.pf-leaf-op {
+  width: 92px;
+  flex: none;
+  font-weight: 600;
+}
+.pf-mode {
+  flex: none;
+  color: #475569;
+  background: #f8fafc;
+}
+
+/* value inputs */
+.pf-val {
+  width: 150px;
+  padding: 0 10px;
+}
+.pf-val.num {
+  width: 92px;
+}
+.pf-val.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  width: 220px;
+}
+.pf-val.wide {
+  width: 240px;
+}
+.pf-val.invalid {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+.pf-val-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pf-unit {
+  font-size: 11.5px;
+  color: var(--muted, #6b7280);
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+/* row action icon buttons */
+.pf-iconbtn {
+  flex: none;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 7px;
+  background: var(--surface, #fff);
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.pf-iconbtn:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+.pf-iconbtn.danger:hover {
+  color: #ef4444;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+/* ── (…) group box ──────────────────────────────────────────────────────── */
+.pf-box {
+  border: 1px solid #dbe1fe;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: #f8f9ff;
+}
+.pf-box.neg {
+  border-color: #fecaca;
+  background: #fef6f6;
+}
+.pf-box.droppable {
+  border-style: dashed;
+  border-color: #818cf8;
+  background: #eef2ff;
+}
+.pf-box-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.pf-box-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4f46e5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pf-box.neg .pf-box-label {
+  color: #b91c1c;
+}
+.pf-spc {
+  flex: 1;
+}
+.pf-box-act {
+  flex: none;
+  height: 28px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--surface, #fff);
+  border-radius: 7px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  color: #4f46e5;
+  cursor: pointer;
+}
+.pf-box-act:hover {
+  background: #eef2ff;
+}
+.pf-or-btn {
+  margin-top: 6px;
+  border: 1px dashed var(--border, #d1d5db);
+  background: none;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.pf-or-btn:hover {
+  border-color: #9ca3af;
+  color: #374151;
+}
+
+/* drag-out target */
+.pf-dropstrip {
+  border: 1.5px dashed #c7d2fe;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+  font-size: 12.5px;
+  color: #6366f1;
+  background: #f5f7ff;
+  margin: 6px 0;
+}
+
+/* ── field combobox ─────────────────────────────────────────────────────── */
+.fc {
+  position: relative;
+  flex: 1 1 150px;
+  min-width: 130px;
+}
+.fc-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 0 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.fc-btn.empty {
+  color: var(--muted, #9ca3af);
+}
+.fc-btn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fc-caret {
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 10px;
+}
+.fc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.fc-pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 320px;
+  max-width: 80vw;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+.fc-search {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border, #eee);
+  padding: 10px 12px;
+  font-size: 13px;
+  outline: none;
+}
+.fc-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.fc-none {
+  padding: 14px;
+  color: var(--muted, #9ca3af);
+  font-size: 12.5px;
+  text-align: center;
+}
+.fc-group-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #6b7280);
+}
+.fc-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.fc-opt.active {
+  background: #f3f4f6;
+}
+.fc-opt.sel {
+  background: #eff6ff;
+}
+.fc-opt-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.fc-opt-label {
+  font-size: 13px;
+  color: #111827;
+}
+.fc-opt-desc {
+  font-size: 11.5px;
+  color: var(--muted, #9ca3af);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fc-chip {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 1px 6px;
+  flex: none;
+}
+.fc-badge {
+  font-size: 10px;
+  color: #7c3aed;
+  background: #f5f3ff;
+  border-radius: 5px;
+  padding: 1px 5px;
+  flex: none;
+}
+
+/* ── validity badge ─────────────────────────────────────────────────────── */
+.pf-status {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pf-status.ok {
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  color: #15803d;
+}
+.pf-status.bad {
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #b91c1c;
+}
+.pf-status-main {
+  font-weight: 600;
+}
+.pf-status-meta {
+  color: var(--muted, #6b7280);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+
+/* ── live cedar pane ────────────────────────────────────────────────────── */
+.pf-cedar {
+  position: sticky;
+  top: 8px;
+  border-radius: 12px;
+  background: #0b1020;
+  color: #e5e7eb;
+  overflow: hidden;
+  min-height: 220px;
+}
+.pf-cedar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pf-sync {
+  font-size: 11px;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.pf-sync.err {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+.pf-cedar-body {
+  margin: 0;
+  padding: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c7d2fe;
+}

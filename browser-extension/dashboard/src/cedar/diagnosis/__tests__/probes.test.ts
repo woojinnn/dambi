@@ -87,4 +87,37 @@ describe("buildProbes", () => {
     expect(ids).toContain("c0.body.left");   // context.a — boolean-position attr
     expect(ids).toContain("c0.body.right");  // context.b — boolean-position attr
   });
+
+  // ── membership over a literal set → one probe per member ──
+
+  it("emits a per-member probe (`other == member`) for a literal-set `contains`", () => {
+    const s = (v: string): Expr => ({ kind: "lit", litType: "string", value: v });
+    // forbid when { ["a","b"] contains context.x }
+    const body: Expr = {
+      kind: "binary", op: "contains",
+      left: { kind: "set", elements: [s("a"), s("b")] },
+      right: ctxAttr("x"),
+    };
+    const probes = buildProbes(forbidWhen(body)).probes;
+    const ids = probes.map((p) => p.id);
+    expect(ids).toContain("c0.body");                  // the membership node itself
+    expect(ids).toContain("c0.body.left.elements[0]"); // member "a"
+    expect(ids).toContain("c0.body.left.elements[1]"); // member "b"
+    // each member probe is an unconstrained permit tagged with the member path
+    const m0 = probes.find((p) => p.id === "c0.body.left.elements[0]")!;
+    expect((m0.est as any).effect).toBe("permit");
+    expect((m0.est as any).annotations.id).toBe("c0.body.left.elements[0]");
+  });
+
+  it("does NOT fan a scalar membership (no literal set) into members", () => {
+    // forbid when { context.tags contains "x" } — no literal set, stays one node
+    const body: Expr = {
+      kind: "binary", op: "contains",
+      left: ctxAttr("tags"),
+      right: { kind: "lit", litType: "string", value: "x" },
+    };
+    const ids = buildProbes(forbidWhen(body)).probes.map((p) => p.id);
+    expect(ids).toContain("c0.body");
+    expect(ids.some((id) => id.includes("elements["))).toBe(false);
+  });
 });

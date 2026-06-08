@@ -31,12 +31,9 @@
    that share the same chrome. Stacks vertically below 640px. */
 .active-cards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
   margin-bottom: 18px;
-}
-@media (max-width: 640px) {
-  .active-cards { grid-template-columns: 1fr; }
 }
 
 .policies-card {

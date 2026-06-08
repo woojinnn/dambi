@@ -18,8 +18,11 @@
  */
 import { useMemo } from "react";
 
-import type { ActionScope, Expr, PolicyIR } from "../blocks/ir";
+import type { ActionScope, BinaryOp, Expr, PolicyIR } from "../blocks/ir";
+import { isAllOf, setLiteralOperand } from "../diagnosis/membership";
 import { eachChild, pathByNode } from "../diagnosis/path";
+import { naturalCondition } from "../nl";
+import { getGloss } from "../../editor-v9/gloss/paths";
 
 import "./policy-diagram.css";
 
@@ -134,12 +137,13 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
     NEGATE_BINARY[e.operand.op]
   ) {
     const inner = e.operand;
+    const negated: Expr = { kind: "binary", op: NEGATE_OP[inner.op] ?? inner.op, left: inner.left, right: inner.right };
     return {
       path: pathOf.get(inner) ?? path,
       kind: "leaf",
-      title: `${exprToText(inner.left)} ${NEGATE_BINARY[inner.op]} ${exprToText(
-        inner.right,
-      )}`,
+      title:
+        exprToKorean(negated) ??
+        `${exprToText(inner.left)} ${NEGATE_BINARY[inner.op]} ${exprToText(inner.right)}`,
       children: [],
     };
   }
@@ -158,7 +162,29 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
       children: [branch(e.cond, "조건"), branch(e.then, "then"), branch(e.else, "else")],
     };
   }
-  return { path, kind: "leaf", title: exprToText(e), children: [] };
+  // `[..] contains x` / `x in [..]` / `set containsAny [..]` over a LITERAL set →
+  // fan out one leaf per member, so the user sees WHICH entry is at play (and the
+  // diagnosis can red-trace the single matched one). Members keep their canonical
+  // `…elements[i]` path (via pathOf), so highlight lines up. A scalar membership
+  // (no literal set) falls through to a single leaf.
+  if (e.kind === "binary") {
+    const mem = setLiteralOperand(e);
+    if (mem) {
+      return {
+        path,
+        kind: "or", // alternation styling — "any of these members"
+        title: isAllOf(e.op) ? "다음 전부" : "다음 중 하나",
+        detail: exprToText(mem.other),
+        children: mem.set.elements.map((m) => ({
+          path: pathOf.get(m) ?? "?",
+          kind: "leaf",
+          title: exprToText(m),
+          children: [],
+        })),
+      };
+    }
+  }
+  return { path, kind: "leaf", title: exprToKorean(e) ?? exprToText(e), children: [] };
 }
 
 function buildTree(ir: PolicyIR): DNode {
@@ -212,6 +238,60 @@ const NEGATE_BINARY: Record<string, string> = {
   "==": "≠",
   "!=": "==",
 };
+
+/** Comparison operator → its negation as an operator (for Korean phrasing). */
+const NEGATE_OP: Record<string, BinaryOp> = {
+  "<": ">=",
+  "<=": ">",
+  ">": "<=",
+  ">=": "<",
+  "==": "!=",
+  "!=": "==",
+};
+
+/** Boolean comparison extension fns → the operator they mean. */
+const EXT_TO_OP: Record<string, string> = {
+  greaterThan: ">",
+  greaterThanOrEqual: ">=",
+  lessThan: "<",
+  lessThanOrEqual: "<=",
+};
+
+/** Human value text for a comparison's right-hand side. */
+function valueExprText(rhs: Expr): string {
+  const lit = unwrapExtLiteral(rhs);
+  if (lit !== null) return lit;
+  if (rhs.kind === "lit") {
+    if (rhs.litType === "bool") return rhs.value ? "참" : "거짓";
+    if (rhs.litType === "string") return String(rhs.value) === "" ? "" : `"${rhs.value}"`;
+    return String(rhs.value);
+  }
+  if (rhs.kind === "set") {
+    return `[${rhs.elements.map((el) => unwrapExtLiteral(el) ?? exprToText(el)).join(", ")}]`;
+  }
+  const p = attrPath(rhs);
+  if (p) return getGloss(p)?.ko ?? p;
+  return exprToText(rhs);
+}
+
+/** A leaf comparison as plain Korean (field label + op phrase + value), or null
+ *  when `e` isn't a humanizable comparison (caller falls back to `exprToText`). */
+function exprToKorean(e: Expr): string | null {
+  if (e.kind === "binary") {
+    const COMPARE = ["==", "!=", "<", "<=", ">", ">=", "contains", "in"];
+    if (!COMPARE.includes(e.op)) return null;
+    const path = attrPath(e.left);
+    if (!path) return null;
+    const emptyStr = e.right.kind === "lit" && e.right.litType === "string" && e.right.value === "";
+    return naturalCondition({ subject: getGloss(path)?.ko ?? path, op: e.op, value: valueExprText(e.right), emptyStr });
+  }
+  if (e.kind === "ext" && EXT_TO_OP[e.fn] && e.args.length === 2) {
+    const path = attrPath(e.args[0]);
+    if (!path) return null;
+    return naturalCondition({ subject: getGloss(path)?.ko ?? path, op: EXT_TO_OP[e.fn], value: valueExprText(e.args[1]) });
+  }
+  return null;
+}
 
 /** `decimal("0.05")` / `ip("…")` used as a value → just its inner literal text. */
 function unwrapExtLiteral(e: Expr): string | null {
