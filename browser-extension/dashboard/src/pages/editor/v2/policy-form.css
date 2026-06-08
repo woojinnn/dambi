@@ -284,6 +284,30 @@
 .pf-val.wide {
   width: 220px;
 }
+.pf-val.num {
+  width: 96px;
+}
+.pf-val.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  width: 200px;
+}
+.pf-val.invalid {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+.pf-val-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pf-unit {
+  font-size: 11.5px;
+  color: var(--muted, #6b7280);
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 2px 6px;
+}
 .pf-leaf-chip {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11.5px;

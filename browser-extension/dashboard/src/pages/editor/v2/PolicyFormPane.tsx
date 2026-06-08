@@ -88,6 +88,26 @@ function valueKindFor(field: FieldOption | undefined, op: FormOp): FormValue["ki
   return field ? valueKindForField(field.fieldKind) : "string";
 }
 
+/** EVM address shape — used to validate/hint address-typed value inputs. */
+const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+const isAddr = (s: string) => s === "" || ADDR_RE.test(s.trim());
+
+/** Known enum value suggestions (no machine-readable enum list exists; these are
+ *  the ones we're confident about — shown as datalist hints, not enforced). */
+const ENUM_SUGGESTIONS: Record<string, string[]> = {
+  "context.direction.kind": ["exact_input", "exact_output"],
+  "context.side": ["long", "short"],
+};
+
+/** How a string-typed value should be entered, refined from the field's role. */
+type StringFlavor = "address" | "enum" | "plain";
+function stringFlavor(field: FieldOption | undefined): StringFlavor {
+  if (!field) return "plain";
+  if (field.role === "address") return "address";
+  if (field.role === "enum") return "enum";
+  return "plain";
+}
+
 function newLeaf(fields: FieldOption[]): FormLeaf {
   return { fieldPath: fields[0]?.path ?? "", op: "==", value: defaultValueOfKind("string") };
 }
@@ -417,7 +437,7 @@ function LeafRow({
           onChange={(p) => onValue({ kind: "field", path: p })}
         />
       ) : (
-        <ValueInput value={leaf.value} onChange={onValue} />
+        <ValueInput value={leaf.value} field={field} onChange={onValue} />
       )}
       <span className="pf-leaf-chip">{chip}</span>
       <button type="button" className="pf-x" onClick={onRemove} aria-label="조건 삭제">
@@ -435,9 +455,18 @@ function safeChip(leaf: FormLeaf): string {
   }
 }
 
-// ── value widget by kind (literal kinds only; `field` handled in LeafRow) ────
+// ── value widget by kind + field type (literal kinds only) ──────────────────
 
-function ValueInput({ value, onChange }: { value: FormValue; onChange: (v: FormValue) => void }) {
+function ValueInput({
+  value,
+  field,
+  onChange,
+}: {
+  value: FormValue;
+  field: FieldOption | undefined;
+  onChange: (v: FormValue) => void;
+}) {
+  const unit = field?.unit;
   switch (value.kind) {
     case "bool":
       return (
@@ -448,31 +477,78 @@ function ValueInput({ value, onChange }: { value: FormValue; onChange: (v: FormV
       );
     case "long":
       return (
-        <input
-          className="pf-val"
-          type="number"
-          value={value.value}
-          onChange={(e) => onChange({ kind: "long", value: Number(e.target.value) })}
-        />
+        <span className="pf-val-wrap">
+          <input
+            className="pf-val num"
+            type="number"
+            value={value.value}
+            onChange={(e) => onChange({ kind: "long", value: Number(e.target.value) })}
+          />
+          {unit && <span className="pf-unit">{unit}</span>}
+        </span>
       );
     case "decimal":
       return (
-        <input className="pf-val" value={value.value} onChange={(e) => onChange({ kind: "decimal", value: e.target.value })} placeholder="0.05" />
+        <span className="pf-val-wrap">
+          <input className="pf-val num" value={value.value} onChange={(e) => onChange({ kind: "decimal", value: e.target.value })} placeholder="0.05" />
+          {unit && <span className="pf-unit">{unit}</span>}
+        </span>
       );
-    case "set":
+    case "set": {
+      // `in` over an address field → validate each entry as an EVM address.
+      const addr = field?.role === "address";
+      const bad = addr && value.values.some((v) => !isAddr(v));
       return (
         <input
-          className="pf-val wide"
+          className={`pf-val wide${addr ? " mono" : ""}${bad ? " invalid" : ""}`}
           value={value.values.join(", ")}
           onChange={(e) =>
             onChange({ kind: "set", values: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })
           }
-          placeholder="값1, 값2, …"
+          placeholder={addr ? "0x…, 0x…" : "값1, 값2, …"}
         />
       );
+    }
     case "field":
       return null; // handled by LeafRow's field combobox
-    default:
+    default: {
+      // string — refine by the field's semantic type (address / enum / plain).
+      const flavor = stringFlavor(field);
+      if (flavor === "address") {
+        const bad = !isAddr(value.value);
+        return (
+          <input
+            className={`pf-val mono${bad ? " invalid" : ""}`}
+            value={value.value}
+            onChange={(e) => onChange({ kind: "string", value: e.target.value })}
+            placeholder="0x…"
+            spellCheck={false}
+          />
+        );
+      }
+      if (flavor === "enum") {
+        const listId = `enum-${field?.path ?? ""}`;
+        const sugg = field ? ENUM_SUGGESTIONS[field.path] : undefined;
+        return (
+          <>
+            <input
+              className="pf-val"
+              list={sugg ? listId : undefined}
+              value={value.value}
+              onChange={(e) => onChange({ kind: "string", value: e.target.value })}
+              placeholder={field?.desc ? field.desc.slice(0, 24) : "값"}
+            />
+            {sugg && (
+              <datalist id={listId}>
+                {sugg.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            )}
+          </>
+        );
+      }
       return <input className="pf-val" value={value.value} onChange={(e) => onChange({ kind: "string", value: e.target.value })} />;
+    }
   }
 }
