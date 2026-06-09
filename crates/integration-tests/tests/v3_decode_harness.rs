@@ -2479,6 +2479,240 @@ fn eigenlayer_complete_queued_withdrawal_decodes_nested_tuple() {
     );
 }
 
+/// Real mainnet BATCH `completeQueuedWithdrawals` 0xaaf5dc7b… (2 withdrawals):
+/// `array_emit` over `withdrawals[]` with the index-aligned top-level
+/// `receiveAsTokens bool[]` decoded PER-ELEMENT via `emit.parallel_sources`.
+/// Pins that the batch path now populates `receive_as_tokens` for every leg —
+/// the receive-as-shares trap is caught on batch, not just the single
+/// `completeQueuedWithdrawal`. Both legs are receiveAsTokens=true here (the
+/// ~96.5% normal token-exit path; all 3 real corpus batches are all-true).
+#[test]
+fn eigenlayer_complete_queued_withdrawals_batch_decodes_receive_as_tokens_per_element() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    const CALLDATA: &str = "0x9435bb430000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000038000000000000000000000000000000000000000000000000000000000000004600000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000b431be7f477560ab9b45b6afd108a4669649481000000000000000000000000071c6f7ed8c2d4925d0baf16f6a85bb1736d412eb000000000000000000000000b431be7f477560ab9b45b6afd108a46696494810000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000017f1cf900000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000acb55c530acdb2849e6d4f36992cd8c9d50ed8f7000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000622eee02eec2d1f28000000000000000000000000b431be7f477560ab9b45b6afd108a4669649481000000000000000000000000071c6f7ed8c2d4925d0baf16f6a85bb1736d412eb000000000000000000000000b431be7f477560ab9b45b6afd108a46696494810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000017f1cf900000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000298afb19a105d59e74658c4c334ff360bade6dd200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000dabff234b311c430000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000001000000000000000000000000ec53bf9167f50cdeb3ae105f56099aaab9061f830000000000000000000000000000000000000000000000000000000000000001000000000000000000000000d5f7838f5c461feff7fe49ea5ebaf7728bb0adfa000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001";
+    let env = harness::route::route_calldata(1, EL_DM, "0x9435bb43", CALLDATA, "0");
+    assert_eq!(
+        env.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "batch completeQueuedWithdrawals route did not succeed: {env}"
+    );
+    assert_eq!(find_string_field(&env, "domain"), Some("multicall".into()));
+    let legs = env
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("batch multicall legs");
+    assert_eq!(legs.len(), 2, "2-withdrawal batch → 2 legs: {env}");
+    for (i, leg) in legs.iter().enumerate() {
+        assert_eq!(
+            find_string_field(leg, "action"),
+            Some("complete_withdrawal".into()),
+            "leg {i} action: {leg}"
+        );
+        // The parallel receiveAsTokens[i] is bound per-element (both true here).
+        assert_eq!(
+            find_bool_field(leg, "receive_as_tokens"),
+            Some(true),
+            "leg {i} receive_as_tokens (parallel bool[] decoded per-element): {leg}"
+        );
+        // `$inputs.element[5]` (strategies) still binds the Withdrawal tuple after
+        // the positional `$inputs[5]` → `$inputs.element[5]` rewrite.
+        assert!(
+            find_object_by_key(leg, "strategies")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|a| !a.is_empty()),
+            "leg {i} strategies (element[5]) present: {leg}"
+        );
+        // `$inputs.element[0]` (staker) still binds.
+        assert!(
+            find_string_field(leg, "staker").is_some_and(|s| s.starts_with("0x")),
+            "leg {i} staker (element[0]) present: {leg}"
+        );
+    }
+}
+
+/// Synthetic batch (real `completeQueuedWithdrawals` 0xe22092ef…, 1 withdrawal,
+/// with the single `receiveAsTokens` flipped true→false): proves the
+/// receive-as-shares TRAP value (`false`) decodes through `parallel_sources` to
+/// `receive_as_tokens = Some(false)` on the batch path — the ~11,430 real
+/// batch-`false` legs (Dune query 7683523) are now reachable, closing the
+/// `withdrawal-safety` coverage gap. The 3 real corpus batches are all-`true`
+/// (the trap is rare, ~3.5%), so this flips one real leg's final calldata word
+/// (`0x…01` → `0x…00`) to exercise the security-critical case.
+#[test]
+fn eigenlayer_complete_queued_withdrawals_batch_receive_as_shares_false_decodes() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+    // Real 1-withdrawal batch 0xe22092ef… (receiveAsTokens=[true]); staker /
+    // withdrawer = 0xba3053…, strategy = native beacon-ETH sentinel.
+    const CALLDATA_TRUE: &str = "0x9435bb4300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000ba3053d3e075a8037d4c01b1ca08aa1cbe508e840000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ba3053d3e075a8037d4c01b1ca08aa1cbe508e84000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000017e6f6c00000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000beac0eeeeeeeeeeeeeeeeeeeeeeeeeeeeeebeac00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000001bc16d674ec800000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001";
+    // Flip the final calldata word (receiveAsTokens[0]) from `…0001` → `…0000`.
+    let synthetic_false = format!("{}0", &CALLDATA_TRUE[..CALLDATA_TRUE.len() - 1]);
+
+    // Sanity: the real (unflipped) form decodes to Some(true).
+    let env_true = harness::route::route_calldata(1, EL_DM, "0x9435bb43", CALLDATA_TRUE, "0");
+    assert_eq!(
+        find_bool_field(&env_true, "receive_as_tokens"),
+        Some(true),
+        "real 1-leg batch must decode receiveAsTokens=true: {env_true}"
+    );
+
+    // The flipped form decodes to Some(false) — the receive-as-shares trap.
+    let env_false = harness::route::route_calldata(1, EL_DM, "0x9435bb43", &synthetic_false, "0");
+    assert_eq!(
+        env_false.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "synthetic batch route did not succeed: {env_false}"
+    );
+    let legs = env_false
+        .pointer("/data/actions/0/body/actions")
+        .and_then(serde_json::Value::as_array)
+        .expect("synthetic batch multicall legs");
+    assert_eq!(legs.len(), 1, "1-withdrawal batch → 1 leg: {env_false}");
+    assert_eq!(
+        find_bool_field(&legs[0], "receive_as_tokens"),
+        Some(false),
+        "flipped receiveAsTokens=false must decode to the receive-as-shares trap value: {}",
+        legs[0]
+    );
+    // staker (element[0]) intact after the rewrite.
+    assert_eq!(
+        find_string_field(&legs[0], "staker"),
+        Some("0xba3053d3e075a8037d4c01b1ca08aa1cbe508e84".into()),
+        "synthetic leg staker (element[0]) mis-decoded: {}",
+        legs[0]
+    );
+}
+
+/// END-TO-END POLICY: a real BATCH `completeQueuedWithdrawals` routed through the
+/// production decoder AND evaluated through the withdrawal-safety
+/// receive-as-shares policy, PER-CHILD — exactly mirroring the orchestrator's
+/// `evaluateBodyTree`, which re-dispatches each Multicall leg as its own leaf
+/// `evaluate_action_v2_json` call (Inner policies fire on the leaf, not on the
+/// batch; `action_eval_exports.rs` TriggerScope gate). This joins the decode fix
+/// (per-element `receive_as_tokens` via `parallel_sources`) to the actual policy
+/// firing, proving the receive-as-shares trap surfaces a WARN on the batch path —
+/// the gap the single-only coverage left open. Uses a 2-withdrawal batch so it
+/// also proves PER-CHILD discrimination (one leg warns, the other passes).
+///
+/// The policy is the firing core of the shipped
+/// `withdrawal-safety/complete-withdrawal-receive-as-shares-warn` preset, inlined
+/// here so this stays a tracked, preset-independent test.
+#[test]
+fn eigenlayer_batch_receive_as_shares_policy_warns_per_child() {
+    let _surface = adapters::load_and_install().expect("install local surface");
+
+    // Load the real 2-withdrawal batch 0xaaf5dc7b… (receiveAsTokens=[true,true])
+    // straight from the golden corpus — no hand-transcription of 1k+ hex chars.
+    const CORPUS: &str = include_str!("../data/golden/v3-decode/eigenlayer/corpus.json");
+    let corpus: serde_json::Value =
+        serde_json::from_str(CORPUS).expect("parse eigenlayer golden corpus");
+    let calldata_all_true = corpus["transactions"]
+        .as_array()
+        .expect("corpus transactions[]")
+        .iter()
+        .find(|t| {
+            t["tx_hash"]
+                .as_str()
+                .is_some_and(|h| h.starts_with("0xaaf5dc7b"))
+        })
+        .expect("2-withdrawal batch tx 0xaaf5dc7b in corpus")["rpc"]["params"][0]["data"]
+        .as_str()
+        .expect("batch calldata hex")
+        .to_string();
+    // Mixed variant: flip the FINAL word (receiveAsTokens[1]) true→false, so the
+    // batch carries one normal leg (true) and one receive-as-shares trap (false).
+    let calldata_mixed = format!("{}0", &calldata_all_true[..calldata_all_true.len() - 1]);
+
+    // Firing core of withdrawal-safety/complete-withdrawal-receive-as-shares-warn.
+    const POLICY: &str = "@id(\"complete-withdrawal-receive-as-shares-warn\")\n\
+@severity(\"warn\")\n\
+@reason(\"Completing as shares re-delegates your stake to your current operator instead of returning tokens\")\n\
+forbid(principal, action == Restaking::Action::\"CompleteWithdrawal\", resource)\n\
+when { context has receiveAsTokens && context.receiveAsTokens == false };\n";
+
+    let manifest = serde_json::json!({
+        "id": "complete-withdrawal-receive-as-shares-warn",
+        "schema_version": 2,
+        "trigger": { "where": { "action.tag": { "eq": "complete_withdrawal" } } }
+    });
+
+    // Mirror evaluateBodyTree: route the batch → Multicall, then evaluate EACH
+    // child as its own leaf. Assert (leg's receiveAsTokens == false) ⇔ WARN.
+    let assert_per_child = |calldata: &str, want_any_warn: bool| {
+        let env = harness::route::route_calldata(1, EL_DM, "0x9435bb43", calldata, "0");
+        assert_eq!(
+            env.get("ok").and_then(serde_json::Value::as_bool),
+            Some(true),
+            "batch route did not succeed: {env}"
+        );
+        let outer = &env["data"]["actions"][0];
+        let meta = outer.get("meta").expect("decoded batch carries meta");
+        let children = outer
+            .pointer("/body/actions")
+            .and_then(serde_json::Value::as_array)
+            .expect("batch multicall children");
+        assert_eq!(children.len(), 2, "2-withdrawal batch → 2 legs: {env}");
+
+        let mut saw_warn = false;
+        let mut saw_pass = false;
+        for (i, child) in children.iter().enumerate() {
+            let is_shares = find_bool_field(child, "receive_as_tokens") == Some(false);
+            let eval_input = serde_json::json!({
+                "action": child,
+                "meta": meta,
+                "tx": { "chain_id": "eip155:1", "from": "0x000000000000000000000000000000000000aaaa", "to": EL_DM },
+                "bundles": [{ "policy": POLICY, "manifest": manifest }],
+                "results": {},
+            });
+            let v = harness::route::evaluate_action(&eval_input);
+            assert_eq!(
+                v.get("ok").and_then(serde_json::Value::as_bool),
+                Some(true),
+                "evaluate child {i} did not return ok envelope: {v}"
+            );
+            let kind = v
+                .pointer("/data/verdict/kind")
+                .and_then(serde_json::Value::as_str);
+            if is_shares {
+                assert_eq!(
+                    kind,
+                    Some("warn"),
+                    "leg {i} receiveAsTokens=false must WARN (receive-as-shares trap): {v}"
+                );
+                let matched = v
+                    .pointer("/data/verdict/matched")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|m| m.get("policy_id").and_then(serde_json::Value::as_str))
+                            .any(|id| id == "complete-withdrawal-receive-as-shares-warn")
+                    })
+                    .unwrap_or(false);
+                assert!(
+                    matched,
+                    "warn must be attributed to the receive-as-shares policy: {v}"
+                );
+                saw_warn = true;
+            } else {
+                assert_eq!(
+                    kind,
+                    Some("pass"),
+                    "leg {i} receiveAsTokens=true must PASS (normal token withdrawal): {v}"
+                );
+                saw_pass = true;
+            }
+        }
+        assert_eq!(saw_warn, want_any_warn, "warn presence mismatch");
+        (saw_warn, saw_pass)
+    };
+
+    // (a) all-true real batch → BOTH legs pass (no false positive).
+    let (warn_a, pass_a) = assert_per_child(&calldata_all_true, false);
+    assert!(!warn_a && pass_a, "all-true batch: both legs must pass");
+    // (b) mixed batch (one true, one flipped false) → exactly the false leg warns.
+    let (warn_b, pass_b) = assert_per_child(&calldata_mixed, true);
+    assert!(warn_b && pass_b, "mixed batch: one leg warns, one passes");
+}
+
 /// Real mainnet `depositIntoStrategy` 0xb175325c…: stETH strategy + stETH token.
 #[test]
 fn eigenlayer_deposit_into_strategy_decodes_strategy_and_token() {
