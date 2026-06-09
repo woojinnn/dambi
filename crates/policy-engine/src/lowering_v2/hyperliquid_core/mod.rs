@@ -103,3 +103,14 @@ pub(crate) fn hl_token_ref(hl_token: &str) -> Value {
 pub(crate) fn hl_usdc_token_ref() -> Value {
     hl_token_ref("USDC")
 }
+
+/// HL `Staking::StakeVenue` (HYPE staking — `cDeposit` / `cWithdraw`). `name` is
+/// a free string in `StakeVenue`, so no schema change is needed; only the
+/// required `name` + `chain` are emitted (all contract-address arms are
+/// Curve/Aave-specific and absent here).
+pub(crate) fn hl_stake_venue() -> Value {
+    let mut m = Map::new();
+    m.insert("name".into(), Value::String("hyperliquid".into()));
+    m.insert("chain".into(), Value::String("hyperliquid:mainnet".into()));
+    Value::Object(m)
+}
