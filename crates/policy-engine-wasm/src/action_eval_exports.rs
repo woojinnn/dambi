@@ -60,11 +60,32 @@ use crate::exports::check_input_size;
 
 /// Transaction-level routing fields. Mirrors the trigger export's `TxInput`,
 /// reused for both phases. `chain_id` is the CAIP-2 string (e.g. `"eip155:1"`).
+///
+/// `from` / `to` are **lowercased at deserialization** (`de_lower_addr`): EVM
+/// addresses are case-insensitive (EIP-55 checksum is display-only), but they
+/// feed `principal.address` (`Wallet`) and `resource` (`Protocol::"<to>"`),
+/// which Cedar compares byte-for-byte against `addr()`-lowercased context
+/// addresses (e.g. `context.recipient`). A wallet that submits a checksummed
+/// `from` would otherwise false-positive a `context.recipient != principal.address`
+/// recipient-self deny on a *legitimate* self-action. Normalizing here is the
+/// single boundary chokepoint shared by plan / evaluate / debug.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct TxInput {
     pub(crate) chain_id: String,
+    #[serde(deserialize_with = "de_lower_addr")]
     pub(crate) from: String,
+    #[serde(deserialize_with = "de_lower_addr")]
     pub(crate) to: String,
+}
+
+/// Deserialize a hex address, normalizing to ASCII lowercase so it compares
+/// byte-equal against `addr()`-lowercased addresses elsewhere in the context.
+fn de_lower_addr<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(s.to_ascii_lowercase())
 }
 
 /// Input to [`plan_action_rpc_v2_json`].

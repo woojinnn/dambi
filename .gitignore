@@ -112,6 +112,9 @@ crates/policy-engine/tests/codex_lido_compare_gate.rs
 crates/policy-engine/tests/eigenlayer_preset_verify_gate.rs
 crates/policy-engine/tests/preset_restaking_eigenlayer_gate.rs
 crates/policy-engine/tests/preset_staking_verify_gate.rs
+crates/integration-tests/tests/aave_staking_preset_e2e.rs
+crates/integration-tests/tests/curve_staking_preset_e2e.rs
+crates/integration-tests/tests/ethena_staking_preset_e2e.rs
 
 # Policy Lab (playwright) scratch — snapshots/screenshots from manual Lab adds.
 .playwright-mcp/
