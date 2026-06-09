@@ -273,6 +273,36 @@ forbid(principal, action == Token::Action::\"Erc20Transfer\", resource);\n";
     );
 }
 
+/// PHASE-3 PROOF: a `cWithdraw` lowers to `Staking::Action::"Redeem"` and a
+/// staking policy selected by the `hl_c_withdraw` trigger FIRES — the HYPE
+/// unstake coverage survives deleting the HL c_withdraw schema.
+#[test]
+fn hyperliquid_c_withdraw_confirmed_via_staking_redeem() {
+    const CONFIRM_REDEEM: &str = "\
+@id(\"hl/c-withdraw-confirm\")\n\
+@severity(\"warn\")\n\
+@reason(\"Withdrawing HYPE from Hyperliquid staking — confirm the amount\")\n\
+forbid(principal, action == Staking::Action::\"Redeem\", resource);\n";
+    let c_withdraw = json!({
+        "domain": "hyperliquid_core",
+        "action": "hl_c_withdraw",
+        "wei": "100000000000"
+    });
+    let parsed = run(
+        c_withdraw,
+        json!([{ "policy": CONFIRM_REDEEM, "manifest": manifest("hl_c_withdraw") }]),
+    );
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["kind"], "warn",
+        "c_withdraw must WARN via Staking::Redeem: {parsed}"
+    );
+    assert_eq!(
+        parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl/c-withdraw-confirm",
+        "{parsed}"
+    );
+}
+
 /// D4 SHIPPED-SEED PROOF: the shipped `hl-confirm-high-leverage` bundle FLAGS a
 /// high-leverage `updateLeverage` (`warn`) — closes the D4 gap where leverage
 /// changes shipped no policy.

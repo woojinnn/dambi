@@ -289,11 +289,6 @@ const HL_USD_CLASS_TRANSFER_SCHEMA: &str = include_str!(
 const HL_SEND_ASSET_SCHEMA: &str = include_str!(
     "../../../../schema/policy-schema/actions/hyperliquid_core/send_asset.cedarschema"
 );
-const HL_C_DEPOSIT_SCHEMA: &str =
-    include_str!("../../../../schema/policy-schema/actions/hyperliquid_core/c_deposit.cedarschema");
-const HL_C_WITHDRAW_SCHEMA: &str = include_str!(
-    "../../../../schema/policy-schema/actions/hyperliquid_core/c_withdraw.cedarschema"
-);
 const HL_TOKEN_DELEGATE_SCHEMA: &str = include_str!(
     "../../../../schema/policy-schema/actions/hyperliquid_core/token_delegate.cedarschema"
 );
@@ -418,8 +413,6 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     HL_WITHDRAW_SCHEMA,
     HL_USD_CLASS_TRANSFER_SCHEMA,
     HL_SEND_ASSET_SCHEMA,
-    HL_C_DEPOSIT_SCHEMA,
-    HL_C_WITHDRAW_SCHEMA,
     HL_TOKEN_DELEGATE_SCHEMA,
     HL_TWAP_ORDER_SCHEMA,
     HL_UPDATE_ISOLATED_MARGIN_SCHEMA,
@@ -920,8 +913,6 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     ("wrap_native", "WrapNativeContext"),
     // hyperliquid_core (alphabetical) — `hl_`-prefixed tags keep these globally
     // unique (notably `withdraw` is already a Lending tag).
-    ("hl_c_deposit", "HlCDepositContext"),
-    ("hl_c_withdraw", "HlCWithdrawContext"),
     ("hl_order", "HlOrderContext"),
     ("hl_send_asset", "HlSendAssetContext"),
     ("hl_token_delegate", "HlTokenDelegateContext"),

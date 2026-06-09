@@ -34,8 +34,7 @@ use super::{
     GOVERNANCE_CLOSE_VOTE_SCHEMA, GOVERNANCE_DELEGATE_SCHEMA, GOVERNANCE_EXECUTE_SCHEMA,
     GOVERNANCE_PROPOSE_SCHEMA, GOVERNANCE_QUEUE_SCHEMA, GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA,
     GOVERNANCE_START_VOTE_SCHEMA, GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA, GOVERNANCE_VOTE_SCHEMA,
-    HL_C_DEPOSIT_SCHEMA,
-    HL_C_WITHDRAW_SCHEMA, HL_ORDER_SCHEMA, HL_SEND_ASSET_SCHEMA,
+    HL_ORDER_SCHEMA, HL_SEND_ASSET_SCHEMA,
     HL_TOKEN_DELEGATE_SCHEMA,
     HL_TWAP_ORDER_SCHEMA, HL_UPDATE_ISOLATED_MARGIN_SCHEMA,
     HL_UPDATE_LEVERAGE_SCHEMA, HL_USD_CLASS_TRANSFER_SCHEMA,
@@ -803,14 +802,14 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
     ActionEntry {
         domain: "hyperliquid_core",
         action_tag: Some("hl_c_deposit"),
-        schema_text: HL_C_DEPOSIT_SCHEMA,
-        pascal_stub: "HlCDeposit",
+        schema_text: STAKING_STAKE_SCHEMA,
+        pascal_stub: "Stake",
     },
     ActionEntry {
         domain: "hyperliquid_core",
         action_tag: Some("hl_c_withdraw"),
-        schema_text: HL_C_WITHDRAW_SCHEMA,
-        pascal_stub: "HlCWithdraw",
+        schema_text: STAKING_REDEEM_SCHEMA,
+        pascal_stub: "Redeem",
     },
     ActionEntry {
         domain: "hyperliquid_core",
