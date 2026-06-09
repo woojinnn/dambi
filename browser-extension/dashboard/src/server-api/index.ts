@@ -173,6 +173,7 @@ export {
   getListing,
   getListingVersion,
   createListing,
+  deleteListing,
   createVersion,
   installListing,
   listReviews,

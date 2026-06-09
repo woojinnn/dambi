@@ -19,7 +19,8 @@ use uuid::Uuid;
 
 use policy_db::market::{
     create_listing as db_create_listing, create_version as db_create_version,
-    get_latest_version as db_get_latest_version, get_listing_by_id as db_get_listing_by_id,
+    delete_listing as db_delete_listing, get_latest_version as db_get_latest_version,
+    get_listing_by_id as db_get_listing_by_id,
     get_listing_by_slug as db_get_listing_by_slug, get_version as db_get_version,
     list_listings as db_list_listings, list_reviews as db_list_reviews,
     list_watches as db_list_watches, record_install as db_record_install, unwatch as db_unwatch,
@@ -385,6 +386,22 @@ pub async fn unwatch(
 ) -> Response {
     match db_unwatch(state.global_db.pool(), &user.user_id, listing_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `DELETE /market/listings/id/:id` — remove a listing you published. Only the
+/// publisher can delete their own listing; child rows (versions, installs,
+/// reviews, watches) cascade. Returns 404 when the listing doesn't exist or
+/// belongs to someone else.
+pub async fn delete_listing(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(listing_id): Path<Uuid>,
+) -> Response {
+    match db_delete_listing(state.global_db.pool(), listing_id, &user.user_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, "listing not found").into_response(),
         Err(e) => server_error(&e.to_string()),
     }
 }

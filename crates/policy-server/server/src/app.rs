@@ -9,7 +9,7 @@ use axum::extract::{FromRef, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::from_fn;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -199,6 +199,10 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
             get(market_handlers::list_listings).post(market_handlers::create_listing),
         )
         .route("/market/listings/:slug", get(market_handlers::get_listing))
+        .route(
+            "/market/listings/id/:id",
+            delete(market_handlers::delete_listing),
+        )
         .route(
             "/market/listings/id/:id/versions",
             post(market_handlers::create_version),

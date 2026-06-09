@@ -247,28 +247,11 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
           />
         </section>
 
-        {/* ③ 예외 (unless) */}
+        {/* ③ 알림 */}
         <section className="pf-section">
           <h3 className="pf-h">
-            <span className="pf-num">3</span> 예외가 있나요? <span className="pf-sub">단, 다음이면 제외(unless) · 선택</span>
+            <span className="pf-num">3</span> 어떻게 알릴까요? <span className="pf-sub">심각도·사유</span>
           </h3>
-          <ConditionEditor
-            nodes={model.unless}
-            ctx={ctx}
-            emptyHint="예외 없음 — 위 조건이 맞으면 항상 적용됩니다."
-            onChange={(unless) => patch({ unless })}
-          />
-        </section>
-
-        {/* ④ 알림 */}
-        <section className="pf-section">
-          <h3 className="pf-h">
-            <span className="pf-num">4</span> 어떻게 알릴까요? <span className="pf-sub">이름·심각도·사유</span>
-          </h3>
-          <div className="pf-row">
-            <label className="pf-label">규칙 id</label>
-            <input className="pf-input pf-readonly" value={model.id} readOnly title="규칙 id는 자동 지정되며 변경할 수 없어요" />
-          </div>
           <div className="pf-row">
             <label className="pf-label">심각도</label>
             <div className="pf-sev">
