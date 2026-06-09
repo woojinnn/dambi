@@ -112,6 +112,11 @@ crates/policy-engine/tests/codex_lido_compare_gate.rs
 crates/policy-engine/tests/eigenlayer_preset_verify_gate.rs
 crates/policy-engine/tests/preset_restaking_eigenlayer_gate.rs
 crates/policy-engine/tests/preset_staking_verify_gate.rs
+# Per-preset e2e tests + their on-chain corpus (read the local presets/ tree).
+crates/policy-engine-wasm/tests/eigenlayer_*.rs
+crates/policy-engine-wasm/tests/data/
+# Built extension dist for aave/curve/ethena live e2e (regenerable build output).
+.live-e2e-aave-curve/
 
 # Policy Lab (playwright) scratch — snapshots/screenshots from manual Lab adds.
 .playwright-mcp/
