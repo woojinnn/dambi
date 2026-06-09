@@ -129,6 +129,13 @@ export function leafToExpr(leaf: FormLeaf): Expr {
   // Decimal comparisons (< <= > >=) use the extension-method form.
   const extFn = leaf.value.kind === "decimal" ? OP_TO_EXT[leaf.op] : undefined;
   if (extFn) return { kind: "ext", fn: extFn, args: [attr, rhs] };
+  // `in` (the form's "다음 중 하나") is membership in a LITERAL set. Cedar's
+  // `in` operator is for entity-hierarchy only, so `attr in [strings]` fails
+  // schema validation ("expected AnyEntity but saw String"). Emit the set's
+  // `.contains(attr)` form instead — that's how Cedar tests set membership.
+  if (leaf.op === "in") {
+    return { kind: "binary", op: "contains", left: rhs, right: attr };
+  }
   return { kind: "binary", op: leaf.op, left: attr, right: rhs };
 }
 
@@ -140,9 +147,9 @@ function exprToLeaf(e: Expr): FormLeaf | null {
     if (!path || !value || value.kind !== "decimal") return null;
     return { fieldPath: path, op: EXT_TO_OP[e.fn], value };
   }
-  // `[set].contains(attr)` is membership over a literal set — normalize it to
-  // the form's `attr in [set]` so allowlist policies open as a single `in` leaf
-  // (the form re-emits it as `in`, an equivalent Cedar).
+  // `[set].contains(attr)` is membership over a literal set — open it as the
+  // form's single `in` leaf (and the form re-emits it as the same
+  // `[set].contains(attr)`, the Cedar-valid form of set membership).
   if (e.kind === "binary" && e.op === "contains" && e.left.kind === "set") {
     const path = exprToPath(e.right);
     const value = exprToValue(e.left);

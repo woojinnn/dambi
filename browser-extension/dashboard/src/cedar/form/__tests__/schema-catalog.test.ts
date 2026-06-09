@@ -99,3 +99,32 @@ describe("automatic has-guards from the schema", () => {
     });
   });
 });
+
+describe("set membership (in) generates valid Cedar", () => {
+  /** Collect every binary operator used in an Expr tree. */
+  function ops(e: unknown, out: string[] = []): string[] {
+    if (!e || typeof e !== "object") return out;
+    const n = e as Expr;
+    if (n.kind === "binary") out.push(n.op);
+    for (const v of Object.values(e as Record<string, unknown>)) {
+      if (Array.isArray(v)) v.forEach((x) => ops(x, out));
+      else if (v && typeof v === "object") ops(v, out);
+    }
+    return out;
+  }
+
+  it("emits [set].contains(attr), not Cedar entity-`in` (which rejects String sets)", () => {
+    const ir = formToIr(
+      model(SWAP, "context.recipient", "in", { kind: "set", values: ["0xaaa", "0xbbb"] }),
+    );
+    const used = ops(ir.conditions[0].body);
+    expect(used).toContain("contains");
+    expect(used).not.toContain("in");
+  });
+
+  it("round-trips an `in` leaf back to op `in`", () => {
+    const m = model(SWAP, "context.recipient", "in", { kind: "set", values: ["0xaaa"] });
+    const back = irToForm(formToIr(m));
+    expect(back?.when[0]).toMatchObject({ fieldPath: "context.recipient", op: "in" });
+  });
+});

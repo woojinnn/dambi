@@ -156,8 +156,12 @@ function humanize(id: string): string {
   return id.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
 }
 
+/** Namespaces hidden from the trigger picker. */
+const EXCLUDED_NS = new Set(["Yield"]);
+const PICKABLE_ACTIONS = SCHEMA_ACTIONS.filter(([ns]) => !EXCLUDED_NS.has(ns));
+
 /** Every schema action, labelled + grouped. */
-export const KNOWN_ACTIONS: KnownAction[] = SCHEMA_ACTIONS.map(([ns, id]) => ({
+export const KNOWN_ACTIONS: KnownAction[] = PICKABLE_ACTIONS.map(([ns, id]) => ({
   entityType: `${ns}::Action`,
   id,
   label: LABEL_KO[`${ns}::${id}`] ?? humanize(id),
@@ -167,7 +171,7 @@ export const KNOWN_ACTIONS: KnownAction[] = SCHEMA_ACTIONS.map(([ns, id]) => ({
 /** Actions bucketed by domain group, in display order, for `<optgroup>`. */
 export const ACTION_GROUPS: { group: string; actions: KnownAction[] }[] = (() => {
   const byNs = new Map<string, KnownAction[]>();
-  for (const [ns] of SCHEMA_ACTIONS) if (!byNs.has(ns)) byNs.set(ns, []);
+  for (const [ns] of PICKABLE_ACTIONS) if (!byNs.has(ns)) byNs.set(ns, []);
   for (const a of KNOWN_ACTIONS) {
     const ns = a.entityType.split("::")[0];
     byNs.get(ns)!.push(a);
