@@ -101,3 +101,21 @@ AGENTS.md
 
 # Extension signing key — never commit
 *.pem
+
+# ── Local-only preset lab work (NOT shipped) ───────────────────────────────
+# Cedar/manifest preset SETs under presets/ are kept local (user's decision:
+# presets stay out of git). The compile/verify gates below READ that tree, so
+# they'd error on a fresh clone without it — keep them local too.
+presets/
+crates/policy-engine/tests/lido_preset_compile_gate.rs
+crates/policy-engine/tests/codex_lido_compare_gate.rs
+crates/policy-engine/tests/eigenlayer_preset_verify_gate.rs
+crates/policy-engine/tests/preset_restaking_eigenlayer_gate.rs
+crates/policy-engine/tests/preset_staking_verify_gate.rs
+
+# Policy Lab (playwright) scratch — snapshots/screenshots from manual Lab adds.
+.playwright-mcp/
+/after-add-stake.yml
+/filled-form.yml
+/new-policy-page.png
+/stake-deny-filled.png
