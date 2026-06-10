@@ -7,7 +7,9 @@
   "match": {
     "selector": "0xad5425c6",
     "chain_to_addresses": {
-      "1": ["0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5"]
+      "1": [
+        "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5"
+      ]
     }
   },
   "abi_fragment": {
@@ -17,18 +19,54 @@
       "type": "function",
       "stateMutability": "payable",
       "inputs": [
-        { "name": "depositor", "type": "bytes32" },
-        { "name": "recipient", "type": "bytes32" },
-        { "name": "inputToken", "type": "bytes32" },
-        { "name": "outputToken", "type": "bytes32" },
-        { "name": "inputAmount", "type": "uint256" },
-        { "name": "outputAmount", "type": "uint256" },
-        { "name": "destinationChainId", "type": "uint256" },
-        { "name": "exclusiveRelayer", "type": "bytes32" },
-        { "name": "quoteTimestamp", "type": "uint32" },
-        { "name": "fillDeadline", "type": "uint32" },
-        { "name": "exclusivityDeadline", "type": "uint32" },
-        { "name": "message", "type": "bytes" }
+        {
+          "name": "depositor",
+          "type": "bytes32"
+        },
+        {
+          "name": "recipient",
+          "type": "bytes32"
+        },
+        {
+          "name": "inputToken",
+          "type": "bytes32"
+        },
+        {
+          "name": "outputToken",
+          "type": "bytes32"
+        },
+        {
+          "name": "inputAmount",
+          "type": "uint256"
+        },
+        {
+          "name": "outputAmount",
+          "type": "uint256"
+        },
+        {
+          "name": "destinationChainId",
+          "type": "uint256"
+        },
+        {
+          "name": "exclusiveRelayer",
+          "type": "bytes32"
+        },
+        {
+          "name": "quoteTimestamp",
+          "type": "uint32"
+        },
+        {
+          "name": "fillDeadline",
+          "type": "uint32"
+        },
+        {
+          "name": "exclusivityDeadline",
+          "type": "uint32"
+        },
+        {
+          "name": "message",
+          "type": "bytes"
+        }
       ],
       "outputs": []
     }
@@ -40,12 +78,19 @@
       "bridge": {
         "action": "send",
         "send": {
-          "venue": { "name": "across_spoke_pool" },
+          "venue": {
+            "name": "across_spoke_pool"
+          },
           "src_token": {
             "key": {
               "standard": "erc20",
               "chain": "$chain",
-              "address": { "$fn": "address_from_uint256", "$args": ["$args.inputToken"] }
+              "address": {
+                "$fn": "address_from_uint256",
+                "$args": [
+                  "$args.inputToken"
+                ]
+              }
             }
           },
           "input_amount": "$args.inputAmount",
@@ -60,12 +105,25 @@
               "59144": "eip155:59144",
               "534352": "eip155:534352",
               "81457": "eip155:81457",
-              "324": "eip155:324"
+              "324": "eip155:324",
+              "56": "eip155:56",
+              "130": "eip155:130",
+              "480": "eip155:480",
+              "999": "eip155:999",
+              "1135": "eip155:1135",
+              "34443": "eip155:34443",
+              "57073": "eip155:57073",
+              "7777777": "eip155:7777777"
             }
           },
           "dst_recipient": {
             "kind": "evm",
-            "address": { "$fn": "address_from_uint256", "$args": ["$args.recipient"] }
+            "address": {
+              "$fn": "address_from_uint256",
+              "$args": [
+                "$args.recipient"
+              ]
+            }
           },
           "dst_token": {
             "key": {
@@ -81,15 +139,38 @@
                   "59144": "eip155:59144",
                   "534352": "eip155:534352",
                   "81457": "eip155:81457",
-                  "324": "eip155:324"
+                  "324": "eip155:324",
+                  "56": "eip155:56",
+                  "130": "eip155:130",
+                  "480": "eip155:480",
+                  "999": "eip155:999",
+                  "1135": "eip155:1135",
+                  "34443": "eip155:34443",
+                  "57073": "eip155:57073",
+                  "7777777": "eip155:7777777"
                 }
               },
-              "address": { "$fn": "address_from_uint256", "$args": ["$args.outputToken"] }
+              "address": {
+                "$fn": "address_from_uint256",
+                "$args": [
+                  "$args.outputToken"
+                ]
+              }
             }
           },
           "output_amount": "$args.outputAmount",
-          "exclusive_relayer": { "$fn": "address_from_uint256", "$args": ["$args.exclusiveRelayer"] },
-          "has_message": { "$fn": "bytes_nonempty", "$args": ["$args.message"] }
+          "exclusive_relayer": {
+            "$fn": "address_from_uint256",
+            "$args": [
+              "$args.exclusiveRelayer"
+            ]
+          },
+          "has_message": {
+            "$fn": "bytes_nonempty",
+            "$args": [
+              "$args.message"
+            ]
+          }
         }
       }
     },
@@ -97,7 +178,9 @@
   },
   "requires": {
     "imperative": [],
-    "adapter_capabilities": ["token_metadata"],
+    "adapter_capabilities": [
+      "token_metadata"
+    ],
     "host_capabilities": [],
     "extension": ">=0.1.0"
   }
