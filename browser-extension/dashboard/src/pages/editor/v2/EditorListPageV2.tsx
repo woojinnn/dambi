@@ -26,9 +26,14 @@ import {
   PencilIcon,
   PlusIcon,
   SearchIcon,
+  ShieldIcon,
   TrashIcon,
 } from "./icons";
 import { mtimeLabel } from "./helpers";
+import { blocksToText } from "../../../cedar";
+import type { PolicyIR } from "../../../cedar/blocks";
+import { collectPackageMembers } from "../publish-package";
+import { PublishModal, type PublishSource } from "../PublishModal";
 
 import "./editor-v2.css";
 
@@ -145,6 +150,35 @@ function LibraryTab(props: {
   const [query, setQuery] = useState("");
   const [catFilter, setCatFilter] = useState<CatFilter>("all");
   const [defaultsFor, setDefaultsFor] = useState<PolicyDef | null>(null);
+  const [publishSrc, setPublishSrc] = useState<PublishSource | null>(null);
+
+  // 패키지 발행: defaults.packageId 기준 구성 defs를 렌더해 PublishModal로.
+  const publishPackage = async (pkg: PackageDef) => {
+    const members = collectPackageMembers(snap.library.defs, pkg.id);
+    if (members.length === 0) {
+      onToast("이 패키지를 기본 패키지로 둔 정책이 없어요");
+      return;
+    }
+    try {
+      const rendered = await Promise.all(
+        members.map(async (d) => ({
+          slug: d.id.replace(/^def::/, ""),
+          title: d.displayName,
+          cedarText: await blocksToText(d.skeleton.ir as PolicyIR),
+          manifest: d.skeleton.manifest,
+        })),
+      );
+      setPublishSrc({
+        kind: "package",
+        suggestedDisplayName: pkg.displayName,
+        suggestedSlug: pkg.id.replace(/^pkg::/, ""),
+        members: rendered,
+      });
+    } catch (err) {
+      console.error("[v2 library] publishPackage render failed:", err);
+      onToast("발행 준비에 실패했어요");
+    }
+  };
 
   const defs = useMemo(
     () =>
@@ -209,7 +243,7 @@ function LibraryTab(props: {
 
   return (
     <div className="ev2-2col">
-      <PackageSection snap={snap} packages={packages} onToast={onToast} invalidate={invalidate} />
+      <PackageSection snap={snap} packages={packages} onToast={onToast} invalidate={invalidate} onPublish={(pkg) => void publishPackage(pkg)} />
 
       <section className="ev2-right">
         <div className="ev2-ctrl">
@@ -289,6 +323,8 @@ function LibraryTab(props: {
           )}
         </div>
       </section>
+
+      <PublishModal open={publishSrc !== null} source={publishSrc} onClose={() => setPublishSrc(null)} />
 
       {defaultsFor && (
         <DefDefaultsModal
@@ -425,8 +461,9 @@ function PackageSection(props: {
   packages: PackageDef[];
   onToast: (text: string) => void;
   invalidate: () => void;
+  onPublish: (pkg: PackageDef) => void;
 }) {
-  const { snap, packages, onToast, invalidate } = props;
+  const { snap, packages, onToast, invalidate, onPublish } = props;
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
 
@@ -519,6 +556,14 @@ function PackageSection(props: {
                 <span className="cnt">{memberCount.get(pkg.id) ?? 0}</span>
                 {!locked && (
                   <span className="acts">
+                    <button
+                      type="button"
+                      className="ev2-iconbtn"
+                      title="마켓에 올리기"
+                      onClick={() => onPublish(pkg)}
+                    >
+                      <ShieldIcon />
+                    </button>
                     <button
                       type="button"
                       className="ev2-iconbtn"

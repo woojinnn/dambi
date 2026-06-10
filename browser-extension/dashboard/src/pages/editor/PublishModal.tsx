@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import {
   createListing,
-  listManagedPolicies,
   type CreateListingBody,
   type ListingKind,
   type MarketSeverity,
@@ -32,13 +31,12 @@ export type PublishSource =
       suggestedSlug: string;
     }
   | {
-      kind: "set";
+      kind: "package";
       suggestedDisplayName: string;
       suggestedSlug: string;
       description?: string;
-      /** Local dashboard:: ids of member policies. The modal looks them up
-       *  in the SW list to snapshot cedar_text/manifest at publish time. */
-      memberIds: readonly string[];
+      /** 사전 렌더된 멤버(defaults.packageId 기준 defs → cedar 텍스트). */
+      members: readonly { slug: string; title: string; cedarText: string; manifest?: unknown }[];
     };
 
 export interface PublishModalProps {
@@ -70,12 +68,6 @@ interface PublishRule {
 export function PublishModal({ open, onClose, source }: PublishModalProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const policiesQ = useQuery({
-    queryKey: ["managed-policies"],
-    queryFn: listManagedPolicies,
-    enabled: open && source?.kind === "set",
-  });
-
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -97,23 +89,20 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
         },
       ];
     }
-    const byId = new Map((policiesQ.data ?? []).map((p) => [p.id, p]));
     const out: PublishRule[] = [];
-    for (const mid of source.memberIds) {
-      const p = byId.get(mid);
-      if (!p) continue;
-      const holes = extractHoles(p.text);
+    for (const m of source.members) {
+      const holes = extractHoles(m.cedarText);
       out.push({
-        ruleId: ruleIdOf(p.text) || stripPrefix(p.id),
-        title: p.displayName ?? stripPrefix(p.id),
-        cedarText: p.text,
-        manifest: p.manifest,
+        ruleId: ruleIdOf(m.cedarText) || m.slug,
+        title: m.title,
+        cedarText: m.cedarText,
+        manifest: m.manifest,
         holes,
-        refs: addressFieldRefs(p.text, new Set(holes.map((h) => h.path))),
+        refs: addressFieldRefs(m.cedarText, new Set(holes.map((h) => h.path))),
       });
     }
     return out;
-  }, [source, policiesQ.data]);
+  }, [source]);
 
   // Aggregate counts for chips + summary.
   const numberHoles = useMemo(
@@ -209,7 +198,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
   if (!open || !source) return null;
 
   const seededName = name || source.suggestedDisplayName;
-  const loadingMembers = source.kind === "set" && policiesQ.isLoading;
+  const loadingMembers = false;
 
   return (
     <div
@@ -515,10 +504,6 @@ function Step2(props: {
 function ruleIdOf(cedarText: string): string {
   const m = cedarText.match(/@id\(\s*"([^"]+)"\s*\)/);
   return m ? m[1] : "";
-}
-function stripPrefix(id: string): string {
-  const PREFIX = "dashboard::";
-  return id.startsWith(PREFIX) ? id.slice(PREFIX.length) : id;
 }
 
 /* ── icons ─────────────────────────────────────────────────────────── */
