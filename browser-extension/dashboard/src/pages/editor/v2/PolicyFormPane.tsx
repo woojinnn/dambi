@@ -45,14 +45,23 @@ import {
   type FormTrigger,
   type FormValue,
 } from "../../../cedar/form";
-import { generateManifest } from "../../../editor-v9/manifest-gen";
+import {
+  ENRICHMENT_FIELDS,
+  generateManifest,
+  type CustomType,
+  type EnrichmentRegistry,
+} from "../../../editor-v9/manifest-gen";
 
+import { CustomFieldModal } from "./CustomFieldModal";
 import { FieldCombobox } from "./FieldCombobox";
 
 import "./policy-form.css";
 
 export interface PolicyFormPaneProps {
   initialModel?: FormModel | null;
+  /** The policy's saved manifest — user-defined enrichment fields (policy_rpc
+   *  entries outside the built-in registry) are restored from it. */
+  initialManifest?: unknown;
   /** `manifest` is the effective manifest to persist — the user's hand-edited
    *  override when `manifestOverridden`, otherwise the auto-generated one
    *  (`undefined` = none). */
@@ -144,6 +153,57 @@ function newCond(fields: FieldOption[]): FormCondition {
   return { fieldPath: fields[0]?.path ?? "", op: "==", value: defaultValueOfKind("string"), joiner: "and" };
 }
 
+/** `custom_context` 타입 → 폼 FieldOption의 fieldKind. */
+const KIND_BY_TYPE: Record<CustomType, FieldOption["fieldKind"]> = {
+  decimal: "primitive.decimal",
+  Long: "primitive.Long",
+  Bool: "primitive.Bool",
+  String: "primitive.String",
+};
+
+/** 현재 trigger의 enrichment action tag (`Erc20Approve` → `erc20_approve`). */
+function actionTagOf(trigger: FormTrigger): string | null {
+  if (trigger.kind !== "actionEq") return null;
+  return trigger.id.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+}
+
+/** 저장된 manifest에서 사용자 정의 보강 필드(기본 레지스트리에 없는
+ *  policy_rpc 항목)를 복원한다. 형태가 어긋나는 항목은 조용히 건너뜀. */
+function userFieldsFromManifest(manifest: unknown, actionTag: string | null): EnrichmentRegistry {
+  const out: EnrichmentRegistry = {};
+  const m = manifest as
+    | {
+        policy_rpc?: unknown;
+        custom_context?: { fields?: Record<string, string> };
+      }
+    | null
+    | undefined;
+  if (!m || !Array.isArray(m.policy_rpc)) return out;
+  const types = m.custom_context?.fields ?? {};
+  for (const raw of m.policy_rpc) {
+    const rpc = raw as {
+      id?: unknown;
+      method?: unknown;
+      params?: unknown;
+      outputs?: { from?: unknown }[];
+    };
+    if (typeof rpc?.id !== "string" || typeof rpc?.method !== "string") continue;
+    if (rpc.id in ENRICHMENT_FIELDS) continue; // 내장 필드는 레지스트리가 원본
+    const type = types[rpc.id];
+    if (type !== "decimal" && type !== "Long" && type !== "Bool" && type !== "String") continue;
+    const from = rpc.outputs?.[0]?.from;
+    out[rpc.id] = {
+      type,
+      label: { ko: rpc.id, en: rpc.id },
+      appliesTo: actionTag ? [actionTag] : [],
+      method: rpc.method,
+      projection: typeof from === "string" ? from : "$.result.value",
+      params: (rpc.params ?? {}) as EnrichmentRegistry[string]["params"],
+    };
+  }
+  return out;
+}
+
 /** 폼↔다이어그램 동기화의 선택 단위: 행/묶음 노드, 또는 상황 카드(머리 노드). */
 type Selection2 = { kind: "node"; node: FormNode } | { kind: "situation"; head: FormNode };
 
@@ -156,13 +216,34 @@ interface EditorSelection {
   registerRow: (n: FormNode, el: HTMLElement | null) => void;
 }
 
-export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) {
+export function PolicyFormPane({ initialModel, initialManifest, onChange }: PolicyFormPaneProps) {
   const [model, setModel] = useState<FormModel>(() => initialModel ?? emptyFormModel());
   // We no longer display the Cedar text (the right pane shows the diagram), but
   // we still build it to push up via onChange and to surface conversion errors.
   const [cedarError, setCedarError] = useState<string | null>(null);
 
-  const fields = useMemo(() => fieldsForTrigger(model.trigger), [model.trigger]);
+  // 사용자 정의 보강 필드 — 저장된 manifest에서 복원, 모달로 추가.
+  const [userFields, setUserFields] = useState<EnrichmentRegistry>(() =>
+    userFieldsFromManifest(initialManifest, actionTagOf((initialModel ?? emptyFormModel()).trigger)),
+  );
+  const [fieldModalOpen, setFieldModalOpen] = useState(false);
+  const registry = useMemo<EnrichmentRegistry>(
+    () => ({ ...ENRICHMENT_FIELDS, ...userFields }),
+    [userFields],
+  );
+
+  const fields = useMemo(() => {
+    const extra: FieldOption[] = Object.entries(userFields).map(([name, def]) => ({
+      path: `context.custom.${name}`,
+      label: def.label.ko,
+      fieldKind: KIND_BY_TYPE[def.type],
+      role: "derived" as const,
+      source: "custom" as const,
+      optional: true,
+      desc: `${def.method} 호출 값`,
+    }));
+    return [...fieldsForTrigger(model.trigger), ...extra];
+  }, [model.trigger, userFields]);
   const rhsFields = useMemo(() => [PRINCIPAL_ADDRESS, ...fields], [fields]);
   const fieldByPath = useMemo(() => {
     const m = new Map<string, FieldOption>();
@@ -171,7 +252,13 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
   }, [fields]);
   const addrBook = useAddressBook();
   const ctx = useMemo<EditorCtx>(
-    () => ({ fields, rhsFields, fieldByPath, lookupAddr: addrBook.lookup }),
+    () => ({
+      fields,
+      rhsFields,
+      fieldByPath,
+      lookupAddr: addrBook.lookup,
+      onCreateCustom: () => setFieldModalOpen(true),
+    }),
     [fields, rhsFields, fieldByPath, addrBook.lookup],
   );
   // Resolve 0x addresses in the structure diagram to friendly names.
@@ -257,8 +344,8 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
   // pure/sync — the same call the save path makes, so the preview matches what
   // gets persisted.
   const gen = useMemo(
-    () => generateManifest(ir, undefined, { id: model.id, severity: model.severity }),
-    [ir, model.id, model.severity],
+    () => generateManifest(ir, registry, { id: model.id, severity: model.severity }),
+    [ir, registry, model.id, model.severity],
   );
   const manifestErrors = gen.errors;
   const roundTrips = useMemo(() => irToForm(ir) !== null, [ir]);
@@ -341,6 +428,8 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
           m.trigger.entityType === next.entityType &&
           m.trigger.id === next.id);
       if (same) return m;
+      // 보강 필드 정의는 action-shaped(파라미터 셀렉터) — 함께 비운다.
+      setUserFields({});
       return { ...m, trigger: next, when: [], unless: [] };
     });
 
@@ -493,6 +582,15 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
           onReset={() => setManifestText(null)}
         />
       </aside>
+
+      {fieldModalOpen && (
+        <CustomFieldModal
+          existingNames={Object.keys(registry)}
+          actionTag={actionTagOf(model.trigger)}
+          onCreate={({ name, field }) => setUserFields((prev) => ({ ...prev, [name]: field }))}
+          onClose={() => setFieldModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -599,6 +697,8 @@ interface EditorCtx {
   fieldByPath: Map<string, FieldOption>;
   /** Resolve an address to a friendly name (my wallet / token), or undefined. */
   lookupAddr: (address: string) => AddressEntry | undefined;
+  /** Open the "+ 새 보강 필드 만들기" modal (LHS field picker entry). */
+  onCreateCustom: () => void;
 }
 
 /** Re-derive a condition after the user picks a new field. */
@@ -992,7 +1092,12 @@ function ConditionRow({
         >
           아니다
         </button>
-        <FieldCombobox value={cond.fieldPath} fields={ctx.fields} onChange={onField} />
+        <FieldCombobox
+          value={cond.fieldPath}
+          fields={ctx.fields}
+          onChange={onField}
+          onCreateCustom={ctx.onCreateCustom}
+        />
         <select className="pf-ctl pf-leaf-op" value={cond.op} onChange={(e) => onOp(e.target.value as FormOp)}>
           {ops.map((op) => (
             <option key={op} value={op}>
