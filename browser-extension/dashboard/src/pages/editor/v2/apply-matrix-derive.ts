@@ -57,3 +57,10 @@ export function defUsageCount(snap: StoreSnapshot, defId: string): number {
   }
   return n;
 }
+
+/** 하이브리드 패키지 토글의 표시 상태 — 게이트가 켜져 있어도 활성 멤버가
+ *  없으면 꺼진 것으로 보여준다("정책이 다 꺼지면 토글도 꺼져 보이길").
+ *  켜기 동작은 게이트 on + (전부 꺼져 있었다면) 멤버 일괄 on. */
+export function packageDisplayOn(packageOn: boolean, activeBindings: number): boolean {
+  return packageOn && activeBindings > 0;
+}

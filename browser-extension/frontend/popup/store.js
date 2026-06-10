@@ -469,9 +469,23 @@
   }
 
   /* ---------- 패키지 상태 헬퍼 ----------
-     v2: 패키지 마스터 = 지갑별 packageEnabled(이항). 멤버 on 수는 별도 표기. */
-  function pkgState(pkg) {
-    return pkg.on ? "on" : "off";
+     하이브리드: 게이트(packageEnabled)가 켜져 있어도 활성 멤버가 없으면
+     꺼진 것으로 보여준다. enabledSet = 활성 bindingId 집합. */
+  function pkgState(pkg, enabledSet) {
+    return pkg.on && pkg.members.some((id) => enabledSet.has(id)) ? "on" : "off";
+  }
+
+  /** 하이브리드 켜기: 게이트 on + (전부 꺼져 있으면) 멤버 일괄 on. */
+  async function enablePackage(address, pkg, enabledSet) {
+    await send("ps2:set-package-enabled", { address, packageId: pkg.id, enabled: true });
+    if (!pkg.members.some((id) => enabledSet.has(id))) {
+      const ws = await send("ps2:get-wallet-state", { address });
+      for (const b of Object.values(ws.bindings || {})) {
+        if (b.packageId === pkg.id && !b.enabled) {
+          await send("ps2:update-binding", { address, bindingId: b.id, patch: { enabled: true } });
+        }
+      }
+    }
   }
 
   const api = {
@@ -497,6 +511,7 @@
     checksumWarn,
     identiconSVG,
     pkgState,
+    enablePackage,
     refreshActivePolicies,
     setBindingEnabled,
     setPackageOn,

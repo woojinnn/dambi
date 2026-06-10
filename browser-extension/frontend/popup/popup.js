@@ -111,7 +111,7 @@ function normalizePins() {
 function walletName(w) { return w && w.nickname ? w.nickname : ""; }
 function addrStatus(addr) {
   const set = new Set(state.appliedByAddress[addr] || []);
-  const pkgCount = S.PACKAGES.filter((p) => p.on).length;
+  const pkgCount = S.PACKAGES.filter((p) => S.pkgState(p, set) === "on").length;
   return { pkgCount, polCount: set.size };
 }
 
@@ -157,7 +157,7 @@ function renderHero() {
   const w = activeWallet();
   const set = enabledSet();
   const on = set.size;
-  const pkgOn = S.PACKAGES.filter((p) => p.on).length;
+  const pkgOn = S.PACKAGES.filter((p) => S.pkgState(p, set) === "on").length;
   const nm = walletName(w);
   hero.innerHTML =
     '<div class="pc-hero-top">' +
@@ -252,7 +252,7 @@ function renderMain() {
   }
 
   for (const pkg of pkgs) {
-    const st = S.pkgState(pkg);
+    const st = S.pkgState(pkg, set);
     const open = state.expanded.has(pkg.id);
     const onCount = pkg.members.filter((id) => set.has(id)).length;
     html += '<div class="pc-pkg ' + (st === "off" ? "dim" : "") + (open ? " open" : "") + '" data-pkg="' + pkg.id + '">';
@@ -291,8 +291,15 @@ function renderMain() {
     });
     cardEl.querySelector('[data-act="master"]').addEventListener("click", (e) => {
       e.stopPropagation();
-      // v2: 패키지 마스터 = 지갑별 packageEnabled — 멤버 토글은 보존된다.
-      void applyMut(() => S.setPackageOn(state.activeAddress, pkg.id, !pkg.on));
+      // 하이브리드: 끄기 = 게이트 off(부분 상태 보존), 켜기 = 게이트 on +
+      // (전부 꺼져 있으면) 멤버 일괄 on.
+      const set3 = enabledSet();
+      const displayedOn = S.pkgState(pkg, set3) === "on";
+      void applyMut(() =>
+        displayedOn
+          ? S.setPackageOn(state.activeAddress, pkg.id, false)
+          : S.enablePackage(state.activeAddress, pkg, set3),
+      );
     });
     cardEl.querySelectorAll('[data-act="member"]').forEach((btn) => {
       btn.addEventListener("click", (e) => {

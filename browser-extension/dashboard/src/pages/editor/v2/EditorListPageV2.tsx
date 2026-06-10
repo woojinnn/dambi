@@ -55,9 +55,10 @@ interface ToastMsg {
 export function EditorListPageV2() {
   const qc = useQueryClient();
   const [sp, setSp] = useSearchParams();
-  const tab: EditorTab = sp.get("tab") === "apply" ? "apply" : "library";
+  // 기본 탭 = 적용 현황 (지갑별 워크스페이스). 라이브러리는 ?tab=library.
+  const tab: EditorTab = sp.get("tab") === "library" ? "library" : "apply";
   const setTab = (t: EditorTab) =>
-    setSp(t === "apply" ? { tab: "apply" } : {}, { replace: true });
+    setSp(t === "library" ? { tab: "library" } : {}, { replace: true });
 
   const overviewQ = useQuery({ queryKey: ["ps2-overview"], queryFn: getOverview });
   const invalidate = () => void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
@@ -101,20 +102,20 @@ export function EditorListPageV2() {
           <button
             type="button"
             role="tab"
-            aria-selected={tab === "library"}
-            className={`ev2-tab${tab === "library" ? " on" : ""}`}
-            onClick={() => setTab("library")}
-          >
-            라이브러리
-          </button>
-          <button
-            type="button"
-            role="tab"
             aria-selected={tab === "apply"}
             className={`ev2-tab${tab === "apply" ? " on" : ""}`}
             onClick={() => setTab("apply")}
           >
             적용 현황
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "library"}
+            className={`ev2-tab${tab === "library" ? " on" : ""}`}
+            onClick={() => setTab("library")}
+          >
+            라이브러리
           </button>
         </div>
 

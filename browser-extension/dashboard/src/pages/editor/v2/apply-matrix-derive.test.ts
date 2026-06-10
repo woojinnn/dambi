@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveMatrix, defUsageCount } from "./apply-matrix-derive";
+import { deriveMatrix, defUsageCount, packageDisplayOn } from "./apply-matrix-derive";
 import type { StoreSnapshot, WalletPolicyState } from "../../../server-api/policy-store";
 
 const snap = (byAddress: Record<string, WalletPolicyState> = {}): StoreSnapshot => ({
@@ -75,5 +75,13 @@ describe("defUsageCount", () => {
     });
     expect(defUsageCount(s, "def::a")).toBe(2);
     expect(defUsageCount(s, "def::nope")).toBe(0);
+  });
+});
+
+describe("packageDisplayOn (하이브리드 토글)", () => {
+  it("gate on이라도 활성 멤버 0이면 off로 보인다", () => {
+    expect(packageDisplayOn(true, 0)).toBe(false);
+    expect(packageDisplayOn(true, 2)).toBe(true);
+    expect(packageDisplayOn(false, 2)).toBe(false);
   });
 });
