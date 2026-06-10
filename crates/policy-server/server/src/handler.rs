@@ -282,6 +282,23 @@ async fn execute_call_specs(
                     call_id: Some(spec.call_id.clone()),
                 }),
             },
+            "bridge.value_loss_pct" => {
+                match bridge_value_loss_pct(state, &spec.params, price_book).await {
+                    Some(value) => {
+                        tracing::debug!(call_id = %spec.call_id, "bridge.value_loss_pct: OK");
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "bridge.value_loss_pct: unpriced leg / unparseable amount / zero input \
+                             (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
             "oracle.steth_peg_status_bps" => {
                 match oracle_steth_peg_status_bps(&spec.params, price_book).await {
                     Some(value) => {
@@ -473,6 +490,80 @@ async fn oracle_usd_value(
     }
     let usd = amount_f / divisor * price_f;
     Some(format!("{usd:.4}"))
+}
+
+/// USD value (f64) of `amount` raw units of `asset` on `chain` — the requesting
+/// wallet's own synced holding price when it holds the asset (freshest for that
+/// user), else the market-global [`PriceBook`] keyed by `(chain, asset)`. The core
+/// valuation shared with [`oracle_usd_value`]; `None` when neither source prices
+/// the asset or the amount cannot be parsed.
+async fn token_amount_usd(
+    state: &WalletState,
+    chain: &str,
+    asset: &str,
+    amount: U256,
+    price_book: &dyn PriceBook,
+) -> Option<f64> {
+    let from_holding = state
+        .tokens
+        .values()
+        .find(|h| h.key.contract().map(|a| format!("{a:#x}")).as_deref() == Some(asset))
+        .and_then(|h| {
+            let price: f64 = h.price_usd.as_ref()?.value.as_str().parse().ok()?;
+            Some((price, h.decimals))
+        });
+    let (price_f, decimals): (f64, u8) = if let Some(pd) = from_holding {
+        pd
+    } else {
+        let fact = price_book.price(chain, asset).await?;
+        (fact.price_usd.parse().ok()?, fact.decimals)
+    };
+    let amount_f: f64 = amount.to_string().parse().ok()?;
+    let divisor = 10f64.powi(i32::from(decimals));
+    if divisor <= 0.0 {
+        return None;
+    }
+    Some(amount_f / divisor * price_f)
+}
+
+/// Server-side `bridge.value_loss_pct` (Bridge preset P3 — output-value-loss
+/// shield): the implied % value loss of a cross-chain bridge —
+/// `(inputUsd − outputUsd) / inputUsd × 100` — where `inputUsd` values the src
+/// token sent (on its chain) and `outputUsd` values the dst token delivered (on the
+/// destination chain). Catches an abnormal fee spread / skim (a frontend that sets
+/// `outputAmount` absurdly low so a relayer/LP pockets the difference) that the
+/// absolute USD *size* cap does not. Same price source as [`oracle_usd_value`],
+/// valued on each token's own chain.
+///
+/// Returns `{ loss_pct }` (4dp decimal string, clamped to `[0, 100]`). `None`
+/// (→ field omitted → policy dormant, fail-open) when EITHER leg is unpriced, an
+/// amount is unparseable, or `inputUsd` is zero — never warns on a bridge it cannot
+/// value.
+async fn bridge_value_loss_pct(
+    state: &WalletState,
+    params: &Value,
+    price_book: &dyn PriceBook,
+) -> Option<Value> {
+    let src_chain = params.get("src_chain_id").and_then(Value::as_str)?;
+    let src_asset = params.get("src_asset").and_then(asset_address)?;
+    let input_raw = params.get("input_amount").and_then(Value::as_str)?;
+    let input_amount = U256::from_str_radix(input_raw.trim_start_matches("0x"), 16).ok()?;
+
+    let dst_chain = params.get("dst_chain_id").and_then(Value::as_str)?;
+    let dst_asset = params.get("dst_asset").and_then(asset_address)?;
+    let output_raw = params.get("output_amount").and_then(Value::as_str)?;
+    let output_amount = U256::from_str_radix(output_raw.trim_start_matches("0x"), 16).ok()?;
+
+    let input_usd =
+        token_amount_usd(state, src_chain, &src_asset, input_amount, price_book).await?;
+    let output_usd =
+        token_amount_usd(state, dst_chain, &dst_asset, output_amount, price_book).await?;
+
+    if input_usd <= 0.0 {
+        return None; // cannot express a % of zero input → dormant
+    }
+    let loss = (1.0 - output_usd / input_usd).max(0.0) * 100.0;
+    Some(json!({ "loss_pct": format!("{loss:.4}") }))
 }
 
 /// Value a single lowered Seaport `MarketItem` leg in USD via the market-global
@@ -1625,6 +1716,93 @@ mod tests {
         assert_eq!(
             resp.policy_request.results["swap-usdc-usd-cap-deny::usd"],
             serde_json::json!({ "usd": "0.0600" })
+        );
+    }
+
+    /// `bridge.value_loss_pct` computes the implied % value loss of a bridge from
+    /// the two USD legs: input 100 USDC ($100) vs output 90 USDC ($90, on a
+    /// different chain) → `(1 − 90/100) × 100 = 10.0000`. Both legs priced from the
+    /// market-global book (empty wallet), exercising the cross-chain dual lookup.
+    #[tokio::test]
+    async fn bridge_value_loss_pct_computes_loss_pct() {
+        let store = InMemoryWalletStore::new();
+        let mut req = empty_envelope_request();
+        req.call_specs.push(CallSpec {
+            manifest_id: "bridge-output-value-loss-warn".into(),
+            call_id: "bridge-output-value-loss-warn::bridge-value-loss".into(),
+            method: "bridge.value_loss_pct".into(),
+            params: serde_json::json!({
+                "src_chain_id": "eip155:1",
+                "src_asset": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "input_amount": "0x5f5e100",  // 100_000_000 = 100 USDC (6 decimals)
+                "dst_chain_id": "eip155:8453",
+                "dst_asset": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "output_amount": "0x55d4a80" // 90_000_000 = 90 USDC
+            }),
+            outputs: Vec::new(),
+            optional: true,
+        });
+        // Same $1.0000/6-decimal fact for both legs (a same-asset USDC→USDC bridge).
+        let price_book = StubPriceBook(
+            Some(PriceFact {
+                price_usd: "1.0000".into(),
+                decimals: 6,
+            }),
+            None,
+        );
+
+        let resp = evaluate(&store, &price_book, &no_sanctions(), &NoFloorOracle, req)
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.policy_request.results["bridge-output-value-loss-warn::bridge-value-loss"],
+            serde_json::json!({ "loss_pct": "10.0000" })
+        );
+    }
+
+    /// An unpriced leg (no holding, no global price) yields no result — the policy
+    /// stays dormant (fail-open), and a diagnostic records the miss. Mirrors
+    /// `oracle_usd_value_skips_unpriced_asset`.
+    #[tokio::test]
+    async fn bridge_value_loss_pct_dormant_when_leg_unpriced() {
+        let store = InMemoryWalletStore::new();
+        let mut req = empty_envelope_request();
+        req.call_specs.push(CallSpec {
+            manifest_id: "bridge-output-value-loss-warn".into(),
+            call_id: "bridge-output-value-loss-warn::bridge-value-loss".into(),
+            method: "bridge.value_loss_pct".into(),
+            params: serde_json::json!({
+                "src_chain_id": "eip155:1",
+                "src_asset": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                "input_amount": "0x5f5e100",
+                "dst_chain_id": "eip155:8453",
+                "dst_asset": "0x1111111111111111111111111111111111111111",
+                "output_amount": "0x55d4a80"
+            }),
+            outputs: Vec::new(),
+            optional: true,
+        });
+
+        // No holdings, no price book → neither leg is priceable → None.
+        let resp = evaluate(
+            &store,
+            &no_price_book(),
+            &no_sanctions(),
+            &NoFloorOracle,
+            req,
+        )
+        .await
+        .unwrap();
+        assert!(
+            resp.policy_request.results.is_empty(),
+            "unpriced leg → no result (dormant): {:?}",
+            resp.policy_request.results
+        );
+        assert!(
+            resp.diagnostics
+                .iter()
+                .any(|d| d.level == "warn" && d.message.contains("bridge.value_loss_pct")),
+            "miss should surface a diagnostic"
         );
     }
 
