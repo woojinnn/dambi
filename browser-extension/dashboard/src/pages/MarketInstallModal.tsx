@@ -199,7 +199,7 @@ export function MarketInstallModal({
                 {ko ? "닫기" : "Close"}
               </button>
               <button type="button" className="btn-primary" onClick={() => navigate("/editor?tab=apply")}>
-                {ko ? "적용 현황 보기" : "View apply status"}
+                {ko ? "지갑별 정책 보기" : "View wallet policies"}
               </button>
             </div>
           </>
