@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { FormCondition, FormNode } from "../model";
-import { flattenSituations, moveCondTo, situationsOf } from "../situations";
+import { flattenSituations, moveCondTo, normalizeSituations, situationsOf } from "../situations";
 
 const c = (name: string, joiner: "and" | "or" = "and"): FormCondition => ({
   fieldPath: `context.${name}`,
@@ -42,6 +42,45 @@ describe("situations", () => {
     const next = moveCondTo([a, group], inner, { kind: "new-situation" });
     expect(next.some((n) => "kind" in n && n.kind === "group")).toBe(false);
     expect(situationsOf(next)).toHaveLength(2); // [a], [g1]
+  });
+
+  it("normalizeSituations dissolves a single-child group into its parent", () => {
+    const a = c("a");
+    const run: FormNode[] = [{ kind: "group", joiner: "and", conds: [a] }, c("b")];
+    expect(normalizeSituations(run)).toEqual([
+      { ...a, joiner: "or" }, // run 머리 joiner는 flatten 관례(or)로 정규화
+      c("b"),
+    ]);
+  });
+
+  it("normalizeSituations splices a laddered same-parity grandchild (또는-사다리)", () => {
+    // 상황 run 안: OR[ AND[ OR[x, y] ], z ]  →  OR[x, y, z]
+    const x = c("x");
+    const y = c("y", "or");
+    const z = c("z", "or");
+    const ladder: FormNode = {
+      kind: "group",
+      joiner: "and",
+      conds: [{ kind: "group", joiner: "and", conds: [{ kind: "group", joiner: "and", conds: [x, y] }] }, z],
+    };
+    const out = normalizeSituations([c("a"), ladder]);
+    expect(out).toHaveLength(2);
+    const g = out[1];
+    expect("kind" in g && g.kind === "group").toBe(true);
+    if (!("kind" in g) || g.kind !== "group") return;
+    expect(g.conds.map((n) => ("fieldPath" in n ? n.fieldPath : "?"))).toEqual([
+      "context.x",
+      "context.y",
+      "context.z",
+    ]);
+  });
+
+  it("normalizeSituations drops empty groups and empty runs", () => {
+    const nodes: FormNode[] = [
+      { kind: "group", joiner: "and", conds: [] },
+      c("a", "or"),
+    ];
+    expect(normalizeSituations(nodes)).toEqual([{ ...c("a"), joiner: "or" }]);
   });
 
   it("moveCondTo into a group appends as an or-alternative", () => {
