@@ -638,16 +638,20 @@ export function PolicyDiagram({
 
   const onPointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
     if (ev.button !== 0) return;
+    // 캡처는 여기서 걸지 않는다 — pointerdown 즉시 캡처하면 자식(노드/버튼)의
+    // click이 래퍼로 리타게팅되어 노드 선택·컨트롤 버튼이 죽는다.
     dragFrom.current = { x: ev.clientX, y: ev.clientY, moved: false };
-    ev.currentTarget.setPointerCapture(ev.pointerId);
   };
   const onPointerMove = (ev: React.PointerEvent<HTMLDivElement>) => {
     const d = dragFrom.current;
     if (!d) return;
     const dx = ev.clientX - d.x;
     const dy = ev.clientY - d.y;
-    if (!d.moved && Math.hypot(dx, dy) < 4) return; // 클릭/드래그 구분 임계값
-    d.moved = true;
+    if (!d.moved) {
+      if (Math.hypot(dx, dy) < 4) return; // 클릭/드래그 구분 임계값
+      d.moved = true;
+      ev.currentTarget.setPointerCapture(ev.pointerId); // 진짜 드래그일 때만 캡처
+    }
     d.x = ev.clientX;
     d.y = ev.clientY;
     setView((v) => (v ? { ...v, x: v.x + dx, y: v.y + dy } : v));
