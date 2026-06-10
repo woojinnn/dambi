@@ -32,6 +32,7 @@ import {
   KNOWN_ACTIONS,
   ACTION_GROUPS,
   moveCondTo,
+  normalizeSituations,
   operatorsFor,
   situationsOf,
   valueKindForField,
@@ -219,7 +220,15 @@ interface EditorSelection {
 }
 
 export function PolicyFormPane({ initialModel, initialManifest, onChange }: PolicyFormPaneProps) {
-  const [model, setModel] = useState<FormModel>(() => initialModel ?? emptyFormModel());
+  const [model, setModel] = useState<FormModel>(() =>
+    initialModel
+      ? {
+          ...initialModel,
+          when: normalizeSituations(initialModel.when),
+          unless: normalizeSituations(initialModel.unless),
+        }
+      : emptyFormModel(),
+  );
   // We no longer display the Cedar text (the right pane shows the diagram), but
   // we still build it to push up via onChange and to surface conversion errors.
   const [cedarError, setCedarError] = useState<string | null>(null);
@@ -737,7 +746,9 @@ function ConditionEditor({
   selection: EditorSelection;
 }) {
   const runs = situationsOf(nodes);
-  const commit = (next: FormNode[][]) => onChange(flattenSituations(next));
+  // 모든 편집은 정규화를 거친다 — 투명 박스(자식 0/1)가 즉시 녹아서, 행의
+  // "+또는"이 한 줄짜리 모두-박스 안에서 눌려도 바깥 하나라도-박스로 합쳐진다.
+  const commit = (next: FormNode[][]) => onChange(normalizeSituations(flattenSituations(next)));
   // 상황 si의 노드 ni 교체/삭제 — runs를 수술하고 flatten으로 joiner 정규화.
   const updateNode = (si: number, ni: number, n: FormNode) =>
     commit(runs.map((r, i) => (i === si ? r.map((x, j) => (j === ni ? n : x)) : r)));
@@ -758,19 +769,12 @@ function ConditionEditor({
       conds: [{ ...n, joiner: "and" }, { ...newCond(ctx.fields), joiner: "or" }],
     });
   };
-  // 단일 leaf 묶음 → 행으로 (항목이 여럿이면 의미가 바뀌므로 버튼이 비활성)
-  const unwrap = (si: number, ni: number) => {
-    const n = runs[si][ni];
-    if (!isGroupNode(n) || n.conds.length !== 1 || isGroupNode(n.conds[0])) return;
-    updateNode(si, ni, { ...(n.conds[0] as FormCondition), joiner: n.joiner });
-  };
-
   // Drag-and-drop: drag a row onto a situation card (AND로 합류), a choice
   // group (선택지로), or the bottom strip (새 상황). Payload = the condition
   // object itself (matched by identity in `moveCondTo`).
   const [drag, setDrag] = useState<FormCondition | null>(null);
   const dropTo = (target: DropTarget) => {
-    if (drag) onChange(moveCondTo(nodes, drag, target));
+    if (drag) onChange(normalizeSituations(moveCondTo(nodes, drag, target)));
     setDrag(null);
   };
 
@@ -830,7 +834,6 @@ function ConditionEditor({
                   onDragStartCond={(c) => setDrag(c)}
                   onDropIntoGroup={(g) => dropTo({ kind: "group", group: g })}
                   onConds={(conds) => updateNode(si, ni, { ...n, conds })}
-                  onUngroup={() => unwrap(si, ni)}
                   onRemove={() => removeNode(si, ni)}
                 />
               ) : (
@@ -899,7 +902,6 @@ function GroupBox({
   onDragStartCond,
   onDropIntoGroup,
   onConds,
-  onUngroup,
   onRemove,
 }: {
   group: FormGroupNode;
@@ -912,7 +914,6 @@ function GroupBox({
   /** Drop the dragged row into `g` (this group or a nested descendant). */
   onDropIntoGroup: (g: FormGroupNode) => void;
   onConds: (conds: FormNode[]) => void;
-  onUngroup: () => void;
   onRemove: () => void;
 }) {
   const { conds } = group;
@@ -939,12 +940,6 @@ function GroupBox({
       conds: [{ ...n, joiner: "and" }, { ...newCond(ctx.fields), joiner: "or" }],
     });
   };
-  const unwrapChild = (i: number) => {
-    const n = conds[i];
-    if (!isGroupNode(n) || n.conds.length !== 1 || isGroupNode(n.conds[0])) return;
-    update(i, { ...(n.conds[0] as FormCondition), joiner: n.joiner });
-  };
-  const singleLeaf = conds.length === 1 && !isGroupNode(conds[0]);
   return (
     <div
       className={`pf-box ${orCtx ? "or" : "and"}${
@@ -971,16 +966,7 @@ function GroupBox({
       >
         <span className="pf-box-label">{orCtx ? "다음 중 하나라도" : "다음에 모두 해당"}</span>
         <span className="pf-spc" />
-        <button
-          type="button"
-          className="pf-box-act"
-          onClick={onUngroup}
-          disabled={!singleLeaf}
-          title={singleLeaf ? "묶음 풀기" : "항목이 여러 개면 풀 수 없어요"}
-        >
-          해제
-        </button>
-        <button type="button" className="pf-iconbtn danger" onClick={onRemove} aria-label="묶음 삭제" title="묶음 삭제">
+        <button type="button" className="pf-iconbtn danger" onClick={onRemove} aria-label="삭제" title="이 묶음 전체 삭제">
           ✕
         </button>
       </div>
@@ -996,7 +982,6 @@ function GroupBox({
             onDragStartCond={onDragStartCond}
             onDropIntoGroup={onDropIntoGroup}
             onConds={(next) => update(i, { ...c, conds: next })}
-            onUngroup={() => unwrapChild(i)}
             onRemove={() => removeAt(i)}
           />
         ) : (

@@ -31,6 +31,43 @@ export function conditionsDeep(nodes: FormNode[]): FormCondition[] {
   return nodes.flatMap((n) => (isGroupNode(n) ? conditionsDeep(n.conds) : [n]));
 }
 
+/**
+ * Dissolve transparent wrappers after every edit: an empty group disappears
+ * and a single-child group IS its child — a lone grandchild GROUP has the same
+ * parity as the container (parity alternates per level), so its children
+ * splice straight in. This keeps visual depth equal to logical depth, and
+ * makes "+또는" inside a one-row 모두-box grow the surrounding 하나라도-box
+ * instead of laddering a new one.
+ */
+export function normalizeSituations(nodes: FormNode[]): FormNode[] {
+  const runs = situationsOf(nodes)
+    .map((run) => normalizeChildren(run))
+    .filter((r) => r.length > 0);
+  return flattenSituations(runs);
+}
+
+/** Normalize one container's children (parity-agnostic — the rules only ever
+ *  splice a lone grandchild group, which always matches the container). */
+function normalizeChildren(children: FormNode[]): FormNode[] {
+  const out: FormNode[] = [];
+  for (const n of children) {
+    if (!isGroupNode(n)) {
+      out.push(n);
+      continue;
+    }
+    const kids = normalizeChildren(n.conds);
+    if (kids.length === 0) continue;
+    if (kids.length === 1) {
+      const only = kids[0];
+      if (isGroupNode(only)) out.push(...only.conds);
+      else out.push(only);
+      continue;
+    }
+    out.push({ ...n, conds: kids.map((k, i) => withJoiner(k, i === 0 ? "and" : "or")) });
+  }
+  return out;
+}
+
 /** Where a dragged condition can land. */
 export type DropTarget =
   | { kind: "situation"; index: number }
