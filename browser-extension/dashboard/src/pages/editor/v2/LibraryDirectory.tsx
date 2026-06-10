@@ -6,7 +6,7 @@ import {
   type PolicyDef,
   type StoreSnapshot,
 } from "../../../server-api/policy-store";
-import { defUsageCount } from "./apply-matrix-derive";
+import { defUsageCount } from "./wallet-policies-derive";
 import { catKey, catLabel, catStyle, type CategoryKey } from "./categories";
 import { mtimeLabel } from "./helpers";
 import {
