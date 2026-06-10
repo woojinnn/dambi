@@ -148,6 +148,7 @@ vi.mock("../wasm-bridge", () => ({
 }));
 vi.mock("../policy-store/resolve", () => ({
   resolveBundlesForWallet: mocks.resolveBundlesForWallet,
+  defRefForPolicyId: vi.fn(async () => null),
   // 픽스처 번들은 trigger 인덱스가 없으므로(=항상 포함) 필터는 패스스루로 충분.
   filterForAction: (bundles: unknown[]) => bundles,
   collectActionMetas: () => [{}],

@@ -51,6 +51,9 @@ export interface PolicyRef {
   id: number | null;
   name: string | null;
   severity: PolicySeverity;
+  /** 기록 시점에 박제된 ps2 def 참조(P3) — 이름 변경/삭제와 무관한 안정 매칭. */
+  def_id?: string | null;
+  display_name?: string | null;
 }
 
 export interface VerdictDto {

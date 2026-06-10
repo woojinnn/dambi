@@ -29,7 +29,7 @@ import {
   ServerError as PasuServerError,
 } from "./pasu-auth";
 import { getCurrentUserId } from "./dashboard/current-user";
-import { collectActionMetas, filterForAction, resolveBundlesForWallet } from "./policy-store/resolve";
+import { collectActionMetas, defRefForPolicyId, filterForAction, resolveBundlesForWallet } from "./policy-store/resolve";
 import type {
   ActionBundleInputDto,
   ActionTxInputDto,
@@ -395,7 +395,16 @@ async function appendVerdictsForMessage(
     return;
   }
 
+  // matched policy_id(@id) → ps2 def 참조 박제 — 이름 변경/삭제 후에도 과거
+  // 기록의 구조 다이어그램 매칭이 끊기지 않는다. best-effort(미발견 = null).
+  const uid = (await getCurrentUserId()) ?? "anonymous";
+  const refCache = new Map<string, { defId: string; displayName: string } | null>();
   for (const matched of verdict.matched) {
+    let ref = refCache.get(matched.policy_id);
+    if (ref === undefined) {
+      ref = await defRefForPolicyId(uid, matched.policy_id).catch(() => null);
+      refCache.set(matched.policy_id, ref);
+    }
     await appendVerdict({
       ...base,
       severity: matched.severity,
@@ -403,6 +412,8 @@ async function appendVerdictsForMessage(
         id: null,
         name: matched.policy_id,
         severity: matched.severity,
+        def_id: ref?.defId ?? null,
+        display_name: ref?.displayName ?? null,
       },
       reason: { ko: null, en: matched.reason ?? null },
     });
