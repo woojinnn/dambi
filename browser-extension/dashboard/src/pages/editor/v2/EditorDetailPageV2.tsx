@@ -450,6 +450,7 @@ function EditorBody({
             <PolicyFormPane
               key={formKey}
               initialModel={formEntry.model}
+              initialManifest={policy.manifest}
               onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden }) => {
                 setCedarText(c);
                 setIr(nextIr);
