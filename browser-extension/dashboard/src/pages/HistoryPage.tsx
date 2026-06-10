@@ -806,6 +806,7 @@ function HistoryDetail({
       {v.verdict === "fail" && v.policy?.name && (
         <PolicyStructureSection
           cedarId={v.policy.name}
+          defId={v.policy.def_id ?? null}
           deltaId={v.delta_id}
           managedPolicies={managedPolicies}
         />
@@ -837,10 +838,13 @@ function manifestIdsOf(results: Record<string, unknown>): Set<string> {
  *  why a USD deny no longer renders a same-`@id` nano policy's diagram. */
 function PolicyStructureSection({
   cedarId,
+  defId,
   deltaId,
   managedPolicies,
 }: {
   cedarId: string;
+  /** verdict에 박제된 def id — 이름이 바뀌어도 1순위로 안정 매칭. */
+  defId: string | null;
   deltaId: string | null;
   managedPolicies: ManagedPolicyEntry[];
 }) {
@@ -855,9 +859,10 @@ function PolicyStructureSection({
   const ctx = ctxQ.data ?? null;
 
   const byCedarId = managedPolicies.filter((p) => p.cedarId === cedarId || p.dashId === cedarId);
-  // Prefer the policy that actually enriched this deny (its dashboard id is in
-  // the captured results), disambiguating a shared @id; else the @id match.
+  // ① verdict에 박제된 def_id(기록 시점 참조 — 이름 변경에 면역) ② 캡처된
+  // results의 manifest id(공유 @id 디스앰비규에이션) ③ @id/def.id 매칭.
   const resolved =
+    (defId && managedPolicies.find((p) => p.dashId === defId)) ||
     (ctx &&
       byCedarId.find((p) => manifestIdsOf(ctx.results).has(p.dashId))) ||
     byCedarId[0] ||

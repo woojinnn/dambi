@@ -37,6 +37,7 @@ vi.mock("./seed", () => ({ ensureSeeded: vi.fn(async () => undefined) }));
 import { bind, putDef, setPackageEnabled, updateBinding } from "./ops";
 import {
   collectActionMetas,
+  defRefForPolicyId,
   extractTrigger,
   filterForAction,
   resolveBundlesForWallet,
@@ -148,5 +149,19 @@ describe("trigger pre-filter", () => {
     expect(filterForAction(bundles, metas).map((b) => b.id)).toEqual(["approve-only", "untriggered"]);
     // 메타를 읽지 못한 액션(tag unknown): 아무것도 드롭하지 않음
     expect(filterForAction(bundles, [{}])).toHaveLength(3);
+  });
+});
+
+describe("defRefForPolicyId", () => {
+  it("matches IR @id annotation first, then def id, else null", async () => {
+    await putDef("u", {
+      ...def("def::1"),
+      displayName: "한도",
+      skeleton: { ir: { kind: "policy", annotations: [{ name: "id", value: "swap-cap" }] } },
+    });
+    await putDef("u", def("def::2"));
+    expect(await defRefForPolicyId("u", "swap-cap")).toEqual({ defId: "def::1", displayName: "한도" });
+    expect(await defRefForPolicyId("u", "def::2")).toEqual({ defId: "def::2", displayName: "def::2" });
+    expect(await defRefForPolicyId("u", "nope")).toBeNull();
   });
 });

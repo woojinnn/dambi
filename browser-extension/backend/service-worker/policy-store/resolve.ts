@@ -126,3 +126,22 @@ export async function resolveBundlesForWallet(uid: string, fromAddress: string):
   }
   return out;
 }
+
+/** verdict의 matched policy_id(=Cedar @id annotation) → def 참조.
+ *  verdict 기록 시점에 def_id/display_name을 박제하는 용도(P3) — 이후 이름
+ *  변경/삭제와 무관하게 과거 기록이 자립한다. ① IR @id annotation ② def.id. */
+export async function defRefForPolicyId(
+  uid: string,
+  policyId: string,
+): Promise<{ defId: string; displayName: string } | null> {
+  const s = await readStore(uid);
+  for (const d of Object.values(s.library.defs)) {
+    const ann = (d.skeleton.ir as { annotations?: { name: string; value: string }[] } | null)
+      ?.annotations;
+    if (Array.isArray(ann) && ann.some((a) => a.name === "id" && a.value === policyId)) {
+      return { defId: d.id, displayName: d.displayName };
+    }
+  }
+  const direct = s.library.defs[policyId];
+  return direct ? { defId: direct.id, displayName: direct.displayName } : null;
+}
