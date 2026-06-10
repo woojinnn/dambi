@@ -108,6 +108,8 @@ AGENTS.md
 # they'd error on a fresh clone without it — keep them local too.
 presets/
 crates/policy-engine/tests/lido_preset_compile_gate.rs
+crates/policy-engine/tests/bridge_preset_compile_gate.rs
+crates/policy-engine/tests/hl_preset_compile_gate.rs
 crates/policy-engine/tests/codex_lido_compare_gate.rs
 crates/policy-engine/tests/eigenlayer_preset_verify_gate.rs
 crates/policy-engine/tests/preset_restaking_eigenlayer_gate.rs
@@ -115,7 +117,12 @@ crates/policy-engine/tests/preset_staking_verify_gate.rs
 crates/policy-engine/tests/seaport_preset_compile_gate.rs
 # Per-preset e2e tests + their on-chain corpus (read the local presets/ tree).
 crates/policy-engine-wasm/tests/eigenlayer_*.rs
+crates/policy-engine-wasm/tests/hl_preset_e2e.rs
 crates/policy-engine-wasm/tests/data/
+crates/integration-tests/tests/bridge_preset_e2e.rs
+crates/integration-tests/tests/bridge_e2e_corpus.rs
+crates/integration-tests/data/bridge-e2e-corpus/
+crates/integration-tests/tests/hl_preset_e2e.rs
 crates/integration-tests/tests/seaport_sign_order_verdict.rs
 crates/integration-tests/tests/seaport_fulfill_cancel_verdict.rs
 # Built extension dist for aave/curve/ethena live e2e (regenerable build output).
