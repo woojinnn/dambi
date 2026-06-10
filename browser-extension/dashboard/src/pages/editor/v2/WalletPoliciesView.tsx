@@ -18,7 +18,7 @@ import {
   type WalletPolicyState,
 } from "../../../server-api/policy-store";
 import { listWallets } from "../../../server-api/wallets";
-import { deriveMatrix, packageDisplayOn } from "./apply-matrix-derive";
+import { deriveWalletRows, packageDisplayOn } from "./wallet-policies-derive";
 import { DRAG_DEF_MIME } from "./LibraryDirectory";
 import { catKey, catLabel, catStyle } from "./categories";
 import { CaretRightIcon, FolderIcon, PencilIcon, PlusIcon, TrashIcon } from "./icons";
@@ -26,7 +26,7 @@ import { CaretRightIcon, FolderIcon, PencilIcon, PlusIcon, TrashIcon } from "./i
 /** 지갑별 정책 — 좌: 이 지갑의 패키지(추가/이름변경/토글/드롭), 우: 라이브러리
  *  디렉토리 모양의 정책 트리. 각 정책 아래에 "이 지갑에서 들어가 있는 패키지"가
  *  바인딩 줄(on/off)로 쌓인다 — 왼쪽 패키지에 추가될 때마다 한 줄씩. */
-export function ApplyMatrixView(props: { onToast: (text: string) => void }) {
+export function WalletPoliciesView(props: { onToast: (text: string) => void }) {
   const { onToast } = props;
   const qc = useQueryClient();
 
@@ -49,10 +49,10 @@ export function ApplyMatrixView(props: { onToast: (text: string) => void }) {
   }, [walletsQ.data, overviewQ.data]);
 
   const snap = overviewQ.data ?? null;
-  const matrix = useMemo(
+  const rows = useMemo(
     () =>
       snap
-        ? deriveMatrix(
+        ? deriveWalletRows(
             snap,
             (walletsQ.data ?? []).map((w) => ({ address: w.address })),
           )
@@ -61,12 +61,12 @@ export function ApplyMatrixView(props: { onToast: (text: string) => void }) {
   );
 
   const [addr, setAddr] = useState<string | null>(null);
-  const activeAddr = addr ?? matrix?.rows[0]?.address ?? null;
+  const activeAddr = addr ?? rows?.[0]?.address ?? null;
 
-  if (overviewQ.isLoading || !matrix || !snap) {
+  if (overviewQ.isLoading || !rows || !snap) {
     return <div className="ev2-status">불러오는 중…</div>;
   }
-  if (matrix.rows.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className="ev2-empty">
         <div className="big">등록된 지갑이 없습니다</div>
@@ -80,7 +80,7 @@ export function ApplyMatrixView(props: { onToast: (text: string) => void }) {
       <div className="wd-modes">
         {activeAddr && (
           <select className="wd-walletsel" value={activeAddr} onChange={(e) => setAddr(e.target.value)}>
-            {matrix.rows.map((r) => (
+            {rows.map((r) => (
               <option key={r.address} value={r.address}>
                 {r.label ? `${r.label} (${shortAddr(r.address)})` : shortAddr(r.address)}
               </option>

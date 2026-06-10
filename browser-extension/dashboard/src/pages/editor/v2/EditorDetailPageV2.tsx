@@ -16,7 +16,7 @@ import {
 import { listWallets } from "../../../server-api/wallets";
 import { buildDefPayload } from "./save-def";
 import { SaveScopeModal, type SaveScopeChoice } from "./SaveScopeModal";
-import { defUsageCount } from "./apply-matrix-derive";
+import { defUsageCount } from "./wallet-policies-derive";
 import { Topbar } from "../../../shell/Topbar";
 
 import { stampAnnotations } from "../../../editor-v9/annotations";

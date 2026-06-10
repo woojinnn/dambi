@@ -15,8 +15,8 @@ import {
   type PolicyDef,
   type StoreSnapshot,
 } from "../../../server-api/policy-store";
-import { defUsageCount } from "./apply-matrix-derive";
-import { ApplyMatrixView } from "./ApplyMatrixView";
+import { defUsageCount } from "./wallet-policies-derive";
+import { WalletPoliciesView } from "./WalletPoliciesView";
 import { LibraryDirectory } from "./LibraryDirectory";
 import { Topbar } from "../../../shell/Topbar";
 import { NewPolicyChooser } from "./NewPolicyChooser";
@@ -121,7 +121,7 @@ export function EditorListPageV2() {
         {snap && tab === "library" && (
           <LibraryTab snap={snap} onToast={pushToast} invalidate={invalidate} />
         )}
-        {snap && tab === "apply" && <ApplyMatrixView onToast={pushToast} />}
+        {snap && tab === "apply" && <WalletPoliciesView onToast={pushToast} />}
       </div>
 
       <ToastStack toasts={toasts} />
