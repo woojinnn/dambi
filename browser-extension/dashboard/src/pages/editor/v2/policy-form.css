@@ -784,6 +784,16 @@
   color: var(--slate-400, #94a3b8);
 }
 .cfm-autoname code { font-size: 11px; color: var(--slate-500, #64748b); }
+.cfm-block {
+  margin: 8px 0 0 98px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn-800, #92400e);
+  background: var(--warn-50, #fffbeb);
+  border: 1px solid var(--warn-300, #fcd34d);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
 .cfm-desc {
   margin: 6px 0 0 98px;
   font-size: 12px;

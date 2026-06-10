@@ -201,6 +201,14 @@ function composeLabel(path: string): string {
   return segs.map((s, i) => koSegment(s, i === 0)).join(" ");
 }
 
+/** The form's Korean label for any dotted path — curated gloss first, composed
+ *  label otherwise. Exported so other surfaces (the structure diagram) speak
+ *  the same vocabulary instead of leaking raw paths. */
+export function labelForPath(path: string): string {
+  const g = glossFor(path);
+  return (g?.ko ?? composeLabel(path)).replace(/\s*\(\s*nano\s*\)/i, "").trim();
+}
+
 /** True for engine-internal fields the form hides by default (Rule 3): nano
  *  mirrors, raw-hex amount strings, deep `.key`/state sub-fields, chain ids.
  *  A field stays prominent if it is glossed, a depth-1 primitive scalar, or a

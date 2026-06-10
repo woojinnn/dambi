@@ -23,6 +23,7 @@ import { isAllOf, setLiteralOperand } from "../diagnosis/membership";
 import { eachChild, pathByNode } from "../diagnosis/path";
 import { naturalCondition } from "../nl";
 import { getGloss } from "../../editor-v9/gloss/paths";
+import { labelForPath } from "../form/field-catalog";
 
 import "./policy-diagram.css";
 
@@ -156,7 +157,7 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
       return {
         path: innerPath,
         kind: "memberset",
-        title: (fieldPath && getGloss(fieldPath)?.ko) || exprToText(mem.other),
+        title: (fieldPath && labelForPath(fieldPath)) || exprToText(mem.other),
         detail: "다음 중 어느 것도 아님",
         memberset: {
           mode: "any",
@@ -203,7 +204,7 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
       return {
         path,
         kind: "memberset",
-        title: (fieldPath && getGloss(fieldPath)?.ko) || exprToText(mem.other),
+        title: (fieldPath && labelForPath(fieldPath)) || exprToText(mem.other),
         detail: isAllOf(e.op) ? "다음 전부 포함" : "다음 중 하나",
         memberset: {
           mode: isAllOf(e.op) ? "all" : "any",
@@ -329,7 +330,7 @@ function valueExprText(rhs: Expr): string {
     return `[${rhs.elements.map((el) => unwrapExtLiteral(el) ?? exprToText(el)).join(", ")}]`;
   }
   const p = attrPath(rhs);
-  if (p) return getGloss(p)?.ko ?? p;
+  if (p) return labelForPath(p);
   return exprToText(rhs);
 }
 
@@ -342,12 +343,12 @@ function exprToKorean(e: Expr): string | null {
     const path = attrPath(e.left);
     if (!path) return null;
     const emptyStr = e.right.kind === "lit" && e.right.litType === "string" && e.right.value === "";
-    return naturalCondition({ subject: getGloss(path)?.ko ?? path, op: e.op, value: valueExprText(e.right), emptyStr });
+    return naturalCondition({ subject: labelForPath(path), op: e.op, value: valueExprText(e.right), emptyStr });
   }
   if (e.kind === "ext" && EXT_TO_OP[e.fn] && e.args.length === 2) {
     const path = attrPath(e.args[0]);
     if (!path) return null;
-    return naturalCondition({ subject: getGloss(path)?.ko ?? path, op: EXT_TO_OP[e.fn], value: valueExprText(e.args[1]) });
+    return naturalCondition({ subject: labelForPath(path), op: EXT_TO_OP[e.fn], value: valueExprText(e.args[1]) });
   }
   return null;
 }
@@ -374,13 +375,13 @@ function leafParts(e: Expr): { title: string; detail?: string } {
     rhs: Expr,
   ): { title: string; detail?: string } | null => {
     if (!path) return null;
-    const g = getGloss(path);
-    const unit = g?.unit?.ko ? ` ${g.unit.ko}` : "";
+    const unit = getGloss(path)?.unit?.ko ? ` ${getGloss(path)!.unit!.ko}` : "";
+    const title = labelForPath(path);
     const emptyStr = rhs.kind === "lit" && rhs.litType === "string" && rhs.value === "";
     if (emptyStr) {
-      return { title: g?.ko ?? path, detail: op === "==" ? "비어 있음" : "비어 있지 않음" };
+      return { title, detail: op === "==" ? "비어 있음" : "비어 있지 않음" };
     }
-    return { title: g?.ko ?? path, detail: `${OP_SYM[op] ?? op} ${valueExprText(rhs)}${unit}` };
+    return { title, detail: `${OP_SYM[op] ?? op} ${valueExprText(rhs)}${unit}` };
   };
 
   if (e.kind === "binary" && OP_SYM[e.op]) {
