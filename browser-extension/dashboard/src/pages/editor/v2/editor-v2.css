@@ -2316,3 +2316,64 @@
   font-size: 12px;
   color: var(--slate-400);
 }
+
+/* ─────────────── P3+: 지갑별 워크스페이스 ─────────────── */
+
+.wd-modes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.wd-walletsel,
+.wd-addsel {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--surface);
+  max-width: 320px;
+}
+.wd-scopelabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slate-800);
+}
+.ev2-pkgrow.wd-scope {
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border-left: 2px solid transparent;
+}
+.ev2-pkgrow.wd-scope.on {
+  background: var(--fog-100);
+  border-left-color: var(--slate-900);
+}
+.ev2-pkgrow.wd-scope.dim {
+  opacity: 0.45;
+}
+.ev2-pkgrow.wd-scope.droptarget {
+  background: var(--sage-100, #eaf3ee);
+  border-left-color: var(--sage-500, #4c7a5e);
+  opacity: 1;
+}
+.wd-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px;
+}
+.wd-cards [draggable] {
+  cursor: grab;
+}
+.pm-pkgchip {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  color: var(--slate-500);
+  background: var(--fog-100);
+}
