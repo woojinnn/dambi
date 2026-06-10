@@ -347,15 +347,19 @@ function EditorBody({
             placeholder="정책 이름"
           />
           <span className="ev2-detail-slug">{stripDashboardId(policy.id)}</span>
-          <select
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
-            className="ev2-detail-sev"
-          >
-            <option value="deny">deny (차단)</option>
-            <option value="warn">warn (경고)</option>
-            <option value="info">info (정보)</option>
-          </select>
+          {/* 폼 탭은 ③ 심각도가 이 값을 소유(onChange로 동기화)하므로 헤더
+              셀렉트는 Cedar 탭에서만 — 같은 값이 두 군데면 헷갈린다. */}
+          {tab !== "form" && (
+            <select
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
+              className="ev2-detail-sev"
+            >
+              <option value="deny">deny (차단)</option>
+              <option value="warn">warn (경고)</option>
+              <option value="info">info (정보)</option>
+            </select>
+          )}
           {policy.cat && (
             <span className="ev2-cat-tag" style={cstyle.tag}>
               {catLabel(policy.cat)}

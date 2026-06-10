@@ -12,7 +12,7 @@
  */
 import { useMemo, useState } from "react";
 
-import type { EnrichmentField } from "../../../editor-v9/manifest-gen";
+import type { EnrichmentField, EnrichmentRegistry, ParamSpec } from "../../../editor-v9/manifest-gen";
 import type { FieldOption } from "../../../cedar/form";
 
 import { METHOD_CATALOG, type MethodSpec } from "./custom-field-methods";
@@ -125,14 +125,14 @@ function defaultParams(m: MethodSpec, all: SelectorOption[]): Record<string, str
 }
 
 export function CustomFieldModal({
-  existingNames,
+  existing,
   actionTag,
   fields,
   onCreate,
   onClose,
 }: {
-  /** 이미 쓰는 custom 필드 이름들 (중복 방지). */
-  existingNames: readonly string[];
+  /** 이미 있는 보강 필드 전체 (내장 + 사용자) — 이름/입력 중복 검사용. */
+  existing: EnrichmentRegistry;
   /** 현재 trigger의 action tag (appliesTo로 기록). null = 모든 동작. */
   actionTag: string | null;
   /** 폼의 필드 카탈로그 — 파라미터 드롭다운의 "이 거래에서 가져오기" 항목. */
@@ -140,6 +140,7 @@ export function CustomFieldModal({
   onCreate: (draft: CustomFieldDraft) => void;
   onClose: () => void;
 }) {
+  const existingNames = Object.keys(existing);
   const allOptions = useMemo(() => buildOptions(fields), [fields]);
   const [method, setMethod] = useState<MethodSpec>(METHOD_CATALOG[0]);
   // 표시 이름은 메서드 라벨이 기본값 — 사용자가 고치기 전까지 메서드를 따라간다.
@@ -154,7 +155,30 @@ export function CustomFieldModal({
   // 내부 필드 이름(manifest의 id)은 메서드에서 자동 생성 — 사용자는 안 만진다.
   const name = useMemo(() => autoName(method.method, existingNames), [method.method, existingNames]);
 
-  const canCreate = label.trim().length > 0;
+  // 같은 표시 이름 금지 + 같은 메서드를 같은 입력으로 부르는 필드가 이미 있으면
+  // 그 이름을 안내하고 생성을 막는다 (조용히 덮어쓰거나 쌍둥이가 생기지 않게).
+  const labelDup = useMemo(() => {
+    const want = label.trim();
+    return want ? Object.values(existing).find((f) => f.label.ko === want) ?? null : null;
+  }, [existing, label]);
+  const sameCall = useMemo(() => {
+    const wantParams = JSON.stringify(sortedParams(paramSpecs(params)));
+    return (
+      Object.values(existing).find(
+        (f) =>
+          f.method === method.method &&
+          f.projection === projection &&
+          JSON.stringify(sortedParams(f.params)) === wantParams,
+      ) ?? null
+    );
+  }, [existing, method.method, projection, params]);
+
+  const blockMsg = sameCall
+    ? `같은 조회(같은 입력)가 이미 '${sameCall.label.ko}' 필드로 있어요 — 그 필드를 그대로 쓰면 돼요.`
+    : labelDup
+      ? "이미 같은 이름의 필드가 있어요 — 다른 이름을 붙여주세요."
+      : null;
+  const canCreate = label.trim().length > 0 && !blockMsg;
 
   const pickMethod = (m: MethodSpec) => {
     setMethod(m);
@@ -173,9 +197,7 @@ export function CustomFieldModal({
         appliesTo: actionTag ? [actionTag] : [],
         method: method.method,
         projection,
-        params: Object.fromEntries(
-          Object.entries(params).map(([k, v]) => [k, parseParam(v)]),
-        ),
+        params: paramSpecs(params),
       },
     });
     onClose();
@@ -278,6 +300,7 @@ export function CustomFieldModal({
           {method.type === "decimal" ? "소수" : method.type === "Long" ? "숫자" : method.type === "Bool" ? "참/거짓" : "문자"}{" "}
           타입 · 저장 이름은 자동: <code>context.custom.{name}</code>
         </div>
+        {blockMsg && <div className="cfm-block">⚠ {blockMsg}</div>}
 
         <div className="cfm-actions">
           <button type="button" className="pf-add-cond" onClick={onClose}>
@@ -337,6 +360,16 @@ function ParamPicker({
       )}
     </span>
   );
+}
+
+/** 편집 문자열 맵 → ParamSpec 맵 (생성과 중복 비교가 같은 해석을 쓰게). */
+function paramSpecs(params: Record<string, string>): Record<string, ParamSpec> {
+  return Object.fromEntries(Object.entries(params).map(([k, v]) => [k, parseParam(v)]));
+}
+
+/** 키 순서를 고정해 JSON 문자열 비교가 안정되게. */
+function sortedParams(p: Record<string, ParamSpec>): [string, ParamSpec][] {
+  return Object.entries(p).sort(([a], [b]) => a.localeCompare(b));
 }
 
 /** Editable string → ParamSpec: `$.`-prefixed stays a selector; otherwise a

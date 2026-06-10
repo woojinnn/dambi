@@ -22,12 +22,10 @@ import { useAddressBook, shortAddress, type AddressEntry } from "../../../hooks/
 import { PolicyDiagram } from "../../../cedar/diagram/PolicyDiagram";
 import { AddressInput, AddressSetInput } from "./AddressPicker";
 import {
-  conditionsDeep,
   emptyFormModel,
   fieldsForTrigger,
   flattenSituations,
   formToIrWithMap,
-  irToForm,
   isGroupNode,
   KNOWN_ACTIONS,
   ACTION_GROUPS,
@@ -376,7 +374,6 @@ export function PolicyFormPane({ initialModel, initialManifest, onChange }: Poli
     [ir, registry, model.id, model.severity],
   );
   const manifestErrors = gen.errors;
-  const roundTrips = useMemo(() => irToForm(ir) !== null, [ir]);
   const valid = !cedarError && manifestErrors.length === 0;
   const [manifestOpen, setManifestOpen] = useState(false);
   // Manual manifest override. `null` = use the auto-generated manifest.
@@ -391,15 +388,6 @@ export function PolicyFormPane({ initialModel, initialManifest, onChange }: Poli
       return { manifest: gen.manifest, parseErr: e instanceof Error ? e.message : "JSON 형식 오류" };
     }
   }, [manifestText, gen.manifest]);
-  const enrichCount = useMemo(
-    () =>
-      new Set(
-        conditionsDeep([...model.when, ...model.unless])
-          .map((c) => c.fieldPath)
-          .filter((p) => p.startsWith("context.custom.")),
-      ).size,
-    [model.when, model.unless],
-  );
   const trig = model.trigger;
   // Cascading trigger picker: 분류(group) → 동작(action). `currentGroup` is
   // `"*"` for the any-action case (no second dropdown).
@@ -561,15 +549,15 @@ export function PolicyFormPane({ initialModel, initialManifest, onChange }: Poli
           </div>
         </section>
 
-        <div className={`pf-status${valid ? " ok" : " bad"}`}>
-          <span className="pf-status-main">
-            {valid ? "✓ 유효한 정책 · .cedar와 manifest 짝 맞음" : "⚠ " + (cedarError ?? manifestErrors[0]?.message ?? "유효하지 않음")}
-          </span>
-          <span className="pf-status-meta">
-            trigger: {triggerText} · 보강필드: {enrichCount > 0 ? `${enrichCount}개` : "없음"} ·
-            round-trip: {roundTrips ? "통과" : "불가"}
-          </span>
-        </div>
+        {/* 문제가 있을 때만 보이는 경고 줄 — 정상일 땐 미리보기 헤더의
+            "폼과 동기화됨" 배지가 그 역할을 한다. */}
+        {!valid && (
+          <div className="pf-status bad">
+            <span className="pf-status-main">
+              ⚠ {cedarError ?? manifestErrors[0]?.message ?? "유효하지 않음"}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 우측 라이브 구조 다이어그램 + manifest 미리보기 */}
@@ -612,7 +600,7 @@ export function PolicyFormPane({ initialModel, initialManifest, onChange }: Poli
 
       {fieldModalOpen && (
         <CustomFieldModal
-          existingNames={Object.keys(registry)}
+          existing={registry}
           actionTag={actionTagOf(model.trigger)}
           fields={fields}
           onCreate={({ name, field }) => setUserFields((prev) => ({ ...prev, [name]: field }))}
