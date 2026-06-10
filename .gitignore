@@ -125,6 +125,9 @@ crates/integration-tests/data/bridge-e2e-corpus/
 crates/integration-tests/tests/hl_preset_e2e.rs
 crates/integration-tests/tests/seaport_sign_order_verdict.rs
 crates/integration-tests/tests/seaport_fulfill_cancel_verdict.rs
+crates/integration-tests/tests/aave_staking_preset_e2e.rs
+crates/integration-tests/tests/curve_staking_preset_e2e.rs
+crates/integration-tests/tests/ethena_staking_preset_e2e.rs
 # Built extension dist for aave/curve/ethena live e2e (regenerable build output).
 .live-e2e-aave-curve/
 e2e-browser/
