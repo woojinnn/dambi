@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -16,7 +16,6 @@ import type { PolicySeverity } from "../../../server-api";
 import { Topbar } from "../../../shell/Topbar";
 
 import { stampAnnotations } from "../../../editor-v9/annotations";
-import { WorkspaceV9 } from "../../../editor-v9/Workspace";
 import { generateManifest } from "../../../editor-v9/manifest-gen";
 import type { PolicyIR } from "../../../cedar/blocks";
 
@@ -34,10 +33,11 @@ import { textToBlocks } from "../../../cedar";
 import { PolicyFormPane } from "./PolicyFormPane";
 import { emptyFormModel, irToForm, type FormModel } from "../../../cedar/form";
 
-type Tab = "cedar" | "form" | "block";
+type Tab = "cedar" | "form";
 
 function defaultTab(method: PolicyMethod | undefined): Tab {
-  if (method === "block") return "block";
+  // Legacy `block`-method policies fall through to Cedar — they keep their full
+  // cedar text, so the Cedar tab opens them correctly.
   if (method === "form") return "form";
   return "cedar";
 }
@@ -168,12 +168,10 @@ function EditorBody({
     severityFromCedar(policy.text),
   );
   const [cedarText, setCedarText] = useState(policy.text);
-  // For `cedar`-method policies the cedar text is canonical, so we
-  // ignore any persisted block snapshot on mount — it can be stale
-  // relative to user edits made before this commit landed. The Block
-  // tab always re-parses from `cedarText` on its first visit. For
-  // `block`-method (and legacy `undefined`) policies we keep the
-  // snapshot so previously-arranged blocks reappear.
+  // Block authoring was removed, but legacy/published policies may still carry a
+  // persisted Blockly snapshot (`policyTree`). We preserve it through save/publish
+  // so existing data isn't dropped, except for `cedar`-method policies where the
+  // cedar text is canonical and any stored tree could be stale.
   const [treeJson, setTreeJson] = useState<string | null>(
     policy.method === "cedar" ? null : (policy.policyTree ?? null),
   );
@@ -192,11 +190,6 @@ function EditorBody({
   const [formEntry, setFormEntry] = useState<FormEntry | null>(null);
   const [formKey, setFormKey] = useState(0);
 
-  /** Force a Workspace remount when seeding swaps (e.g. user typed in
-   *  the Cedar tab, then switched to Block — Blockly needs to re-parse). */
-  const [workspaceKey, setWorkspaceKey] = useState(0);
-  const lastBlockSnapshot = useRef<string>(policy.text);
-
   // Reseed when the parent swaps to a different policy id.
   useEffect(() => {
     setName(nameFromPolicy(policy));
@@ -208,8 +201,6 @@ function EditorBody({
     setTab(defaultTab(policy.method));
     setManifestOverride(null);
     setFormEntry(null);
-    lastBlockSnapshot.current = policy.text;
-    setWorkspaceKey((k) => k + 1);
   }, [policy.id]);
 
   const fromMarket = isMarketSource(policy);
@@ -332,12 +323,6 @@ function EditorBody({
 
   const handleTabChange = (next: Tab) => {
     if (next === tab) return;
-    // When switching to Block tab from Cedar where the user may have
-    // typed by hand, force a Workspace remount so Blockly re-parses
-    // the latest cedar text rather than keeping its stale AST.
-    if (next === "block" && cedarText !== lastBlockSnapshot.current) {
-      setWorkspaceKey((k) => k + 1);
-    }
     if (next === "form") void openForm(); // recompute the form from latest cedar
     setTab(next);
   };
@@ -362,15 +347,19 @@ function EditorBody({
             placeholder="정책 이름"
           />
           <span className="ev2-detail-slug">{stripDashboardId(policy.id)}</span>
-          <select
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
-            className="ev2-detail-sev"
-          >
-            <option value="deny">deny (차단)</option>
-            <option value="warn">warn (경고)</option>
-            <option value="info">info (정보)</option>
-          </select>
+          {/* 폼 탭은 ③ 심각도가 이 값을 소유(onChange로 동기화)하므로 헤더
+              셀렉트는 Cedar 탭에서만 — 같은 값이 두 군데면 헷갈린다. */}
+          {tab !== "form" && (
+            <select
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
+              className="ev2-detail-sev"
+            >
+              <option value="deny">deny (차단)</option>
+              <option value="warn">warn (경고)</option>
+              <option value="info">info (정보)</option>
+            </select>
+          )}
           {policy.cat && (
             <span className="ev2-cat-tag" style={cstyle.tag}>
               {catLabel(policy.cat)}
@@ -403,11 +392,6 @@ function EditorBody({
             label="폼"
             active={tab === "form"}
             onClick={() => handleTabChange("form")}
-          />
-          <TabBtn
-            label="블록"
-            active={tab === "block"}
-            onClick={() => handleTabChange("block")}
           />
           <span className="ev2-spc" />
           <button
@@ -470,15 +454,15 @@ function EditorBody({
             <PolicyFormPane
               key={formKey}
               initialModel={formEntry.model}
+              initialManifest={policy.manifest}
               onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden }) => {
                 setCedarText(c);
                 setIr(nextIr);
                 // Keep the header severity in sync so save stamps it correctly.
                 setSeverity(model.severity as PolicySeverity);
-                // The form doesn't produce a Blockly tree; drop the snapshot so
-                // a later Block-tab visit re-parses from the new cedar.
+                // The form edited the cedar; drop any stale block snapshot so a
+                // published policy doesn't carry a tree that no longer matches.
                 setTreeJson(null);
-                lastBlockSnapshot.current = c;
                 // Carry the form's manifest override (if any) so save persists it
                 // instead of re-generating.
                 setManifestOverride(manifestOverridden ? { value: manifest } : null);
@@ -489,14 +473,11 @@ function EditorBody({
               <div className="big">이 정책은 폼으로 열 수 없어요</div>
               <div className="sm">
                 폼은 단순한 조건(AND/OR 비교)만 다뤄요. 부정(!)·중첩·if 같은 복잡한
-                정책은 Cedar 또는 블록 탭에서 편집해 주세요.
+                정책은 Cedar 탭에서 편집해 주세요.
               </div>
               <div className="ev2-empty-actions">
                 <button type="button" className="ev2-pri ghost" onClick={() => handleTabChange("cedar")}>
                   Cedar 탭으로
-                </button>
-                <button type="button" className="ev2-pri ghost" onClick={() => handleTabChange("block")}>
-                  블록 탭으로
                 </button>
               </div>
             </div>
@@ -505,22 +486,6 @@ function EditorBody({
               <div className="sm">폼을 불러오는 중…</div>
             </div>
           ))}
-        {tab === "block" && (
-          <WorkspaceV9
-            key={workspaceKey}
-            policyName={name.trim() || "untitled"}
-            initialJson={tryParseV9Json(treeJson)}
-            initialCedarText={cedarText}
-            hideImport
-            hidePreview
-            onChange={({ cedarText: c, json, ir: nextIr }) => {
-              setCedarText(c);
-              setTreeJson(JSON.stringify({ v: 9, ws: json }));
-              setIr(nextIr ?? null);
-              lastBlockSnapshot.current = c;
-            }}
-          />
-        )}
       </div>
 
       <PublishModal
@@ -582,17 +547,4 @@ function CedarPane({
       />
     </div>
   );
-}
-
-function tryParseV9Json(s: string | null): object | null {
-  if (!s) return null;
-  try {
-    const obj = JSON.parse(s);
-    if (obj && typeof obj === "object" && (obj as { v?: number }).v === 9) {
-      return (obj as { ws: object }).ws;
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }

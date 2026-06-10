@@ -6,14 +6,17 @@
  * (debounced) renders Cedar via `blocksToText`, then calls `onChange`. Mirrors
  * the Block tab's (WorkspaceV9) contract so the editor wiring is identical.
  *
- * Sections: 검사 대상 (trigger) / 조건 (when, AND of OR, per-group NOT) / 예외
- * (unless) / 알림. Right side = a live read-only policy.cedar preview. Beyond the
- * subset (deep nesting, if/then/else, …) the editor hands off to the Block tab.
+ * Sections: 검사 대상 (trigger) / 언제 위험한가요 (when — "위험 상황" 카드:
+ * 카드 안은 모두-AND, 카드끼리 OR; 괄호 묶음은 "다음 중 하나라도" OR-전용) /
+ * 알림. Right side = a live structure diagram (pan/zoom + click-sync). Beyond
+ * the subset (deep nesting, if/then/else, …) the editor hands off to the Block
+ * tab.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { blocksToText } from "../../../cedar";
 import type { PolicyIR } from "../../../cedar/blocks/ir";
+import { pathByNode } from "../../../cedar/diagnosis/path";
 import { naturalCondition } from "../../../cedar/nl";
 import { useAddressBook, shortAddress, type AddressEntry } from "../../../hooks/useAddressBook";
 import { PolicyDiagram } from "../../../cedar/diagram/PolicyDiagram";
@@ -21,13 +24,17 @@ import { AddressInput, AddressSetInput } from "./AddressPicker";
 import {
   emptyFormModel,
   fieldsForTrigger,
-  formToIr,
-  irToForm,
+  flattenSituations,
+  formToIrWithMap,
   isGroupNode,
   KNOWN_ACTIONS,
   ACTION_GROUPS,
+  moveCondTo,
+  normalizeSituations,
   operatorsFor,
+  situationsOf,
   valueKindForField,
+  type DropTarget,
   type FieldOption,
   type FormCondition,
   type FormGroupNode,
@@ -36,16 +43,24 @@ import {
   type FormOp,
   type FormTrigger,
   type FormValue,
-  type GroupOp,
 } from "../../../cedar/form";
-import { generateManifest } from "../../../editor-v9/manifest-gen";
+import {
+  ENRICHMENT_FIELDS,
+  generateManifest,
+  type CustomType,
+  type EnrichmentRegistry,
+} from "../../../editor-v9/manifest-gen";
 
+import { CustomFieldModal } from "./CustomFieldModal";
 import { FieldCombobox } from "./FieldCombobox";
 
 import "./policy-form.css";
 
 export interface PolicyFormPaneProps {
   initialModel?: FormModel | null;
+  /** The policy's saved manifest — user-defined enrichment fields (policy_rpc
+   *  entries outside the built-in registry) are restored from it. */
+  initialManifest?: unknown;
   /** `manifest` is the effective manifest to persist — the user's hand-edited
    *  override when `manifestOverridden`, otherwise the auto-generated one
    *  (`undefined` = none). */
@@ -66,7 +81,9 @@ const OP_LABEL: Record<FormOp, string> = {
   ">": ">",
   ">=": "≥",
   contains: "포함",
+  notContains: "포함 안 함",
   in: "다음 중 하나",
+  notIn: "다음 중 아님",
 };
 
 /** Ops that compare two scalars — these can take a field-vs-field RHS. */
@@ -98,10 +115,26 @@ function defaultValueOfKind(kind: FormValue["kind"]): FormValue {
   }
 }
 
-/** Value kind for a (field, op): `in` is always a set, else the field's kind. */
+/** Value kind for a (field, op): membership ops take a set, else the field's kind. */
 function valueKindFor(field: FieldOption | undefined, op: FormOp): FormValue["kind"] {
-  if (op === "in") return "set";
+  if (op === "in" || op === "notIn") return "set";
   return field ? valueKindForField(field.fieldKind) : "string";
+}
+
+/** RHS options for a field-vs-field comparison: only PRIMITIVE fields whose
+ *  value kind matches the LHS (String↔String, Long↔Long, …), addresses only
+ *  against addresses (another String rarely compares meaningfully against
+ *  one), and never the LHS field itself. */
+function compatibleRhsFields(all: FieldOption[], lhs: FieldOption | undefined): FieldOption[] {
+  if (!lhs) return all;
+  const kind = valueKindForField(lhs.fieldKind);
+  return all.filter(
+    (f) =>
+      f.path !== lhs.path &&
+      f.fieldKind.startsWith("primitive.") &&
+      valueKindForField(f.fieldKind) === kind &&
+      (f.role === "address") === (lhs.role === "address"),
+  );
 }
 
 
@@ -110,6 +143,18 @@ function valueKindFor(field: FieldOption | undefined, op: FormOp): FormValue["ki
 const ENUM_SUGGESTIONS: Record<string, string[]> = {
   "context.direction.kind": ["exact_input", "exact_output"],
   "context.side": ["long", "short"],
+  // 프로토콜(venue) 제한 — manifest trigger의 `action.venue`와 같은 어휘.
+  "context.venue.name": [
+    "uniswap_v2",
+    "uniswap_v3",
+    "uniswap_v4",
+    "aave_v3",
+    "curve",
+    "balancer_v2",
+    "cowswap",
+    "1inch",
+    "hyperliquid",
+  ],
 };
 
 /** How a string-typed value should be entered, refined from the field's role. */
@@ -125,40 +170,105 @@ function newCond(fields: FieldOption[]): FormCondition {
   return { fieldPath: fields[0]?.path ?? "", op: "==", value: defaultValueOfKind("string"), joiner: "and" };
 }
 
-/**
- * Move a condition (matched by object identity) to `targetBox` (append) or to the
- * top level (`null`). Removes it from wherever it was; a box left empty is
- * dropped. Pure — returns the new node list. Self-drops are no-ops.
- */
-function moveCond(
-  nodes: FormNode[],
-  cond: FormCondition,
-  targetBox: FormGroupNode | null,
-): FormNode[] {
-  if (targetBox ? targetBox.conds.includes(cond) : nodes.includes(cond)) return nodes; // already there
-  const removed: FormNode[] = [];
-  for (const n of nodes) {
-    if (n === cond) continue; // a top-level leaf being moved
-    if (isGroupNode(n)) {
-      const conds = n.conds.filter((c) => c !== cond);
-      if (conds.length === 0) continue; // box emptied by the move → drop it
-      removed.push(conds.length === n.conds.length ? n : { ...n, conds });
-    } else removed.push(n);
-  }
-  const leaf: FormCondition = { ...cond, joiner: "and" };
-  if (!targetBox) return [...removed, leaf];
-  // `targetBox` never contained `cond` (guarded above), so its identity survived
-  // the removal pass and we can match it by reference.
-  return removed.map((n) => (n === targetBox ? { ...n, conds: [...n.conds, leaf] } : n));
+/** `custom_context` 타입 → 폼 FieldOption의 fieldKind. */
+const KIND_BY_TYPE: Record<CustomType, FieldOption["fieldKind"]> = {
+  decimal: "primitive.decimal",
+  Long: "primitive.Long",
+  Bool: "primitive.Bool",
+  String: "primitive.String",
+};
+
+/** 현재 trigger의 enrichment action tag (`Erc20Approve` → `erc20_approve`). */
+function actionTagOf(trigger: FormTrigger): string | null {
+  if (trigger.kind !== "actionEq") return null;
+  return trigger.id.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
 
-export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) {
-  const [model, setModel] = useState<FormModel>(() => initialModel ?? emptyFormModel());
+/** 저장된 manifest에서 사용자 정의 보강 필드(기본 레지스트리에 없는
+ *  policy_rpc 항목)를 복원한다. 형태가 어긋나는 항목은 조용히 건너뜀. */
+function userFieldsFromManifest(manifest: unknown, actionTag: string | null): EnrichmentRegistry {
+  const out: EnrichmentRegistry = {};
+  const m = manifest as
+    | {
+        policy_rpc?: unknown;
+        custom_context?: { fields?: Record<string, string> };
+      }
+    | null
+    | undefined;
+  if (!m || !Array.isArray(m.policy_rpc)) return out;
+  const types = m.custom_context?.fields ?? {};
+  for (const raw of m.policy_rpc) {
+    const rpc = raw as {
+      id?: unknown;
+      method?: unknown;
+      params?: unknown;
+      outputs?: { from?: unknown }[];
+    };
+    if (typeof rpc?.id !== "string" || typeof rpc?.method !== "string") continue;
+    if (rpc.id in ENRICHMENT_FIELDS) continue; // 내장 필드는 레지스트리가 원본
+    const type = types[rpc.id];
+    if (type !== "decimal" && type !== "Long" && type !== "Bool" && type !== "String") continue;
+    const from = rpc.outputs?.[0]?.from;
+    out[rpc.id] = {
+      type,
+      label: { ko: rpc.id, en: rpc.id },
+      appliesTo: actionTag ? [actionTag] : [],
+      method: rpc.method,
+      projection: typeof from === "string" ? from : "$.result.value",
+      params: (rpc.params ?? {}) as EnrichmentRegistry[string]["params"],
+    };
+  }
+  return out;
+}
+
+/** 폼↔다이어그램 동기화의 선택 단위: 행/묶음 노드, 또는 상황 카드(머리 노드). */
+type Selection2 = { kind: "node"; node: FormNode } | { kind: "situation"; head: FormNode };
+
+/** ConditionEditor에 내려보내는 선택 배선. */
+interface EditorSelection {
+  isNodeSelected: (n: FormNode) => boolean;
+  isSituationSelected: (head: FormNode) => boolean;
+  onClickNode: (n: FormNode) => void;
+  onClickSituation: (head: FormNode) => void;
+  registerRow: (n: FormNode, el: HTMLElement | null) => void;
+}
+
+export function PolicyFormPane({ initialModel, initialManifest, onChange }: PolicyFormPaneProps) {
+  const [model, setModel] = useState<FormModel>(() =>
+    initialModel
+      ? {
+          ...initialModel,
+          when: normalizeSituations(initialModel.when),
+          unless: normalizeSituations(initialModel.unless),
+        }
+      : emptyFormModel(),
+  );
   // We no longer display the Cedar text (the right pane shows the diagram), but
   // we still build it to push up via onChange and to surface conversion errors.
   const [cedarError, setCedarError] = useState<string | null>(null);
 
-  const fields = useMemo(() => fieldsForTrigger(model.trigger), [model.trigger]);
+  // 사용자 정의 보강 필드 — 저장된 manifest에서 복원, 모달로 추가.
+  const [userFields, setUserFields] = useState<EnrichmentRegistry>(() =>
+    userFieldsFromManifest(initialManifest, actionTagOf((initialModel ?? emptyFormModel()).trigger)),
+  );
+  const [fieldModalOpen, setFieldModalOpen] = useState(false);
+  const registry = useMemo<EnrichmentRegistry>(
+    () => ({ ...ENRICHMENT_FIELDS, ...userFields }),
+    [userFields],
+  );
+
+  const fields = useMemo(() => {
+    const extra: FieldOption[] = Object.entries(userFields).map(([name, def]) => ({
+      path: `context.custom.${name}`,
+      label: def.label.ko,
+      fieldKind: KIND_BY_TYPE[def.type],
+      role: "derived" as const,
+      source: "custom" as const,
+      optional: true,
+      desc: `${def.method} 호출 값`,
+    }));
+    return [...fieldsForTrigger(model.trigger), ...extra];
+  }, [model.trigger, userFields]);
   const rhsFields = useMemo(() => [PRINCIPAL_ADDRESS, ...fields], [fields]);
   const fieldByPath = useMemo(() => {
     const m = new Map<string, FieldOption>();
@@ -167,8 +277,15 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
   }, [fields]);
   const addrBook = useAddressBook();
   const ctx = useMemo<EditorCtx>(
-    () => ({ fields, rhsFields, fieldByPath, lookupAddr: addrBook.lookup }),
-    [fields, rhsFields, fieldByPath, addrBook.lookup],
+    () => ({
+      fields,
+      rhsFields,
+      fieldByPath,
+      lookupAddr: addrBook.lookup,
+      onCreateCustom: () => setFieldModalOpen(true),
+      customFieldEnabled: model.trigger.kind === "actionEq",
+    }),
+    [fields, rhsFields, fieldByPath, addrBook.lookup, model.trigger.kind],
   );
   // Resolve 0x addresses in the structure diagram to friendly names.
   const humanizeAddrs = (text: string): string =>
@@ -177,18 +294,86 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
       return e ? `${e.name}(${shortAddress(m)})` : m;
     });
 
-  const ir = useMemo(() => formToIr(model), [model]);
+  const { ir, exprsByNode, runRootByHead } = useMemo(() => formToIrWithMap(model), [model]);
+  const pathOf = useMemo(() => pathByNode(ir), [ir]);
+
+  // ── 폼 ↔ 다이어그램 선택 동기화 ─────────────────────────────────────────
+  // 선택 단위: 폼 노드(행/묶음) 또는 상황 카드(머리 노드로 식별).
+  const [selected, setSelected] = useState<Selection2 | null>(null);
+  // 모델 편집으로 선택 대상이 사라지면 해제된 것으로 취급.
+  const sel =
+    selected &&
+    (selected.kind === "node" ? exprsByNode.has(selected.node) : runRootByHead.has(selected.head))
+      ? selected
+      : null;
+
+  const selectedPaths = useMemo(() => {
+    if (!sel) return [];
+    const exprs =
+      sel.kind === "node"
+        ? (exprsByNode.get(sel.node) ?? [])
+        : [runRootByHead.get(sel.head)].filter((e): e is NonNullable<typeof e> => !!e);
+    return exprs.map((e) => pathOf.get(e)).filter((p): p is string => !!p);
+  }, [sel, exprsByNode, runRootByHead, pathOf]);
+
+  // canonical path → 선택 (다이어그램 클릭의 역방향). run 루트를 먼저 깔고,
+  // 노드가 같은 path를 덮어쓴다(단일 조건 상황 = 행 선택 우선).
+  const selectionByPath = useMemo(() => {
+    const m = new Map<string, Selection2>();
+    for (const [head, e] of runRootByHead) {
+      const p = pathOf.get(e);
+      if (p) m.set(p, { kind: "situation", head });
+    }
+    for (const [node, exprs] of exprsByNode) {
+      for (const e of exprs) {
+        const p = pathOf.get(e);
+        if (p) m.set(p, { kind: "node", node });
+      }
+    }
+    return m;
+  }, [exprsByNode, runRootByHead, pathOf]);
+
+  const sameSelection = (a: Selection2, b: Selection2) =>
+    a.kind === b.kind &&
+    (a.kind === "node" ? a.node === (b as { node: FormNode }).node : a.head === (b as { head: FormNode }).head);
+
+  // 다이어그램 클릭 → 폼 선택 + 해당 행으로 스크롤.
+  const rowElByNode = useRef(new Map<FormNode, HTMLElement>());
+  const onDiagramNodeClick = (path: string) => {
+    const next = selectionByPath.get(path);
+    if (!next) return;
+    if (sel && sameSelection(sel, next)) {
+      setSelected(null);
+      return;
+    }
+    setSelected(next);
+    const el = rowElByNode.current.get(next.kind === "node" ? next.node : next.head);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+  const editorSelection: EditorSelection = {
+    isNodeSelected: (n) => !!sel && sel.kind === "node" && sel.node === n,
+    isSituationSelected: (h) => !!sel && sel.kind === "situation" && sel.head === h,
+    onClickNode: (n) =>
+      setSelected((s) => (s?.kind === "node" && s.node === n ? null : { kind: "node", node: n })),
+    onClickSituation: (h) =>
+      setSelected((s) =>
+        s?.kind === "situation" && s.head === h ? null : { kind: "situation", head: h },
+      ),
+    registerRow: (n, el) => {
+      if (el) rowElByNode.current.set(n, el);
+      else rowElByNode.current.delete(n);
+    },
+  };
 
   // Validity badge + manifest preview: cedar rendered + manifest generates
   // cleanly + the IR is still form-representable (round-trips). Manifest gen is
   // pure/sync — the same call the save path makes, so the preview matches what
   // gets persisted.
   const gen = useMemo(
-    () => generateManifest(ir, undefined, { id: model.id, severity: model.severity }),
-    [ir, model.id, model.severity],
+    () => generateManifest(ir, registry, { id: model.id, severity: model.severity }),
+    [ir, registry, model.id, model.severity],
   );
   const manifestErrors = gen.errors;
-  const roundTrips = useMemo(() => irToForm(ir) !== null, [ir]);
   const valid = !cedarError && manifestErrors.length === 0;
   const [manifestOpen, setManifestOpen] = useState(false);
   // Manual manifest override. `null` = use the auto-generated manifest.
@@ -203,16 +388,6 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
       return { manifest: gen.manifest, parseErr: e instanceof Error ? e.message : "JSON 형식 오류" };
     }
   }, [manifestText, gen.manifest]);
-  const enrichCount = useMemo(
-    () =>
-      new Set(
-        [...model.when, ...model.unless]
-          .flatMap((n) => (isGroupNode(n) ? n.conds : [n]))
-          .map((c) => c.fieldPath)
-          .filter((p) => p.startsWith("context.custom.")),
-      ).size,
-    [model.when, model.unless],
-  );
   const trig = model.trigger;
   // Cascading trigger picker: 분류(group) → 동작(action). `currentGroup` is
   // `"*"` for the any-action case (no second dropdown).
@@ -269,6 +444,8 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
           m.trigger.entityType === next.entityType &&
           m.trigger.id === next.id);
       if (same) return m;
+      // 보강 필드 정의는 action-shaped(파라미터 셀렉터) — 함께 비운다.
+      setUserFields({});
       return { ...m, trigger: next, when: [], unless: [] };
     });
 
@@ -330,13 +507,15 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
         {/* ② 조건 (when) */}
         <section className="pf-section">
           <h3 className="pf-h">
-            <span className="pf-num">2</span> 언제 위험한가요? <span className="pf-sub">조건 추가, 여러 개면 모두 참(AND)</span>
+            <span className="pf-num">2</span> 언제 위험한가요?{" "}
+            <span className="pf-sub">아래 상황 중 하나라도 해당되면 발동해요</span>
           </h3>
           <ConditionEditor
             nodes={model.when}
             ctx={ctx}
             emptyHint="조건이 없으면 이 동작은 항상 막힙니다."
             onChange={(when) => patch({ when })}
+            selection={editorSelection}
           />
         </section>
 
@@ -370,15 +549,15 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
           </div>
         </section>
 
-        <div className={`pf-status${valid ? " ok" : " bad"}`}>
-          <span className="pf-status-main">
-            {valid ? "✓ 유효한 정책 · .cedar와 manifest 짝 맞음" : "⚠ " + (cedarError ?? manifestErrors[0]?.message ?? "유효하지 않음")}
-          </span>
-          <span className="pf-status-meta">
-            trigger: {triggerText} · 보강필드: {enrichCount > 0 ? `${enrichCount}개` : "없음"} ·
-            round-trip: {roundTrips ? "통과" : "불가"}
-          </span>
-        </div>
+        {/* 문제가 있을 때만 보이는 경고 줄 — 정상일 땐 미리보기 헤더의
+            "폼과 동기화됨" 배지가 그 역할을 한다. */}
+        {!valid && (
+          <div className="pf-status bad">
+            <span className="pf-status-main">
+              ⚠ {cedarError ?? manifestErrors[0]?.message ?? "유효하지 않음"}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 우측 라이브 구조 다이어그램 + manifest 미리보기 */}
@@ -387,8 +566,22 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
           구조 미리보기
           <span className={`pf-sync${cedarError ? " err" : ""}`}>{cedarError ? "변환 오류" : "폼과 동기화됨"}</span>
         </div>
+        {/* 문장형 프레임: 위(무엇에서) → 트리(언제) → 아래(어떻게) 한 문장으로 읽힘 */}
+        <div className="pf-sentence top">
+          {trig.kind === "actionEq" ? <>「{triggerText}」 거래에서</> : <>모든 거래에서</>}
+        </div>
         <div className="pf-diagram-body">
-          <PolicyDiagram ir={ir} humanizeLabel={humanizeAddrs} />
+          <PolicyDiagram
+            ir={ir}
+            interactive
+            selectedPaths={selectedPaths}
+            onNodeClick={onDiagramNodeClick}
+            humanizeLabel={humanizeAddrs}
+          />
+        </div>
+        <div className={`pf-sentence bottom ${model.severity}`}>
+          {model.reason ? `'${model.reason}' (이)라는 메시지와 함께 ` : ""}
+          {model.severity === "deny" ? "차단" : "경고"}
         </div>
         <ManifestPreview
           open={manifestOpen}
@@ -404,6 +597,16 @@ export function PolicyFormPane({ initialModel, onChange }: PolicyFormPaneProps) 
           onReset={() => setManifestText(null)}
         />
       </aside>
+
+      {fieldModalOpen && (
+        <CustomFieldModal
+          existing={registry}
+          actionTag={actionTagOf(model.trigger)}
+          fields={fields}
+          onCreate={({ name, field }) => setUserFields((prev) => ({ ...prev, [name]: field }))}
+          onClose={() => setFieldModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -501,7 +704,7 @@ function ManifestPreview({
   );
 }
 
-// ── condition editor — a flat list with per-row AND/OR + NOT ─────────────────
+// ── condition editor — "위험 상황" 카드 (카드 안 AND, 카드끼리 OR) ────────────
 
 /** Shared field/operator context threaded to rows and boxes. */
 interface EditorCtx {
@@ -510,6 +713,12 @@ interface EditorCtx {
   fieldByPath: Map<string, FieldOption>;
   /** Resolve an address to a friendly name (my wallet / token), or undefined. */
   lookupAddr: (address: string) => AddressEntry | undefined;
+  /** Open the "+ 새 보강 필드 만들기" modal. */
+  onCreateCustom: () => void;
+  /** False while the trigger is "모든 동작" — enrichment params are
+   *  action-shaped, so a concrete action must be chosen first. The button
+   *  stays visible but disabled with the reason, instead of vanishing. */
+  customFieldEnabled: boolean;
 }
 
 /** Re-derive a condition after the user picks a new field. */
@@ -534,172 +743,276 @@ function ConditionEditor({
   ctx,
   emptyHint,
   onChange,
+  selection,
 }: {
   nodes: FormNode[];
   ctx: EditorCtx;
   emptyHint: string;
   onChange: (nodes: FormNode[]) => void;
+  selection: EditorSelection;
 }) {
-  const update = (i: number, n: FormNode) => onChange(nodes.map((x, j) => (j === i ? n : x)));
-  const removeAt = (i: number) => onChange(nodes.filter((_, j) => j !== i));
-  // Wrap a leaf into a 1-condition `(…)` box (the user then adds OR/AND inside).
-  const wrap = (i: number) => {
-    const n = nodes[i];
+  const runs = situationsOf(nodes);
+  // 모든 편집은 정규화를 거친다 — 투명 박스(자식 0/1)가 즉시 녹아서, 행의
+  // "+또는"이 한 줄짜리 모두-박스 안에서 눌려도 바깥 하나라도-박스로 합쳐진다.
+  const commit = (next: FormNode[][]) => onChange(normalizeSituations(flattenSituations(next)));
+  // 상황 si의 노드 ni 교체/삭제 — runs를 수술하고 flatten으로 joiner 정규화.
+  const updateNode = (si: number, ni: number, n: FormNode) =>
+    commit(runs.map((r, i) => (i === si ? r.map((x, j) => (j === ni ? n : x)) : r)));
+  const removeNode = (si: number, ni: number) =>
+    commit(runs.map((r, i) => (i === si ? r.filter((_, j) => j !== ni) : r)));
+  const addCond = (si: number) =>
+    commit(runs.map((r, i) => (i === si ? [...r, newCond(ctx.fields)] : r)));
+  const addSituation = () => commit([...runs, [newCond(ctx.fields)]]);
+  const removeSituation = (si: number) => commit(runs.filter((_, i) => i !== si));
+  // 행에 "또는" 선택지 붙이기 — 행을 "다음 중 하나라도" 묶음으로 감싸고 빈
+  // 선택지를 바로 하나 추가 (한 클릭으로 "B 또는 C" 의도 완성).
+  const addOr = (si: number, ni: number) => {
+    const n = runs[si][ni];
     if (isGroupNode(n)) return;
-    update(i, { kind: "group", joiner: n.joiner, conds: [{ ...n, joiner: "and" }] });
+    updateNode(si, ni, {
+      kind: "group",
+      joiner: n.joiner,
+      conds: [{ ...n, joiner: "and" }, { ...newCond(ctx.fields), joiner: "or" }],
+    });
   };
-  // Ungroup: splice a box's conditions back as leaf nodes (first inherits joiner).
-  const unwrap = (i: number) => {
-    const n = nodes[i];
-    if (!isGroupNode(n)) return;
-    const inner: FormNode[] = n.conds.map((c, ci) => (ci === 0 ? { ...c, joiner: n.joiner } : c));
-    onChange([...nodes.slice(0, i), ...inner, ...nodes.slice(i + 1)]);
-  };
-
-  // Drag-and-drop: drag a condition onto a box to move it in, or onto the
-  // top-level strip to move it out. The payload is the condition object itself
-  // (matched by identity in `moveCond`).
+  // Drag-and-drop: drag a row onto a situation card (AND로 합류), a choice
+  // group (선택지로), or the bottom strip (새 상황). Payload = the condition
+  // object itself (matched by identity in `moveCondTo`).
   const [drag, setDrag] = useState<FormCondition | null>(null);
-  const dropTo = (box: FormGroupNode | null) => {
-    if (drag) onChange(moveCond(nodes, drag, box));
+  const dropTo = (target: DropTarget) => {
+    if (drag) onChange(normalizeSituations(moveCondTo(nodes, drag, target)));
     setDrag(null);
   };
 
   return (
     <>
-      {nodes.length === 0 && <div className="pf-empty-cond">{emptyHint}</div>}
-      {nodes.map((n, i) =>
-        isGroupNode(n) ? (
-          <GroupBox
-            key={i}
-            group={n}
-            first={i === 0}
-            ctx={ctx}
-            dragging={drag !== null}
-            onDragStartCond={(c) => setDrag(c)}
-            onDropInto={() => dropTo(n)}
-            onJoiner={(joiner) => update(i, { ...n, joiner })}
-            onToggleNot={() => update(i, { ...n, not: !n.not })}
-            onConds={(conds) => update(i, { ...n, conds })}
-            onUngroup={() => unwrap(i)}
-            onRemove={() => removeAt(i)}
-          />
-        ) : (
-          <ConditionRow
-            key={i}
-            cond={n}
-            first={i === 0}
-            ctx={ctx}
-            onDragStart={() => setDrag(n)}
-            onJoiner={(joiner) => update(i, { ...n, joiner })}
-            onToggleNot={() => update(i, { ...n, not: !n.not })}
-            onField={(p) => update(i, pickFieldCond(n, p, ctx.fieldByPath))}
-            onOp={(op) => update(i, pickOpCond(n, op, ctx.fieldByPath))}
-            onValue={(value) => update(i, { ...n, value })}
-            onGroup={() => wrap(i)}
-            onRemove={() => removeAt(i)}
-          />
-        ),
-      )}
+      {runs.length === 0 && <div className="pf-empty-cond">{emptyHint}</div>}
+      {runs.map((run, si) => (
+        <div key={si}>
+          {si > 0 && (
+            <div className="pf-or-div">
+              <span>또는</span>
+            </div>
+          )}
+          <div
+            className={`pf-sit${drag ? " droppable" : ""}${
+              selection.isSituationSelected(run[0]) ? " is-selected" : ""
+            }`}
+            onDragOver={drag ? (e) => e.preventDefault() : undefined}
+            onDrop={
+              drag
+                ? (e) => {
+                    e.preventDefault();
+                    dropTo({ kind: "situation", index: si });
+                  }
+                : undefined
+            }
+          >
+            <div
+              className="pf-sit-head"
+              onClick={(ev) => {
+                if ((ev.target as HTMLElement).closest("button")) return;
+                selection.onClickSituation(run[0]);
+              }}
+            >
+              <span className="pf-sit-title">상황 {si + 1}</span>
+              {run.length > 1 && <span className="pf-sit-mode">다음에 모두 해당</span>}
+              <span className="pf-spc" />
+              <button
+                type="button"
+                className="pf-iconbtn danger"
+                onClick={() => removeSituation(si)}
+                aria-label="상황 삭제"
+                title="상황 삭제"
+              >
+                ✕
+              </button>
+            </div>
+            {run.map((n, ni) =>
+              isGroupNode(n) ? (
+                <GroupBox
+                  key={ni}
+                  group={n}
+                  orCtx
+                  ctx={ctx}
+                  dragging={drag !== null}
+                  selection={selection}
+                  onDragStartCond={(c) => setDrag(c)}
+                  onDropIntoGroup={(g) => dropTo({ kind: "group", group: g })}
+                  onConds={(conds) => updateNode(si, ni, { ...n, conds })}
+                  onRemove={() => removeNode(si, ni)}
+                />
+              ) : (
+                <ConditionRow
+                  key={ni}
+                  cond={n}
+                  ctx={ctx}
+                  selected={selection.isNodeSelected(n)}
+                  onSelect={() => selection.onClickNode(n)}
+                  rowRef={(el) => selection.registerRow(n, el)}
+                  onDragStart={() => setDrag(n)}
+                  onField={(p) => updateNode(si, ni, pickFieldCond(n, p, ctx.fieldByPath))}
+                  onOp={(op) => updateNode(si, ni, pickOpCond(n, op, ctx.fieldByPath))}
+                  onValue={(value) => updateNode(si, ni, { ...n, value })}
+                  onGroup={() => addOr(si, ni)}
+                  onRemove={() => removeNode(si, ni)}
+                />
+              ),
+            )}
+            <button type="button" className="pf-add-cond sm" onClick={() => addCond(si)}>
+              + 그리고
+            </button>
+          </div>
+        </div>
+      ))}
       {drag !== null && (
-        <div className="pf-dropstrip" onDragOver={(e) => e.preventDefault()} onDrop={() => dropTo(null)}>
-          여기에 놓아 묶음에서 빼기 (최상위로)
+        <div
+          className="pf-dropstrip"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            dropTo({ kind: "new-situation" });
+          }}
+        >
+          여기에 놓아 새 상황으로 만들기
         </div>
       )}
-      {nodes.length > 1 && (
-        <div className="pf-precedence">AND가 OR보다 먼저 묶여요 · 괄호로 묶으려면 행의 “묶기”</div>
-      )}
       <div className="pf-add-row">
-        <button type="button" className="pf-add-cond" onClick={() => onChange([...nodes, newCond(ctx.fields)])}>
-          + 조건 추가
+        <button type="button" className="pf-add-cond" onClick={addSituation}>
+          {runs.length === 0 ? "+ 위험 상황 추가" : "+ 또는"}
         </button>
         <button
           type="button"
-          className="pf-add-cond"
-          onClick={() => onChange([...nodes, { kind: "group", joiner: "and", conds: [newCond(ctx.fields)] }])}
+          className="pf-add-cond accent"
+          onClick={ctx.onCreateCustom}
+          disabled={!ctx.customFieldEnabled}
+          title={
+            ctx.customFieldEnabled
+              ? "서버에서 조회한 값(위험 점수, USD 가치 등)으로 조건을 걸 수 있는 필드를 만들어요"
+              : "먼저 ①에서 동작을 골라주세요 — 어떤 값을 넘길 수 있는지가 동작마다 달라요"
+          }
         >
-          + 묶음 ( ) 추가
+          ＋ 새 보강 필드 만들기
         </button>
       </div>
     </>
   );
 }
 
-// ── a (…) group box ─────────────────────────────────────────────────────────
+// ── a nested group box — OR("다음 중 하나라도") / AND("다음에 모두 해당") by
+//    nesting parity, recursive ─────────────────────────────────────────────
 
 function GroupBox({
   group,
-  first,
+  orCtx,
   ctx,
   dragging,
+  selection,
   onDragStartCond,
-  onDropInto,
-  onJoiner,
-  onToggleNot,
+  onDropIntoGroup,
   onConds,
-  onUngroup,
   onRemove,
 }: {
   group: FormGroupNode;
-  first: boolean;
+  /** true = this group ORs its children; false = an AND-subgroup. */
+  orCtx: boolean;
   ctx: EditorCtx;
   dragging: boolean;
+  selection: EditorSelection;
   onDragStartCond: (c: FormCondition) => void;
-  onDropInto: () => void;
-  onJoiner: (op: GroupOp) => void;
-  onToggleNot: () => void;
-  onConds: (conds: FormCondition[]) => void;
-  onUngroup: () => void;
+  /** Drop the dragged row into `g` (this group or a nested descendant). */
+  onDropIntoGroup: (g: FormGroupNode) => void;
+  onConds: (conds: FormNode[]) => void;
   onRemove: () => void;
 }) {
   const { conds } = group;
-  const updateCond = (i: number, c: FormCondition) => onConds(conds.map((x, j) => (j === i ? c : x)));
+  // joiner는 그룹 안에서 의미가 없지만 관례(머리 and, 나머지 or)로 정규화.
+  const norm = (xs: FormNode[]): FormNode[] =>
+    xs.map((c, i) => {
+      const want = i === 0 ? "and" : "or";
+      return c.joiner === want ? c : { ...c, joiner: want };
+    });
+  const update = (i: number, n: FormNode) => onConds(norm(conds.map((x, j) => (j === i ? n : x))));
+  const removeAt = (i: number) => {
+    const next = conds.filter((_, j) => j !== i);
+    if (next.length === 0) onRemove(); // emptying the box removes it
+    else onConds(norm(next));
+  };
+  // 자식 행을 반대 패리티 묶음으로 감싸며 빈 항목을 바로 추가 (원클릭
+  // "또는/그리고") / 단일 leaf 묶음 풀기.
+  const wrapChild = (i: number) => {
+    const n = conds[i];
+    if (isGroupNode(n)) return;
+    update(i, {
+      kind: "group",
+      joiner: n.joiner,
+      conds: [{ ...n, joiner: "and" }, { ...newCond(ctx.fields), joiner: "or" }],
+    });
+  };
   return (
     <div
-      className={`pf-box${group.not ? " neg" : ""}${dragging ? " droppable" : ""}`}
+      className={`pf-box ${orCtx ? "or" : "and"}${
+        dragging ? " droppable" : ""
+      }${selection.isNodeSelected(group) ? " is-selected" : ""}`}
+      ref={(el) => selection.registerRow(group, el)}
       onDragOver={dragging ? (e) => e.preventDefault() : undefined}
-      onDrop={dragging ? (e) => { e.preventDefault(); onDropInto(); } : undefined}
+      onDrop={
+        dragging
+          ? (e) => {
+              e.stopPropagation(); // 바깥 카드/묶음의 drop이 같이 받지 않게
+              e.preventDefault();
+              onDropIntoGroup(group);
+            }
+          : undefined
+      }
     >
-      <div className="pf-box-head">
-        {!first && (
-          <select className={`pf-ctl pf-join ${group.joiner}`} value={group.joiner} onChange={(e) => onJoiner(e.target.value as GroupOp)}>
-            <option value="and">그리고(AND)</option>
-            <option value="or">또는(OR)</option>
-          </select>
-        )}
-        <span className="pf-box-label">( 묶음 )</span>
-        <button type="button" className={`pf-ctl pf-not${group.not ? " on" : ""}`} onClick={onToggleNot} title="이 묶음을 부정 — NOT">
-          아니다
-        </button>
+      <div
+        className="pf-box-head"
+        onClick={(ev) => {
+          if ((ev.target as HTMLElement).closest("button")) return;
+          selection.onClickNode(group);
+        }}
+      >
+        <span className="pf-box-label">{orCtx ? "다음 중 하나라도" : "다음에 모두 해당"}</span>
         <span className="pf-spc" />
-        <button type="button" className="pf-box-act" onClick={onUngroup}>
-          해제
-        </button>
-        <button type="button" className="pf-iconbtn danger" onClick={onRemove} aria-label="묶음 삭제" title="묶음 삭제">
+        <button type="button" className="pf-iconbtn danger" onClick={onRemove} aria-label="삭제" title="이 묶음 전체 삭제">
           ✕
         </button>
       </div>
-      {conds.map((c, i) => (
-        <ConditionRow
-          key={i}
-          cond={c}
-          first={i === 0}
-          ctx={ctx}
-          onDragStart={() => onDragStartCond(c)}
-          onJoiner={(joiner) => updateCond(i, { ...c, joiner })}
-          onToggleNot={() => updateCond(i, { ...c, not: !c.not })}
-          onField={(p) => updateCond(i, pickFieldCond(c, p, ctx.fieldByPath))}
-          onOp={(op) => updateCond(i, pickOpCond(c, op, ctx.fieldByPath))}
-          onValue={(value) => updateCond(i, { ...c, value })}
-          onRemove={() => {
-            const next = conds.filter((_, j) => j !== i);
-            if (next.length === 0) onRemove(); // emptying the box removes it
-            else onConds(next);
-          }}
-        />
-      ))}
-      <button type="button" className="pf-or-btn" onClick={() => onConds([...conds, newCond(ctx.fields)])}>
-        + 조건
+      {conds.map((c, i) =>
+        isGroupNode(c) ? (
+          <GroupBox
+            key={i}
+            group={c}
+            orCtx={!orCtx}
+            ctx={ctx}
+            dragging={dragging}
+            selection={selection}
+            onDragStartCond={onDragStartCond}
+            onDropIntoGroup={onDropIntoGroup}
+            onConds={(next) => update(i, { ...c, conds: next })}
+            onRemove={() => removeAt(i)}
+          />
+        ) : (
+          <ConditionRow
+            key={i}
+            cond={c}
+            alt={orCtx}
+            ctx={ctx}
+            selected={selection.isNodeSelected(c)}
+            onSelect={() => selection.onClickNode(c)}
+            rowRef={(el) => selection.registerRow(c, el)}
+            onDragStart={() => onDragStartCond(c)}
+            onField={(p) => update(i, pickFieldCond(c, p, ctx.fieldByPath))}
+            onOp={(op) => update(i, pickOpCond(c, op, ctx.fieldByPath))}
+            onValue={(value) => update(i, { ...c, value })}
+            onGroup={() => wrapChild(i)}
+            onRemove={() => removeAt(i)}
+          />
+        ),
+      )}
+      <button type="button" className="pf-or-btn" onClick={() => onConds(norm([...conds, newCond(ctx.fields)]))}>
+        {orCtx ? "+ 또는" : "+ 그리고"}
       </button>
     </div>
   );
@@ -709,11 +1022,12 @@ function GroupBox({
 
 function ConditionRow({
   cond,
-  first,
+  alt,
   ctx,
+  selected,
+  onSelect,
+  rowRef,
   onDragStart,
-  onJoiner,
-  onToggleNot,
   onField,
   onOp,
   onValue,
@@ -721,11 +1035,13 @@ function ConditionRow({
   onRemove,
 }: {
   cond: FormCondition;
-  first: boolean;
+  /** 묶음 안의 선택지 행(◦ 불릿) — 상황 카드의 행은 • 불릿. */
+  alt?: boolean;
   ctx: EditorCtx;
+  selected?: boolean;
+  onSelect?: () => void;
+  rowRef?: (el: HTMLElement | null) => void;
   onDragStart?: () => void;
-  onJoiner: (op: GroupOp) => void;
-  onToggleNot: () => void;
   onField: (path: string) => void;
   onOp: (op: FormOp) => void;
   onValue: (v: FormValue) => void;
@@ -735,10 +1051,24 @@ function ConditionRow({
   const field = ctx.fieldByPath.get(cond.fieldPath);
   const ops = field ? operatorsFor(field.fieldKind) : (["=="] as FormOp[]);
   const chip = cond.fieldPath ? condChip(cond, ctx) : "…";
-  const canField = SCALAR_OPS.has(cond.op);
+  // 필드-비교 RHS는 LHS와 값 타입이 맞는 필드만 — 하나도 없으면 토글 자체를 숨김.
+  const rhsOptions = compatibleRhsFields(ctx.rhsFields, field);
+  const canField = SCALAR_OPS.has(cond.op) && rhsOptions.length > 0;
   const fieldMode = cond.value.kind === "field";
   return (
-    <div className="pf-cond">
+    <div
+      className={`pf-cond${selected ? " is-selected" : ""}`}
+      ref={rowRef}
+      onClick={
+        onSelect
+          ? (ev) => {
+              // 행의 컨트롤(필드/연산/값/버튼) 조작은 선택 토글이 아니다.
+              if ((ev.target as HTMLElement).closest("button, select, input, [draggable], .fc")) return;
+              onSelect();
+            }
+          : undefined
+      }
+    >
       <div className="pf-cond-main">
         {onDragStart && (
           <span
@@ -749,27 +1079,12 @@ function ConditionRow({
               e.dataTransfer.setData("text/plain", "cond"); // Firefox needs data
               onDragStart();
             }}
-            title="드래그해서 묶음으로 이동 / 빼기"
+            title="드래그해서 다른 상황·묶음으로 이동"
           >
             ⠿
           </span>
         )}
-        {first ? (
-          <span className="pf-join-tag">조건</span>
-        ) : (
-          <select className={`pf-ctl pf-join ${cond.joiner}`} value={cond.joiner} onChange={(e) => onJoiner(e.target.value as GroupOp)}>
-            <option value="and">그리고(AND)</option>
-            <option value="or">또는(OR)</option>
-          </select>
-        )}
-        <button
-          type="button"
-          className={`pf-ctl pf-not${cond.not ? " on" : ""}`}
-          onClick={onToggleNot}
-          title="이 조건을 부정 — NOT"
-        >
-          아니다
-        </button>
+        <span className={`pf-bullet${alt ? " alt" : ""}`}>{alt ? "◦" : "•"}</span>
         <FieldCombobox value={cond.fieldPath} fields={ctx.fields} onChange={onField} />
         <select className="pf-ctl pf-leaf-op" value={cond.op} onChange={(e) => onOp(e.target.value as FormOp)}>
           {ops.map((op) => (
@@ -783,7 +1098,11 @@ function ConditionRow({
             type="button"
             className="pf-ctl pf-mode"
             onClick={() =>
-              onValue(fieldMode ? defaultValueOfKind(valueKindFor(field, cond.op)) : { kind: "field", path: ctx.rhsFields[0]?.path ?? "principal.address" })
+              onValue(
+                fieldMode
+                  ? defaultValueOfKind(valueKindFor(field, cond.op))
+                  : { kind: "field", path: rhsOptions[0]?.path ?? "principal.address" },
+              )
             }
             title={fieldMode ? "고정 값으로" : "다른 필드와 비교"}
           >
@@ -793,7 +1112,7 @@ function ConditionRow({
         {fieldMode ? (
           <FieldCombobox
             value={cond.value.kind === "field" ? cond.value.path : ""}
-            fields={ctx.rhsFields}
+            fields={rhsOptions}
             onChange={(p) => onValue({ kind: "field", path: p })}
           />
         ) : (
@@ -801,8 +1120,17 @@ function ConditionRow({
         )}
         <span className="pf-grow" />
         {onGroup && (
-          <button type="button" className="pf-iconbtn" onClick={onGroup} title="이 조건을 괄호로 묶기">
-            묶기
+          <button
+            type="button"
+            className="pf-iconbtn"
+            onClick={onGroup}
+            title={
+              alt
+                ? "이 선택지에 '그리고' 조건을 붙여요 — 다음에 모두 해당 묶음이 생겨요"
+                : "이 조건에 '또는' 선택지를 붙여요 — 다음 중 하나라도 묶음이 생겨요"
+            }
+          >
+            {alt ? "+그리고" : "+또는"}
           </button>
         )}
         <button type="button" className="pf-iconbtn danger" onClick={onRemove} aria-label="조건 삭제" title="삭제">
@@ -847,15 +1175,17 @@ function valueText(v: FormValue, ctx: EditorCtx, field?: FieldOption): string {
   }
 }
 
-/** Plain-Korean chip for a condition, falling back to "…" if anything is off. */
+/** Plain-Korean chip for a condition, falling back to "…" if anything is off.
+ *  The negative memberships map onto nl's positive op + `neg`. */
 function condChip(cond: FormCondition, ctx: EditorCtx): string {
+  const neg = cond.op === "notIn" || cond.op === "notContains";
   try {
     return naturalCondition({
       subject: labelOf(cond.fieldPath, ctx),
-      op: cond.op,
+      op: cond.op === "notIn" ? "in" : cond.op === "notContains" ? "contains" : cond.op,
       value: valueText(cond.value, ctx, ctx.fieldByPath.get(cond.fieldPath)),
       emptyStr: cond.value.kind === "string" && cond.value.value === "",
-      neg: cond.not,
+      neg,
     });
   } catch {
     return "…";
@@ -945,9 +1275,11 @@ function ValueInput({
           />
         );
       }
-      if (flavor === "enum") {
+      // A suggestion list applies whenever we know one for the path (e.g.
+      // venue names), not only for role-"enum" fields.
+      const sugg = field ? ENUM_SUGGESTIONS[field.path] : undefined;
+      if (flavor === "enum" || sugg) {
         const listId = `enum-${field?.path ?? ""}`;
-        const sugg = field ? ENUM_SUGGESTIONS[field.path] : undefined;
         return (
           <>
             <input

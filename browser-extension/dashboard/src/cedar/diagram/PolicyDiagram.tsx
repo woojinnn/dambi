@@ -16,13 +16,14 @@
  * verdict, history detail, confirm popup) — only the data source and `compact`
  * sizing differ.
  */
-import { useMemo } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { BinaryOp, Expr, PolicyIR } from "../blocks/ir";
 import { isAllOf, setLiteralOperand } from "../diagnosis/membership";
 import { eachChild, pathByNode } from "../diagnosis/path";
 import { naturalCondition } from "../nl";
 import { getGloss } from "../../editor-v9/gloss/paths";
+import { labelForPath } from "../form/field-catalog";
 
 import "./policy-diagram.css";
 
@@ -122,7 +123,7 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
     return {
       path,
       kind: e.op === "&&" ? "and" : "or",
-      title: e.op === "&&" ? "AND" : "OR",
+      title: e.op === "&&" ? "모두 해당" : "하나라도 해당",
       children: operands.map((c) => exprToNode(c, pathOf)),
     };
   }
@@ -139,8 +140,45 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
     const negated: Expr = { kind: "binary", op: NEGATE_OP[inner.op] ?? inner.op, left: inner.left, right: inner.right };
     return { path: pathOf.get(inner) ?? path, kind: "leaf", ...leafParts(negated), children: [] };
   }
+  // `!(x contains v)` / `!([…].contains(x))` — the form's negative membership
+  // ops. Fold to a leaf/memberset phrased negatively, carrying the INNER
+  // comparison's path (what a diagnosis blames) so highlight lines up.
+  if (
+    e.kind === "unary" &&
+    e.op === "!" &&
+    e.operand.kind === "binary" &&
+    e.operand.op === "contains"
+  ) {
+    const inner = e.operand;
+    const innerPath = pathOf.get(inner) ?? path;
+    const mem = setLiteralOperand(inner);
+    if (mem) {
+      const fieldPath = attrPath(mem.other);
+      return {
+        path: innerPath,
+        kind: "memberset",
+        title: (fieldPath && labelForPath(fieldPath)) || exprToText(mem.other),
+        detail: "다음 중 어느 것도 아님",
+        memberset: {
+          mode: "any",
+          members: mem.set.elements.map((m) => ({ text: exprToText(m), path: pathOf.get(m) ?? "?" })),
+        },
+        children: [],
+      };
+    }
+    const lp = leafParts(inner);
+    return {
+      path: innerPath,
+      kind: "leaf",
+      // No structured detail (e.g. an empty-set placeholder) → mark the
+      // negation in the title so the box never reads as the positive form.
+      title: lp.detail ? lp.title : `${lp.title} — 아님`,
+      ...(lp.detail ? { detail: lp.detail.replace(/^포함/, "포함 안 함") } : {}),
+      children: [],
+    };
+  }
   if (e.kind === "unary" && e.op === "!") {
-    return { path, kind: "not", title: "NOT", children: [exprToNode(e.operand, pathOf)] };
+    return { path, kind: "not", title: "아니다", children: [exprToNode(e.operand, pathOf)] };
   }
   if (e.kind === "if") {
     const branch = (b: Expr, tag: string): DNode => ({
@@ -166,7 +204,7 @@ function exprToNode(e: Expr, pathOf: Map<Expr, string>): DNode {
       return {
         path,
         kind: "memberset",
-        title: (fieldPath && getGloss(fieldPath)?.ko) || exprToText(mem.other),
+        title: (fieldPath && labelForPath(fieldPath)) || exprToText(mem.other),
         detail: isAllOf(e.op) ? "다음 전부 포함" : "다음 중 하나",
         memberset: {
           mode: isAllOf(e.op) ? "all" : "any",
@@ -185,7 +223,7 @@ function buildTree(ir: PolicyIR): DNode {
     // Display wrapper for the clause; its body carries the canonical `c{i}.body`.
     path: `clause${i}`,
     kind: c.kind === "unless" ? "unless" : "when",
-    title: c.kind === "unless" ? "UNLESS" : "WHEN",
+    title: c.kind === "unless" ? "예외" : "발동 조건",
     children: [exprToNode(c.body, pathOf)],
   }));
   // The FORBID/PERMIT head is dropped — the action is shown in the form's
@@ -205,9 +243,22 @@ function buildTree(ir: PolicyIR): DNode {
     ) {
       return clause.children[0];
     }
+    // Sentence flow: a lone WHEN over a gate reads as the gate itself, with the
+    // top gate phrased as the sentence opener ("아래 중 하나라도 해당하면").
+    if (clause.kind === "when" && clause.children.length === 1) {
+      return sentenceGate(clause.children[0]);
+    }
     return clause;
   }
   return { path: "root", kind: "root", title: "규칙", children: clauses };
+}
+
+/** Rephrase the TOP gate as a sentence opener (lower gates keep the short
+ *  모두/하나라도 라벨). Non-gates pass through. */
+function sentenceGate(n: DNode): DNode {
+  if (n.kind === "or") return { ...n, title: "아래 중 하나라도 해당하면" };
+  if (n.kind === "and") return { ...n, title: "아래에 모두 해당하면" };
+  return n;
 }
 
 /**
@@ -279,7 +330,7 @@ function valueExprText(rhs: Expr): string {
     return `[${rhs.elements.map((el) => unwrapExtLiteral(el) ?? exprToText(el)).join(", ")}]`;
   }
   const p = attrPath(rhs);
-  if (p) return getGloss(p)?.ko ?? p;
+  if (p) return labelForPath(p);
   return exprToText(rhs);
 }
 
@@ -292,12 +343,12 @@ function exprToKorean(e: Expr): string | null {
     const path = attrPath(e.left);
     if (!path) return null;
     const emptyStr = e.right.kind === "lit" && e.right.litType === "string" && e.right.value === "";
-    return naturalCondition({ subject: getGloss(path)?.ko ?? path, op: e.op, value: valueExprText(e.right), emptyStr });
+    return naturalCondition({ subject: labelForPath(path), op: e.op, value: valueExprText(e.right), emptyStr });
   }
   if (e.kind === "ext" && EXT_TO_OP[e.fn] && e.args.length === 2) {
     const path = attrPath(e.args[0]);
     if (!path) return null;
-    return naturalCondition({ subject: getGloss(path)?.ko ?? path, op: EXT_TO_OP[e.fn], value: valueExprText(e.args[1]) });
+    return naturalCondition({ subject: labelForPath(path), op: EXT_TO_OP[e.fn], value: valueExprText(e.args[1]) });
   }
   return null;
 }
@@ -324,13 +375,13 @@ function leafParts(e: Expr): { title: string; detail?: string } {
     rhs: Expr,
   ): { title: string; detail?: string } | null => {
     if (!path) return null;
-    const g = getGloss(path);
-    const unit = g?.unit?.ko ? ` ${g.unit.ko}` : "";
+    const unit = getGloss(path)?.unit?.ko ? ` ${getGloss(path)!.unit!.ko}` : "";
+    const title = labelForPath(path);
     const emptyStr = rhs.kind === "lit" && rhs.litType === "string" && rhs.value === "";
     if (emptyStr) {
-      return { title: g?.ko ?? path, detail: op === "==" ? "비어 있음" : "비어 있지 않음" };
+      return { title, detail: op === "==" ? "비어 있음" : "비어 있지 않음" };
     }
-    return { title: g?.ko ?? path, detail: `${OP_SYM[op] ?? op} ${valueExprText(rhs)}${unit}` };
+    return { title, detail: `${OP_SYM[op] ?? op} ${valueExprText(rhs)}${unit}` };
   };
 
   if (e.kind === "binary" && OP_SYM[e.op]) {
@@ -455,9 +506,17 @@ function isStacked(n: DNode): boolean {
   );
 }
 
+/** Label width in latin-char units — CJK glyphs run ~1.8× a latin char at the
+ *  diagram's 12px font, so width math counts them accordingly. */
+function textUnits(s: string): number {
+  let u = 0;
+  for (const ch of s) u += /[ᄀ-ᇿ　-〿一-鿿가-힯＀-￯]/.test(ch) ? 1.8 : 1;
+  return u;
+}
+
 function nodeWidth(n: DNode): number {
   if (n.kind === "memberset") return membersetSize(n).w;
-  const text = Math.max(n.title.length, (n.detail ?? "").length);
+  const text = Math.max(textUnits(n.title), textUnits(n.detail ?? ""));
   return Math.min(MAX_W, Math.max(MIN_W, Math.min(text, LABEL_CAP) * CHAR_W + PAD_X));
 }
 /** Box height of a node (taller for a memberset chip box). */
@@ -548,19 +607,110 @@ export interface PolicyDiagramProps {
   erroredPaths?: readonly string[];
   /** Tighter sizing for cramped surfaces (e.g. the confirm popup). */
   compact?: boolean;
+  /** Pan/zoom canvas (wheel zoom at cursor, drag pan, dblclick/버튼 fit) — the
+   *  editor surface only; other surfaces stay static. */
+  interactive?: boolean;
+  /** Canonical paths to render as the user's SELECTION (editor click-sync) —
+   *  blue outline, distinct from the diagnosis red. */
+  selectedPaths?: readonly string[];
+  /** Node click callback (editor click-sync). Wrapper nodes (root/when/unless)
+   *  don't fire. */
+  onNodeClick?: (path: string) => void;
   /** Optional resolver: rewrite 0x addresses in node labels to friendly names.
    *  The caller owns the address book (a hook), keeping this module pure. */
   humanizeLabel?: (text: string) => string;
 }
+
+/** Zoom clamps for the interactive canvas. */
+const PZ_MIN = 0.25;
+const PZ_MAX = 3;
 
 export function PolicyDiagram({
   ir,
   highlightPaths,
   erroredPaths,
   compact,
+  interactive,
+  selectedPaths,
+  onNodeClick,
   humanizeLabel,
 }: PolicyDiagramProps) {
   const model = useMemo(() => (ir ? layout(buildTree(ir)) : null), [ir]);
+
+  const PAD = compact ? 8 : 16;
+  const W = (model?.width ?? 0) + PAD * 2;
+  const H = (model?.height ?? 0) + PAD * 2;
+
+  // ── pan/zoom (interactive mode only) ──────────────────────────────────
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<{ k: number; x: number; y: number } | null>(null);
+  // pan 후의 클릭(드래그 잔향)이 노드 선택으로 새지 않게 한 번 삼킨다.
+  const suppressClick = useRef(false);
+  const dragFrom = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+
+  const fit = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el || !W || !H) return;
+    const k = Math.min(el.clientWidth / W, el.clientHeight / H, 1);
+    setView({ k, x: (el.clientWidth - W * k) / 2, y: Math.max((el.clientHeight - H * k) / 2, 8) });
+  }, [W, H]);
+  useLayoutEffect(() => {
+    if (interactive) fit();
+  }, [interactive, fit]);
+
+  // wheel은 React 합성 이벤트가 passive라 preventDefault가 안 먹는다 — native로.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || !interactive) return;
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      setView((v) => {
+        if (!v) return v;
+        const r = el.getBoundingClientRect();
+        const px = ev.clientX - r.left;
+        const py = ev.clientY - r.top;
+        const k = Math.min(PZ_MAX, Math.max(PZ_MIN, v.k * Math.exp(-ev.deltaY * 0.0015)));
+        return { k, x: px - ((px - v.x) * k) / v.k, y: py - ((py - v.y) * k) / v.k };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [interactive]);
+
+  const zoomBy = (f: number) =>
+    setView((v) => {
+      const el = wrapRef.current;
+      if (!v || !el) return v;
+      const px = el.clientWidth / 2;
+      const py = el.clientHeight / 2;
+      const k = Math.min(PZ_MAX, Math.max(PZ_MIN, v.k * f));
+      return { k, x: px - ((px - v.x) * k) / v.k, y: py - ((py - v.y) * k) / v.k };
+    });
+
+  const onPointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
+    if (ev.button !== 0) return;
+    // 캡처는 여기서 걸지 않는다 — pointerdown 즉시 캡처하면 자식(노드/버튼)의
+    // click이 래퍼로 리타게팅되어 노드 선택·컨트롤 버튼이 죽는다.
+    dragFrom.current = { x: ev.clientX, y: ev.clientY, moved: false };
+  };
+  const onPointerMove = (ev: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragFrom.current;
+    if (!d) return;
+    const dx = ev.clientX - d.x;
+    const dy = ev.clientY - d.y;
+    if (!d.moved) {
+      if (Math.hypot(dx, dy) < 4) return; // 클릭/드래그 구분 임계값
+      d.moved = true;
+      ev.currentTarget.setPointerCapture(ev.pointerId); // 진짜 드래그일 때만 캡처
+    }
+    d.x = ev.clientX;
+    d.y = ev.clientY;
+    setView((v) => (v ? { ...v, x: v.x + dx, y: v.y + dy } : v));
+  };
+  const onPointerUp = () => {
+    if (dragFrom.current?.moved) suppressClick.current = true;
+    dragFrom.current = null;
+  };
 
   // Friendly-name resolver for 0x addresses inside labels (supplied by the
   // caller, which owns the address book). Identity when not provided.
@@ -572,6 +722,7 @@ export function PolicyDiagram({
 
   const hl = new Set(highlightPaths ?? []);
   const err = new Set(erroredPaths ?? []);
+  const sel = new Set(selectedPaths ?? []);
   const active = hl.size > 0 || err.size > 0;
   // A node is on the trace if it (or any descendant) is a culprit/errored, so we
   // can dim the branches that did NOT contribute to the block.
@@ -586,10 +737,6 @@ export function PolicyDiagram({
     };
     mark(model.placed);
   }
-
-  const PAD = compact ? 8 : 16;
-  const W = model.width + PAD * 2;
-  const H = model.height + PAD * 2;
 
   const edges: JSX.Element[] = [];
   const nodes: JSX.Element[] = [];
@@ -636,13 +783,31 @@ export function PolicyDiagram({
     const title = humanizeAddrs(n.title);
     const detail = n.detail ? humanizeAddrs(n.detail) : undefined;
     const label = title.length > LABEL_CAP ? `${title.slice(0, LABEL_CAP - 1)}…` : title;
+    const isWrapper = n.kind === "root" || n.kind === "when" || n.kind === "unless";
+    const selected =
+      sel.has(n.path) || (n.memberset?.members.some((m) => sel.has(m.path)) ?? false);
+    const clickable = !!onNodeClick && !isWrapper;
     nodes.push(
       <g
         key={`n-${n.path}`}
         className={`pd-node pd-${n.kind}${culprit ? " pd-culprit" : ""}${
           errored ? " pd-errored" : ""
-        }${dimmed ? " pd-dim" : ""}`}
+        }${dimmed ? " pd-dim" : ""}${selected ? " pd-selected" : ""}${
+          clickable ? " pd-clickable" : ""
+        }`}
         transform={`translate(${cx - n.w / 2}, ${cy})`}
+        onClick={
+          clickable
+            ? (ev) => {
+                ev.stopPropagation();
+                if (suppressClick.current) {
+                  suppressClick.current = false;
+                  return;
+                }
+                onNodeClick(n.path);
+              }
+            : undefined
+        }
       >
         {n.memberset ? (
           <foreignObject width={n.w} height={n.h}>
@@ -685,6 +850,44 @@ export function PolicyDiagram({
     );
   };
   walk(model.placed);
+
+  if (interactive) {
+    return (
+      <div
+        className="pdiagram is-interactive"
+        ref={wrapRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onDoubleClick={fit}
+      >
+        <svg
+          className="pdiagram-svg"
+          width="100%"
+          height="100%"
+          role="img"
+          aria-label="정책 구조 다이어그램"
+        >
+          <g transform={view ? `translate(${view.x} ${view.y}) scale(${view.k})` : undefined}>
+            {edges}
+            {nodes}
+          </g>
+        </svg>
+        <div className="pd-controls">
+          <button type="button" onClick={() => zoomBy(1.25)} aria-label="확대">
+            ＋
+          </button>
+          <button type="button" onClick={() => zoomBy(1 / 1.25)} aria-label="축소">
+            −
+          </button>
+          <button type="button" onClick={fit}>
+            맞춤
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`pdiagram${compact ? " is-compact" : ""}`}>

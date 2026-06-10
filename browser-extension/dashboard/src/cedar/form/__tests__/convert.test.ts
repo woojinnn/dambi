@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { blocksToEst } from "../../blocks/blocksToEst";
 import type { Expr, PolicyIR } from "../../blocks/ir";
-import { formToIr, irToForm } from "../convert";
+import { pathByNode } from "../../diagnosis/path";
+import { policyDiagramPaths } from "../../diagram/PolicyDiagram";
+import { formToIr, formToIrWithMap, irToForm } from "../convert";
 import type { FormCondition, FormModel } from "../model";
 
 const cond = (
@@ -64,19 +66,77 @@ describe("formToIr / irToForm", () => {
     expect(irToForm(formToIr(m))).toEqual(m);
   });
 
-  it("round-trips a per-row NOT", () => {
+  it("canonicalizes a hand-written `!(a == b)` into the complement operator", () => {
+    const ir = formToIr({
+      trigger: { kind: "any" },
+      when: [cond("context.flagged", "==", { kind: "bool", value: true })],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    });
+    const negated: PolicyIR = {
+      ...ir,
+      conditions: [{ kind: "when", body: { kind: "unary", op: "!", operand: ir.conditions[0].body } }],
+    };
+    expect(irToForm(negated)?.when).toEqual([
+      cond("context.flagged", "!=", { kind: "bool", value: true }),
+    ]);
+  });
+
+  it("round-trips the negative memberships (notIn / notContains)", () => {
     const m: FormModel = {
       trigger: { kind: "any" },
-      when: [cond("context.flagged", "==", { kind: "bool", value: true }, { not: true })],
+      when: [
+        cond("context.target", "notIn", { kind: "set", values: ["0xaa", "0xbb"] }),
+        cond("context.tags", "notContains", { kind: "string", value: "risky" }),
+      ],
       unless: [],
       id: "p",
       severity: "warn",
       reason: "",
     };
     const ir = formToIr(m);
-    // body is `!(context.flagged == true)`
-    expect(ir.conditions[0].body.kind).toBe("unary");
+    // both emit `!(…contains…)`
+    expect(ir.conditions[0].body.kind).toBe("binary"); // && of the two
     expect(irToForm(ir)).toEqual(m);
+  });
+
+  it("De-Morgans `!(A || B)` in an AND context into complemented rows", () => {
+    // when { z == 0 && !(a == 1 || b == 2) }  →  [z==0, a!=1, b!=2]
+    const cmp3 = (n: string, v: number): Expr => ({
+      kind: "binary",
+      op: "==",
+      left: { kind: "attr", of: { kind: "var", name: "context" }, attr: n },
+      right: { kind: "lit", litType: "long", value: v },
+    });
+    const ir: PolicyIR = {
+      ...formToIr(richModel),
+      conditions: [
+        {
+          kind: "when",
+          body: {
+            kind: "binary",
+            op: "&&",
+            left: cmp3("z", 0),
+            right: {
+              kind: "unary",
+              op: "!",
+              operand: { kind: "binary", op: "||", left: cmp3("a", 1), right: cmp3("b", 2) },
+            },
+          },
+        },
+      ],
+    };
+    const form = irToForm(ir);
+    expect(form?.when).toEqual([
+      cond("context.z", "==", { kind: "long", value: 0 }),
+      cond("context.a", "!=", { kind: "long", value: 1 }),
+      cond("context.b", "!=", { kind: "long", value: 2 }),
+    ]);
+    // and the canonical form round-trips stably
+    const m: FormModel = { ...richModel, when: form!.when, unless: [] };
+    expect(irToForm(formToIr(m))?.when).toEqual(form?.when);
   });
 
   it("emits forbid + action scope + @id/@severity/@reason", () => {
@@ -90,7 +150,7 @@ describe("formToIr / irToForm", () => {
     ]);
   });
 
-  it("auto-inserts has-guards for a custom field at the top-level AND", () => {
+  it("auto-inserts has-guards for a custom field inside its run", () => {
     const ir = formToIr({
       ...richModel,
       when: [cond("context.custom.inputUsd", ">=", { kind: "decimal", value: "1" })],
@@ -112,6 +172,179 @@ describe("formToIr / irToForm", () => {
       of: { kind: "attr", of: { kind: "var", name: "context" }, attr: "custom" },
       attr: "inputUsd",
     });
+  });
+
+  it("places has-guards inside the run that uses the optional field (no fail-open)", () => {
+    // when { a == 1 || custom.x >= 1 } — 가드가 OR 전체가 아니라 두 번째 run 안에만.
+    const m: FormModel = {
+      trigger: { kind: "any" },
+      when: [
+        cond("context.a", "==", { kind: "long", value: 1 }),
+        cond("context.custom.x", ">=", { kind: "decimal", value: "1" }, { joiner: "or" }),
+      ],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    };
+    const body = formToIr(m).conditions[0].body;
+    expect(body.kind).toBe("binary");
+    if (body.kind !== "binary") return;
+    expect(body.op).toBe("||");
+    // 왼쪽 run(a == 1)에는 has가 전혀 없어야 한다.
+    const hasCount = (e: Expr): number => {
+      if (e.kind === "has") return 1;
+      if (e.kind === "binary") return hasCount(e.left) + hasCount(e.right);
+      if (e.kind === "unary") return hasCount(e.operand);
+      return 0;
+    };
+    expect(hasCount(body.left)).toBe(0);
+    expect(hasCount(body.right)).toBe(2); // context has custom, context.custom has x
+    // round-trip 유지
+    expect(irToForm(formToIr(m))).toEqual(m);
+  });
+
+  it("rejects a clause where a run is only guards", () => {
+    // when { a == 1 || context has custom } — has만 남는 run은 폼 밖(블록 핸드오프).
+    const a: Expr = {
+      kind: "binary",
+      op: "==",
+      left: { kind: "attr", of: { kind: "var", name: "context" }, attr: "a" },
+      right: { kind: "lit", litType: "long", value: 1 },
+    };
+    const guardOnly: Expr = { kind: "has", of: { kind: "var", name: "context" }, attr: "custom" };
+    const ir: PolicyIR = {
+      ...formToIr(richModel),
+      conditions: [{ kind: "when", body: { kind: "binary", op: "||", left: a, right: guardOnly } }],
+    };
+    expect(irToForm(ir)).toBeNull();
+  });
+
+  it("opens `X && (A && B || C)` as an OR-group with an AND-subgroup alternative", () => {
+    const cmp2 = (n: string, v: number): Expr => ({
+      kind: "binary",
+      op: "==",
+      left: { kind: "attr", of: { kind: "var", name: "context" }, attr: n },
+      right: { kind: "lit", litType: "long", value: v },
+    });
+    const ir: PolicyIR = {
+      ...formToIr(richModel),
+      conditions: [
+        {
+          kind: "when",
+          body: {
+            kind: "binary",
+            op: "&&",
+            left: cmp2("x", 0),
+            right: {
+              kind: "binary",
+              op: "||",
+              left: { kind: "binary", op: "&&", left: cmp2("a", 1), right: cmp2("b", 2) },
+              right: cmp2("c", 3),
+            },
+          },
+        },
+      ],
+    };
+    const form = irToForm(ir);
+    expect(form).not.toBeNull();
+    expect(form?.when).toEqual([
+      cond("context.x", "==", { kind: "long", value: 0 }),
+      {
+        kind: "group",
+        joiner: "and",
+        conds: [
+          {
+            kind: "group",
+            joiner: "and",
+            conds: [
+              cond("context.a", "==", { kind: "long", value: 1 }),
+              cond("context.b", "==", { kind: "long", value: 2 }, { joiner: "or" }),
+            ],
+          },
+          cond("context.c", "==", { kind: "long", value: 3 }, { joiner: "or" }),
+        ],
+      },
+    ]);
+    // and round-trips losslessly from the form side
+    const m: FormModel = { ...richModel, when: form!.when, unless: [] };
+    expect(irToForm(formToIr(m))?.when).toEqual(form?.when);
+  });
+
+  it("round-trips the deep nesting (A && (B||C)) && D && (E || (F && (G||H)))", () => {
+    const c1 = (n: string, j: "and" | "or" = "and") =>
+      cond(`context.${n}`, "==", { kind: "long", value: 1 }, j === "or" ? { joiner: "or" } : {});
+    const m: FormModel = {
+      trigger: { kind: "any" },
+      when: [
+        c1("a"),
+        { kind: "group", joiner: "and", conds: [c1("b"), c1("c", "or")] },
+        c1("d"),
+        {
+          kind: "group",
+          joiner: "and",
+          conds: [
+            c1("e"),
+            {
+              kind: "group",
+              joiner: "or",
+              conds: [
+                c1("f"),
+                { kind: "group", joiner: "or", conds: [c1("g"), c1("h", "or")] },
+              ],
+            },
+          ],
+        },
+      ],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    };
+    const round = irToForm(formToIr(m));
+    expect(round).not.toBeNull();
+    // joiners inside groups are display-dead and normalized (head and, rest or)
+    expect(round?.when).toHaveLength(4);
+    expect(irToForm(formToIr(round!))).toEqual(round);
+  });
+
+  it("guards an optional field inside its nearest AND context only (deep branch)", () => {
+    // when { a == 1 && (b == 2 || custom.x >= 1) } — 가드는 custom.x 선택지에만.
+    const m: FormModel = {
+      trigger: { kind: "any" },
+      when: [
+        cond("context.a", "==", { kind: "long", value: 1 }),
+        {
+          kind: "group",
+          joiner: "and",
+          conds: [
+            cond("context.b", "==", { kind: "long", value: 2 }),
+            cond("context.custom.x", ">=", { kind: "decimal", value: "1" }, { joiner: "or" }),
+          ],
+        },
+      ],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    };
+    const body = formToIr(m).conditions[0].body;
+    const hasCount = (e: Expr): number => {
+      if (e.kind === "has") return 1;
+      if (e.kind === "binary") return hasCount(e.left) + hasCount(e.right);
+      if (e.kind === "unary") return hasCount(e.operand);
+      return 0;
+    };
+    // body = a==1 && (b==2 || (has·has && x>=1))
+    expect(body.kind).toBe("binary");
+    if (body.kind !== "binary") return;
+    const orNode = body.right;
+    expect(orNode.kind === "binary" && orNode.op === "||").toBe(true);
+    if (orNode.kind !== "binary") return;
+    expect(hasCount(body.left)).toBe(0); // a==1 쪽엔 가드 없음
+    expect(hasCount(orNode.left)).toBe(0); // b==2 선택지엔 없음
+    expect(hasCount(orNode.right)).toBe(2); // custom.x 선택지에만
+    expect(irToForm(formToIr(m))).toEqual(m);
   });
 
   it("normalizes `[set].contains(attr)` to an `in` condition (allowlist policies)", () => {
@@ -138,8 +371,49 @@ describe("formToIr / irToForm", () => {
       ],
     };
     expect(irToForm(ir)?.when).toEqual([
-      cond("context.target", "in", { kind: "set", values: ["0xaa", "0xbb"] }, { not: true }),
+      cond("context.target", "notIn", { kind: "set", values: ["0xaa", "0xbb"] }),
     ]);
+  });
+
+  it("formToIrWithMap: every form node maps to an Expr whose path the diagram renders", () => {
+    const m: FormModel = {
+      trigger: { kind: "any" },
+      when: [
+        cond("context.a", "==", { kind: "long", value: 1 }),
+        cond("context.flagged", "notIn", { kind: "set", values: ["a", "b"] }),
+        cond("context.spender", "in", { kind: "set", values: ["0xaa", "0xbb"] }, { joiner: "or" }),
+        {
+          kind: "group",
+          joiner: "and",
+          conds: [
+            cond("context.b", "==", { kind: "long", value: 2 }),
+            cond("context.c", "==", { kind: "long", value: 3 }, { joiner: "or" }),
+          ],
+        },
+      ],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    };
+    const { ir, exprsByNode, runRootByHead } = formToIrWithMap(m);
+    const pathOf = pathByNode(ir);
+    const shown = new Set(policyDiagramPaths(ir));
+    // 모든 폼 노드(when의 leaf 3 + group 1 = 4, group 안 leaf 2 = 6)가 등록되고,
+    expect(exprsByNode.size).toBe(6);
+    for (const exprs of exprsByNode.values()) {
+      const paths = exprs.map((e) => pathOf.get(e));
+      // 각 Expr은 canonical path를 갖고, 그중 하나는 다이어그램이 실제로 그린다.
+      expect(paths.every(Boolean)).toBe(true);
+      expect(paths.some((p) => shown.has(p!))).toBe(true);
+    }
+    // run 머리(1번째/3번째 노드) → run 루트 게이트.
+    expect(runRootByHead.size).toBe(2);
+    expect(runRootByHead.has(m.when[0])).toBe(true);
+    expect(runRootByHead.has(m.when[2])).toBe(true);
+    for (const root of runRootByHead.values()) expect(pathOf.get(root)).toBeTruthy();
+    // 동일 모델의 formToIr와 같은 IR.
+    expect(ir).toEqual(formToIr(m));
   });
 
   it("produces an EST the local IR→EST converter accepts", () => {
@@ -255,9 +529,9 @@ describe("formToIr / irToForm", () => {
     expect(irToForm(formToIr(m))).toEqual(m);
   });
 
-  it("rejects a doubly-nested group (hands off to blocks)", () => {
-    // forbid when { z==0 && (a==1 || (b==2 && (c==3 || d==4))) } — a group whose
-    // own internals need another group → beyond the one-level form subset.
+  it("opens a doubly-nested group recursively (parity alternation)", () => {
+    // forbid when { z==0 && (a==1 || (b==2 && (c==3 || d==4))) } — depth 4,
+    // alternating OR/AND containers.
     const cmp = (n: string, v: number): Expr => ({
       kind: "binary",
       op: "==",
@@ -275,6 +549,9 @@ describe("formToIr / irToForm", () => {
         },
       ],
     };
-    expect(irToForm(ir)).toBeNull();
+    const form = irToForm(ir);
+    expect(form).not.toBeNull();
+    const m: FormModel = { ...richModel, when: form!.when, unless: [] };
+    expect(irToForm(formToIr(m))?.when).toEqual(form?.when);
   });
 });

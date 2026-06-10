@@ -2,11 +2,12 @@
  * Form-editor model — the small, constrained shape the "폼으로 만들기" UI edits.
  *
  * A policy is a `forbid` over an action-eq trigger with two flat condition lists
- * (`when` and `unless`). Each condition is a single comparison with its own
- * `not` and a `joiner` (AND/OR) to the previous one. AND binds tighter than OR,
- * so the list reads as an OR of AND-runs (e.g. `A 그리고 B 또는 C` = `(A∧B)∨C`)
- * — a flat, query-builder UX that still covers most real policies. Anything
- * deeper (nested OR-groups, if/then/else, …) hands off to the Block tab.
+ * (`when` and `unless`). Each condition is a single comparison with a `joiner`
+ * (AND/OR) to the previous one. AND binds tighter than OR,
+ * so the list reads as an OR of AND-runs ("위험 상황" cards in the UI). Inside a
+ * run, {@link FormGroupNode} containers nest recursively with alternating
+ * AND/OR parity, covering arbitrary boolean structure. What the form still
+ * can't hold (if/then/else, like/is, …) stays Cedar-text-only.
  *
  * The form NEVER assembles Cedar text. It builds this model, {@link formToIr}
  * turns it into a `PolicyIR`, and the existing pipeline renders Cedar.
@@ -15,8 +16,20 @@
  */
 
 /** Comparison operators the form offers. `contains`/`in` are membership over a
- *  set field / a literal set respectively. */
-export type FormOp = "==" | "!=" | "<" | "<=" | ">" | ">=" | "contains" | "in";
+ *  set field / a literal set; `notContains`/`notIn` are their complements.
+ *  EVERY op has a complement, so the form needs no separate NOT toggle — a
+ *  hand-written `!(…)` canonicalizes into complement ops (De Morgan) on open. */
+export type FormOp =
+  | "=="
+  | "!="
+  | "<"
+  | "<="
+  | ">"
+  | ">="
+  | "contains"
+  | "notContains"
+  | "in"
+  | "notIn";
 
 /** A typed leaf value. The field's type (from the gloss/enrichment catalog)
  *  picks which variant the value widget produces. */
@@ -43,23 +56,27 @@ export interface FormLeaf {
 /** AND/OR connector between conditions. */
 export type GroupOp = "and" | "or";
 
-/** One row of the condition list: a comparison, optionally negated, joined to
- *  the previous row by `joiner` (ignored for the first row). */
+/** One row of the condition list, joined to the previous row by `joiner`
+ *  (ignored for the first row). Negation lives in the operator (≠, 포함 안 함,
+ *  …), never as a separate flag. */
 export interface FormCondition extends FormLeaf {
-  /** Wrap this single condition in `!(…)`. */
-  not?: boolean;
   /** Connector to the PREVIOUS condition. The first row's value is ignored. */
   joiner: GroupOp;
 }
 
-/** An explicit parenthesized group — `(…)` — of conditions, joined to its
- *  siblings by `joiner`. One level deep (its `conds` are plain leaves), which is
- *  enough for CNF like `(A | B) & (C | D)`; deeper nesting hands off to blocks. */
+/** An explicit parenthesized group — `(…)` — of conditions and/or deeper
+ *  groups. A group's MEANING comes from nesting parity, not a stored op: a
+ *  group sitting in an AND context (a situation card, or an AND-subgroup) is an
+ *  OR of its children ("다음 중 하나라도"); a group sitting in an OR group is an
+ *  AND of its children ("다음에 모두 해당"). Alternating containers express any
+ *  boolean formula (NOT stays a per-node toggle). Children's `joiner` carries
+ *  no meaning inside a group and is normalized to head "and" / rest "or".
+ *  A hand-written `!(group)` De-Morgans into the opposite container with
+ *  complemented leaf operators on open, so groups carry no NOT either. */
 export interface FormGroupNode {
   kind: "group";
   joiner: GroupOp;
-  not?: boolean;
-  conds: FormCondition[];
+  conds: FormNode[];
 }
 
 /** A node in a clause's list: either a bare condition or a `(…)` group box.
