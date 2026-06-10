@@ -15,7 +15,7 @@ interface CardDef {
   rec: string;
   pros: string[];
   cons: string[];
-  preview: "form" | "block" | "cedar";
+  preview: "form" | "cedar";
   disabled?: boolean;
   disabledNote?: string;
 }
@@ -31,17 +31,6 @@ const CARDS: CardDef[] = [
     pros: ["round-trip 안전망", "cedar·manifest 자동", "인라인 값 편집"],
     cons: ["복잡한 정책(OR·중첩 등)은 폼으로 안 열릴 수 있어요"],
     preview: "form",
-  },
-  {
-    key: "block",
-    accent: "sage",
-    title: "블록으로 만들기",
-    summary:
-      "OR·has·중첩 등 복잡한 조건까지 시각적으로 조립 · 전체 Cedar 표현.",
-    rec: "복잡한 로직",
-    pros: ["OR · has · set", "시각적 조립", "전체 AST(만능)"],
-    cons: ["폼보다 손이 감"],
-    preview: "block",
   },
   {
     key: "cedar",
@@ -97,7 +86,7 @@ export function NewPolicyChooser({ open, onClose }: ChooserProps) {
           <div>
             <div className="t">새 정책 만들기</div>
             <div className="s">
-              어떤 방식으로 시작할지 고르세요. 셋 다 같은 Cedar로 저장되고,
+              어떤 방식으로 시작할지 고르세요. 둘 다 같은 Cedar로 저장되고,
               나중에 다른 방식으로도 볼 수 있어요 (폼은 단순한 정책만).
             </div>
           </div>
@@ -175,7 +164,7 @@ export function NewPolicyChooser({ open, onClose }: ChooserProps) {
   );
 }
 
-function ChooserPreview({ kind }: { kind: "form" | "block" | "cedar" }) {
+function ChooserPreview({ kind }: { kind: "form" | "cedar" }) {
   if (kind === "form") {
     return (
       <div className="ev2-mpc-prev form">
@@ -191,18 +180,6 @@ function ChooserPreview({ kind }: { kind: "form" | "block" | "cedar" }) {
           <span className="fld w2" />
           <span className="op">≠</span>
           <span className="val ref">self</span>
-        </div>
-      </div>
-    );
-  }
-  if (kind === "block") {
-    return (
-      <div className="ev2-mpc-prev block">
-        <div className="hat" />
-        <div className="or">
-          <span className="spine" />
-          <div className="chip" />
-          <div className="chip w2" />
         </div>
       </div>
     );
