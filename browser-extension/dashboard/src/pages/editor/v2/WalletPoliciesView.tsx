@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+/** 지갑 전용 정책(def.hidden)이 모이는 가상 폴더 키. */
+const WALLET_ONLY_FOLDER = "__wallet_only__";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -187,7 +190,16 @@ function WalletWorkspace(props: {
   // 우측 트리: 라이브러리 디렉토리 구조(폴더 멤버십 = defaults.packageId).
   const defsByFolder = useMemo(() => {
     const m = new Map<string, PolicyDef[]>();
+    const boundHere = new Set(Object.values(wallet.bindings).map((b) => b.defId));
     for (const d of Object.values(snap.library.defs)) {
+      // 지갑 전용 정책: 이 지갑에 바인딩이 있을 때만, 전용 폴더로.
+      if (d.hidden) {
+        if (!boundHere.has(d.id)) continue;
+        const arr = m.get(WALLET_ONLY_FOLDER) ?? [];
+        arr.push(d);
+        m.set(WALLET_ONLY_FOLDER, arr);
+        continue;
+      }
       // 죽은 패키지를 가리키면 미분류로 — 안 그러면 폴더가 안 그려져 정책이
       // 사라져 보인다.
       const raw = d.defaults.packageId;
@@ -198,7 +210,7 @@ function WalletWorkspace(props: {
     }
     for (const arr of m.values()) arr.sort((a, b) => a.displayName.localeCompare(b.displayName, "ko"));
     return m;
-  }, [snap]);
+  }, [snap, wallet]);
 
   /** 하이브리드 토글: 켜기 = 게이트 on + (전부 꺼져 있으면) 멤버 일괄 on;
    *  끄기 = 게이트 off(부분 상태 보존). */
@@ -405,11 +417,14 @@ function WalletWorkspace(props: {
 
         <div className="ev2-scroll">
           <div className="ld">
-            {packages
-              .slice()
-              .sort((a, b) =>
+            {[
+              ...(defsByFolder.has(WALLET_ONLY_FOLDER)
+                ? [{ id: WALLET_ONLY_FOLDER, displayName: "이 지갑 전용" }]
+                : []),
+              ...Object.values(snap.library.packages).sort((a, b) =>
                 a.id === UNCATEGORIZED_PKG ? 1 : b.id === UNCATEGORIZED_PKG ? -1 : a.id.localeCompare(b.id),
-              )
+              ),
+            ]
               .map((folder) => {
                 let defs = defsByFolder.get(folder.id) ?? [];
                 // 스코프(지갑 패키지) 선택 시: 그 패키지에 바인딩된 정책만.

@@ -110,6 +110,7 @@ export function removePackageFromWallet(
     }
     delete w.packages[opts.packageId];
     delete w.packageEnabled[opts.packageId];
+    pruneHiddenDefs(d);
   });
 }
 
@@ -154,10 +155,23 @@ export function updateBinding(
   });
 }
 
+/** 지갑 전용(hidden) def는 마지막 바인딩이 사라지면 함께 정리한다 — 라이브러리
+ *  카탈로그에 안 보이는 def가 유령으로 남지 않도록. */
+function pruneHiddenDefs(d: StoreSnapshot): void {
+  const bound = new Set<string>();
+  for (const w of Object.values(d.wallets.byAddress)) {
+    for (const b of Object.values(w.bindings)) bound.add(b.defId);
+  }
+  for (const def of Object.values(d.library.defs)) {
+    if (def.hidden && !bound.has(def.id)) delete d.library.defs[def.id];
+  }
+}
+
 export function removeBinding(uid: string, opts: { address: string; bindingId: string }): Promise<void> {
   return mutate(uid, (d) => {
     const w = d.wallets.byAddress[opts.address.toLowerCase()];
     if (w) delete w.bindings[opts.bindingId];
+    pruneHiddenDefs(d);
   });
 }
 

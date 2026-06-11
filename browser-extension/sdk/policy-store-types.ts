@@ -16,6 +16,9 @@ export interface HoleSpec {
 
 export interface PolicyDef {
   id: string; // "def::<slug>"
+  /** 지갑 전용 정책 — 라이브러리 카탈로그에 노출하지 않는다. 바인딩된 지갑의
+   *  트리에서만 보이고, 마지막 바인딩이 사라지면 함께 정리된다. */
+  hidden?: boolean | undefined;
   displayName: string;
   cat?: string;
   memo?: string;
