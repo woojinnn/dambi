@@ -10,6 +10,7 @@ import {
   getOverview,
   putDef,
   putPackage,
+  putWalletPackage,
   updateBinding,
   type Binding,
   type PolicyDef,
@@ -336,6 +337,31 @@ function EditorBody({
       throw new Error("저장을 취소했어요");
     }
     if (structureKey(canonicalizeModel(defModel)) !== structureKey(canonicalizeModel(editedModel))) {
+      // 지갑 전용 정책이 이 지갑에만 묶여 있으면 구조도 자유 — 템플릿의 집이
+      // 이 지갑이고, 바뀌어도 다른 지갑에 퍼질 게 없다.
+      const soleOwner =
+        def.hidden &&
+        snap !== null &&
+        Object.entries(snap.wallets.byAddress).every(
+          ([addr, w]) =>
+            addr === ctx.address ||
+            Object.values(w.bindings).every((b) => b.defId !== def.id),
+        );
+      if (soleOwner) {
+        const pEdited = formToIr(parameterizeModel(canonicalizeModel(editedModel)));
+        const { holes, paramDefaults } = holesFromIr(pEdited);
+        await putDef({
+          ...def,
+          displayName: aliasInput || def.displayName,
+          skeleton: { ...def.skeleton, ir: pEdited },
+          holes,
+          defaults: { ...def.defaults, params: paramDefaults },
+          updatedAtMs: Date.now(),
+        });
+        // 구조가 바뀌었으니 옛 오버라이드는 의미를 잃는다 — 비운다(값=새 기본).
+        await updateBinding({ address: ctx.address, bindingId: ctx.binding.id, patch: { params: {} } });
+        return def.id;
+      }
       window.alert(
         "지갑 인스턴스에서는 값(숫자·주소 목록·비교 필드)만 다르게 저장할 수 있어요.\n조건의 구성이 바뀌면 새 정책이 필요해요 — 라이브러리에서 이 정책을 복제해 수정한 뒤 지갑에 추가해 주세요.",
       );
@@ -419,15 +445,19 @@ function EditorBody({
   const finishMut = useMutation({
     mutationFn: async (choice: SaveScopeChoice): Promise<string> => {
       if (!scopeAsk) throw new Error("내부 오류: 저장 준비가 비어 있어요");
+      const walletOnly = choice.scope.kind === "wallets";
       let pkgId = choice.packageId;
       if (pkgId === "__new__") {
         pkgId = `pkg::${crypto.randomUUID()}`;
-        await putPackage({
-          id: pkgId,
-          displayName: choice.newPackageName ?? "새 패키지",
-          source: "mine",
-          updatedAtMs: Date.now(),
-        });
+        const displayName = choice.newPackageName ?? "새 패키지";
+        if (walletOnly) {
+          // 지갑 전용 정책의 패키지는 각 지갑 소속 — 라이브러리에 안 생긴다.
+          for (const address of choice.scope.kind === "wallets" ? choice.scope.addresses : []) {
+            await putWalletPackage({ address, pkg: { id: pkgId, displayName } });
+          }
+        } else {
+          await putPackage({ id: pkgId, displayName, source: "mine", updatedAtMs: Date.now() });
+        }
       }
       const { def, bindPlan } = buildDefPayload({
         existing: null,
@@ -438,6 +468,7 @@ function EditorBody({
         scope: choice.scope,
         packageId: pkgId,
         applyToNewWallets: choice.applyToNewWallets,
+        walletOnly,
       });
       await putDef(def);
       if (bindPlan) await bindDef(bindPlan);
