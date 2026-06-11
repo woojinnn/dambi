@@ -12,6 +12,10 @@ export interface HoleSpec {
   type: "addressSet" | "address" | "long" | "decimal" | "string" | "bool" | "field";
   label: string;
   desc?: string;
+  /** 마켓 게시 때 비식별로 블랭킹된 칸 — 사용자가 값을 채우기 전에는
+   *  바인딩(패키지 적용)할 수 없다. defaults.params/binding.params 가
+   *  이 이름을 덮어야 충전된 것으로 본다. */
+  required?: boolean | undefined;
 }
 
 export interface PolicyDef {
