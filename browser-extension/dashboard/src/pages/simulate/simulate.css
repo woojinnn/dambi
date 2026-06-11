@@ -475,13 +475,3 @@
   }
   .sd-gone { transform: none; }
 }
-
-/* ── data-source toggle (Mock / 실데이터) ── */
-.sw-mode-row { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; }
-.sw-mode-lbl { font-size: 12px; color: var(--slate-500); font-weight: 600; }
-.sw-mode { display: inline-flex; border: 1px solid var(--hairline); border-radius: var(--r-pill); overflow: hidden; }
-.sw-mode-btn {
-  border: none; background: var(--surface); cursor: pointer;
-  padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--slate-600);
-}
-.sw-mode-btn.on { background: var(--slate-700); color: var(--fog-50); }
