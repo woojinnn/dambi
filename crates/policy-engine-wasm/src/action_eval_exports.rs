@@ -67,6 +67,17 @@ pub(crate) struct TxInput {
     pub(crate) to: String,
 }
 
+impl TxInput {
+    /// 엔진 내부의 주소 표기는 전부 소문자(`lowering_v2::common::cedar::addr`)다.
+    /// dapp이 checksum 케이스 `from`/`to`를 주면 `principal.address`(= `tx.from`
+    /// 원문)와 lowering된 context 주소의 String 비교가 오탐하므로(예:
+    /// `context.recipient != principal.address`) 입구에서 정규화한다.
+    fn normalize(&mut self) {
+        self.from = self.from.to_lowercase();
+        self.to = self.to.to_lowercase();
+    }
+}
+
 /// Input to [`plan_action_rpc_v2_json`].
 ///
 /// Carries the decoded [`ActionBody`], its [`ActionMeta`], the installed v2
@@ -178,8 +189,9 @@ struct EvaluateActionOutput {
 pub fn plan_action_rpc_v2_json(input_json: String) -> String {
     let result = (|| -> Result<PlanActionOutput, EngineErrorDto> {
         check_input_size(&input_json, "plan_action_rpc_v2_json")?;
-        let input: PlanActionInput =
+        let mut input: PlanActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
+        input.tx.normalize();
         let decimals = TokenDecimals::new(input.token_decimals.clone());
         let leverage = AccountLeverage::new(input.account_leverage.clone());
         let lowered = lower(&input.action, &input.meta, &input.tx, &decimals, &leverage)?;
@@ -217,8 +229,9 @@ pub fn plan_action_rpc_v2_json(input_json: String) -> String {
 pub fn evaluate_action_v2_json(input_json: String) -> String {
     let verdict = (|| -> Result<Verdict, EngineErrorDto> {
         check_input_size(&input_json, "evaluate_action_v2_json")?;
-        let input: EvaluateActionInput =
+        let mut input: EvaluateActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
+        input.tx.normalize();
 
         let decimals = TokenDecimals::new(input.token_decimals.clone());
         let leverage = AccountLeverage::new(input.account_leverage.clone());
@@ -792,6 +805,42 @@ pub(crate) mod tests {
                 "meta": meta,
                 "tx": tx(),
                 "bundles": [],
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&eval_out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["verdict"]["kind"], "pass", "{parsed}");
+    }
+
+    /// 호스트(dapp)가 checksum 케이스 `tx.from`을 줘도 `principal.address` 비교가
+    /// 오탐하지 않는다 — 엔진 내부 주소는 전부 소문자라 입구에서 정규화해야 한다
+    /// (UNI-01 `swap-recipient-not-self-deny` 거짓 양성 회귀).
+    #[test]
+    fn evaluate_action_v2_normalizes_checksummed_tx_from() {
+        let (body, meta) = swap_sample();
+        // swap_sample의 recipient = 0x…a01c (소문자). tx.from은 같은 주소의
+        // checksum 케이스 — 정규화 없으면 `recipient != principal.address`가 발화.
+        let policy = "@id(\"swap-recipient-not-self-deny\")\n@severity(\"deny\")\n\
+             @reason(\"recipient is not your wallet\")\n\
+             forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
+             when { context.recipient != principal.address };\n";
+        let manifest = json!({
+            "id": "swap-recipient-not-self-deny",
+            "schema_version": 2,
+            "trigger": { "where": { "action.tag": { "eq": "swap" } } }
+        });
+        let eval_out = evaluate_action_v2_json(
+            json!({
+                "action": body,
+                "meta": meta,
+                "tx": {
+                    "chain_id": "eip155:42161",
+                    "from": "0x000000000000000000000000000000000000A01C",
+                    "to": TO
+                },
+                "bundles": [{ "policy": policy, "manifest": manifest }],
                 "results": {}
             })
             .to_string(),
