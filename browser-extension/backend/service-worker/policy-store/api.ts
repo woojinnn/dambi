@@ -36,12 +36,13 @@ export type Ps2Request =
       addresses: string[];
       params?: Record<string, HoleValue>;
       enabled?: boolean;
+      alias?: string;
     }
   | {
       type: "ps2:update-binding";
       address: string;
       bindingId: string;
-      patch: Partial<Pick<Binding, "enabled" | "params" | "packageId">>;
+      patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias">>;
     }
   | { type: "ps2:remove-binding"; address: string; bindingId: string }
   | { type: "ps2:copy-bindings"; fromAddress: string; toAddress: string; bindingIds: string[] }

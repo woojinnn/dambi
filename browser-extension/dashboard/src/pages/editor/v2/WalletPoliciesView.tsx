@@ -13,6 +13,7 @@ import {
   updateBinding,
   UNCATEGORIZED_PKG,
   type Binding,
+  type HoleValue,
   type PolicyDef,
   type StoreSnapshot,
   type WalletPolicyState,
@@ -21,7 +22,8 @@ import { listWallets } from "../../../server-api/wallets";
 import { deriveWalletRows, packageDisplayOn } from "./wallet-policies-derive";
 import { DRAG_DEF_MIME } from "./LibraryDirectory";
 import { catKey, catLabel, catStyle } from "./categories";
-import { CaretRightIcon, FolderIcon, PencilIcon, PlusIcon, TrashIcon } from "./icons";
+import { formatHoleValue, parseHoleInput } from "./hole-params";
+import { CaretRightIcon, CopyIcon, FolderIcon, PencilIcon, PlusIcon, TrashIcon } from "./icons";
 
 /** 지갑별 정책 — 좌: 이 지갑의 패키지(추가/이름변경/토글/드롭), 우: 라이브러리
  *  디렉토리 모양의 정책 트리. 각 정책 아래에 "이 지갑에서 들어가 있는 패키지"가
@@ -449,46 +451,17 @@ function WalletWorkspace(props: {
                                   </button>
                                 </span>
                               </div>
-                              {rows.map((b) => {
-                                const pkgOn = wallet.packageEnabled[b.packageId] ?? true;
-                                const effective = isEffectiveOn(wallet, b);
-                                return (
-                                  <div key={b.id} className={`wt-binding${effective ? "" : " off"}`}>
-                                    <span className="wt-pkg">
-                                      {snap.library.packages[b.packageId]?.displayName ?? b.packageId}
-                                      {!pkgOn && <span className="wt-pkgoff">패키지 꺼짐</span>}
-                                    </span>
-                                    <label className="pm-switch sm" title="이 정책만 켜기/끄기">
-                                      <input
-                                        type="checkbox"
-                                        checked={b.enabled}
-                                        onChange={(e) =>
-                                          void run("토글", () =>
-                                            updateBinding({
-                                              address,
-                                              bindingId: b.id,
-                                              patch: { enabled: e.target.checked },
-                                            }),
-                                          )
-                                        }
-                                      />
-                                      <span className="trk" />
-                                    </label>
-                                    <button
-                                      type="button"
-                                      className="ev2-iconbtn danger"
-                                      title="이 패키지에서 제거"
-                                      onClick={() =>
-                                        void run("제거", () =>
-                                          removeBinding({ address, bindingId: b.id }),
-                                        )
-                                      }
-                                    >
-                                      <TrashIcon />
-                                    </button>
-                                  </div>
-                                );
-                              })}
+                              {rows.map((b) => (
+                                <BindingRow
+                                  key={b.id}
+                                  binding={b}
+                                  def={d}
+                                  wallet={wallet}
+                                  pkgName={snap.library.packages[b.packageId]?.displayName ?? b.packageId}
+                                  onRun={run}
+                                  address={address}
+                                />
+                              ))}
                             </div>
                           );
                         })}
@@ -500,6 +473,189 @@ function WalletWorkspace(props: {
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+/** 한 바인딩 줄: 소속 패키지 · 별칭(인라인 편집) · 파라미터(있으면 확장) ·
+ *  복제 · 토글 · 제거. 별칭/파라미터가 "지갑별로 서로 다른 정책"을 만든다. */
+function BindingRow(props: {
+  binding: Binding;
+  def: PolicyDef;
+  wallet: WalletPolicyState;
+  pkgName: string;
+  address: string;
+  onRun: (label: string, fn: () => Promise<unknown>) => Promise<boolean>;
+}) {
+  const { binding: b, def, wallet, pkgName, address, onRun } = props;
+  const pkgOn = wallet.packageEnabled[b.packageId] ?? true;
+  const effective = isEffectiveOn(wallet, b);
+  const [editingAlias, setEditingAlias] = useState(false);
+  const [aliasDraft, setAliasDraft] = useState(b.alias ?? "");
+  const [paramsOpen, setParamsOpen] = useState(false);
+
+  const saveAlias = () => {
+    setEditingAlias(false);
+    const alias = aliasDraft.trim();
+    if ((b.alias ?? "") === alias) return;
+    void onRun("별칭 저장", () =>
+      updateBinding({ address, bindingId: b.id, patch: { alias: alias || undefined } }),
+    );
+  };
+
+  const duplicate = () =>
+    void onRun("복제", () =>
+      bindDef({
+        defId: b.defId,
+        packageId: b.packageId,
+        addresses: [address],
+        ...(b.params ? { params: b.params } : {}),
+        alias: `${b.alias ?? def.displayName} (복사)`,
+      }),
+    );
+
+  return (
+    <div className={`wt-binding${effective ? "" : " off"}`}>
+      <div className="wt-binding-main">
+        <span className="wt-pkg">
+          {pkgName}
+          {!pkgOn && <span className="wt-pkgoff">패키지 꺼짐</span>}
+        </span>
+        {editingAlias ? (
+          <input
+            className="wt-alias-input"
+            autoFocus
+            value={aliasDraft}
+            placeholder={def.displayName}
+            onChange={(e) => setAliasDraft(e.target.value)}
+            onBlur={saveAlias}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") setEditingAlias(false);
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className={`wt-alias${b.alias ? "" : " empty"}`}
+            title="이 지갑에서 부를 이름(별칭) 바꾸기"
+            onClick={() => {
+              setAliasDraft(b.alias ?? "");
+              setEditingAlias(true);
+            }}
+          >
+            {b.alias ?? "별칭 없음"}
+            <PencilIcon />
+          </button>
+        )}
+        {def.holes.length > 0 && (
+          <button
+            type="button"
+            className={`pm-count${paramsOpen ? " on" : ""}`}
+            title="지갑별 설정 값"
+            onClick={() => setParamsOpen((v) => !v)}
+          >
+            설정 {def.holes.length}
+          </button>
+        )}
+        <button type="button" className="ev2-iconbtn" title="이 지갑에 복제" onClick={duplicate}>
+          <CopyIcon />
+        </button>
+        <label className="pm-switch sm" title="이 정책만 켜기/끄기">
+          <input
+            type="checkbox"
+            checked={b.enabled}
+            onChange={(e) =>
+              void onRun("토글", () =>
+                updateBinding({ address, bindingId: b.id, patch: { enabled: e.target.checked } }),
+              )
+            }
+          />
+          <span className="trk" />
+        </label>
+        <button
+          type="button"
+          className="ev2-iconbtn danger"
+          title="이 패키지에서 제거"
+          onClick={() => void onRun("제거", () => removeBinding({ address, bindingId: b.id }))}
+        >
+          <TrashIcon />
+        </button>
+      </div>
+      {paramsOpen && def.holes.length > 0 && (
+        <BindingParamsEditor
+          def={def}
+          binding={b}
+          onSave={(params) =>
+            void onRun("설정 저장", () =>
+              updateBinding({ address, bindingId: b.id, patch: { params } }),
+            ).then((ok) => ok && setParamsOpen(false))
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+/** def.holes 기반 지갑별 값 편집 — 비워둔 항목은 기본값으로 평가된다. */
+function BindingParamsEditor(props: {
+  def: PolicyDef;
+  binding: Binding;
+  onSave: (params: Record<string, HoleValue>) => void;
+}) {
+  const { def, binding, onSave } = props;
+  const merged = { ...def.defaults.params, ...binding.params };
+  const [drafts, setDrafts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(def.holes.map((h) => [h.name, formatHoleValue(merged[h.name])])),
+  );
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const save = () => {
+    const params: Record<string, HoleValue> = {};
+    const errs: Record<string, string> = {};
+    for (const h of def.holes) {
+      const r = parseHoleInput(h.type, drafts[h.name] ?? "");
+      if (r.ok) params[h.name] = r.value;
+      else errs[h.name] = r.error;
+    }
+    setErrors(errs);
+    if (Object.keys(errs).length === 0) onSave(params);
+  };
+
+  return (
+    <div className="pm-holes wt-params">
+      {def.holes.map((h) => (
+        <label key={h.name} className="pm-hole">
+          <span className="lb" title={h.desc}>
+            {h.label}
+          </span>
+          {h.type === "bool" ? (
+            <select
+              value={drafts[h.name] || "false"}
+              onChange={(e) => setDrafts((d) => ({ ...d, [h.name]: e.target.value }))}
+            >
+              <option value="true">예</option>
+              <option value="false">아니오</option>
+            </select>
+          ) : h.type === "addressSet" ? (
+            <textarea
+              rows={2}
+              value={drafts[h.name] ?? ""}
+              placeholder="주소를 줄마다 하나씩"
+              onChange={(e) => setDrafts((d) => ({ ...d, [h.name]: e.target.value }))}
+            />
+          ) : (
+            <input
+              value={drafts[h.name] ?? ""}
+              onChange={(e) => setDrafts((d) => ({ ...d, [h.name]: e.target.value }))}
+            />
+          )}
+          {errors[h.name] && <span className="err">{errors[h.name]}</span>}
+        </label>
+      ))}
+      <button type="button" className="ev2-sec" onClick={save}>
+        저장
+      </button>
     </div>
   );
 }

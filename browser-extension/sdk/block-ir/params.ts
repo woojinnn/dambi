@@ -295,3 +295,28 @@ export function fillParams(
   if (errors.length) return { ok: false, errors };
   return { ok: true, policy: replaceHoles(ir, repl) };
 }
+
+/** Replace every hole with a concrete value (supplied params, else the hole's
+ *  default) so hole-free consumers (`blocksToEst`, diagrams, text rendering)
+ *  can run. Returns the input unchanged when it has no holes; falls back to
+ *  the input if a non-optional hole can't be defaulted. */
+export function concretizeIr(ir: PolicyIR, values: Record<string, ParamFillValue> = {}): PolicyIR {
+  let specs: ParamSpec[];
+  try {
+    specs = extractParams(ir);
+  } catch {
+    return ir; // duplicate names etc. — leave for the editor to surface
+  }
+  if (specs.length === 0) return ir;
+  const repl = new Map<string, Expr>();
+  const errors: ParamError[] = [];
+  for (const s of specs) {
+    if (Object.prototype.hasOwnProperty.call(values, s.name)) {
+      const built = buildValue(s, values[s.name], errors);
+      repl.set(s.name, built ?? s.default);
+    } else {
+      repl.set(s.name, s.default);
+    }
+  }
+  return replaceHoles(ir, repl);
+}

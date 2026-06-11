@@ -43,12 +43,13 @@ export const bindDef = (opts: {
   addresses: string[];
   params?: Record<string, HoleValue>;
   enabled?: boolean;
+  alias?: string;
 }) => sendToExtension<null>({ type: "ps2:bind", ...opts });
 
 export const updateBinding = (opts: {
   address: string;
   bindingId: string;
-  patch: Partial<Pick<Binding, "enabled" | "params" | "packageId">>;
+  patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias">>;
 }) => sendToExtension<null>({ type: "ps2:update-binding", ...opts });
 
 export const removeBinding = (opts: { address: string; bindingId: string }) =>

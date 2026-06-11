@@ -82,6 +82,7 @@ export function bind(
     addresses: string[];
     params?: Record<string, HoleValue>;
     enabled?: boolean;
+    alias?: string;
   },
 ): Promise<void> {
   return mutate(uid, (d) => {
@@ -92,6 +93,7 @@ export function bind(
         defId: opts.defId,
         packageId: opts.packageId,
         enabled: opts.enabled ?? true,
+        alias: opts.alias,
         params: opts.params,
         updatedAtMs: Date.now(),
       };
@@ -102,7 +104,7 @@ export function bind(
 
 export function updateBinding(
   uid: string,
-  opts: { address: string; bindingId: string; patch: Partial<Pick<Binding, "enabled" | "params" | "packageId">> },
+  opts: { address: string; bindingId: string; patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias">> },
 ): Promise<void> {
   return mutate(uid, (d) => {
     const w = d.wallets.byAddress[opts.address.toLowerCase()];
