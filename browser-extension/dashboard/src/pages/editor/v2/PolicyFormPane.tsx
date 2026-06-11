@@ -30,6 +30,7 @@ import {
   KNOWN_ACTIONS,
   ACTION_GROUPS,
   moveCondTo,
+  normalizeDecimal,
   normalizeSituations,
   operatorsFor,
   situationsOf,
@@ -1295,7 +1296,17 @@ function ValueInput({
     case "decimal":
       return (
         <span className="pf-val-wrap">
-          <input className="pf-val num" value={value.value} onChange={(e) => onChange({ kind: "decimal", value: e.target.value })} placeholder="0.05" />
+          <input
+            className="pf-val num"
+            value={value.value}
+            onChange={(e) => onChange({ kind: "decimal", value: e.target.value })}
+            onBlur={(e) => {
+              // Cedar decimal은 소수점이 필수 — "3"은 "3.0"으로 정규화.
+              const n = normalizeDecimal(e.target.value);
+              if (n !== null && n !== e.target.value) onChange({ kind: "decimal", value: n });
+            }}
+            placeholder="0.05"
+          />
           {unit && <span className="pf-unit">{unit}</span>}
         </span>
       );
