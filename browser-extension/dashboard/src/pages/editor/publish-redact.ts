@@ -107,6 +107,23 @@ export function extractHoles(cedarText: string): PublishHole[] {
     });
   }
 
+  // 1b) `PATH.contains("0x..")` — 폼의 contains/notContains 연산이 내는 모양
+  // (집합 필드 ∋ 주소 리터럴). notContains는 `!( … )`로 감싸일 뿐이라 같이 잡힌다.
+  const attrContainsAddr = new RegExp(`(${PATH})\\.contains\\(\\s*("${ADDR}")\\s*\\)`, "g");
+  for (const m of cedarText.matchAll(attrContainsAddr)) {
+    const path = m[1];
+    const raw = m[2];
+    push({
+      kind: "address",
+      path,
+      label: labelFor(path),
+      paramName: paramFor(path),
+      display: shortAddr(raw.replace(/"/g, "")),
+      raw,
+      addrCount: 1,
+    });
+  }
+
   // 2) `PATH (== | != | in) "0x.." | [ "0x..", … ]`
   const pathToAddr = new RegExp(
     `(${PATH})\\s*(?:==|!=|in|\\bin\\b)\\s*("${ADDR}"|\\[\\s*"${ADDR}"(?:\\s*,\\s*"${ADDR}")*\\s*\\])`,
@@ -127,6 +144,22 @@ export function extractHoles(cedarText: string): PublishHole[] {
     });
   }
 
+  // 2b) `"0x.." (== | !=) PATH` — 리터럴이 좌변인 손편집 모양.
+  const addrToPath = new RegExp(`("${ADDR}")\\s*(?:==|!=)\\s*(${PATH})`, "g");
+  for (const m of cedarText.matchAll(addrToPath)) {
+    const raw = m[1];
+    const path = m[2];
+    push({
+      kind: "address",
+      path,
+      label: labelFor(path),
+      paramName: paramFor(path),
+      display: shortAddr(raw.replace(/"/g, "")),
+      raw,
+      addrCount: 1,
+    });
+  }
+
   // 3) numeric thresholds: `PATH OP decimal("N")` or `PATH OP N`
   const pathToNum = new RegExp(
     `(${PATH})\\s*(>=|<=|>|<|==|!=)\\s*(decimal\\(\\s*"[0-9.]+"\\s*\\)|[0-9]+(?:\\.[0-9]+)?)`,
@@ -143,6 +176,27 @@ export function extractHoles(cedarText: string): PublishHole[] {
       label: labelFor(path),
       paramName: paramFor(path),
       display: num,
+      raw,
+      unit: unitFor(path),
+    });
+  }
+
+  // 3b) decimal 비교는 < <= > >= 가 전부 확장 메소드형 —
+  // `PATH.greaterThanOrEqual(decimal("3.0"))` (form convert.ts OP_TO_EXT 참고).
+  const pathDecimalMethod = new RegExp(
+    `(${PATH})\\.(?:lessThan|lessThanOrEqual|greaterThan|greaterThanOrEqual)\\(\\s*(decimal\\(\\s*"[0-9.]+"\\s*\\))`,
+    "g",
+  );
+  for (const m of cedarText.matchAll(pathDecimalMethod)) {
+    const path = m[1];
+    const raw = m[2];
+    const numMatch = raw.match(/[0-9]+(?:\.[0-9]+)?/);
+    push({
+      kind: "number",
+      path,
+      label: labelFor(path),
+      paramName: paramFor(path),
+      display: numMatch ? numMatch[0] : raw,
       raw,
       unit: unitFor(path),
     });
@@ -213,13 +267,27 @@ export function redactCedar(
   let out = cedarText;
   for (const h of holes) {
     if (h.kind === "number" && keptNumberKeys.has(h.key)) continue;
-    const replacement =
-      h.kind === "address"
-        ? h.raw.trim().startsWith("[")
-          ? `[${ZERO_ADDR ? `"${ZERO_ADDR}"` : ""}]`
-          : `"${ZERO_ADDR}"`
-        : h.raw.replace(/[0-9]+(?:\.[0-9]+)?/, "0");
-    out = out.replace(h.raw, replacement);
+    let replacement: string;
+    if (h.kind === "address") {
+      replacement = h.raw.trim().startsWith("[") ? `["${ZERO_ADDR}"]` : `"${ZERO_ADDR}"`;
+    } else if (h.raw.startsWith("decimal(")) {
+      // Cedar decimal 리터럴은 소수점 필수 — `decimal("0")`은 설치를 거부당한다.
+      replacement = `decimal("0.0")`;
+    } else {
+      replacement = h.raw.replace(/[0-9]+(?:\.[0-9]+)?/, "0");
+    }
+    // 같은 리터럴이 정책 안에 여러 번 나와도 전부 치환한다 (extractHoles가
+    // raw 기준으로 중복 제거하므로 hole은 하나, 출현은 여럿일 수 있다).
+    // 따옴표/괄호가 없는 맨숫자 raw는 다른 토큰의 부분 문자열을 건드리지
+    // 않도록 단어 경계로 치환한다.
+    if (/^[0-9]/.test(h.raw)) {
+      out = out.replace(
+        new RegExp(`(?<![\\w.])${h.raw.replace(/\./g, "\\.")}(?![\\w.])`, "g"),
+        replacement,
+      );
+    } else {
+      out = out.split(h.raw).join(replacement);
+    }
   }
   return out;
 }
