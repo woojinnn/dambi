@@ -27,14 +27,46 @@ export interface TokenHolding {
   balance: string;
   /** Optional USD value, e.g. "$1,250". */
   usd?: string;
+  /** Numeric USD value — drives allocation bars + sorting (display via `usd`). */
+  usdNum?: number;
+  /** Unit price display, e.g. "$65,000". */
+  priceUsd?: string;
+  /** Amount locked behind pending txs (display), e.g. "0.05". */
+  committed?: string;
+  /** CAIP-2 chain the holding lives on, e.g. "eip155:1". */
+  chain?: string;
 }
 
-/** A protocol position (perp / lending / staking …). */
+/** A protocol position (perp / lending / staking …). Optional fields let the
+ *  dashboard render a rich card; the RealProvider fills what the protocol
+ *  exposes and leaves the rest undefined. */
 export interface PositionView {
   id: string;
   label: string;
   /** Protocol id (aave / hyperliquid …) — a relevance-filter key. */
   protocol: string;
+  /** Card layout discriminator. */
+  kind?: "perp" | "lending" | "staking" | "other";
+  side?: "long" | "short";
+  /** Leverage display, e.g. "2x". */
+  leverage?: string;
+  /** Notional size display, e.g. "$58,400". */
+  sizeUsd?: string;
+  entryPrice?: string;
+  markPrice?: string;
+  /** Unrealized PnL display, e.g. "+$1,240". */
+  pnlUsd?: string;
+  pnlSign?: "up" | "down";
+  liqPrice?: string;
+  /** Margin posted, display e.g. "$29,200". */
+  marginUsd?: string;
+  /** Return on equity display, e.g. "+4.2%". */
+  roe?: string;
+  /** Lending health factor, e.g. "1.82". */
+  health?: string;
+  /** Lending collateral / debt detail (display). */
+  collateralUsd?: string;
+  debtUsd?: string;
 }
 
 /** An outstanding approval. */
@@ -45,6 +77,20 @@ export interface ApprovalView {
   /** Spender label/address. */
   spender: string;
   unlimited: boolean;
+  /** Approved amount display ("무제한" / "1,000"). */
+  amount?: string;
+  /** Spender contract address (lowercase) for the mono chip. */
+  spenderAddress?: string;
+  /** Risk tier — unlimited / unknown spender → high. */
+  risk?: "high" | "med" | "low";
+  /** Approval scope display, e.g. "ERC-20" / "Permit2". */
+  scope?: string;
+  /** Token contract the approval is on (lowercase). */
+  tokenAddress?: string;
+  /** When the approval was granted (display), e.g. "2024-11-02". */
+  grantedAt?: string;
+  /** Short human reason the risk tier is what it is. */
+  riskReason?: string;
 }
 
 /** A wallet's full state snapshot (s0, s1, … in the result step). */
@@ -54,6 +100,8 @@ export interface WalletStateView {
   tokens: TokenHolding[];
   positions: PositionView[];
   approvals: ApprovalView[];
+  /** Total portfolio value display, e.g. "$98,300". */
+  portfolioUsd?: string;
 }
 
 /** A policy selectable in step 2. */

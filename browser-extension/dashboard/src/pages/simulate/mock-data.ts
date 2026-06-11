@@ -53,36 +53,148 @@ export const MOCK_WALLETS: WalletView[] = [
 ];
 
 // ── per-wallet state (s0) ────────────────────────────────────────────────────
-function holding(symbol: keyof typeof TOKENS, balance: string, usd?: string) {
-  return { symbol, address: TOKENS[symbol], balance, usd };
+function usd(n: number): string {
+  return `$${n.toLocaleString("en-US")}`;
+}
+function holding(
+  symbol: keyof typeof TOKENS,
+  balance: string,
+  usdNum: number,
+  extra?: { priceUsd?: string; committed?: string },
+) {
+  return {
+    symbol,
+    address: TOKENS[symbol],
+    balance,
+    usd: usd(usdNum),
+    usdNum,
+    chain: "eip155:1",
+    ...extra,
+  };
 }
 
 export const MOCK_STATES: Record<string, WalletStateView> = {
   [W_BUJA]: {
     address: W_BUJA,
     name: "부자성준",
+    portfolioUsd: usd(73_450),
     tokens: [
-      holding("USDC", "12,500.00", "$12,500"),
-      holding("USDT", "3,000.00", "$3,000"),
-      holding("WETH", "8.20", "$28,700"),
-      holding("WBTC", "0.45", "$29,250"),
+      holding("WBTC", "0.45", 29_250, { priceUsd: "$65,000", committed: "0.00" }),
+      holding("WETH", "8.20", 28_700, { priceUsd: "$3,500", committed: "0.50" }),
+      holding("USDC", "12,500.00", 12_500, { priceUsd: "$1.00", committed: "1,000.00" }),
+      holding("USDT", "3,000.00", 3_000, { priceUsd: "$1.00", committed: "0.00" }),
     ],
-    positions: [{ id: "p-hl-1", label: "BTC-PERP 롱 2x", protocol: "hyperliquid" }],
+    positions: [
+      {
+        id: "p-hl-1",
+        label: "BTC-PERP",
+        protocol: "hyperliquid",
+        kind: "perp",
+        side: "long",
+        leverage: "2x",
+        sizeUsd: usd(58_400),
+        entryPrice: "$62,100",
+        markPrice: "$64,250",
+        pnlUsd: "+$1,240",
+        pnlSign: "up",
+        liqPrice: "$41,800",
+        marginUsd: usd(29_200),
+        roe: "+4.2%",
+      },
+      {
+        id: "p-hl-2",
+        label: "ETH-PERP",
+        protocol: "hyperliquid",
+        kind: "perp",
+        side: "short",
+        leverage: "5x",
+        sizeUsd: usd(17_500),
+        entryPrice: "$3,420",
+        markPrice: "$3,500",
+        pnlUsd: "-$410",
+        pnlSign: "down",
+        liqPrice: "$3,910",
+        marginUsd: usd(3_500),
+        roe: "-11.7%",
+      },
+      {
+        id: "p-aave-1",
+        label: "WETH 담보 대출",
+        protocol: "aave",
+        kind: "lending",
+        sizeUsd: usd(9_800),
+        health: "1.82",
+        collateralUsd: usd(17_500),
+        debtUsd: usd(7_700),
+      },
+    ],
     approvals: [
-      { id: "a1", token: "USDC", spender: "Uniswap V3", unlimited: true },
-      { id: "a2", token: "WETH", spender: "Aave V3", unlimited: false },
+      {
+        id: "a1",
+        token: "USDC",
+        spender: "Uniswap V3",
+        spenderAddress: "0xe592427a0aece92de3edee1f18e0157c05861564",
+        unlimited: true,
+        amount: "무제한",
+        risk: "high",
+        scope: "ERC-20",
+        tokenAddress: TOKENS.USDC,
+        grantedAt: "2024-09-12",
+        riskReason: "무제한 한도 — 스펜더가 잔액 전부를 인출할 수 있어요",
+      },
+      {
+        id: "a2",
+        token: "WETH",
+        spender: "Aave V3",
+        spenderAddress: "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+        unlimited: false,
+        amount: "10.0",
+        risk: "low",
+        scope: "ERC-20",
+        tokenAddress: TOKENS.WETH,
+        grantedAt: "2024-10-01",
+        riskReason: "한도가 잔액 수준으로 제한됨 — 검증된 프로토콜",
+      },
+      {
+        id: "a4",
+        token: "USDT",
+        spender: "0x알수없는컨트랙트",
+        spenderAddress: "0x000000000000c2e074ec69a0dfb2997ba6c7d2e1",
+        unlimited: true,
+        amount: "무제한",
+        risk: "high",
+        scope: "ERC-20",
+        tokenAddress: TOKENS.USDT,
+        grantedAt: "2024-11-02",
+        riskReason: "미확인 컨트랙트에 무제한 승인 — 즉시 회수 권장",
+      },
     ],
   },
   [W_PLAIN]: {
     address: W_PLAIN,
     name: "일반지갑",
+    portfolioUsd: usd(1_760),
     tokens: [
-      holding("USDC", "420.00", "$420"),
-      holding("DAI", "150.00", "$150"),
-      holding("LINK", "85.00", "$1,190"),
+      holding("LINK", "85.00", 1_190, { priceUsd: "$14.00", committed: "0.00" }),
+      holding("USDC", "420.00", 420, { priceUsd: "$1.00", committed: "0.00" }),
+      holding("DAI", "150.00", 150, { priceUsd: "$1.00", committed: "0.00" }),
     ],
     positions: [],
-    approvals: [{ id: "a3", token: "DAI", spender: "Curve", unlimited: true }],
+    approvals: [
+      {
+        id: "a3",
+        token: "DAI",
+        spender: "Curve",
+        spenderAddress: "0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+        unlimited: true,
+        amount: "무제한",
+        risk: "high",
+        scope: "ERC-20",
+        tokenAddress: TOKENS.DAI,
+        grantedAt: "2024-08-20",
+        riskReason: "무제한 한도 — 사용 안 하면 회수 권장",
+      },
+    ],
   },
 };
 
@@ -110,6 +222,16 @@ export const MOCK_PACKAGES: PackageView[] = [
 
 /** Initially "선택된" policies (what the real getEnabledPolicyIds would seed). */
 export const MOCK_ENABLED_IDS = ["swap-token-allowlist", "large-transfer-block", "unlimited-approve-warn"];
+
+/**
+ * Per-wallet enabled policy ids. Policies are now managed PER WALLET (the
+ * redesign), so each registered wallet carries its own on/off set. The
+ * RealProvider would seed this from `getEnabledPolicyIds(walletAddress)`.
+ */
+export const MOCK_ENABLED_BY_WALLET: Record<string, string[]> = {
+  [W_BUJA]: ["swap-token-allowlist", "large-transfer-block", "unlimited-approve-warn", "perp-leverage-cap"],
+  [W_PLAIN]: ["unlimited-approve-warn"],
+};
 
 // ── transaction queue ─────────────────────────────────────────────────────────
 export const MOCK_TX_ROWS: TxRow[] = [
