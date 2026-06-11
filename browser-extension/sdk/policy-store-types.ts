@@ -37,6 +37,8 @@ export interface Binding {
   defId: string;
   packageId: string;
   enabled: boolean;
+  /** 지갑별 별칭 — 없으면 def displayName으로 표시. */
+  alias?: string | undefined;
   params?: Record<string, HoleValue> | undefined;
   updatedAtMs: number;
 }

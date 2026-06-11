@@ -33,6 +33,7 @@ import "../../market.css";
 import { catLabel, catStyle } from "./categories";
 import { CatIcon, ShieldIcon, WarnIcon } from "./icons";
 import { blocksToText, textToBlocks } from "../../../cedar";
+import { concretizeIr } from "../../../cedar/blocks";
 import { PolicyFormPane } from "./PolicyFormPane";
 import { emptyFormModel, irToForm, type FormModel } from "../../../cedar/form";
 
@@ -228,6 +229,13 @@ function EditorBody({
   /** 저장 페이로드 준비. v2 저장 형식은 BlockIR이므로 IR이 필수 — Cedar 탭에서
    *  변환 불가한 구문이면 사유와 함께 저장을 거부한다. */
   const prepare = async (): Promise<{ ir: PolicyIR; manifest: unknown }> => {
+    // Cedar 탭 저장은 구체 텍스트 기반이라 기존 파라미터(홀)가 해제된다 — 확인.
+    if (tab === "cedar" && (storedDef?.holes.length ?? 0) > 0 && !ir) {
+      const n = storedDef!.holes.length;
+      if (!window.confirm(`Cedar 텍스트로 저장하면 지갑별 설정 ${n}개가 해제됩니다. 계속할까요?`)) {
+        throw new Error("저장을 취소했어요");
+      }
+    }
     const stamped = stampAnnotations(cedarText, name.trim() || "untitled", severity);
     let effectiveIr = ir;
     if (!effectiveIr) {
@@ -248,7 +256,9 @@ function EditorBody({
       // The form supplied a hand-edited manifest — persist it as-is.
       manifest = manifestOverride.value;
     } else {
-      const gen = generateManifest(effectiveIr, undefined, { id: policy.id, severity });
+      // manifest 생성은 홀을 기본값으로 굳힌 구체 IR로 — 평가 시 렌더는 바인딩
+      // 파라미터를 채운 IR을 따로 쓴다.
+      const gen = generateManifest(concretizeIr(effectiveIr), undefined, { id: policy.id, severity });
       if (gen.errors.length > 0) {
         throw new Error(gen.errors.map((e) => e.message).join("\n"));
       }
@@ -367,7 +377,8 @@ function EditorBody({
         model: { ...parsed, id: stripDashboardId(policy.id), severity: severity as FormModel["severity"] },
       });
       setFormKey((k) => k + 1);
-    } catch {
+    } catch (err) {
+      console.warn("[editor] 폼 열기 실패 — Cedar 탭으로 안내:", err);
       setFormEntry({ kind: "closed" });
     }
   };

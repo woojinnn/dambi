@@ -15,7 +15,10 @@ interface LibDoc {
 }
 
 interface WalletState {
-  bindings: Record<string, { id: string; defId: string; packageId: string; enabled: boolean }>;
+  bindings: Record<
+    string,
+    { id: string; defId: string; packageId: string; enabled: boolean; alias?: string }
+  >;
   packageEnabled: Record<string, boolean>;
 }
 
@@ -52,7 +55,7 @@ export function derivePopupPackages(lib: LibDoc, wallet: WalletState | null): Po
     arr.push({
       bindingId: b.id,
       defId: b.defId,
-      name: def?.displayName ?? b.defId,
+      name: b.alias ?? def?.displayName ?? b.defId,
       sev: sevOf(def?.skeleton?.ir),
       enabled: b.enabled,
     });
