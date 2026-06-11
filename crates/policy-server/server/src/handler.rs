@@ -305,6 +305,113 @@ async fn execute_call_specs(
                     }),
                 }
             }
+            "address.sanctions" => {
+                match crate::methods::address_sanctions(state, &spec.params) {
+                    Some(value) => {
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "address.sanctions: missing/unparseable address param \
+                             (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
+            "address.reputation" => {
+                match crate::methods::address_reputation(state, &spec.params) {
+                    Some(value) => {
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "address.reputation: missing/unparseable address param \
+                             (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
+            "token.metadata" => match crate::methods::token_metadata(state, &spec.params) {
+                Some(value) => {
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "token.metadata: missing/unparseable asset param \
+                         (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
+            "lending.health_factor" => {
+                match crate::methods::lending_health_factor(state, &spec.params) {
+                    Some(value) => {
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "info".to_owned(),
+                        message: format!(
+                            "lending.health_factor: post-action HF needs per-collateral \
+                             liquidation thresholds + prices not in WalletState (call {}) \
+                             — fail-open, field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
+            "address.activity" => match crate::methods::address_activity(state, &spec.params) {
+                Some(value) => {
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "info".to_owned(),
+                    message: format!(
+                        "address.activity: tx-count / first-seen need an external chain \
+                         indexer or archive RPC (call {}) — fail-open, field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
+            "address.similarity" => {
+                match crate::methods::address_similarity(state, &spec.params) {
+                    Some(value) => {
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "info".to_owned(),
+                        message: format!(
+                            "address.similarity: no known-counterparty set in WalletState to \
+                             compare the candidate against (call {}) — fail-open, field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
+            "pool.liquidity" => match crate::methods::pool_liquidity(state, &spec.params) {
+                Some(value) => {
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "info".to_owned(),
+                    message: format!(
+                        "pool.liquidity: pool TVL / 24h volume is external market data, not in \
+                         WalletState (call {}) — fail-open, field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
             other => diagnostics.push(Diagnostic {
                 level: "info".to_owned(),
                 message: format!(

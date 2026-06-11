@@ -56,6 +56,103 @@
       "returns": { "kind": "scalar", "type": "Long", "from": "$.result.nowTs" },
       "origin": "bundled"
     },
+    "address.sanctions": {
+      "name": "address.sanctions",
+      "description": "Whether an address is on the OFAC SDN crypto-address list. Backed by a bundled v1 seed (Tornado Cash pool/router set + well-known designations), to be expanded from the official U.S. Treasury SDN feed.",
+      "params": {
+        "address": {
+          "type": "AssetRef",
+          "required": true,
+          "description": "Address to screen (bare hex string or an object carrying `address`). Case-insensitive.",
+          "defaultSelector": "$.action.recipient"
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.sanctioned" },
+      "origin": "bundled"
+    },
+    "address.reputation": {
+      "name": "address.reputation",
+      "description": "Whether an address is a known malicious / scam / drainer address. Backed by a bundled v1 denylist seed, to be expanded from threat-intel feeds. Unknown well-formed addresses return flagged=false (so they pass).",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": false,
+          "description": "EIP-155 chain ID (accepted for forward-compat; v1 seed is mainnet-EVM, keyed on address alone).",
+          "defaultSelector": "$.root.chain_id"
+        },
+        "address": {
+          "type": "AssetRef",
+          "required": true,
+          "description": "Address to check (bare hex string or an object carrying `address`). Case-insensitive.",
+          "defaultSelector": "$.action.spender"
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.flagged" },
+      "origin": "bundled"
+    },
+    "token.metadata": {
+      "name": "token.metadata",
+      "description": "Whether a token is verified/known. Trusts a synced holding with non-user-supplied provenance, else falls back to a bundled allowlist of major mainnet tokens. Unknown tokens return isVerified=false (the intended firing condition).",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": false,
+          "description": "EIP-155 chain ID.",
+          "defaultSelector": "$.root.chain_id"
+        },
+        "asset": {
+          "type": "AssetRef",
+          "required": true,
+          "description": "Token to check (address string or AssetRef object carrying `address`).",
+          "defaultSelector": "$.action.token"
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.isVerified" },
+      "origin": "bundled"
+    },
+    "lending.health_factor": {
+      "name": "lending.health_factor",
+      "description": "Post-action lending health factor. STUB (fail-open / returns nothing): a correct post-action HF needs per-collateral liquidation thresholds + USD prices, which are NOT present in the synced WalletState (only an account-level HF/threshold is synced). Requires extending LendingAccount with per-collateral (token, amount, liqThreshold, priceUsd) rows, OR passing the action's userStateBefore/reserveState as params.",
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from" },
+        "venue": { "type": "String", "required": true, "defaultSelector": "$.action.venue" },
+        "asset": { "type": "AssetRef", "required": true, "defaultSelector": "$.action.asset" },
+        "amount": { "type": "String", "required": true, "defaultSelector": "$.action.amount" }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.postActionHf" },
+      "origin": "bundled"
+    },
+    "address.activity": {
+      "name": "address.activity",
+      "description": "An address's transaction count and first-seen timestamp. STUB (fail-open / returns nothing): requires an external chain indexer / archive RPC (eth_getTransactionCount + earliest-tx lookup); not derivable from WalletState.",
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "address": { "type": "AssetRef", "required": true, "defaultSelector": "$.action.recipient" }
+      },
+      "returns": { "kind": "scalar", "type": "Long", "from": "$.result.txCount" },
+      "origin": "bundled"
+    },
+    "address.similarity": {
+      "name": "address.similarity",
+      "description": "Address-poisoning check: is the candidate recipient visually similar (shared prefix+suffix) to a known counterparty? STUB (fail-open / returns nothing): WalletState has no known-counterparty / contacts set to compare against. Requires a counterparties set populated from outbound-transfer history during sync.",
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "candidate": { "type": "AssetRef", "required": true, "defaultSelector": "$.action.recipient" }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.poisonCollision" },
+      "origin": "bundled"
+    },
+    "pool.liquidity": {
+      "name": "pool.liquidity",
+      "description": "A pool's 24h USD volume. STUB (fail-open / returns nothing): pool TVL / volume is external market data (DEX subgraph or on-chain reserves + oracle pricing); not in WalletState.",
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "venue": { "type": "String", "required": true, "defaultSelector": "$.action.venue" }
+      },
+      "returns": { "kind": "scalar", "type": "decimal", "from": "$.result.vol24hUsd" },
+      "origin": "bundled"
+    },
     "oracle.effective_rate_bps": {
       "name": "oracle.effective_rate_bps",
       "description": "Effective rate of a swap vs the oracle's mid-market price, expressed in basis points (negative = unfavourable).",

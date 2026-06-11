@@ -408,10 +408,17 @@ fn evaluate_matching_bundles(
     // here) and `lowered.resource` as `Protocol::"<to>"`, so the principal /
     // resource uids the evaluator passes downstream resolve cleanly against
     // this slice without any further glue.
+    // `attrs.address` is lowercased: decoded context addresses (recipient,
+    // spender, …) are emitted lowercase by the decoder, but `tx.from` arrives
+    // in whatever case the wallet/provider sent (often EIP-55 checksum). Cedar
+    // string `==` is case-sensitive, so a self-send (`recipient == signer`) was
+    // false-warning purely on case. The uid is left verbatim so it still matches
+    // the lowering's `Wallet::"<from>"` principal uid (only the compared attr
+    // is normalized).
     let entities = serde_json::json!([
         {
             "uid": { "type": "Wallet", "id": tx.from.as_str() },
-            "attrs": { "address": tx.from.as_str() },
+            "attrs": { "address": tx.from.as_str().to_lowercase() },
             "parents": [],
         },
         {

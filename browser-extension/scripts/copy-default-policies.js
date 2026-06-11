@@ -58,10 +58,13 @@ function copyDefaultPoliciesV2() {
   // `loadDefaults()` in policy-selection.ts consumes for the popup catalog.
   // Enumerate via package.json's `policies[]` so order + id match the bundle's
   // canonical manifest; fall back to dir-scan if package.json is absent.
-  const bundleDir = path.join(EXT_ROOT, "default-bundles", "day1-safety");
+  // Which bundle to bake. Defaults to `day1-safety`; override with
+  // `DEFAULT_BUNDLE=<dir>` (e.g. `safe-swap-lp`) at build time.
+  const bundleName = process.env.DEFAULT_BUNDLE || "day1-safety";
+  const bundleDir = path.join(EXT_ROOT, "default-bundles", bundleName);
   if (!fs.existsSync(bundleDir)) {
     fs.writeFileSync(destPath, "[]");
-    console.log("Wrote empty policy-set-v2.json (default-bundles/day1-safety not found)");
+    console.log(`Wrote empty policy-set-v2.json (default-bundles/${bundleName} not found)`);
     return;
   }
 
@@ -79,13 +82,23 @@ function copyDefaultPoliciesV2() {
   }
 
   const policySet = ids.map((id) => {
-    const cedarPath = path.join(bundleDir, "policies", id, "policy.cedar");
-    return { id, policy: fs.readFileSync(cedarPath, "utf8") };
+    const dir = path.join(bundleDir, "policies", id);
+    const policy = fs.readFileSync(path.join(dir, "policy.cedar"), "utf8");
+    // Embed the parsed manifest. The default-policy loader (policies-loader-v2)
+    // does NOT synthesize a manifest the way managed/dashboard policies do, so a
+    // missing manifest reaches the WASM `evaluate_action_v2_json` as `null` →
+    // `invalid type: null, expected struct ManifestV2` → fail-closed warn on
+    // every tx. Ship each policy's `manifest.json` verbatim (fallback: minimal).
+    const manifestPath = path.join(dir, "manifest.json");
+    const manifest = fs.existsSync(manifestPath)
+      ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+      : { id, schema_version: 2 };
+    return { id, policy, manifest };
   });
 
   fs.writeFileSync(destPath, JSON.stringify(policySet, null, 2));
   console.log(
-    `Wrote policy-set-v2.json with ${policySet.length} day1-safety policies → ${destPath}`,
+    `Wrote policy-set-v2.json with ${policySet.length} ${bundleName} policies → ${destPath}`,
   );
 }
 
