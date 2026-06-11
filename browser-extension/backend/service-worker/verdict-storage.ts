@@ -21,6 +21,10 @@ export interface PolicyRef {
   id: number | null;
   name: string | null;
   severity: PolicySeverity;
+  /** 기록 시점에 박제한 ps2 def 참조 — 정책 이름이 바뀌거나 정의가 삭제돼도
+   *  과거 verdict가 자립하도록 한다(P3). 리셋 이전 행은 null. */
+  def_id?: string | null;
+  display_name?: string | null;
 }
 
 export interface VerdictRow {

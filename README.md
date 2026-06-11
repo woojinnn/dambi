@@ -41,6 +41,22 @@ dApp → window.ethereum  ──intercept──▶  extension service worker
    the asset-model reducer. The extension owns the final verdict; the server
    supplies state context.
 
+## Naming guide (versioned names you will meet in the code)
+
+The version suffixes are **protocol names, not "old vs new"** — they coexist on
+purpose and renaming them would churn every call site. What each one means:
+
+| Name | What it is |
+|------|------------|
+| `ActionBody` / **v3 decode** | The declarative calldata/typed-data decoder driven by `registryV2` manifests (`declarative_route_*_v3`). "v3" names the decode-registry format. |
+| **v2 evaluation** (`evaluate_action_v2`, `manifest_v2`) | The stateless per-request Cedar evaluation: `{policy, manifest}` bundles + trigger matching + `policy_rpc` enrichment planning. "v2" names the policy-bundle contract. |
+| **`ps2:*`** | The extension's policy-storage namespace (account ⊃ wallets ⊃ bindings/packages) and its service-worker message family. The dashboard/popup manage policies exclusively through it. |
+| `verdictSource: "declarative-v2" \| "fail_closed"` | Where a verdict came from: a real policy evaluation, or the fail-closed tail (undecodable request, engine fault). `fail_closed` is a safety semantic, not a legacy marker. |
+| `registryV2/` | The adapter-manifest registry that feeds the v3 decoder. The `registry-api/` proxy fronts its private deployment. |
+
+If you add a new protocol revision, give it a name here and keep the old one
+documented until it is actually deleted.
+
 ## Workspace layout
 
 | Path | What |
@@ -164,18 +180,23 @@ in-extension OAuth flow. For a prod-like local Kubernetes loop see
 
 ## CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs four jobs on every
-PR and push to `main`:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every PR and
+push to `main`; new pushes cancel the previous in-flight run for that branch.
+`rust` and `wasm` run in parallel; `extension` waits only on the wasm pkg
+artifact.
 
 - **rust** — builds the `registryV2` index (npm), then `cargo fmt --check`,
-  `cargo check`, `cargo clippy -D warnings`, `cargo test`, doctests, and
+  `cargo clippy -D warnings`, `cargo test` (doctests included), and
   `cargo doc` with `-D warnings`.
-- **wasm** — `wasm-pack build crates/policy-engine-wasm`, native tests on the
-  wasm crate, and headless-Chrome `wasm-bindgen` tests.
-- **extension** — `yarn typecheck`, vitest, Chrome MV3 + Firefox MV2 builds, the
-  dashboard build, and packaged zips. The Chrome/Firefox/dashboard artifacts are
-  uploaded per-PR so reviewers can sideload without recompiling.
-- **dependency-policy** — `cargo audit` + `cargo deny`.
+- **wasm** — `wasm-pack build crates/policy-engine-wasm` (artifact reused by
+  the extension job) and headless-Chrome `wasm-bindgen` tests.
+- **extension** — `yarn typecheck`, vitest, Chrome MV3 build + zip, the
+  dashboard build (uploaded per-PR so reviewers can sideload). Firefox MV2
+  build/zip runs on `main` only.
+- **secrets-scan** — gitleaks over the full history.
+
+[`dependency-policy.yml`](.github/workflows/dependency-policy.yml) (`cargo
+audit` + `cargo deny`) runs when dependency files change and weekly.
 
 To reproduce the suite locally, run `cargo test` (with the registry index built,
 above) and `cd browser-extension && yarn test`.

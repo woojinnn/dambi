@@ -21,6 +21,12 @@ sourcify_dump/
 
 # Frontend build artifacts and dependencies
 **/node_modules/
+# On macOS+iCloud the real dep dirs live under `node_modules.nosync/` (the
+# `.nosync` suffix excludes them from iCloud sync) and the plain `node_modules`
+# is a symlink to it — neither is caught by the dir pattern above, so ignore
+# both forms explicitly.
+**/node_modules.nosync/
+**/node_modules
 **/dist/
 .vite/
 
@@ -131,6 +137,9 @@ crates/integration-tests/tests/ethena_staking_preset_e2e.rs
 # Built extension dist for aave/curve/ethena live e2e (regenerable build output).
 .live-e2e-aave-curve/
 e2e-browser/
+# Local dApp playground — assemble tx/typed-sig/HL orders and fire them through
+# the extension to test policies. Local test tooling (same as e2e-browser/).
+playground/
 
 # Policy Lab (playwright) scratch — snapshots/screenshots from manual Lab adds.
 .playwright-mcp/
@@ -138,3 +147,10 @@ e2e-browser/
 /filled-form.yml
 /new-policy-page.png
 /stake-deny-filled.png
+
+# Operational hygiene: env-specific Terraform inputs stay local
+# (terraform.tfvars.example is the tracked template).
+*.tfvars
+!*.tfvars.example
+# browser-extension is a Yarn workspace — never track an npm lockfile there.
+browser-extension/package-lock.json
