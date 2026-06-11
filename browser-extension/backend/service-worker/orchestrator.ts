@@ -11,6 +11,7 @@ import {
   type PendingRequest,
 } from "./storage";
 import { appendVerdict, type VerdictInsert } from "./verdict-storage";
+import { refreshBadge } from "./mascot-badge";
 import { appendStateDelta } from "./state-delta-storage";
 import { appendDiagnosisContext } from "./diagnosis-context-storage";
 import {
@@ -354,9 +355,15 @@ async function appendAudit(
   // Keep the user-facing verdict log on-device. The server returns simulated
   // state for policy evaluation; the extension owns policy verdicts and audit
   // history, so this replaces the old server `/verdicts` write path.
-  void appendVerdictsForMessage(message, verdict, userDecision).catch((err) => {
-    console.warn("[Pasu] verdict-storage append failed", err);
-  });
+  //
+  // After the verdict row is written, refresh the toolbar mascot badge so it
+  // reflects the latest 24h fail/warn count (safe → warn → fail). Chained
+  // after the append so `countVerdicts` sees this verdict; best-effort.
+  void appendVerdictsForMessage(message, verdict, userDecision)
+    .then(() => refreshBadge())
+    .catch((err) => {
+      console.warn("[Pasu] verdict-storage append / badge refresh failed", err);
+    });
 }
 
 async function appendVerdictsForMessage(
