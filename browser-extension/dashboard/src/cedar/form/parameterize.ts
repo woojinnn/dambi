@@ -6,6 +6,7 @@
  *  오버라이드한다. 위치 기반 이름이 안전한 이유: 바인딩이 존재하는 동안 구조는
  *  잠긴다(구조 변경 = 라이브러리에서 복제). */
 import { formToIr, irToForm } from "./convert";
+import { normalizeDecimal } from "./decimal";
 import { isGroupNode } from "./model";
 import type { FormCondition, FormModel, FormNode, FormValue } from "./model";
 import type { HoleValue } from "../../server-api/policy-store";
@@ -69,7 +70,8 @@ export function leafValueToHoleValue(v: FormValue): HoleValue {
     case "long":
       return v.value;
     case "decimal":
-      return v.value; // decimal 홀은 내부 lit string
+      // decimal 홀은 내부 lit string — Cedar 형식("3"→"3.0")으로 정규화해 저장.
+      return normalizeDecimal(v.value) ?? v.value;
     case "string":
       return v.value;
     case "set":

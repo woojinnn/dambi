@@ -16,6 +16,7 @@ export type {
 } from "./model";
 export { emptyFormModel, isGroupNode } from "./model";
 export { formToIr, formToIrWithMap, irToForm, leafToExpr, splitRuns, type FormIrMaps } from "./convert";
+export { normalizeDecimal, findInvalidIrDecimals, findInvalidModelDecimals, CEDAR_DECIMAL_RE } from "./decimal";
 export {
   situationsOf,
   flattenSituations,

@@ -35,6 +35,7 @@ import type {
   GroupOp,
 } from "./model";
 import { isGroupNode } from "./model";
+import { normalizeDecimal } from "./decimal";
 import { guardsForPath } from "./schema-catalog";
 
 const REQUEST_VARS = new Set<VarName>(["principal", "action", "resource", "context"]);
@@ -87,7 +88,13 @@ function valueToExpr(v: FormValue): Expr {
     case "string":
       return { kind: "lit", litType: "string", value: v.value };
     case "decimal":
-      return { kind: "ext", fn: "decimal", args: [{ kind: "lit", litType: "string", value: v.value }] };
+      // Cedar decimal은 소수점이 필수 — "3"을 그대로 내보내면 엔진 설치가
+      // 거부된다. 정규화 불가한 값은 그대로 두고 저장 검증이 잡는다.
+      return {
+        kind: "ext",
+        fn: "decimal",
+        args: [{ kind: "lit", litType: "string", value: normalizeDecimal(v.value) ?? v.value }],
+      };
     case "set":
       return {
         kind: "set",
