@@ -46,7 +46,14 @@ import { CatIcon, ShieldIcon, WarnIcon } from "./icons";
 import { blocksToText, textToBlocks } from "../../../cedar";
 import { concretizeIr } from "../../../cedar/blocks";
 import { PolicyFormPane } from "./PolicyFormPane";
-import { emptyFormModel, formToIr, irToForm, type FormModel } from "../../../cedar/form";
+import {
+  emptyFormModel,
+  findInvalidIrDecimals,
+  findInvalidModelDecimals,
+  formToIr,
+  irToForm,
+  type FormModel,
+} from "../../../cedar/form";
 
 type Tab = "cedar" | "form";
 
@@ -331,6 +338,14 @@ function EditorBody({
         "사유가 비어 있어요 — 정책이 발동했을 때 사용자에게 보여줄 메시지예요. ③ '어떻게 알릴까요?'의 사유를 채워주세요.",
       );
     }
+    // decimal 리터럴 형식: Cedar 파서는 통과하지만 엔진 설치 시 거부돼
+    // 모든 요청이 막히므로(fail-closed) 저장 단계에서 잡는다.
+    const badDecimals = findInvalidIrDecimals(concretizeIr(finalIr));
+    if (badDecimals.length > 0) {
+      throw new Error(
+        `decimal 값 형식이 잘못됐어요: ${badDecimals.map((v) => `"${v}"`).join(", ")} — 소수점이 꼭 필요해요 (예: 3 → 3.0, 소수점 아래 최대 4자리)`,
+      );
+    }
     let manifest: unknown;
     if (tab === "form" && manifestOverride) {
       // The form supplied a hand-edited manifest — persist it as-is.
@@ -358,6 +373,16 @@ function EditorBody({
     const defModel = irToForm(def.skeleton.ir as PolicyIR);
     if (!defModel || !editedModel) {
       window.alert("이 정책은 폼으로 분석할 수 없어서 지갑별 값 편집을 지원하지 않아요.");
+      throw new Error("저장을 취소했어요");
+    }
+    // 인스턴스 저장은 prepare()를 거치지 않으니 decimal 값을 여기서 검증한다.
+    // ("3"처럼 정규화로 고쳐지는 값은 직렬화가 알아서 고치고, 숫자가 아닌
+    // 값만 걸린다.)
+    const badDecimals = findInvalidModelDecimals(editedModel);
+    if (badDecimals.length > 0) {
+      window.alert(
+        `decimal 값 형식이 잘못됐어요: ${badDecimals.map((v) => `"${v}"`).join(", ")} — 숫자로 입력해 주세요 (예: 3.0, 소수점 아래 최대 4자리)`,
+      );
       throw new Error("저장을 취소했어요");
     }
     if (structureKey(canonicalizeModel(defModel)) !== structureKey(canonicalizeModel(editedModel))) {

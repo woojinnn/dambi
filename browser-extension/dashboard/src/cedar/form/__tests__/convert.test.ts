@@ -181,7 +181,7 @@ describe("formToIr / irToForm", () => {
       trigger: { kind: "any" },
       when: [
         cond("context.a", "==", { kind: "long", value: 1 }),
-        cond("context.custom.x", ">=", { kind: "decimal", value: "1" }, { joiner: "or" }),
+        cond("context.custom.x", ">=", { kind: "decimal", value: "1.0" }, { joiner: "or" }),
       ],
       unless: [],
       id: "p",
@@ -320,7 +320,7 @@ describe("formToIr / irToForm", () => {
           joiner: "and",
           conds: [
             cond("context.b", "==", { kind: "long", value: 2 }),
-            cond("context.custom.x", ">=", { kind: "decimal", value: "1" }, { joiner: "or" }),
+            cond("context.custom.x", ">=", { kind: "decimal", value: "1.0" }, { joiner: "or" }),
           ],
         },
       ],
@@ -625,7 +625,7 @@ describe("지갑별 설정(param) 승격 라운드트립", () => {
   const model: FormModel = {
     trigger: { kind: "actionEq", entityType: "Amm::Action", id: "Swap" },
     when: [
-      cond("context.custom.inputUsd", ">=", { kind: "decimal", value: "100" }, {
+      cond("context.custom.inputUsd", ">=", { kind: "decimal", value: "100.0" }, {
         param: { name: "maxUsd", label: "최대 금액(USD)" },
       }),
       cond("context.spender", "in", { kind: "set", values: ["0xab"] }, {
@@ -656,7 +656,7 @@ describe("지갑별 설정(param) 승격 라운드트립", () => {
     const byField = new Map(reopened!.when.map((c) => ["fieldPath" in c ? c.fieldPath : "", c]));
     const usd = byField.get("context.custom.inputUsd") as FormCondition;
     expect(usd.param).toEqual({ name: "maxUsd", label: "최대 금액(USD)" });
-    expect(usd.value).toEqual({ kind: "decimal", value: "100" });
+    expect(usd.value).toEqual({ kind: "decimal", value: "100.0" });
     const spd = byField.get("context.spender") as FormCondition;
     expect(spd.param?.name).toBe("allowedSpenders");
     expect(spd.value).toEqual({ kind: "set", values: ["0xab"] });
