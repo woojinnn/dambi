@@ -1,13 +1,13 @@
 /**
- * The /simulate wizard controller — owns ALL shared state + actions across the
- * 4 steps, so navigating back/forward keeps data. Today it is backed by the
- * MockProvider (fixtures in {@link mock-data}); a RealProvider (server +
- * sim-bridge WASM) later replaces the data sources without touching the step UI.
+ * The /simulation wizard controller — owns ALL shared state + actions across
+ * the 4 steps, so navigating back/forward keeps data. All source data is read
+ * through the injected {@link SimProvider} (the live `realProvider`), so the
+ * step UI never touches the backend directly.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { mockProvider, type SimData, type SimProvider } from "./provider";
+import type { SimData, SimProvider } from "./provider";
 import type {
   DenyView,
   PackageView,
@@ -90,7 +90,7 @@ export interface SimController {
   cumulativeDenies: (cursor: number) => DenyView[];
 }
 
-export function useSimController(provider: SimProvider = mockProvider): SimController {
+export function useSimController(provider: SimProvider): SimController {
   // Provider-sourced data: seeded synchronously from `initial()` (fixtures for
   // mock, empty shells for real) and refreshed async via `load()`.
   const init = useMemo<SimData>(() => provider.initial(), [provider]);

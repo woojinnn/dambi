@@ -1,26 +1,13 @@
 /**
  * The /simulate wizard's data seam. The controller ({@link useSimController})
- * reads ALL its source data through a {@link SimProvider}, so swapping fixtures
- * for the real backend (server state + ps2 store + sim-bridge WASM) never
- * touches the controller logic or the step views.
+ * reads ALL its source data through a {@link SimProvider} so the views never
+ * touch the backend directly. The live implementation is {@link realProvider}
+ * (server + ps2 store + sim-bridge WASM).
  *
- *   - {@link mockProvider}  fixtures (offline demo) — the default.
- *   - RealProvider          server + ps2 + sim-bridge (wired phase-by-phase).
- *
- * `initial()` is a SYNCHRONOUS seed (so the first render has data and the mock
- * path has zero flash); `load()` is the async refresh that the RealProvider
- * uses to fetch from the server. `run()` performs the actual simulation.
+ * `initial()` is a SYNCHRONOUS seed for the first render (empty shells for the
+ * real provider); `load()` is the async fetch; `run()` performs the simulation.
  */
 
-import {
-  MOCK_ENABLED_BY_WALLET,
-  MOCK_PACKAGES,
-  MOCK_POLICIES,
-  MOCK_RUN,
-  MOCK_STATES,
-  MOCK_TX_ROWS,
-  MOCK_WALLETS,
-} from "./mock-data";
 import type {
   PackageView,
   PolicyView,
@@ -58,30 +45,10 @@ export interface RunInput {
 }
 
 export interface SimProvider {
-  /** Synchronous seed for the first render (fixtures for mock; empty for real). */
+  /** Synchronous seed for the first render (empty shells; `load()` fills them). */
   initial(): SimData;
-  /** Async refresh — the real provider fetches wallets/state/policies here. */
+  /** Async refresh — fetches wallets/state/policies from the backend. */
   load(): Promise<SimData>;
   /** Run the simulation: tx queue + enabled policies → per-step verdicts + diffs. */
   run(input: RunInput): Promise<RunResult>;
 }
-
-const MOCK_DATA: SimData = {
-  wallets: MOCK_WALLETS,
-  statesByAddr: MOCK_STATES,
-  policies: MOCK_POLICIES,
-  packages: MOCK_PACKAGES,
-  enabledByWallet: MOCK_ENABLED_BY_WALLET,
-  txRows: MOCK_TX_ROWS,
-};
-
-/** Fixtures-backed provider — the default; works offline with no bridge. */
-export const mockProvider: SimProvider = {
-  initial: () => MOCK_DATA,
-  load: () => Promise.resolve(MOCK_DATA),
-  // Keep the short delay so the "실행 중…" state is visible, matching the old run.
-  run: () =>
-    new Promise((resolve) => {
-      setTimeout(() => resolve(MOCK_RUN), 450);
-    }),
-};

@@ -5,7 +5,7 @@
  */
 import { PolicyDiagram } from "../../cedar/diagram/PolicyDiagram";
 
-import { humanizeAddr } from "./mock-data";
+import { humanizeAddr } from "./humanize";
 import type { SimController } from "./useSimController";
 import type { DenyView, StepView, WalletStateView } from "./types";
 
