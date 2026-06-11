@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from "react";
 
+import { StateDashboard } from "./StateDashboard";
 import type { SimController, PkgState } from "./useSimController";
 import type { PolicyView } from "./types";
 
@@ -14,14 +15,16 @@ export function Step2Policies({ c }: { c: SimController }) {
   const pkgPolicyIds = new Set(c.packages.flatMap((p) => p.policyIds));
   // 전체 = policies not already shown under 지갑관련/패키지.
   const rest = c.policies.filter((p) => !relatedIds.has(p.id) && !pkgPolicyIds.has(p.id));
-  const filtering = c.relevantTokens.size > 0;
+  const filtering = c.hasRelevanceFilter;
 
   return (
     <div className="sw-step">
       <header className="sw-step-head">
         <h2>② 정책 선택</h2>
-        <p>적용할 정책을 켜고 끄세요. 선택한 정책과 관련된 상태만 오른쪽에 남습니다.</p>
+        <p>정책은 <b>지갑 단위</b>로 관리됩니다. 지갑을 고른 뒤 정책·패키지를 켜고 끄세요.</p>
       </header>
+
+      <WalletSwitcher c={c} />
 
       <div className="sw-cols">
         <section className="sw-policies">
@@ -67,32 +70,55 @@ export function Step2Policies({ c }: { c: SimController }) {
           <div className="sw-relstate-head">
             <b>관련 상태</b>
             <span className="sw-mut">
-              {filtering ? `선택 정책이 참조하는 토큰만 강조 (${[...c.relevantTokens].join(", ")})` : "모든 상태 표시"}
+              {filtering
+                ? "켠 정책이 다루는 자산만 남고 나머지는 빠집니다"
+                : "정책을 켜면 관련 자산만 남습니다"}
             </span>
           </div>
-          {c.selectedStates.map((s) => (
-            <div key={s.address} className="sw-statecard mini">
-              <div className="sw-statecard-head">
-                <b>{s.name}</b>
-              </div>
-              <table className="sw-tokens">
-                <tbody>
-                  {s.tokens.map((t) => {
-                    const rel = c.isTokenRelevant(t.symbol);
-                    return (
-                      <tr key={t.address} className={rel ? "" : "dim"}>
-                        <td className="sym">{t.symbol}</td>
-                        <td className="bal">{t.balance}</td>
-                        <td className="rel">{filtering && rel ? "● 관련" : ""}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ))}
+          {c.activeState && (
+            <StateDashboard
+              key={c.activeWallet}
+              s={c.activeState}
+              entrance={false}
+              filter={{
+                active: filtering,
+                isTokenRelevant: c.isTokenRelevant,
+                isProtocolRelevant: c.isProtocolRelevant,
+              }}
+            />
+          )}
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** Per-wallet tabs — pick which selected wallet's policy set you're editing. */
+function WalletSwitcher({ c }: { c: SimController }) {
+  const sel = c.wallets.filter((w) => c.selected.has(w.address));
+  if (sel.length <= 1) {
+    const w = sel[0];
+    return (
+      <div className="sw-wsw single">
+        <span className="sw-mut">정책을 관리할 지갑:</span>
+        <b className="sw-wsw-name">{w ? w.name : "선택된 지갑 없음"}</b>
+        {w && <span className="sw-wsw-count">{c.enabledCount(w.address)}개 켜짐</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="sw-wsw">
+      {sel.map((w) => (
+        <button
+          key={w.address}
+          type="button"
+          className={`sw-wtab${c.activeWallet === w.address ? " on" : ""}`}
+          onClick={() => c.setActiveWallet(w.address)}
+        >
+          <span className="sw-wtab-name">{w.name}</span>
+          <span className="sw-wtab-count">{c.enabledCount(w.address)}</span>
+        </button>
+      ))}
     </div>
   );
 }
