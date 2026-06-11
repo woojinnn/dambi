@@ -38,6 +38,7 @@ import {
 } from "../simulation/sim-bridge";
 import { parseStateDelta, formatSignedDelta } from "../simulation/state-view";
 
+import { TOKENS } from "./humanize";
 import type { SimData, SimProvider, RunInput } from "./provider";
 import type {
   ApprovalView,
@@ -121,40 +122,59 @@ function mapPositions(positions: Position[]): PositionView[] {
   });
 }
 
+/** A raw base-unit allowance so large it's effectively unlimited (≥ 2^256 has
+ *  ~78 digits; a 30-digit cap is far past any real balance). */
+function isEffectivelyUnlimited(amount?: string): boolean {
+  return !!amount && /^\d+$/.test(amount) && amount.length >= 30;
+}
+const SYMBOL_BY_ADDR: Record<string, string> = Object.fromEntries(
+  Object.entries(TOKENS).map(([sym, addr]) => [addr, sym]),
+);
+/** Known token symbol for an address, else a shortened hex. */
+function tokenLabel(addr: string): string {
+  return SYMBOL_BY_ADDR[addr.toLowerCase()] ?? shortAddr(addr);
+}
+/** Display string for an approval amount — collapses MAX/huge to "무제한". */
+function apprAmount(amount: string | undefined, unlimited: boolean): string {
+  return unlimited ? "무제한" : (amount ?? "—");
+}
+
 /** ClassifiedApprovals → ApprovalView[] (Phase 1b). */
 function mapApprovals(ap: ClassifiedApprovals): ApprovalView[] {
   const out: ApprovalView[] = [];
-  ap.erc20?.forEach((a, i) =>
+  ap.erc20?.forEach((a, i) => {
+    const unlimited = a.is_unlimited || isEffectivelyUnlimited(a.amount);
     out.push({
       id: `erc20-${i}`,
-      token: a.token,
-      spender: shortAddr(a.spender),
+      token: tokenLabel(a.token),
+      spender: "",
       spenderAddress: a.spender,
-      unlimited: a.is_unlimited,
-      amount: a.is_unlimited ? "무제한" : a.amount,
+      unlimited,
+      amount: apprAmount(a.amount, unlimited),
       tokenAddress: a.token.toLowerCase(),
       scope: "ERC-20",
-      risk: (a.risk?.length ?? 0) > 0 ? "high" : "low",
-    }),
-  );
-  ap.permit2?.forEach((a, i) =>
+      risk: unlimited || (a.risk?.length ?? 0) > 0 ? "high" : "low",
+    });
+  });
+  ap.permit2?.forEach((a, i) => {
+    const unlimited = isEffectivelyUnlimited(a.amount);
     out.push({
       id: `permit2-${i}`,
-      token: a.token,
-      spender: shortAddr(a.spender),
+      token: tokenLabel(a.token),
+      spender: "",
       spenderAddress: a.spender,
-      unlimited: false,
-      amount: a.amount,
+      unlimited,
+      amount: apprAmount(a.amount, unlimited),
       tokenAddress: a.token.toLowerCase(),
       scope: "Permit2",
-      risk: (a.risk?.length ?? 0) > 0 ? "high" : "low",
-    }),
-  );
+      risk: unlimited || (a.risk?.length ?? 0) > 0 ? "high" : "low",
+    });
+  });
   ap.set_for_all?.forEach((a, i) =>
     out.push({
       id: `setall-${i}`,
-      token: a.collection,
-      spender: shortAddr(a.operator),
+      token: tokenLabel(a.collection),
+      spender: "",
       spenderAddress: a.operator,
       unlimited: true,
       amount: "전체 컬렉션",
@@ -197,7 +217,13 @@ function relevanceOf(def: PolicyDef): { tokens: string[]; protocols: string[] } 
   const venues = new Set<string>();
   deepFindStrings(man, "venue", venues);
   deepFindStrings(man, "name", venues); // venue.name etc.
-  const tokens = [...addrs].filter((s) => /^0x[0-9a-fA-F]{40}$/.test(s)).map((s) => s.toLowerCase());
+  // Map referenced token addresses → SYMBOLS so they match the dashboard's
+  // token rows (which key relevance by symbol). Unknown tokens contribute no
+  // relevance rather than a never-matching address.
+  const tokens = [...addrs]
+    .filter((s) => /^0x[0-9a-fA-F]{40}$/.test(s))
+    .map((s) => SYMBOL_BY_ADDR[s.toLowerCase()])
+    .filter((sym): sym is string => Boolean(sym));
   const protocols = [...venues].filter((s) => !/^0x/.test(s) && s.length < 30);
   return { tokens, protocols };
 }
