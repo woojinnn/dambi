@@ -7,7 +7,9 @@ import {
   bindDef,
   getOverview,
   isEffectiveOn,
+  putWalletFolder,
   removeBinding,
+  removeWalletFolder,
   putWalletPackage,
   removeWalletPackage,
   setPackageEnabled,
@@ -198,19 +200,21 @@ function WalletWorkspace(props: {
     return m;
   }, [snap]);
 
-  // 이 지갑 전용 정책: 바인딩의 지갑 패키지 기준으로 그룹 (라이브러리 폴더 무관).
-  const walletOnlyByPkg = useMemo(() => {
+  // 이 지갑 전용 정책(모델 A): homeWallet=이 지갑인 템플릿을 **지갑 전용 폴더**
+  // 기준으로 그룹 — 바인딩(적용) 여부와 무관하게 보인다. 인스턴스 축(패키지)과
+  // 분리된 정리 축. 키 "__uncat__" = 미분류.
+  const walletOnlyByFolder = useMemo(() => {
     const m = new Map<string, PolicyDef[]>();
-    for (const b of Object.values(wallet.bindings)) {
-      const d = snap.library.defs[b.defId];
-      if (!d?.hidden) continue;
-      const arr = m.get(b.packageId) ?? [];
-      if (!arr.some((x) => x.id === d.id)) arr.push(d);
-      m.set(b.packageId, arr);
+    for (const d of Object.values(snap.library.defs)) {
+      if (d.hidden !== true || d.homeWallet !== address.toLowerCase()) continue;
+      const key = d.walletFolderId ?? "__uncat__";
+      const arr = m.get(key) ?? [];
+      arr.push(d);
+      m.set(key, arr);
     }
     for (const arr of m.values()) arr.sort((a, b) => a.displayName.localeCompare(b.displayName, "ko"));
     return m;
-  }, [snap, wallet]);
+  }, [snap, address]);
 
   /** 하이브리드 토글: 켜기 = 게이트 on + (전부 꺼져 있으면) 멤버 일괄 on;
    *  끄기 = 게이트 off(부분 상태 보존). */
@@ -291,6 +295,41 @@ function WalletWorkspace(props: {
       return n;
     });
 
+  // 지갑 전용 폴더 목록: 이름순, 미분류(멤버 있을 때만)는 맨 뒤.
+  const ownFolderIds = useMemo(() => {
+    const ids = Object.values(wallet.folders ?? {})
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko"))
+      .map((f) => f.id);
+    if (walletOnlyByFolder.has("__uncat__")) ids.push("__uncat__");
+    return ids;
+  }, [wallet, walletOnlyByFolder]);
+
+  const createWalletFolder = () =>
+    void run("폴더 생성", () =>
+      putWalletFolder({
+        address,
+        folder: { id: `fold::${crypto.randomUUID()}`, displayName: "새 폴더" },
+      }),
+    ).then((ok) => ok && onToast("폴더를 만들었어요 — 이름을 바꿔보세요"));
+
+  const renameWalletFolderUi = (folderId: string) => {
+    const current = wallet.folders?.[folderId]?.displayName ?? "";
+    const name = window.prompt("폴더 이름", current)?.trim();
+    if (!name || name === current) return;
+    void run("폴더 이름 변경", () =>
+      putWalletFolder({ address, folder: { id: folderId, displayName: name } }),
+    );
+  };
+
+  const deleteWalletFolderUi = (folderId: string) => {
+    const name = wallet.folders?.[folderId]?.displayName ?? folderId;
+    if (!window.confirm(`"${name}" 폴더를 삭제할까요?\n안의 정책은 미분류로 이동해요(삭제되지 않아요).`))
+      return;
+    void run("폴더 삭제", () => removeWalletFolder({ address, folderId })).then(
+      (ok) => ok && onToast("폴더를 삭제했어요 — 정책은 미분류로 옮겼어요"),
+    );
+  };
+
   // 마켓 게시 — 지갑 패키지(보이는 그대로: 바인딩의 def, 중복 제거) 또는 개별
   // 정책을 PublishModal로. 라이브러리 디렉토리의 폴더 발행과 같은 Source 모양.
   const [publishSrc, setPublishSrc] = useState<PublishSource | null>(null);
@@ -341,14 +380,16 @@ function WalletWorkspace(props: {
 
   const totalActive = Object.values(wallet.bindings).filter((b) => isEffectiveOn(wallet, b)).length;
 
-  /** 폴더 박스 한 개 — 전용 섹션(지갑 패키지 그룹)과 공유 섹션(라이브러리 폴더)이
-   *  같은 모양을 공유한다. bindingFilter가 있으면 그 그룹의 바인딩 줄만. */
+  /** 폴더 박스 한 개 — 전용 섹션(지갑 전용 폴더)과 공유 섹션(라이브러리 폴더)이
+   *  같은 모양을 공유한다. bindingFilter가 있으면 그 그룹의 바인딩 줄만.
+   *  actions = 폴더 헤더의 관리 버튼(이름변경/삭제 — 지갑 전용 폴더만). */
   const renderFolder = (
     folder: { id: string; displayName: string },
     defs: PolicyDef[],
     bindingFilter: ((b: Binding) => boolean) | null,
+    opts?: { actions?: React.ReactNode; showEmpty?: boolean },
   ) => {
-    if (defs.length === 0) return null;
+    if (defs.length === 0 && !opts?.showEmpty) return null;
     const open = !collapsed.has(folder.id);
     return (
       <div key={folder.id} className="ld-folder">
@@ -359,6 +400,11 @@ function WalletWorkspace(props: {
           <FolderIcon />
           <span className="nm">{folder.displayName}</span>
           <span className="cnt">{defs.length}</span>
+          {opts?.actions && (
+            <span className="acts" onClick={(e) => e.stopPropagation()}>
+              {opts.actions}
+            </span>
+          )}
         </div>
         {open && (
           <div className="ld-defs">
@@ -555,20 +601,61 @@ function WalletWorkspace(props: {
 
         <div className="ev2-scroll">
           <div className="ld">
-            {walletOnlyByPkg.size > 0 && (
+            {(walletOnlyByFolder.size > 0 || Object.keys(wallet.folders ?? {}).length > 0) && (
               <div className="wt-section">
-                <div className="wt-section-h">이 지갑 전용 정책</div>
-                {[...walletOnlyByPkg.entries()]
-                  .sort(([a], [b]) =>
-                    a === UNCATEGORIZED_PKG ? 1 : b === UNCATEGORIZED_PKG ? -1 : a.localeCompare(b),
-                  )
-                  .map(([pkgId, defs]) =>
-                    renderFolder(
-                      { id: `own:${pkgId}`, displayName: walletPkgName(pkgId) },
-                      scope === "all" ? defs : pkgId === scope ? defs : [],
-                      (b) => b.packageId === pkgId,
-                    ),
-                  )}
+                <div className="wt-section-h">
+                  이 지갑 전용 정책
+                  <button
+                    type="button"
+                    className="ev2-iconbtn wt-newfolder"
+                    title="새 폴더"
+                    onClick={createWalletFolder}
+                  >
+                    <PlusIcon />
+                  </button>
+                </div>
+                {ownFolderIds.map((fid) => {
+                  const all = walletOnlyByFolder.get(fid) ?? [];
+                  // 좌측 scope(패키지) 필터: 그 패키지에 인스턴스가 있는 템플릿만.
+                  const defs =
+                    scope === "all"
+                      ? all
+                      : all.filter((d) =>
+                          (bindingsByDef.get(d.id) ?? []).some((b) => b.packageId === scope),
+                        );
+                  const isUncat = fid === "__uncat__";
+                  return renderFolder(
+                    {
+                      id: `own:${fid}`,
+                      displayName: isUncat ? "미분류" : (wallet.folders?.[fid]?.displayName ?? fid),
+                    },
+                    defs,
+                    null,
+                    {
+                      showEmpty: !isUncat && scope === "all",
+                      actions: isUncat ? undefined : (
+                        <>
+                          <button
+                            type="button"
+                            className="ev2-iconbtn"
+                            title="폴더 이름 변경"
+                            onClick={() => renameWalletFolderUi(fid)}
+                          >
+                            <PencilIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="ev2-iconbtn danger"
+                            title="폴더 삭제 (안의 정책은 미분류로)"
+                            onClick={() => deleteWalletFolderUi(fid)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </>
+                      ),
+                    },
+                  );
+                })}
               </div>
             )}
             <div className="wt-section">

@@ -11,9 +11,11 @@ import {
   provisionWallets,
   putDef,
   putPackage,
+  putWalletFolder,
   putWalletPackage,
   removeBinding,
   removePackageFromWallet,
+  removeWalletFolder,
   setPackageEnabled,
   updateBinding,
   type MarketInstallScope,
@@ -49,6 +51,8 @@ export type Ps2Request =
   | { type: "ps2:remove-binding"; address: string; bindingId: string }
   | { type: "ps2:remove-wallet-package"; address: string; packageId: string }
   | { type: "ps2:put-wallet-package"; address: string; pkg: { id: string; displayName: string } }
+  | { type: "ps2:put-wallet-folder"; address: string; folder: { id: string; displayName: string } }
+  | { type: "ps2:remove-wallet-folder"; address: string; folderId: string }
   | { type: "ps2:copy-bindings"; fromAddress: string; toAddress: string; bindingIds: string[] }
   | { type: "ps2:set-package-enabled"; address: string; packageId: string; enabled: boolean }
   | { type: "ps2:provision-wallets"; addresses: string[] }
@@ -106,6 +110,10 @@ export async function handlePs2Request(req: Ps2Request): Promise<unknown> {
       return removePackageFromWallet(uid, req);
     case "ps2:put-wallet-package":
       return putWalletPackage(uid, req);
+    case "ps2:put-wallet-folder":
+      return putWalletFolder(uid, req);
+    case "ps2:remove-wallet-folder":
+      return removeWalletFolder(uid, req);
     case "ps2:copy-bindings":
       return copyBindings(uid, req);
     case "ps2:set-package-enabled":
