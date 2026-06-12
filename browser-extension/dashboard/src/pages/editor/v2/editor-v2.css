@@ -2300,6 +2300,32 @@
   font-size: 11px;
 }
 
+/* 첫 저장 모달의 정책 이름 입력 */
+.ssm-name {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 12px;
+}
+.ssm-name span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-600);
+}
+.ssm-name input {
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--slate-900);
+}
+.ssm-name input:focus {
+  outline: none;
+  border-color: var(--sage-400, var(--sage-300));
+}
+
 .ssm-wallets {
   display: flex;
   flex-direction: column;

@@ -101,6 +101,57 @@ when { context.recipient == "0xA1c4000000000000000000000000000000007e29"
     expect(out).not.toContain("0xA1c4000000000000000000000000000000007e29");
   });
 
+  // wasm EST→text 렌더러는 피연산자를 괄호로 감싼다 — 폼으로 만든 정책이
+  // 게시될 때의 실제 모양. 탐지는 이 모양도 잡아야 한다.
+  describe("괄호로 감싼 렌더 출력", () => {
+    it("(path) == 리터럴", () => {
+      const cedar = `@id("p")
+forbid(principal, action, resource)
+when { ((context.recipient) == "0xA1c4000000000000000000000000000000007e29") };`;
+      const holes = extractHoles(cedar);
+      expect(holes.find((h) => h.kind === "address")?.path).toBe("context.recipient");
+    });
+
+    it("(셋 리터럴).contains((path))", () => {
+      const cedar = `@id("p")
+forbid(principal, action, resource)
+when { (["0x91d2000000000000000000000000000000000001"]).contains((context.delegatee)) };`;
+      const holes = extractHoles(cedar);
+      expect(holes.find((h) => h.kind === "address")?.path).toBe("context.delegatee");
+    });
+
+    it("(path).contains(리터럴)", () => {
+      const cedar = `@id("p")
+forbid(principal, action, resource)
+when { ((context.path).contains("0x7a3f000000000000000000000000000000009c21")) };`;
+      expect(extractHoles(cedar).find((h) => h.kind === "address")?.path).toBe("context.path");
+    });
+
+    it("(path).greaterThan(decimal(...)) — 폼의 3달러 임곗값", () => {
+      const cedar = `@id("new-form-test")
+forbid(principal, action, resource)
+when { ((context.custom.inputUsd).greaterThan(decimal("3.0"))) };`;
+      const holes = extractHoles(cedar);
+      const num = holes.find((h) => h.kind === "number");
+      expect(num?.path).toBe("context.custom.inputUsd");
+      expect(num?.display).toBe("3.0");
+    });
+
+    it("((path)) >= 숫자", () => {
+      const cedar = `@id("p")
+forbid(principal, action, resource)
+when { (((context.slippageBp)) >= 150) };`;
+      expect(extractHoles(cedar).find((h) => h.kind === "number")?.display).toBe("150");
+    });
+
+    it("리터럴 == (path)", () => {
+      const cedar = `@id("p")
+forbid(principal, action, resource)
+when { ("0xA1c4000000000000000000000000000000007e29" == (context.recipient)) };`;
+      expect(extractHoles(cedar).find((h) => h.kind === "address")?.path).toBe("context.recipient");
+    });
+  });
+
   it("센티널 주소는 개인 값이 아니다 — uint160::MAX 비교는 hole로 안 잡힌다", () => {
     const cedar = `@id("unlimited-approval-deny")
 forbid(principal, action, resource)
