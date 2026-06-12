@@ -1,10 +1,11 @@
 /**
  * Publish-time de-identification.
  *
- * When a curated policy/package goes to the market, address-like literals must
- * not leak the publisher's own wallets/allowlists — they are ALWAYS blanked
- * into parameter holes (the installer fills their own). Numeric thresholds are
- * optional: the author may keep a recommended value or blank it.
+ * When a curated policy/package goes to the market, address-like literals can
+ * leak the publisher's own wallets/allowlists — they are blanked into
+ * parameter holes BY DEFAULT (the installer fills their own). Every hole is
+ * opt-out per 칸: the author may keep the value public — addresses where the
+ * address IS the policy (e.g. "이 주소로 보내면 차단"), numbers as 추천값.
  *
  * We work over the raw Cedar text with focused regexes (no async IR round-trip)
  * so the publish wizard can preview holes synchronously. Redaction replaces the
@@ -255,18 +256,17 @@ export const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
 /**
  * Apply de-identification to one policy's Cedar text.
  *
- * `keptNumberKeys` — number holes the author chose to keep (추천값 남기기);
- * everything else (all addresses, and blanked numbers) is replaced with a
- * neutral placeholder.
+ * `keptKeys` — holes the author chose to keep public (주소 공개 / 숫자 추천값
+ * 남기기); everything else is replaced with a neutral placeholder.
  */
 export function redactCedar(
   cedarText: string,
   holes: PublishHole[],
-  keptNumberKeys: ReadonlySet<string>,
+  keptKeys: ReadonlySet<string>,
 ): string {
   let out = cedarText;
   for (const h of holes) {
-    if (h.kind === "number" && keptNumberKeys.has(h.key)) continue;
+    if (keptKeys.has(h.key)) continue;
     let replacement: string;
     if (h.kind === "address") {
       replacement = h.raw.trim().startsWith("[") ? `["${ZERO_ADDR}"]` : `"${ZERO_ADDR}"`;

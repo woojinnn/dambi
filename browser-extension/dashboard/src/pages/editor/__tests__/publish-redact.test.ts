@@ -101,6 +101,21 @@ when { context.recipient == "0xA1c4000000000000000000000000000000007e29"
     expect(out).not.toContain("0xA1c4000000000000000000000000000000007e29");
   });
 
+  it("keeps an address the author chose to publish (마스킹 opt-out)", () => {
+    const holes = extractHoles(RECIPIENT);
+    const addr = holes.find((h) => h.kind === "address")!;
+    const out = redactCedar(RECIPIENT, holes, new Set([addr.key]));
+    expect(out).toContain("0xA1c4000000000000000000000000000000007e29");
+  });
+
+  it("keeps an address SET literal when chosen", () => {
+    const holes = extractHoles(ALLOWLIST);
+    const addr = holes.find((h) => h.kind === "address")!;
+    const out = redactCedar(ALLOWLIST, holes, new Set([addr.key]));
+    expect(out).toContain("0x91d2000000000000000000000000000000000001");
+    expect(out).toContain("0x44ab000000000000000000000000000000000002");
+  });
+
   it("does not mangle a longer number that contains the blanked one as a substring", () => {
     const cedar = `@id("p")
 forbid(principal, action, resource)
