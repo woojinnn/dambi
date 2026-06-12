@@ -12,6 +12,7 @@ import {
 import { severityFromCedar } from "./policy-meta";
 import { textToBlocks } from "../../cedar";
 import { computeShippedHoles, manifestWithHoles } from "./publish-holes";
+import { PublishPreviewTree } from "./PublishPreviewTree";
 import {
   addressFieldRefs,
   extractHoles,
@@ -353,6 +354,14 @@ function Step1(props: {
 }) {
   const { rules, blankedAddrCount, keptAddrCount, numberCount, kept, onToggleKeep, loading } =
     props;
+  const [openTrees, setOpenTrees] = useState<Set<string>>(new Set());
+  const toggleTree = (ruleId: string) =>
+    setOpenTrees((prev) => {
+      const n = new Set(prev);
+      if (n.has(ruleId)) n.delete(ruleId);
+      else n.add(ruleId);
+      return n;
+    });
   if (loading) return <div className="pub-muted">멤버 정책 불러오는 중…</div>;
 
   return (
@@ -389,7 +398,23 @@ function Step1(props: {
               <span className="pub-rule-dot" />
               <span className="pub-rule-title">{r.title}</span>
               <span className="pub-rule-id">{r.ruleId}</span>
+              <button
+                type="button"
+                className={`pub-tree-toggle${openTrees.has(r.ruleId) ? " on" : ""}`}
+                onClick={() => toggleTree(r.ruleId)}
+              >
+                조건 보기
+              </button>
             </div>
+
+            {openTrees.has(r.ruleId) && (
+              <PublishPreviewTree
+                cedarText={r.cedarText}
+                holes={r.holes}
+                kept={kept}
+                onToggleKeep={onToggleKeep}
+              />
+            )}
 
             {r.refs.map((ref) => (
               <div key={ref.path} className="pub-field">
