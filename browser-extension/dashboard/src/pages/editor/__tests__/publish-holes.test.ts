@@ -77,6 +77,26 @@ describe("computeShippedHoles", () => {
     expect(shipped).toEqual([]); // 150은 플레이스홀더(0)가 아니다
   });
 
+  it("kept(공개 선택) 주소는 placeholder가 아니라 blanked에 끼어도 hole로 안 잡힌다", async () => {
+    const keptModel: FormModel = {
+      ...REDACTED,
+      when: [
+        {
+          joiner: "and",
+          fieldPath: "context.recipient",
+          op: "==",
+          value: { kind: "string", value: "0xA1c4000000000000000000000000000000007e29" },
+        },
+      ],
+    };
+    const shipped = await computeShippedHoles(
+      "x",
+      [hole("context.recipient", "address", "받는 주소")],
+      async () => [formToIr(keptModel)],
+    );
+    expect(shipped).toEqual([]);
+  });
+
   it("returns null for form-incompatible policies", async () => {
     const shipped = await computeShippedHoles(
       "x",

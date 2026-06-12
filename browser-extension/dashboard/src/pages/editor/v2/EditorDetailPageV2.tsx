@@ -209,13 +209,16 @@ export function EditorDetailPageV2() {
                 navigate("/editor"); // 지갑별 정책(기본 탭)으로 복귀
                 return;
               }
+              if (isNew) {
+                // 새 정책 저장 완료 → "+ 새 정책"을 눌렀던 목록으로 복귀.
+                // (상세에 머무르지 않는다 — 저장이 끝났다는 감각 + 다음 작업 동선)
+                navigate("/editor", { replace: true });
+                return;
+              }
               if (savedId !== id) {
                 navigate(`/editor/${encodeURIComponent(savedId)}`, {
                   replace: true,
                 });
-              } else if (isNew) {
-                // Drop the navigation seed so a reload doesn't re-enter new mode.
-                navigate(`/editor/${encodeURIComponent(id)}`, { replace: true });
               }
             }}
             onDeleted={() => {
@@ -418,11 +421,20 @@ function EditorBody({
     }
 
     // def가 아직 파라미터화 전이면 canonical 파라미터 형태로 1회 승격(의미 불변).
+    // 지갑 전용(hidden) def의 이름 변경은 별칭이 아니라 def 자체에 저장한다 —
+    // 이 지갑에만 존재하는 정책의 유일한 이름이고, 그래야 지갑별 정책 목록과
+    // 게시 모달에도 그 이름이 보인다. 공유 def만 바인딩 별칭을 쓴다.
+    const renameDef = alias !== undefined && def.hidden === true;
     const pIr = formToIr(parameterizeModel(canonicalizeModel(defModel)));
-    if (def.holes.length === 0 || JSON.stringify(def.skeleton.ir) !== JSON.stringify(pIr)) {
+    if (
+      renameDef ||
+      def.holes.length === 0 ||
+      JSON.stringify(def.skeleton.ir) !== JSON.stringify(pIr)
+    ) {
       const { holes, paramDefaults } = holesFromIr(pIr);
       await putDef({
         ...def,
+        ...(renameDef ? { displayName: aliasInput } : {}),
         skeleton: { ...def.skeleton, ir: pIr },
         holes,
         defaults: { ...def.defaults, params: paramDefaults },
@@ -432,10 +444,15 @@ function EditorBody({
 
     // 값 오버라이드: 템플릿 기본값과 같아진 항목은 자연히 빠진다(기본값 상속).
     const params = diffParamValues(defModel, editedModel);
+    const aliasPatch = renameDef
+      ? {} // 이름은 def로 갔다 — 별칭은 만들지 않는다(기존 별칭은 같은 값이라 무해)
+      : alias !== (ctx.binding.alias ?? undefined)
+        ? { alias }
+        : {};
     await updateBinding({
       address: ctx.address,
       bindingId: ctx.binding.id,
-      patch: { params, ...(alias !== (ctx.binding.alias ?? undefined) ? { alias } : {}) },
+      patch: { params, ...aliasPatch },
     });
     return def.id;
   };
@@ -518,7 +535,7 @@ function EditorBody({
         }
         const { def } = buildDefPayload({
           existing: null,
-          displayName: name.trim() || "untitled",
+          displayName: choice.name || name.trim() || "untitled",
           cat: policy.cat,
           ir: scopeAsk.ir,
           manifest: scopeAsk.manifest,
@@ -551,7 +568,7 @@ function EditorBody({
       }
       const { def, bindPlan } = buildDefPayload({
         existing: null,
-        displayName: name.trim() || "untitled",
+        displayName: choice.name || name.trim() || "untitled",
         cat: policy.cat,
         ir: scopeAsk.ir,
         manifest: scopeAsk.manifest,

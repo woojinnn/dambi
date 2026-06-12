@@ -275,6 +275,16 @@
 .pk-folder-count b { color: var(--slate-700); font-weight: 700; }
 .pk-folder.off .pk-folder-count b { color: var(--slate-400); }
 .pk-sw { flex-shrink: 0; }
+.pk-pub {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  border: 0; background: none; cursor: pointer; padding: 0;
+  color: var(--slate-400); flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+.pk-pub:hover { background: var(--surface); color: var(--slate-700); }
+.pk-pub svg { width: 15px; height: 15px; }
+/* pol2-edit is also used as a <button> (마켓 게시) — strip native chrome */
+button.pol2-edit { border: 0; background: none; cursor: pointer; padding: 0; }
 
 /* folder body collapse — JS-driven height animation (guaranteed end state) */
 .pk-folder-body { overflow: hidden; height: 0; }

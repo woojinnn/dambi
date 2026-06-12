@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { UNCATEGORIZED_PKG, type PackageDef } from "../../../server-api/policy-store";
 import type { SaveScope } from "./save-def";
@@ -8,6 +8,8 @@ import type { SaveScope } from "./save-def";
 export type WalletPkgPick = { id: string } | { newName: string };
 
 export interface SaveScopeChoice {
+  /** 저장할 정책 이름 — 모달에서 확정한다 ("새 정책"인 채 저장되는 일이 없게). */
+  name: string;
   scope: SaveScope;
   /** 라이브러리 경로의 폴더(또는 "__new__"). 지갑 경로에서는 무시. */
   packageId: string | "__new__";
@@ -45,6 +47,12 @@ export function SaveScopeModal(props: {
 }) {
   const { open, policyName, wallets, packages, busy, onCancel, onConfirm } = props;
   const [kind, setKind] = useState<Kind | null>(null);
+  // 정책 이름 — 헤더 제목을 못 보고 지나친 채 "새 정책"으로 저장되는 일이
+  // 잦아서, 첫 저장 모달이 명시적으로 묻는다.
+  const [nameDraft, setNameDraft] = useState(policyName);
+  useEffect(() => {
+    if (open) setNameDraft(policyName);
+  }, [open, policyName]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   // 지갑별 패키지 선택 — 패키지는 지갑 소속이라 지갑마다 따로 고른다.
   const [walletPkg, setWalletPkg] = useState<Record<string, string>>({});
@@ -92,12 +100,13 @@ export function SaveScopeModal(props: {
   const pkgOf = (addr: string) => walletPkg[addr] ?? UNCATEGORIZED_PKG;
 
   const invalid =
-    kind === "wallet"
+    !nameDraft.trim() ||
+    (kind === "wallet"
       ? picked.size === 0 ||
         (bulk
           ? !bulkName.trim()
           : [...picked].some((a) => pkgOf(a) === "__new__" && !(walletNewName[a] ?? "").trim()))
-      : packageId === "__new__" && !newPackageName.trim();
+      : packageId === "__new__" && !newPackageName.trim());
 
   const confirm = () => {
     if (kind === "wallet") {
@@ -112,6 +121,7 @@ export function SaveScopeModal(props: {
         }
       }
       onConfirm({
+        name: nameDraft.trim(),
         scope: { kind: "wallets", addresses: [...picked] },
         packageId: UNCATEGORIZED_PKG,
         walletPackages,
@@ -121,6 +131,7 @@ export function SaveScopeModal(props: {
       return;
     }
     onConfirm({
+      name: nameDraft.trim(),
       scope: applyToAllNow
         ? { kind: "all-wallets", addresses: allAddresses }
         : { kind: "library-only" },
@@ -137,10 +148,18 @@ export function SaveScopeModal(props: {
           <>
             <div className="ptm-h">
               <div className="ptm-t">어떤 정책으로 저장할까요?</div>
-              <div className="ptm-s">
-                <b>{policyName}</b> — 처음 저장하는 정책이에요.
-              </div>
+              <div className="ptm-s">처음 저장하는 정책이에요 — 이름부터 정해주세요.</div>
             </div>
+            <label className="ssm-name">
+              <span>정책 이름</span>
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                placeholder="예: 3달러 초과 스왑 시 차단"
+                maxLength={120}
+              />
+            </label>
             <div className="ptm-opts">
               <button
                 type="button"
@@ -174,7 +193,7 @@ export function SaveScopeModal(props: {
                 {kind === "wallet" ? "어느 지갑에 적용할까요?" : "라이브러리 설정"}
               </div>
               <div className="ptm-s">
-                <b>{policyName}</b> —{" "}
+                <b>{nameDraft.trim() || policyName}</b> —{" "}
                 {kind === "wallet"
                   ? "선택한 지갑에만 저장돼요. 패키지는 지갑마다 따로 골라요."
                   : "라이브러리에 템플릿으로 저장돼요."}
