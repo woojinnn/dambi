@@ -2493,6 +2493,15 @@
 .ld-def:hover {
   background: var(--fog-100);
 }
+/* 지갑 뷰의 정책 행 게시 버튼 — hover에서만 드러난다 */
+.ld-def .wt-pub {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.ld-def:hover .wt-pub {
+  opacity: 1;
+}
 .ld-cat {
   width: 8px;
   height: 8px;

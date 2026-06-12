@@ -23,7 +23,10 @@ import { listWallets } from "../../../server-api/wallets";
 import { deriveWalletRows, packageDisplayOn } from "./wallet-policies-derive";
 import { DRAG_DEF_MIME } from "./LibraryDirectory";
 import { catKey, catLabel, catStyle } from "./categories";
-import { CaretRightIcon, CopyIcon, FolderIcon, PencilIcon, PlusIcon, TrashIcon } from "./icons";
+import { blocksToText } from "../../../cedar";
+import type { PolicyIR } from "../../../cedar/blocks";
+import { PublishModal, type PublishSource } from "../PublishModal";
+import { CaretRightIcon, CopyIcon, FolderIcon, PencilIcon, PlusIcon, ShieldIcon, TrashIcon } from "./icons";
 
 /** 지갑별 정책 — 좌: 이 지갑의 패키지(추가/이름변경/토글/드롭), 우: 라이브러리
  *  디렉토리 모양의 정책 트리. 각 정책 아래에 "이 지갑에서 들어가 있는 패키지"가
@@ -295,6 +298,54 @@ function WalletWorkspace(props: {
       return n;
     });
 
+  // 마켓 게시 — 지갑 패키지(보이는 그대로: 바인딩의 def, 중복 제거) 또는 개별
+  // 정책을 PublishModal로. 라이브러리 디렉토리의 폴더 발행과 같은 Source 모양.
+  const [publishSrc, setPublishSrc] = useState<PublishSource | null>(null);
+
+  const renderMember = async (d: PolicyDef) => ({
+    slug: d.id.replace(/^def::/, ""),
+    title: d.displayName,
+    cedarText: await blocksToText(d.skeleton.ir as PolicyIR),
+    manifest: d.skeleton.manifest,
+  });
+
+  const publishWalletPackage = async (pkgId: string, members: Binding[]) => {
+    const defs = [
+      ...new Map(members.map((b) => [b.defId, snap.library.defs[b.defId]])).values(),
+    ].filter((d): d is PolicyDef => !!d);
+    if (defs.length === 0) {
+      onToast("이 패키지에 든 정책이 없어요");
+      return;
+    }
+    try {
+      setPublishSrc({
+        kind: "package",
+        suggestedDisplayName: walletPkgName(pkgId),
+        suggestedSlug: pkgId.replace(/^pkg::/, ""),
+        members: await Promise.all(defs.map(renderMember)),
+      });
+    } catch (err) {
+      console.error("[v2 apply] publish package render failed:", err);
+      onToast("게시 준비에 실패했어요");
+    }
+  };
+
+  const publishDef = async (d: PolicyDef) => {
+    try {
+      const m = await renderMember(d);
+      setPublishSrc({
+        kind: "policy",
+        cedarText: m.cedarText,
+        manifest: m.manifest,
+        suggestedDisplayName: d.displayName,
+        suggestedSlug: m.slug,
+      });
+    } catch (err) {
+      console.error("[v2 apply] publish policy render failed:", err);
+      onToast("게시 준비에 실패했어요");
+    }
+  };
+
   const totalActive = Object.values(wallet.bindings).filter((b) => isEffectiveOn(wallet, b)).length;
 
   /** 폴더 박스 한 개 — 전용 섹션(지갑 패키지 그룹)과 공유 섹션(라이브러리 폴더)이
@@ -341,6 +392,17 @@ function WalletWorkspace(props: {
                       title={catLabel(cat)}
                     />
                     <span className={`nm${rows.length === 0 ? " dim" : ""}`}>{d.displayName}</span>
+                    <button
+                      type="button"
+                      className="ev2-iconbtn wt-pub"
+                      title="이 정책을 마켓에 게시"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void publishDef(d);
+                      }}
+                    >
+                      <ShieldIcon />
+                    </button>
                   </div>
                   {rows.map((b) => (
                     <BindingRow
@@ -435,6 +497,16 @@ function WalletWorkspace(props: {
                   <span className="cnt">{empty ? "–" : `${active}/${members.length}`}</span>
                   {!locked && (
                     <span className="acts" onClick={(e) => e.stopPropagation()}>
+                      {!empty && (
+                        <button
+                          type="button"
+                          className="ev2-iconbtn"
+                          title="이 패키지를 마켓에 게시"
+                          onClick={() => void publishWalletPackage(pkg.id, members)}
+                        >
+                          <ShieldIcon />
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="ev2-iconbtn"
@@ -525,6 +597,8 @@ function WalletWorkspace(props: {
           </div>
         </div>
       </section>
+
+      <PublishModal open={publishSrc !== null} source={publishSrc} onClose={() => setPublishSrc(null)} />
     </div>
   );
 }
