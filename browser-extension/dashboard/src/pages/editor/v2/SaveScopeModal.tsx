@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { UNCATEGORIZED_PKG, type PackageDef } from "../../../server-api/policy-store";
 import type { SaveScope } from "./save-def";
@@ -46,6 +47,7 @@ export function SaveScopeModal(props: {
   onConfirm: (choice: SaveScopeChoice) => void;
 }) {
   const { open, policyName, wallets, packages, busy, onCancel, onConfirm } = props;
+  const { t } = useTranslation("editor");
   const [kind, setKind] = useState<Kind | null>(null);
   // 정책 이름 — 헤더 제목을 못 보고 지나친 채 "새 정책"으로 저장되는 일이
   // 잦아서, 첫 저장 모달이 명시적으로 묻는다.
@@ -147,16 +149,16 @@ export function SaveScopeModal(props: {
         {kind === null ? (
           <>
             <div className="ptm-h">
-              <div className="ptm-t">어떤 정책으로 저장할까요?</div>
-              <div className="ptm-s">처음 저장하는 정책이에요 — 이름부터 정해주세요.</div>
+              <div className="ptm-t">{t("saveScope.title1")}</div>
+              <div className="ptm-s">{t("saveScope.sub1")}</div>
             </div>
             <label className="ssm-name">
-              <span>정책 이름</span>
+              <span>{t("saveScope.nameLabel")}</span>
               <input
                 autoFocus
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
-                placeholder="예: 3달러 초과 스왑 시 차단"
+                placeholder={t("saveScope.namePlaceholder")}
                 maxLength={120}
               />
             </label>
@@ -167,21 +169,19 @@ export function SaveScopeModal(props: {
                 disabled={wallets.length === 0}
                 onClick={() => choose("wallet")}
               >
-                <span className="ptm-opt-t">지갑 전용 정책</span>
+                <span className="ptm-opt-t">{t("saveScope.walletOptTitle")}</span>
                 <span className="ptm-opt-d">
-                  선택한 지갑에만 존재해요 — 라이브러리에는 보이지 않아요.
-                  {wallets.length === 0 ? " (등록된 지갑이 없어요)" : ""}
+                  {t("saveScope.walletOptDesc")}
+                  {wallets.length === 0 ? t("saveScope.noWalletsSuffix") : ""}
                 </span>
               </button>
               <button type="button" className="ptm-opt" onClick={() => choose("library")}>
-                <span className="ptm-opt-t">라이브러리 정책</span>
-                <span className="ptm-opt-d">
-                  지갑 간 공유되는 템플릿으로 저장돼요 — 지갑별 정책에서 언제든 적용할 수 있어요.
-                </span>
+                <span className="ptm-opt-t">{t("saveScope.libOptTitle")}</span>
+                <span className="ptm-opt-d">{t("saveScope.libOptDesc")}</span>
               </button>
               <div className="ptm-row">
                 <button type="button" className="ev2-sec" onClick={onCancel} disabled={busy}>
-                  취소
+                  {t("common:cancel")}
                 </button>
               </div>
             </div>
@@ -190,13 +190,11 @@ export function SaveScopeModal(props: {
           <>
             <div className="ptm-h">
               <div className="ptm-t">
-                {kind === "wallet" ? "어느 지갑에 적용할까요?" : "라이브러리 설정"}
+                {kind === "wallet" ? t("saveScope.title2Wallet") : t("saveScope.title2Library")}
               </div>
               <div className="ptm-s">
                 <b>{nameDraft.trim() || policyName}</b> —{" "}
-                {kind === "wallet"
-                  ? "선택한 지갑에만 저장돼요. 패키지는 지갑마다 따로 골라요."
-                  : "라이브러리에 템플릿으로 저장돼요."}
+                {kind === "wallet" ? t("saveScope.sub2Wallet") : t("saveScope.sub2Library")}
               </div>
             </div>
             <div className="ptm-opts">
@@ -215,20 +213,20 @@ export function SaveScopeModal(props: {
                         </label>
                         {picked.has(w.address) && !bulk && (
                           <div className="ssm-pkgrow">
-                            <span className="ssm-pkglabel">패키지</span>
+                            <span className="ssm-pkglabel">{t("saveScope.pkgLabel")}</span>
                             <select
                               value={pkgOf(w.address)}
                               onChange={(e) =>
                                 setWalletPkg((m) => ({ ...m, [w.address]: e.target.value }))
                               }
                             >
-                              <option value={UNCATEGORIZED_PKG}>미분류</option>
+                              <option value={UNCATEGORIZED_PKG}>{t("uncategorized")}</option>
                               {w.packages.map((p) => (
                                 <option key={p.id} value={p.id}>
                                   {p.displayName}
                                 </option>
                               ))}
-                              <option value="__new__">+ 새 패키지…</option>
+                              <option value="__new__">{t("saveScope.newPackageOption")}</option>
                             </select>
                             {pkgOf(w.address) === "__new__" && (
                               <input
@@ -239,7 +237,7 @@ export function SaveScopeModal(props: {
                                     [w.address]: e.target.value,
                                   }))
                                 }
-                                placeholder="새 패키지 이름"
+                                placeholder={t("saveScope.newPackagePlaceholder")}
                               />
                             )}
                           </div>
@@ -258,7 +256,7 @@ export function SaveScopeModal(props: {
                         if (e.target.checked) setPicked(new Set(allAddresses));
                       }}
                     />
-                    모든 지갑에 새 패키지를 만들어 넣기
+                    {t("saveScope.bulkLabel")}
                   </label>
                   {bulk && (
                     <>
@@ -267,13 +265,14 @@ export function SaveScopeModal(props: {
                           autoFocus
                           value={bulkName}
                           onChange={(e) => setBulkName(e.target.value)}
-                          placeholder="새 패키지 이름"
+                          placeholder={t("saveScope.newPackagePlaceholder")}
                         />
                       </label>
                       {bulkCollisions.length > 0 && (
                         <div className="ssm-info">
-                          같은 이름의 패키지가 이미 있는 지갑은 그 패키지에 넣어요:{" "}
-                          {bulkCollisions.map(shortAddr).join(", ")}
+                          {t("saveScope.bulkCollision", {
+                            wallets: bulkCollisions.map(shortAddr).join(", "),
+                          })}
                         </div>
                       )}
                     </>
@@ -284,7 +283,7 @@ export function SaveScopeModal(props: {
               {kind === "library" && (
                 <>
                   <label className="ptm-field">
-                    폴더
+                    {t("saveScope.folder")}
                     <select
                       value={packageId}
                       onChange={(e) => setPackageId(e.target.value as string | "__new__")}
@@ -294,7 +293,7 @@ export function SaveScopeModal(props: {
                           {p.displayName}
                         </option>
                       ))}
-                      <option value="__new__">+ 새 폴더…</option>
+                      <option value="__new__">{t("saveScope.newFolderOption")}</option>
                     </select>
                   </label>
                   {packageId === "__new__" && (
@@ -303,7 +302,7 @@ export function SaveScopeModal(props: {
                         autoFocus
                         value={newPackageName}
                         onChange={(e) => setNewPackageName(e.target.value)}
-                        placeholder="새 폴더 이름"
+                        placeholder={t("saveScope.newFolderPlaceholder")}
                       />
                     </label>
                   )}
@@ -314,7 +313,7 @@ export function SaveScopeModal(props: {
                       disabled={wallets.length === 0}
                       onChange={(e) => setApplyToAllNow(e.target.checked)}
                     />
-                    지금 모든 지갑에 적용 ({wallets.length}개)
+                    {t("saveScope.applyAllNow", { count: wallets.length })}
                   </label>
                   <label className="ptm-field">
                     <input
@@ -322,17 +321,17 @@ export function SaveScopeModal(props: {
                       checked={applyToNewWallets}
                       onChange={(e) => setApplyToNewWallets(e.target.checked)}
                     />
-                    앞으로 추가되는 지갑에도 기본 적용
+                    {t("saveScope.applyToNew")}
                   </label>
                 </>
               )}
 
               <div className="ptm-row">
                 <button type="button" className="ev2-sec" onClick={() => setKind(null)} disabled={busy}>
-                  ← 이전
+                  {t("saveScope.back")}
                 </button>
                 <button type="button" className="ev2-pri" onClick={confirm} disabled={invalid || busy}>
-                  {busy ? "저장 중…" : "저장"}
+                  {busy ? t("saving") : t("common:save")}
                 </button>
               </div>
             </div>
