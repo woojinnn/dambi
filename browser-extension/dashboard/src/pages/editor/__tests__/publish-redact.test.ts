@@ -101,6 +101,31 @@ when { context.recipient == "0xA1c4000000000000000000000000000000007e29"
     expect(out).not.toContain("0xA1c4000000000000000000000000000000007e29");
   });
 
+  it("센티널 주소는 개인 값이 아니다 — uint160::MAX 비교는 hole로 안 잡힌다", () => {
+    const cedar = `@id("unlimited-approval-deny")
+forbid(principal, action, resource)
+when { context.amount == "0xffffffffffffffffffffffffffffffffffffffff" };`;
+    expect(extractHoles(cedar)).toEqual([]);
+  });
+
+  it("센티널 주소 — 소각주소(제로/dead) 집합 비교도 hole로 안 잡힌다", () => {
+    const cedar = `@id("send-first-time-or-burn-recipient-warn")
+forbid(principal, action, resource)
+when { ["0x0000000000000000000000000000000000000000",
+   "0x000000000000000000000000000000000000dead"].contains(context.recipient) };`;
+    expect(extractHoles(cedar)).toEqual([]);
+  });
+
+  it("센티널 + 개인 주소가 섞인 집합은 여전히 hole (개인 값을 가려야 함)", () => {
+    const cedar = `@id("p")
+forbid(principal, action, resource)
+when { ["0x0000000000000000000000000000000000000000",
+   "0x91d2000000000000000000000000000000000001"].contains(context.recipient) };`;
+    const holes = extractHoles(cedar);
+    expect(holes).toHaveLength(1);
+    expect(holes[0]!.kind).toBe("address");
+  });
+
   it("keeps an address the author chose to publish (마스킹 opt-out)", () => {
     const holes = extractHoles(RECIPIENT);
     const addr = holes.find((h) => h.kind === "address")!;

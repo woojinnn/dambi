@@ -117,11 +117,11 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
     () => rules.flatMap((r) => r.holes.filter((h) => h.kind === "address")),
     [rules],
   );
-  const refsCount = useMemo(() => rules.reduce((n, r) => n + r.refs.length, 0), [rules]);
   const keptNumCount = numberHoles.filter((h) => kept.has(h.key)).length;
   const keptAddrCount = addressHoles.filter((h) => kept.has(h.key)).length;
-  // 비식별로 나가는 주소 칸 = 안 남긴 주소 hole + 런타임 비교(refs, 가릴 값 없음).
-  const blankedAddrCount = addressHoles.length - keptAddrCount + refsCount;
+  // 비식별로 나가는 주소 칸 = 안 남긴 주소 hole. 런타임 비교(refs)는 가릴
+  // 값 자체가 없으므로 "비움" 카운트에 넣지 않는다(안내 행으로만 표시).
+  const blankedAddrCount = addressHoles.length - keptAddrCount;
 
   const reset = () => {
     setStep(1);
@@ -399,18 +399,18 @@ function Step1(props: {
                     {ref.label} <code>{ref.path}</code>
                   </div>
                   <div className="pub-field-val">
-                    <span className="redacted">런타임 값</span>
-                    <span className="arrow">→</span>
-                    <span className="param">{ref.paramName}</span>
+                    <span className="pub-runtime">
+                      런타임 값끼리 비교해요 — 텍스트에 가릴 개인 값이 없어요
+                    </span>
                   </div>
                 </div>
-                <span className="pub-blanked"><LockIcon /> 비워짐</span>
+                <span className="pub-blanked">개인값 없음</span>
               </div>
             ))}
 
             {r.holes.map((h) =>
               h.kind === "address" ? (
-                <div key={h.key} className="pub-field">
+                <div key={h.key} className={`pub-field${kept.has(h.key) ? " kept" : ""}`}>
                   <span className="pub-field-ic addr"><SearchIcon /></span>
                   <div className="pub-field-main">
                     <div className="pub-field-label">
@@ -431,6 +431,11 @@ function Step1(props: {
                         </>
                       )}
                     </div>
+                    {(h.addrCount ?? 0) > 1 && (
+                      <div className="pub-field-sub mono" title={addrsOf(h.raw).join("\n")}>
+                        {addrsOf(h.raw).map(shortAddr).join(" · ")}
+                      </div>
+                    )}
                   </div>
                   <div className="pub-numtoggle pub-addrtoggle">
                     <button
@@ -572,6 +577,14 @@ function Step2(props: {
 function ruleIdOf(cedarText: string): string {
   const m = cedarText.match(/@id\(\s*"([^"]+)"\s*\)/);
   return m ? m[1] : "";
+}
+
+function addrsOf(raw: string): string[] {
+  return raw.match(/0x[0-9a-fA-F]{40}/g) ?? [];
+}
+
+function shortAddr(a: string): string {
+  return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
 /* ── icons ─────────────────────────────────────────────────────────── */

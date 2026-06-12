@@ -1783,6 +1783,11 @@
 }
 .pub-field-sub { font-size: 11.5px; color: var(--slate-500); margin-top: 3px; }
 .pub-field-sub b { color: var(--slate-700); }
+.pub-field-sub.mono { font-family: var(--ff-mono); font-size: 11px; word-break: break-all; }
+/* 토글이 어느 칸의 선택인지 — 행 단위 hover/kept 강조 */
+.pub-field:hover { background: var(--fog-100, #f7f8fa); }
+.pub-field.kept { background: var(--fail-100, #fee2e2); }
+.pub-field-val .pub-runtime { color: var(--slate-400); font-size: 12px; }
 .pub-blanked {
   display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
   font-size: 11.5px; font-weight: 600; color: var(--slate-500);

@@ -2493,14 +2493,10 @@
 .ld-def:hover {
   background: var(--fog-100);
 }
-/* 지갑 뷰의 정책 행 게시 버튼 — hover에서만 드러난다 */
+/* 지갑 뷰의 정책 행 게시 버튼 — BindingRow의 액션들처럼 항상 보인다
+ * (hover 전용으로 숨기면 동선 자체를 발견하지 못한다) */
 .ld-def .wt-pub {
   margin-left: auto;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-.ld-def:hover .wt-pub {
-  opacity: 1;
 }
 .ld-cat {
   width: 8px;

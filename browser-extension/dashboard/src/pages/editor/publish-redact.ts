@@ -41,6 +41,22 @@ export interface PublishHole {
 const ADDR = `0x[0-9a-fA-F]{40}`;
 const PATH = `(?:principal|resource|context|action)(?:\\.[A-Za-z_]\\w*)+`;
 
+/**
+ * 보편 센티널 주소 — 게시자의 개인 값이 아니므로 비식별 대상이 아니다.
+ * 제로주소(소각/플레이스홀더), 0x…dead(소각), uint160::MAX(40개의 f —
+ * unlimited-approval류의 "무제한" 센티널이 amount 문자열로 비교될 때 주소
+ * 모양과 겹친다). 이걸 빼지 않으면 기본 비우기가 센티널을 제로주소로 갈아
+ * 끼워 정책 의미를 조용히 바꾼다.
+ */
+const SENTINEL_ADDR = /^0x(?:0{40}|f{40}|0{36}dead)$/i;
+
+/** raw 리터럴 안의 주소가 전부 센티널이면 비식별 대상이 아니다.
+ *  (센티널+개인 주소가 섞인 집합은 개인 값을 가려야 하므로 여전히 대상.) */
+function allSentinel(raw: string): boolean {
+  const addrs = raw.match(new RegExp(ADDR, "g")) ?? [];
+  return addrs.length > 0 && addrs.every((a) => SENTINEL_ADDR.test(a));
+}
+
 /** Friendly fallbacks for paths the gloss doesn't carry. */
 const PATH_LABEL: Record<string, string> = {
   "principal.address": "내 지갑 주소",
@@ -85,6 +101,7 @@ export function extractHoles(cedarText: string): PublishHole[] {
   const push = (h: Omit<PublishHole, "key" | "ruleId">) => {
     if (seen.has(h.raw)) return;
     seen.add(h.raw);
+    if (h.kind === "address" && allSentinel(h.raw)) return; // 보편 상수 — 가리지 않는다
     holes.push({ ...h, key: `${ruleId}#${n++}`, ruleId });
   };
 
