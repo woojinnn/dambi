@@ -91,6 +91,67 @@ impl NftFloorOracle for NoFloorOracle {
     }
 }
 
+/// Live external enrichment IO — a network call per request, distinct from the
+/// wallet-state-derived [`crate::methods`] facts. Both external token-policy
+/// needs (a malicious-address feed and the owner's transfer history) are bundled
+/// into ONE trait so the dispatch and every call site thread a single param.
+/// Each method returns `Option`, independently fail-open: a `None` leaves that
+/// enrichment field absent (the optional policy stays dormant), never a
+/// fabricated value. Mirrors the [`SanctionsScreen`] / [`NftFloorOracle`] shape.
+#[async_trait]
+pub trait ExternalEnrichment: Send + Sync {
+    /// Malicious-address reputation for `address` (an approve `spender` /
+    /// counterparty): `Some(true)` = flagged by the upstream feed, `Some(false)`
+    /// = explicitly clean, `None` = could not screen. Backs `address.reputation`.
+    async fn reputation_flagged(&self, chain_id: i64, address: &str) -> Option<bool>;
+
+    /// The wallet `owner`'s OUTBOUND transfers at or after `since_unix` (unix
+    /// seconds; `0` = no lower bound). Backs `stat_window.snapshot` (24h USD
+    /// outflow) and `address.similarity` (prior-counterparty poison check).
+    /// `None` = the transfer source is unavailable/unconfigured.
+    async fn recent_outbound(
+        &self,
+        chain_id: i64,
+        owner: &str,
+        since_unix: i64,
+    ) -> Option<Vec<OutboundTransfer>>;
+}
+
+/// One outbound transfer of the owner, as surfaced by [`ExternalEnrichment`].
+/// Carries the pricing inputs (`asset` + `amount`) rather than a pre-computed USD
+/// value, so the consuming method values it via the wallet-independent
+/// [`PriceBook`] (the IO layer has no price source).
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutboundTransfer {
+    /// Recipient (lowercase `0x` address).
+    pub to: String,
+    /// ERC20 contract (lowercase `0x`) moved; `None` for a native-coin transfer.
+    pub asset: Option<String>,
+    /// Amount in whole token units (human-readable, as Alchemy reports `value`).
+    pub amount: f64,
+    /// Block timestamp (unix seconds); `0` when unknown.
+    pub ts_unix: i64,
+}
+
+/// The safe default when no external enrichment is configured: every method
+/// `None`, so `address.reputation` / `stat_window.snapshot` / `address.similarity`
+/// all stay dormant. Mirrors [`NoFloorOracle`].
+pub struct NoEnrichment;
+#[async_trait]
+impl ExternalEnrichment for NoEnrichment {
+    async fn reputation_flagged(&self, _chain_id: i64, _address: &str) -> Option<bool> {
+        None
+    }
+    async fn recent_outbound(
+        &self,
+        _chain_id: i64,
+        _owner: &str,
+        _since_unix: i64,
+    ) -> Option<Vec<OutboundTransfer>> {
+        None
+    }
+}
+
 /// Error surfaced by [`evaluate`].
 /// `Reducer` is a *client* error (the action could not be applied to the given
 /// state — map to `422 Unprocessable Entity`); `Store` is a *server* error (the
@@ -153,6 +214,7 @@ pub async fn evaluate(
     price_book: &dyn PriceBook,
     sanctions: &dyn SanctionsScreen,
     floor: &dyn NftFloorOracle,
+    external: &dyn ExternalEnrichment,
     req: EvaluateRequest,
 ) -> Result<EvaluateResponse, HandlerError> {
     // This handler is db-agnostic: production passes the PostgreSQL-backed
@@ -211,8 +273,15 @@ pub async fn evaluate(
     // requesting wallet doesn't hold it — no live network call either way — so a
     // USD-cap policy's `context.custom.*Usd` field is populated even for a wallet
     // that was never registered/synced.
-    let (results, mut diagnostics) =
-        execute_call_specs(&state_before, &req.call_specs, price_book, sanctions, floor).await;
+    let (results, mut diagnostics) = execute_call_specs(
+        &state_before,
+        &req.call_specs,
+        price_book,
+        sanctions,
+        floor,
+        external,
+    )
+    .await;
     diagnostics.append(&mut sim_diagnostics);
 
     let note = if req.envelopes.is_empty() {
@@ -251,6 +320,7 @@ async fn execute_call_specs(
     price_book: &dyn PriceBook,
     sanctions: &dyn SanctionsScreen,
     floor: &dyn NftFloorOracle,
+    external: &dyn ExternalEnrichment,
 ) -> (BTreeMap<String, Value>, Vec<Diagnostic>) {
     let mut results = BTreeMap::new();
     let mut diagnostics = Vec::new();
@@ -472,6 +542,83 @@ async fn execute_call_specs(
                     }),
                 }
             }
+            "stat_window.snapshot" => {
+                match stat_window_snapshot(state, &spec.params, price_book, external).await {
+                    Some(value) => {
+                        tracing::debug!(call_id = %spec.call_id, "stat_window.snapshot: OK");
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "stat_window.snapshot: outbound transfer source unavailable \
+                             (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
+            "address.similarity" => match address_similarity(state, &spec.params, external).await {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "address.similarity: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "address.similarity: missing candidate or transfer source \
+                             unavailable (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
+            "clock.now" => match crate::methods::clock_now(&spec.params) {
+                Some(value) => {
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "clock.now: could not read wall clock (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
+            "portfolio.input_fraction_bps" => {
+                match crate::methods::input_fraction_bps(state, &spec.params) {
+                    Some(value) => {
+                        tracing::debug!(call_id = %spec.call_id, "portfolio.input_fraction_bps: OK");
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "portfolio.input_fraction_bps: asset not held / zero balance / \
+                             unparseable params (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
+            "address.reputation" => match address_reputation(&spec.params, external).await {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "address.reputation: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "address.reputation: missing address or feed unavailable \
+                         (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
             other => diagnostics.push(Diagnostic {
                 level: "info".to_owned(),
                 message: format!(
@@ -893,6 +1040,132 @@ async fn address_sanctions(params: &Value, sanctions: &dyn SanctionsScreen) -> O
     Some(json!({ "sanctioned": flag }))
 }
 
+/// Server-side `address.reputation`: screen the approve `spender` (params
+/// `{ address, chain_id? }`) via the injected [`ExternalEnrichment`] feed (`GoPlus`
+/// in production). Returns `{ "flagged": bool }`
+/// (`$.result.flagged → context.custom.spenderFlagged`). `None` when the address
+/// is missing or the feed could not answer → result omitted (fail-open for the
+/// optional call), never a fabricated `false`.
+async fn address_reputation(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
+    let address = params.get("address").and_then(asset_address)?;
+    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let flag = external.reputation_flagged(chain_id, &address).await?;
+    Some(json!({ "flagged": flag }))
+}
+
+/// Numeric EIP-155 chain id from a params value that may be a JSON number or a
+/// CAIP-2 string (`"eip155:1"`) — the form `$.root.chain_id` resolves to. Falls
+/// back to `1` (Ethereum mainnet; the v1 token policies are mainnet-scoped).
+fn chain_id_to_eip155_num(v: &Value) -> i64 {
+    if let Some(n) = v.as_i64() {
+        return n;
+    }
+    if let Some(s) = v.as_str() {
+        if let Some(rest) = s.strip_prefix("eip155:") {
+            if let Ok(n) = rest.parse::<i64>() {
+                return n;
+            }
+        }
+        if let Ok(n) = s.parse::<i64>() {
+            return n;
+        }
+    }
+    1
+}
+
+/// Mainnet WETH — price proxy for valuing native-coin outflow.
+const WETH_MAINNET: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+
+/// Current unix time in seconds (wall clock); `0` on a clock error.
+fn now_unix() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or(0)
+}
+
+/// Server-side `stat_window.snapshot`: the wallet owner's total USD OUTFLOW over
+/// the last 24h, summed from its outbound transfers
+/// ([`ExternalEnrichment::recent_outbound`]) and valued via the [`PriceBook`].
+/// Params are the manifest's `{ owner }` (advisory — the loaded `state` IS the
+/// owner's). Returns `{ "windowOutflowUsd": "<decimal>" }`
+/// (`$.result.windowOutflowUsd → context.custom.windowOutflowUsd`, a Cedar
+/// `decimal` STRING). `None` (fail-open) when the transfer source is unavailable.
+/// Unpriceable transfers contribute 0, so the sum is a best-effort lower bound.
+async fn stat_window_snapshot(
+    state: &WalletState,
+    _params: &Value,
+    price_book: &dyn PriceBook,
+    external: &dyn ExternalEnrichment,
+) -> Option<Value> {
+    let owner = format!("{:#x}", state.wallet_id.address);
+    let chain = "eip155:1";
+    let chain_id = 1;
+    let since = now_unix() - 86_400;
+    let transfers = external.recent_outbound(chain_id, &owner, since).await?;
+
+    let mut total = 0f64;
+    for t in &transfers {
+        if t.ts_unix != 0 && t.ts_unix < since {
+            continue;
+        }
+        let price = match &t.asset {
+            Some(addr) => price_book.price(chain, addr).await,
+            None => price_book.price(chain, WETH_MAINNET).await,
+        };
+        if let Some(p) = price {
+            if let Ok(pf) = p.price_usd.parse::<f64>() {
+                total += t.amount * pf;
+            }
+        }
+    }
+    Some(json!({ "windowOutflowUsd": format!("{total:.4}") }))
+}
+
+/// Server-side `address.similarity`: is the `candidate` recipient an
+/// address-poisoning look-alike — NOT a counterparty the owner has used before,
+/// yet sharing the truncated-display pattern (first 4 + last 4 hex) with one that
+/// is? Params are the manifest's `{ chain_id, candidate }`; the owner is the
+/// loaded `state`'s wallet. Pulls the owner's prior outbound recipients
+/// ([`ExternalEnrichment::recent_outbound`], full history). Returns
+/// `{ "poisonCollision": bool }`
+/// (`$.result.poisonCollision → context.custom.poisonCollision`). `None`
+/// (fail-open) when the candidate is missing or the history source is unavailable.
+async fn address_similarity(
+    state: &WalletState,
+    params: &Value,
+    external: &dyn ExternalEnrichment,
+) -> Option<Value> {
+    let candidate = params.get("candidate").and_then(asset_address)?;
+    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let owner = format!("{:#x}", state.wallet_id.address);
+    let transfers = external.recent_outbound(chain_id, &owner, 0).await?;
+
+    let prior: std::collections::BTreeSet<String> = transfers.into_iter().map(|t| t.to).collect();
+    // A candidate the owner has actually used before is trusted (not poison); a
+    // never-used candidate that mimics a used one is the poisoning signal.
+    let collision = !prior.contains(&candidate)
+        && prior
+            .iter()
+            .any(|r| r != &candidate && looks_alike(r, &candidate));
+    Some(json!({ "poisonCollision": collision }))
+}
+
+/// Address-poisoning look-alike heuristic: two DISTINCT addresses whose
+/// truncated-display ends match — first 4 AND last 4 hex nybbles (what a wallet
+/// shows as `0xABCD…WXYZ`). Vanity-grinding those is the poisoning attack's whole
+/// point. Case-insensitive; expects `0x`-hex 20-byte addresses.
+fn looks_alike(a: &str, b: &str) -> bool {
+    let a = a.trim_start_matches("0x").to_lowercase();
+    let b = b.trim_start_matches("0x").to_lowercase();
+    if a.len() != 40 || b.len() != 40 {
+        return false;
+    }
+    a[..4] == b[..4] && a[36..] == b[36..]
+}
+
 /// ABI-encode `isSanctioned(address)` calldata: 4-byte selector `0xdf592f7d`
 /// (`keccak256("isSanctioned(address)")[..4]`) + the 32-byte left-padded
 /// lowercased address. `None` for a malformed (non-20-byte / non-hex) address.
@@ -985,6 +1258,394 @@ mod tests {
             }),
             Some(18),
         )
+    }
+
+    /// A test [`ExternalEnrichment`]: a fixed reputation answer + a fixed outbound
+    /// transfer list for ANY address/owner.
+    struct StubEnrichment {
+        flagged: Option<bool>,
+        outbound: Option<Vec<OutboundTransfer>>,
+    }
+    #[async_trait]
+    impl ExternalEnrichment for StubEnrichment {
+        async fn reputation_flagged(&self, _chain_id: i64, _address: &str) -> Option<bool> {
+            self.flagged
+        }
+        async fn recent_outbound(
+            &self,
+            _chain_id: i64,
+            _owner: &str,
+            _since_unix: i64,
+        ) -> Option<Vec<OutboundTransfer>> {
+            self.outbound.clone()
+        }
+    }
+    /// Default: the feed answers nothing → the external methods stay dormant.
+    fn no_external() -> StubEnrichment {
+        StubEnrichment {
+            flagged: None,
+            outbound: None,
+        }
+    }
+
+    // ── address.reputation (TOKEN-003) ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn address_reputation_flagged_true_projects_flagged_true() {
+        let params = serde_json::json!({ "address": "0xABCdef0000000000000000000000000000000001", "chain_id": "eip155:1" });
+        let v = super::address_reputation(
+            &params,
+            &StubEnrichment {
+                flagged: Some(true),
+                outbound: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(v, serde_json::json!({ "flagged": true }));
+    }
+
+    #[tokio::test]
+    async fn address_reputation_clean_projects_flagged_false() {
+        let params = serde_json::json!({ "address": "0x0000000000000000000000000000000000000002" });
+        let v = super::address_reputation(
+            &params,
+            &StubEnrichment {
+                flagged: Some(false),
+                outbound: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(v, serde_json::json!({ "flagged": false }));
+    }
+
+    #[tokio::test]
+    async fn address_reputation_feed_unavailable_is_none() {
+        let params = serde_json::json!({ "address": "0x0000000000000000000000000000000000000003" });
+        assert!(super::address_reputation(&params, &no_external())
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn address_reputation_missing_address_is_none() {
+        let params = serde_json::json!({ "chain_id": "eip155:1" });
+        assert!(super::address_reputation(
+            &params,
+            &StubEnrichment {
+                flagged: Some(true),
+                outbound: None,
+            },
+        )
+        .await
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_call_specs_serves_address_reputation() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        let spec = CallSpec {
+            manifest_id: "approve-spender-reputation-deny".into(),
+            call_id: "m::spender-rep".into(),
+            method: "address.reputation".into(),
+            params: serde_json::json!({ "address": "0xabc0000000000000000000000000000000000001", "chain_id": "eip155:1" }),
+            outputs: Vec::new(),
+            optional: true,
+        };
+        let (results, _diag) = super::execute_call_specs(
+            &st,
+            &[spec],
+            &no_price_book(),
+            &no_sanctions(),
+            &NoFloorOracle,
+            &StubEnrichment {
+                flagged: Some(true),
+                outbound: None,
+            },
+        )
+        .await;
+        assert_eq!(
+            results["m::spender-rep"],
+            serde_json::json!({ "flagged": true })
+        );
+    }
+
+    // ── clock.now (TOKEN-007) ───────────────────────────────────────────────
+
+    #[test]
+    fn clock_now_returns_a_plausible_unix_long() {
+        let v = crate::methods::clock_now(&serde_json::json!({})).unwrap();
+        let now = v["nowTs"].as_i64().unwrap();
+        // After 2023-11-14 and before some far-future date — a sane wall clock.
+        assert!(now > 1_700_000_000, "nowTs should be a recent unix time");
+    }
+
+    #[tokio::test]
+    async fn execute_call_specs_serves_clock_now() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        let spec = CallSpec {
+            manifest_id: "permit2-far-expiration-warn".into(),
+            call_id: "now::1".into(),
+            method: "clock.now".into(),
+            params: serde_json::json!({}),
+            outputs: Vec::new(),
+            optional: true,
+        };
+        let (results, _diag) = super::execute_call_specs(
+            &st,
+            &[spec],
+            &no_price_book(),
+            &no_sanctions(),
+            &NoFloorOracle,
+            &no_external(),
+        )
+        .await;
+        assert!(results["now::1"]["nowTs"].as_i64().unwrap() > 1_700_000_000);
+    }
+
+    // ── portfolio.input_fraction_bps (TOKEN-010) ────────────────────────────
+
+    /// `$.action.token` resolves to the lowered token ref `{ key: { … address } }`,
+    /// so the method must dig into `key.address`. 60 USDC of a 100-USDC holding
+    /// = 6000 bps (a >5000-bps cap fires).
+    fn usdc_token_ref() -> Value {
+        serde_json::json!({
+            "key": {
+                "standard": "erc20",
+                "chain": "eip155:1",
+                "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            }
+        })
+    }
+
+    #[test]
+    fn input_fraction_bps_over_half_holdings() {
+        let (state, _key) = state_with_usdc_price(); // 100 USDC held (1e8 raw @ 6dp)
+        let params = serde_json::json!({
+            "chain_id": "eip155:1",
+            "owner": "0x0000000000000000000000000000000000000000",
+            "asset": usdc_token_ref(),
+            "amount": "0x3938700" // 60_000_000 = 60 USDC
+        });
+        let v = crate::methods::input_fraction_bps(&state, &params).unwrap();
+        assert_eq!(v, serde_json::json!({ "bps": 6000 }));
+    }
+
+    #[test]
+    fn input_fraction_bps_under_half_holdings() {
+        let (state, _key) = state_with_usdc_price();
+        let params = serde_json::json!({
+            "chain_id": "eip155:1",
+            "owner": "0x0000000000000000000000000000000000000000",
+            "asset": usdc_token_ref(),
+            "amount": "0x2625a00" // 40_000_000 = 40 USDC
+        });
+        let v = crate::methods::input_fraction_bps(&state, &params).unwrap();
+        assert_eq!(v, serde_json::json!({ "bps": 4000 }));
+    }
+
+    #[test]
+    fn input_fraction_bps_asset_not_held_is_none() {
+        let (state, _key) = state_with_usdc_price();
+        let params = serde_json::json!({
+            "chain_id": "eip155:1",
+            "owner": "0x0000000000000000000000000000000000000000",
+            "asset": "0x1111111111111111111111111111111111111111",
+            "amount": "0x3938700"
+        });
+        assert!(crate::methods::input_fraction_bps(&state, &params).is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_call_specs_serves_input_fraction_bps() {
+        let (state, _key) = state_with_usdc_price();
+        let spec = CallSpec {
+            manifest_id: "transfer-fraction-of-holdings-warn".into(),
+            call_id: "frac::1".into(),
+            method: "portfolio.input_fraction_bps".into(),
+            params: serde_json::json!({
+                "chain_id": "eip155:1",
+                "owner": "0x0000000000000000000000000000000000000000",
+                "asset": usdc_token_ref(),
+                "amount": "0x3938700"
+            }),
+            outputs: Vec::new(),
+            optional: true,
+        };
+        let (results, _diag) = super::execute_call_specs(
+            &state,
+            &[spec],
+            &no_price_book(),
+            &no_sanctions(),
+            &NoFloorOracle,
+            &no_external(),
+        )
+        .await;
+        assert_eq!(results["frac::1"], serde_json::json!({ "bps": 6000 }));
+    }
+
+    // ── stat_window.snapshot (TOKEN-005) ────────────────────────────────────
+
+    fn now_secs() -> i64 {
+        i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn stat_window_snapshot_sums_priced_outflow() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        // One recent ERC20 transfer of 6 units; priced_book values ANY asset at
+        // $2000 → 6 × 2000 = $12,000.
+        let stub = StubEnrichment {
+            flagged: None,
+            outbound: Some(vec![OutboundTransfer {
+                to: "0x1111111111111111111111111111111111111111".into(),
+                asset: Some("0x2222222222222222222222222222222222222222".into()),
+                amount: 6.0,
+                ts_unix: now_secs(),
+            }]),
+        };
+        let v = super::stat_window_snapshot(&st, &serde_json::json!({}), &priced_book(), &stub)
+            .await
+            .unwrap();
+        assert_eq!(v, serde_json::json!({ "windowOutflowUsd": "12000.0000" }));
+    }
+
+    #[tokio::test]
+    async fn stat_window_snapshot_skips_outside_window() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        // A transfer two days old (> 24h) contributes nothing → $0.
+        let stub = StubEnrichment {
+            flagged: None,
+            outbound: Some(vec![OutboundTransfer {
+                to: "0x1111111111111111111111111111111111111111".into(),
+                asset: Some("0x2222222222222222222222222222222222222222".into()),
+                amount: 6.0,
+                ts_unix: now_secs() - 2 * 86_400,
+            }]),
+        };
+        let v = super::stat_window_snapshot(&st, &serde_json::json!({}), &priced_book(), &stub)
+            .await
+            .unwrap();
+        assert_eq!(v, serde_json::json!({ "windowOutflowUsd": "0.0000" }));
+    }
+
+    #[tokio::test]
+    async fn stat_window_snapshot_source_unavailable_is_none() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        assert!(super::stat_window_snapshot(
+            &st,
+            &serde_json::json!({}),
+            &priced_book(),
+            &no_external()
+        )
+        .await
+        .is_none());
+    }
+
+    // ── address.similarity (TOKEN-009) ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn address_similarity_flags_lookalike() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        // Prior counterparty 0x1234…5678; the candidate shares first-4/last-4 but
+        // is a different (never-used) address → poison.
+        let prior = "0x1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5678";
+        let candidate = "0x1234bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb5678";
+        let stub = StubEnrichment {
+            flagged: None,
+            outbound: Some(vec![OutboundTransfer {
+                to: prior.into(),
+                asset: None,
+                amount: 1.0,
+                ts_unix: now_secs(),
+            }]),
+        };
+        let v = super::address_similarity(
+            &st,
+            &serde_json::json!({ "chain_id": "eip155:1", "candidate": candidate }),
+            &stub,
+        )
+        .await
+        .unwrap();
+        assert_eq!(v, serde_json::json!({ "poisonCollision": true }));
+    }
+
+    #[tokio::test]
+    async fn address_similarity_trusts_known_counterparty() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        let known = "0x1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5678";
+        let stub = StubEnrichment {
+            flagged: None,
+            outbound: Some(vec![OutboundTransfer {
+                to: known.into(),
+                asset: None,
+                amount: 1.0,
+                ts_unix: now_secs(),
+            }]),
+        };
+        // Sending again to the SAME address the owner used before is not poison.
+        let v = super::address_similarity(
+            &st,
+            &serde_json::json!({ "chain_id": "eip155:1", "candidate": known }),
+            &stub,
+        )
+        .await
+        .unwrap();
+        assert_eq!(v, serde_json::json!({ "poisonCollision": false }));
+    }
+
+    #[tokio::test]
+    async fn address_similarity_source_unavailable_is_none() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        assert!(super::address_similarity(
+            &st,
+            &serde_json::json!({ "chain_id": "eip155:1", "candidate": "0x1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5678" }),
+            &no_external(),
+        )
+        .await
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_call_specs_serves_address_similarity() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        let stub = StubEnrichment {
+            flagged: None,
+            outbound: Some(vec![OutboundTransfer {
+                to: "0x1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5678".into(),
+                asset: None,
+                amount: 1.0,
+                ts_unix: now_secs(),
+            }]),
+        };
+        let spec = CallSpec {
+            manifest_id: "transfer-address-poisoning-warn".into(),
+            call_id: "poison::1".into(),
+            method: "address.similarity".into(),
+            params: serde_json::json!({ "chain_id": "eip155:1", "candidate": "0x1234bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb5678" }),
+            outputs: Vec::new(),
+            optional: true,
+        };
+        let (results, _diag) = super::execute_call_specs(
+            &st,
+            &[spec],
+            &no_price_book(),
+            &no_sanctions(),
+            &NoFloorOracle,
+            &stub,
+        )
+        .await;
+        assert_eq!(
+            results["poison::1"],
+            serde_json::json!({ "poisonCollision": true })
+        );
     }
 
     /// A standard Seaport listing params object: offer 1 NFT, consideration one
@@ -1232,6 +1893,7 @@ mod tests {
             &no_price_book(),
             &StubSanctions(Some(true)),
             &NoFloorOracle,
+            &NoEnrichment,
         )
         .await;
         assert_eq!(
@@ -1263,6 +1925,7 @@ mod tests {
             &priced_book(),
             &StubSanctions(None),
             &StubFloor(Some(5.0)),
+            &NoEnrichment,
         )
         .await;
         assert_eq!(
@@ -1293,6 +1956,7 @@ mod tests {
             &priced_book(),
             &StubSanctions(None),
             &StubFloor(Some(1.0)),
+            &NoEnrichment,
         )
         .await;
         assert_eq!(
@@ -1325,6 +1989,7 @@ mod tests {
             &priced_book(),
             &no_sanctions(),
             &StubFloor(Some(5.0)),
+            &NoEnrichment,
             req,
         )
         .await
@@ -1544,6 +2209,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             empty_envelope_request(),
         )
         .await
@@ -1575,6 +2241,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             empty_envelope_request(),
         )
         .await
@@ -1597,6 +2264,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             request_with_envelope(hyperliquid_withdraw_action()),
         )
         .await
@@ -1639,6 +2307,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             req,
         )
         .await
@@ -1670,6 +2339,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             req,
         )
         .await
@@ -1710,6 +2380,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             req,
         )
         .await
@@ -1748,9 +2419,16 @@ mod tests {
             None,
         );
 
-        let resp = evaluate(&store, &price_book, &no_sanctions(), &NoFloorOracle, req)
-            .await
-            .unwrap();
+        let resp = evaluate(
+            &store,
+            &price_book,
+            &no_sanctions(),
+            &NoFloorOracle,
+            &NoEnrichment,
+            req,
+        )
+        .await
+        .unwrap();
 
         // 60_000 / 1e6 × 0.9996 = 0.059976 → "0.0600" (≥ 0.05 ⇒ a USD cap denies).
         assert_eq!(
@@ -1791,9 +2469,16 @@ mod tests {
             None,
         );
 
-        let resp = evaluate(&store, &price_book, &no_sanctions(), &NoFloorOracle, req)
-            .await
-            .unwrap();
+        let resp = evaluate(
+            &store,
+            &price_book,
+            &no_sanctions(),
+            &NoFloorOracle,
+            &NoEnrichment,
+            req,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             resp.policy_request.results["bridge-output-value-loss-warn::bridge-value-loss"],
             serde_json::json!({ "loss_pct": "10.0000" })
@@ -1829,6 +2514,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             req,
         )
         .await
@@ -1868,9 +2554,16 @@ mod tests {
         // Empty wallet — decimals can ONLY come from the global book (=6, USDC).
         let price_book = StubPriceBook(None, Some(6));
 
-        let resp = evaluate(&store, &price_book, &no_sanctions(), &NoFloorOracle, req)
-            .await
-            .unwrap();
+        let resp = evaluate(
+            &store,
+            &price_book,
+            &no_sanctions(),
+            &NoFloorOracle,
+            &NoEnrichment,
+            req,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             resp.policy_request.results["swap-intoken-cap-deny::nano"],
@@ -1899,9 +2592,16 @@ mod tests {
         });
         let price_book = StubPriceBook(None, Some(18));
 
-        let resp = evaluate(&store, &price_book, &no_sanctions(), &NoFloorOracle, req)
-            .await
-            .unwrap();
+        let resp = evaluate(
+            &store,
+            &price_book,
+            &no_sanctions(),
+            &NoFloorOracle,
+            &NoEnrichment,
+            req,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             resp.policy_request.results["swap-intoken-cap-deny::nano"],
@@ -2001,6 +2701,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
         )
         .await;
         assert_eq!(
@@ -2090,6 +2791,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
         )
         .await;
         assert_eq!(
@@ -2145,6 +2847,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
         )
         .await;
         // day: (968.42-920)/968.42 ≈ 500 bps; peak: (1000-920)/1000 = 800 bps.
@@ -2165,6 +2868,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
         )
         .await;
         assert!(!results.contains_key(&spec.call_id));
@@ -2230,6 +2934,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             req,
         )
         .await
@@ -2252,6 +2957,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
             req,
         )
         .await
@@ -2314,6 +3020,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
         )
         .await;
         assert_eq!(
@@ -2334,6 +3041,7 @@ mod tests {
             &no_price_book(),
             &no_sanctions(),
             &NoFloorOracle,
+            &NoEnrichment,
         )
         .await;
         assert!(!results.contains_key(&spec.call_id));

@@ -42,6 +42,19 @@ fn parse_hex_u256(v: &Value) -> Option<U256> {
     U256::from_str_radix(s.trim_start_matches("0x"), 16).ok()
 }
 
+/// Lowercase hex address from a token-ish param in any shape the planner emits: a
+/// bare address string, `{ address }`, or a lowered token ref
+/// `{ key: { standard, chain, address } }` (what `$.action.token` resolves to —
+/// `lower_token_ref`). `None` for a native/non-fungible token (no `key.address`).
+fn token_param_address(v: &Value) -> Option<String> {
+    if let Some(a) = asset_hex(v) {
+        return Some(a);
+    }
+    v.get("key")
+        .and_then(|k| k.get("address"))
+        .and_then(asset_hex)
+}
+
 /// `intent.pending_cap_over_balance`: do the wallet's already-open signed orders
 /// selling this token, plus the new order, commit more than the held balance?
 ///
@@ -341,6 +354,55 @@ fn unix_now() -> i64 {
         .ok()
         .and_then(|d| i64::try_from(d.as_secs()).ok())
         .unwrap_or(0)
+}
+
+/// `clock.now`: the server wall clock as unix seconds, for time-window policies
+/// (e.g. a Permit2 far-expiration check `expiresAt > nowTs + 1y`). Params are
+/// ignored (`{}`). The one enrichment that can't fail — always serves. Projects
+/// `{ nowTs }` (`$.result.nowTs → context.custom.nowTs`, a Cedar `Long`).
+// Always `Some` by design — kept `Option` for a uniform method interface (the
+// dispatch matches every enrichment method as `Option<Value>`).
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn clock_now(_params: &Value) -> Option<Value> {
+    Some(json!({ "nowTs": unix_now() }))
+}
+
+/// `portfolio.input_fraction_bps`: what fraction — in basis points — of the
+/// owner's HELD balance of `asset` this transfer's `amount` moves. The loaded
+/// `WalletState` already IS the owner's, so the balance comes from its synced
+/// holding (no live call). `bps = amount × 10000 / balance`, saturating to
+/// `i64::MAX` (an amount far above the held balance reads as "essentially all of
+/// it", which any `> X bps` cap fires on). Returns `None` (fail-open) when the
+/// params don't parse, the asset isn't held, or the held balance is zero.
+/// Projects `{ bps }` (`$.result.bps → context.custom.holdingsBp`, a Cedar `Long`).
+///
+/// Params are the manifest's `{ chain_id, owner, asset, amount }`: `chain_id` the
+/// CAIP-2 string matching a `TokenKey`'s `chain().as_str()`, `asset` the lowered
+/// token (bare address or `{ address }`), `amount` the `0x`-hex transfer size.
+/// `owner` is advisory — the loaded state is already that wallet's.
+pub(crate) fn input_fraction_bps(state: &WalletState, params: &Value) -> Option<Value> {
+    let chain = params.get("chain_id").and_then(Value::as_str)?;
+    let asset = params.get("asset").and_then(token_param_address)?;
+    let amount = params.get("amount").and_then(parse_hex_u256)?;
+
+    let matches = |k: &policy_state::token::TokenKey| -> bool {
+        k.chain().as_str() == chain
+            && k.contract().map(|a| format!("{a:#x}")).as_deref() == Some(asset.as_str())
+    };
+    // First matching holding with a fungible balance (skips a non-fungible
+    // holding that happens to share the contract address).
+    let balance = state
+        .tokens
+        .values()
+        .find_map(|h| matches(&h.key).then(|| h.balance.as_fungible()).flatten())?;
+    if balance == U256::ZERO {
+        return None;
+    }
+    let bps_u = amount
+        .saturating_mul(U256::from(10_000u64))
+        .checked_div(balance)?;
+    let bps = bps_u.to_string().parse::<i64>().unwrap_or(i64::MAX);
+    Some(json!({ "bps": bps }))
 }
 
 #[cfg(test)]
