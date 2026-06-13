@@ -124,7 +124,14 @@ function RailItem({ to, label, icon, end, disabled, badge, showDot }: RailItemPr
     );
   }
   return (
-    <NavLink to={to} end={end} className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+      onPointerUp={(event) => {
+        event.currentTarget.blur();
+      }}
+    >
       <span className="icon">{icon}</span>
       <span className="label">{label}</span>
       {badge && <span className="badge">{badge}</span>}
