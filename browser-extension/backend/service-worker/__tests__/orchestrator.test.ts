@@ -70,6 +70,11 @@ const mocks = vi.hoisted(() => {
         manifest: { id: "high-slippage-warning", schema_version: 2 },
       },
     ]),
+    // WP7: controllable render-fault list for the venue deny-closed path; the
+    // resolve mock factory threads it into resolveBundlesForWalletWithFaults.
+    // Reset in beforeEach. A {severity:"deny"} entry must make a venue order
+    // deny-close (a DENY policy that could not be rendered fail-opens if dropped).
+    venueRenderFaults: [] as Array<{ defId: string; severity: string | undefined }>,
     tryDeclarativeRouteV3: vi.fn<
       (...args: unknown[]) => Promise<unknown>
     >(async () => ({
@@ -148,6 +153,14 @@ vi.mock("../wasm-bridge", () => ({
 }));
 vi.mock("../policy-store/resolve", () => ({
   resolveBundlesForWallet: mocks.resolveBundlesForWallet,
+  // Delegates to the same bundle mock so existing venue tests are unchanged;
+  // `venueRenderFaults` (default []) lets a test inject a faulted DENY policy.
+  resolveBundlesForWalletWithFaults: async (...args: unknown[]) => ({
+    bundles: await (
+      mocks.resolveBundlesForWallet as (...a: unknown[]) => Promise<unknown[]>
+    )(...args),
+    renderFaults: mocks.venueRenderFaults,
+  }),
   isWalletRegistered: vi.fn(async () => true),
   defRefForPolicyId: vi.fn(async () => null),
   // 픽스처 번들은 trigger 인덱스가 없으므로(=항상 포함) 필터는 패스스루로 충분.
@@ -211,7 +224,7 @@ vi.mock("../venue/resolve-order-symbol", () => ({
   resolveOrderSymbol: vi.fn(async () => undefined),
 }));
 
-import { decideMessage } from "../orchestrator";
+import { decideMessage, inferActor } from "../orchestrator";
 
 function txMessage(requestId = "req-1"): Message {
   return {
@@ -285,6 +298,30 @@ function approve(requestId: string, ok: boolean): void {
   }
 }
 
+describe("inferActor — per-actor lock key (venue coverage)", () => {
+  it("returns the tx `from` for a transaction", () => {
+    expect(inferActor(txMessage())).toBe(OWNER);
+  });
+
+  it("returns the trusted wallet_id for a venue order (shares the lock with that wallet's tx/sig)", () => {
+    const WALLET = "0x000000000000000000000000000000000000a01c";
+    expect(inferActor(venueMessage("v1", WALLET))).toBe(WALLET);
+  });
+
+  it("falls back to the page origin when a venue order has no wallet_id (same-page orders still serialize)", () => {
+    // Previously returned undefined → NO lock → concurrent same-page orders
+    // raced (stacked modals / clobbered read-evaluate-reserve rows).
+    expect(inferActor(venueMessage("v2"))).toBe("venue:app.hyperliquid.xyz");
+  });
+
+  it("IGNORES a page-supplied vaultAddress for the lock key", () => {
+    const m = venueMessage("v3");
+    (m.data as VenueOrderPayload).vaultAddress =
+      "0x000000000000000000000000000000000000dead";
+    expect(inferActor(m)).toBe("venue:app.hyperliquid.xyz");
+  });
+});
+
 /**
  * Drive a request that is expected to fail closed (a warn verdict that opens
  * the verdict window and AWAITS the user's choice). We must NOT `await
@@ -307,6 +344,7 @@ describe("orchestrator", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    mocks.venueRenderFaults = [];
     mocks.sessionStore.clear();
     mocks.localStore.clear();
     mocks.runtimeMessageListeners.length = 0;
@@ -822,6 +860,30 @@ describe("orchestrator", () => {
     it("falls back to the submitter sentinel when no master is resolvable", async () => {
       await decideMessage(venueMessage("venue-nomaster-1"), { onAwaitingUser: vi.fn() });
       expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith("u-test", SUBMITTER_SENTINEL);
+    });
+
+    it("DENY-CLOSES when a DENY policy fails to render (must not silently drop → fail-open)", async () => {
+      // A deny-closed venue order whose DENY policy threw during render must be
+      // BLOCKED — dropping it would let an order that should have been denied ride
+      // through (the WP7 fail-open).
+      mocks.venueRenderFaults = [{ defId: "no-new-short-deny", severity: "deny" }];
+      const result = await decideMessage(venueMessage("venue-deny-fault-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.ok).toBe(false);
+      // The order must be blocked BEFORE the engine evaluates (deny-close).
+      expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    });
+
+    it("does NOT deny-close when only a WARN policy fails to render", async () => {
+      // A warn fault must not hard-block the order (only a faulted DENY does);
+      // the remaining bundles evaluate normally (mock → pass).
+      mocks.venueRenderFaults = [{ defId: "some-warn", severity: "warn" }];
+      const result = await decideMessage(venueMessage("venue-warn-fault-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(result.verdict.kind).not.toBe("fail");
     });
 
     // SW prereq for HL server-state methods (`perp.*`): the server loads
