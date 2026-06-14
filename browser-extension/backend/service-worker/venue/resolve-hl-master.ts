@@ -1,17 +1,27 @@
 /**
- * Resolve the HL master account address whose per-asset leverage applies to a
- * venue order, for the `activeAssetData` lookup.
+ * Resolve the HL master account whose per-wallet policy bindings guard a venue
+ * order and whose synced state / per-asset leverage the enrichment reads.
  *
- * Priority:
- *   1. `payload.vaultAddress` — when the order is placed on behalf of a vault /
- *      subaccount, THAT account's leverage is what the venue applies.
- *   2. `payload.wallet_id.address` — the connected EVM account the fetch-hook
- *      read from `window.ethereum` (`eth_accounts`) and stamped on the payload
- *      (the master for normal, non-vault trading).
- *   3. The per-origin connected account in {@link getConnectedAccount} — a
- *      manually-seeded / future-captured fallback when the payload carries none.
- *   4. `null` — unknown. The caller then omits leverage (best-effort), leaving
- *      a `context has leverage` policy dormant rather than over-blocking.
+ * SECURITY — principal-confusion guard. Resolve ONLY from the TRUSTED connected
+ * account; a page-supplied `vaultAddress` must NEVER decide the principal:
+ *   1. `payload.wallet_id.address` — stamped by the fetch-hook from OUR
+ *      `eth_accounts` read; any page-supplied value is overwritten, so this is
+ *      trusted (see `fetch-hook.ts` `evaluatePayloads`).
+ *   2. {@link getConnectedAccount} — the per-origin connected account fallback.
+ *   3. `null` — unknown. The caller degrades to the submitter sentinel
+ *      (`defaults.enabled`) for the policy set and omits enrichment (a
+ *      `context has <field>` policy stays dormant), never blocking.
+ *
+ * `payload.vaultAddress` is copied VERBATIM from the page `/exchange` body and is
+ * NEVER overwritten (unlike `wallet_id`). It is deliberately NOT consulted here:
+ * if it could outrank the trusted account, a hostile frontend would set it to an
+ * unregistered address to (a) drop the connected wallet's per-wallet deny
+ * bindings → `defaults.enabled`, and (b) point `/info` enrichment at an
+ * attacker-chosen HEALTHY account, defeating margin-health / drawdown /
+ * liquidation-proximity deny policies. Honoring a vault the connected account is
+ * actually authorized to trade for needs an HL subaccount / vault-membership
+ * lookup — a follow-up; until then we fail toward the trusted account, never
+ * toward a page-chosen one.
  */
 import type { VenueOrderPayload } from "@lib/types";
 import { getConnectedAccount } from "./hl-master-store";
@@ -28,7 +38,6 @@ export async function resolveHlMaster(
   payload: VenueOrderPayload,
 ): Promise<string | null> {
   return (
-    validAddr(payload.vaultAddress) ??
     validAddr(payload.wallet_id?.address) ??
     (await getConnectedAccount(payload.hostname))
   );

@@ -171,15 +171,25 @@ describe("hl-master-store", () => {
 describe("resolveHlMaster", () => {
   const WALLET = "0x2222222222222222222222222222222222222222";
 
-  it("prefers vaultAddress over wallet_id and the stored account", async () => {
+  it("IGNORES a page-supplied vaultAddress — trusted wallet_id wins (principal-confusion guard)", async () => {
     await setConnectedAccount(HOST, MASTER);
+    // A hostile frontend sets vaultAddress to an unregistered address to dodge
+    // the connected wallet's per-wallet deny bindings and point enrichment at a
+    // healthy decoy. It must NOT decide the principal — the trusted wallet_id
+    // (stamped by the fetch-hook from eth_accounts) wins.
     const m = await resolveHlMaster(
       payload({
         vaultAddress: VAULT,
         wallet_id: { address: WALLET, chains: [] },
       }),
     );
-    expect(m).toBe(VAULT.toLowerCase());
+    expect(m).toBe(WALLET.toLowerCase());
+  });
+
+  it("IGNORES vaultAddress even without wallet_id — uses the stored account, never the page vault", async () => {
+    await setConnectedAccount(HOST, MASTER);
+    const m = await resolveHlMaster(payload({ vaultAddress: VAULT }));
+    expect(m).toBe(MASTER.toLowerCase());
   });
 
   it("uses the fetch-hook-stamped wallet_id when there is no vault", async () => {
@@ -260,11 +270,11 @@ describe("collectHlLeverage", () => {
     expect(await collectHlLeverage(order("BTC"), orderPayload(0), client)).toEqual({});
   });
 
-  it("uses vaultAddress as the master when present", async () => {
+  it("resolves the master from the stamped wallet_id (not a page vaultAddress)", async () => {
     const client = new HlInfoClient({ fetchImpl: infoFetch({ leverage: 11 }) });
     const out = await collectHlLeverage(
       order("ETH"),
-      orderPayload(1, { vaultAddress: VAULT }),
+      orderPayload(1, { wallet_id: { address: VAULT, chains: [] } }),
       client,
     );
     expect(out).toEqual({ ETH: 11 });
