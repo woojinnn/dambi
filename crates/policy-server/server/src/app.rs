@@ -28,7 +28,7 @@ use crate::dto::EvaluateRequest;
 use crate::events::{EventBus, EventPublisher};
 use crate::handler::{
     evaluate, ExternalEnrichment, HandlerError, NftFloorOracle, OutboundTransfer, PriceBook,
-    PriceFact, SanctionsScreen,
+    PriceFact, SanctionsScreen, TokenSecurityFlags,
 };
 use crate::market_handlers;
 use crate::read_handlers;
@@ -490,6 +490,11 @@ const GOPLUS_MALICIOUS_FLAGS: &[&str] = &[
     "blackmail_activities",
 ];
 
+/// EIP-155 chain ids where `GoPlus` `token_security` is supported AND `ScopeBall`
+/// collects token enrichment. Outside this set `token.security_flags` stays dormant
+/// rather than calling and mis-keying on an unsupported chain. Widen by adding ids.
+const TOKEN_SECURITY_CHAINS: &[i64] = &[1, 10, 8453, 42161];
+
 /// Live external enrichment for the token policies: `GoPlus` malicious-address
 /// reputation (`address.reputation`) and the owner's transfer history
 /// (`stat_window.snapshot` / `address.similarity`, Phase 2 via Alchemy
@@ -552,6 +557,104 @@ impl ExternalEnrichment for LiveEnrichment {
         since_unix: i64,
     ) -> Option<Vec<OutboundTransfer>> {
         self.alchemy_outbound(chain_id, owner, since_unix).await
+    }
+
+    #[allow(clippy::cast_possible_truncation)] // tax clamped to [0, 1e7] before the cast
+    async fn token_security_flags(&self, chain_id: i64, token: &str) -> Option<TokenSecurityFlags> {
+        // Validate 0x-hex (20 bytes) before building the URL.
+        let addr = token.trim_start_matches("0x").to_lowercase();
+        if addr.len() != 40 || !addr.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        // `token_security`'s supported-chain set differs from `address_security`'s;
+        // skip (dormant) outside it rather than mis-keying on an unsupported chain.
+        if !TOKEN_SECURITY_CHAINS.contains(&chain_id) {
+            return None;
+        }
+        let base = self
+            .goplus_base
+            .as_deref()
+            .unwrap_or("https://api.gopluslabs.io/api/v1");
+        if base.is_empty() {
+            return None; // explicitly disabled
+        }
+        let url = format!("{base}/token_security/{chain_id}?contract_addresses=0x{addr}");
+        let resp = self
+            .client
+            .get(&url)
+            .header("accept", "application/json")
+            .timeout(Duration::from_millis(1500))
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let body = resp.json::<serde_json::Value>().await.ok()?;
+        // `GoPlus` envelope: `{ code, message, result }`; `code == 1` = success.
+        if body.get("code").and_then(serde_json::Value::as_i64) != Some(1) {
+            return None;
+        }
+        // `result` is an OBJECT keyed by the (lowercased) contract address. Look it
+        // up case-insensitively; an absent/empty entry = unanalyzed → UNKNOWN (None),
+        // never a fabricated "clean".
+        let result = body.get("result")?.as_object()?;
+        let key = format!("0x{addr}");
+        let entry = result
+            .get(&key)
+            .or_else(|| {
+                result
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(&key))
+                    .map(|(_, v)| v)
+            })?
+            .as_object()?;
+        if entry.is_empty() {
+            return None;
+        }
+        let flag = |k: &str| entry.get(k).and_then(serde_json::Value::as_str) == Some("1");
+        // Tax is a decimal-FRACTION string ("0.04" = 4%, "1" = 100%); empty/absent =
+        // unknown (NOT 0). bps = round(fraction * 10000). (Confirmed against the live
+        // GoPlus response: SAITAMA buy_tax "0.04" = 4%, USDC/USDT "0".)
+        let tax_bps = |k: &str| -> Option<i64> {
+            let s = entry.get(k).and_then(serde_json::Value::as_str)?;
+            if s.is_empty() {
+                return None;
+            }
+            let frac: f64 = s.parse().ok()?;
+            // Clamp to a sane band (0%–100000%) so the `as i64` cannot wrap.
+            Some((frac * 10_000.0).round().clamp(0.0, 1e7) as i64)
+        };
+        // A `GoPlus`-vetted famous token (trust_list == "1") → report all-clear. This
+        // kills blue-chip false-positives: USDT carries owner_change_balance / is_
+        // blacklisted / is_mintable / transfer_pausable == "1" but trust_list == "1".
+        if flag("trust_list") {
+            return Some(TokenSecurityFlags::default());
+        }
+        let sell_tax_bps = tax_bps("sell_tax");
+        // Honeypot is deny-grade ONLY when GoPlus could actually analyze the contract
+        // (open-source — a closed-source contract yields no honeypot verdict anyway).
+        let is_honeypot =
+            (flag("is_honeypot") || flag("cannot_sell_all")) && flag("is_open_source");
+        // Counterfeit: `is_true_token` == "0" (string). NOTE `token_security`'s
+        // `fake_token` is an OBJECT here (unlike `address_security`'s string flag).
+        let counterfeit = entry
+            .get("is_true_token")
+            .and_then(serde_json::Value::as_str)
+            == Some("0");
+        let unsellable_tax = sell_tax_bps.is_some_and(|b| b >= 10_000);
+        let is_malicious = is_honeypot
+            || flag("hidden_owner")
+            || flag("selfdestruct")
+            || flag("is_airdrop_scam")
+            || counterfeit
+            || unsellable_tax;
+        Some(TokenSecurityFlags {
+            is_honeypot,
+            is_malicious,
+            sell_tax_bps,
+            buy_tax_bps: tax_bps("buy_tax"),
+        })
     }
 }
 

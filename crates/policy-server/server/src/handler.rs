@@ -115,6 +115,13 @@ pub trait ExternalEnrichment: Send + Sync {
         owner: &str,
         since_unix: i64,
     ) -> Option<Vec<OutboundTransfer>>;
+
+    /// Token-contract security flags for `token` (the decoded ERC-20 contract
+    /// address): honeypot / owner-controls / counterfeit / buy-sell tax. `None` =
+    /// could not screen (feed down, unsupported chain, unanalyzable contract) → the
+    /// optional policy stays dormant, never a fabricated "clean". Backs
+    /// `token.security_flags`.
+    async fn token_security_flags(&self, chain_id: i64, token: &str) -> Option<TokenSecurityFlags>;
 }
 
 /// One outbound transfer of the owner, as surfaced by [`ExternalEnrichment`].
@@ -133,6 +140,29 @@ pub struct OutboundTransfer {
     pub ts_unix: i64,
 }
 
+/// Token-contract security verdict from an external feed (`GoPlus` `token_security`
+/// in production), as surfaced by [`ExternalEnrichment::token_security_flags`]. Risk
+/// fields are pre-rolled host-side so a Cedar policy compares a single bool / bps
+/// integer (Cedar can neither OR ~10 string flags nor parse a decimal tax string). A
+/// `GoPlus`-trust-listed (famous) token is reported as all-clear to avoid
+/// false-positives on blue-chips (e.g. USDT carries mint/pause/blacklist/owner
+/// controls).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TokenSecurityFlags {
+    /// Buyable-but-not-sellable honeypot (or sell blocked), analysis-confirmed
+    /// (open-source). Deny-grade: an unambiguous total-loss outcome.
+    pub is_honeypot: bool,
+    /// Any high-precision total-loss signal — honeypot, hidden owner, selfdestruct,
+    /// airdrop-scam, counterfeit, or 100% sell tax. EXCLUDES blue-chip-common
+    /// controls (mint / pause / blacklist / owner-balance). Warn-grade.
+    pub is_malicious: bool,
+    /// Current sell tax in basis points (`round(fraction × 10000)`); `None` when the
+    /// feed reported no parseable tax (empty/absent → unknown, NOT zero).
+    pub sell_tax_bps: Option<i64>,
+    /// Current buy tax in basis points; `None` when unreported.
+    pub buy_tax_bps: Option<i64>,
+}
+
 /// The safe default when no external enrichment is configured: every method
 /// `None`, so `address.reputation` / `stat_window.snapshot` / `address.similarity`
 /// all stay dormant. Mirrors [`NoFloorOracle`].
@@ -148,6 +178,13 @@ impl ExternalEnrichment for NoEnrichment {
         _owner: &str,
         _since_unix: i64,
     ) -> Option<Vec<OutboundTransfer>> {
+        None
+    }
+    async fn token_security_flags(
+        &self,
+        _chain_id: i64,
+        _token: &str,
+    ) -> Option<TokenSecurityFlags> {
         None
     }
 }
@@ -619,6 +656,21 @@ async fn execute_call_specs(
                     call_id: Some(spec.call_id.clone()),
                 }),
             },
+            "token.security_flags" => match token_security(&spec.params, external).await {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "token.security_flags: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "token.security_flags: missing token or feed unavailable \
+                         (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
             other => diagnostics.push(Diagnostic {
                 level: "info".to_owned(),
                 message: format!(
@@ -1035,7 +1087,10 @@ fn asset_address(v: &Value) -> Option<String> {
 /// (fail-open for the optional call), never a fabricated `false`.
 async fn address_sanctions(params: &Value, sanctions: &dyn SanctionsScreen) -> Option<Value> {
     let address = params.get("address").and_then(asset_address)?;
-    let chain_id = params.get("chain_id").and_then(Value::as_i64).unwrap_or(1);
+    // Accept both a numeric chain id and a CAIP-2 string (`"eip155:1"`), matching
+    // `address_reputation`; `as_i64` alone silently dropped the string form to the
+    // default 1, so a non-mainnet sanctions screen could mis-key.
+    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
     let flag = sanctions.is_sanctioned(chain_id, &address).await?;
     Some(json!({ "sanctioned": flag }))
 }
@@ -1051,6 +1106,32 @@ async fn address_reputation(params: &Value, external: &dyn ExternalEnrichment) -
     let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
     let flag = external.reputation_flagged(chain_id, &address).await?;
     Some(json!({ "flagged": flag }))
+}
+
+/// Server-side `token.security_flags`: screen the decoded ERC-20 `token` contract
+/// (params `{ token, chain_id? }` — `token` is `$.action.token.key.address`, the
+/// pre-resolved lowercase contract address, NOT the `{key}` object: `asset_address`
+/// reads a bare string / `.address`, it does not traverse into `key`) via the
+/// injected [`ExternalEnrichment`] feed (`GoPlus` `token_security` in production).
+/// Projects `{ tokenIsHoneypot, tokenIsMalicious, tokenSellTaxBps?, tokenBuyTaxBps? }`
+/// — the tax fields are OMITTED when the feed reported no parseable tax (so a
+/// quantity-cap policy stays dormant rather than comparing against a fabricated 0).
+/// `None` when the token is missing or the feed could not answer → result omitted
+/// (fail-open for the optional call), never a fabricated "clean".
+async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
+    let token = params.get("token").and_then(asset_address)?;
+    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let f = external.token_security_flags(chain_id, &token).await?;
+    let mut out = serde_json::Map::new();
+    out.insert("tokenIsHoneypot".to_owned(), json!(f.is_honeypot));
+    out.insert("tokenIsMalicious".to_owned(), json!(f.is_malicious));
+    if let Some(bps) = f.sell_tax_bps {
+        out.insert("tokenSellTaxBps".to_owned(), json!(bps));
+    }
+    if let Some(bps) = f.buy_tax_bps {
+        out.insert("tokenBuyTaxBps".to_owned(), json!(bps));
+    }
+    Some(Value::Object(out))
 }
 
 /// Numeric EIP-155 chain id from a params value that may be a JSON number or a
@@ -1279,6 +1360,13 @@ mod tests {
         ) -> Option<Vec<OutboundTransfer>> {
             self.outbound.clone()
         }
+        async fn token_security_flags(
+            &self,
+            _chain_id: i64,
+            _token: &str,
+        ) -> Option<TokenSecurityFlags> {
+            None
+        }
     }
     /// Default: the feed answers nothing → the external methods stay dormant.
     fn no_external() -> StubEnrichment {
@@ -1286,6 +1374,86 @@ mod tests {
             flagged: None,
             outbound: None,
         }
+    }
+
+    /// A test [`ExternalEnrichment`] returning a fixed token-security verdict (the
+    /// other legs stay dormant), for the `token.security_flags` server fn.
+    struct StubTokenSec(Option<TokenSecurityFlags>);
+    #[async_trait]
+    impl ExternalEnrichment for StubTokenSec {
+        async fn reputation_flagged(&self, _c: i64, _a: &str) -> Option<bool> {
+            None
+        }
+        async fn recent_outbound(
+            &self,
+            _c: i64,
+            _o: &str,
+            _s: i64,
+        ) -> Option<Vec<OutboundTransfer>> {
+            None
+        }
+        async fn token_security_flags(&self, _c: i64, _t: &str) -> Option<TokenSecurityFlags> {
+            self.0
+        }
+    }
+
+    // ── token.security_flags (Malicious-Token Shield) ───────────────────────
+
+    #[tokio::test]
+    async fn token_security_projects_flags_and_present_tax() {
+        let params = serde_json::json!({ "token": "0xABCdef0000000000000000000000000000000001", "chain_id": "eip155:1" });
+        let v = super::token_security(
+            &params,
+            &StubTokenSec(Some(TokenSecurityFlags {
+                is_honeypot: true,
+                is_malicious: true,
+                sell_tax_bps: Some(2500),
+                buy_tax_bps: None,
+            })),
+        )
+        .await
+        .unwrap();
+        // Honeypot + malicious projected; present sell tax emitted, absent buy tax omitted.
+        assert_eq!(
+            v,
+            serde_json::json!({ "tokenIsHoneypot": true, "tokenIsMalicious": true, "tokenSellTaxBps": 2500 })
+        );
+    }
+
+    #[tokio::test]
+    async fn token_security_omits_absent_tax() {
+        // A clean verdict with no parseable tax → tax fields OMITTED (cap stays
+        // dormant), the two bool flags still present and false.
+        let params = serde_json::json!({ "token": "0x0000000000000000000000000000000000000002" });
+        let v = super::token_security(&params, &StubTokenSec(Some(TokenSecurityFlags::default())))
+            .await
+            .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "tokenIsHoneypot": false, "tokenIsMalicious": false })
+        );
+    }
+
+    #[tokio::test]
+    async fn token_security_feed_unavailable_is_none() {
+        let params = serde_json::json!({ "token": "0x0000000000000000000000000000000000000003" });
+        assert!(super::token_security(&params, &StubTokenSec(None))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn token_security_missing_token_is_none() {
+        let params = serde_json::json!({ "chain_id": "eip155:1" });
+        assert!(super::token_security(
+            &params,
+            &StubTokenSec(Some(TokenSecurityFlags {
+                is_malicious: true,
+                ..Default::default()
+            })),
+        )
+        .await
+        .is_none());
     }
 
     // ── address.reputation (TOKEN-003) ──────────────────────────────────────
@@ -1368,6 +1536,37 @@ mod tests {
         assert_eq!(
             results["m::spender-rep"],
             serde_json::json!({ "flagged": true })
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_call_specs_serves_token_security() {
+        let st = WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()]));
+        let spec = CallSpec {
+            manifest_id: "approve-honeypot-token-deny".into(),
+            call_id: "m::token-sec".into(),
+            method: "token.security_flags".into(),
+            params: serde_json::json!({ "token": "0xabc0000000000000000000000000000000000001", "chain_id": "eip155:1" }),
+            outputs: Vec::new(),
+            optional: true,
+        };
+        let (results, _diag) = super::execute_call_specs(
+            &st,
+            &[spec],
+            &no_price_book(),
+            &no_sanctions(),
+            &NoFloorOracle,
+            &StubTokenSec(Some(TokenSecurityFlags {
+                is_honeypot: true,
+                is_malicious: true,
+                sell_tax_bps: None,
+                buy_tax_bps: None,
+            })),
+        )
+        .await;
+        assert_eq!(
+            results["m::token-sec"],
+            serde_json::json!({ "tokenIsHoneypot": true, "tokenIsMalicious": true })
         );
     }
 
