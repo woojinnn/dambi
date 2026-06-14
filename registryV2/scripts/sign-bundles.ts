@@ -97,6 +97,17 @@ export function collectBundleShas(registryRoot: string): string[] {
   return [...shas].sort();
 }
 
+/** Built-index bundle_sha256 values that have NO signatures/<sha>.sig sidecar —
+ *  i.e. a coverage gap. Empty ⇒ every served bundle is verifiable. This is the
+ *  hard gate that must hold before DAMBI_REQUIRE_BUNDLE_SIGNATURE is flipped on:
+ *  a single uncovered bundle would fail-closed fleet-wide once REQUIRE is true. */
+export function findMissingSignatures(registryRoot: string): string[] {
+  const sigDir = join(registryRoot, "signatures");
+  return collectBundleShas(registryRoot).filter(
+    (sha) => !existsSync(join(sigDir, `${sha}.sig`)),
+  );
+}
+
 function digestBytes(sha256Hex: string): Uint8Array {
   const hex = sha256Hex.startsWith("0x") ? sha256Hex.slice(2) : sha256Hex;
   return Uint8Array.from(Buffer.from(hex, "hex"));
@@ -115,6 +126,15 @@ function signLocal(digest: Uint8Array, priv: Uint8Array): Uint8Array {
   return p256.sign(digest, priv, { prehash: false });
 }
 
+/** Convert an ASN.1 DER ECDSA signature (what Cloud KMS asymmetricSign returns)
+ *  to raw r||s P1363 bytes — the form WebCrypto `verify` expects. This is the one
+ *  transform unique to the KMS signing path (local mode emits P1363 directly), and
+ *  historically the most error-prone (r/s leading-zero & length handling), so it is
+ *  exported and unit-tested independently (sign-bundles.test.ts) without a live KMS. */
+export function derToP1363(der: Uint8Array): Uint8Array {
+  return p256.Signature.fromBytes(der, "der").toBytes("compact");
+}
+
 /** kms: asymmetricSign returns DER; convert to P1363 (WebCrypto verify format). */
 async function signKms(digest: Uint8Array, keyName: string): Promise<Uint8Array> {
   const { KeyManagementServiceClient } = await import("@google-cloud/kms");
@@ -126,8 +146,7 @@ async function signKms(digest: Uint8Array, keyName: string): Promise<Uint8Array>
   if (!resp.signature) {
     throw new Error(`KMS returned no signature for ${keyName}`);
   }
-  const der = Uint8Array.from(resp.signature as Buffer);
-  return p256.Signature.fromBytes(der, "der").toBytes("compact");
+  return derToP1363(Uint8Array.from(resp.signature as Buffer));
 }
 
 function localKeyId(priv: Uint8Array): string {
@@ -221,7 +240,19 @@ if (isMain) {
         console.error(
           "[sign-bundles] WARN: no bundle_sha256 found — was the index built (npm run build)?",
         );
+        return;
       }
+      // Coverage gate — every built bundle MUST have a .sig before publish, else
+      // a REQUIRE=true install of that bundle would fail-closed in the field.
+      const missing = findMissingSignatures(DEFAULT_ROOT);
+      if (missing.length > 0) {
+        console.error(
+          `[sign-bundles] FATAL: signature coverage gap — ${missing.length}/${r.total} bundles have no .sig:`,
+        );
+        for (const sha of missing.slice(0, 5)) console.error(`    ${sha}`);
+        process.exit(1);
+      }
+      console.error(`[sign-bundles] coverage OK: all ${r.total} bundles signed`);
     })
     .catch((e) => {
       console.error("[sign-bundles] FATAL:", e instanceof Error ? e.message : e);

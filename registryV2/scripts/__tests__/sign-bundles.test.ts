@@ -27,6 +27,8 @@ import { p256 } from "@noble/curves/nist.js";
 import {
   SIG_ALG,
   collectBundleShas,
+  derToP1363,
+  findMissingSignatures,
   publicKeySpkiBase64,
   signBundles,
 } from "../sign-bundles.js";
@@ -148,5 +150,51 @@ describe("sign-bundles", () => {
     const tampered = new TextEncoder().encode(canonicalize({ ...A, x: 999 }) as string);
     const bad = await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pubKey, sigBytes, tampered);
     expect(bad).toBe(false);
+  });
+
+  it("derToP1363: a DER signature (the Cloud KMS shape) converts to a P1363 sig WebCrypto verifies", async () => {
+    // Exercise the prod KMS path WITHOUT a live KMS call: produce a DER signature
+    // exactly as `asymmetricSign` returns, run it through the same derToP1363()
+    // signKms() uses, and verify the result under the SPKI pin. Guards the one
+    // transform unique to prod signing (a regression here bricks REQUIRE fleet-wide).
+    const message = "kms-der-conversion-path";
+    const digest = createHash("sha256").update(message, "utf8").digest();
+    const priv = Uint8Array.from(Buffer.from(privHex, "hex"));
+    const compact = p256.sign(new Uint8Array(digest), priv, { prehash: false });
+    const der = p256.Signature.fromBytes(compact, "compact").toBytes("der");
+    expect(der.length).toBeGreaterThan(64); // ASN.1 DER carries length/tag overhead
+
+    const p1363 = derToP1363(der);
+    expect(p1363.length).toBe(64); // raw r||s
+
+    const pubKey = await subtle.importKey(
+      "spki",
+      Buffer.from(spkiB64, "base64"),
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"],
+    );
+    const ok = await subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      pubKey,
+      p1363,
+      new TextEncoder().encode(message),
+    );
+    expect(ok).toBe(true);
+  });
+
+  it("findMissingSignatures: flags bundles with no .sig (the REQUIRE-flip coverage gate)", async () => {
+    seedRoot([
+      { seg: "1__0xaa__0x01", bundle: A },
+      { seg: "1__0xbb__0x02", bundle: B },
+    ]);
+    // unsigned: every bundle is a coverage gap
+    expect(findMissingSignatures(root).sort()).toEqual([bundleSha(A), bundleSha(B)].sort());
+    // signed: full coverage, no gaps
+    await signBundles({ registryRoot: root, mode: "local", privKeyHex: privHex });
+    expect(findMissingSignatures(root)).toEqual([]);
+    // delete one .sig → that exact sha is reported as the gap
+    rmSync(join(root, "signatures", `${bundleSha(B)}.sig`));
+    expect(findMissingSignatures(root)).toEqual([bundleSha(B)]);
   });
 });

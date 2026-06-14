@@ -110,6 +110,15 @@ jobs:
             done
           fi
 
+      - name: Verify published signature coverage (REQUIRE-flip gate)
+        working-directory: registryV2
+        # Bucket-side: assert every built bundle_sha256 has a published .sig in the
+        # live bucket. A single gap would fail-closed fleet-wide once REQUIRE is on.
+        # (sign-bundles.ts already self-gates local coverage before upload; this
+        # confirms the LIVE bucket post-rsync.) SKIP_FAITHFULNESS — the PoC↔prod
+        # byte-diff is a one-time migration check, not a per-publish gate.
+        run: SKIP_FAITHFULNESS=1 bash scripts/deploy/verify-bucket-parity.sh
+
       - name: Summary
         run: |
           echo "Published registry **${{ github.ref_name }}** (mode=${{ github.event.inputs.mode || 'incremental' }})" >> "$GITHUB_STEP_SUMMARY"
