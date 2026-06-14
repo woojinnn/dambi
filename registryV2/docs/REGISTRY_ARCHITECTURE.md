@@ -274,7 +274,7 @@ installed extensions pointing at the PoC URL never break.
 | Proxy (Cloud Run) | `registry-api-v3` → `https://registry-api-v3-65uggwflcq-du.a.run.app` (stable; custom domain declined) | `registry-api-v3-891268973493.…run.app` |
 | Runtime SA | `registry-api-v3-sa@dambi-registry` (objectViewer only) | (shared project SAs) |
 | Signer SA (CI/WIF) | `registry-signer@dambi-registry` (signerVerifier + objectAdmin) | — |
-| WIF | pool `github-pool` / provider `github-provider` (repo-pinned `woojinnn/scopeball`) | none |
+| WIF | pool `github-pool` / provider `github-provider` (repo-pinned `woojinnn/dambi`) | none |
 | gcloud config | `dambi` | `scopeball` |
 
 Bucket settings are identical across both (asia-northeast3 · versioning · PAP enforced · UBLA).
@@ -289,12 +289,12 @@ The prod **pinned public key differs** from PoC (new HSM key) — see channel pi
 4. Runtime SA + `objectViewer`; AR repo `dambi`; **`PROJECT_ID=dambi-registry deploy-proxy.sh`**
    (proxy serving verified: proxy-fetch sha == bucket sha, CORS, 404 on bad path).
 5. Signer SA + KMS `signerVerifier` + bucket `objectAdmin`; WIF pool/provider **pinned to
-   `woojinnn/scopeball`**; `workloadIdentityUser` binding.
+   `woojinnn/dambi`**; `workloadIdentityUser` binding.
 6. In-repo prod-targeting: `_common.sh` defaults (`PROJECT_ID=dambi-registry`, config map),
    `registry-publish.yml` env (`PROJECT_ID`/`BUCKET` → prod).
 
 ### Manual finish steps (operator)
-- **GitHub secrets** (repo `woojinnn/scopeball`) for CI keyless signing/publish:
+- **GitHub secrets** (repo `woojinnn/dambi`) for CI keyless signing/publish:
   - `GCP_WIF_PROVIDER = projects/1912792298/locations/global/workloadIdentityPools/github-pool/providers/github-provider`
   - `GCP_DEPLOY_SA = registry-signer@dambi-registry.iam.gserviceaccount.com`
 - **Re-sign** — DONE: all 31285 unique bundles re-signed with the prod HSM key + published to
