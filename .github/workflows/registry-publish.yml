@@ -8,11 +8,13 @@
 #
 # Signing runs in KMS mode under keyless Workload Identity Federation — the
 # private key never leaves the HSM, and no SA key file ever touches the runner.
-# One-time WIF setup (the two secrets below) mirrors policy-server-deploy.yml.
+# One-time WIF setup. These are DEDICATED registry secrets (dambi-registry),
+# DISTINCT from policy-server-deploy.yml's GCP_* secrets (policy-engine-498313) —
+# the two target different projects/SAs, so they cannot share secret names.
 #
 # Required repository secrets:
-#   GCP_WIF_PROVIDER  - full Workload Identity *provider* resource name
-#   GCP_DEPLOY_SA     - signer/publisher SA email (needs roles/cloudkms.signerVerifier
+#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (dambi-registry)
+#   REGISTRY_DEPLOY_SA     - signer/publisher SA email (needs roles/cloudkms.signerVerifier
 #                       on the key + roles/storage.objectAdmin on the bucket)
 #
 # NOTE: deploy the proxy `/signatures/` allowlist (deploy/deploy-proxy.sh) BEFORE
@@ -60,8 +62,8 @@ jobs:
       - name: Authenticate to Google Cloud (keyless WIF)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+          workload_identity_provider: ${{ secrets.REGISTRY_WIF_PROVIDER }}
+          service_account: ${{ secrets.REGISTRY_DEPLOY_SA }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2

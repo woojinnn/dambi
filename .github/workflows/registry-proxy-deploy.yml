@@ -17,10 +17,11 @@
 # NOT called here: that guard pins a local gcloud config + operator account,
 # whereas CI authenticates keylessly as the deploy SA via WIF below.
 #
-# Required repository secrets (same one-time WIF setup as registry-publish.yml /
-# policy-server-deploy.yml):
-#   GCP_WIF_PROVIDER  - full Workload Identity *provider* resource name
-#   GCP_DEPLOY_SA     - deploy SA email. Needs, on PROJECT_ID=dambi-registry:
+# Required repository secrets — DEDICATED to the registry (dambi-registry),
+# DISTINCT from policy-server-deploy.yml's GCP_* secrets (policy-engine-498313).
+# Shared with registry-publish.yml:
+#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (dambi-registry)
+#   REGISTRY_DEPLOY_SA     - deploy SA email. Needs, on PROJECT_ID=dambi-registry:
 #                       roles/run.admin, roles/cloudbuild.builds.editor,
 #                       roles/artifactregistry.writer, and
 #                       roles/iam.serviceAccountUser on the runtime SA
@@ -46,8 +47,8 @@ jobs:
       - name: Authenticate to Google Cloud (keyless WIF)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+          workload_identity_provider: ${{ secrets.REGISTRY_WIF_PROVIDER }}
+          service_account: ${{ secrets.REGISTRY_DEPLOY_SA }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
