@@ -284,7 +284,9 @@ on the runtime SA. A post-deploy `/health` smoke (200 or fail) guards a broken r
 | build-time pin/flag | `browser-extension/webpack/{env,webpack.common,webpack.prod}.js` · `.env(.example)` |
 | infra | `registryV2/scripts/deploy/{_common,provision-infra,publish-index,deploy-proxy}.sh` |
 | ops (Tier D) | `registryV2/scripts/deploy/{provision-monitoring,provision-budget}.sh` · `bucket-lifecycle.json` |
-| CI | `.github/workflows/{ci,registry-publish,registry-proxy-deploy}.yml` |
+| ops (Tier E) | `registryV2/scripts/deploy/{rotate-signing-key,rollback-index}.sh` · `registryV2/docs/REGISTRY_RUNBOOK.md` |
+| CI | `.github/workflows/{ci,registry-publish,registry-proxy-deploy,extension-release}.yml` |
+| operator runbook | `registryV2/docs/REGISTRY_RUNBOOK.md` (day-2 ops, incident response, rotation, rollback, PoC decommission) |
 
 ---
 

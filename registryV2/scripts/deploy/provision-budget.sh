@@ -20,7 +20,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 rv3_activate_and_guard
 
 : "${BILLING_ACCOUNT:?set BILLING_ACCOUNT=XXXXXX-XXXXXX-XXXXXX  (gcloud billing accounts list)}"
-BUDGET_AMOUNT="${BUDGET_AMOUNT:-50USD}"
+# The amount's CURRENCY must match the billing account's currency or the API
+# rejects it (INVALID_ARGUMENT). The dambi-registry billing account is KRW, so
+# the default is KRW; override BUDGET_AMOUNT=<n><CCY> for a different account
+# (e.g. 50USD). ~100k KRW (~$75) is generous headroom over the warm-instance
+# baseline so the 50% threshold doesn't false-alarm.
+BUDGET_AMOUNT="${BUDGET_AMOUNT:-100000KRW}"
 BUDGET_NAME="${BUDGET_NAME:-registry-prod monthly}"
 # Optional: a Monitoring notification channel resource name for budget alerts.
 NOTIF_CHANNEL="${NOTIF_CHANNEL:-}"

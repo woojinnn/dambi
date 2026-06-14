@@ -93,6 +93,7 @@ browser-extension/public/wasm/
 # Registry trust-chain operator runbook — must travel with the repo (sole doc of
 # the signing contract, cutover order, rotation, and PoC decommission).
 !registryV2/docs/REGISTRY_ARCHITECTURE.md
+!registryV2/docs/REGISTRY_RUNBOOK.md
 # Local Codex session memory; keep repo-specific copies out of git.
 AGENTS.md
 # The rest of /docs/ stays ignored (scratch research/audit notes).
@@ -156,3 +157,7 @@ browser-extension/package-lock.json
 
 # local runtime scratch (sqlite, sockets) — never tracked
 .dambi-runtime/
+
+# local byte-perfect mirror of the GitBook "Docs" space (walletguardians/pasu-docs@main).
+# Refreshed manually; never tracked.
+gitbook/
