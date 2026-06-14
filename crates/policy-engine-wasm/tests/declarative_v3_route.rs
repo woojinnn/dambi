@@ -277,6 +277,62 @@ fn h2_sweep_token_decodes_to_router_egress_transfer() {
     assert_eq!(body["is_router_egress"], true, "{parsed}");
 }
 
+/// WP2 / H2 conformance (drift guard): the SHIPPED Universal Router `execute`
+/// manifest must decode a `SWEEP(token, recipient, amountMin)` command to an
+/// `Erc20Transfer` carrying `is_router_egress = true`, so
+/// `sweep-recipient-not-self-warn` fires when a UR command stream redirects swept
+/// router funds to a non-signer (`execute([V3_SWAP→router, SWEEP(token,attacker)])`
+/// — the dominant Uniswap drain pattern). Loads the REAL manifest from disk so a
+/// future edit that drops the flag from SWEEP/TRANSFER/UNWRAP_WETH fails HERE.
+#[test]
+fn h2_ur_execute_sweep_decodes_to_router_egress_transfer() {
+    let manifest = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/uniswap/universal-router/execute-v2@1.0.0.json"
+    ))
+    .expect("read shipped execute-v2 manifest");
+    install_ok(&manifest);
+
+    let token = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
+    let attacker = "0x000000000000000000000000000000000000dead"; // != the signer
+
+    // SWEEP input tuple: (address token, address recipient, uint256 amountMin).
+    let sweep_blob = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(token)),
+        DynSolValue::Address(addr(attacker)),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+    ])
+    .abi_encode_params();
+
+    // execute(bytes commands = [0x04 SWEEP], bytes[] inputs, uint256 deadline).
+    let calldata = encode_calldata(
+        "0x3593564c",
+        &[
+            DynSolValue::Bytes(vec![0x04]),
+            DynSolValue::Array(vec![DynSolValue::Bytes(sweep_blob)]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af", // UniversalRouter v1.2 (mainnet)
+        "0x3593564c",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let leg = &body["actions"][0];
+    assert_eq!(leg["domain"], "token", "{parsed}");
+    assert_eq!(leg["action"], "erc20_transfer", "{parsed}");
+    assert_eq!(leg["recipient"], attacker, "{parsed}");
+    assert_eq!(
+        leg["is_router_egress"], true,
+        "UR SWEEP must carry is_router_egress so sweep-recipient-not-self-warn fires: {parsed}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // t2 — Uniswap V2 swapExactTokensForTokens (single_emit + literal venue)
 // ---------------------------------------------------------------------------
