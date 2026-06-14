@@ -1,0 +1,91 @@
+# Deploy the registry-api PROXY CODE to Cloud Run — the CI mirror of
+# registryV2/scripts/deploy/deploy-proxy.sh. Run this ONLY when the proxy code
+# changes (path allowlist, cache, rate-limit, edge hardening). Index DATA is a
+# separate concern — see registry-publish.yml.
+#
+# Gated like registry-publish.yml: the `production` Environment requires a human
+# reviewer before the live shared revision is replaced. Cloud Run keeps the
+# prior revision; an unhealthy new revision fails the deploy (traffic stays put).
+#
+# Trigger model:
+#   • push a tag `registry-proxy-v*`  → build + deploy (intentional release)
+#   • workflow_dispatch               → deploy current main by hand
+#
+# Config (project / region / service / runtime flags / env-vars) is sourced from
+# scripts/deploy/_common.sh — the SAME single source of truth the local
+# deploy-proxy.sh uses, so the two can never drift. rv3_activate_and_guard is
+# NOT called here: that guard pins a local gcloud config + operator account,
+# whereas CI authenticates keylessly as the deploy SA via WIF below.
+#
+# Required repository secrets (same one-time WIF setup as registry-publish.yml /
+# policy-server-deploy.yml):
+#   GCP_WIF_PROVIDER  - full Workload Identity *provider* resource name
+#   GCP_DEPLOY_SA     - deploy SA email. Needs, on PROJECT_ID=dambi-registry:
+#                       roles/run.admin, roles/cloudbuild.builds.editor,
+#                       roles/artifactregistry.writer, and
+#                       roles/iam.serviceAccountUser on the runtime SA
+#                       (registry-api-v3-sa) so it can deploy "run as" it.
+name: registry-proxy-deploy
+
+on:
+  push:
+    tags: ["registry-proxy-v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # keyless auth to Google Cloud (do not remove)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production # required-reviewers approval gate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (keyless WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build proxy image + deploy to Cloud Run
+        run: |
+          # Source _common.sh for config + rv3_env_vars ONLY (guard not called).
+          source registryV2/scripts/deploy/_common.sh
+          TAG="${GITHUB_SHA::8}"
+          IMAGE="${AR_REPO}:${TAG}"
+          echo "build → ${IMAGE}"
+          gcloud builds submit registry-api --tag "${IMAGE}" --project "${PROJECT_ID}"
+          echo "deploy ${SERVICE_NAME} ← ${IMAGE}"
+          gcloud run deploy "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${IMAGE}" \
+            --service-account="${SA_EMAIL}" \
+            --cpu="${CPU}" --memory="${MEMORY}" \
+            --min-instances="${MIN_INSTANCES}" --max-instances="${MAX_INSTANCES}" \
+            --concurrency="${CONCURRENCY}" --timeout="${TIMEOUT}" \
+            --cpu-boost --ingress=all --no-allow-unauthenticated \
+            --set-env-vars="$(rv3_env_vars)"
+
+      - name: Ensure public invoker (extension anonymous fetch; bucket stays private)
+        run: |
+          source registryV2/scripts/deploy/_common.sh
+          gcloud run services add-iam-policy-binding "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --member=allUsers --role=roles/run.invoker
+
+      - name: Smoke /health
+        run: |
+          source registryV2/scripts/deploy/_common.sh
+          URL="$(gcloud run services describe "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          echo "health-check ${URL}/health"
+          code="$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health")"
+          echo "HTTP ${code}"
+          test "${code}" = "200"
+          echo "Deployed proxy ${URL} (HTTP ${code})" >> "$GITHUB_STEP_SUMMARY"

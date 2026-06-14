@@ -221,6 +221,38 @@ proxy cache TTL — **no extension change**.
 Flipping the flag before steps 1–3 would 404 every signature → fail-closed → the extension
 decodes nothing.
 
+### Observability + cost guards (Tier D)
+`provision-monitoring.sh` (operator-run, idempotent) wires Cloud Monitoring to the prod proxy:
+an **uptime check** on `/health` (1-min, all regions; host derived from the live service URL)
+and three **alert policies** — 5xx burst (`>N` 5xx / 5 min), p95 latency (`>N`ms / 5 min), and
+uptime failure (`<50%` of probes passing / 10 min) — plus a **log-based error metric**
+(`registry_api_errors`, ERROR+ logs). Thresholds are env-tunable (`ERR_5XX_PER_5M`,
+`LATENCY_P95_MS`); the paging channel is owner-provided (`NOTIFICATION_CHANNEL`, created via the
+beta `gcloud monitoring channels` component — see the script header).
+
+`provision-budget.sh` (operator-run; needs `BILLING_ACCOUNT`) sets a Cloud Billing budget scoped
+to `dambi-registry` with 50/90/100% actual + 100% forecast thresholds — a denial-of-wallet /
+egress-spike safety net (**notify-only, not a hard cap**).
+
+Bucket **lifecycle** (`bucket-lifecycle.json`, applied by `provision-infra.sh`): a single rule
+AND-ing `numNewerVersions:4` + `daysSinceNoncurrentTime:30`. GCS counts the live version toward
+"newer", so `4` keeps the **3 newest noncurrent** versions forever (rollback floor); noncurrent
+versions beyond those are deleted 30 days after going noncurrent. Both conditions must hold, so the
+newest 3 are never expired by age — over-retention is the safe direction for a signing trust-root
+(the two-rule OR pattern would instead expire the newest after 30d, risking a zero-version floor).
+
+### Proxy deploy via CI (`registry-proxy-deploy.yml`)
+The CI mirror of `deploy-proxy.sh`: keyless WIF auth → `gcloud builds submit` → `gcloud run
+deploy`, gated behind the `production` Environment, triggered by a `registry-proxy-v*` tag or
+`workflow_dispatch`. Runtime flags + env-vars are **sourced from `_common.sh`** — the same single
+source the local script uses, so CI and local can't drift; the local account/config guard
+(`rv3_activate_and_guard`) is skipped because CI authenticates as the deploy SA via WIF. That SA
+needs `run.admin` + `cloudbuild.builds.editor` + `artifactregistry.writer` + `iam.serviceAccountUser`
+on the runtime SA. A post-deploy `/health` smoke (200 or fail) guards a broken revision.
+
+> CI installs are pinned: `ci.yml` + `registry-publish.yml` use `npm ci` (lockfile-exact,
+> reproducible) rather than `npm install`.
+
 ---
 
 ## 8. Residual risks (honest limits)
@@ -251,7 +283,8 @@ decodes nothing.
 | extension verify | `…/adapter-loader/bundle-verify.ts` · `declarative-adapter-loader.ts` (3 sites) |
 | build-time pin/flag | `browser-extension/webpack/{env,webpack.common,webpack.prod}.js` · `.env(.example)` |
 | infra | `registryV2/scripts/deploy/{_common,provision-infra,publish-index,deploy-proxy}.sh` |
-| CI | `.github/workflows/{ci,registry-publish}.yml` |
+| ops (Tier D) | `registryV2/scripts/deploy/{provision-monitoring,provision-budget}.sh` · `bucket-lifecycle.json` |
+| CI | `.github/workflows/{ci,registry-publish,registry-proxy-deploy}.yml` |
 
 ---
 

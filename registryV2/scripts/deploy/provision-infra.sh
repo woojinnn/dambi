@@ -30,6 +30,17 @@ echo "=== Object versioning (rollback / supply-chain forensics) ==="
 # version, and noncurrent versions give an audit trail of what was ever served.
 gcloud storage buckets update "gs://${BUCKET}" --versioning
 
+echo "=== Lifecycle: keep 3 newest noncurrent versions, expire the rest after 30d ==="
+# Versioning is unbounded without this — every overwrite keeps the old object
+# forever (storage cost grows monotonically). The single rule AND-s its two
+# conditions, so a noncurrent version is deleted only when it BOTH has >=4 newer
+# versions AND has been noncurrent for >=30d. GCS counts the LIVE version toward
+# "newer", so numNewerVersions=4 means "keep the 3 newest NONCURRENT versions"
+# (4 = the 3 we keep + the live one). Net: the 3 newest noncurrent versions are
+# retained forever (rollback floor); older ones expire 30d after going noncurrent.
+gcloud storage buckets update "gs://${BUCKET}" \
+  --lifecycle-file="$(dirname "${BASH_SOURCE[0]}")/bucket-lifecycle.json"
+
 echo "=== KMS keyring + asymmetric-signing key (EC_SIGN_P256_SHA256) ==="
 if ! gcloud kms keyrings describe "${KMS_KEYRING}" \
   --location="${KMS_LOCATION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then

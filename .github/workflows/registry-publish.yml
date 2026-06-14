@@ -69,7 +69,7 @@ jobs:
       - name: Build index
         working-directory: registryV2
         run: |
-          npm install --no-audit --no-fund
+          npm ci
           npx tsx scripts/build-index.ts --strict-callkeys
 
       # Gate: prove every served bundle (concrete + materialized) hashes to its
@@ -78,7 +78,7 @@ jobs:
       - name: Parity gate (canonicalize + materialization)
         working-directory: registry-api
         run: |
-          npm install --no-audit --no-fund
+          npm ci
           npx vitest run src/__tests__/materialization-parity.test.ts
 
       - name: Sign bundles (KMS, DER→P1363)

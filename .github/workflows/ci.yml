@@ -242,13 +242,13 @@ jobs:
       - name: Build registry index (parity-gate corpus)
         working-directory: registryV2
         run: |
-          npm install --no-audit --no-fund
+          npm ci
           npx tsx scripts/build-index.ts --strict-callkeys
 
       - name: registry-api tests (validation + serving + parity gate)
         working-directory: registry-api
         run: |
-          npm install --no-audit --no-fund
+          npm ci
           npm test
 
       - name: registry-api typecheck
