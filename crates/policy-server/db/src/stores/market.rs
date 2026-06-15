@@ -151,9 +151,10 @@ pub struct NewListing {
     pub initial_body: VersionBody,
 }
 
-/// Cap server-side regardless of caller value. Browse queries should never
-/// return more than this in one shot.
-pub const LIST_LIMIT_MAX: i64 = 100;
+/// Cap server-side regardless of caller value. The browse grid filters and
+/// paginates client-side, so it pulls the whole result set in one shot; keep
+/// this high enough to cover the full catalog for the foreseeable future.
+pub const LIST_LIMIT_MAX: i64 = 500;
 pub const LIST_LIMIT_DEFAULT: i64 = 30;
 
 /// `SemVer` regex check duplicated from the SQL CHECK so failures surface
