@@ -171,7 +171,7 @@ const HF_SENTINEL: &str = "999999.0000";
 
 /// Shared post-action HF closed form: `(collateral_base × LT) / debt_base`,
 /// formatted to 4 decimals (Cedar `decimal("1.5000")` scale). Zero debt ⇒
-/// [`HF_SENTINEL`]. f64 scale (warn heuristic; mirrors `live/calc.rs::aave_hf`).
+/// the `HF_SENTINEL`. f64 scale (warn heuristic; mirrors `live/calc.rs::aave_hf`).
 #[must_use]
 pub fn post_action_hf(pos: &NormalizedPosition) -> String {
     if pos.debt_base <= 0.0 {
