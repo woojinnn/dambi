@@ -29,7 +29,7 @@ import { HomePage } from "./pages/HomePage";
 import { EditorListPage } from "./pages/editor/EditorListPage";
 import { EditorDetailPage } from "./pages/editor/EditorDetailPage";
 import { SimulateWizardPage } from "./pages/simulate/SimulateWizardPage";
-import { MonitoringPage } from "./pages/MonitoringPage";
+import { Assets2Page } from "./pages/Assets2Page";
 import { HistoryPage } from "./pages/HistoryPage";
 import { MarketPage } from "./pages/MarketPage";
 import { MarketDetailPage } from "./pages/MarketDetailPage";
@@ -60,7 +60,9 @@ const router = createRouter([
           { path: "editor/:id", element: <EditorDetailPage /> },
           { path: "simulation", element: <SimulateWizardPage /> },
           { path: "simulate", element: <Navigate to="/simulation" replace /> },
-          { path: "monitoring", element: <MonitoringPage /> },
+          { path: "assets", element: <Assets2Page /> },
+          { path: "monitoring", element: <Navigate to="/assets" replace /> },
+          { path: "assets2", element: <Navigate to="/assets" replace /> },
           { path: "history", element: <HistoryPage /> },
           { path: "market", element: <MarketPage /> },
           { path: "market/:slug", element: <MarketDetailPage /> },

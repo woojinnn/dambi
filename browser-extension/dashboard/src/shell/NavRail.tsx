@@ -55,7 +55,7 @@ export function NavRail() {
         <RailItem to="/" end label="Home" icon={<HomeIcon />} />
         <RailItem to="/editor" label="Editor" icon={<EditorIcon />} />
         <RailItem to="/simulation" label="Simulation" icon={<SimIcon />} />
-        <RailItem to="/monitoring" label="Assets" icon={<MonIcon />} />
+        <RailItem to="/assets" label="Assets" icon={<MonIcon />} />
         <RailItem to="/market" label="Policy Hub" icon={<MarketIcon />} />
       </div>
 
