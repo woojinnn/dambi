@@ -360,7 +360,7 @@ function WalletWorkspace(props: {
     );
   };
 
-  // 마켓 게시 — 지갑 패키지(보이는 그대로: 바인딩의 def, 중복 제거) 또는 개별
+  // Policy Hub 게시 — 지갑 패키지(보이는 그대로: 바인딩의 def, 중복 제거) 또는 개별
   // 정책을 PublishModal로. 라이브러리 디렉토리의 폴더 발행과 같은 Source 모양.
   const [publishSrc, setPublishSrc] = useState<PublishSource | null>(null);
 
@@ -499,7 +499,7 @@ function WalletWorkspace(props: {
                       <button
                         type="button"
                         className="ev2-iconbtn wt-pub"
-                        title="이 정책을 마켓에 게시"
+                        title="이 정책을 Policy Hub에 게시"
                         onClick={(e) => {
                           e.stopPropagation();
                           void publishDef(d);
@@ -628,7 +628,7 @@ function WalletWorkspace(props: {
                         <button
                           type="button"
                           className="ev2-iconbtn"
-                          title="이 패키지를 마켓에 게시"
+                          title="이 패키지를 Policy Hub에 게시"
                           onClick={() => void publishWalletPackage(pkg.id, members)}
                         >
                           <ShieldIcon />

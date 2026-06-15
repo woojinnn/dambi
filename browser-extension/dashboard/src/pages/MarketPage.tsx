@@ -65,7 +65,7 @@ export function MarketPage() {
         <>
           <MarketPagehead
             crumb={locale === "ko" ? "전체 목록" : "All listings"}
-            back={{ to: "/market", label: locale === "ko" ? "← 마켓 홈" : "← Market home" }}
+            back={{ to: "/market", label: locale === "ko" ? "← Policy Hub 홈" : "← Policy Hub home" }}
           />
           <ListView locale={locale} initialParams={params} />
         </>
@@ -234,7 +234,7 @@ function LandingView({ locale }: { locale: MarketLocale }) {
     <div className="rm-page">
       <div className="rm-shead">
         <div>
-          <div className="rm-shead-ttl">Market</div>
+          <div className="rm-shead-ttl">Policy Hub</div>
           <div className="rm-shead-sub">
             {ko ? "지갑을 지키는 정책과 패키지를 둘러보세요" : "Browse policies and packages that protect your wallet"}
           </div>
@@ -819,7 +819,7 @@ function ListView({
       {loading && <div className="market-status">{ko ? "불러오는 중…" : "Loading…"}</div>}
       {policiesQ.isError && (
         <div className="market-status market-error">
-          {ko ? "마켓 로드 실패" : "Market load failed"}
+          {ko ? "Policy Hub 로드 실패" : "Policy Hub load failed"}
         </div>
       )}
 

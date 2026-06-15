@@ -115,7 +115,7 @@ export function ProfilePage() {
           {myListingsQ.isLoading && <div className="pp-muted">불러오는 중…</div>}
           {myListingsQ.data && myListingsQ.data.length === 0 && (
             <div className="pp-empty">
-              아직 마켓에 올린 게시물이 없어요. 에디터에서 정책을 만들고 “마켓에
+              아직 Policy Hub에 올린 게시물이 없어요. 에디터에서 정책을 만들고 “Policy Hub에
               올리기”로 공개해보세요.
             </div>
           )}
@@ -146,7 +146,7 @@ export function ProfilePage() {
                     onClick={() => {
                       if (
                         window.confirm(
-                          `게시물 "${pickI18n(l.display_name)}"을(를) 마켓에서 삭제할까요?\n되돌릴 수 없어요.`,
+                          `게시물 "${pickI18n(l.display_name)}"을(를) Policy Hub에서 삭제할까요?\n되돌릴 수 없어요.`,
                         )
                       )
                         deleteListingMut.mutate(l.id);

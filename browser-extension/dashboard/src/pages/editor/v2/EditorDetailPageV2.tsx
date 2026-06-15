@@ -621,7 +621,7 @@ function EditorBody({
   const publishSource: PublishSource = {
     kind: "policy",
     cedarText,
-    // Prefer the manifest computed when "마켓에 올리기" was clicked (covers an
+    // Prefer the manifest computed when "Policy Hub에 올리기" was clicked (covers an
     // unsaved policy); fall back to the persisted def manifest otherwise.
     manifest: publishManifest ? publishManifest.value : policy.manifest,
     policyTree: null,
@@ -629,7 +629,7 @@ function EditorBody({
     suggestedSlug: stripDashboardId(policy.id),
   };
 
-  /** "마켓에 올리기": generate the manifest from the CURRENT editor state
+  /** "Policy Hub에 올리기": generate the manifest from the CURRENT editor state
    *  (same path as save's `prepare()`), so an unsaved policy still publishes a
    *  valid manifest. Validation errors block the publish with a message. */
   const openPublish = async () => {
@@ -731,7 +731,7 @@ function EditorBody({
           {fromMarket && (
             <span className="ev2-detail-prov">
               <ShieldIcon />
-              마켓에서 가져옴
+              Policy Hub에서 가져옴
               {policy.sourceVersion ? ` · ${policy.sourceVersion}` : ""}
             </span>
           )}
@@ -755,9 +755,9 @@ function EditorBody({
               type="button"
               className="ev2-pri ghost"
               onClick={openPublish}
-              title="마켓에 올리기"
+              title="Policy Hub에 올리기"
             >
-              <ShieldIcon /> 마켓에 올리기
+              <ShieldIcon /> Policy Hub에 올리기
             </button>
           )}
           {!bindingCtx && (

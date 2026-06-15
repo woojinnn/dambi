@@ -62,7 +62,7 @@ interface PublishRule {
 }
 
 /**
- * Publish wizard — "마켓에 올리기". Two working steps:
+ * Publish wizard — "Policy Hub에 올리기". Two working steps:
  *   1. 비식별 확인 — address identifiers are ALWAYS blanked into parameter
  *      holes; numeric thresholds may be kept (추천값) or blanked.
  *   2. 이름·설명 — name + description, then publish.
@@ -76,7 +76,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
   const [description, setDescription] = useState("");
   // Hole keys the author chose to KEEP public (주소 공개 / 숫자 추천값 남기기).
   // Default = all blanked. 주소를 남기는 건 "특정 주소로 거래되면 차단"처럼
-  // 주소가 정책의 본질인 경우 — 공개한 값은 마켓에 그대로 노출된다.
+  // 주소가 정책의 본질인 경우 — 공개한 값은 Policy Hub에 그대로 노출된다.
   const [kept, setKept] = useState<Set<string>>(new Set());
 
   const rules = useMemo<PublishRule[]>(() => {
@@ -229,7 +229,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
         <header className="pub-head">
           <span className="pub-head-ic"><ShieldIcon /></span>
           <div className="pub-head-t">
-            <div className="pub-title">마켓에 올리기</div>
+            <div className="pub-title">Policy Hub에 올리기</div>
             <div className="pub-sub">
               내가 큐레이션한 패키지를 공개해 다른 사용자가 담을 수 있게 합니다.
             </div>
@@ -276,7 +276,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
             <>
               {keptAddrCount > 0 ? (
                 <span className="pub-foot-note warn">
-                  주소 {keptAddrCount}칸이 마켓에 공개로 올라갑니다
+                  주소 {keptAddrCount}칸이 Policy Hub에 공개로 올라갑니다
                 </span>
               ) : (
                 <span className="pub-foot-note">
@@ -308,7 +308,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
                 disabled={publishMut.isPending}
               >
                 <ShieldIcon />
-                {publishMut.isPending ? "공개 중…" : "마켓에 공개"}
+                {publishMut.isPending ? "공개 중…" : "Policy Hub에 공개"}
               </button>
             </>
           )}
@@ -374,7 +374,7 @@ function Step1(props: {
             주소류 식별자(지갑·수취인·위임 대상·allowlist)는 기본으로{" "}
             <b>파라미터 구멍으로 비워서</b> 올라가고, 담는 사람이 자기 값을 채웁니다.
             주소가 정책의 본질이면(예: 특정 주소로 보내면 차단) 칸별로{" "}
-            <b>값 공개</b>를 선택할 수 있어요 — 공개한 값은 마켓에 그대로 노출됩니다.
+            <b>값 공개</b>를 선택할 수 있어요 — 공개한 값은 Policy Hub에 그대로 노출됩니다.
           </div>
         </div>
       </div>
@@ -446,7 +446,7 @@ function Step1(props: {
                         <>
                           <span>{h.display}</span>
                           <span className="arrow">→</span>
-                          <span className="param public">마켓에 공개</span>
+                          <span className="param public">Policy Hub에 공개</span>
                         </>
                       ) : (
                         <>
@@ -592,7 +592,7 @@ function Step2(props: {
       </div>
 
       <div className="pub-note">
-        <ShieldIcon /> 공개 = 누구나 마켓에서 담을 수 있음. 비공개로 되돌릴 수 있어요.
+        <ShieldIcon /> 공개 = 누구나 Policy Hub에서 담을 수 있음. 비공개로 되돌릴 수 있어요.
       </div>
     </>
   );

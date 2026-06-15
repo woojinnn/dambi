@@ -61,7 +61,7 @@ export function MarketDetailPage() {
   // Market route owns its frame (prototype `.app-content { padding: 0 }`).
   useMarketContentClass();
 
-  // Prototype detail = shell(<listing name>, {act:home, "← 마켓 목록"}, …):
+  // Prototype detail = shell(<listing name>, {act:home, "← Policy Hub 목록"}, …):
   // `.rm-pagehead` crumb is the listing's display name, back returns to the
   // list view (label says 목록, so route to ?view=list, not the bare home).
   const crumb = detailQ.data
@@ -71,7 +71,7 @@ export function MarketDetailPage() {
     <>
       <MarketPagehead
         crumb={crumb}
-        back={{ to: "/market?view=list", label: locale === "ko" ? "← 마켓 목록" : "← Market" }}
+        back={{ to: "/market?view=list", label: locale === "ko" ? "← Policy Hub 목록" : "← Policy Hub" }}
       />
 
       <div className="market-detail-wrap">

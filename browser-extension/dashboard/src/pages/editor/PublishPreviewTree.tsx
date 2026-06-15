@@ -219,7 +219,7 @@ export function PublishPreviewTree(props: {
         className={`pub-tree-hole${isKept ? " public" : ""}`}
         title={
           isKept
-            ? "이 값이 마켓에 그대로 공개됩니다 — 클릭해서 비우기"
+            ? "이 값이 Policy Hub에 그대로 공개됩니다 — 클릭해서 비우기"
             : `게시 시 비워지고 설치자가 채웁니다 (${h.paramName}) — 클릭해서 값 공개`
         }
         onClick={() => onToggleKeep(h.key)}
