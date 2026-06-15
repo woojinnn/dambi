@@ -42,11 +42,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: production # required-reviewers approval gate
     env:
-      # External_account (keyless WIF) creds carry no quota project, so
-      # `gcloud builds submit` can't bill its GCS source upload and 403s on
-      # "serviceusage.services.use" against the *_cloudbuild staging bucket — even
-      # though the SA already holds serviceUsageConsumer. gcloud reads this on every
-      # call and attaches x-goog-user-project. (Local owner deploy never hits this.)
+      # External_account (keyless WIF) creds carry no quota project. The image build
+      # avoids GCS entirely (docker push, see below), but `gcloud run deploy` still
+      # needs a billing project for its API calls — gcloud's modern clients read this
+      # and attach x-goog-user-project (SA holds serviceUsageConsumer there).
       CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
     steps:
       - uses: actions/checkout@v4
@@ -66,8 +65,20 @@ jobs:
           source registryV2/scripts/deploy/_common.sh
           TAG="${GITHUB_SHA::8}"
           IMAGE="${AR_REPO}:${TAG}"
+          # Build on the runner and push straight to Artifact Registry. We deliberately
+          # do NOT use `gcloud builds submit`: it stages source to the GCS *_cloudbuild
+          # bucket, and keyless WIF (external_account) creds cannot bill that GCS upload
+          # — it 403s on serviceusage.services.use REGARDLESS of quota project, because
+          # the legacy apitools storage client reads the quota project from the
+          # credential file, which google-github-actions/auth never populates. docker
+          # push authenticates with the SA token (artifactregistry.writer) and has no
+          # staging bucket in the path. --provenance=false → a plain single-arch image
+          # Cloud Run accepts (no attestation manifest list).
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           echo "build → ${IMAGE}"
-          gcloud builds submit registry-api --tag "${IMAGE}" --project "${PROJECT_ID}"
+          docker build --platform linux/amd64 --provenance=false -t "${IMAGE}" registry-api
+          echo "push → ${IMAGE}"
+          docker push "${IMAGE}"
           echo "deploy ${SERVICE_NAME} ← ${IMAGE}"
           gcloud run deploy "${SERVICE_NAME}" \
             --project="${PROJECT_ID}" \
