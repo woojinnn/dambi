@@ -9,12 +9,12 @@ const common = require("./webpack.common.js");
 // attacks against the bundle / token registry trust path. We fail the
 // build instead of letting that ship.
 const registryBaseUrl = process.env.REGISTRY_BASE_URL ?? "";
-if (process.env.PASU_ALLOW_INSECURE_REGISTRY !== "1") {
+if (process.env.DAMBI_ALLOW_INSECURE_REGISTRY !== "1") {
   if (!registryBaseUrl) {
     throw new Error(
       "[webpack.prod] REGISTRY_BASE_URL must be set for production builds. " +
         "Set it in browser-extension/.env (e.g. https://storage.googleapis.com/...) " +
-        "or export PASU_ALLOW_INSECURE_REGISTRY=1 to bypass for a local " +
+        "or export DAMBI_ALLOW_INSECURE_REGISTRY=1 to bypass for a local " +
         "smoke test build.",
     );
   }
@@ -22,9 +22,24 @@ if (process.env.PASU_ALLOW_INSECURE_REGISTRY !== "1") {
     throw new Error(
       `[webpack.prod] REGISTRY_BASE_URL must be https:// (got ${JSON.stringify(
         registryBaseUrl,
-      )}). Override with PASU_ALLOW_INSECURE_REGISTRY=1 only for local smoke tests.`,
+      )}). Override with DAMBI_ALLOW_INSECURE_REGISTRY=1 only for local smoke tests.`,
     );
   }
+}
+
+// Bundle-signature pinned-key guard. If this build ENFORCES signatures, a
+// pinned public key MUST be present — otherwise every bundle install would
+// fail-closed (warn) and the extension would decode nothing. Fail the build.
+if (
+  process.env.DAMBI_REQUIRE_BUNDLE_SIGNATURE === "true" &&
+  !(process.env.PINNED_BUNDLE_PUBLIC_KEY ?? "").trim()
+) {
+  throw new Error(
+    "[webpack.prod] DAMBI_REQUIRE_BUNDLE_SIGNATURE=true but PINNED_BUNDLE_PUBLIC_KEY " +
+      "is empty. Set the SPKI(base64) pinned signing key in browser-extension/.env " +
+      "(from `gcloud kms keys versions get-public-key` or `npm run gen-signing-key`), " +
+      "or unset the require flag for an unsigned-registry build.",
+  );
 }
 
 const prodOverrides = {

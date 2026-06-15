@@ -10,13 +10,16 @@
 
 use policy_state::primitives::{Decimal, U256};
 
+use super::super::common::amount::nano_from_decimals;
 use super::super::common::cedar::u256_hex;
 
 /// The amount layers a `Token::Erc20Transfer` context carries from a lowering.
 pub(super) struct HlAmount {
     /// `context.amount` — raw smallest-unit `U256`, lower-hex.
     pub raw_hex: String,
-    /// `context.amountNano` — raw × 10^(9 − decimals), or `None` if it overflows i64.
+    /// `context.amountNano` — `raw × 10^(9 − decimals)`, SATURATED to `i64::MAX`
+    /// when too large (fail-CLOSED for a quantity cap). Always `Some` here
+    /// (decimals are caller-supplied); the `Option` mirrors the EVM projection.
     pub nano: Option<i64>,
 }
 
@@ -43,25 +46,18 @@ pub(super) fn hl_amount_projection(amount: &Decimal, decimals: u32) -> HlAmount 
     } else {
         U256::from_str_radix(trimmed, 10).unwrap_or(U256::ZERO)
     };
-    let nano_scale = 9i32 - decimals as i32;
-    let nano = compute_nano(raw, nano_scale);
+    // Reuse the shared SATURATE-CLOSED nano projection: an HL amount too large for
+    // i64 saturates to i64::MAX (so an `amountNano >= N` quantity cap fails CLOSED)
+    // rather than omitting the field — which would fail OPEN, letting the order
+    // ride past the cap. Decimals are caller-supplied (always known) here.
+    let nano = Some(nano_from_decimals(
+        raw,
+        u8::try_from(decimals).unwrap_or(u8::MAX),
+    ));
     HlAmount {
         raw_hex: u256_hex(raw),
         nano,
     }
-}
-
-/// raw × 10^scale (scale = 9 − decimals), as i64; `None` on overflow.
-// `scale` ∈ [−9, 9] (9 − decimals, decimals ≤ 18) and each branch guards its
-// sign, so the `u64` casts never lose a sign.
-#[allow(clippy::cast_sign_loss)]
-fn compute_nano(raw: U256, scale: i32) -> Option<i64> {
-    let scaled = if scale >= 0 {
-        raw.checked_mul(U256::from(10u64).pow(U256::from(scale as u64)))?
-    } else {
-        raw / U256::from(10u64).pow(U256::from((-scale) as u64))
-    };
-    i64::try_from(scaled).ok()
 }
 
 #[cfg(test)]
@@ -89,5 +85,19 @@ mod tests {
         let p = hl_amount_projection(&Decimal::new("0"), 6);
         assert_eq!(p.raw_hex, "0x0");
         assert_eq!(p.nano, Some(0));
+    }
+
+    /// An astronomically large HL amount must SATURATE to i64::MAX (fail-CLOSED so
+    /// an `amountNano >= N` quantity cap still fires), NOT omit amountNano — which
+    /// would fail OPEN, letting the order ride past the cap.
+    #[test]
+    fn over_large_amount_saturates_closed_not_omitted() {
+        let huge = Decimal::new("99999999999999999999999999"); // ~10^26 USDC
+        let p = hl_amount_projection(&huge, 6);
+        assert_eq!(
+            p.nano,
+            Some(i64::MAX),
+            "over-large HL nano must saturate to i64::MAX, never None (fail-open)"
+        );
     }
 }

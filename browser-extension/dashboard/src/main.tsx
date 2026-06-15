@@ -9,11 +9,11 @@ import { initI18n } from "./i18n";
 
 const queryClient = new QueryClient();
 
-// One-time scopeball_* → pasu_* localStorage migration. Runs synchronously
+// One-time legacy-key to dambi localStorage migration. Runs synchronously
 // before bootstrapExtensionEnv() and the first render so the renamed JWT /
 // server-url / market-locale keys are populated before anything reads them —
 // a returning user keeps their session and preferences across the rename.
-migratePasuRenameLocalStorage();
+migrateDambiRenameLocalStorage();
 
 // i18n reads the persisted locale from localStorage, so it must init after
 // the key migration above and before the first render below.

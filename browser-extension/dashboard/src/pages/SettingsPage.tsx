@@ -6,11 +6,11 @@ import { Trans, useTranslation } from "react-i18next";
  *
  * Writes the runtime override to BOTH `localStorage` (dashboard) and
  * `chrome.storage.local` (service worker) under the same key, so one save
- * points the whole extension at a local/test server or prod without a
- * rebuild. The SW picks it up live (its `chrome.storage.onChanged`
+ * points the whole extension at a server URL without a rebuild. The SW picks
+ * it up live (its `chrome.storage.onChanged`
  * listener); the dashboard reads it on next load — hence the reload hint.
  */
-const KEY = "pasu_server_url";
+const KEY = "dambi_server_url";
 
 // Labels are i18n keys, resolved at render time (never call t() at import time).
 const PRESETS = [

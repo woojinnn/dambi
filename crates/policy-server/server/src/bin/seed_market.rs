@@ -28,7 +28,7 @@ use tracing_subscriber::EnvFilter;
 /// each row carries the badge; this row in `users` only exists so the FK is
 /// satisfied.
 const OFFICIAL_USER_ID: &str = "u_seed_official";
-const OFFICIAL_EMAIL: &str = "official@pasu.seed";
+const OFFICIAL_EMAIL: &str = "official@dambi.seed";
 
 #[derive(Deserialize)]
 struct SeedEntry {
@@ -60,7 +60,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     let pool = connect_pool(database_url, 10, std::time::Duration::from_secs(10)).await?;
-    tracing::info!("seeding marketplace into {database_url}");
+    // Redact embedded credentials (`scheme://user:pass@host/db`) before logging —
+    // a full DATABASE_URL at info level leaks the DB password into retained logs.
+    let safe_db = match database_url.split_once("://") {
+        Some((scheme, rest)) => {
+            let host_db = rest
+                .rsplit_once('@')
+                .map_or(rest, |(_creds, hostdb)| hostdb);
+            format!("{scheme}://{host_db}")
+        }
+        None => "<redacted>".to_string(),
+    };
+    tracing::info!("seeding marketplace into {safe_db}");
 
     ensure_official_user(&pool).await?;
     let entries: Vec<SeedEntry> = serde_json::from_str(PHASE1_JSON)?;

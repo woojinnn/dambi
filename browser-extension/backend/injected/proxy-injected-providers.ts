@@ -2,9 +2,10 @@ import { WindowPostMessageStream } from "@metamask/post-message-stream";
 import { ethErrors } from "eth-rpc-errors";
 import { Identifier, PROVIDER_MARKER } from "@lib/identifier";
 import {
-  sendToStreamAndAwaitResponse,
+  sendRequestAndAwaitVerdict,
   sendToStreamAndDisregard,
 } from "@lib/messages";
+import { createVerdictReceiver } from "@lib/verdict-channel";
 import { RequestType } from "@lib/types";
 import type {
   ExecutionReportOutcome,
@@ -50,7 +51,7 @@ interface InstallState {
   pollHandle: number | undefined;
 }
 
-const INSTALL_STATE = Symbol.for("__pasu_provider_proxy_install_state__");
+const INSTALL_STATE = Symbol.for("__dambi_provider_proxy_install_state__");
 const windowWithInstallState = window as unknown as Record<
   PropertyKey,
   unknown
@@ -74,11 +75,16 @@ const stream = new WindowPostMessageStream({
   target: Identifier.CONTENT_SCRIPT,
 }) as WritableStream;
 
+// C1: verdicts are read ONLY from the authenticated MessageChannel the ISOLATED
+// bridge transfers at document_start — never from the page-observable stream —
+// so a same-realm page cannot forge an `allow`. See `@lib/verdict-channel`.
+const verdictReceiver = createVerdictReceiver(Identifier.VERDICT_PORT_INIT);
+
 const REJECT_TX = ethErrors.provider.userRejectedRequest(
-  "Pasu: transaction blocked by policy",
+  "Dambi: transaction blocked by policy",
 );
 const REJECT_SIG = ethErrors.provider.userRejectedRequest(
-  "Pasu: signature blocked by policy",
+  "Dambi: signature blocked by policy",
 );
 
 const TYPED_SIGNATURE_METHODS = new Set([
@@ -161,7 +167,7 @@ async function readChainId(
       Reflect.apply(request, provider, [{ method: "eth_chainId" }]),
       new Promise<never>((_, reject) => {
         window.setTimeout(
-          () => reject(new Error("Pasu: chainId timeout")),
+          () => reject(new Error("Dambi: chainId timeout")),
           1_500,
         );
       }),
@@ -192,7 +198,7 @@ async function checkTransaction(
     transaction,
   } as MessageData;
 
-  return sendToStreamAndAwaitResponse(stream, data);
+  return sendRequestAndAwaitVerdict(stream, verdictReceiver, data);
 }
 
 async function checkWalletSendCalls(
@@ -250,7 +256,7 @@ async function checkTypedSignature(
       ? second
       : `0x${"0".repeat(40)}`;
 
-  return sendToStreamAndAwaitResponse(stream, {
+  return sendRequestAndAwaitVerdict(stream, verdictReceiver, {
     type: RequestType.TYPED_SIGNATURE,
     chainId: await readChainId(provider, readRequest),
     hostname: location.hostname,
@@ -263,7 +269,7 @@ async function checkUntypedSignature(params: unknown[]): Promise<boolean> {
   const [first, second] = params;
   if (first === undefined || second === undefined) return true;
 
-  return sendToStreamAndAwaitResponse(stream, {
+  return sendRequestAndAwaitVerdict(stream, verdictReceiver, {
     type: RequestType.UNTYPED_SIGNATURE,
     hostname: location.hostname,
     message: String(looksLikeAddress(first) ? second : first),
@@ -357,7 +363,7 @@ async function ensureAllowed(
 
 function logRawTransaction(params: unknown[]): void {
   const raw = String(params[0] ?? "");
-  console.warn("Pasu: eth_sendRawTransaction pass-through advisory", {
+  console.warn("Dambi: eth_sendRawTransaction pass-through advisory", {
     hostname: location.hostname,
     rawPreview: raw.slice(0, 18),
   });
@@ -575,7 +581,7 @@ function rejectJsonRpc(
 }
 
 function reportFrozenProvider(provider: Eip1193Provider, error: unknown): void {
-  console.error("Pasu: provider is frozen and cannot be wrapped", error);
+  console.error("Dambi: provider is frozen and cannot be wrapped", error);
   stream.write({
     requestId: `frozen-provider-${Date.now().toString(16)}`,
     data: {
@@ -593,8 +599,8 @@ function reportFrozenProvider(provider: Eip1193Provider, error: unknown): void {
 // PROVIDER_MARKER is not enough: the marker survives even when the
 // wrapped methods were stomped, leaving us with a "wrapped" object
 // whose request is the unwrapped native one.
-const WRAP_MARKER = Symbol.for("__pasu_wrapper__");
-const WRAP_TARGET = Symbol.for("__pasu_wrapper_target__");
+const WRAP_MARKER = Symbol.for("__dambi_wrapper__");
+const WRAP_TARGET = Symbol.for("__dambi_wrapper_target__");
 type WithMarker<T> = T & { [WRAP_MARKER]?: true; [WRAP_TARGET]?: T };
 
 function isAlreadyWrapped(fn: unknown): boolean {
@@ -950,7 +956,7 @@ function discoverAndProxyAll(): void {
   }
 }
 
-const PASU_RDNS = "dev.scopeball.wrapper";
+const DAMBI_RDNS = "dev.dambi.wrapper";
 const FALLBACK_ICON =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQI12P4//8/AwAI/AL+T1pNCgAAAABJRU5ErkJggg==";
 
@@ -966,10 +972,10 @@ function reannounceWrapped(detail: unknown): void {
   reannouncedProviders.add(provider);
 
   const info = Object.freeze({
-    uuid: `pasu-${providerDetail.info?.uuid ?? Math.random().toString(36).slice(2)}`,
-    name: `Pasu (wraps ${providerDetail.info?.name ?? "provider"})`,
+    uuid: `dambi-${providerDetail.info?.uuid ?? Math.random().toString(36).slice(2)}`,
+    name: `Dambi (wraps ${providerDetail.info?.name ?? "provider"})`,
     icon: providerDetail.info?.icon ?? FALLBACK_ICON,
-    rdns: PASU_RDNS,
+    rdns: DAMBI_RDNS,
   });
 
   window.dispatchEvent(
@@ -981,7 +987,7 @@ function reannounceWrapped(detail: unknown): void {
 
 const eip6963Listener = (event: Event) => {
   const detail = (event as CustomEvent).detail;
-  if (detail?.info?.rdns === PASU_RDNS) return;
+  if (detail?.info?.rdns === DAMBI_RDNS) return;
   reannounceWrapped(detail);
 };
 installState.eip6963Listener = eip6963Listener;

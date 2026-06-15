@@ -1,5 +1,5 @@
 /* ============================================================
-   Pasu — confirm (Review request) · ④ B 우측 드로어 GuardCard
+   Dambi — confirm (Review request) · ④ B 우측 드로어 GuardCard
    Sentinel(navy) 룩. 카드가 곧 창(window) 전체.
    구조는 인터셉트 B 카드, 데이터는 VerdictDto 바인딩.
    ============================================================ */
@@ -238,6 +238,39 @@ body {
   color: var(--slate-400);
   font-family: var(--ff-mono);
   margin-top: 1px;
+}
+
+.sig-preview {
+  border: 1px solid var(--hair);
+  border-radius: var(--r-md);
+  background: var(--white);
+  padding: 10px 11px;
+}
+.sig-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--slate-600);
+}
+.sig-message {
+  margin: 7px 0 0;
+  max-height: 142px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: var(--ff-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--slate-600);
+  background: var(--fog);
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  padding: 8px;
+}
+.sig-note {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--slate-400);
 }
 
 .matched-label {

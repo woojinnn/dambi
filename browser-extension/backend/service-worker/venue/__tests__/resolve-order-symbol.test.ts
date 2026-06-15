@@ -242,7 +242,7 @@ describe("resolveOrderSymbol", () => {
   it("patches symbol so collectOrderEnrichment keys its market by the resolved name", async () => {
     const client = new HlInfoClient({ fetchImpl: infoFetch({ markPx: "60000" }) });
     const action = body("ASSET-0");
-    const p = orderPayload(0, { vaultAddress: VAULT }); // resolvable master
+    const p = orderPayload(0, { wallet_id: { address: VAULT, chains: [] } }); // resolvable master (trusted)
 
     await resolveOrderSymbol(action, p, client);
     expect(symbolOf(action)).toBe("BTC");

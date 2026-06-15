@@ -285,11 +285,11 @@ describe("collectOrderEnrichment", () => {
     expect(out.account ?? {}).not.toHaveProperty("margin_used_ratio_bps");
   });
 
-  it("uses vaultAddress as the master", async () => {
+  it("resolves the master from the stamped wallet_id (not a page vaultAddress)", async () => {
     const client = new HlInfoClient({ fetchImpl: infoFetch() });
     const out = await collectOrderEnrichment(
       order("BTC"),
-      orderPayload(0, { vaultAddress: VAULT }),
+      orderPayload(0, { wallet_id: { address: VAULT, chains: [] } }),
       client,
     );
     expect(out.markets?.BTC?.max_leverage).toBe(50);
@@ -329,7 +329,7 @@ const LIVE = process.env.HL_LIVE === "1";
     const client = new HlInfoClient({ fetchImpl: globalThis.fetch, timeoutMs: 8000 });
     const out = await collectOrderEnrichment(
       order("BTC", "0.1"),
-      orderPayload(0, { vaultAddress: REAL }),
+      orderPayload(0, { wallet_id: { address: REAL, chains: [] } }),
       client,
     );
     // eslint-disable-next-line no-console

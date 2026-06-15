@@ -1,10 +1,10 @@
-# gitleaks config for pasu.
+# gitleaks config for dambi.
 # Extends the built-in rules; allowlists known non-secret high-entropy data so
 # the scan flags REAL secrets only. (A full-history scan of the default ruleset
 # produced ~3.3k findings, all `generic-api-key` entropy hits on blockchain data
 # — addresses, tx hashes, EIP-712 signatures, calldata — the Chrome extension
 # PUBLIC key, and the vendored yarn binary. None were real secrets.)
-title = "pasu gitleaks"
+title = "dambi gitleaks"
 
 [extend]
 useDefault = true
@@ -53,5 +53,7 @@ paths = [
 ]
 regexes = [
   '''0x[a-fA-F0-9]{40}\b''',                          # EVM addresses are never secrets
+  '''permit2-max-signature-warn''',                    # market policy id, not a secret
+  '''permit2-sign-allowance-far-expiry-warn''',        # market policy id, not a secret
   '''test-secret-only-do-not-use-in-production''',    # explicit throwaway test JWT secret
 ]

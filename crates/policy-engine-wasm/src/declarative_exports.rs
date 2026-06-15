@@ -193,6 +193,17 @@ thread_local! {
 /// function / version, matching how the registry indexes manifests). Both
 /// `decoder_id` and `bundle_id` are populated to the same value to preserve the
 /// existing [`DeclarativeInstallResultDto`] wire shape.
+/// Selectors permitted to install as ADDRESS-AGNOSTIC (selector-only, any
+/// contract) decoders. Restricted to standard NFT `setApprovalForAll`
+/// (`0xa22cb465`) — the only call whose security meaning is identical on every
+/// collection and which is disjoint from every fungible-token selector. The
+/// registry `build-index` already restricts `address_agnostic` to this, but the
+/// WASM install is the TRUST BOUNDARY: a compromised/MITM'd registry response
+/// could otherwise install an agnostic decoder for a high-value fungible
+/// selector (e.g. erc20 `approve` `0x095ea7b3`), forcing ScopeBall to decode
+/// EVERY such call on ANY contract via an attacker-chosen bundle. Enforce here.
+const AGNOSTIC_SELECTOR_ALLOWLIST: &[&str] = &["0xa22cb465"];
+
 #[wasm_bindgen]
 pub fn declarative_install_v3_json(bundle_json: String) -> String {
     let result = (|| -> Result<DeclarativeInstallResultDto, EngineErrorDto> {
@@ -257,6 +268,23 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                     .map(str::to_owned);
                 Some((vc, pt, wt))
             });
+
+        // TRUST BOUNDARY: refuse an address-agnostic (any-contract) install for a
+        // selector outside the allowlist, so a malicious/MITM'd registry cannot
+        // register an any-contract decoder for a fungible selector and force every
+        // such call through an attacker-chosen bundle. (Address-SPECIFIC installs
+        // are unaffected — they bind to the manifest's `chain_to_addresses`.)
+        if bundle_match.address_agnostic
+            && !AGNOSTIC_SELECTOR_ALLOWLIST.contains(&selector.as_str())
+        {
+            return Err(EngineErrorDto::new(
+                "agnostic_selector_not_allowed",
+                format!(
+                    "address-agnostic install refused for selector {selector}: only \
+                     {AGNOSTIC_SELECTOR_ALLOWLIST:?} may install as any-contract decoders"
+                ),
+            ));
+        }
 
         DECLARATIVE_V3_STATE.with(|state| {
             let mut state = state.borrow_mut();
@@ -1876,14 +1904,23 @@ fn dispatch_opcode_stream(
                     ));
                 }
                 V3UnknownOpcodePolicy::Warn => {
-                    // Drop a single unmapped opcode (the registry's `warn` policy
-                    // intentionally skips benign/unmodelled plumbing opcodes). The
-                    // N2 fail-open it could cause — an ALL-dropped stream becoming
-                    // an empty Multicall that aggregates to PASS — is closed at the
-                    // function tail: an empty result surfaces as Unknown (warn).
+                    // An UNMAPPED opcode under `warn` must NOT silently vanish. A
+                    // PARTIAL decode that dropped a recipient-bearing opcode (a
+                    // SWEEP/TRANSFER/UNWRAP hidden inside an otherwise-benign swap
+                    // stream) would aggregate to PASS — the H2 fail-open. Surface
+                    // the dropped leg as an `Unknown` so the WHOLE stream
+                    // warn-closes instead of riding through. `Skip` remains the
+                    // explicit opt-in for provably-benign plumbing opcodes a
+                    // manifest author has vetted as non-fund-moving.
                     eprintln!(
-                        "[declarative_exports] warn: unknown opcode 0x{opcode:02x} at index {i}"
+                        "[declarative_exports] warn: unknown opcode 0x{opcode:02x} at index {i} → warn-close (Unknown leg)"
                     );
+                    actions.push(unknown_leg(
+                        ctx.tx_to,
+                        ctx.chain.clone(),
+                        ctx.raw_calldata.to_string(),
+                        ctx.value,
+                    ));
                     continue;
                 }
                 V3UnknownOpcodePolicy::Skip => continue,
@@ -1934,10 +1971,12 @@ fn dispatch_opcode_stream(
         actions.push(child_action);
     }
 
-    // N2: an opcode stream that decoded to NOTHING (every opcode unmapped and
-    // dropped above) must NOT become an empty `Multicall` — that aggregates to
-    // PASS (fail-open). Surface a single `Unknown` so it warn-closes. A PARTIAL
-    // decode keeps its mapped legs (honouring `warn`=skip for the rest).
+    // N2 (defensive): an opcode stream that produced NO legs at all (only
+    // reachable now via empty `commands_bytes`, since unmapped opcodes under
+    // `warn`/`deny` no longer vanish) must NOT become an empty `Multicall` —
+    // that aggregates to PASS (fail-open). Surface a single `Unknown` so it
+    // warn-closes. A PARTIAL decode keeps its mapped legs AND carries an
+    // `Unknown` for each unmapped (warn-closing the whole stream).
     if actions.is_empty() {
         return Ok(unknown_leg(
             ctx.tx_to,
@@ -3640,12 +3679,11 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn opcode_stream_all_unknown_decodes_to_unknown_not_empty_multicall() {
+    fn opcode_stream_all_unknown_warn_closes_not_empty_multicall() {
         // An opcode stream whose commands are ALL unmapped used to drop every leg
         // and return an EMPTY Multicall — which aggregates to PASS (N2 fail-open).
-        // It must now surface a single `Unknown` body so it warn-closes. (A single
-        // unmapped opcode in an otherwise-decoded stream is still dropped — the
-        // registry's `warn`=skip intent; only an all-empty result is escalated.)
+        // Each unmapped opcode under `warn` now surfaces an `Unknown` leg, so the
+        // stream warn-closes (here: a single-opcode stream → Multicall[Unknown]).
         let args = json!({});
         let ctx = V3MapContext {
             chain: V3ChainId::new("eip155:1".to_string()),
@@ -3675,10 +3713,80 @@ mod tests {
         )
         .unwrap();
         let body_json = serde_json::to_value(body).unwrap();
+        // Warn-closes: a Multicall carrying the Unknown leg (NOT an empty
+        // Multicall that would aggregate to PASS).
+        assert_eq!(body_json["domain"], "multicall", "{body_json}");
+        let acts = body_json["actions"].as_array().unwrap();
+        assert_eq!(acts.len(), 1, "{body_json}");
+        assert_eq!(acts[0]["domain"], "unknown", "{body_json}");
+    }
+
+    #[test]
+    fn opcode_stream_partial_unmapped_leg_warn_closes_not_dropped() {
+        // H2 regression guard: a PARTIAL decode (one MAPPED opcode + one UNMAPPED)
+        // must keep the mapped leg AND carry an `Unknown` for the unmapped one, so
+        // the whole stream warn-closes. Previously the unmapped leg was silently
+        // dropped and the stream aggregated to PASS — the exact fund-redirect
+        // fail-open (a SWEEP-to-attacker opcode hidden inside a benign swap).
+        let args = json!({});
+        let ctx = V3MapContext {
+            chain: V3ChainId::new("eip155:1".to_string()),
+            tx_to: parse_v3_address("0x000000000000000000000000000000000000babe", "to").unwrap(),
+            tx_from: parse_v3_address("0x000000000000000000000000000000000000aaaa", "from")
+                .unwrap(),
+            value: V3U256::ZERO,
+            submitted_at: V3Time::from_unix(1_700_000_000),
+            args_json: &args,
+            raw_calldata: "0xabcdef",
+            resolved: std::collections::BTreeMap::new(),
+            derived: std::collections::BTreeMap::new(),
+            inputs: None,
+        };
+        // 0x00 → a fully-literal (no `$args`) Erc20Transfer leg that builds with
+        // no decoded inputs; 0x01 → unmapped (must warn-close, not vanish).
+        let mut per_opcode_body = serde_json::Map::new();
+        per_opcode_body.insert(
+            "0x00".to_string(),
+            json!({
+                "body": {
+                    "domain": "token",
+                    "token": {
+                        "action": "erc20_transfer",
+                        "erc20_transfer": {
+                            "token": { "key": { "standard": "erc20", "chain": "eip155:1",
+                                "address": "0x000000000000000000000000000000000000c0de" } },
+                            "recipient": "0x0000000000000000000000000000000000001234",
+                            "amount": "0x1"
+                        }
+                    }
+                }
+            }),
+        );
+        let commands = [0x00u8, 0x01u8];
+        let body = dispatch_opcode_stream(
+            &ctx,
+            &per_opcode_body,
+            &commands,
+            &[],
+            0xff,
+            0x00,
+            V3UnknownOpcodePolicy::Warn,
+            0,
+            5,
+        )
+        .unwrap();
+        let body_json = serde_json::to_value(body).unwrap();
+        assert_eq!(body_json["domain"], "multicall", "{body_json}");
+        let acts = body_json["actions"].as_array().unwrap();
         assert_eq!(
-            body_json["domain"], "unknown",
-            "all-unknown opcode stream must surface Unknown (not an empty Multicall \
-             that aggregates to PASS): {body_json}"
+            acts.len(),
+            2,
+            "mapped leg kept AND unmapped leg surfaced (not dropped): {body_json}"
+        );
+        assert_eq!(acts[0]["domain"], "token", "{body_json}");
+        assert_eq!(
+            acts[1]["domain"], "unknown",
+            "the unmapped opcode must warn-close as Unknown, not vanish: {body_json}"
         );
     }
 
@@ -3806,6 +3914,25 @@ mod tests {
             "{body}"
         );
         assert_eq!(body["approved"], true, "{body}");
+    }
+
+    /// TRUST BOUNDARY (WP4): an address-agnostic install for a NON-allowlisted
+    /// selector — here erc20 `approve` `0x095ea7b3` — must be REFUSED. Otherwise a
+    /// compromised / MITM'd registry could register an any-contract decoder for a
+    /// fungible selector and force every such call through an attacker-chosen
+    /// bundle. The allowlisted `setApprovalForAll` agnostic install still succeeds
+    /// (`address_agnostic_set_approval_for_all_decodes_on_unregistered_collection`).
+    #[test]
+    fn agnostic_install_refused_for_non_allowlisted_selector() {
+        let mut bundle = set_approval_for_all_agnostic_bundle();
+        bundle["match"]["selector"] = json!("0x095ea7b3"); // erc20 approve — NOT allowlisted
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], false, "{installed}");
+        assert_eq!(
+            installed["error"]["kind"], "agnostic_selector_not_allowed",
+            "{installed}"
+        );
     }
 
     #[test]

@@ -100,7 +100,26 @@ export async function isWalletRegistered(uid: string, address: string): Promise<
   return s.wallets.byAddress[address.toLowerCase()] !== undefined;
 }
 
-export async function resolveBundlesForWallet(uid: string, fromAddress: string): Promise<ResolvedBundle[]> {
+export interface ResolveResult {
+  bundles: ResolvedBundle[];
+  /** defId들 중 render가 throw한 것 + 선언된 `@severity`(IR annotation에서 읽음 —
+   *  render 성공 없이도 가용). venue DENY-CLOSED 경로가 "평가 못 한 DENY 정책"을
+   *  조용히 드롭(fail-open)하는 대신 차단하도록 신호한다. */
+  renderFaults: { defId: string; severity: string | undefined }[];
+}
+
+/** def의 선언 `@severity` — render 실패 시에도 IR annotation은 정적이라 읽힌다
+ *  (render는 hole만 채움). */
+function defSeverity(def: PolicyDef): string | undefined {
+  const ann = (def.skeleton.ir as { annotations?: { name: string; value: string }[] } | null)
+    ?.annotations;
+  return Array.isArray(ann) ? ann.find((a) => a.name === "severity")?.value : undefined;
+}
+
+export async function resolveBundlesForWalletWithFaults(
+  uid: string,
+  fromAddress: string,
+): Promise<ResolveResult> {
   await ensureSeeded(uid);
   const s = await readStore(uid);
   const addr = fromAddress.toLowerCase();
@@ -120,7 +139,7 @@ export async function resolveBundlesForWallet(uid: string, fromAddress: string):
   const holesOk = (def: PolicyDef, params?: Record<string, HoleValue>): boolean => {
     const missing = missingRequiredHoles(def, params);
     if (missing.length > 0) {
-      console.warn(`[Pasu] 빈칸 미충전 정책 건너뜀: ${def.displayName} (${missing.join(", ")})`);
+      console.warn(`[Dambi] 빈칸 미충전 정책 건너뜀: ${def.displayName} (${missing.join(", ")})`);
       return false;
     }
     return true;
@@ -143,6 +162,7 @@ export async function resolveBundlesForWallet(uid: string, fromAddress: string):
   }
 
   const out: ResolvedBundle[] = [];
+  const renderFaults: ResolveResult["renderFaults"] = [];
   for (const { defId, params } of wanted) {
     const def = s.library.defs[defId];
     try {
@@ -153,11 +173,24 @@ export async function resolveBundlesForWallet(uid: string, fromAddress: string):
       const manifest = r.manifest ?? emptyManifestFor(def);
       out.push({ id: defId, policy: r.text, manifest, trigger: extractTrigger(manifest) });
     } catch (err) {
-      // 한 정의의 손상이 전체 평가를 막지 않게 — 그 정의만 건너뛴다.
-      console.warn(`[Pasu] 정책 렌더 실패 — 건너뜀: ${defId}`, err);
+      // 한 정의의 손상이 전체 평가를 막지 않게 — 그 정의만 건너뛴다(warn-closed
+      // tx/sig에선 baseline으로 degrade). 단 fault를 severity와 함께 surface해서
+      // venue deny-closed 경로가 "평가 못 한 DENY 정책"엔 차단(fail-open 금지)하도록.
+      console.warn(`[Dambi] 정책 렌더 실패 — 건너뜀: ${defId}`, err);
+      renderFaults.push({ defId, severity: defSeverity(def) });
     }
   }
-  return out;
+  return { bundles: out, renderFaults };
+}
+
+/** Back-compat: warn-closed 호출자(tx / typed-sig)는 bundles만 필요하다 — 거기선
+ *  드롭된 정책이 baseline으로 degrade. venue 경로는 faults-aware 변형을 써서
+ *  faulted DENY 정책에 deny-close 한다. */
+export async function resolveBundlesForWallet(
+  uid: string,
+  fromAddress: string,
+): Promise<ResolvedBundle[]> {
+  return (await resolveBundlesForWalletWithFaults(uid, fromAddress)).bundles;
 }
 
 /** manifest 없는 def의 평가용 최소 ManifestV2. trigger/policy_rpc/custom_context는

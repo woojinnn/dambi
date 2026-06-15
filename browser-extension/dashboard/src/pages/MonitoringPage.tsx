@@ -51,7 +51,7 @@ import "./monitoring.css";
  *   single   → L2 layout: per-wallet header band (FAIL/WARN/CALM + VaR
  *              + unlimited count), action queue (urgent findings + risky
  *              approvals), holdings, approvals. Closer to the original
- *              front/pasu-v3 drilldown experience.
+ *              front/dambi-v3 drilldown experience.
  *
  * Risk overlay (UNLIMITED / BLOCKED inline on a holding) and VaR
  * (= min(allowance, balance) × price) are computed client-side by

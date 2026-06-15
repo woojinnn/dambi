@@ -1,0 +1,86 @@
+# Build + package the browser extension on a release tag and attach the
+# Chrome/Firefox zips to a GitHub Release. The store upload (Chrome Web Store /
+# AMO) stays MANUAL — this only produces the reproducible, prod-pinned artifacts
+# to upload, so a human still gates what reaches users.
+#
+# Trigger: push a tag `ext-v*` (e.g. ext-v1.2.0), or run by hand.
+#
+# The registry URL + pinned public key + REQUIRE flag are baked at build time.
+# In CI there is no gitignored .env, so they come from repo VARIABLES (not
+# secrets — they are public in the shipped bundle anyway; dotenv-webpack
+# systemvars:true lets env override). Set, one-time, in repo Settings → Variables:
+#   REGISTRY_BASE_URL              = https://registry-api-v3-65uggwflcq-du.a.run.app
+#   PINNED_BUNDLE_PUBLIC_KEY       = <prod SPKI base64>
+#   DAMBI_REQUIRE_BUNDLE_SIGNATURE = false   (flip to true on the staged rollout)
+name: extension-release
+
+on:
+  push:
+    tags: ["ext-v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # create the GitHub Release + upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable corepack + Yarn 4
+        run: |
+          corepack enable
+          corepack prepare yarn@4.14.1 --activate
+
+      - working-directory: browser-extension
+        run: yarn install --immutable
+
+      # Fail BEFORE building if the prod build config is missing — otherwise a
+      # release could bake an empty/wrong pin (advisory while REQUIRE=false, but
+      # it would silently ship un-validated until the REQUIRE flip).
+      - name: Require prod build config
+        env:
+          REGISTRY_BASE_URL: ${{ vars.REGISTRY_BASE_URL }}
+          PINNED_BUNDLE_PUBLIC_KEY: ${{ vars.PINNED_BUNDLE_PUBLIC_KEY }}
+        run: |
+          : "${REGISTRY_BASE_URL:?set repo Variable REGISTRY_BASE_URL (https prod proxy URL)}"
+          : "${PINNED_BUNDLE_PUBLIC_KEY:?set repo Variable PINNED_BUNDLE_PUBLIC_KEY (prod SPKI base64)}"
+          case "$REGISTRY_BASE_URL" in https://*) ;; *) echo "REGISTRY_BASE_URL must be https://"; exit 1 ;; esac
+          echo "prod build config present (URL=$REGISTRY_BASE_URL, pin len=${#PINNED_BUNDLE_PUBLIC_KEY})."
+
+      - name: Build + zip Chrome and Firefox (prod-pinned)
+        working-directory: browser-extension
+        env:
+          REGISTRY_BASE_URL: ${{ vars.REGISTRY_BASE_URL }}
+          PINNED_BUNDLE_PUBLIC_KEY: ${{ vars.PINNED_BUNDLE_PUBLIC_KEY }}
+          DAMBI_REQUIRE_BUNDLE_SIGNATURE: ${{ vars.DAMBI_REQUIRE_BUNDLE_SIGNATURE }}
+        run: |
+          # build:* run prepare:wasm (../scripts/wasm-build.sh) → needs the rust +
+          # wasm-pack toolchain installed above. A real fat-LTO build, not the
+          # SKIP_WASM CI shortcut — the release artifact must be the true bundle.
+          yarn build:chrome
+          yarn build:firefox
+          yarn zip:chrome
+          yarn zip:firefox
+
+      - name: Create GitHub Release with extension zips
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            browser-extension/dist/chrome.zip \
+            browser-extension/dist/firefox.zip \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Reproducible extension build for ${GITHUB_REF_NAME}. Registry URL + pinned key baked at build time. Upload chrome.zip → Chrome Web Store and firefox.zip → AMO manually."

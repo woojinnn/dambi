@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use alloy_primitives::U256;
 
 use policy_state::{Address, Balance, BlockHeight, ChainId, Time, TokenKey, WalletState};
@@ -119,6 +121,17 @@ impl Orchestrator {
         state: &mut WalletState,
         now: Time,
     ) -> Result<PrimitivesReport, SyncError> {
+        let mut block_cache = HashMap::new();
+        self.sync_primitives_with_block_cache(state, now, &mut block_cache)
+            .await
+    }
+
+    pub async fn sync_primitives_with_block_cache(
+        &self,
+        state: &mut WalletState,
+        now: Time,
+        block_cache: &mut HashMap<ChainId, u64>,
+    ) -> Result<PrimitivesReport, SyncError> {
         if self.router_ref().is_none() {
             return Ok(PrimitivesReport {
                 errors: vec!["no router configured".into()],
@@ -130,7 +143,10 @@ impl Orchestrator {
         let plan = plan_primitive_fetches(state);
 
         for request in plan.requests {
-            match self.fetch_primitive_update(&request, plan.owner).await {
+            match self
+                .fetch_primitive_update(&request, plan.owner, block_cache)
+                .await
+            {
                 Ok(updates) => {
                     for update in updates {
                         apply_primitive_update(state, &mut report, update, now);
@@ -151,6 +167,7 @@ impl Orchestrator {
         &self,
         request: &PrimitiveFetchRequest,
         owner: Address,
+        block_cache: &mut HashMap<ChainId, u64>,
     ) -> Result<Vec<PrimitiveFetchUpdate>, SyncError> {
         let Some(router) = self.router_ref() else {
             return Err(SyncError::FetchFailed {
@@ -161,7 +178,13 @@ impl Orchestrator {
 
         match request {
             PrimitiveFetchRequest::BlockHeight { chain } => {
-                let number = router.eth_block_number(chain).await?;
+                let number = if let Some(number) = block_cache.get(chain).copied() {
+                    number
+                } else {
+                    let number = router.eth_block_number(chain).await?;
+                    block_cache.insert(chain.clone(), number);
+                    number
+                };
                 Ok(vec![PrimitiveFetchUpdate::BlockHeight {
                     chain: chain.clone(),
                     number,

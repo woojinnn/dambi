@@ -34,6 +34,10 @@ import {
   type DeclarativeV3CacheEntry,
 } from "./declarative-v3-cache";
 import { fetchStarted, fetchEnded } from "../diagnostics";
+import {
+  readBundleSigDefines,
+  verifyBundleSignature,
+} from "./bundle-verify";
 
 /**
  * Cached v3 install results keyed by canonical callkey. The process-local map
@@ -67,7 +71,11 @@ export type InstallV3Stage =
   | "fetch_status"
   | "fetch_json"
   | "parse"
+  | "verify"
   | "install";
+
+/** Build-time bundle-signature policy (pinned key + require flag), read once. */
+const bundleSigDefines = readBundleSigDefines();
 
 export class InstallDeclarativeV3Error extends Error {
   constructor(
@@ -159,7 +167,7 @@ async function timedRegistryFetch(
   const sentAtMs = Date.now();
   const startedAt = performance.now();
   const traceSeq = fetchStarted(label, url);
-  console.info("[Pasu] registry-fetch → sent", {
+  console.info("[Dambi] registry-fetch → sent", {
     label,
     url,
     sentAt: new Date(sentAtMs).toISOString(),
@@ -168,7 +176,7 @@ async function timedRegistryFetch(
     const response = await doFetch(url);
     const durationMs = Math.round(performance.now() - startedAt);
     fetchEnded(traceSeq, response.status, durationMs);
-    console.info("[Pasu] registry-fetch ← recv", {
+    console.info("[Dambi] registry-fetch ← recv", {
       label,
       url,
       sentAt: new Date(sentAtMs).toISOString(),
@@ -184,7 +192,7 @@ async function timedRegistryFetch(
       `error:${err instanceof Error ? err.message : String(err)}`,
       durationMs,
     );
-    console.warn("[Pasu] registry-fetch ✗ error", {
+    console.warn("[Dambi] registry-fetch ✗ error", {
       label,
       url,
       sentAt: new Date(sentAtMs).toISOString(),
@@ -298,7 +306,7 @@ export async function installDeclarativeBundleV3(
     if (parsedBundle) {
       // Cache-hit marker for repeat calls in the same service-worker lifetime;
       // WASM already has this bundle installed in its in-memory v3 state.
-      console.info("[Pasu] installDeclarativeBundleV3 cache-hit", {
+      console.info("[Dambi] installDeclarativeBundleV3 cache-hit", {
         callkey: cacheKey,
         bundleId: cached.bundle_id,
         decoderId: cached.decoder_id,
@@ -316,6 +324,13 @@ export async function installDeclarativeBundleV3(
   // process-local cache is empty, but a prior lifetime may have persisted the
   // bundle. On hit, reinstall into WASM and rebuild the in-memory cache without
   // a registry round-trip.
+  //
+  // Signature trust: the verify gate runs BEFORE install (and install precedes
+  // persistence), so only signature-verified bundles are ever persisted here.
+  // Rehydrate therefore reinstalls a previously-verified bundle without a fresh
+  // sig fetch. Defeating this requires DIRECT chrome.storage tampering — a
+  // strictly stronger local attacker than the registry-MITM this guards — which
+  // is out of scope for v1 (documented in REGISTRY_ARCHITECTURE.md).
   try {
     const storageEntry = await declarativeV3Cache.get(cacheKey);
     if (storageEntry) {
@@ -334,7 +349,7 @@ export async function installDeclarativeBundleV3(
         v3InstallCache.set(k, reinstalled);
         v3CachedBundleByCallKey.set(k, storageEntry.bundle);
       }
-      console.info("[Pasu] installDeclarativeBundleV3 storage-hit", {
+      console.info("[Dambi] installDeclarativeBundleV3 storage-hit", {
         callkey: cacheKey,
         bundleId: reinstalled.bundle_id,
         decoderId: reinstalled.decoder_id,
@@ -349,7 +364,7 @@ export async function installDeclarativeBundleV3(
     // chrome.storage 읽기 실패 / WASM install 실패 — 무음으로 cold fetch 로
     // 떨어뜨림. storage corruption 이 SW 를 brick 시키지 않게 함.
     console.warn(
-      "[Pasu] installDeclarativeBundleV3 storage rehydrate failed",
+      "[Dambi] installDeclarativeBundleV3 storage rehydrate failed",
       err instanceof Error ? err.message : err,
     );
   }
@@ -411,6 +426,24 @@ export async function installDeclarativeBundleV3(
     return null;
   }
 
+  // Supply-chain gate — verify the bundle's detached signature BEFORE install.
+  // Hash the RAW response bundle (not parseBundleV3 output). tx flow is
+  // warn-closed, so a throw here degrades to the same fail-closed warn as a miss.
+  const verifyResult = await verifyBundleSignature({
+    bundle: parsedResponse.bundle,
+    claimedSha256: parsedResponse.bundle_sha256,
+    baseUrl,
+    fetchImpl: doFetch,
+    ...bundleSigDefines,
+  });
+  if (!verifyResult.ok) {
+    throw new InstallDeclarativeV3Error(
+      "verify",
+      url,
+      new Error(`bundle signature: ${verifyResult.reason}`),
+    );
+  }
+
   const bundleJson = JSON.stringify(parsedResponse.bundle);
   let installed: DeclarativeInstallResult;
   try {
@@ -470,14 +503,14 @@ export async function installDeclarativeBundleV3(
     // Persisting is best-effort — degrade gracefully so a storage fault
     // (quota exceeded etc.) cannot block the v3 install path itself.
     console.warn(
-      "[Pasu] installDeclarativeBundleV3 storage persist failed",
+      "[Dambi] installDeclarativeBundleV3 storage persist failed",
       err instanceof Error ? err.message : err,
     );
   }
 
   // Fresh-install marker: registry fetch, parseBundleV3, WASM install, and
   // best-effort chrome.storage mirroring all completed for this callkey.
-  console.info("[Pasu] installDeclarativeBundleV3 fresh-install", {
+  console.info("[Dambi] installDeclarativeBundleV3 fresh-install", {
     callkey: cacheKey,
     url,
     bundleId: installed.bundle_id,
@@ -520,7 +553,7 @@ export async function installDeclarativeBundleV3ByTypedData(
   const cached = v3InstallCache.get(cacheKey);
   if (cached) {
     console.info(
-      "[Pasu] installDeclarativeBundleV3ByTypedData cache-hit",
+      "[Dambi] installDeclarativeBundleV3ByTypedData cache-hit",
       {
         typedDataKey: cacheKey,
         bundleId: cached.bundle_id,
@@ -539,7 +572,7 @@ export async function installDeclarativeBundleV3ByTypedData(
     response = await timedRegistryFetch(doFetch, url, "typed-data");
   } catch (err) {
     console.warn(
-      "[Pasu] installDeclarativeBundleV3ByTypedData fetch failed",
+      "[Dambi] installDeclarativeBundleV3ByTypedData fetch failed",
       {
         typedDataKey: cacheKey,
         message: err instanceof Error ? err.message : err,
@@ -560,7 +593,7 @@ export async function installDeclarativeBundleV3ByTypedData(
     parsedResponse = (await response.json()) as DeclarativeRegistryV3Response;
   } catch (err) {
     console.warn(
-      "[Pasu] installDeclarativeBundleV3ByTypedData json parse failed",
+      "[Dambi] installDeclarativeBundleV3ByTypedData json parse failed",
       {
         typedDataKey: cacheKey,
         message: err instanceof Error ? err.message : err,
@@ -579,7 +612,7 @@ export async function installDeclarativeBundleV3ByTypedData(
   } catch (err) {
     if (err instanceof BundleParseError) {
       console.warn(
-        "[Pasu] installDeclarativeBundleV3ByTypedData parse failed",
+        "[Dambi] installDeclarativeBundleV3ByTypedData parse failed",
         { typedDataKey: cacheKey, message: err.message },
       );
       return { ok: false, reason: "parse_failed" };
@@ -590,13 +623,31 @@ export async function installDeclarativeBundleV3ByTypedData(
     return { ok: false, reason: "not_v3_bundle" };
   }
 
+  // Supply-chain gate — verify before install. typed-data NEVER throws (the
+  // sig-router maps a miss to a transparent null fall-through), so a verify
+  // failure returns { ok:false } like every other fault here.
+  const verifyResult = await verifyBundleSignature({
+    bundle: parsedResponse.bundle,
+    claimedSha256: parsedResponse.bundle_sha256,
+    baseUrl,
+    fetchImpl: doFetch,
+    ...bundleSigDefines,
+  });
+  if (!verifyResult.ok) {
+    console.warn("[Dambi] installDeclarativeBundleV3ByTypedData verify failed", {
+      typedDataKey: cacheKey,
+      reason: verifyResult.reason,
+    });
+    return { ok: false, reason: "verify_failed" };
+  }
+
   const bundleJson = JSON.stringify(parsedResponse.bundle);
   let installed: DeclarativeInstallResult;
   try {
     installed = await declarativeInstallV3(bundleJson);
   } catch (err) {
     console.warn(
-      "[Pasu] installDeclarativeBundleV3ByTypedData install failed",
+      "[Dambi] installDeclarativeBundleV3ByTypedData install failed",
       {
         typedDataKey: cacheKey,
         message: err instanceof Error ? err.message : err,
@@ -610,7 +661,7 @@ export async function installDeclarativeBundleV3ByTypedData(
   v3InstalledBundleIds.add(installed.bundle_id);
 
   console.info(
-    "[Pasu] installDeclarativeBundleV3ByTypedData fresh-install",
+    "[Dambi] installDeclarativeBundleV3ByTypedData fresh-install",
     {
       typedDataKey: cacheKey,
       url,
@@ -661,7 +712,7 @@ export async function installDeclarativeBundleV3BySelector(args: {
   try {
     response = await doFetch(url);
   } catch (err) {
-    console.warn("[Pasu] installDeclarativeBundleV3BySelector fetch failed", {
+    console.warn("[Dambi] installDeclarativeBundleV3BySelector fetch failed", {
       selectorKey: cacheKey,
       message: err instanceof Error ? err.message : err,
     });
@@ -670,7 +721,7 @@ export async function installDeclarativeBundleV3BySelector(args: {
 
   if (response.status === 404) return null;
   if (!response.ok) {
-    console.warn("[Pasu] installDeclarativeBundleV3BySelector fetch_status", {
+    console.warn("[Dambi] installDeclarativeBundleV3BySelector fetch_status", {
       selectorKey: cacheKey,
       status: response.status,
     });
@@ -681,7 +732,7 @@ export async function installDeclarativeBundleV3BySelector(args: {
   try {
     parsedResponse = (await response.json()) as DeclarativeRegistryV3Response;
   } catch (err) {
-    console.warn("[Pasu] installDeclarativeBundleV3BySelector json parse failed", {
+    console.warn("[Dambi] installDeclarativeBundleV3BySelector json parse failed", {
       selectorKey: cacheKey,
       message: err instanceof Error ? err.message : err,
     });
@@ -695,7 +746,7 @@ export async function installDeclarativeBundleV3BySelector(args: {
     parsedBundle = parseBundleV3(parsedResponse.bundle);
   } catch (err) {
     if (err instanceof BundleParseError) {
-      console.warn("[Pasu] installDeclarativeBundleV3BySelector parse failed", {
+      console.warn("[Dambi] installDeclarativeBundleV3BySelector parse failed", {
         selectorKey: cacheKey,
         message: err.message,
       });
@@ -705,12 +756,29 @@ export async function installDeclarativeBundleV3BySelector(args: {
   }
   if (parsedBundle === null) return null;
 
+  // Supply-chain gate — verify before install. by-selector NEVER throws; a
+  // verify failure returns null like every other miss/fault (warn-closed).
+  const verifyResult = await verifyBundleSignature({
+    bundle: parsedResponse.bundle,
+    claimedSha256: parsedResponse.bundle_sha256,
+    baseUrl,
+    fetchImpl: doFetch,
+    ...bundleSigDefines,
+  });
+  if (!verifyResult.ok) {
+    console.warn("[Dambi] installDeclarativeBundleV3BySelector verify failed", {
+      selectorKey: cacheKey,
+      reason: verifyResult.reason,
+    });
+    return null;
+  }
+
   const bundleJson = JSON.stringify(parsedResponse.bundle);
   let installed: DeclarativeInstallResult;
   try {
     installed = await declarativeInstallV3(bundleJson);
   } catch (err) {
-    console.warn("[Pasu] installDeclarativeBundleV3BySelector install failed", {
+    console.warn("[Dambi] installDeclarativeBundleV3BySelector install failed", {
       selectorKey: cacheKey,
       message: err instanceof Error ? err.message : err,
     });
@@ -721,7 +789,7 @@ export async function installDeclarativeBundleV3BySelector(args: {
   v3CachedBundleByCallKey.set(cacheKey, parsedBundle);
   v3InstalledBundleIds.add(installed.bundle_id);
 
-  console.info("[Pasu] installDeclarativeBundleV3BySelector fresh-install", {
+  console.info("[Dambi] installDeclarativeBundleV3BySelector fresh-install", {
     selectorKey: cacheKey,
     url,
     bundleId: installed.bundle_id,

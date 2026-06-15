@@ -21,7 +21,7 @@ import {
 
 /** 라이브러리 정의 드래그 페이로드 — 라이브러리 폴더 드롭 = 소속 변경,
  *  지갑 패키지 드롭 = 그 지갑에 바인딩. */
-export const DRAG_DEF_MIME = "application/x-pasu-def-id";
+export const DRAG_DEF_MIME = "application/x-dambi-def-id";
 
 /** def 출처 라벨 키 — t()는 렌더 시점에 호출한다. */
 const SOURCE_LABEL_KEY: Record<PolicyDef["source"], string> = {

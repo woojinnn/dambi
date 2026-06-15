@@ -8,6 +8,8 @@ const {
   envPathForMode,
   loadBuildEnv,
   resolveServerUrl,
+  resolvePinnedBundleKey,
+  resolveRequireBundleSig,
 } = require("./env");
 
 const targetBrowser = process.env.TARGET_BROWSER || "chrome";
@@ -31,6 +33,8 @@ const backendDir = path.join(extRoot, "backend");
 const frontendDir = path.join(extRoot, "frontend");
 const distDir = path.join(extRoot, "dist", targetBrowser);
 const serverUrl = resolveServerUrl();
+const pinnedBundleKey = resolvePinnedBundleKey();
+const requireBundleSig = resolveRequireBundleSig();
 
 // Shared bits of the webpack config — the actual exported configs differ
 // only in `entry`, `target`, and which build-time plugins they own.
@@ -85,7 +89,11 @@ const sharedPlugins = () => [
     systemvars: true,
   }),
   new webpack.DefinePlugin({
-    PASU_SERVER_URL: JSON.stringify(serverUrl),
+    DAMBI_SERVER_URL: JSON.stringify(serverUrl),
+    // Registry bundle-signing trust anchor — pinned verify key (SPKI base64)
+    // and the enforce flag ("true"/"false"). Read by adapter-loader/bundle-verify.ts.
+    PINNED_BUNDLE_PUBLIC_KEY: JSON.stringify(pinnedBundleKey),
+    DAMBI_REQUIRE_BUNDLE_SIGNATURE: JSON.stringify(requireBundleSig),
   }),
   // ProvidePlugin for `process` so readable-stream's `process.nextTick` etc.
   // resolve at runtime even in code paths that don't import it explicitly.
@@ -134,10 +142,10 @@ const pageConfig = {
       "content-scripts",
       "fetch-bridge.ts",
     ),
-    "content-scripts/pasu-advisory": path.join(
+    "content-scripts/dambi-advisory": path.join(
       backendDir,
       "content-scripts",
-      "pasu-advisory.ts",
+      "dambi-advisory.ts",
     ),
     "confirm/index": path.join(frontendDir, "confirm", "index.ts"),
     "popup/index": path.join(frontendDir, "popup", "index.ts"),

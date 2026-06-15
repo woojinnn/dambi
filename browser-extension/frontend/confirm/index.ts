@@ -5,7 +5,7 @@ import "./styles.css";
 // (asset/resource) 룰이 .wasm 에만 걸려 있어 `import x from "*.png"` 를 못 쓴다.
 // 핸드오프 권장 대안대로 에셋을 public/picture/ 에 두고(CopyPlugin 이 dist 로
 // 복사) 런타임 확장 URL 로 참조한다.
-const markWhite = Browser.runtime.getURL("picture/pasu-mark-white.png");
+const markWhite = Browser.runtime.getURL("picture/dambi-mark-white.png");
 // 가드 = 상태별 마스코트(캐논 GuardFace = STATE_MARTEN[kind]) — 인터셉트·②배지·⑤토스트와 동일한 담비 변신.
 const STATE_MARTEN: Record<string, string> = {
   pass: Browser.runtime.getURL("picture/state-safe.png"),
@@ -23,17 +23,31 @@ interface VerdictDto {
   kind: "pass" | "warn" | "fail";
   matched?: MatchedPolicy[];
 }
+interface ConfirmDetails {
+  kind: "untyped_signature";
+  title?: string;
+  messagePreview?: string;
+  messageTruncated?: boolean;
+}
 
 const params = new URLSearchParams(window.location.search);
 const requestId = params.get("requestId") ?? "";
 const hostname = params.get("hostname") ?? "";
 const verdictRaw = params.get("verdict") ?? '{"kind":"fail"}';
+const detailsRaw = params.get("details") ?? "";
 
 let verdict: VerdictDto;
 try {
   verdict = JSON.parse(verdictRaw) as VerdictDto;
 } catch {
   verdict = { kind: "fail" };
+}
+
+let details: ConfirmDetails | null = null;
+try {
+  details = detailsRaw ? (JSON.parse(detailsRaw) as ConfirmDetails) : null;
+} catch {
+  details = null;
 }
 
 const PENDING_DECISION_KEY = "requests:pending-decisions";
@@ -58,7 +72,7 @@ async function reply(ok: boolean): Promise<void> {
   }
   try {
     await Browser.runtime.sendMessage({
-      type: "pasu:verdict-decision",
+      type: "dambi:verdict-decision",
       requestId,
       ok,
     });
@@ -106,7 +120,7 @@ const SVG = {
 const COPY: Record<string, { head: string; sub: string }> = {
   fail: {
     head: "Transaction blocked",
-    sub: "Pasu policy stopped this signature. Review the matched policies below.",
+    sub: "Dambi policy stopped this signature. Review the matched policies below.",
   },
   warn: {
     head: "Manual review recommended",
@@ -114,7 +128,7 @@ const COPY: Record<string, { head: string; sub: string }> = {
   },
   pass: {
     head: "No policy risks found",
-    sub: "This request passed Pasu's baseline checks.",
+    sub: "This request passed Dambi's baseline checks.",
   },
 };
 
@@ -122,6 +136,28 @@ const BADGE: Record<string, string> = { fail: SVG.x, warn: SVG.warn, pass: SVG.c
 const SEV_ICON: Record<string, string> = { deny: SVG.x, warn: SVG.warn, info: SVG.info };
 // severity(데이터) → 행 비주얼 클래스
 const SEV_CLASS: Record<string, string> = { deny: "fail", warn: "warn", info: "info" };
+
+function renderDetails(details: ConfirmDetails | null): HTMLElement | null {
+  if (!details || details.kind !== "untyped_signature") return null;
+  const messagePreview = details.messagePreview ?? "";
+  if (!messagePreview) return null;
+
+  const children: HTMLElement[] = [
+    el("div", {
+      class: "sig-title",
+      text: details.title || "Plain-text signature",
+    }),
+    el("pre", { class: "sig-message", text: messagePreview }),
+  ];
+
+  if (details.messageTruncated) {
+    children.push(
+      el("div", { class: "sig-note", text: "Message preview truncated." }),
+    );
+  }
+
+  return el("section", { class: "sig-preview" }, children);
+}
 
 function render(): void {
   const root = document.getElementById("root");
@@ -147,7 +183,7 @@ function render(): void {
   ]);
   const top = el("div", { class: "top" }, [
     mk,
-    el("span", { class: "wd", text: "PASU" }),
+    el("span", { class: "wd", text: "DAMBI" }),
     net,
   ]);
 
@@ -168,17 +204,23 @@ function render(): void {
 
   // ── body: origin + matched ──
   const body = el("div", { class: "body" });
+  const requestLabel =
+    details?.kind === "untyped_signature"
+      ? "Plain-text signature requested"
+      : "Signature requested";
   if (hostname) {
     body.appendChild(
       el("div", { class: "origin" }, [
         svgSpan("fav", SVG.globe),
         el("div", { class: "otx" }, [
           el("div", { class: "oh", text: hostname }),
-          el("div", { class: "os", text: "Signature requested" }),
+          el("div", { class: "os", text: requestLabel }),
         ]),
       ]),
     );
   }
+  const detailsCard = renderDetails(details);
+  if (detailsCard) body.appendChild(detailsCard);
 
   const matched = verdict.matched ?? [];
   if (matched.length === 0) {

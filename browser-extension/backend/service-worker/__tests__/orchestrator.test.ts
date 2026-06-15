@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RequestType, type Message, type VenueOrderPayload } from "@lib/types";
+import {
+  RequestType,
+  isUntypedSignature,
+  type Message,
+  type VenueOrderPayload,
+} from "@lib/types";
 
 const OWNER = "0x1111111111111111111111111111111111111111";
 const ROUTER = "0x2222222222222222222222222222222222222222";
@@ -70,6 +75,11 @@ const mocks = vi.hoisted(() => {
         manifest: { id: "high-slippage-warning", schema_version: 2 },
       },
     ]),
+    // WP7: controllable render-fault list for the venue deny-closed path; the
+    // resolve mock factory threads it into resolveBundlesForWalletWithFaults.
+    // Reset in beforeEach. A {severity:"deny"} entry must make a venue order
+    // deny-close (a DENY policy that could not be rendered fail-opens if dropped).
+    venueRenderFaults: [] as Array<{ defId: string; severity: string | undefined }>,
     tryDeclarativeRouteV3: vi.fn<
       (...args: unknown[]) => Promise<unknown>
     >(async () => ({
@@ -116,7 +126,7 @@ const mocks = vi.hoisted(() => {
         },
       },
       runtime: {
-        getURL: vi.fn((path: string) => `chrome-extension://pasu/${path}`),
+        getURL: vi.fn((path: string) => `chrome-extension://dambi/${path}`),
         sendMessage: vi.fn(async () => undefined),
         onMessage: {
           addListener: vi.fn((listener: (message: unknown) => void) => {
@@ -148,6 +158,14 @@ vi.mock("../wasm-bridge", () => ({
 }));
 vi.mock("../policy-store/resolve", () => ({
   resolveBundlesForWallet: mocks.resolveBundlesForWallet,
+  // Delegates to the same bundle mock so existing venue tests are unchanged;
+  // `venueRenderFaults` (default []) lets a test inject a faulted DENY policy.
+  resolveBundlesForWalletWithFaults: async (...args: unknown[]) => ({
+    bundles: await (
+      mocks.resolveBundlesForWallet as (...a: unknown[]) => Promise<unknown[]>
+    )(...args),
+    renderFaults: mocks.venueRenderFaults,
+  }),
   isWalletRegistered: vi.fn(async () => true),
   defRefForPolicyId: vi.fn(async () => null),
   // 픽스처 번들은 trigger 인덱스가 없으므로(=항상 포함) 필터는 패스스루로 충분.
@@ -211,7 +229,7 @@ vi.mock("../venue/resolve-order-symbol", () => ({
   resolveOrderSymbol: vi.fn(async () => undefined),
 }));
 
-import { decideMessage } from "../orchestrator";
+import { decideMessage, inferActor } from "../orchestrator";
 
 function txMessage(requestId = "req-1"): Message {
   return {
@@ -281,9 +299,33 @@ function venueMessage(requestId: string, walletAddress?: string): Message {
 
 function approve(requestId: string, ok: boolean): void {
   for (const listener of [...mocks.runtimeMessageListeners]) {
-    listener({ type: "pasu:verdict-decision", requestId, ok });
+    listener({ type: "dambi:verdict-decision", requestId, ok });
   }
 }
+
+describe("inferActor — per-actor lock key (venue coverage)", () => {
+  it("returns the tx `from` for a transaction", () => {
+    expect(inferActor(txMessage())).toBe(OWNER);
+  });
+
+  it("returns the trusted wallet_id for a venue order (shares the lock with that wallet's tx/sig)", () => {
+    const WALLET = "0x000000000000000000000000000000000000a01c";
+    expect(inferActor(venueMessage("v1", WALLET))).toBe(WALLET);
+  });
+
+  it("falls back to the page origin when a venue order has no wallet_id (same-page orders still serialize)", () => {
+    // Previously returned undefined → NO lock → concurrent same-page orders
+    // raced (stacked modals / clobbered read-evaluate-reserve rows).
+    expect(inferActor(venueMessage("v2"))).toBe("venue:app.hyperliquid.xyz");
+  });
+
+  it("IGNORES a page-supplied vaultAddress for the lock key", () => {
+    const m = venueMessage("v3");
+    (m.data as VenueOrderPayload).vaultAddress =
+      "0x000000000000000000000000000000000000dead";
+    expect(inferActor(m)).toBe("venue:app.hyperliquid.xyz");
+  });
+});
 
 /**
  * Drive a request that is expected to fail closed (a warn verdict that opens
@@ -307,6 +349,7 @@ describe("orchestrator", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    mocks.venueRenderFaults = [];
     mocks.sessionStore.clear();
     mocks.localStore.clear();
     mocks.runtimeMessageListeners.length = 0;
@@ -823,6 +866,72 @@ describe("orchestrator", () => {
       await decideMessage(venueMessage("venue-nomaster-1"), { onAwaitingUser: vi.fn() });
       expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith("u-test", SUBMITTER_SENTINEL);
     });
+
+    it("DENY-CLOSES when a DENY policy fails to render (must not silently drop → fail-open)", async () => {
+      // A deny-closed venue order whose DENY policy threw during render must be
+      // BLOCKED — dropping it would let an order that should have been denied ride
+      // through (the WP7 fail-open).
+      mocks.venueRenderFaults = [{ defId: "no-new-short-deny", severity: "deny" }];
+      const result = await decideMessage(venueMessage("venue-deny-fault-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.ok).toBe(false);
+      // The order must be blocked BEFORE the engine evaluates (deny-close).
+      expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    });
+
+    it("does NOT deny-close when only a WARN policy fails to render", async () => {
+      // A warn fault must not hard-block the order (only a faulted DENY does);
+      // the remaining bundles evaluate normally (mock → pass).
+      mocks.venueRenderFaults = [{ defId: "some-warn", severity: "warn" }];
+      const result = await decideMessage(venueMessage("venue-warn-fault-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(result.verdict.kind).not.toBe("fail");
+    });
+
+    // SW prereq for HL server-state methods (`perp.*`): the server loads
+    // wallet state by the dispatch ctx identity. The venue `tx.from` is the
+    // SENTINEL, so the resolved master must ride along as `walletAddress` —
+    // otherwise the server reads an empty wallet and every stateful policy
+    // stays dormant. The eval `tx` context itself stays sentinel-keyed.
+    const plannedServerCall = {
+      manifest_id: "order-daily-loss-limit-warn",
+      call_id: "order-daily-loss-limit-warn::equity-drawdown",
+      method: "perp.equity_drawdown_bps",
+      params: { chain_id: "hl-mainnet" },
+      outputs: [],
+      optional: true,
+    };
+
+    it("passes the resolved master as walletAddress in the dispatch ctx", async () => {
+      mocks.planActionRpcV2.mockResolvedValueOnce([plannedServerCall]);
+      await decideMessage(venueMessage("venue-dispatch-master-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(mocks.dispatchCallsV2).toHaveBeenCalledTimes(1);
+      const ctx = mocks.dispatchCallsV2.mock.calls[0][2] as {
+        tx: { from: string };
+        walletAddress?: string;
+      };
+      expect(ctx.walletAddress).toBe(MASTER);
+      // Only the server state-load identity changes; eval tx stays sentinel.
+      expect(ctx.tx.from).toBe(SUBMITTER_SENTINEL);
+    });
+
+    it("omits walletAddress from the dispatch ctx when no master is resolvable", async () => {
+      mocks.planActionRpcV2.mockResolvedValueOnce([plannedServerCall]);
+      await decideMessage(venueMessage("venue-dispatch-nomaster-1"), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(mocks.dispatchCallsV2).toHaveBeenCalledTimes(1);
+      const ctx = mocks.dispatchCallsV2.mock.calls[0][2] as Record<string, unknown>;
+      // Absent key (not `undefined`) — the fallback to tx.from happens inside
+      // serveEnrichmentViaEvaluate, and an explicit-undefined would violate
+      // exactOptionalPropertyTypes.
+      expect("walletAddress" in ctx).toBe(false);
+    });
   });
 
   // ── Typed-data signature verdict path (typedSignatureLifecycle) ──────────
@@ -917,7 +1026,7 @@ describe("orchestrator", () => {
 
     const summary = infoSpy.mock.calls
       .map((call) => String(call[0]))
-      .find((line) => line.startsWith("[Pasu] off-chain signature parsed"));
+      .find((line) => line.startsWith("[Dambi] off-chain signature parsed"));
     expect(summary).toBeDefined();
     // EIP-712 primaryType + routing decoder + the decoded action tag/fields are
     // all surfaced in one readable line.
@@ -960,6 +1069,29 @@ describe("orchestrator", () => {
     const result = await decideAndApprove(untypedMessage("sig-skip"), true);
     expect(result.ok).toBe(true);
     expect(mocks.tryDeclarativeRouteV3).not.toHaveBeenCalled();
+  });
+
+  it("passes a readable untyped signature preview to the confirmation window", async () => {
+    const message = untypedMessage("sig-preview");
+    if (!isUntypedSignature(message))
+      throw new Error("expected untyped signature");
+    message.data.message = "EigenLayer Terms of Service\nI agree to the terms.";
+
+    const result = await decideAndApprove(message, true);
+
+    expect(result.ok).toBe(true);
+    const lastCreateCall = mocks.browser.windows.create.mock.calls.at(-1) as
+      | [{ url: string }]
+      | undefined;
+    expect(lastCreateCall).toBeDefined();
+    const url = new URL(lastCreateCall![0].url);
+    const detailsRaw = url.searchParams.get("details");
+    expect(detailsRaw).toBeTruthy();
+    expect(JSON.parse(detailsRaw!)).toMatchObject({
+      kind: "untyped_signature",
+      title: "Plain-text signature",
+      messagePreview: "EigenLayer Terms of Service\nI agree to the terms.",
+    });
   });
 
   it("lets the user explicitly approve unsupported untyped signatures", async () => {

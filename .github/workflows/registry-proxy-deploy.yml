@@ -1,0 +1,110 @@
+# Deploy the registry-api PROXY CODE to Cloud Run — the CI mirror of
+# registryV2/scripts/deploy/deploy-proxy.sh. Run this ONLY when the proxy code
+# changes (path allowlist, cache, rate-limit, edge hardening). Index DATA is a
+# separate concern — see registry-publish.yml.
+#
+# Gated like registry-publish.yml: the `production` Environment requires a human
+# reviewer before the live shared revision is replaced. Cloud Run keeps the
+# prior revision; an unhealthy new revision fails the deploy (traffic stays put).
+#
+# Trigger model:
+#   • push a tag `registry-proxy-v*`  → build + deploy (intentional release)
+#   • workflow_dispatch               → deploy current main by hand
+#
+# Config (project / region / service / runtime flags / env-vars) is sourced from
+# scripts/deploy/_common.sh — the SAME single source of truth the local
+# deploy-proxy.sh uses, so the two can never drift. rv3_activate_and_guard is
+# NOT called here: that guard pins a local gcloud config + operator account,
+# whereas CI authenticates keylessly as the deploy SA via WIF below.
+#
+# Required repository secrets — DEDICATED to the registry (dambi-registry),
+# DISTINCT from policy-server-deploy.yml's GCP_* secrets (policy-engine-498313).
+# Shared with registry-publish.yml:
+#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (dambi-registry)
+#   REGISTRY_DEPLOY_SA     - deploy SA email. Needs, on PROJECT_ID=dambi-registry:
+#                       roles/run.admin, roles/cloudbuild.builds.editor,
+#                       roles/artifactregistry.writer, and
+#                       roles/iam.serviceAccountUser on the runtime SA
+#                       (registry-api-v3-sa) so it can deploy "run as" it.
+name: registry-proxy-deploy
+
+on:
+  push:
+    tags: ["registry-proxy-v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # keyless auth to Google Cloud (do not remove)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production # required-reviewers approval gate
+    env:
+      # External_account (keyless WIF) creds carry no quota project. The image build
+      # avoids GCS entirely (docker push, see below), but `gcloud run deploy` still
+      # needs a billing project for its API calls — gcloud's modern clients read this
+      # and attach x-goog-user-project (SA holds serviceUsageConsumer there).
+      CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (keyless WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.REGISTRY_WIF_PROVIDER }}
+          service_account: ${{ secrets.REGISTRY_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build proxy image + deploy to Cloud Run
+        run: |
+          # Source _common.sh for config + rv3_env_vars ONLY (guard not called).
+          source registryV2/scripts/deploy/_common.sh
+          TAG="${GITHUB_SHA::8}"
+          IMAGE="${AR_REPO}:${TAG}"
+          # Build on the runner and push straight to Artifact Registry. We deliberately
+          # do NOT use `gcloud builds submit`: it stages source to the GCS *_cloudbuild
+          # bucket, and keyless WIF (external_account) creds cannot bill that GCS upload
+          # — it 403s on serviceusage.services.use REGARDLESS of quota project, because
+          # the legacy apitools storage client reads the quota project from the
+          # credential file, which google-github-actions/auth never populates. docker
+          # push authenticates with the SA token (artifactregistry.writer) and has no
+          # staging bucket in the path. --provenance=false → a plain single-arch image
+          # Cloud Run accepts (no attestation manifest list).
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          echo "build → ${IMAGE}"
+          docker build --platform linux/amd64 --provenance=false -t "${IMAGE}" registry-api
+          echo "push → ${IMAGE}"
+          docker push "${IMAGE}"
+          echo "deploy ${SERVICE_NAME} ← ${IMAGE}"
+          gcloud run deploy "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${IMAGE}" \
+            --service-account="${SA_EMAIL}" \
+            --cpu="${CPU}" --memory="${MEMORY}" \
+            --min-instances="${MIN_INSTANCES}" --max-instances="${MAX_INSTANCES}" \
+            --concurrency="${CONCURRENCY}" --timeout="${TIMEOUT}" \
+            --cpu-boost --ingress=all --no-allow-unauthenticated \
+            --set-env-vars="$(rv3_env_vars)"
+
+      - name: Ensure public invoker (extension anonymous fetch; bucket stays private)
+        run: |
+          source registryV2/scripts/deploy/_common.sh
+          gcloud run services add-iam-policy-binding "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --member=allUsers --role=roles/run.invoker
+
+      - name: Smoke /health
+        run: |
+          source registryV2/scripts/deploy/_common.sh
+          URL="$(gcloud run services describe "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          echo "health-check ${URL}/health"
+          code="$(curl -s -o /dev/null -w '%{http_code}' "${URL}/health")"
+          echo "HTTP ${code}"
+          test "${code}" = "200"
+          echo "Deployed proxy ${URL} (HTTP ${code})" >> "$GITHUB_STEP_SUMMARY"
