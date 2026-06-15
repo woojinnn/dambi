@@ -1,0 +1,150 @@
+# Publish the registry DATA (signed bundles + index) to the GCS bucket.
+#
+# Trigger model (orthogonal axes — see registryV2/docs/REGISTRY_ARCHITECTURE.md):
+#   • push a tag `registry-v*`           → incremental publish (additive, default)
+#   • workflow_dispatch (mode=full-sync) → full sync (prunes orphans — destructive)
+# The `production` Environment gate (configure required-reviewers in repo settings)
+# means a human approves the run before anything reaches the live bucket.
+#
+# Signing runs in KMS mode under keyless Workload Identity Federation — the
+# private key never leaves the HSM, and no SA key file ever touches the runner.
+# One-time WIF setup. These are DEDICATED registry secrets (dambi-registry),
+# DISTINCT from policy-server-deploy.yml's GCP_* secrets (policy-engine-498313) —
+# the two target different projects/SAs, so they cannot share secret names.
+#
+# Required repository secrets:
+#   REGISTRY_WIF_PROVIDER  - full Workload Identity *provider* resource name (dambi-registry)
+#   REGISTRY_DEPLOY_SA     - signer/publisher SA email (needs roles/cloudkms.signerVerifier
+#                       on the key + roles/storage.objectAdmin on the bucket)
+#
+# NOTE: deploy the proxy `/signatures/` allowlist (deploy/deploy-proxy.sh) BEFORE
+# flipping the extension's DAMBI_REQUIRE_BUNDLE_SIGNATURE=true, or installs would
+# 404 their signatures and fail-closed.
+name: registry-publish
+
+on:
+  push:
+    tags: ["registry-v*"]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "incremental = additive upload; full-sync = also prune orphans (destructive)"
+        type: choice
+        default: incremental
+        options: [incremental, full-sync]
+
+# ----------------------------------------------------------------------------
+# CHANGE THESE for your own project.
+# ----------------------------------------------------------------------------
+env:
+  PROJECT_ID: dambi-registry
+  REGION: asia-northeast3
+  BUCKET: dambi-registry-v3-seoul
+  KMS_KEYRING: registry-signing
+  KMS_KEY: bundle-sign-p256
+  KMS_KEY_VERSION: "1"
+  # Keyless WIF credentials are external_account type with NO quota project, so
+  # gcloud cannot bill GCS operations and they 403 with "serviceusage.services.use"
+  # — even though the SA already holds serviceUsageConsumer. Pinning the quota
+  # project (gcloud reads this on every call) makes it attach x-goog-user-project
+  # to the storage rsync below. The local owner publish never hits this: user creds
+  # carry an implicit quota project.
+  CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
+
+permissions:
+  contents: read
+  id-token: write # keyless auth to Google Cloud (do not remove)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: production # required-reviewers approval gate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Authenticate to Google Cloud (keyless WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.REGISTRY_WIF_PROVIDER }}
+          service_account: ${{ secrets.REGISTRY_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build index
+        working-directory: registryV2
+        run: |
+          npm ci
+          npx tsx scripts/build-index.ts --strict-callkeys
+
+      # Gate: prove every served bundle (concrete + materialized) hashes to its
+      # bundle_sha256 BEFORE we sign — a drift here would publish signatures the
+      # extension cannot verify (fail-closed). This is the Phase-0 parity invariant.
+      - name: Parity gate (canonicalize + materialization)
+        working-directory: registry-api
+        run: |
+          npm ci
+          npx vitest run src/__tests__/materialization-parity.test.ts
+
+      # Hydrate already-published signatures so the KMS step only signs genuinely
+      # NEW bundles. Without this a fresh runner re-signs the WHOLE corpus (30k+)
+      # every publish — the sequential KMS loop that previously ran for ~4h before
+      # the WIF token refresh timed out. signatures/ is gitignored, so the bucket is
+      # the source of truth. (sign-bundles.ts skips any sha that already has a .sig.)
+      - name: Hydrate published signatures (incremental — sign only new bundles)
+        working-directory: registryV2
+        run: |
+          mkdir -p signatures
+          if gcloud storage ls "gs://${BUCKET}/signatures/" >/dev/null 2>&1; then
+            gcloud storage rsync --recursive "gs://${BUCKET}/signatures" signatures
+            echo "hydrated $(find signatures -name '*.sig' | wc -l | tr -d ' ') existing signatures"
+          else
+            echo "no signatures/ prefix in bucket — first publish, signing full corpus"
+          fi
+
+      - name: Sign bundles (KMS, DER→P1363)
+        working-directory: registryV2
+        env:
+          BUNDLE_SIGNING_MODE: kms
+          KMS_KEY_NAME: projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/keyRings/${{ env.KMS_KEYRING }}/cryptoKeys/${{ env.KMS_KEY }}/cryptoKeyVersions/${{ env.KMS_KEY_VERSION }}
+        run: npx tsx scripts/sign-bundles.ts
+
+      - name: Publish to GCS
+        working-directory: registryV2
+        run: |
+          MODE="${{ github.event.inputs.mode || 'incremental' }}"
+          find bundles contexts tokens signatures manifests index -name '.DS_Store' -delete 2>/dev/null || true
+          # Phase 1 — additive, leaves (incl. signatures) BEFORE pointers (index).
+          for prefix in bundles contexts tokens signatures manifests index; do
+            if [ -d "$prefix" ]; then
+              echo "rsync (additive) $prefix/ → gs://${BUCKET}/$prefix"
+              gcloud storage rsync --recursive "$prefix" "gs://${BUCKET}/$prefix"
+            fi
+          done
+          # Phase 2 — full-sync only: prune orphans, pointers (index) BEFORE leaves.
+          if [ "$MODE" = "full-sync" ]; then
+            echo "full-sync — pruning orphans (pointers→leaves)"
+            for prefix in index manifests tokens contexts signatures bundles; do
+              if [ -d "$prefix" ]; then
+                gcloud storage rsync --recursive --delete-unmatched-destination-objects "$prefix" "gs://${BUCKET}/$prefix"
+              fi
+            done
+          fi
+
+      - name: Verify published signature coverage (REQUIRE-flip gate)
+        working-directory: registryV2
+        # Bucket-side: assert every built bundle_sha256 has a published .sig in the
+        # live bucket. A single gap would fail-closed fleet-wide once REQUIRE is on.
+        # (sign-bundles.ts already self-gates local coverage before upload; this
+        # confirms the LIVE bucket post-rsync.) SKIP_FAITHFULNESS — the PoC↔prod
+        # byte-diff is a one-time migration check, not a per-publish gate.
+        run: SKIP_FAITHFULNESS=1 bash scripts/deploy/verify-bucket-parity.sh
+
+      - name: Summary
+        run: |
+          echo "Published registry **${{ github.ref_name }}** (mode=${{ github.event.inputs.mode || 'incremental' }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Bucket: gs://${BUCKET} · proxy 5-min cache TTL before live" >> "$GITHUB_STEP_SUMMARY"

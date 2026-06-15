@@ -36,6 +36,9 @@ const baseConfig = {
   cacheTtlMs: 10000,
   cacheNegativeTtlMs: 10000,
   cacheControlValue: "public, max-age=300",
+  immutableCacheControlValue: "public, max-age=31536000, immutable",
+  negativeCacheControlValue: "public, max-age=10",
+  debugToken: "test-debug-token",
   rateLimitBurst: 1000,
   rateLimitRefillPerSec: 1000,
   rateLimitMaxIps: 1000,
@@ -302,9 +305,11 @@ describe("registry-api HTTP server", () => {
       }),
     );
     await fetch(`${url}${CALLKEY_PATH}`);
-    const body = (await (await fetch(`${url}/debug/recent`)).json()) as {
-      entries: unknown[];
-    };
+    const body = (await (
+      await fetch(`${url}/debug/recent`, {
+        headers: { "x-debug-token": "test-debug-token" },
+      })
+    ).json()) as { entries: unknown[] };
     expect(body.entries.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -339,5 +344,53 @@ describe("registry-api HTTP server", () => {
     const res = await fetch(`${url}/index/by-typed-data/0x1__bad__Type.json`);
     expect(res.status).toBe(404);
     expect(reader.reads).toHaveLength(0);
+  });
+
+  it("serves a signature sidecar verbatim (200, content-addressed)", async () => {
+    const sha = "0x" + "b".repeat(64);
+    const sigBody =
+      '{"alg":"ECDSA_P256_SHA256","key_id":"local-x","sig_b64":"AAAA"}';
+    const url = await start(fakeReader({ [`signatures/${sha}.sig`]: sigBody }));
+    const res = await fetch(`${url}/signatures/${sha}.sig`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    // content-addressed (the sha IS the version) → immutable long cache
+    expect(res.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(await res.text()).toBe(sigBody);
+  });
+
+  it("passes a missing signature through as a real HTTP 404", async () => {
+    const url = await start(fakeReader({}));
+    const sha = "0x" + "c".repeat(64);
+    expect((await fetch(`${url}/signatures/${sha}.sig`)).status).toBe(404);
+  });
+
+  it("rejects a malformed signature path with 404 and no GCS read", async () => {
+    const reader = fakeReader({});
+    const url = await start(reader);
+    const res = await fetch(`${url}/signatures/not-a-sha.sig`);
+    expect(res.status).toBe(404);
+    expect(reader.reads).toHaveLength(0);
+  });
+
+  it("gates /debug/recent behind the debug token (no / wrong token → 404)", async () => {
+    const url = await start(fakeReader({}));
+    expect((await fetch(`${url}/debug/recent`)).status).toBe(404);
+    expect(
+      (
+        await fetch(`${url}/debug/recent`, {
+          headers: { "x-debug-token": "wrong" },
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("404 responses carry a short negative Cache-Control (probe-flood blunting)", async () => {
+    const url = await start(fakeReader({}));
+    const res = await fetch(`${url}${TYPED_DATA_PATH}`);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=10");
   });
 });

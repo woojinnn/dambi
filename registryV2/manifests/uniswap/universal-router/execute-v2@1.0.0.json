@@ -290,7 +290,8 @@
                 }
               },
               "recipient": "$inputs.recipient",
-              "amount": "$inputs.amountMin"
+              "amount": "$inputs.amountMin",
+              "is_router_egress": true
             }
           }
         },
@@ -312,7 +313,8 @@
                 }
               },
               "recipient": "$inputs.recipient",
-              "amount": "$inputs.value"
+              "amount": "$inputs.value",
+              "is_router_egress": true
             }
           }
         }
@@ -587,7 +589,8 @@
                 }
               },
               "recipient": "$inputs.recipient",
-              "amount": "$inputs.amountMin"
+              "amount": "$inputs.amountMin",
+              "is_router_egress": true
             }
           }
         },
@@ -1023,7 +1026,8 @@
                       }
                     },
                     "recipient": "$tx.from",
-                    "amount": "$inputs.minAmount"
+                    "amount": "$inputs.minAmount",
+                    "is_router_egress": true
                   }
                 }
               },
@@ -1067,7 +1071,8 @@
                       }
                     },
                     "recipient": "$inputs.recipient",
-                    "amount": "$inputs.amount"
+                    "amount": "$inputs.amount",
+                    "is_router_egress": true
                   }
                 }
               },

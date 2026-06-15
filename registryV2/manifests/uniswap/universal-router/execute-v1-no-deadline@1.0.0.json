@@ -273,7 +273,8 @@
                 }
               },
               "recipient": "$inputs.recipient",
-              "amount": "$inputs.amountMin"
+              "amount": "$inputs.amountMin",
+              "is_router_egress": true
             }
           }
         },
@@ -295,7 +296,8 @@
                 }
               },
               "recipient": "$inputs.recipient",
-              "amount": "$inputs.value"
+              "amount": "$inputs.value",
+              "is_router_egress": true
             }
           }
         }
@@ -570,7 +572,8 @@
                 }
               },
               "recipient": "$inputs.recipient",
-              "amount": "$inputs.amountMin"
+              "amount": "$inputs.amountMin",
+              "is_router_egress": true
             }
           }
         },

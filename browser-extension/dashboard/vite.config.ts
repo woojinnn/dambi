@@ -52,7 +52,14 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_DAMBI_SERVER_URL": JSON.stringify(serverUrl),
     },
     build: {
-      outDir: path.resolve(__dirname, "../dist/chrome"),
+      // Target-aware so `build:firefox` lands options.html in dist/firefox, not
+      // always dist/chrome. Defaults to chrome (the standalone `vite build` case).
+      outDir: path.resolve(
+        __dirname,
+        "..",
+        "dist",
+        process.env.TARGET_BROWSER || "chrome",
+      ),
       emptyOutDir: false,
       rollupOptions: {
         input: {

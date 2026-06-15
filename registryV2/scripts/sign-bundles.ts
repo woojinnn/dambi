@@ -1,0 +1,321 @@
+/**
+ * sign-bundles — detached ECDSA P-256 signatures over each unique registry bundle.
+ *
+ * The signed message is `canonicalize(bundle)` (RFC 8785 JCS); its SHA-256 is
+ * exactly the `bundle_sha256` that build-index.ts stamps on every index entry
+ * (proven for the whole corpus by registry-api's materialization-parity gate).
+ * Signing that 32-byte digest therefore signs the canonical bundle. The browser
+ * extension verifies with:
+ *
+ *     crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"}, pinnedKey, sig, canonicalize(bundle))
+ *
+ * which re-hashes the canonical message to the same digest. So we never need the
+ * canonical bytes here — only `bundle_sha256`, read straight from the built index.
+ *
+ * Output: one detached sidecar per unique bundle, `signatures/<sha>.sig`:
+ *     { "alg": "ECDSA_P256_SHA256", "key_id": "<label>", "sig_b64": "<base64 P1363 r||s>" }
+ * The extension treats `alg`/`key_id` as telemetry ONLY — it hard-codes the
+ * algorithm and the pinned key, so a malicious registry cannot downgrade them.
+ *
+ * Modes (BUNDLE_SIGNING_MODE):
+ *   local (default) — sign with a local P-256 secret key (@noble/curves). dev / CI-test.
+ *   kms             — sign each digest via Google Cloud KMS asymmetricSign (DER → P1363).
+ *
+ *   npm run sign                 # local mode (BUNDLE_SIGNING_KEY_PATH or dev key)
+ *   BUNDLE_SIGNING_MODE=kms KMS_KEY_NAME=projects/.../cryptoKeyVersions/1 npm run sign
+ *   npm run sign -- --force      # re-sign even when a .sig already exists
+ */
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { p256 } from "@noble/curves/nist.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ROOT = resolve(HERE, "..");
+
+export const SIG_ALG = "ECDSA_P256_SHA256";
+
+/** Fixed ASN.1 SubjectPublicKeyInfo prefix for an uncompressed prime256v1 point. */
+const P256_SPKI_PREFIX = Buffer.from(
+  "3059301306072a8648ce3d020106082a8648ce3d030107034200",
+  "hex",
+);
+
+export interface SignBundlesOptions {
+  registryRoot?: string;
+  mode?: "local" | "kms";
+  /** local mode: 32-byte secret key, hex (0x optional). */
+  privKeyHex?: string;
+  /** kms mode: full crypto key VERSION resource name. */
+  kmsKeyName?: string;
+  /** label stored in each .sig (telemetry only; the extension ignores it). */
+  keyId?: string;
+  /** re-sign even when a .sig already exists (key rotation / corpus repair). */
+  force?: boolean;
+  /** kms mode: max concurrent asymmetricSign calls (default 12; env BUNDLE_SIGN_CONCURRENCY). */
+  concurrency?: number;
+  log?: (msg: string) => void;
+}
+
+export interface SignBundlesResult {
+  total: number;
+  signed: number;
+  skipped: number;
+}
+
+// ---- helpers ----------------------------------------------------------------
+
+function walkJson(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...walkJson(full));
+    else if (ent.name.endsWith(".json")) out.push(full);
+  }
+  return out;
+}
+
+/** Every unique `bundle_sha256` referenced by the built index/ tree. */
+export function collectBundleShas(registryRoot: string): string[] {
+  const shas = new Set<string>();
+  for (const file of walkJson(join(registryRoot, "index"))) {
+    let entry: { bundle_sha256?: unknown };
+    try {
+      entry = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      continue;
+    }
+    const sha = entry.bundle_sha256;
+    if (typeof sha === "string" && /^0x[0-9a-f]{64}$/.test(sha)) shas.add(sha);
+  }
+  return [...shas].sort();
+}
+
+/** Built-index bundle_sha256 values that have NO signatures/<sha>.sig sidecar —
+ *  i.e. a coverage gap. Empty ⇒ every served bundle is verifiable. This is the
+ *  hard gate that must hold before DAMBI_REQUIRE_BUNDLE_SIGNATURE is flipped on:
+ *  a single uncovered bundle would fail-closed fleet-wide once REQUIRE is true. */
+export function findMissingSignatures(registryRoot: string): string[] {
+  const sigDir = join(registryRoot, "signatures");
+  return collectBundleShas(registryRoot).filter(
+    (sha) => !existsSync(join(sigDir, `${sha}.sig`)),
+  );
+}
+
+function digestBytes(sha256Hex: string): Uint8Array {
+  const hex = sha256Hex.startsWith("0x") ? sha256Hex.slice(2) : sha256Hex;
+  return Uint8Array.from(Buffer.from(hex, "hex"));
+}
+
+function privKeyBytes(hex: string): Uint8Array {
+  const h = hex.trim().replace(/^0x/, "");
+  if (!/^[0-9a-fA-F]{64}$/.test(h)) {
+    throw new Error("local signing key must be 32-byte hex (64 chars)");
+  }
+  return Uint8Array.from(Buffer.from(h, "hex"));
+}
+
+/** local: P1363 r||s directly from the prehashed digest. */
+function signLocal(digest: Uint8Array, priv: Uint8Array): Uint8Array {
+  return p256.sign(digest, priv, { prehash: false });
+}
+
+/** Convert an ASN.1 DER ECDSA signature (what Cloud KMS asymmetricSign returns)
+ *  to raw r||s P1363 bytes — the form WebCrypto `verify` expects. This is the one
+ *  transform unique to the KMS signing path (local mode emits P1363 directly), and
+ *  historically the most error-prone (r/s leading-zero & length handling), so it is
+ *  exported and unit-tested independently (sign-bundles.test.ts) without a live KMS. */
+export function derToP1363(der: Uint8Array): Uint8Array {
+  return p256.Signature.fromBytes(der, "der").toBytes("compact");
+}
+
+/** Minimal shape of the one KMS client method we use — keeps the heavy
+ *  @google-cloud/kms type surface out of the hot path while staying type-checked. */
+type KmsSigner = {
+  asymmetricSign(req: {
+    name: string;
+    digest: { sha256: Buffer };
+  }): Promise<[{ signature?: Buffer | Uint8Array | string | null }, ...unknown[]]>;
+};
+
+/** Construct the KMS client ONCE per run. Previously a fresh client — and with it
+ *  a fresh credential + gRPC-channel init — was built per signature; on a full
+ *  re-sign that is 30k+ auth handshakes, which exhausted the keyless WIF token
+ *  refresh and hung the job for hours ("Getting metadata from plugin failed:
+ *  upstream request timeout"). One client reuses a single cached token + channel. */
+async function newKmsClient(): Promise<KmsSigner> {
+  const { KeyManagementServiceClient } = await import("@google-cloud/kms");
+  return new KeyManagementServiceClient() as unknown as KmsSigner;
+}
+
+/** kms: asymmetricSign returns DER; convert to P1363 (WebCrypto verify format). */
+async function signKms(
+  client: KmsSigner,
+  digest: Uint8Array,
+  keyName: string,
+): Promise<Uint8Array> {
+  const [resp] = await client.asymmetricSign({
+    name: keyName,
+    digest: { sha256: Buffer.from(digest) },
+  });
+  if (!resp.signature) {
+    throw new Error(`KMS returned no signature for ${keyName}`);
+  }
+  return derToP1363(Uint8Array.from(resp.signature as Buffer));
+}
+
+/** Run `fn` over `items` with at most `concurrency` in flight, aborting fast on the
+ *  first rejection — a broken KMS/auth fails in seconds, not after a partial corpus
+ *  and not after a multi-hour stall. Single-threaded JS makes `next++` atomic. */
+async function mapPool<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  let aborted = false;
+  const worker = async (): Promise<void> => {
+    while (!aborted && next < items.length) {
+      const item = items[next++];
+      try {
+        await fn(item);
+      } catch (e) {
+        aborted = true;
+        throw e;
+      }
+    }
+  };
+  const n = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+}
+
+function localKeyId(priv: Uint8Array): string {
+  const pub = p256.getPublicKey(priv, false);
+  return "local-" + createHash("sha256").update(pub).digest("hex").slice(0, 12);
+}
+
+/** SPKI(base64) public key for a local secret — the value pinned in the extension. */
+export function publicKeySpkiBase64(privKeyHex: string): string {
+  const pubU = p256.getPublicKey(privKeyBytes(privKeyHex), false); // 65-byte uncompressed
+  return Buffer.concat([P256_SPKI_PREFIX, Buffer.from(pubU)]).toString("base64");
+}
+
+function readLocalKey(): string {
+  const path =
+    process.env.BUNDLE_SIGNING_KEY_PATH ??
+    join(DEFAULT_ROOT, "scripts", "deploy", "keys", "dev-signing-key.hex");
+  if (!existsSync(path)) {
+    throw new Error(
+      `local signing key not found at ${path}. Generate one with: npm run gen-signing-key`,
+    );
+  }
+  return readFileSync(path, "utf8");
+}
+
+// ---- main -------------------------------------------------------------------
+
+export async function signBundles(
+  opts: SignBundlesOptions = {},
+): Promise<SignBundlesResult> {
+  const root = opts.registryRoot ?? DEFAULT_ROOT;
+  const mode =
+    opts.mode ?? (process.env.BUNDLE_SIGNING_MODE === "kms" ? "kms" : "local");
+  const log = opts.log ?? (() => {});
+  const sigDir = join(root, "signatures");
+
+  let priv: Uint8Array | undefined;
+  let kmsKeyName: string | undefined;
+  let keyId = opts.keyId;
+  if (mode === "local") {
+    priv = privKeyBytes(opts.privKeyHex ?? readLocalKey());
+    keyId = keyId ?? localKeyId(priv);
+  } else {
+    kmsKeyName = opts.kmsKeyName ?? process.env.KMS_KEY_NAME;
+    if (!kmsKeyName) {
+      throw new Error("kms mode requires KMS_KEY_NAME (key version resource name)");
+    }
+    keyId = keyId ?? kmsKeyName;
+  }
+
+  const shas = collectBundleShas(root);
+  mkdirSync(sigDir, { recursive: true });
+
+  // Sign only the gaps. In CI the workflow hydrates signatures/ from the bucket
+  // first, so an incremental publish signs ~0 — the heavy KMS loop only runs on a
+  // genuine new bundle or a --force rotation.
+  const toSign = shas.filter(
+    (sha) => opts.force || !existsSync(join(sigDir, `${sha}.sig`)),
+  );
+  const skipped = shas.length - toSign.length;
+
+  const kmsClient = mode === "kms" ? await newKmsClient() : undefined;
+  const concurrency =
+    mode === "kms"
+      ? (opts.concurrency ?? Number(process.env.BUNDLE_SIGN_CONCURRENCY)) || 12
+      : 1;
+
+  let signed = 0;
+  await mapPool(toSign, concurrency, async (sha) => {
+    const digest = digestBytes(sha);
+    const sig =
+      mode === "local"
+        ? signLocal(digest, priv as Uint8Array)
+        : await signKms(kmsClient as KmsSigner, digest, kmsKeyName as string);
+    const doc = {
+      alg: SIG_ALG,
+      key_id: keyId,
+      sig_b64: Buffer.from(sig).toString("base64"),
+    };
+    writeFileSync(
+      join(sigDir, `${sha}.sig`),
+      JSON.stringify(doc, null, 2) + "\n",
+      "utf8",
+    );
+    signed++;
+  });
+  log(`[${mode}] ${signed} signed, ${skipped} skipped, ${shas.length} total`);
+  return { total: shas.length, signed, skipped };
+}
+
+// CLI -------------------------------------------------------------------------
+
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  signBundles({
+    force: process.argv.includes("--force"),
+    log: (m) => console.error(`[sign-bundles] ${m}`),
+  })
+    .then((r) => {
+      if (r.total === 0) {
+        console.error(
+          "[sign-bundles] WARN: no bundle_sha256 found — was the index built (npm run build)?",
+        );
+        return;
+      }
+      // Coverage gate — every built bundle MUST have a .sig before publish, else
+      // a REQUIRE=true install of that bundle would fail-closed in the field.
+      const missing = findMissingSignatures(DEFAULT_ROOT);
+      if (missing.length > 0) {
+        console.error(
+          `[sign-bundles] FATAL: signature coverage gap — ${missing.length}/${r.total} bundles have no .sig:`,
+        );
+        for (const sha of missing.slice(0, 5)) console.error(`    ${sha}`);
+        process.exit(1);
+      }
+      console.error(`[sign-bundles] coverage OK: all ${r.total} bundles signed`);
+    })
+    .catch((e) => {
+      console.error("[sign-bundles] FATAL:", e instanceof Error ? e.message : e);
+      process.exit(1);
+    });
+}

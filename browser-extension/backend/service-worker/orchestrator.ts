@@ -36,6 +36,7 @@ import {
   filterForAction,
   isWalletRegistered,
   resolveBundlesForWallet,
+  resolveBundlesForWalletWithFaults,
 } from "./policy-store/resolve";
 import type {
   ActionBundleInputDto,
@@ -828,7 +829,23 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
   const venueUid = (await getCurrentUserId()) ?? "anonymous";
   const master = await resolveHlMaster(message.data);
   const evalAddress = master ?? tx.from;
-  const resolved = await resolveBundlesForWallet(venueUid, evalAddress);
+  const { bundles: resolved, renderFaults } =
+    await resolveBundlesForWalletWithFaults(venueUid, evalAddress);
+  // DENY-CLOSED: venue 주문은 "평가 못 한 DENY 정책"이 있으면 통과시키면 안 된다.
+  // render가 throw한 DENY 정책은 조용히 드롭되어 fail-open이 되므로(주문이 막혀야
+  // 했는데 통과), 그런 fault가 하나라도 있으면 차단한다(rare — 손상된 def 신호).
+  const denyFault = renderFaults.find((f) => f.severity === "deny");
+  if (denyFault) {
+    console.warn("[Dambi] HL venue deny-close: DENY policy render fault", {
+      requestId: message.requestId,
+      defId: denyFault.defId,
+    });
+    return {
+      verdict: venueDenyVerdict(`deny policy render fault: ${denyFault.defId}`),
+      verdictSource: "fail_closed",
+      declarativeV3: { outcome: "miss", nature, reason: "deny_render_fault" },
+    };
+  }
   // 진단: registered=false 면 evalAddress가 미등록 → per-wallet 토글이 아니라
   // defaults.enabled 전역 폴백으로 평가된 것(= 토글이 이 주문에 안 먹은 경우).
   // master=null(주소 미해석)이나 venueUid="anonymous"(미로그인)면 대개 여기로 샌다.
@@ -1572,9 +1589,19 @@ function txValueToWeiDecimal(value: string | undefined): string {
   return value;
 }
 
-function inferActor(message: Message): string | undefined {
+export function inferActor(message: Message): string | undefined {
   if (isTransaction(message)) return message.data.transaction.from;
   if (isTypedSignature(message)) return message.data.address;
+  // Venue (HL) orders must take the per-actor lock too: a page can fire N
+  // concurrent `/exchange` orders for the same wallet, and the deny-closed
+  // read-evaluate-reserve would otherwise race (stacked modals / clobbered
+  // rows). Key by the TRUSTED stamped `wallet_id` (so it shares the lock with
+  // that wallet's tx/sig decisions); fall back to the page origin when the
+  // master is not yet revealed, so same-page orders still serialize. NEVER a
+  // page-supplied `vaultAddress` — it must not split or pick the lock key.
+  if (isVenueOrder(message)) {
+    return message.data.wallet_id?.address ?? `venue:${message.data.hostname}`;
+  }
   return undefined;
 }
 
