@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./tokens.css";
 import { AppRouter } from "./router";
 import { bootstrapExtensionEnv } from "./extension-bootstrap";
-import { migratePasuRenameLocalStorage } from "./pasu-rename-storage-migration";
+import { migrateDambiRenameLocalStorage } from "./dambi-rename-storage-migration";
 import { initI18n } from "./i18n";
 
 const queryClient = new QueryClient();

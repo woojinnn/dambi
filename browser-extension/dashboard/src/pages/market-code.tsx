@@ -6,7 +6,6 @@
  * Not a full parser — display-only. Cedar + JSON are the only langs needed.
  */
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
 
 import { ListingConditionTree } from "./editor/PublishPreviewTree";
 
@@ -99,15 +98,16 @@ export function CodeView({ code, lang }: { code: string; lang: "cedar" | "json" 
 export function CodeTabs({
   cedar,
   manifest,
+  locale,
   hideComments = false,
 }: {
   cedar?: string | null;
   manifest?: unknown;
+  locale: "ko" | "en";
   /** Strip `//` comments from the cedar tab (the long English rationale lives
    * in the Korean description above the code instead). */
   hideComments?: boolean;
 }) {
-  const { t } = useTranslation("market");
   const shownCedar = cedar ? (hideComments ? stripCedarComments(cedar) : cedar) : null;
   const manifestStr =
     manifest != null ? JSON.stringify(manifest, null, 2) : null;
@@ -136,7 +136,7 @@ export function CodeTabs({
             className={tab === "tree" ? "is-active" : ""}
             onClick={() => setTab("tree")}
           >
-            {t("code.conditions")}
+            {locale === "ko" ? "조건" : "Conditions"}
           </button>
         )}
         {shownCedar && (
@@ -158,7 +158,7 @@ export function CodeTabs({
           </button>
         )}
         <button type="button" className="codetabs-copy" onClick={copy}>
-          {copied ? t("code.copied") : t("code.copy")}
+          {copied ? (locale === "ko" ? "복사됨" : "Copied") : locale === "ko" ? "복사" : "Copy"}
         </button>
       </div>
       {tab === "tree" && cedar && (
