@@ -14,10 +14,12 @@ use axum::{Extension, Json, Router};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use policy_db::{GlobalDb, MultiUserStore};
+use policy_state::U256;
 use policy_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 use crate::auth::{require_auth, AuthUser};
@@ -338,6 +340,230 @@ impl PriceBook for DbPriceBook {
             }
         }
     }
+}
+
+// ── F-ENRICH-1 fix: on-demand Chainlink price fallback ──────────────────────
+//
+// Root cause: `oracle.usd_value` resolves a price ONLY from a SYNCED wallet
+// holding's `price_usd` (own wallet, else the cross-wallet `latest_token_price`
+// DB scan — `DbPriceBook`). The Chainlink feed is exercised only as a side
+// effect of `POST /wallets` sync, so a canonical token held by NO synced wallet
+// (e.g. mainnet USDC) had no priced row and a USD-cap policy silently
+// fail-opened — even though the feed exists. This decouples price coverage from
+// holdings: on a DB miss `LayeredPriceBook` reads the canonical Chainlink USD
+// feed directly, bounded + fail-open, mirroring `ChainalysisSanctionsOracle` /
+// `AlchemyFloorOracle` (live eth_call at evaluate time for an OPTIONAL fact).
+
+/// Chainlink `AggregatorV3Interface::latestRoundData()` selector.
+const LATEST_ROUND_DATA_SELECTOR: &str = "0xfeaf968c";
+
+/// A canonical `(chain, token)` → Chainlink USD aggregator binding.
+#[derive(Clone, Copy)]
+struct UsdFeedSpec {
+    /// USD aggregator contract (the `latestRoundData()` target).
+    aggregator: &'static str,
+    /// Aggregator answer decimals — 8 for every Chainlink USD feed below.
+    feed_decimals: u8,
+    /// The ERC-20 token's OWN decimals (what `oracle.usd_value` divides by).
+    token_decimals: u8,
+}
+
+/// Resolve a canonical ERC-20 `(chain, token)` to its Chainlink USD feed. `token`
+/// must be a lowercase `0x` address. `None` for any token without a wired feed
+/// (the fallback then stays inert — fail-open, never a fabricated price).
+///
+/// Aggregator addresses are sourced in-repo so there is one provenance:
+/// mainnet from `policy_sync …::chainlink::ChainlinkFeedRegistry::with_mainnet_defaults`,
+/// arb/base from `deploy/helm/policy-server/values-m3.yaml` (the prod sync feeds).
+/// Token addresses are the canonical mainnet / L2 deployments. Wrapper tokens
+/// share the underlying feed (WETH → ETH/USD), mirroring `chainlink_feed_for`.
+fn canonical_usd_feed(chain: &str, token_lower: &str) -> Option<UsdFeedSpec> {
+    let spec = |aggregator, token_decimals| UsdFeedSpec {
+        aggregator,
+        feed_decimals: 8,
+        token_decimals,
+    };
+    match (chain, token_lower) {
+        // ── Ethereum mainnet (eip155:1) ──
+        // USDC
+        ("eip155:1", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48") => {
+            Some(spec("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6", 6))
+        }
+        // USDT
+        ("eip155:1", "0xdac17f958d2ee523a2206206994597c13d831ec7") => {
+            Some(spec("0x3E7d1eAB13ad0104d2750B8863b489D65364e32D", 6))
+        }
+        // WETH → ETH/USD
+        ("eip155:1", "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2") => {
+            Some(spec("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419", 18))
+        }
+        // WBTC
+        ("eip155:1", "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599") => {
+            Some(spec("0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c", 8))
+        }
+        // DAI
+        ("eip155:1", "0x6b175474e89094c44da98b954eedeac495271d0f") => {
+            Some(spec("0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9", 18))
+        }
+        // ── Arbitrum One (eip155:42161) ──
+        // USDC
+        ("eip155:42161", "0xaf88d065e77c8cc2239327c5edb3a432268e5831") => {
+            Some(spec("0x50834F3163758fcC1Df9973b6e91f0F0F0434aD3", 6))
+        }
+        // WETH → ETH/USD
+        ("eip155:42161", "0x82af49447d8a07e3bd95bd0d56f35241523fbab1") => {
+            Some(spec("0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612", 18))
+        }
+        // ── Base (eip155:8453) ──
+        // USDC
+        ("eip155:8453", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913") => {
+            Some(spec("0x7e860098F58bBFC8648a4311b374B1D669a2bc6B", 6))
+        }
+        // WETH → ETH/USD
+        ("eip155:8453", "0x4200000000000000000000000000000000000006") => {
+            Some(spec("0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70", 18))
+        }
+        _ => None,
+    }
+}
+
+/// Decode a Chainlink `latestRoundData()` `eth_call` result into a USD price
+/// decimal string: the 2nd ABI word (`int256 answer`) scaled by `feed_decimals`.
+/// `None` on malformed data or a NEGATIVE answer (USD feeds are non-negative; a
+/// set sign bit means a bad feed, never a price — fail-open, never fabricate).
+fn decode_chainlink_usd_answer(result_hex: &str, feed_decimals: u8) -> Option<String> {
+    let body = result_hex.strip_prefix("0x").unwrap_or(result_hex);
+    // Need at least 2 ABI words: roundId (word 0) + answer (word 1).
+    let answer_hex = body.get(64..128)?;
+    // int256 sign bit (top bit of the leading byte) set ⇒ negative ⇒ reject.
+    if u8::from_str_radix(answer_hex.get(0..2)?, 16).ok()? & 0x80 != 0 {
+        return None;
+    }
+    let answer = U256::from_str_radix(answer_hex, 16).ok()?;
+    Some(scale_u256(&answer, feed_decimals))
+}
+
+/// Render a `U256` magnitude as a fixed-point decimal string with `decimals`
+/// fractional digits, trailing zeros trimmed (mirrors the sync crate's
+/// `scale_to_decimal`). `oracle.usd_value` parses the result as a Cedar decimal.
+fn scale_u256(v: &U256, decimals: u8) -> String {
+    let s = v.to_string();
+    let d = decimals as usize;
+    let out = if s.len() > d {
+        let split = s.len() - d;
+        format!("{}.{}", &s[..split], &s[split..])
+    } else {
+        format!("0.{}{}", "0".repeat(d - s.len()), s)
+    };
+    let trimmed = out.trim_end_matches('0').trim_end_matches('.');
+    if trimmed.is_empty() {
+        "0".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// On-demand Chainlink price source for [`PriceBook`]: reads a canonical
+/// `(chain, token)`'s USD feed via a bounded `eth_call`. Used only as the
+/// `LayeredPriceBook` fallback (DB miss), so the hot path stays a pure DB read;
+/// this fires only for a canonical token that no synced wallet holds. Bounded
+/// (1.5 s) + fail-open (`None`) exactly like [`ChainalysisSanctionsOracle`].
+struct OnchainChainlinkPriceBook {
+    client: reqwest::Client,
+    /// CAIP-2 chain → JSON-RPC URL. Empty ⇒ the fallback is inert (always
+    /// `None`), so `LayeredPriceBook` collapses to `DbPriceBook` (pre-fix).
+    rpc_urls: HashMap<String, String>,
+}
+
+#[async_trait::async_trait]
+impl PriceBook for OnchainChainlinkPriceBook {
+    async fn price(&self, chain: &str, address: &str) -> Option<PriceFact> {
+        let spec = canonical_usd_feed(chain, &address.to_ascii_lowercase())?;
+        let rpc_url = self.rpc_urls.get(chain)?;
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [{ "to": spec.aggregator, "data": LATEST_ROUND_DATA_SELECTOR }, "latest"],
+        });
+        let resp = self
+            .client
+            .post(rpc_url)
+            .json(&req)
+            .timeout(Duration::from_millis(1500))
+            .send()
+            .await
+            .ok()?
+            .json::<serde_json::Value>()
+            .await
+            .ok()?;
+        let result = resp.get("result")?.as_str()?;
+        let price_usd = decode_chainlink_usd_answer(result, spec.feed_decimals)?;
+        Some(PriceFact {
+            price_usd,
+            decimals: spec.token_decimals,
+        })
+    }
+
+    async fn decimals(&self, chain: &str, address: &str) -> Option<u8> {
+        canonical_usd_feed(chain, &address.to_ascii_lowercase()).map(|s| s.token_decimals)
+    }
+}
+
+/// Compose the wallet-derived [`DbPriceBook`] (primary) with the on-demand
+/// [`OnchainChainlinkPriceBook`] (fallback). `price` / `decimals` try the DB
+/// first (fast, covers every synced token) and fall back to the canonical
+/// Chainlink feed only on a miss — the F-ENRICH-1 fix that lets a USD-cap policy
+/// value a canonical token NO wallet currently holds.
+struct LayeredPriceBook {
+    db: DbPriceBook,
+    onchain: OnchainChainlinkPriceBook,
+}
+
+#[async_trait::async_trait]
+impl PriceBook for LayeredPriceBook {
+    async fn price(&self, chain: &str, address: &str) -> Option<PriceFact> {
+        if let Some(fact) = self.db.price(chain, address).await {
+            return Some(fact);
+        }
+        self.onchain.price(chain, address).await
+    }
+
+    async fn decimals(&self, chain: &str, address: &str) -> Option<u8> {
+        if let Some(decimals) = self.db.decimals(chain, address).await {
+            return Some(decimals);
+        }
+        self.onchain.decimals(chain, address).await
+    }
+}
+
+/// Per-chain JSON-RPC URLs for the on-demand Chainlink price fallback. Defaults
+/// to the keyless public RPCs `values-m3.yaml` already uses for the sync worker,
+/// so the fix works without new config. Override per chain with
+/// `POLICY_PRICE_RPC_URL_<numeric-chain-id>` (empty disables that chain), or
+/// disable the whole fallback with `POLICY_PRICE_ONCHAIN_FALLBACK=0` (the price
+/// book then collapses to the wallet-derived DB source, pre-fix behavior).
+fn price_rpc_urls() -> HashMap<String, String> {
+    let mut urls = HashMap::new();
+    if std::env::var("POLICY_PRICE_ONCHAIN_FALLBACK").is_ok_and(|v| v == "0") {
+        return urls;
+    }
+    for (caip, id, default_url) in [
+        ("eip155:1", "1", "https://ethereum-rpc.publicnode.com"),
+        (
+            "eip155:42161",
+            "42161",
+            "https://arbitrum-one-rpc.publicnode.com",
+        ),
+        ("eip155:8453", "8453", "https://base-rpc.publicnode.com"),
+    ] {
+        let url = std::env::var(format!("POLICY_PRICE_RPC_URL_{id}"))
+            .unwrap_or_else(|_| default_url.to_owned());
+        if !url.is_empty() {
+            urls.insert(caip.to_owned(), url);
+        }
+    }
+    urls
 }
 
 /// Chainalysis sanctions-list address `0x40C5…c8fb` is the canonical on-chain
@@ -765,8 +991,16 @@ async fn evaluate_handler(
                 .into_response();
         }
     };
-    let price_book = DbPriceBook {
-        global_db: state.global_db.clone(),
+    // F-ENRICH-1 fix: DB-derived price (primary) + on-demand Chainlink fallback
+    // (DB miss) so a USD-cap can value a canonical token NO synced wallet holds.
+    let price_book = LayeredPriceBook {
+        db: DbPriceBook {
+            global_db: state.global_db.clone(),
+        },
+        onchain: OnchainChainlinkPriceBook {
+            client: reqwest::Client::new(),
+            rpc_urls: price_rpc_urls(),
+        },
     };
     let sanctions = ChainalysisSanctionsOracle {
         client: reqwest::Client::new(),
@@ -800,6 +1034,89 @@ mod tests {
 
     fn at(ts: &str) -> OffsetDateTime {
         OffsetDateTime::parse(ts, &Rfc3339).unwrap()
+    }
+
+    // ── F-ENRICH-1: on-demand Chainlink price fallback ──────────────────────
+
+    /// The canonical `(chain, token)` → feed table resolves the audit's flagged
+    /// tokens and rejects unknowns. Input must be lowercase (the caller lowercases).
+    #[test]
+    fn canonical_feed_table_resolves_and_rejects() {
+        // mainnet USDC — the token the audit found dormant (no wallet held it).
+        let usdc =
+            super::canonical_usd_feed("eip155:1", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+                .expect("mainnet USDC feed");
+        assert_eq!(usdc.token_decimals, 6);
+        assert_eq!(usdc.feed_decimals, 8);
+        // mainnet WETH shares the ETH/USD feed, 18 decimals.
+        assert_eq!(
+            super::canonical_usd_feed("eip155:1", "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
+                .unwrap()
+                .token_decimals,
+            18
+        );
+        // base USDC is wired too.
+        assert!(super::canonical_usd_feed(
+            "eip155:8453",
+            "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+        )
+        .is_some());
+        // unknown token / unknown chain → no feed (fallback stays inert).
+        assert!(super::canonical_usd_feed(
+            "eip155:1",
+            "0x000000000000000000000000000000000000dead"
+        )
+        .is_none());
+        assert!(super::canonical_usd_feed(
+            "eip155:999",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        )
+        .is_none());
+    }
+
+    /// `latestRoundData()` result decoding: 2nd ABI word (answer) scaled by 8.
+    #[test]
+    fn decode_chainlink_answer_scales_and_rejects_negative() {
+        // 5-word return: roundId | answer | startedAt | updatedAt | answeredInRound.
+        let ret =
+            |answer_hex: &str| format!("0x{}{answer_hex}{}", "0".repeat(64), "0".repeat(64 * 3));
+        // 1718.53051744 × 1e8 = 171_853_051_744
+        let eth = ret(&format!("{:064x}", 171_853_051_744_u128));
+        assert_eq!(
+            super::decode_chainlink_usd_answer(&eth, 8).as_deref(),
+            Some("1718.53051744")
+        );
+        // 0.99970974 × 1e8 = 99_970_974 (sub-dollar → "0." prefix)
+        let usdc = ret(&format!("{:064x}", 99_970_974_u128));
+        assert_eq!(
+            super::decode_chainlink_usd_answer(&usdc, 8).as_deref(),
+            Some("0.99970974")
+        );
+        // sign bit set ⇒ negative answer ⇒ rejected (no fabricated price).
+        let neg = ret(&"f".repeat(64));
+        assert!(super::decode_chainlink_usd_answer(&neg, 8).is_none());
+        // truncated payload ⇒ None.
+        assert!(super::decode_chainlink_usd_answer("0x1234", 8).is_none());
+    }
+
+    /// LIVE e2e (run with `--ignored`): the REAL on-demand fallback prices
+    /// mainnet USDC from publicnode end-to-end — the exact F-ENRICH-1 case (a
+    /// token the test wallets never held). Off by default (network dependent).
+    #[tokio::test]
+    #[ignore = "hits live publicnode RPC"]
+    async fn live_onchain_usdc_price() {
+        use crate::handler::PriceBook;
+        let pb = super::OnchainChainlinkPriceBook {
+            client: reqwest::Client::new(),
+            rpc_urls: super::price_rpc_urls(),
+        };
+        let fact = pb
+            .price("eip155:1", "0xA0b86991c6218b36c1D19D4a2e9Eb0cE3606eB48")
+            .await;
+        assert!(
+            matches!(&fact, Some(f) if f.decimals == 6 && f.price_usd.parse::<f64>().is_ok_and(|p| p > 0.5 && p < 2.0)),
+            "live mainnet USDC should price near $1 with 6 decimals, got {fact:?}"
+        );
     }
 
     /// Both quotes fresh → the LOWEST is the floor (cheapest current listing).
