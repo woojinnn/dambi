@@ -23,7 +23,10 @@ if [ -d browser-extension ] && [ -f browser-extension/package.json ]; then
   fi
 
   echo "==> yarn build:chrome (browser-extension)"
-  (cd browser-extension && yarn build:chrome >/dev/null)
+  # Local "does it all compile" gate — NOT a user-distributed build, so it is
+  # allowed to build against an unsigned registry (DAMBI_ALLOW_UNSIGNED_REGISTRY=1
+  # waives the prod signature-enforcement guard in webpack.prod.js).
+  (cd browser-extension && DAMBI_ALLOW_UNSIGNED_REGISTRY=1 yarn build:chrome >/dev/null)
 fi
 
 echo "==> all checks passed"
