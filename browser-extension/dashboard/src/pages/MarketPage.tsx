@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -87,6 +87,9 @@ export function MarketPage() {
  */
 const POPULAR_QUERIES = ["무제한 승인", "드레이너", "슬리피지", "블라인드 서명", "에어드랍", "Permit2"];
 const RECENT_KEY = "market:recent-searches";
+
+/** Items per page in the package / policy grids (numbered pagination). */
+const PAGE_SIZE = 24;
 
 function readRecent(): string[] {
   try {
@@ -645,7 +648,6 @@ function ListSearchPalette({
             <div className="rm-srch-shead rm-srch-shead-row">
               <span>{ko ? "카테고리" : "Category"} <span className="muted">· {ko ? "여러 개 선택 가능" : "multi-select"}</span></span>
               <span className="rm-srch-allacts">
-                <button type="button" onClick={() => CATEGORY_ORDER.forEach((c) => { if (!cats.has(c)) toggleCat(c); })}>{ko ? "모두 선택" : "Select all"}</button>
                 <button type="button" onClick={() => [...cats].forEach(toggleCat)}>{ko ? "모두 해제" : "Clear"}</button>
               </span>
             </div>
@@ -677,6 +679,68 @@ function ListSearchPalette({
   );
 }
 
+/** Numbered pagination: 이전 · 1 2 3 … N · 다음. Always rendered (even for a
+ *  single page). Shows the first/last page always and a small window around the
+ *  current page, with ellipses for the gaps. */
+function Pagination({
+  page,
+  pageCount,
+  onChange,
+  ko,
+}: {
+  page: number;
+  pageCount: number;
+  onChange: (p: number) => void;
+  ko: boolean;
+}) {
+  const nums: (number | "gap")[] = [];
+  const lo = Math.max(2, page - 1);
+  const hi = Math.min(pageCount - 1, page + 1);
+  nums.push(1);
+  if (lo > 2) nums.push("gap");
+  for (let p = lo; p <= hi; p++) nums.push(p);
+  if (hi < pageCount - 1) nums.push("gap");
+  if (pageCount > 1) nums.push(pageCount); // skip when there's only page 1
+
+  return (
+    <nav className="rm-pager" aria-label={ko ? "페이지" : "pagination"}>
+      <button
+        type="button"
+        className="rm-pager-nav"
+        disabled={page <= 1}
+        onClick={() => onChange(page - 1)}
+      >
+        {ko ? "이전" : "Prev"}
+      </button>
+      {nums.map((n, i) =>
+        n === "gap" ? (
+          <span key={`gap-${i}`} className="rm-pager-gap">
+            …
+          </span>
+        ) : (
+          <button
+            key={n}
+            type="button"
+            className={`rm-pager-num${n === page ? " on" : ""}`}
+            aria-current={n === page ? "page" : undefined}
+            onClick={() => onChange(n)}
+          >
+            {n}
+          </button>
+        ),
+      )}
+      <button
+        type="button"
+        className="rm-pager-nav"
+        disabled={page >= pageCount}
+        onClick={() => onChange(page + 1)}
+      >
+        {ko ? "다음" : "Next"}
+      </button>
+    </nav>
+  );
+}
+
 function ListView({
   locale,
   initialParams,
@@ -696,9 +760,11 @@ function ListView({
   const [sort, setSort] = useState<ListingSort>(initialSort);
   const [q, setQ] = useState(initialQ);
   const [search, setSearch] = useState(initialQ);
-  const [pkgAll, setPkgAll] = useState(false);
-  const [polAll, setPolAll] = useState(false);
+  const [pkgPage, setPkgPage] = useState(1);
+  const [polPage, setPolPage] = useState(1);
   const [installTarget, setInstallTarget] = useState<ListingSummary | null>(null);
+  const pkgSecRef = useRef<HTMLDivElement>(null);
+  const polSecRef = useRef<HTMLDivElement>(null);
 
   const selected = [...cats];
   const toggleCat = (c: CategoryKey) =>
@@ -713,7 +779,7 @@ function ListView({
   const policiesQ = useQuery({
     queryKey: ["market-listings", { kind: "policy", sort, q: search }],
     queryFn: () =>
-      listListings({ kind: "policy", sort, q: search.trim() || undefined, limit: 100 }),
+      listListings({ kind: "policy", sort, q: search.trim() || undefined, limit: 500 }),
   });
   const allPolicies = policiesQ.data ?? [];
   const polCatCounts = useMemo(() => {
@@ -728,7 +794,7 @@ function ListView({
   const setsQ = useQuery({
     queryKey: ["market-sets-list", { sort, q: search }],
     queryFn: () =>
-      listListings({ kind: "set", sort, q: search.trim() || undefined, limit: 50 }),
+      listListings({ kind: "set", sort, q: search.trim() || undefined, limit: 200 }),
   });
   const sets = setsQ.data ?? [];
   const setDetailQs = useQueries({
@@ -763,8 +829,27 @@ function ListView({
           const cc = metaFor(i).catCount;
           return selected.some((c) => cc.has(c));
         });
-  const pkgShown = pkgAll ? pkgList : pkgList.slice(0, 8);
-  const polShown = polAll ? polList : polList.slice(0, 12);
+  // Numbered pagination (client-side). Filters/sort change the result set, so
+  // reset to page 1 whenever they do; clamp the active page if the list shrinks.
+  useEffect(() => {
+    setPkgPage(1);
+    setPolPage(1);
+  }, [search, sort, cats]);
+
+  const pkgPageCount = Math.max(1, Math.ceil(pkgList.length / PAGE_SIZE));
+  const polPageCount = Math.max(1, Math.ceil(polList.length / PAGE_SIZE));
+  const pkgPageSafe = Math.min(pkgPage, pkgPageCount);
+  const polPageSafe = Math.min(polPage, polPageCount);
+  const pkgShown = pkgList.slice((pkgPageSafe - 1) * PAGE_SIZE, pkgPageSafe * PAGE_SIZE);
+  const polShown = polList.slice((polPageSafe - 1) * PAGE_SIZE, polPageSafe * PAGE_SIZE);
+  const goPkgPage = (p: number) => {
+    setPkgPage(p);
+    pkgSecRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const goPolPage = (p: number) => {
+    setPolPage(p);
+    polSecRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const loading = policiesQ.isLoading || setsQ.isLoading;
 
   return (
@@ -827,7 +912,7 @@ function ListView({
           별도 .rm-results 래퍼 안(스태거 인덱스 분리). 첫 섹션은 margin-top:8px. */}
       {!loading && (
         <div className="rm-results">
-          <section className="rm-sec" style={{ marginTop: 8 }}>
+          <section className="rm-sec" style={{ marginTop: 8 }} ref={pkgSecRef}>
             <div className="rm-lv-head">
               <h2>{ko ? "패키지" : "Packages"}</h2>
               <span className="count">{pkgList.length}</span>
@@ -851,18 +936,17 @@ function ListView({
                     />
                   ))}
                 </div>
-                {pkgList.length > 8 && (
-                  <button type="button" className="rm-lv-more" onClick={() => setPkgAll((v) => !v)}>
-                    {pkgAll
-                      ? ko ? "접기" : "Show less"
-                      : ko ? `더보기 (+${pkgList.length - 8})` : `Show more (+${pkgList.length - 8})`}
-                  </button>
-                )}
+                <Pagination
+                  page={pkgPageSafe}
+                  pageCount={pkgPageCount}
+                  onChange={goPkgPage}
+                  ko={ko}
+                />
               </>
             )}
           </section>
 
-          <section className="rm-sec">
+          <section className="rm-sec" ref={polSecRef}>
             <div className="rm-lv-head">
               <h2>{ko ? "정책" : "Policies"}</h2>
               <span className="count">{polList.length}</span>
@@ -879,13 +963,12 @@ function ListView({
                     <PolicyListCard key={l.id} listing={l} locale={locale} onInstall={setInstallTarget} />
                   ))}
                 </div>
-                {polList.length > 12 && (
-                  <button type="button" className="rm-lv-more" onClick={() => setPolAll((v) => !v)}>
-                    {polAll
-                      ? ko ? "접기" : "Show less"
-                      : ko ? `더보기 (+${polList.length - 12})` : `Show more (+${polList.length - 12})`}
-                  </button>
-                )}
+                <Pagination
+                  page={polPageSafe}
+                  pageCount={polPageCount}
+                  onChange={goPolPage}
+                  ko={ko}
+                />
               </>
             )}
           </section>
