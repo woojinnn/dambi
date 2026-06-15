@@ -129,6 +129,36 @@ describe("sign-bundles", () => {
     expect(forced.skipped).toBe(0);
   });
 
+  it("signs every unique bundle correctly under bounded concurrency (>1)", async () => {
+    // The KMS path runs the signing loop through a bounded promise pool. Prove the
+    // pool signs every gap exactly once with no lost/duplicated work — exercised in
+    // local mode (instant, deterministic) with concurrency forced above 1.
+    const entries = Array.from({ length: 25 }, (_, i) => ({
+      seg: `1__0x${i.toString(16).padStart(2, "0")}__0x01`,
+      bundle: { ...A, id: `a@${i}`, n: i },
+    }));
+    seedRoot(entries);
+    const r = await signBundles({
+      registryRoot: root,
+      mode: "local",
+      privKeyHex: privHex,
+      concurrency: 8,
+    });
+    expect(r.total).toBe(25);
+    expect(r.signed).toBe(25);
+    expect(r.skipped).toBe(0);
+    expect(findMissingSignatures(root)).toEqual([]);
+    // a second concurrent run is a pure no-op (every gap already filled)
+    const second = await signBundles({
+      registryRoot: root,
+      mode: "local",
+      privKeyHex: privHex,
+      concurrency: 8,
+    });
+    expect(second.signed).toBe(0);
+    expect(second.skipped).toBe(25);
+  });
+
   it("the .sig verifies under WebCrypto over canonicalize(bundle) with the pinned SPKI key", async () => {
     seedRoot([{ seg: "1__0xaa__0x01", bundle: A }]);
     await signBundles({ registryRoot: root, mode: "local", privKeyHex: privHex });

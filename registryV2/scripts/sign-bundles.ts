@@ -59,6 +59,8 @@ export interface SignBundlesOptions {
   keyId?: string;
   /** re-sign even when a .sig already exists (key rotation / corpus repair). */
   force?: boolean;
+  /** kms mode: max concurrent asymmetricSign calls (default 12; env BUNDLE_SIGN_CONCURRENCY). */
+  concurrency?: number;
   log?: (msg: string) => void;
 }
 
@@ -135,10 +137,31 @@ export function derToP1363(der: Uint8Array): Uint8Array {
   return p256.Signature.fromBytes(der, "der").toBytes("compact");
 }
 
-/** kms: asymmetricSign returns DER; convert to P1363 (WebCrypto verify format). */
-async function signKms(digest: Uint8Array, keyName: string): Promise<Uint8Array> {
+/** Minimal shape of the one KMS client method we use — keeps the heavy
+ *  @google-cloud/kms type surface out of the hot path while staying type-checked. */
+type KmsSigner = {
+  asymmetricSign(req: {
+    name: string;
+    digest: { sha256: Buffer };
+  }): Promise<[{ signature?: Buffer | Uint8Array | string | null }, ...unknown[]]>;
+};
+
+/** Construct the KMS client ONCE per run. Previously a fresh client — and with it
+ *  a fresh credential + gRPC-channel init — was built per signature; on a full
+ *  re-sign that is 30k+ auth handshakes, which exhausted the keyless WIF token
+ *  refresh and hung the job for hours ("Getting metadata from plugin failed:
+ *  upstream request timeout"). One client reuses a single cached token + channel. */
+async function newKmsClient(): Promise<KmsSigner> {
   const { KeyManagementServiceClient } = await import("@google-cloud/kms");
-  const client = new KeyManagementServiceClient();
+  return new KeyManagementServiceClient() as unknown as KmsSigner;
+}
+
+/** kms: asymmetricSign returns DER; convert to P1363 (WebCrypto verify format). */
+async function signKms(
+  client: KmsSigner,
+  digest: Uint8Array,
+  keyName: string,
+): Promise<Uint8Array> {
   const [resp] = await client.asymmetricSign({
     name: keyName,
     digest: { sha256: Buffer.from(digest) },
@@ -147,6 +170,31 @@ async function signKms(digest: Uint8Array, keyName: string): Promise<Uint8Array>
     throw new Error(`KMS returned no signature for ${keyName}`);
   }
   return derToP1363(Uint8Array.from(resp.signature as Buffer));
+}
+
+/** Run `fn` over `items` with at most `concurrency` in flight, aborting fast on the
+ *  first rejection — a broken KMS/auth fails in seconds, not after a partial corpus
+ *  and not after a multi-hour stall. Single-threaded JS makes `next++` atomic. */
+async function mapPool<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  let aborted = false;
+  const worker = async (): Promise<void> => {
+    while (!aborted && next < items.length) {
+      const item = items[next++];
+      try {
+        await fn(item);
+      } catch (e) {
+        aborted = true;
+        throw e;
+      }
+    }
+  };
+  const n = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(Array.from({ length: n }, () => worker()));
 }
 
 function localKeyId(priv: Uint8Array): string {
@@ -200,27 +248,39 @@ export async function signBundles(
   const shas = collectBundleShas(root);
   mkdirSync(sigDir, { recursive: true });
 
+  // Sign only the gaps. In CI the workflow hydrates signatures/ from the bucket
+  // first, so an incremental publish signs ~0 — the heavy KMS loop only runs on a
+  // genuine new bundle or a --force rotation.
+  const toSign = shas.filter(
+    (sha) => opts.force || !existsSync(join(sigDir, `${sha}.sig`)),
+  );
+  const skipped = shas.length - toSign.length;
+
+  const kmsClient = mode === "kms" ? await newKmsClient() : undefined;
+  const concurrency =
+    mode === "kms"
+      ? (opts.concurrency ?? Number(process.env.BUNDLE_SIGN_CONCURRENCY)) || 12
+      : 1;
+
   let signed = 0;
-  let skipped = 0;
-  for (const sha of shas) {
-    const outPath = join(sigDir, `${sha}.sig`);
-    if (!opts.force && existsSync(outPath)) {
-      skipped++;
-      continue;
-    }
+  await mapPool(toSign, concurrency, async (sha) => {
     const digest = digestBytes(sha);
     const sig =
       mode === "local"
         ? signLocal(digest, priv as Uint8Array)
-        : await signKms(digest, kmsKeyName as string);
+        : await signKms(kmsClient as KmsSigner, digest, kmsKeyName as string);
     const doc = {
       alg: SIG_ALG,
       key_id: keyId,
       sig_b64: Buffer.from(sig).toString("base64"),
     };
-    writeFileSync(outPath, JSON.stringify(doc, null, 2) + "\n", "utf8");
+    writeFileSync(
+      join(sigDir, `${sha}.sig`),
+      JSON.stringify(doc, null, 2) + "\n",
+      "utf8",
+    );
     signed++;
-  }
+  });
   log(`[${mode}] ${signed} signed, ${skipped} skipped, ${shas.length} total`);
   return { total: shas.length, signed, skipped };
 }
