@@ -72,7 +72,12 @@ impl Multicall {
 /// 32-byte: array length N
 ///     element = (address pad, bool pad, bytes_offset, bytes_len, bytes_data padded)
 /// ```
-fn encode_aggregate3_calldata(calls: &[Call3]) -> Vec<u8> {
+///
+/// `pub` so the policy-server lending-HF batch path (`RpcOnchainView::eth_call_batch`,
+/// which issues a raw reqwest `eth_call` rather than going through [`RpcRouter`]) can
+/// reuse this exact, tested ABI codec instead of carrying a second copy.
+#[must_use]
+pub fn encode_aggregate3_calldata(calls: &[Call3]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(4 + 64 + calls.len() * 96);
 
     // selector
@@ -163,7 +168,10 @@ const fn bool_to_32bytes(b: bool) -> [u8; 32] {
 /// 32: offset to array (= 0x20)
 /// 32: array length N
 /// ```
-fn decode_aggregate3_returndata(data: &[u8]) -> Result<Vec<Call3Result>, SyncError> {
+///
+/// `pub` for reuse by the policy-server lending-HF batch path — see
+/// [`encode_aggregate3_calldata`].
+pub fn decode_aggregate3_returndata(data: &[u8]) -> Result<Vec<Call3Result>, SyncError> {
     if data.len() < 64 {
         return Err(SyncError::FetchFailed {
             source_id: "multicall".into(),

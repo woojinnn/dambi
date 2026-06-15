@@ -1,6 +1,6 @@
 {
   "name": "dambi-extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Policy-engine-backed wallet transaction safety extension",
   "workspaces": [

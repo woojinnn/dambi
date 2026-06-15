@@ -98,6 +98,30 @@ describe("verifyBundleSignature", () => {
     expect(r).toMatchObject({ ok: true });
   });
 
+  it("binds native-like fetch to globalThis to avoid Illegal invocation", async () => {
+    const fetchImpl = (function (this: unknown, input: RequestInfo | URL) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      const url = String(input);
+      if (url === `${BASE}/signatures/${bundleSha}.sig`) {
+        return Promise.resolve(
+          new Response(JSON.stringify(sig(goodSigB64)), { status: 200 }),
+        );
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    }) as unknown as typeof fetch;
+    const r = await verifyBundleSignature({
+      bundle: BUNDLE,
+      claimedSha256: bundleSha,
+      baseUrl: BASE,
+      fetchImpl,
+      require: true,
+      pinnedKeySpkiB64: pinnedSpkiB64,
+    });
+    expect(r).toMatchObject({ ok: true });
+  });
+
   it("missing .sig (404) → fail-closed", async () => {
     const r = await verifyBundleSignature({
       bundle: BUNDLE,
@@ -108,6 +132,46 @@ describe("verifyBundleSignature", () => {
       pinnedKeySpkiB64: pinnedSpkiB64,
     });
     expect(r).toMatchObject({ ok: false, reason: "sig_http_404" });
+  });
+
+  it("signature fetch throws → reports sig_fetch_error with diagnostics", async () => {
+    const fetchImpl = (async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+    const r = await verifyBundleSignature({
+      bundle: BUNDLE,
+      claimedSha256: bundleSha,
+      baseUrl: BASE,
+      fetchImpl,
+      require: true,
+      pinnedKeySpkiB64: pinnedSpkiB64,
+    });
+    expect(r).toMatchObject({
+      ok: false,
+      reason: "sig_fetch_error",
+      localSha: bundleSha,
+      sigUrl: `${BASE}/signatures/${bundleSha}.sig`,
+      detail: "network down",
+    });
+  });
+
+  it("signature response is not JSON → reports sig_json_error", async () => {
+    const fetchImpl = (async () =>
+      new Response("not json", { status: 200 })) as unknown as typeof fetch;
+    const r = await verifyBundleSignature({
+      bundle: BUNDLE,
+      claimedSha256: bundleSha,
+      baseUrl: BASE,
+      fetchImpl,
+      require: true,
+      pinnedKeySpkiB64: pinnedSpkiB64,
+    });
+    expect(r).toMatchObject({
+      ok: false,
+      reason: "sig_json_error",
+      localSha: bundleSha,
+      sigUrl: `${BASE}/signatures/${bundleSha}.sig`,
+    });
   });
 
   it("sha mismatch (response lies about bundle_sha256) → fail-closed", async () => {
@@ -184,6 +248,23 @@ describe("verifyBundleSignature", () => {
       pinnedKeySpkiB64: pinnedSpkiB64,
     });
     expect(r).toMatchObject({ ok: false, reason: "sig_malformed" });
+  });
+
+  it("malformed .sig base64 → reports sig_base64_error", async () => {
+    const r = await verifyBundleSignature({
+      bundle: BUNDLE,
+      claimedSha256: bundleSha,
+      baseUrl: BASE,
+      fetchImpl: sigFetch(bundleSha, sig("@@@")),
+      require: true,
+      pinnedKeySpkiB64: pinnedSpkiB64,
+    });
+    expect(r).toMatchObject({
+      ok: false,
+      reason: "sig_base64_error",
+      localSha: bundleSha,
+      sigUrl: `${BASE}/signatures/${bundleSha}.sig`,
+    });
   });
 
   it("fetches the sig by the RECOMPUTED hash, not the (untrusted) claim", async () => {

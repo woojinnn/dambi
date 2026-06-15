@@ -63,7 +63,13 @@ export function readBundleSigDefines(): BundleSigDefines {
 
 export type VerifyOutcome =
   | { ok: true; localSha?: string }
-  | { ok: false; reason: string; localSha?: string };
+  | {
+      ok: false;
+      reason: string;
+      localSha?: string;
+      sigUrl?: string;
+      detail?: string;
+    };
 
 export interface VerifyBundleParams {
   /** The RAW response bundle object — `parsedResponse.bundle`, NOT parseBundleV3 output. */
@@ -88,6 +94,10 @@ function bufToHex(buf: ArrayBuffer): string {
   let s = "";
   for (let i = 0; i < b.length; i += 1) s += b[i].toString(16).padStart(2, "0");
   return s;
+}
+
+function errorDetail(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 // importKey is async; memoize per SPKI so we import once per pinned key.
@@ -140,17 +150,51 @@ export async function verifyBundleSignature(
 
   // Fetch the detached signature by the RECOMPUTED hash (N4).
   let sigBytes: Uint8Array;
+  const base = p.baseUrl.endsWith("/") ? p.baseUrl.slice(0, -1) : p.baseUrl;
+  const sigUrl = `${base}/signatures/${localSha}.sig`;
+  let res: Response;
   try {
-    const base = p.baseUrl.endsWith("/") ? p.baseUrl.slice(0, -1) : p.baseUrl;
-    const res = await p.fetchImpl(`${base}/signatures/${localSha}.sig`);
-    if (!res.ok) return { ok: false, reason: `sig_http_${res.status}`, localSha };
-    const doc = (await res.json()) as { sig_b64?: unknown };
-    if (typeof doc.sig_b64 !== "string") {
-      return { ok: false, reason: "sig_malformed", localSha };
-    }
+    // Native WorkerGlobalScope.fetch throws "Illegal invocation" when invoked
+    // as a property of our params object (`p.fetchImpl(...)`). Bind it back to
+    // globalThis while still allowing test fetch shims.
+    res = await p.fetchImpl.call(globalThis, sigUrl);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "sig_fetch_error",
+      localSha,
+      sigUrl,
+      detail: errorDetail(err),
+    };
+  }
+  if (!res.ok)
+    return { ok: false, reason: `sig_http_${res.status}`, localSha, sigUrl };
+
+  let doc: { sig_b64?: unknown };
+  try {
+    doc = (await res.json()) as { sig_b64?: unknown };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "sig_json_error",
+      localSha,
+      sigUrl,
+      detail: errorDetail(err),
+    };
+  }
+  if (typeof doc.sig_b64 !== "string") {
+    return { ok: false, reason: "sig_malformed", localSha, sigUrl };
+  }
+  try {
     sigBytes = base64ToBytes(doc.sig_b64); // alg / key_id ignored (telemetry only, N2)
-  } catch {
-    return { ok: false, reason: "sig_fetch_error", localSha };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "sig_base64_error",
+      localSha,
+      sigUrl,
+      detail: errorDetail(err),
+    };
   }
 
   // Verify with the HARD-CODED algorithm + the build-time pinned key (N2).

@@ -18,6 +18,10 @@ policy-sync.workspace = true
 policy-db.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# ABI helpers for the on-chain `lending.health_factor` reads: keccak256 (4-byte
+# selectors) + hex (calldata/returndata <-> JSON-RPC eth_call).
+alloy-primitives.workspace = true
+hex.workspace = true
 
 # HTTP server stack — versions mirror `adapter-debug-dashboard`.
 axum = "0.7"

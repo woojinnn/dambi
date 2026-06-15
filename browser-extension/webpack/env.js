@@ -36,6 +36,34 @@ function resolveRequireBundleSig(env = process.env) {
   return env.DAMBI_REQUIRE_BUNDLE_SIGNATURE === "true" ? "true" : "false";
 }
 
+// Production-build guard: a build destined for actual user distribution MUST
+// enforce bundle signatures, otherwise the shipped extension would trust an
+// unsigned/MITM'd registry and the supply-chain integrity check is silently
+// defeated. We fail the build rather than let that ship (mirrors the
+// REGISTRY_BASE_URL https guard's "fail the build, not the user" stance).
+//
+// The default IS strict: only an EXPLICIT opt-out downgrades a prod-config build
+// to a non-enforcing local/staging smoke build —
+//   - DAMBI_ALLOW_UNSIGNED_REGISTRY=1  (dedicated, clearest intent), or
+//   - DAMBI_ALLOW_INSECURE_REGISTRY=1  (already marks a build as non-production,
+//     so it implies the signature requirement is waived too — keeps CI's existing
+//     compile-only build steps working with no extra flag).
+// Only the literal "1" counts (a stray "true"/"yes" must not silently disarm it).
+function assertProdSignatureEnforced(env = process.env) {
+  const optedOut =
+    env.DAMBI_ALLOW_UNSIGNED_REGISTRY === "1" ||
+    env.DAMBI_ALLOW_INSECURE_REGISTRY === "1";
+  if (optedOut) return;
+  if (env.DAMBI_REQUIRE_BUNDLE_SIGNATURE !== "true") {
+    throw new Error(
+      "[webpack.prod] production builds must enforce bundle signatures: set " +
+        "DAMBI_REQUIRE_BUNDLE_SIGNATURE=true (and PINNED_BUNDLE_PUBLIC_KEY) in " +
+        "browser-extension/.env, or export DAMBI_ALLOW_UNSIGNED_REGISTRY=1 for a " +
+        "local/staging smoke build that is NOT being distributed to users.",
+    );
+  }
+}
+
 module.exports = {
   DEFAULT_SERVER_URL,
   buildMode,
@@ -45,4 +73,5 @@ module.exports = {
   resolveServerUrl,
   resolvePinnedBundleKey,
   resolveRequireBundleSig,
+  assertProdSignatureEnforced,
 };

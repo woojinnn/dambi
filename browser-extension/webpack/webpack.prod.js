@@ -1,6 +1,7 @@
 const { merge } = require("webpack-merge");
 process.env.NODE_ENV = process.env.NODE_ENV || "production";
 const common = require("./webpack.common.js");
+const { assertProdSignatureEnforced } = require("./env.js");
 
 // Audit Round 7+ (P1) — production builds must point at a real HTTPS
 // registry. A missing or `http://localhost:*` `REGISTRY_BASE_URL` in a
@@ -26,6 +27,13 @@ if (process.env.DAMBI_ALLOW_INSECURE_REGISTRY !== "1") {
     );
   }
 }
+
+// Bundle-signature ENFORCEMENT guard. A production-distributed build must verify
+// bundle signatures; otherwise the shipped extension trusts an unsigned registry
+// and the supply-chain check is silently defeated. Default-strict — only an
+// explicit DAMBI_ALLOW_UNSIGNED_REGISTRY=1 / DAMBI_ALLOW_INSECURE_REGISTRY=1
+// downgrades this to a non-prod smoke build. (Details in env.js.)
+assertProdSignatureEnforced(process.env);
 
 // Bundle-signature pinned-key guard. If this build ENFORCES signatures, a
 // pinned public key MUST be present — otherwise every bundle install would
