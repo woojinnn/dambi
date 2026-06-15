@@ -252,6 +252,7 @@ pub async fn evaluate(
     sanctions: &dyn SanctionsScreen,
     floor: &dyn NftFloorOracle,
     external: &dyn ExternalEnrichment,
+    onchain: &dyn crate::lending_hf::OnchainView,
     req: EvaluateRequest,
 ) -> Result<EvaluateResponse, HandlerError> {
     // This handler is db-agnostic: production passes the PostgreSQL-backed
@@ -317,6 +318,7 @@ pub async fn evaluate(
         sanctions,
         floor,
         external,
+        onchain,
     )
     .await;
     diagnostics.append(&mut sim_diagnostics);
@@ -358,6 +360,7 @@ async fn execute_call_specs(
     sanctions: &dyn SanctionsScreen,
     floor: &dyn NftFloorOracle,
     external: &dyn ExternalEnrichment,
+    onchain: &dyn crate::lending_hf::OnchainView,
 ) -> (BTreeMap<String, Value>, Vec<Diagnostic>) {
     let mut results = BTreeMap::new();
     let mut diagnostics = Vec::new();
@@ -671,6 +674,23 @@ async fn execute_call_specs(
                     call_id: Some(spec.call_id.clone()),
                 }),
             },
+            "lending.health_factor" => {
+                match crate::lending_hf::lending_health_factor(&spec.params, onchain).await {
+                    Some(value) => {
+                        tracing::debug!(call_id = %spec.call_id, "lending.health_factor: OK");
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "lending.health_factor: unsupported venue/chain, no RPC, or read \
+                             failed (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
             other => diagnostics.push(Diagnostic {
                 level: "info".to_owned(),
                 message: format!(
@@ -1066,7 +1086,7 @@ async fn normalize_to_nano(params: &Value, price_book: &dyn PriceBook) -> Option
 
 /// Extract a lowercase hex address from an `asset` param that may be a bare
 /// address string or an `AssetRef` object carrying an `address` field.
-fn asset_address(v: &Value) -> Option<String> {
+pub(crate) fn asset_address(v: &Value) -> Option<String> {
     let raw = match v {
         Value::String(s) => s.clone(),
         Value::Object(_) => v.get("address").and_then(Value::as_str)?.to_owned(),
@@ -1137,7 +1157,7 @@ async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Op
 /// Numeric EIP-155 chain id from a params value that may be a JSON number or a
 /// CAIP-2 string (`"eip155:1"`) — the form `$.root.chain_id` resolves to. Falls
 /// back to `1` (Ethereum mainnet; the v1 token policies are mainnet-scoped).
-fn chain_id_to_eip155_num(v: &Value) -> i64 {
+pub(crate) fn chain_id_to_eip155_num(v: &Value) -> i64 {
     if let Some(n) = v.as_i64() {
         return n;
     }
@@ -1531,6 +1551,7 @@ mod tests {
                 flagged: Some(true),
                 outbound: None,
             },
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -1562,6 +1583,7 @@ mod tests {
                 sell_tax_bps: None,
                 buy_tax_bps: None,
             })),
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -1598,6 +1620,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &no_external(),
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert!(results["now::1"]["nowTs"].as_i64().unwrap() > 1_700_000_000);
@@ -1679,6 +1702,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &no_external(),
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(results["frac::1"], serde_json::json!({ "bps": 6000 }));
@@ -1839,6 +1863,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &stub,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2093,6 +2118,7 @@ mod tests {
             &StubSanctions(Some(true)),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2125,6 +2151,7 @@ mod tests {
             &StubSanctions(None),
             &StubFloor(Some(5.0)),
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2156,6 +2183,7 @@ mod tests {
             &StubSanctions(None),
             &StubFloor(Some(1.0)),
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2189,6 +2217,7 @@ mod tests {
             &no_sanctions(),
             &StubFloor(Some(5.0)),
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2409,6 +2438,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             empty_envelope_request(),
         )
         .await
@@ -2441,6 +2471,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             empty_envelope_request(),
         )
         .await
@@ -2464,6 +2495,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             request_with_envelope(hyperliquid_withdraw_action()),
         )
         .await
@@ -2507,6 +2539,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2539,6 +2572,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2580,6 +2614,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2624,6 +2659,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2674,6 +2710,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2714,6 +2751,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2759,6 +2797,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2797,6 +2836,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2901,6 +2941,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2991,6 +3032,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -3047,6 +3089,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         // day: (968.42-920)/968.42 ≈ 500 bps; peak: (1000-920)/1000 = 800 bps.
@@ -3068,6 +3111,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert!(!results.contains_key(&spec.call_id));
@@ -3134,6 +3178,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -3157,6 +3202,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -3220,6 +3266,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -3241,6 +3288,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert!(!results.contains_key(&spec.call_id));

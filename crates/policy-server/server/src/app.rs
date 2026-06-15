@@ -18,6 +18,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use policy_db::{GlobalDb, MultiUserStore};
+use policy_sync::sources::fetchers::rpc::multicall::{
+    decode_aggregate3_returndata, encode_aggregate3_calldata, Call3,
+};
 use policy_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 use crate::auth::{require_auth, AuthUser};
@@ -387,6 +390,106 @@ impl SanctionsScreen for ChainalysisSanctionsOracle {
         // A revert / error surfaces as a JSON-RPC `error` with no `result` → None.
         let result = resp.get("result")?.as_str()?;
         crate::handler::decode_sanctioned(result)
+    }
+}
+
+/// On-chain reader for `lending.health_factor` — a raw JSON-RPC `eth_call`
+/// returning the ABI returndata bytes. Mirrors [`ChainalysisSanctionsOracle`]:
+/// reads the Ethereum-mainnet RPC URL from `POLICY_LENDING_RPC_URL` (falling back
+/// to the general `ALCHEMY_RPC_URL`); when unset the read returns `None`, so the
+/// optional health-factor call fail-opens (the borrow/withdraw HF policies stay
+/// dormant) rather than fabricating a value. Each `eth_call` is hard-bounded
+/// (1.5 s) and mainnet-only (v1).
+struct RpcOnchainView {
+    client: reqwest::Client,
+    rpc_url: Option<String>,
+}
+
+/// Multicall3 — the same deterministic address on every EVM chain (CREATE2 deploy).
+/// Used to fold a Comet collateral enumeration into one round-trip via `aggregate3`.
+const MULTICALL3: &str = "0xcA11bde05977b3631167028862bE2a173976CA11";
+
+impl RpcOnchainView {
+    /// One raw JSON-RPC `eth_call` to `to` with `data`, returning the returndata
+    /// bytes (1.5 s bound). `None` on any transport error or a JSON-RPC `error`
+    /// (revert / no `result`). Shared by `eth_call` and the Multicall3 batch.
+    async fn raw_eth_call(&self, to: &str, data: &[u8]) -> Option<Vec<u8>> {
+        let rpc_url = self.rpc_url.as_deref()?;
+        let data_hex = format!("0x{}", hex::encode(data));
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_call",
+            "params": [{ "to": to, "data": data_hex }, "latest"],
+        });
+        let resp = self
+            .client
+            .post(rpc_url)
+            .json(&body)
+            .timeout(std::time::Duration::from_millis(1500))
+            .send()
+            .await
+            .ok()?
+            .json::<serde_json::Value>()
+            .await
+            .ok()?;
+        // A revert surfaces as a JSON-RPC `error` with no `result` → None.
+        let result = resp.get("result")?.as_str()?;
+        hex::decode(result.trim_start_matches("0x")).ok()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::lending_hf::OnchainView for RpcOnchainView {
+    async fn eth_call(&self, chain_id: i64, to: &str, data: &[u8]) -> Option<Vec<u8>> {
+        if chain_id != 1 {
+            return None; // v1: Ethereum mainnet only.
+        }
+        self.raw_eth_call(to, data).await
+    }
+
+    /// Batch via a single Multicall3 `aggregate3` (`allowFailure = true` per leg, so a
+    /// reverting feed yields just that slot's `None` rather than sinking the batch).
+    /// One round-trip replaces N sequential `eth_call`s — the Comet enumeration's
+    /// 8 s-timeout risk. Reuses policy-sync's tested ABI codec
+    /// (`encode_aggregate3_calldata` / `decode_aggregate3_returndata`).
+    async fn eth_call_batch(
+        &self,
+        chain_id: i64,
+        calls: &[(String, Vec<u8>)],
+    ) -> Option<Vec<Option<Vec<u8>>>> {
+        if chain_id != 1 {
+            return None; // v1: Ethereum mainnet only.
+        }
+        if calls.is_empty() {
+            return Some(Vec::new());
+        }
+        let mut mc_calls = Vec::with_capacity(calls.len());
+        for (to, data) in calls {
+            let raw = hex::decode(to.trim_start_matches("0x")).ok()?;
+            if raw.len() != 20 {
+                return None; // malformed target ⇒ dormant (never a fabricated batch)
+            }
+            mc_calls.push(Call3 {
+                target: alloy_primitives::Address::from_slice(&raw),
+                allow_failure: true,
+                call_data: data.clone(),
+            });
+        }
+        let calldata = encode_aggregate3_calldata(&mc_calls);
+        let ret = self.raw_eth_call(MULTICALL3, &calldata).await?;
+        let results = decode_aggregate3_returndata(&ret).ok()?;
+        if results.len() != calls.len() {
+            return None; // arity mismatch ⇒ can't trust the mapping
+        }
+        // A leg that reverted (success=false) or returned empty maps to None — the
+        // adapter decides whether that slot's absence is fatal.
+        Some(
+            results
+                .into_iter()
+                .map(|r| (r.success && !r.return_data.is_empty()).then_some(r.return_data))
+                .collect(),
+        )
     }
 }
 
@@ -781,7 +884,23 @@ async fn evaluate_handler(
         goplus_base: std::env::var("GOPLUS_API_URL").ok(),
         alchemy_rpc: std::env::var("ALCHEMY_RPC_URL").ok(),
     };
-    match evaluate(&*store, &price_book, &sanctions, &floor, &external, req).await {
+    let onchain = RpcOnchainView {
+        client: reqwest::Client::new(),
+        rpc_url: std::env::var("POLICY_LENDING_RPC_URL")
+            .ok()
+            .or_else(|| std::env::var("ALCHEMY_RPC_URL").ok()),
+    };
+    match evaluate(
+        &*store,
+        &price_book,
+        &sanctions,
+        &floor,
+        &external,
+        &onchain,
+        req,
+    )
+    .await
+    {
         Ok(resp) => Json(resp).into_response(),
         Err(err @ HandlerError::Reducer(_)) => {
             (StatusCode::UNPROCESSABLE_ENTITY, err.to_string()).into_response()

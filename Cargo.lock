@@ -2507,11 +2507,13 @@ dependencies = [
 name = "policy-server"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "async-trait",
  "axum",
  "base64",
  "dotenvy",
  "futures",
+ "hex",
  "jsonwebtoken",
  "policy-db",
  "policy-state",
