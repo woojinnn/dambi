@@ -506,6 +506,17 @@ impl PostgresWalletStore {
     }
 }
 
+fn wallet_id_from_row(row: &PgRow) -> Result<WalletId, StoreError> {
+    let address: String = row.get("address");
+    let chains_value: serde_json::Value = row.get("chains");
+    let chains = serde_json::from_value::<Vec<ChainId>>(chains_value)
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    let address = address
+        .parse()
+        .map_err(|e| StoreError::Backend(format!("wallet address: {e}")))?;
+    Ok(WalletId::new(address, chains))
+}
+
 #[async_trait]
 impl WalletStore for PostgresWalletStore {
     async fn list_wallets(&self) -> Result<Vec<WalletId>, StoreError> {
@@ -519,18 +530,103 @@ impl WalletStore for PostgresWalletStore {
         .await
         .map_err(|e| StoreError::Backend(e.to_string()))?;
 
-        rows.into_iter()
-            .map(|row| {
-                let address: String = row.get("address");
-                let chains_value: serde_json::Value = row.get("chains");
-                let chains = serde_json::from_value::<Vec<ChainId>>(chains_value)
-                    .map_err(|e| StoreError::Backend(e.to_string()))?;
-                let address = address
-                    .parse()
-                    .map_err(|e| StoreError::Backend(format!("wallet address: {e}")))?;
-                Ok(WalletId::new(address, chains))
-            })
-            .collect()
+        rows.iter().map(wallet_id_from_row).collect()
+    }
+
+    async fn list_wallets_for_sync(
+        &self,
+        source: &str,
+        now_unix: u64,
+        limit: usize,
+        cursor_after: Option<String>,
+    ) -> Result<Vec<WalletId>, StoreError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let now_i64 = i64::try_from(now_unix).unwrap_or(i64::MAX);
+        let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut rows: Vec<PgRow> = Vec::new();
+
+        if let Some(cursor) = cursor_after.as_deref() {
+            rows.extend(
+                query(
+                    "SELECT w.address, w.chains
+                     FROM wallets w
+                     LEFT JOIN sync_cursors c
+                       ON c.user_id = w.user_id
+                      AND c.wallet_address = w.address
+                      AND c.source = $2
+                     WHERE w.user_id = $1
+                       AND w.archived = FALSE
+                       AND COALESCE((c.cursor_json->>'next_due_at')::BIGINT, 0) <= $3
+                       AND w.address > $4
+                     ORDER BY w.address
+                     LIMIT $5",
+                )
+                .bind(&self.user_id)
+                .bind(source)
+                .bind(now_i64)
+                .bind(cursor)
+                .bind(limit_i64)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| StoreError::Backend(e.to_string()))?,
+            );
+        }
+
+        let remaining = limit.saturating_sub(rows.len());
+        if remaining > 0 {
+            let remaining_i64 = i64::try_from(remaining).unwrap_or(i64::MAX);
+            let wrap_rows = if let Some(cursor) = cursor_after.as_deref() {
+                query(
+                    "SELECT w.address, w.chains
+                     FROM wallets w
+                     LEFT JOIN sync_cursors c
+                       ON c.user_id = w.user_id
+                      AND c.wallet_address = w.address
+                      AND c.source = $2
+                     WHERE w.user_id = $1
+                       AND w.archived = FALSE
+                       AND COALESCE((c.cursor_json->>'next_due_at')::BIGINT, 0) <= $3
+                       AND w.address <= $4
+                     ORDER BY w.address
+                     LIMIT $5",
+                )
+                .bind(&self.user_id)
+                .bind(source)
+                .bind(now_i64)
+                .bind(cursor)
+                .bind(remaining_i64)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| StoreError::Backend(e.to_string()))?
+            } else {
+                query(
+                    "SELECT w.address, w.chains
+                     FROM wallets w
+                     LEFT JOIN sync_cursors c
+                       ON c.user_id = w.user_id
+                      AND c.wallet_address = w.address
+                      AND c.source = $2
+                     WHERE w.user_id = $1
+                       AND w.archived = FALSE
+                       AND COALESCE((c.cursor_json->>'next_due_at')::BIGINT, 0) <= $3
+                     ORDER BY w.address
+                     LIMIT $4",
+                )
+                .bind(&self.user_id)
+                .bind(source)
+                .bind(now_i64)
+                .bind(remaining_i64)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| StoreError::Backend(e.to_string()))?
+            };
+            rows.extend(wrap_rows);
+        }
+
+        rows.iter().map(wallet_id_from_row).collect()
     }
 
     async fn load(&self, id: &WalletId) -> Result<WalletState, StoreError> {
@@ -597,6 +693,34 @@ impl WalletStore for PostgresWalletStore {
         tx.commit()
             .await
             .map_err(|e| StoreError::Backend(e.to_string()))
+    }
+
+    async fn mark_wallet_sync_due_at(
+        &self,
+        id: &WalletId,
+        source: &str,
+        next_due_at: u64,
+    ) -> Result<(), StoreError> {
+        let address = format!("{:#x}", id.address);
+        let next_due_at = i64::try_from(next_due_at).unwrap_or(i64::MAX);
+        let cursor_json = serde_json::json!({ "next_due_at": next_due_at });
+        let now = unix_now_or_default();
+        query(
+            "INSERT INTO sync_cursors (user_id, wallet_address, source, cursor_json, updated_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT(user_id, wallet_address, source) DO UPDATE
+             SET cursor_json = excluded.cursor_json,
+                 updated_at = excluded.updated_at",
+        )
+        .bind(&self.user_id)
+        .bind(address)
+        .bind(source)
+        .bind(cursor_json)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
     }
 }
 

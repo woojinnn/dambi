@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -59,23 +60,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(30),
     );
     let sync_lock_ttl = Duration::from_secs(config.sync_lock_ttl_secs);
+    let mut schedulers: HashMap<String, Scheduler> = HashMap::new();
 
     loop {
-        for user_id in storage.list_user_ids().await? {
+        let user_ids = storage.list_user_ids().await?;
+        let active_users: HashSet<_> = user_ids.iter().cloned().collect();
+        schedulers.retain(|user_id, _| active_users.contains(user_id));
+
+        for user_id in user_ids {
             let lock_key = format!("sync:user:{user_id}");
             let Some(lock) = coordinator.try_lock(&lock_key, sync_lock_ttl).await? else {
                 continue;
             };
 
-            let store = storage.wallet_store_for_user(&user_id)?;
-            let scheduler = Scheduler::new(
-                orchestrator.clone(),
-                store,
-                SchedulerConfig {
-                    tick_interval,
-                    ..SchedulerConfig::default()
-                },
-            );
+            if !schedulers.contains_key(&user_id) {
+                let store = storage.wallet_store_for_user(&user_id)?;
+                schedulers.insert(
+                    user_id.clone(),
+                    Scheduler::new(
+                        orchestrator.clone(),
+                        store,
+                        SchedulerConfig {
+                            tick_interval,
+                            wallet_min_sync_interval: tick_interval,
+                            ..SchedulerConfig::default()
+                        },
+                    ),
+                );
+            }
+            let scheduler = schedulers
+                .get(&user_id)
+                .expect("scheduler inserted for active user");
             let report_result = scheduler.tick_once().await;
             coordinator.release_lock(lock).await?;
             let report = report_result?;
