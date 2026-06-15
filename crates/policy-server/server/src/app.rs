@@ -1089,4 +1089,80 @@ mod tests {
             "live BAYC floor should be a sane positive ETH value, got {floor:?}"
         );
     }
+
+    /// Live e2e for `pool.liquidity`: the production `LiveEnrichment` `GeckoTerminal`
+    /// fetch against the real Uniswap V3 WETH/USDC 0.05% pool. Exercises the
+    /// venue→pool-key resolution, the chain→network slug, and the
+    /// `attributes.volume_usd.h24` parse end-to-end. Keyless public API, so it runs
+    /// whenever network egress is available (no env / key needed).
+    #[tokio::test]
+    #[ignore = "hits live GeckoTerminal public API"]
+    async fn live_pool_liquidity_geckoterminal() {
+        use crate::handler::ExternalEnrichment;
+        let ext = super::LiveEnrichment {
+            client: reqwest::Client::new(),
+            goplus_base: None,
+            alchemy_rpc: None,
+            geckoterminal_base: None, // built-in keyless public default
+        };
+        let venue = json!({
+            "name": "uniswap_v3",
+            "pool": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640" // WETH/USDC 0.05%
+        });
+        let facts = ext.pool_liquidity(1, &venue).await;
+        let vol = facts.and_then(|f| f.vol_24h_usd);
+        eprintln!("pool.liquidity live vol24hUsd = {vol:?}");
+        assert!(
+            matches!(vol, Some(v) if v.is_finite() && v > 0.0),
+            "live WETH/USDC pool should report a positive 24h volume, got {vol:?}"
+        );
+    }
+
+    /// Live e2e for `lending.health_factor` THROUGH the production Multicall3 path
+    /// (`RpcOnchainView::eth_call_batch` → one `aggregate3` `eth_call`). Proves the
+    /// aggregate3 encode/decode round-trips on real mainnet and that Aave V3's
+    /// `getUserAccountData` + `getAssetPrice` + `decimals` reads decode into a real
+    /// post-action HF. The borrower (must currently hold an Aave V3 debt position) is
+    /// overridable via `LENDING_E2E_BORROWER`. Requires a mainnet RPC
+    /// (`POLICY_LENDING_RPC_URL` / `ALCHEMY_RPC_URL`); SKIPS (ok) when unset so a
+    /// keyless CI `--ignored` run doesn't fail.
+    #[tokio::test]
+    #[ignore = "hits live mainnet RPC via Multicall3; needs POLICY_LENDING_RPC_URL/ALCHEMY_RPC_URL"]
+    async fn live_lending_health_factor_aave_multicall3() {
+        let Some(rpc) = std::env::var("POLICY_LENDING_RPC_URL")
+            .ok()
+            .or_else(|| std::env::var("ALCHEMY_RPC_URL").ok())
+        else {
+            eprintln!("skipping live_lending_health_factor_aave_multicall3: no RPC env");
+            return;
+        };
+        let onchain = super::RpcOnchainView {
+            client: reqwest::Client::new(),
+            rpc_url: Some(rpc),
+        };
+        let borrower = std::env::var("LENDING_E2E_BORROWER")
+            .unwrap_or_else(|_| "0xf0ffc2a63bdfe3eaf8fbe77174c5d314bf4358e9".to_owned());
+        // Borrowing 100 USDC of a live Aave V3 position — the whole read goes out as
+        // ONE Multicall3 aggregate3 (getUserAccountData + getAssetPrice + decimals).
+        let params = json!({
+            "chain_id": "eip155:1",
+            "owner": borrower,
+            "venue": { "name": "aave_v3", "chain": "eip155:1",
+                       "pool": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2" },
+            "asset": { "key": { "standard": "erc20", "chain": "eip155:1",
+                       "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } }, // USDC
+            "amount": "0x5f5e100", // 100 USDC (100e6)
+            "action_kind": "borrow",
+        });
+        let out = crate::lending_hf::lending_health_factor(&params, &onchain).await;
+        eprintln!("lending.health_factor live result = {out:?}");
+        let out = out.expect("live HF should resolve (Multicall3 aggregate3 + Aave decode)");
+        let hf: f64 = out["postActionHf"].as_str().unwrap().parse().unwrap();
+        // A live borrower with debt ⇒ a finite, positive, NON-sentinel HF (999999
+        // sentinel = zero debt ⇒ the position closed; set LENDING_E2E_BORROWER).
+        assert!(
+            hf.is_finite() && hf > 0.0 && hf < 100_000.0,
+            "post-action HF for a live Aave borrower should be sane positive, got {hf}"
+        );
+    }
 }
