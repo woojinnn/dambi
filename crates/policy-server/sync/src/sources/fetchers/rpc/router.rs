@@ -174,6 +174,24 @@ impl RpcRouter {
         }
         results
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_test_providers(providers: Vec<Arc<dyn RpcProvider>>) -> Self {
+        let mut by_chain: BTreeMap<ChainId, Vec<Arc<dyn RpcProvider>>> = BTreeMap::new();
+        for provider in providers {
+            by_chain
+                .entry(provider.chain().clone())
+                .or_default()
+                .push(provider);
+        }
+        Self {
+            by_chain,
+            multicall: BTreeMap::new(),
+            health: Arc::new(RwLock::new(HealthTracker::new(
+                super::config::FailoverConfig::default(),
+            ))),
+        }
+    }
 }
 
 fn instantiate_provider(

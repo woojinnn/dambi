@@ -49,6 +49,22 @@ pub trait WalletStore: Send + Sync {
     /// Returns every wallet id the store currently holds.
     async fn list_wallets(&self) -> Result<Vec<WalletId>, StoreError>;
 
+    /// Returns wallets eligible for background sync, ordered after the supplied
+    /// cursor when the backend supports cursor-aware selection. The default keeps
+    /// existing stores source-compatible by rotating the full wallet list in
+    /// memory; durable stores can override this to apply `next_due_at` and `LIMIT`
+    /// in the backend.
+    async fn list_wallets_for_sync(
+        &self,
+        _source: &str,
+        _now_unix: u64,
+        _limit: usize,
+        cursor_after: Option<String>,
+    ) -> Result<Vec<WalletId>, StoreError> {
+        let wallets = self.list_wallets().await?;
+        Ok(rotate_wallets_after_cursor(wallets, cursor_after))
+    }
+
     /// Loads the wallet state for `id`. Returns an empty
     /// [`WalletState::new`] for a wallet the store has never
     /// seen, rather than [`StoreError::NotFound`].
@@ -56,4 +72,36 @@ pub trait WalletStore: Send + Sync {
 
     /// Persists `state` as an upsert (create or replace).
     async fn save(&self, state: &WalletState) -> Result<(), StoreError>;
+
+    /// Records the next time a wallet should be considered for background sync.
+    /// The default is a no-op so lightweight stores and tests do not need cursor
+    /// tables; production stores can persist this for DB-side due filtering.
+    async fn mark_wallet_sync_due_at(
+        &self,
+        _id: &WalletId,
+        _source: &str,
+        _next_due_at: u64,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
+fn rotate_wallets_after_cursor(
+    mut wallets: Vec<WalletId>,
+    cursor_after: Option<String>,
+) -> Vec<WalletId> {
+    wallets.sort_by_key(wallet_sync_order_key);
+    let Some(cursor_after) = cursor_after else {
+        return wallets;
+    };
+    let split = wallets
+        .iter()
+        .position(|wid| wallet_sync_order_key(wid) > cursor_after)
+        .unwrap_or(0);
+    wallets.rotate_left(split);
+    wallets
+}
+
+fn wallet_sync_order_key(wid: &WalletId) -> String {
+    format!("{:#x}", wid.address)
 }

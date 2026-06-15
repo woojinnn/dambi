@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::watch;
@@ -8,6 +9,8 @@ use policy_state::{Time, WalletId, WalletStore};
 
 use crate::error::SyncError;
 use crate::orchestrator::{Orchestrator, RefreshReport};
+
+const WALLET_SYNC_SOURCE: &str = "wallet_sync";
 
 #[derive(Clone, Debug)]
 pub struct SchedulerConfig {
@@ -24,6 +27,10 @@ pub struct SchedulerConfig {
     /// Run the HL long-tail sync (staking/vaults/borrow-lend/agents) once every
     /// N ticks; the fast core sync runs every tick. Values below 1 act as 1.
     pub hl_longtail_every: u64,
+    /// Minimum interval before the same wallet is eligible for another
+    /// background sync. Set to zero in tests or one-shot callers that need every
+    /// `tick_once` to process the same wallet immediately.
+    pub wallet_min_sync_interval: Duration,
 }
 
 impl Default for SchedulerConfig {
@@ -36,6 +43,7 @@ impl Default for SchedulerConfig {
             sync_intent_orders: true,
             refresh_live_fields: true,
             hl_longtail_every: 10,
+            wallet_min_sync_interval: Duration::from_secs(30),
         }
     }
 }
@@ -72,6 +80,12 @@ pub struct Scheduler {
     stop: watch::Sender<bool>,
     /// Monotonic tick counter for sub-cadence scheduling (e.g. HL long-tail).
     tick_index: AtomicU64,
+    /// Round-robin cursor into the stable wallet list. This prevents the first
+    /// `max_wallets_per_tick` wallets from monopolizing every tick.
+    wallet_cursor: Mutex<Option<String>>,
+    /// Process-local mirror of per-wallet due times. Durable stores also persist
+    /// the same due time so DB-side selection can avoid scanning every wallet.
+    wallet_next_due: Mutex<HashMap<WalletId, u64>>,
 }
 
 impl Scheduler {
@@ -87,17 +101,30 @@ impl Scheduler {
             config,
             stop,
             tick_index: AtomicU64::new(0),
+            wallet_cursor: Mutex::new(None),
+            wallet_next_due: Mutex::new(HashMap::new()),
         }
     }
 
     pub async fn tick_once(&self) -> Result<TickReport, SyncError> {
-        let wallets = self.store.list_wallets().await?;
         let mut report = TickReport::default();
-        let now = Time::from_unix(unix_now());
+        let now_unix = unix_now();
+        let now = Time::from_unix(now_unix);
         let limit = self.config.max_wallets_per_tick;
         let tick = self.tick_index.fetch_add(1, Ordering::Relaxed);
+        let cursor_after = self
+            .wallet_cursor
+            .lock()
+            .expect("scheduler wallet_cursor mutex poisoned")
+            .clone();
+        let wallets = self
+            .store
+            .list_wallets_for_sync(WALLET_SYNC_SOURCE, now_unix, limit, cursor_after)
+            .await?;
+        let selected_wallets = self.select_wallets_for_tick(wallets, limit, now_unix);
+        let mut block_cache = HashMap::new();
 
-        for wid in wallets.into_iter().take(limit) {
+        for wid in selected_wallets {
             let mut state = match self.store.load(&wid).await {
                 Ok(state) => state,
                 Err(e) => {
@@ -110,7 +137,11 @@ impl Scheduler {
             let mut w_failed: usize = 0;
 
             if self.config.sync_primitives {
-                match self.orchestrator.sync_primitives(&mut state, now).await {
+                match self
+                    .orchestrator
+                    .sync_primitives_with_block_cache(&mut state, now, &mut block_cache)
+                    .await
+                {
                     Ok(pr) => {
                         let updated = pr.block_heights_updated
                             + pr.native_balances_updated
@@ -249,6 +280,11 @@ impl Scheduler {
 
             match self.store.save(&state).await {
                 Ok(()) => {
+                    if let Err(e) = self.mark_wallet_synced(&wid, now_unix).await {
+                        report
+                            .errors
+                            .push(format!("mark sync due {}: {}", wid.address, e));
+                    }
                     report.wallets_processed += 1;
                     report.synced_wallets.push(WalletSyncCounts {
                         wallet: wid,
@@ -260,6 +296,57 @@ impl Scheduler {
             }
         }
         Ok(report)
+    }
+
+    fn select_wallets_for_tick(
+        &self,
+        wallets: Vec<WalletId>,
+        limit: usize,
+        now_unix: u64,
+    ) -> Vec<WalletId> {
+        if wallets.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+
+        let next_due = self
+            .wallet_next_due
+            .lock()
+            .expect("scheduler wallet_next_due mutex poisoned");
+        let mut selected = Vec::with_capacity(limit.min(wallets.len()));
+
+        for wid in &wallets {
+            let due = next_due
+                .get(wid)
+                .copied()
+                .is_none_or(|due_at| due_at <= now_unix);
+            if !due {
+                continue;
+            }
+            selected.push(wid.clone());
+            if selected.len() == limit {
+                break;
+            }
+        }
+        selected
+    }
+
+    async fn mark_wallet_synced(
+        &self,
+        wid: &WalletId,
+        now_unix: u64,
+    ) -> Result<(), policy_state::StoreError> {
+        let due_at = now_unix.saturating_add(self.config.wallet_min_sync_interval.as_secs());
+        *self
+            .wallet_cursor
+            .lock()
+            .expect("scheduler wallet_cursor mutex poisoned") = Some(wallet_order_key(wid));
+        self.wallet_next_due
+            .lock()
+            .expect("scheduler wallet_next_due mutex poisoned")
+            .insert(wid.clone(), due_at);
+        self.store
+            .mark_wallet_sync_due_at(wid, WALLET_SYNC_SOURCE, due_at)
+            .await
     }
 
     pub async fn run_forever(&self) -> Result<(), SyncError> {
@@ -290,6 +377,10 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+fn wallet_order_key(wid: &WalletId) -> String {
+    format!("{:#x}", wid.address)
+}
+
 #[allow(dead_code)]
 fn _refresh_report_keep() -> RefreshReport {
     RefreshReport::default()
@@ -299,14 +390,77 @@ fn _refresh_report_keep() -> RefreshReport {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::atomic::AtomicU64 as TestAtomicU64;
     use std::sync::Mutex;
 
+    use crate::fetchers::rpc::{BlockTag, EthCallRequest, RpcProvider, TxReceipt};
     use async_trait::async_trait;
     use policy_state::store::StoreError;
-    use policy_state::{Address, ChainId, WalletId, WalletState};
+    use policy_state::{Address, ChainId, WalletId, WalletState, U256};
+
+    struct CountingBlockProvider {
+        chain: ChainId,
+        block_calls: Arc<TestAtomicU64>,
+        block_number: u64,
+    }
+
+    #[async_trait]
+    impl RpcProvider for CountingBlockProvider {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+
+        fn chain(&self) -> &ChainId {
+            &self.chain
+        }
+
+        async fn health_check(&self) -> Result<(), SyncError> {
+            Ok(())
+        }
+
+        async fn eth_call(&self, _req: EthCallRequest) -> Result<Vec<u8>, SyncError> {
+            Err(unsupported_counting_method("eth_call"))
+        }
+
+        async fn eth_balance(
+            &self,
+            _address: Address,
+            _block: BlockTag,
+        ) -> Result<U256, SyncError> {
+            Err(unsupported_counting_method("eth_balance"))
+        }
+
+        async fn eth_block_number(&self) -> Result<u64, SyncError> {
+            self.block_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self.block_number)
+        }
+
+        async fn eth_gas_price(&self) -> Result<U256, SyncError> {
+            Err(unsupported_counting_method("eth_gas_price"))
+        }
+
+        async fn eth_get_transaction_receipt(
+            &self,
+            _tx_hash: &str,
+        ) -> Result<Option<TxReceipt>, SyncError> {
+            Err(unsupported_counting_method("eth_get_transaction_receipt"))
+        }
+    }
+
+    fn unsupported_counting_method(method: &str) -> SyncError {
+        SyncError::FetchFailed {
+            source_id: "counting".into(),
+            reason: format!("{method} unsupported in scheduler test"),
+        }
+    }
 
     struct MemStore {
         wallets: Mutex<HashMap<WalletId, WalletState>>,
+    }
+
+    struct OrderedMemStore {
+        wallets: Vec<WalletId>,
+        states: Mutex<HashMap<WalletId, WalletState>>,
     }
 
     #[async_trait]
@@ -331,7 +485,37 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl WalletStore for OrderedMemStore {
+        async fn list_wallets(&self) -> Result<Vec<WalletId>, StoreError> {
+            Ok(self.wallets.clone())
+        }
+        async fn load(&self, id: &WalletId) -> Result<WalletState, StoreError> {
+            self.states
+                .lock()
+                .unwrap()
+                .get(id)
+                .cloned()
+                .ok_or_else(|| StoreError::NotFound(id.clone()))
+        }
+        async fn save(&self, state: &WalletState) -> Result<(), StoreError> {
+            self.states
+                .lock()
+                .unwrap()
+                .insert(state.wallet_id.clone(), state.clone());
+            Ok(())
+        }
+    }
+
     fn mk_scheduler() -> Scheduler {
+        mk_scheduler_with_config(SchedulerConfig {
+            sync_primitives: false,
+            sync_hyperliquid_accounts: false,
+            ..SchedulerConfig::default()
+        })
+    }
+
+    fn mk_scheduler_with_config(config: SchedulerConfig) -> Scheduler {
         let toml = r#"
 [chains."eip155:1"]
 multicall_addr = "0xcA11bde05977b3631167028862bE2a173976CA11"
@@ -354,15 +538,7 @@ priority = 1
             wallets: Mutex::new(map),
         });
 
-        Scheduler::new(
-            orch,
-            store,
-            SchedulerConfig {
-                sync_primitives: false,
-                sync_hyperliquid_accounts: false,
-                ..SchedulerConfig::default()
-            },
-        )
+        Scheduler::new(orch, store, config)
     }
 
     #[tokio::test]
@@ -384,6 +560,140 @@ priority = 1
         assert_eq!(report.wallets_processed, 1);
         assert_eq!(report.synced_wallets.len(), 1);
         assert_eq!(report.synced_wallets[0].wallet.address, Address::ZERO);
+    }
+
+    #[tokio::test]
+    async fn tick_rotates_wallet_cursor_when_limited() {
+        let toml = r#"
+[chains."eip155:1"]
+[[chains."eip155:1".providers]]
+name = "publicnode"
+kind = "public"
+url = "https://ethereum-rpc.publicnode.com"
+priority = 1
+"#;
+        let cfg = crate::RpcConfig::load_str(toml).unwrap();
+        let router = Arc::new(crate::RpcRouter::from_config(cfg).unwrap());
+        let orch = Arc::new(Orchestrator::from_rpc_router(router));
+        let chain = ChainId::ethereum_mainnet();
+        let wallets: Vec<_> = (1..=5)
+            .map(|n| WalletId::new(Address::from([n; 20]), [chain.clone()]))
+            .collect();
+        let states = wallets
+            .iter()
+            .cloned()
+            .map(|wid| {
+                let state = WalletState::new(wid.clone());
+                (wid, state)
+            })
+            .collect();
+        let store = Arc::new(OrderedMemStore {
+            wallets: wallets.clone(),
+            states: Mutex::new(states),
+        });
+
+        let scheduler = Scheduler::new(
+            orch,
+            store,
+            SchedulerConfig {
+                max_wallets_per_tick: 2,
+                sync_primitives: false,
+                sync_hyperliquid_accounts: false,
+                sync_intent_orders: false,
+                refresh_live_fields: false,
+                wallet_min_sync_interval: Duration::ZERO,
+                ..SchedulerConfig::default()
+            },
+        );
+
+        let first = scheduler.tick_once().await.unwrap();
+        let second = scheduler.tick_once().await.unwrap();
+        let third = scheduler.tick_once().await.unwrap();
+
+        let processed: Vec<_> = first
+            .synced_wallets
+            .iter()
+            .chain(second.synced_wallets.iter())
+            .chain(third.synced_wallets.iter())
+            .map(|w| w.wallet.address)
+            .collect();
+        assert_eq!(
+            processed,
+            vec![
+                wallets[0].address,
+                wallets[1].address,
+                wallets[2].address,
+                wallets[3].address,
+                wallets[4].address,
+                wallets[0].address,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_reuses_block_number_per_chain_for_wallets_in_same_tick() {
+        let chain = ChainId::ethereum_mainnet();
+        let block_calls = Arc::new(TestAtomicU64::new(0));
+        let provider = Arc::new(CountingBlockProvider {
+            chain: chain.clone(),
+            block_calls: block_calls.clone(),
+            block_number: 19_000_000,
+        });
+        let router = Arc::new(crate::RpcRouter::from_test_providers(vec![provider]));
+        let orch = Arc::new(Orchestrator::from_rpc_router(router));
+        let wallets: Vec<_> = (1..=2)
+            .map(|n| WalletId::new(Address::from([n; 20]), [chain.clone()]))
+            .collect();
+        let states = wallets
+            .iter()
+            .cloned()
+            .map(|wid| {
+                let state = WalletState::new(wid.clone());
+                (wid, state)
+            })
+            .collect();
+        let store = Arc::new(OrderedMemStore {
+            wallets,
+            states: Mutex::new(states),
+        });
+
+        let scheduler = Scheduler::new(
+            orch,
+            store,
+            SchedulerConfig {
+                max_wallets_per_tick: 2,
+                sync_hyperliquid_accounts: false,
+                sync_intent_orders: false,
+                refresh_live_fields: false,
+                wallet_min_sync_interval: Duration::ZERO,
+                ..SchedulerConfig::default()
+            },
+        );
+
+        let report = scheduler.tick_once().await.unwrap();
+
+        assert_eq!(report.wallets_processed, 2);
+        assert_eq!(report.total_primitive_errors, 0);
+        assert_eq!(report.total_primitives_updated, 2);
+        assert_eq!(block_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn tick_skips_wallet_until_next_due_time() {
+        let scheduler = mk_scheduler_with_config(SchedulerConfig {
+            sync_primitives: false,
+            sync_hyperliquid_accounts: false,
+            sync_intent_orders: false,
+            refresh_live_fields: false,
+            wallet_min_sync_interval: Duration::from_mins(1),
+            ..SchedulerConfig::default()
+        });
+
+        let first = scheduler.tick_once().await.unwrap();
+        let second = scheduler.tick_once().await.unwrap();
+
+        assert_eq!(first.wallets_processed, 1);
+        assert_eq!(second.wallets_processed, 0);
     }
 
     #[tokio::test]
