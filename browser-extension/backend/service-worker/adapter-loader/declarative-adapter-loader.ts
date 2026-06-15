@@ -437,10 +437,11 @@ export async function installDeclarativeBundleV3(
     ...bundleSigDefines,
   });
   if (!verifyResult.ok) {
+    const detail = verifyResult.detail ? ` (${verifyResult.detail})` : "";
     throw new InstallDeclarativeV3Error(
       "verify",
       url,
-      new Error(`bundle signature: ${verifyResult.reason}`),
+      new Error(`bundle signature: ${verifyResult.reason}${detail}`),
     );
   }
 
@@ -634,10 +635,16 @@ export async function installDeclarativeBundleV3ByTypedData(
     ...bundleSigDefines,
   });
   if (!verifyResult.ok) {
-    console.warn("[Dambi] installDeclarativeBundleV3ByTypedData verify failed", {
-      typedDataKey: cacheKey,
-      reason: verifyResult.reason,
-    });
+    console.warn(
+      "[Dambi] installDeclarativeBundleV3ByTypedData verify failed",
+      {
+        typedDataKey: cacheKey,
+        reason: verifyResult.reason,
+        localSha: verifyResult.localSha,
+        sigUrl: verifyResult.sigUrl,
+        detail: verifyResult.detail,
+      },
+    );
     return { ok: false, reason: "verify_failed" };
   }
 
@@ -769,6 +776,9 @@ export async function installDeclarativeBundleV3BySelector(args: {
     console.warn("[Dambi] installDeclarativeBundleV3BySelector verify failed", {
       selectorKey: cacheKey,
       reason: verifyResult.reason,
+      localSha: verifyResult.localSha,
+      sigUrl: verifyResult.sigUrl,
+      detail: verifyResult.detail,
     });
     return null;
   }
