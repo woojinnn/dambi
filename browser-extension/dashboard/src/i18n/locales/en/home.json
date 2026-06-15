@@ -31,7 +31,7 @@
   },
   "folder": {
     "policies": "policies",
-    "publishTitle": "Publish this package to the market",
+    "publishTitle": "Publish this package to Policy Hub",
     "uncategorized": "Uncategorized"
   },
   "policy": {
@@ -41,7 +41,7 @@
     "includeTitle": "Include this policy — applies when the package is on",
     "exclude": "Exclude policy",
     "include": "Include policy",
-    "publish": "Publish to market",
+    "publish": "Publish to Policy Hub",
     "openInEditor": "Open in Editor",
     "params": "Parameters"
   },

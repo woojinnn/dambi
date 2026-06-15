@@ -29,7 +29,7 @@
   },
   "folder": {
     "policies": "정책",
-    "publishTitle": "이 패키지를 마켓에 게시",
+    "publishTitle": "이 패키지를 Policy Hub에 게시",
     "uncategorized": "미분류"
   },
   "policy": {
@@ -39,7 +39,7 @@
     "includeTitle": "이 정책 포함하기 — 패키지를 켜면 적용",
     "exclude": "정책 제외",
     "include": "정책 포함",
-    "publish": "마켓에 게시",
+    "publish": "Policy Hub에 게시",
     "openInEditor": "Editor에서 열기",
     "params": "파라미터"
   },
