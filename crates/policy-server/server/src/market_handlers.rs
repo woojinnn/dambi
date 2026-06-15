@@ -93,7 +93,7 @@ pub async fn activity_summary(
     let days = q.days.unwrap_or(7).clamp(1, 90);
     let limit = q.limit.unwrap_or(50);
     let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_secs() as i64,
+        Ok(d) => i64::try_from(d.as_secs()).unwrap_or(i64::MAX),
         Err(e) => return server_error(&e.to_string()),
     };
     let since = now - days * 86_400;
