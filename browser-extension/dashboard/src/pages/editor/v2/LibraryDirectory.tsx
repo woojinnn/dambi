@@ -25,7 +25,7 @@ export const DRAG_DEF_MIME = "application/x-dambi-def-id";
 const SOURCE_LABEL: Record<PolicyDef["source"], string> = {
   builtin: "내장",
   mine: "내 정책",
-  market: "마켓",
+  market: "Policy Hub",
 };
 
 /** 라이브러리의 디렉토리 뷰 — 폴더(라이브러리 패키지) 안에 정의 = 파일. 폴더
@@ -149,7 +149,7 @@ export function LibraryDirectory(props: {
               {mode === "manage" && (
                 <span className="acts" onClick={(e) => e.stopPropagation()}>
                   {onPublishPackage && !locked && (
-                    <button type="button" className="ev2-iconbtn" title="이 폴더를 마켓에 패키지로 올리기" onClick={() => onPublishPackage(pkg)}>
+                    <button type="button" className="ev2-iconbtn" title="이 폴더를 Policy Hub에 패키지로 올리기" onClick={() => onPublishPackage(pkg)}>
                       <ShieldIcon />
                     </button>
                   )}

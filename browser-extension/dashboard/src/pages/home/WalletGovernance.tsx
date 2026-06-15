@@ -480,7 +480,7 @@ function FolderRow({
           <button
             className="pk-pub"
             type="button"
-            title="이 패키지를 마켓에 게시"
+            title="이 패키지를 Policy Hub에 게시"
             onClick={(e) => { e.stopPropagation(); onPublishFolder(); }}
           >
             <Upload />
@@ -547,7 +547,7 @@ function PolicyRow({
         >
           {policy.enabled ? "○" : "✕"}
         </button>
-        <button className="pol2-edit" type="button" title="마켓에 게시" onClick={(e) => { e.stopPropagation(); onPublish(); }}><Upload /></button>
+        <button className="pol2-edit" type="button" title="Policy Hub에 게시" onClick={(e) => { e.stopPropagation(); onPublish(); }}><Upload /></button>
         <Link className="pol2-edit" title="Editor에서 열기" to={`/editor/${encodeURIComponent(policy.defId)}`} onClick={(e) => e.stopPropagation()}><Edit /></Link>
       </div>
       {hasParams && (
