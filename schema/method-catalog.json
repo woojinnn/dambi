@@ -1,5 +1,24 @@
 {
   "methods": {
+    "pool.liquidity": {
+      "name": "pool.liquidity",
+      "description": "Market depth (rolling 24h swap volume, USD) of the add-liquidity target AMM pool, via the keyless GeckoTerminal (CoinGecko on-chain) API. Backs lp-low-liquidity (warn on a thinly-traded pool). Active by default; set GECKOTERMINAL_API_URL empty to disable.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "venue": {
+          "type": "AmmVenue",
+          "required": true,
+          "description": "The add-liquidity venue (internally-tagged AmmVenue object); the subgraph pool key is read from .pool / .pool_id / .pair by variant.",
+          "defaultSelector": "$.action.venue"
+        }
+      },
+      "returns": { "kind": "record", "type": "PoolLiquidity" },
+      "origin": "bundled"
+    },
     "address.sanctions": {
       "name": "address.sanctions",
       "description": "Is an address on an on-chain sanctions oracle (Chainalysis isSanctioned — OFAC/EU/UN)? Legal-list membership, distinct from a scam/drainer heuristic. v1 screens Ethereum mainnet (the EigenLayer chain).",
