@@ -27,8 +27,8 @@ use crate::dashboard_handlers;
 use crate::dto::EvaluateRequest;
 use crate::events::{EventBus, EventPublisher};
 use crate::handler::{
-    evaluate, ExternalEnrichment, HandlerError, NftFloorOracle, OutboundTransfer, PriceBook,
-    PriceFact, SanctionsScreen, TokenSecurityFlags,
+    evaluate, ExternalEnrichment, HandlerError, NftFloorOracle, OutboundTransfer,
+    PoolLiquidityFacts, PriceBook, PriceFact, SanctionsScreen, TokenSecurityFlags,
 };
 use crate::market_handlers;
 use crate::read_handlers;
@@ -495,6 +495,23 @@ const GOPLUS_MALICIOUS_FLAGS: &[&str] = &[
 /// rather than calling and mis-keying on an unsupported chain. Widen by adding ids.
 const TOKEN_SECURITY_CHAINS: &[i64] = &[1, 10, 8453, 42161];
 
+/// Map an EIP-155 `chain_id` to `GeckoTerminal`'s network SLUG (its on-chain API
+/// keys pools by slug, not chainId). `None` for an unsupported chain → the
+/// `pool.liquidity` call stays dormant on that chain. Slugs per `GeckoTerminal`
+/// `GET /networks`.
+fn geckoterminal_network_slug(chain_id: i64) -> Option<&'static str> {
+    Some(match chain_id {
+        1 => "eth",
+        10 => "optimism",
+        56 => "bsc",
+        137 => "polygon_pos",
+        8453 => "base",
+        42161 => "arbitrum",
+        43114 => "avax",
+        _ => return None,
+    })
+}
+
 /// Live external enrichment for the token policies: `GoPlus` malicious-address
 /// reputation (`address.reputation`) and the owner's transfer history
 /// (`stat_window.snapshot` / `address.similarity`, Phase 2 via Alchemy
@@ -509,6 +526,10 @@ struct LiveEnrichment {
     /// Alchemy JSON-RPC base incl. key (for `getAssetTransfers`); `None` → the
     /// transfer-history methods stay dormant.
     alchemy_rpc: Option<String>,
+    /// `GeckoTerminal` on-chain DEX API base for `pool.liquidity` (24h pool volume).
+    /// `None` → built-in public default (`https://api.geckoterminal.com/api/v2`,
+    /// keyless & free); empty → off. Defaults ON, like `goplus_base`.
+    geckoterminal_base: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -557,6 +578,56 @@ impl ExternalEnrichment for LiveEnrichment {
         since_unix: i64,
     ) -> Option<Vec<OutboundTransfer>> {
         self.alchemy_outbound(chain_id, owner, since_unix).await
+    }
+
+    async fn pool_liquidity(
+        &self,
+        chain_id: i64,
+        venue: &serde_json::Value,
+    ) -> Option<PoolLiquidityFacts> {
+        // Resolve the pool key from the internally-tagged `AmmVenue`
+        // (`.pool` / `.pool_id` / `.pair`); non-pool / unknown venue → dormant.
+        let pool_key = crate::handler::amm_venue_pool_key(venue)?.to_lowercase();
+        if !pool_key.starts_with("0x") || pool_key.len() < 4 {
+            return None;
+        }
+        // `GeckoTerminal` keys pools by its own network SLUG, not eip155 chainId.
+        let network = geckoterminal_network_slug(chain_id)?;
+        let base = self
+            .geckoterminal_base
+            .as_deref()
+            .unwrap_or("https://api.geckoterminal.com/api/v2");
+        if base.is_empty() {
+            return None; // explicitly disabled
+        }
+        // `GeckoTerminal` (CoinGecko on-chain) public API — keyless, free. The pool
+        // object's `attributes.volume_usd.h24` is a TRUE rolling-24h USD figure
+        // (a string). A 404 (pool not indexed) or parse miss → `None` (dormant),
+        // never a fabricated 0.
+        let url = format!("{base}/networks/{network}/pools/{pool_key}");
+        let resp = self
+            .client
+            .get(&url)
+            .header("accept", "application/json")
+            .timeout(Duration::from_millis(2500))
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let body = resp.json::<serde_json::Value>().await.ok()?;
+        let vol = body
+            .get("data")?
+            .get("attributes")?
+            .get("volume_usd")?
+            .get("h24")?
+            .as_str()?
+            .parse::<f64>()
+            .ok()?;
+        Some(PoolLiquidityFacts {
+            vol_24h_usd: Some(vol),
+        })
     }
 
     #[allow(clippy::cast_possible_truncation)] // tax clamped to [0, 1e7] before the cast
@@ -780,6 +851,7 @@ async fn evaluate_handler(
         client: reqwest::Client::new(),
         goplus_base: std::env::var("GOPLUS_API_URL").ok(),
         alchemy_rpc: std::env::var("ALCHEMY_RPC_URL").ok(),
+        geckoterminal_base: std::env::var("GECKOTERMINAL_API_URL").ok(),
     };
     match evaluate(&*store, &price_book, &sanctions, &floor, &external, req).await {
         Ok(resp) => Json(resp).into_response(),
@@ -800,6 +872,15 @@ mod tests {
 
     fn at(ts: &str) -> OffsetDateTime {
         OffsetDateTime::parse(ts, &Rfc3339).unwrap()
+    }
+
+    #[test]
+    fn geckoterminal_slug_maps_known_chains_and_misses_unknown() {
+        assert_eq!(super::geckoterminal_network_slug(1), Some("eth"));
+        assert_eq!(super::geckoterminal_network_slug(8453), Some("base"));
+        assert_eq!(super::geckoterminal_network_slug(42161), Some("arbitrum"));
+        // Unknown chain → None → pool.liquidity dormant on that chain.
+        assert_eq!(super::geckoterminal_network_slug(999_999), None);
     }
 
     /// Both quotes fresh → the LOWEST is the floor (cheapest current listing).
