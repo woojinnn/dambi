@@ -43,6 +43,13 @@ env:
   KMS_KEYRING: registry-signing
   KMS_KEY: bundle-sign-p256
   KMS_KEY_VERSION: "1"
+  # Keyless WIF credentials are external_account type with NO quota project, so
+  # gcloud cannot bill GCS operations and they 403 with "serviceusage.services.use"
+  # — even though the SA already holds serviceUsageConsumer. Pinning the quota
+  # project (gcloud reads this on every call) makes it attach x-goog-user-project
+  # to the storage rsync below. The local owner publish never hits this: user creds
+  # carry an implicit quota project.
+  CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
 
 permissions:
   contents: read
@@ -82,6 +89,22 @@ jobs:
         run: |
           npm ci
           npx vitest run src/__tests__/materialization-parity.test.ts
+
+      # Hydrate already-published signatures so the KMS step only signs genuinely
+      # NEW bundles. Without this a fresh runner re-signs the WHOLE corpus (30k+)
+      # every publish — the sequential KMS loop that previously ran for ~4h before
+      # the WIF token refresh timed out. signatures/ is gitignored, so the bucket is
+      # the source of truth. (sign-bundles.ts skips any sha that already has a .sig.)
+      - name: Hydrate published signatures (incremental — sign only new bundles)
+        working-directory: registryV2
+        run: |
+          mkdir -p signatures
+          if gcloud storage ls "gs://${BUCKET}/signatures/" >/dev/null 2>&1; then
+            gcloud storage rsync --recursive "gs://${BUCKET}/signatures" signatures
+            echo "hydrated $(find signatures -name '*.sig' | wc -l | tr -d ' ') existing signatures"
+          else
+            echo "no signatures/ prefix in bucket — first publish, signing full corpus"
+          fi
 
       - name: Sign bundles (KMS, DER→P1363)
         working-directory: registryV2

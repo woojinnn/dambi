@@ -41,6 +41,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production # required-reviewers approval gate
+    env:
+      # External_account (keyless WIF) creds carry no quota project, so
+      # `gcloud builds submit` can't bill its GCS source upload and 403s on
+      # "serviceusage.services.use" against the *_cloudbuild staging bucket — even
+      # though the SA already holds serviceUsageConsumer. gcloud reads this on every
+      # call and attaches x-goog-user-project. (Local owner deploy never hits this.)
+      CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
     steps:
       - uses: actions/checkout@v4
 
