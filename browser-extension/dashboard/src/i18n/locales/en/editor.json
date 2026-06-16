@@ -386,7 +386,7 @@
     "unlessLabel": "Except when",
     "diagramTitle": "Policy flow",
     "readonly": "Read-only",
-    "footNote": "Only values can change here · edit structure, trigger, and severity in the library policy.",
+    "footNote": "Values and block/warn (severity) change only for this wallet · edit structure and trigger in the library policy.",
     "revert": "Revert"
   },
   "customField": {
