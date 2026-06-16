@@ -387,6 +387,7 @@
     "diagramTitle": "Policy flow",
     "readonly": "Read-only",
     "footNote": "Values and block/warn (severity) change only for this wallet · edit structure and trigger in the library policy.",
+    "sevSelectTitle": "Change block/warn for this wallet only",
     "revert": "Revert"
   },
   "customField": {

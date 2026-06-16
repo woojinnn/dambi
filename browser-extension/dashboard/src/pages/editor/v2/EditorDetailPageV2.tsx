@@ -735,19 +735,17 @@ function EditorBody({
           />
           <span className="ev2-detail-slug">{stripDashboardId(policy.id)}</span>
           {/* 폼 탭은 ③ 심각도가 이 값을 소유(onChange로 동기화)하므로 헤더
-              셀렉트는 Cedar 탭에서만. 단 바인딩 모드에선 ③가 안 보이고(값 전용
-              폼), 차단/경고를 지갑별로 바꿀 수 있어야 하므로 헤더 셀렉트를 항상
-              노출한다(deny/warn override — info 는 def 전용). */}
-          {(tab !== "form" || bindingCtx) && (
+              셀렉트는 Cedar 탭에서만. 바인딩 모드에선 헤더 셀렉트를 숨기고
+              차단/경고를 값 시트의 결과(→ 차단/경고) 자리에서 인라인으로 바꾼다. */}
+          {tab !== "form" && !bindingCtx && (
             <select
               value={severity}
               onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
               className="ev2-detail-sev"
-              title={bindingCtx ? t("detail.sevBindingTitle") : undefined}
             >
               <option value="deny">{t("detail.sevDeny")}</option>
               <option value="warn">{t("detail.sevWarn")}</option>
-              {!bindingCtx && <option value="info">{t("detail.sevInfo")}</option>}
+              <option value="info">{t("detail.sevInfo")}</option>
             </select>
           )}
           {policy.cat && (
@@ -918,6 +916,14 @@ function EditorBody({
               valuesOnly={!!bindingCtx}
               onValidity={setFormValidity}
               resetToken={resetToken}
+              {...(bindingCtx
+                ? {
+                    // 바인딩 모드: 값 시트의 결과 자리에서 차단/경고를 인라인 편집.
+                    // 헤더 셀렉트 대신 이 상태가 override 의 source of truth.
+                    severityValue: severity,
+                    onSeverityChange: (s: "deny" | "warn") => setSeverity(s),
+                  }
+                : {})}
               onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden }) => {
                 setCedarText(c);
                 setIr(nextIr);

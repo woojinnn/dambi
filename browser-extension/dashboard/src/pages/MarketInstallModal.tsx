@@ -579,9 +579,6 @@ export function MarketInstallModal({
                     : `Wallets with a same-name package reuse it: ${bulkCollisions.map(shortAddr).join(", ")}`}
                 </div>
               )}
-              {!hasHoles && mut.isError && (
-                <div className="publish-error">{(mut.error as Error).message}</div>
-              )}
             </div>
             <div className="im-actions">
               <button type="button" className="sec" onClick={() => setKind(null)}>
@@ -590,26 +587,10 @@ export function MarketInstallModal({
               <button
                 type="button"
                 className="pri"
-                disabled={
-                  !detailQ.data ||
-                  !snap ||
-                  holesQ.isLoading ||
-                  walletSelectionInvalid ||
-                  (!hasHoles && mut.isPending)
-                }
-                onClick={() => (hasHoles ? setWalletStep("params") : mut.mutate())}
+                disabled={!detailQ.data || !snap || holesQ.isLoading || walletSelectionInvalid}
+                onClick={() => setWalletStep("params")}
               >
-                {hasHoles
-                  ? ko
-                    ? "다음 →"
-                    : "Next →"
-                  : mut.isPending
-                    ? ko
-                      ? "받는 중…"
-                      : "Installing…"
-                    : ko
-                      ? "받기"
-                      : "Install"}
+                {ko ? "다음 →" : "Next →"}
               </button>
             </div>
           </>
@@ -619,24 +600,34 @@ export function MarketInstallModal({
             {head}
             <div className="im-body">
               <p className="im-sub">
-                {ko
-                  ? "지갑마다 빈칸을 채워주세요. 지갑별로 다른 값을 넣을 수 있어요."
-                  : "Fill the blanks per wallet — each can use different values."}
+                {hasHoles
+                  ? ko
+                    ? "지갑마다 빈칸을 채워주세요. 지갑별로 다른 값을 넣을 수 있어요."
+                    : "Fill the blanks per wallet — each can use different values."
+                  : ko
+                    ? "이 정책은 설정할 파라미터가 없어요. 바로 받을 수 있어요."
+                    : "This policy has no parameters to set — you can install it directly."}
               </p>
-              {[...picked].map((addr) => {
-                const w = wallets.find((x) => x.address === addr);
-                const wname = w?.label?.trim() || shortAddr(addr);
-                return (
-                  <div key={addr} className="im-wparams">
-                    <div className="im-wparams-head">{wname}</div>
-                    {renderHoleForm(
-                      (defId, name) => walletHoleGet(addr, defId, name),
-                      (defId, name, v) => setWalletHoleVal(addr, defId, name, v),
-                      { keyPrefix: `${addr}:`, heading: false },
-                    )}
-                  </div>
-                );
-              })}
+              {hasHoles ? (
+                [...picked].map((addr) => {
+                  const w = wallets.find((x) => x.address === addr);
+                  const wname = w?.label?.trim() || shortAddr(addr);
+                  return (
+                    <div key={addr} className="im-wparams">
+                      <div className="im-wparams-head">{wname}</div>
+                      {renderHoleForm(
+                        (defId, name) => walletHoleGet(addr, defId, name),
+                        (defId, name, v) => setWalletHoleVal(addr, defId, name, v),
+                        { keyPrefix: `${addr}:`, heading: false },
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="im-noparams">
+                  {ko ? "설정할 파라미터가 없습니다." : "No parameters to set."}
+                </div>
+              )}
               {mut.isError && <div className="publish-error">{(mut.error as Error).message}</div>}
             </div>
             <div className="im-actions">

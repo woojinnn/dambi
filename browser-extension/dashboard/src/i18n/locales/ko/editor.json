@@ -381,6 +381,7 @@
     "diagramTitle": "정책 흐름도",
     "readonly": "읽기전용",
     "footNote": "값과 차단/경고(심각도)는 이 지갑에만 바꿀 수 있어요 · 구조·트리거는 라이브러리 정책에서 수정해요.",
+    "sevSelectTitle": "이 지갑에서만 차단/경고를 바꿔요",
     "revert": "되돌리기"
   },
   "customField": {

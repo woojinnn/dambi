@@ -86,6 +86,12 @@ export interface PolicyFormPaneProps {
   onValidity?: (v: { valid: boolean; error: string | null }) => void;
   /** 이 토큰이 바뀌면 시트를 연 시점의 값으로 되돌린다(저장 시 형식오류 → 복원). */
   resetToken?: number;
+  /** 값 시트(valuesOnly)에서 결과 자리에 보여줄 심각도(지갑별 override). 부모가
+   *  소유하므로 model.severity(=def 선언값) 대신 이 값을 표시·편집한다. */
+  severityValue?: "deny" | "warn" | "info";
+  /** 결과 자리의 인라인 심각도 변경(차단↔경고) 콜백. 주어지면 결과가 셀렉트가
+   *  된다 — 바인딩 모드 전용. */
+  onSeverityChange?: (s: "deny" | "warn") => void;
 }
 
 /** FormOp → i18n 키 조각 (sheet.op.* / 연산자 드롭다운). */
@@ -308,7 +314,7 @@ interface EditorSelection {
   registerRow: (n: FormNode, el: HTMLElement | null) => void;
 }
 
-export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = false, onChange, onValidity, resetToken }: PolicyFormPaneProps) {
+export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = false, onChange, onValidity, resetToken, severityValue, onSeverityChange }: PolicyFormPaneProps) {
   const { t } = useTranslation("editor");
   const [model, setModel] = useState<FormModel>(() =>
     initialModel
@@ -572,7 +578,8 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
         ctx={ctx}
         triggerLabel={triggerText}
         triggerAny={trig.kind === "any"}
-        severity={model.severity}
+        severity={severityValue ?? model.severity}
+        onSeverity={onSeverityChange}
         reason={model.reason}
         dirty={dirty}
         error={sheetError}
@@ -798,6 +805,7 @@ function ValueSheet({
   triggerLabel,
   triggerAny,
   severity,
+  onSeverity,
   reason,
   dirty,
   error,
@@ -813,6 +821,8 @@ function ValueSheet({
   triggerLabel: string;
   triggerAny: boolean;
   severity: FormModel["severity"];
+  /** 주어지면 결과(→ 차단/경고)가 인라인 셀렉트가 된다 — 지갑별 override. */
+  onSeverity?: (s: "deny" | "warn") => void;
   reason: string;
   dirty: boolean;
   /** 전체 유효성 메시지(없으면 정상). 상단 배너로 보여준다. */
@@ -944,13 +954,28 @@ function ValueSheet({
 
         <div className={`pv-verb ${severity}`}>
           <span className="pv-arrow">→</span>
-          <span className="pv-verb-act">
-            {severity === "deny"
-              ? `🚫 ${t("severity.deny")}`
-              : severity === "warn"
-                ? `⚠ ${t("severity.warn")}`
-                : `ℹ ${t("severity.info")}`}
-          </span>
+          {onSeverity && severity !== "info" ? (
+            <span className="pv-verb-sev">
+              <span className="pv-verb-ico">{severity === "deny" ? "🚫" : "⚠"}</span>
+              <select
+                className="pv-verb-sel"
+                value={severity}
+                onChange={(e) => onSeverity(e.target.value as "deny" | "warn")}
+                title={t("sheet.sevSelectTitle")}
+              >
+                <option value="deny">{t("severity.deny")}</option>
+                <option value="warn">{t("severity.warn")}</option>
+              </select>
+            </span>
+          ) : (
+            <span className="pv-verb-act">
+              {severity === "deny"
+                ? `🚫 ${t("severity.deny")}`
+                : severity === "warn"
+                  ? `⚠ ${t("severity.warn")}`
+                  : `ℹ ${t("severity.info")}`}
+            </span>
+          )}
           <input
             className={`pv-reason-input${reason.trim() ? "" : " empty"}`}
             value={reason}
