@@ -19,7 +19,9 @@ import {
   CategoryGlyph,
   categoryOf,
 } from "./market-domain";
+import { AddressInput, AddressSetInput } from "./editor/v2/AddressPicker";
 import type { MarketLocale } from "./market-locale";
+import "./editor/v2/policy-form.css";
 
 function shortAddr(a: string): string {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
@@ -299,51 +301,50 @@ export function MarketInstallModal({
             {holeReqs.length > 1 && <div className="im-holes-defname">{req.defName}</div>}
             {req.holes.map((h) => {
               const raw = getVal(req.defId, h.name);
-              const bad = raw.trim() !== "" && holeInputToValue(h.type, raw) === null;
+              // 주소/주소집합은 칩 입력이 자체 검증을 표시하므로 텍스트 오류는 끈다.
+              const bad =
+                raw.trim() !== "" &&
+                h.type !== "address" &&
+                h.type !== "addressSet" &&
+                holeInputToValue(h.type, raw) === null;
               return (
                 <label key={h.name} className="im-field im-hole">
                   <span className="im-hole-label">{h.label}</span>
                   {h.type === "addressSet" ? (
-                    <textarea
-                      value={raw}
-                      rows={2}
-                      onChange={(e) => setVal(req.defId, h.name, e.target.value)}
-                      placeholder={
-                        ko ? "0x… 주소 (쉼표/줄바꿈으로 여러 개)" : "0x… (comma/newline separated)"
-                      }
+                    // 에디터와 같은 칩 입력(이름 해석·추가/제거). 내부는 string[] 이라
+                    // 저장 문자열(쉼표 구분)과 양방향 변환한다.
+                    <AddressSetInput
+                      values={raw.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean)}
+                      onChange={(vals) => setVal(req.defId, h.name, vals.join(", "))}
                     />
+                  ) : h.type === "address" ? (
+                    <AddressInput value={raw} onChange={(v) => setVal(req.defId, h.name, v)} />
                   ) : (
                     <input
                       value={raw}
                       onChange={(e) => setVal(req.defId, h.name, e.target.value)}
                       placeholder={
-                        h.type === "address"
-                          ? "0x…"
-                          : h.type === "decimal"
+                        h.type === "decimal"
+                          ? ko
+                            ? "예: 3.0"
+                            : "e.g. 3.0"
+                          : h.type === "long"
                             ? ko
-                              ? "예: 3.0"
-                              : "e.g. 3.0"
-                            : h.type === "long"
-                              ? ko
-                                ? "숫자"
-                                : "number"
-                              : ""
+                              ? "숫자"
+                              : "number"
+                            : ""
                       }
                     />
                   )}
                   {bad && (
                     <span className="im-hole-err">
-                      {h.type === "address" || h.type === "addressSet"
+                      {h.type === "decimal"
                         ? ko
-                          ? "0x로 시작하는 40자리 주소여야 해요"
-                          : "Must be a 0x… address"
-                        : h.type === "decimal"
-                          ? ko
-                            ? "소수점 형식이어야 해요 (예: 3.0)"
-                            : "Decimal format (e.g. 3.0)"
-                          : ko
-                            ? "형식이 맞지 않아요"
-                            : "Invalid format"}
+                          ? "소수점 형식이어야 해요 (예: 3.0)"
+                          : "Decimal format (e.g. 3.0)"
+                        : ko
+                          ? "형식이 맞지 않아요"
+                          : "Invalid format"}
                     </span>
                   )}
                 </label>
