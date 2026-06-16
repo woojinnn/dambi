@@ -322,3 +322,56 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* settings (moved from /settings) — server env + language */
+.pp-set-presets {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+.pp-set-preset {
+  flex: 1;
+  min-width: 180px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.pp-set-preset:hover { border-color: var(--slate-300, #cbd5e1); }
+.pp-set-preset.on {
+  border-color: var(--accent, #5b8cff);
+  background: var(--accent-soft, #eef3ff);
+}
+.pp-set-preset-name { font-weight: 600; font-size: 13.5px; margin-bottom: 2px; }
+.pp-set-preset code { font-size: 11px; opacity: 0.7; }
+.pp-set-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  box-sizing: border-box;
+}
+.pp-set-input:focus {
+  outline: none;
+  border-color: var(--accent, #5b8cff);
+  box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.15);
+}
+.pp-set-save {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pp-link {
+  color: var(--accent, #5b8cff);
+  cursor: pointer;
+  text-decoration: underline;
+}
