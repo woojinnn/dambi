@@ -44,6 +44,8 @@ export type PublishSource =
       description?: string;
       /** 사전 렌더된 멤버(defaults.packageId 기준 defs → cedar 텍스트). */
       members: readonly { slug: string; title: string; cedarText: string; manifest?: unknown }[];
+      /** 멤버 정책들의 카테고리(중복 제거) — set 의 intents 로 발행된다. */
+      categories?: readonly string[];
     };
 
 export interface PublishModalProps {
@@ -212,6 +214,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
         description: desc,
         version: SEMVER,
         members,
+        intents: source.categories && source.categories.length ? [...source.categories] : undefined,
       };
       await createListing(body);
       return { slug, kind: "set" };

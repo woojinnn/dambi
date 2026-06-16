@@ -807,11 +807,18 @@ function ListView({
   const metaFor = (i: number) => {
     const members = setDetailQs[i]?.data?.latest_version?.members ?? [];
     const catCount = new Map<CategoryKey, number>();
-    members.forEach((m) => {
-      const c = categoryOf(m.slug);
-      catCount.set(c, (catCount.get(c) ?? 0) + 1);
-    });
-    return { count: members.length, catCount, ready: members.length > 0 };
+    // 서버가 저장한 멤버 카테고리(intents) 우선 — pasu 카탈로그 슬러그까지 정확.
+    // 없으면(구 패키지) 멤버 슬러그 기반 추정으로 폴백.
+    const intents = (sets[i]?.intents ?? []).filter(isCategoryKey);
+    if (intents.length) {
+      intents.forEach((c) => catCount.set(c, catCount.get(c) ?? 1));
+    } else {
+      members.forEach((m) => {
+        const c = categoryOf(m.slug);
+        catCount.set(c, (catCount.get(c) ?? 0) + 1);
+      });
+    }
+    return { count: members.length, catCount, ready: members.length > 0 || intents.length > 0 };
   };
 
   const polList =
