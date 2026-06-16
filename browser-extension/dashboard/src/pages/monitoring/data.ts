@@ -147,6 +147,11 @@ export function aggregate(rows: DashboardWalletSummary[]): Aggregate {
 export interface DonutData {
   wallets: { id: "wallets"; title: string; centerLabel: string; total: number; items: DonutItem[] };
   assets: { id: "assets"; title: string; centerLabel: string; total: number; items: DonutItem[] };
+  /** Per-wallet asset distribution — the 자산 분포 donut scoped to ONE wallet
+   *  (its chains + HL venue), with each slice's pct recomputed against that
+   *  wallet's own total. Keyed by wallet address. Drives the filtered donut
+   *  when a wallet is picked in 지갑별 자산 비율 (replaces the old highlight). */
+  walletAssets: Record<string, { centerLabel: string; total: number; items: DonutItem[] }>;
   adjacency: {
     walletToAsset: Record<string, string[]>;
     assetToWallet: Record<string, string[]>;
@@ -229,9 +234,65 @@ export function buildDonutData(
     if (hlAccountOf(positions[i] ?? [])) link(w.address, "venue:hyperliquid");
   });
 
+  // Per-wallet asset distribution: sum this wallet's on-chain holdings by chain
+  // (+ its HL venue exposure), then recompute each slice's pct against the
+  // wallet's OWN total so the filtered donut sums to 100%. The center total is
+  // the sum of shown slices (chains + venue).
+  const walletAssets: DonutData["walletAssets"] = {};
+  wallets.forEach((w, i) => {
+    const byChain: Record<string, number> = {};
+    (holdings[i] ?? []).forEach((h) => {
+      const chain = chainOf(h);
+      if (!chain) return;
+      byChain[chain] = (byChain[chain] ?? 0) + Number(h.value_usd ?? 0);
+    });
+    // HL venue value = wallet total − on-chain holdings. The HL snapshot only
+    // carries perp equity (perp_account_value_usd); spot/staking/vault USD isn't
+    // in the client snapshot, so perp alone undercounts the venue. The
+    // authoritative total_usd already includes the full HL value, so backing it
+    // out of (total − on-chain) keeps this donut consistent with both the wallet
+    // headline AND the portfolio 자산 분포 (server's full venue valuation).
+    const chainsSum = Object.values(byChain).reduce((s, v) => s + v, 0);
+    const hl = hlAccountOf(positions[i] ?? []);
+    const venueUsd = hl ? Math.max(0, Number(w.total_usd ?? 0) - chainsSum) : 0;
+
+    const raw: DonutItem[] = [
+      ...Object.entries(byChain).map(([chain, usd]) => ({
+        key: `chain:${chain}`,
+        name: chainName(chain),
+        color: chainColor(chain),
+        usd,
+        pct: 0,
+        chainName: chainName(chain),
+      })),
+      ...(venueUsd > 0
+        ? [{
+            key: "venue:hyperliquid",
+            name: venueName("hyperliquid"),
+            color: venueColor("hyperliquid"),
+            usd: venueUsd,
+            pct: 0,
+            chainName: venueName("hyperliquid"),
+          }]
+        : []),
+    ].filter((it) => it.usd > 0);
+
+    const total = raw.reduce((s, it) => s + it.usd, 0);
+    const items = raw
+      .map((it) => ({ ...it, pct: total > 0 ? (it.usd / total) * 100 : 0 }))
+      .sort((a, b) => b.usd - a.usd);
+
+    walletAssets[w.address] = {
+      centerLabel: `${w.label ?? shortAddr(w.address)} 자산`,
+      total,
+      items,
+    };
+  });
+
   return {
     wallets: { id: "wallets", title: "지갑별 자산 비율", centerLabel: "합산 자산", total: walletTotal, items: walletItems },
     assets: { id: "assets", title: "자산 분포", centerLabel: "총 자산", total: assetTotal, items: assetItems },
+    walletAssets,
     adjacency: { walletToAsset, assetToWallet },
   };
 }

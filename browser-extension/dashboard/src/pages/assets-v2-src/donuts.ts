@@ -35,6 +35,8 @@ interface PasuDonutGroup {
 interface PasuDonut {
   wallets: PasuDonutGroup;
   assets: PasuDonutGroup;
+  /** Per-wallet asset distribution (자산 분포 scoped to one wallet). */
+  walletAssets?: Record<string, PasuDonutGroup>;
   adjacency: { walletToAsset: Record<string, string[]>; assetToWallet: Record<string, string[]> };
 }
 
@@ -144,9 +146,6 @@ export function initDonuts(root: HTMLElement): () => void {
   function money(n: number): string {
     return "$" + Math.round(n).toLocaleString("en-US");
   }
-  function partnerOf(id: string): string {
-    return id === "donut-wallets" ? "donut-assets" : "donut-wallets";
-  }
 
   function build(id: string, cfg: DonutCfg): void {
     const card = root.querySelector<HTMLElement>("#" + id);
@@ -238,7 +237,8 @@ export function initDonuts(root: HTMLElement): () => void {
     }
     function preview(i: number) {
       const it = cfg.items[i];
-      setCenter(it.name, money(it.usd), it.pct.toFixed(2) + "%", true);
+      // 비율 도넛 — % 를 크게(dc-v), 금액을 작게(dc-sub) 표시.
+      setCenter(it.name, it.pct.toFixed(2) + "%", money(it.usd), true);
     }
     function showTotal(animate: boolean) {
       setCenter(cfg.centerK, money(cfg.total), "", animate);
@@ -360,9 +360,35 @@ export function initDonuts(root: HTMLElement): () => void {
     };
   }
 
-  // 두 도넛을 잇는 컨트롤러 — 한쪽 선택 → 반대쪽 연관 강조 (양방향)
+  // 지갑 선택 → 자산 분포를 그 지갑 자산만으로 필터(비율 재계산)해 재렌더.
+  // 자산 선택 → 보유 지갑 강조(기존 cross-link 유지). walletFilter 가 켜진
+  // 동안 자산 도넛은 이미 한 지갑으로 좁혀진 뷰라 cross-link 토글을 막는다.
+  let walletFilter: string | null = null;
+
+  // 한쪽 도넛만 비우고 다시 그린다(자산 분포 필터 전환/복원용). clearDonuts 는
+  // 둘 다 날리므로 부적합 — 지갑 선택은 자산 도넛만 갈아끼워야 한다.
+  function rebuildOne(id: string, cfg: DonutCfg): void {
+    const card = root.querySelector<HTMLElement>("#" + id);
+    if (!card) return;
+    const svg = card.querySelector(".donut");
+    const legend = card.querySelector(".donut-legend");
+    const center = card.querySelector(".donut-center");
+    if (svg) svg.innerHTML = "";
+    if (legend) legend.innerHTML = "";
+    if (center) center.innerHTML = "";
+    delete registry[id];
+    build(id, cfg);
+  }
+  function assetsCfgForWallet(walletKey: string): DonutCfg | null {
+    const wa = dd?.walletAssets;
+    const g = wa ? wa[walletKey] : undefined;
+    return g ? toCfg(g, FALLBACK) : null;
+  }
+
   const controller = {
     toggle: function (id: string, i: number) {
+      // 필터된 자산 도넛은 cross-link 비활성 (이미 한 지갑 뷰)
+      if (id === "donut-assets" && walletFilter) return;
       if (registry[id].getSel() === i) {
         this.clearAll();
         return;
@@ -370,29 +396,63 @@ export function initDonuts(root: HTMLElement): () => void {
       this.select(id, i);
     },
     select: function (id: string, i: number) {
-      const pid = partnerOf(id),
-        me = registry[id],
-        partner = registry[pid];
-      partner.clearLinked();
-      partner.clearLocal();
+      if (id === "donut-wallets") {
+        const me = registry["donut-wallets"],
+          assets = registry["donut-assets"];
+        assets.clearLinked();
+        assets.clearLocal();
+        me.clearLinked();
+        me.selectLocal(i);
+        const walletKey = me.keyAt(i);
+        const filtered = assetsCfgForWallet(walletKey);
+        if (filtered) {
+          // 자산 분포 = 이 지갑의 자산만, 비율 재계산, 중앙 총액 = 지갑 총액
+          walletFilter = walletKey;
+          rebuildOne("donut-assets", filtered);
+        } else {
+          // 지갑별 자산 데이터가 없으면 기존 강조로 폴백
+          walletFilter = null;
+          const keys = (ADJ["donut-wallets→donut-assets"] || {})[walletKey] || [];
+          const idxs: number[] = [],
+            names: string[] = [];
+          keys.forEach(function (k) {
+            const idx = assets.indexOfKey(k);
+            if (idx >= 0) {
+              idxs.push(idx);
+              names.push(assets.nameAt(idx));
+            }
+          });
+          assets.setLinked(idxs, me.nameAt(i), names.join(" · "));
+        }
+        return;
+      }
+      // id === "donut-assets": 자산 → 보유 지갑 강조 (기존 동작 유지)
+      const me = registry["donut-assets"],
+        wallets = registry["donut-wallets"];
+      wallets.clearLinked();
+      wallets.clearLocal();
       me.clearLinked();
       me.selectLocal(i);
       const srcKey = me.keyAt(i),
         srcName = me.nameAt(i);
-      const adjMap = ADJ[id + "→" + pid] || {};
-      const partnerKeys = adjMap[srcKey] || [];
+      const keys = (ADJ["donut-assets→donut-wallets"] || {})[srcKey] || [];
       const idxs: number[] = [],
         names: string[] = [];
-      partnerKeys.forEach(function (k) {
-        const idx = partner.indexOfKey(k);
+      keys.forEach(function (k) {
+        const idx = wallets.indexOfKey(k);
         if (idx >= 0) {
           idxs.push(idx);
-          names.push(partner.nameAt(idx));
+          names.push(wallets.nameAt(idx));
         }
       });
-      partner.setLinked(idxs, srcName, names.join(" · "));
+      wallets.setLinked(idxs, srcName, names.join(" · "));
     },
     clearAll: function () {
+      // 지갑 필터 해제 시 자산 분포를 전체 포트폴리오 뷰로 복원
+      if (walletFilter) {
+        walletFilter = null;
+        rebuildOne("donut-assets", DONUTS["donut-assets"]);
+      }
       Object.keys(registry).forEach(function (k) {
         registry[k].clearLocal();
         registry[k].clearLinked();
@@ -420,6 +480,7 @@ export function initDonuts(root: HTMLElement): () => void {
     DONUTS["donut-wallets"] = dd ? toCfg(dd.wallets, FALLBACK) : FALLBACK;
     DONUTS["donut-assets"] = dd ? toCfg(dd.assets, FALLBACK) : FALLBACK;
     refreshAdj();
+    walletFilter = null; // 데이터 리프레시 → 자산 분포 필터 해제
     clearDonuts();
     build("donut-wallets", DONUTS["donut-wallets"]);
     build("donut-assets", DONUTS["donut-assets"]);
