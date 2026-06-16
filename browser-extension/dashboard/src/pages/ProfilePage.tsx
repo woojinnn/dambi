@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 
 import {
   deleteListing,
@@ -20,9 +20,35 @@ import "./profile.css";
  * `/profile` — account page. Three concerns:
  *  1. Identity + sign out.
  *  2. Posts this account published to the market (view / open).
- *  3. Reset switches: wipe this account's wallets / policies.
+ *  3. Settings (moved here from the old /settings page): server environment +
+ *     language.
+ *  4. Reset switches: wipe this account's wallets / policies.
  */
 const LISTINGS_PAGE_SIZE = 8;
+
+// ── Settings (server environment + language) ───────────────────────────────
+// Runtime override written to BOTH localStorage (dashboard) and
+// chrome.storage.local (service worker) under one key — points the whole
+// extension at a server URL without a rebuild.
+const SERVER_URL_KEY = "dambi_server_url";
+const SERVER_PRESETS = [
+  { labelKey: "settings.presetLocal", url: "http://127.0.0.1:8788" },
+  { labelKey: "settings.presetProd", url: "https://pasu-policy.duckdns.org" },
+];
+const LANGUAGES: Array<{ code: "ko" | "en"; labelKey: string }> = [
+  { code: "ko", labelKey: "settings.languageKo" },
+  { code: "en", labelKey: "settings.languageEn" },
+];
+
+type ChromeStorageLocal = {
+  set(items: Record<string, unknown>): Promise<void>;
+  remove(key: string): Promise<void>;
+};
+/** Service-worker storage, only present when running as an extension page. */
+function swStorage(): ChromeStorageLocal | undefined {
+  return (globalThis as { chrome?: { storage?: { local?: ChromeStorageLocal } } }).chrome
+    ?.storage?.local;
+}
 
 export function ProfilePage() {
   const { t, i18n } = useTranslation("common");
@@ -46,6 +72,21 @@ export function ProfilePage() {
     : 0;
 
   const [banner, setBanner] = useState<string | null>(null);
+
+  // 서버 환경 설정 (구 /settings 에서 이전).
+  const [serverUrl, setServerUrl] = useState(() => window.localStorage.getItem(SERVER_URL_KEY) ?? "");
+  const [serverSaved, setServerSaved] = useState(false);
+  const saveServerUrl = () => {
+    const url = serverUrl.trim();
+    if (url) window.localStorage.setItem(SERVER_URL_KEY, url);
+    else window.localStorage.removeItem(SERVER_URL_KEY);
+    const sw = swStorage();
+    if (sw) {
+      if (url) void sw.set({ [SERVER_URL_KEY]: url });
+      else void sw.remove(SERVER_URL_KEY);
+    }
+    setServerSaved(true);
+  };
 
   // 올린 게시물 — 정책/패키지 탭 + 페이지네이션.
   const [listTab, setListTab] = useState<"policy" | "set">("policy");
@@ -205,6 +246,77 @@ export function ProfilePage() {
               )}
             </>
           )}
+        </section>
+
+        {/* settings — server environment */}
+        <section className="pp-card">
+          <div className="pp-sec-head">
+            <h2>{t("settings.title")}</h2>
+          </div>
+          <p className="pp-muted">
+            <Trans i18nKey="settings.desc" ns="common" components={{ code: <code /> }} />
+          </p>
+          <div className="pp-set-presets">
+            {SERVER_PRESETS.map((p) => (
+              <button
+                key={p.url}
+                type="button"
+                className={`pp-set-preset${serverUrl === p.url ? " on" : ""}`}
+                onClick={() => {
+                  setServerUrl(p.url);
+                  setServerSaved(false);
+                }}
+              >
+                <div className="pp-set-preset-name">{t(p.labelKey)}</div>
+                <code>{p.url}</code>
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            className="pp-set-input"
+            value={serverUrl}
+            placeholder={t("settings.urlPlaceholder")}
+            onChange={(e) => {
+              setServerUrl(e.target.value);
+              setServerSaved(false);
+            }}
+          />
+          <div className="pp-set-save">
+            <button type="button" className="pp-btn" onClick={saveServerUrl}>
+              {t("save")}
+            </button>
+            {serverSaved && (
+              <span className="pp-muted">
+                <Trans
+                  i18nKey="settings.savedNote"
+                  ns="common"
+                  components={{ reload: <a onClick={() => window.location.reload()} className="pp-link" /> }}
+                />
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* settings — language */}
+        <section className="pp-card">
+          <div className="pp-sec-head">
+            <h2>{t("settings.languageTitle")}</h2>
+          </div>
+          <p className="pp-muted">{t("settings.languageDesc")}</p>
+          <div className="pp-set-presets">
+            {LANGUAGES.map((l) => (
+              <button
+                key={l.code}
+                type="button"
+                className={`pp-set-preset${i18n.language === l.code ? " on" : ""}`}
+                onClick={() => void i18n.changeLanguage(l.code)}
+              >
+                <div className="pp-set-preset-name">{t(l.labelKey)}</div>
+                <code>{l.code}</code>
+              </button>
+            ))}
+          </div>
         </section>
 
         {/* reset switches */}

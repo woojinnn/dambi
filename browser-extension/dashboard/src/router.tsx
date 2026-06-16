@@ -33,7 +33,6 @@ import { Assets2Page } from "./pages/Assets2Page";
 import { HistoryPage } from "./pages/HistoryPage";
 import { MarketPage } from "./pages/MarketPage";
 import { MarketDetailPage } from "./pages/MarketDetailPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { ProfilePage } from "./pages/ProfilePage";
 
 // On an extension page the URL is `…/options.html` (a real file, no dev
@@ -45,7 +44,6 @@ const createRouter = isExtensionContext() ? createHashRouter : createBrowserRout
 const router = createRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/auth/callback", element: <AuthCallbackPage /> },
-  { path: "/settings", element: <SettingsPage /> },
   {
     path: "/",
     element: <RequireAuth />,
