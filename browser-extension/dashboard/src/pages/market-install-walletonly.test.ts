@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // params로 바인딩이 생기는지 본다.
 const mocks = vi.hoisted(() => ({
   bindDef: vi.fn(
-    async (_arg: { addresses: string[]; params?: Record<string, unknown> }) => undefined,
+    async (_arg: {
+      addresses: string[];
+      params?: Record<string, unknown>;
+      severity?: "deny" | "warn";
+    }) => undefined,
   ),
   installMarket: vi.fn(async () => undefined),
   putWalletPackage: vi.fn(async () => undefined),
@@ -98,5 +102,21 @@ describe("installListingWalletOnlyV2 per-wallet params", () => {
     expect(mocks.bindDef).toHaveBeenCalledWith(
       expect.objectContaining({ addresses: [A], params: { v1: "0xcommon" } }),
     );
+  });
+
+  it("threads per-wallet severity override to the binding", async () => {
+    const A = "0xaaaa000000000000000000000000000000000001";
+    const B = "0xbbbb000000000000000000000000000000000002";
+    await installListingWalletOnlyV2(detail, "ko", {
+      addresses: [A, B],
+      walletPackages: { [A]: { id: "pkg::uncat" }, [B]: { id: "pkg::uncat" } },
+      snap: emptySnap,
+      severityByAddress: { [A]: { "def::market.L1": "warn" } },
+    });
+    const sevByAddr = new Map(
+      mocks.bindDef.mock.calls.map(([arg]) => [arg.addresses[0], arg.severity]),
+    );
+    expect(sevByAddr.get(A)).toBe("warn"); // override
+    expect(sevByAddr.get(B)).toBeUndefined(); // def 선언값 따름
   });
 });
