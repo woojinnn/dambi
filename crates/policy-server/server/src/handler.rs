@@ -122,6 +122,18 @@ pub trait ExternalEnrichment: Send + Sync {
     /// optional policy stays dormant, never a fabricated "clean". Backs
     /// `token.security_flags`.
     async fn token_security_flags(&self, chain_id: i64, token: &str) -> Option<TokenSecurityFlags>;
+
+    /// Market depth for the add-liquidity target `venue` (the pre-resolved,
+    /// internally-tagged `AmmVenue` object, e.g.
+    /// `{ "name": "uniswap_v3", "pool": "0x.." }`) on `chain_id`. `None` = no
+    /// subgraph configured / unknown or non-pool venue / fetch failed → the optional
+    /// `lp-low-liquidity` policy stays dormant, never a fabricated volume. Backs
+    /// `pool.liquidity`.
+    async fn pool_liquidity(
+        &self,
+        chain_id: i64,
+        venue: &serde_json::Value,
+    ) -> Option<PoolLiquidityFacts>;
 }
 
 /// One outbound transfer of the owner, as surfaced by [`ExternalEnrichment`].
@@ -163,6 +175,18 @@ pub struct TokenSecurityFlags {
     pub buy_tax_bps: Option<i64>,
 }
 
+/// AMM pool market-depth facts from a DEX-analytics subgraph, surfaced by
+/// [`ExternalEnrichment::pool_liquidity`]. Backs `pool.liquidity`. Every field is
+/// `Option` and independently omittable: a value the subgraph cannot supply is left
+/// `None` so the consuming policy (`lp-low-liquidity`) stays dormant rather than
+/// comparing against a fabricated number.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PoolLiquidityFacts {
+    /// Trailing 24h swap volume in USD. `None` when the subgraph reported no
+    /// parseable 24h figure (cumulative-only / brand-new pool) — NOT zero.
+    pub vol_24h_usd: Option<f64>,
+}
+
 /// The safe default when no external enrichment is configured: every method
 /// `None`, so `address.reputation` / `stat_window.snapshot` / `address.similarity`
 /// all stay dormant. Mirrors [`NoFloorOracle`].
@@ -185,6 +209,13 @@ impl ExternalEnrichment for NoEnrichment {
         _chain_id: i64,
         _token: &str,
     ) -> Option<TokenSecurityFlags> {
+        None
+    }
+    async fn pool_liquidity(
+        &self,
+        _chain_id: i64,
+        _venue: &serde_json::Value,
+    ) -> Option<PoolLiquidityFacts> {
         None
     }
 }
@@ -252,6 +283,7 @@ pub async fn evaluate(
     sanctions: &dyn SanctionsScreen,
     floor: &dyn NftFloorOracle,
     external: &dyn ExternalEnrichment,
+    onchain: &dyn crate::lending_hf::OnchainView,
     req: EvaluateRequest,
 ) -> Result<EvaluateResponse, HandlerError> {
     // This handler is db-agnostic: production passes the PostgreSQL-backed
@@ -317,6 +349,7 @@ pub async fn evaluate(
         sanctions,
         floor,
         external,
+        onchain,
     )
     .await;
     diagnostics.append(&mut sim_diagnostics);
@@ -358,6 +391,7 @@ async fn execute_call_specs(
     sanctions: &dyn SanctionsScreen,
     floor: &dyn NftFloorOracle,
     external: &dyn ExternalEnrichment,
+    onchain: &dyn crate::lending_hf::OnchainView,
 ) -> (BTreeMap<String, Value>, Vec<Diagnostic>) {
     let mut results = BTreeMap::new();
     let mut diagnostics = Vec::new();
@@ -666,6 +700,38 @@ async fn execute_call_specs(
                     message: format!(
                         "token.security_flags: missing token or feed unavailable \
                          (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
+            "lending.health_factor" => {
+                match crate::lending_hf::lending_health_factor(&spec.params, onchain).await {
+                    Some(value) => {
+                        tracing::debug!(call_id = %spec.call_id, "lending.health_factor: OK");
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "lending.health_factor: unsupported venue/chain, no RPC, or read \
+                             failed (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
+            "pool.liquidity" => match pool_liquidity(&spec.params, external).await {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "pool.liquidity: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "pool.liquidity: market-data source unavailable or unknown \
+                         venue/chain (call {}) — field left unset",
                         spec.call_id
                     ),
                     call_id: Some(spec.call_id.clone()),
@@ -1066,7 +1132,7 @@ async fn normalize_to_nano(params: &Value, price_book: &dyn PriceBook) -> Option
 
 /// Extract a lowercase hex address from an `asset` param that may be a bare
 /// address string or an `AssetRef` object carrying an `address` field.
-fn asset_address(v: &Value) -> Option<String> {
+pub(crate) fn asset_address(v: &Value) -> Option<String> {
     let raw = match v {
         Value::String(s) => s.clone(),
         Value::Object(_) => v.get("address").and_then(Value::as_str)?.to_owned(),
@@ -1134,10 +1200,52 @@ async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Op
     Some(Value::Object(out))
 }
 
+/// Extract the DEX-analytics subgraph lookup key from a pre-resolved,
+/// internally-tagged `AmmVenue` object (`{ "name": "<tag>", ... }`): `.pool` for the
+/// address-keyed constant-product / concentrated pools, `.pool_id` for the Uniswap
+/// V4 / Balancer singletons, and `.pair` for Trader Joe LB. `None` for non-pool
+/// venues (`aave_gsm`, `aggregator_route`) or an unrecognized tag → the call stays
+/// dormant. NOTE the venue is INTERNALLY tagged (flat `{name, ...}`), NOT externally
+/// tagged (`{ "UniswapV3": {...} }`).
+pub(crate) fn amm_venue_pool_key(venue: &Value) -> Option<&str> {
+    match venue.get("name")?.as_str()? {
+        "uniswap_v2" | "uniswap_v3" | "sushi_v2" | "curve_v1" | "curve_v2" | "maverick_v2" => {
+            venue.get("pool")?.as_str()
+        }
+        "uniswap_v4" | "balancer_v2" | "balancer_v3" => venue.get("pool_id")?.as_str(),
+        "trader_joe_l_b" => venue.get("pair")?.as_str(),
+        _ => None,
+    }
+}
+
+/// Server-side `pool.liquidity`: surface the add-liquidity target pool's 24h market
+/// depth (params `{ chain_id?, venue }` — `venue` is `$.action.venue`, the
+/// pre-resolved internally-tagged `AmmVenue` object) via the injected
+/// [`ExternalEnrichment`] feed (the keyless `GeckoTerminal` on-chain API in
+/// production). Projects `{ vol24hUsd? }` as a Decimal STRING (`format!("{:.4}")` —
+/// the v2 Decimal projection requires a string, not a JSON number) and OMITS the
+/// field when no parseable 24h volume is available, so `lp-low-liquidity` stays
+/// dormant rather than comparing against a fabricated 0. `None` when the venue is missing /
+/// unrecognized or the feed could not answer → result omitted (fail-open for the
+/// optional call), never a fabricated volume.
+async fn pool_liquidity(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
+    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let venue = params.get("venue")?;
+    let f = external.pool_liquidity(chain_id, venue).await?;
+    let mut out = serde_json::Map::new();
+    if let Some(v) = f.vol_24h_usd {
+        out.insert("vol24hUsd".to_owned(), json!(format!("{v:.4}")));
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(Value::Object(out))
+}
+
 /// Numeric EIP-155 chain id from a params value that may be a JSON number or a
 /// CAIP-2 string (`"eip155:1"`) — the form `$.root.chain_id` resolves to. Falls
 /// back to `1` (Ethereum mainnet; the v1 token policies are mainnet-scoped).
-fn chain_id_to_eip155_num(v: &Value) -> i64 {
+pub(crate) fn chain_id_to_eip155_num(v: &Value) -> i64 {
     if let Some(n) = v.as_i64() {
         return n;
     }
@@ -1367,6 +1475,13 @@ mod tests {
         ) -> Option<TokenSecurityFlags> {
             None
         }
+        async fn pool_liquidity(
+            &self,
+            _chain_id: i64,
+            _venue: &serde_json::Value,
+        ) -> Option<PoolLiquidityFacts> {
+            None
+        }
     }
     /// Default: the feed answers nothing → the external methods stay dormant.
     fn no_external() -> StubEnrichment {
@@ -1394,6 +1509,13 @@ mod tests {
         }
         async fn token_security_flags(&self, _c: i64, _t: &str) -> Option<TokenSecurityFlags> {
             self.0
+        }
+        async fn pool_liquidity(
+            &self,
+            _c: i64,
+            _v: &serde_json::Value,
+        ) -> Option<PoolLiquidityFacts> {
+            None
         }
     }
 
@@ -1454,6 +1576,107 @@ mod tests {
         )
         .await
         .is_none());
+    }
+
+    // ── pool.liquidity (lp-low-liquidity) ───────────────────────────────────
+
+    /// A test [`ExternalEnrichment`] returning a fixed pool-liquidity verdict (the
+    /// other legs stay dormant), for the `pool.liquidity` server fn.
+    struct StubPoolLiq(Option<PoolLiquidityFacts>);
+    #[async_trait]
+    impl ExternalEnrichment for StubPoolLiq {
+        async fn reputation_flagged(&self, _c: i64, _a: &str) -> Option<bool> {
+            None
+        }
+        async fn recent_outbound(
+            &self,
+            _c: i64,
+            _o: &str,
+            _s: i64,
+        ) -> Option<Vec<OutboundTransfer>> {
+            None
+        }
+        async fn token_security_flags(&self, _c: i64, _t: &str) -> Option<TokenSecurityFlags> {
+            None
+        }
+        async fn pool_liquidity(
+            &self,
+            _c: i64,
+            _v: &serde_json::Value,
+        ) -> Option<PoolLiquidityFacts> {
+            self.0
+        }
+    }
+
+    #[tokio::test]
+    async fn pool_liquidity_projects_vol_as_decimal_string() {
+        // 24h volume emitted as a Decimal STRING (4 dp) — the v2 Decimal projection
+        // calls value.as_str(); a JSON number would error "expected Decimal string".
+        let params = serde_json::json!({
+            "chain_id": "eip155:1",
+            "venue": { "name": "uniswap_v3", "pool": "0xABCdef0000000000000000000000000000000001", "fee_tier_bp": 500 }
+        });
+        let v = super::pool_liquidity(
+            &params,
+            &StubPoolLiq(Some(PoolLiquidityFacts {
+                vol_24h_usd: Some(5000.0),
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(v, serde_json::json!({ "vol24hUsd": "5000.0000" }));
+    }
+
+    #[tokio::test]
+    async fn pool_liquidity_venue_key_branch() {
+        // The internally-tagged AmmVenue (flat `{name, ...}`) resolves the right
+        // lookup key per variant — NOT externally-tagged `{ "UniswapV3": {...} }`.
+        let v3 = serde_json::json!({ "name": "uniswap_v3", "pool": "0xpool", "fee_tier_bp": 500 });
+        assert_eq!(super::amm_venue_pool_key(&v3), Some("0xpool"));
+        let v4 = serde_json::json!({ "name": "uniswap_v4", "pool_id": "0xpid", "pool_manager": "0xpm", "hooks": "0x0" });
+        assert_eq!(super::amm_venue_pool_key(&v4), Some("0xpid"));
+        let joe = serde_json::json!({ "name": "trader_joe_l_b", "pair": "0xpair", "bin_step": 25 });
+        assert_eq!(super::amm_venue_pool_key(&joe), Some("0xpair"));
+        let bal = serde_json::json!({ "name": "balancer_v2", "vault": "0xv", "pool_id": "0xbid", "pool_type": "Weighted" });
+        assert_eq!(super::amm_venue_pool_key(&bal), Some("0xbid"));
+        // Non-pool venue and unknown tag → None (dormant).
+        let gsm = serde_json::json!({ "name": "aave_gsm", "gsm": "0xg" });
+        assert_eq!(super::amm_venue_pool_key(&gsm), None);
+        let unknown = serde_json::json!({ "name": "some_new_dex", "pool": "0xp" });
+        assert_eq!(super::amm_venue_pool_key(&unknown), None);
+    }
+
+    #[tokio::test]
+    async fn pool_liquidity_feed_unavailable_is_none() {
+        let params = serde_json::json!({ "venue": { "name": "uniswap_v3", "pool": "0x01" } });
+        assert!(super::pool_liquidity(&params, &StubPoolLiq(None))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn pool_liquidity_missing_venue_is_none() {
+        let params = serde_json::json!({ "chain_id": "eip155:1" });
+        assert!(super::pool_liquidity(
+            &params,
+            &StubPoolLiq(Some(PoolLiquidityFacts {
+                vol_24h_usd: Some(1.0),
+            })),
+        )
+        .await
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn pool_liquidity_empty_facts_is_none() {
+        // Facts present but no parseable 24h volume → field omitted → None (dormant),
+        // never a fabricated 0 (which would falsely trip the < $10k warn).
+        let params = serde_json::json!({ "venue": { "name": "uniswap_v3", "pool": "0x01" } });
+        assert!(
+            super::pool_liquidity(&params, &StubPoolLiq(Some(PoolLiquidityFacts::default())))
+                .await
+                .is_none()
+        );
     }
 
     // ── address.reputation (TOKEN-003) ──────────────────────────────────────
@@ -1531,6 +1754,7 @@ mod tests {
                 flagged: Some(true),
                 outbound: None,
             },
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -1562,6 +1786,7 @@ mod tests {
                 sell_tax_bps: None,
                 buy_tax_bps: None,
             })),
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -1598,6 +1823,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &no_external(),
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert!(results["now::1"]["nowTs"].as_i64().unwrap() > 1_700_000_000);
@@ -1679,6 +1905,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &no_external(),
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(results["frac::1"], serde_json::json!({ "bps": 6000 }));
@@ -1839,6 +2066,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &stub,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2093,6 +2321,7 @@ mod tests {
             &StubSanctions(Some(true)),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2125,6 +2354,7 @@ mod tests {
             &StubSanctions(None),
             &StubFloor(Some(5.0)),
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2156,6 +2386,7 @@ mod tests {
             &StubSanctions(None),
             &StubFloor(Some(1.0)),
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2189,6 +2420,7 @@ mod tests {
             &no_sanctions(),
             &StubFloor(Some(5.0)),
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2409,6 +2641,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             empty_envelope_request(),
         )
         .await
@@ -2441,6 +2674,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             empty_envelope_request(),
         )
         .await
@@ -2464,6 +2698,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             request_with_envelope(hyperliquid_withdraw_action()),
         )
         .await
@@ -2507,6 +2742,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2539,6 +2775,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2580,6 +2817,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2624,6 +2862,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2674,6 +2913,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2714,6 +2954,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2759,6 +3000,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2797,6 +3039,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -2901,6 +3144,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -2991,6 +3235,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -3047,6 +3292,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         // day: (968.42-920)/968.42 ≈ 500 bps; peak: (1000-920)/1000 = 800 bps.
@@ -3068,6 +3314,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert!(!results.contains_key(&spec.call_id));
@@ -3134,6 +3381,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -3157,6 +3405,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
             req,
         )
         .await
@@ -3220,6 +3469,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert_eq!(
@@ -3241,6 +3491,7 @@ mod tests {
             &no_sanctions(),
             &NoFloorOracle,
             &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
         )
         .await;
         assert!(!results.contains_key(&spec.call_id));

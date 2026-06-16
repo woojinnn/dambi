@@ -60,6 +60,26 @@ jobs:
           case "$REGISTRY_BASE_URL" in https://*) ;; *) echo "REGISTRY_BASE_URL must be https://"; exit 1 ;; esac
           echo "prod build config present (URL=$REGISTRY_BASE_URL, pin len=${#PINNED_BUNDLE_PUBLIC_KEY})."
 
+      # Bake the release version from the tag (ext-vX.Y.Z) so a release needs only a
+      # tag — no manual package.json / backend/manifest.json bump or commit. Edits are
+      # ephemeral (runner only, never committed). On a non-tag ref (workflow_dispatch
+      # from a branch) the committed version is kept.
+      - name: Bake version from tag
+        working-directory: browser-extension
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            ext-v*)
+              VERSION="${GITHUB_REF_NAME#ext-v}"
+              case "$VERSION" in
+                [0-9]*.[0-9]*.[0-9]*) ;;
+                *) echo "::error::release tag must be ext-vX.Y.Z (got ${GITHUB_REF_NAME})"; exit 1 ;;
+              esac
+              VERSION="$VERSION" node -e "const fs=require('fs');for(const p of ['package.json','backend/manifest.json']){let s=fs.readFileSync(p,'utf8');s=s.replace(/\"version\": \"[0-9][^\"]*\"/,'\"version\": \"'+process.env.VERSION+'\"');fs.writeFileSync(p,s)}"
+              echo "baked extension version $VERSION from tag ${GITHUB_REF_NAME}"
+              ;;
+            *) echo "non-tag ref (${GITHUB_REF_NAME}) — keeping committed version" ;;
+          esac
+
       - name: Build + zip Chrome and Firefox (prod-pinned)
         working-directory: browser-extension
         env:

@@ -243,4 +243,49 @@ mod tests {
             "optional call with missing selector is skipped"
         );
     }
+
+    /// Activation gate for `lending.health_factor`: the REAL shipped borrow
+    /// manifest, planned against a production-shaped lowered `Lending::Borrow`
+    /// context, must resolve the literal `action_kind` constant (the lowered
+    /// context carries no tag, so direction rides a per-manifest constant) and the
+    /// `$.action.*` selectors against the real lowered shapes — `venue {name,pool}`
+    /// and a `TokenRef {key:{address}}`. Mirrors what the server method consumes.
+    #[test]
+    fn lending_hf_manifest_resolves_action_kind_constant_and_selectors() {
+        let m: ManifestV2 = serde_json::from_str(include_str!(
+            "../../tests/fixtures/policy_catalog_v2/action/lending/borrow-low-health-factor/manifest.json"
+        ))
+        .expect("real borrow-low-health-factor manifest parses");
+        let view = ActionView {
+            domain: "lending",
+            action_tag: Some("borrow"),
+            venue_name: Some("aave_v3"),
+        };
+        let lowered = json!({
+            "venue": { "name": "aave_v3", "chain": "eip155:1", "pool": "0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2" },
+            "asset": { "key": { "standard": "erc20", "chain": "eip155:1", "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" } },
+            "amount": "0x5f5e100"
+        });
+
+        let calls = plan_policy_rpc_v2(&[m], &view, &lowered, &tx()).unwrap();
+
+        assert_eq!(calls.len(), 1);
+        let c = &calls[0];
+        assert_eq!(c.method, "lending.health_factor");
+        assert_eq!(c.params["action_kind"], json!("borrow")); // literal constant, not a selector
+        assert_eq!(c.params["chain_id"], json!("eip155:1")); // $.root.chain_id
+        assert_eq!(
+            c.params["owner"],
+            json!("0x1111111111111111111111111111111111111111")
+        ); // $.root.from
+        assert_eq!(
+            c.params["venue"]["pool"],
+            json!("0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2")
+        );
+        assert_eq!(
+            c.params["asset"]["key"]["address"],
+            json!("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+        );
+        assert_eq!(c.params["amount"], json!("0x5f5e100"));
+    }
 }

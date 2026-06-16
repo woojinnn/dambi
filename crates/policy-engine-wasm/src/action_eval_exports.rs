@@ -493,36 +493,91 @@ fn evaluate_matching_bundles(
 
     let mut verdicts: Vec<Verdict> = Vec::new();
     for bundle in bundles {
-        bundle
-            .manifest
-            .validate()
-            .map_err(|error| EngineErrorDto::new("invalid_manifest", error.to_string()))?;
-        match bundle.manifest.trigger.scope {
-            TriggerScope::Outer if !is_multicall => continue,
-            TriggerScope::Inner if is_multicall => continue,
-            _ => {}
-        }
-        if !policy_engine::policy_rpc::evaluate_trigger(&bundle.manifest.trigger, &view, &tx_view) {
-            continue;
-        }
+        // Per-bundle install-quarantine. A single broken bundle — invalid
+        // manifest, un-composable schema, un-installable / un-evaluable Cedar
+        // policy — must NOT blanket-deny the whole action tag. Pre-fix, the first
+        // `?` short-circuited the ENTIRE function to one `__engine::<kind>` Fail,
+        // discarding every already-collected healthy verdict AND skipping every
+        // later bundle (this is the F-SCHEMA-1 / F-REQRPC amplification: one
+        // policy typo → tag-wide outage / false denials). Now each bundle is
+        // evaluated in isolation: a fault becomes a warn-closed
+        // `__engine::quarantine::<kind>` verdict (auditable, surfaced, but not a
+        // hard block), and the healthy bundles still evaluate and drive the
+        // aggregate — deny-overrides is preserved, so a healthy deny still Fails
+        // the action. (Genuine WHOLE-engine faults — lower / plan / materialize,
+        // handled ABOVE this loop — remain fail-closed via `?`.)
+        let outcome: Result<Option<Verdict>, EngineErrorDto> = (|| {
+            bundle
+                .manifest
+                .validate()
+                .map_err(|error| EngineErrorDto::new("invalid_manifest", error.to_string()))?;
+            match bundle.manifest.trigger.scope {
+                TriggerScope::Outer if !is_multicall => return Ok(None),
+                TriggerScope::Inner if is_multicall => return Ok(None),
+                _ => {}
+            }
+            if !policy_engine::policy_rpc::evaluate_trigger(
+                &bundle.manifest.trigger,
+                &view,
+                &tx_view,
+            ) {
+                return Ok(None);
+            }
 
-        let schema = compose_per_policy(&bundle.manifest)
-            .map_err(|error| EngineErrorDto::new("schema_failed", error.to_string()))?;
-        let engine = PolicyEngine::build_from_per_policy(&[(bundle.policy.clone(), schema)])
-            .map_err(|error| EngineErrorDto::new("install_failed", error.to_string()))?;
-        let verdict = engine
-            .evaluate(
-                &lowered.principal,
-                &lowered.action_uid,
-                &lowered.resource,
-                &entities,
-                context,
-            )
-            .map_err(|error| EngineErrorDto::new("policy", error.to_string()))?;
-        verdicts.push(verdict);
+            let schema = compose_per_policy(&bundle.manifest)
+                .map_err(|error| EngineErrorDto::new("schema_failed", error.to_string()))?;
+            let engine = PolicyEngine::build_from_per_policy(&[(bundle.policy.clone(), schema)])
+                .map_err(|error| EngineErrorDto::new("install_failed", error.to_string()))?;
+            let verdict = engine
+                .evaluate(
+                    &lowered.principal,
+                    &lowered.action_uid,
+                    &lowered.resource,
+                    &entities,
+                    context,
+                )
+                .map_err(|error| EngineErrorDto::new("policy", error.to_string()))?;
+            Ok(Some(verdict))
+        })();
+
+        match outcome {
+            Ok(Some(verdict)) => verdicts.push(verdict),
+            // Scope / trigger non-match: not an error, contributes no verdict.
+            Ok(None) => {}
+            // Broken bundle: quarantine to a warn-closed verdict, keep going.
+            Err(error) => verdicts.push(quarantine_verdict(&error)),
+        }
     }
 
     Ok(Verdict::aggregate(verdicts))
+}
+
+/// Isolate a single broken bundle's fault to a warn-closed [`Verdict`] so it
+/// cannot blanket-deny the whole action tag (install-quarantine). Carries a
+/// `__engine::quarantine::<kind>` matched policy at `Warn` severity, so the
+/// fault is auditable and surfaced to the user without hard-blocking every
+/// action that matched the broken policy; the healthy bundles still drive the
+/// aggregate (deny-overrides). This is deliberately DISTINCT from
+/// [`engine_error_verdict`] (whole-engine fault → `Fail`): that path is for
+/// lower / plan / materialize faults, which genuinely cannot produce ANY verdict
+/// for the action, whereas a broken individual bundle is one policy among many
+/// that did evaluate. (A broken policy cannot enforce its intent regardless of
+/// severity; warn-closing it trades an availability DoS for a visible warning.
+/// Preventing broken policies from being installed is the separate publish-time
+/// gate — F1.2.)
+fn quarantine_verdict(error: &EngineErrorDto) -> Verdict {
+    let policy_id = format!("__engine::quarantine::{}", error.kind);
+    let reason = if error.message.is_empty() {
+        policy_id.clone()
+    } else {
+        error.message.clone()
+    };
+    Verdict::Warn(vec![MatchedPolicy {
+        policy_id,
+        reason: Some(reason),
+        severity: Severity::Warn,
+        origin: policy_engine::PolicyRequestOrigin::Action,
+    }])
 }
 
 /// Build a borrowed [`TxView`] from the parsed `tx` input.
@@ -962,6 +1017,121 @@ pub(crate) mod tests {
         assert_eq!(
             parsed["data"]["verdict"]["matched"][0]["policy_id"], "__system__",
             "{parsed}"
+        );
+    }
+
+    // ── Per-bundle install-quarantine (F-SCHEMA-1 / F-REQRPC amplification fix) ──
+    //
+    // A broken bundle must be isolated to a warn-closed `__engine::quarantine::*`
+    // verdict instead of short-circuiting the whole `evaluate_matching_bundles`
+    // loop to a blanket `__engine` Fail. The broken policy below is the literal
+    // F-SCHEMA-1 shape: a forbid reading the UNDECLARED `context.protocol.name`
+    // (the declared field is `context.venue.name`), which fails Cedar
+    // install/validation → a broken bundle.
+
+    /// A bundle that fails to install (references undeclared `context.protocol.*`).
+    fn broken_schema_policy() -> &'static str {
+        "@id(\"bridge-protocol-not-allowlisted-warn\")\n@severity(\"warn\")\n\
+         @reason(\"protocol not allowlisted\")\n\
+         forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
+         when { context.protocol.name == \"evil\" };\n"
+    }
+
+    /// A single broken bundle quarantines to `warn` (NOT a blanket `__engine` deny).
+    #[test]
+    fn evaluate_action_v2_broken_bundle_quarantined_to_warn() {
+        let (body, meta) = swap_sample();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{ "policy": broken_schema_policy(), "manifest": dashboard_manifest("broken") }],
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["kind"], "warn",
+            "a broken bundle must quarantine to warn, not blanket-deny the tag: {parsed}"
+        );
+        let pid = parsed["data"]["verdict"]["matched"][0]["policy_id"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            pid.starts_with("__engine::quarantine"),
+            "quarantine verdict must carry __engine::quarantine::*, got {pid}: {parsed}"
+        );
+    }
+
+    /// A broken bundle must NOT poison a sibling HEALTHY policy that passes. The
+    /// `only-usdt` forbid does not fire on the WETH sample (Pass), so with the
+    /// broken bundle quarantined the aggregate is `warn` — pre-fix the broken
+    /// bundle's `?` short-circuited the whole function to a blanket `__engine` Fail.
+    #[test]
+    fn evaluate_action_v2_broken_bundle_does_not_poison_healthy_pass() {
+        let (body, meta) = swap_sample();
+        let healthy_pass = format!(
+            "@id(\"only-usdt\")\n@severity(\"deny\")\n\
+             forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
+             when {{ context has tokenOut && context.tokenOut.key has address \
+             && context.tokenOut.key.address == \"{USDT}\" }};\n"
+        );
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [
+                    { "policy": broken_schema_policy(), "manifest": dashboard_manifest("broken") },
+                    { "policy": healthy_pass, "manifest": dashboard_manifest("only-usdt") }
+                ],
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["kind"], "warn",
+            "a healthy pass must not be flipped to a deny by a sibling broken bundle: {parsed}"
+        );
+    }
+
+    /// A healthy DENY still fires even when a SIBLING bundle is broken and listed
+    /// FIRST: pre-fix the broken bundle's `?` exited before the deny was ever
+    /// evaluated (blanket `__engine` fail, real deny absent). Post-fix the broken
+    /// bundle is quarantined and `block-non-usdt` is evaluated and present in the
+    /// matched set (deny-overrides → Fail).
+    #[test]
+    fn evaluate_action_v2_healthy_deny_survives_broken_bundle() {
+        let (body, meta) = swap_sample();
+        let healthy_deny = format!(
+            "@id(\"block-non-usdt\")\n@severity(\"deny\")\n@reason(\"output token is not USDT\")\n\
+             forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
+             when {{ context has tokenOut \
+             && !(context.tokenOut.key has address && context.tokenOut.key.address == \"{USDT}\") }};\n"
+        );
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [
+                    { "policy": broken_schema_policy(), "manifest": dashboard_manifest("broken") },
+                    { "policy": healthy_deny, "manifest": dashboard_manifest("block-non-usdt") }
+                ],
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["verdict"]["kind"], "fail", "{parsed}");
+        let matched = parsed["data"]["verdict"]["matched"].as_array().unwrap();
+        let ids: Vec<&str> = matched
+            .iter()
+            .filter_map(|m| m["policy_id"].as_str())
+            .collect();
+        assert!(
+            ids.contains(&"block-non-usdt"),
+            "the healthy deny must be evaluated despite a broken sibling listed first, got {ids:?}: {parsed}"
         );
     }
 

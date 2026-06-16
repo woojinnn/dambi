@@ -1,5 +1,24 @@
 {
   "methods": {
+    "pool.liquidity": {
+      "name": "pool.liquidity",
+      "description": "Market depth (rolling 24h swap volume, USD) of the add-liquidity target AMM pool, via the keyless GeckoTerminal (CoinGecko on-chain) API. Backs lp-low-liquidity (warn on a thinly-traded pool). Active by default; set GECKOTERMINAL_API_URL empty to disable.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "venue": {
+          "type": "AmmVenue",
+          "required": true,
+          "description": "The add-liquidity venue (internally-tagged AmmVenue object); the subgraph pool key is read from .pool / .pool_id / .pair by variant.",
+          "defaultSelector": "$.action.venue"
+        }
+      },
+      "returns": { "kind": "record", "type": "PoolLiquidity" },
+      "origin": "bundled"
+    },
     "address.sanctions": {
       "name": "address.sanctions",
       "description": "Is an address on an on-chain sanctions oracle (Chainalysis isSanctioned — OFAC/EU/UN)? Legal-list membership, distinct from a scam/drainer heuristic. v1 screens Ethereum mainnet (the EigenLayer chain).",
@@ -16,6 +35,20 @@
         }
       },
       "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.sanctioned" },
+      "origin": "bundled"
+    },
+    "lending.health_factor": {
+      "name": "lending.health_factor",
+      "description": "Projected post-action health factor of a lending position (Aave V3; Spark fork shares the ABI). Reads the borrower's on-chain account state and applies the pending borrow/withdraw delta — a CONSERVATIVE pre-sign estimate (HF < 1 ⇒ liquidatable), NOT a transaction simulation. v1 reads Ethereum mainnet only; any uncertainty omits the field so the policy stays dormant (never a fabricated HF).",
+      "params": {
+        "chain_id": { "type": "Long", "required": true, "defaultSelector": "$.root.chain_id" },
+        "owner": { "type": "String", "required": true, "defaultSelector": "$.root.from", "description": "Position owner (0x-hex)." },
+        "venue": { "type": "Venue", "required": true, "defaultSelector": "$.action.venue", "description": "Lending venue — the LendingVenue object carries the Pool address inline." },
+        "asset": { "type": "AssetRef", "required": true, "defaultSelector": "$.action.asset", "description": "Borrowed / withdrawn asset." },
+        "amount": { "type": "String", "required": true, "defaultSelector": "$.action.amount", "description": "On-chain amount (uint256 hex string); uint256::MAX = withdraw-all." },
+        "action_kind": { "type": "String", "required": true, "enum_": ["borrow", "withdraw"], "description": "Direction of the action. Supplied by the manifest as a literal constant (the trigger already pins borrow vs withdraw), since the lowered Cedar context carries no tag field." }
+      },
+      "returns": { "kind": "scalar", "type": "Decimal", "from": "$.result.postActionHf" },
       "origin": "bundled"
     },
     "approval.allowance": {
