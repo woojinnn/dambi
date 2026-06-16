@@ -1,0 +1,55 @@
+{
+  "type": "adapter_action",
+  "id": "pancakeswap-ifo/sale/claim-allocation@1.0.0",
+  "publisher": "pancakeswap",
+  "note": "PancakeSwap IFO harvestPool(uint8 _pid) — CLAIM after sale end: delivers the offering-token allocation for pool _pid AND returns the oversubscription overflow refund (committed minus allocation cost, minus tiered overflow tax) to msg.sender in the same call. Maps to launchpad::ClaimAllocation (platform=pancakeswap_ifo, recipient=$from — harvestPool pays msg.sender, NO recipient arg). The bundled overflow refund is represented inside the claim_allocation refund_due live_input, NOT a separate Refund body — PancakeSwap has no standalone refund() selector. selector 0x2374876c keccak-verified (cast sig) AND confirmed on the BscScan-verified IFOV2 instance. live_inputs (allocated/refund_due/is_claimable) are user_supplied placeholders (no IFO allocation enrichment wired; viewUserOfferingAndRefundingAmountsForPools is the candidate source for a follow-up).",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x2374876c",
+    "chain_to_addresses": {
+      "56": [
+        "0x6137b571f7f1e44839ae10310a08be86d1a4d03b"
+      ]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "harvestPool",
+    "abi": {
+      "name": "harvestPool",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "_pid", "type": "uint8" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "launchpad",
+      "launchpad": {
+        "action": "claim_allocation",
+        "claim_allocation": {
+          "platform": {
+            "name": "pancakeswap_ifo",
+            "chain": "$chain"
+          },
+          "sale_id": "$to",
+          "recipient": "$tx.from"
+        }
+      }
+    },
+    "live_inputs": {
+      "allocated": { "source": { "kind": "user_supplied" } },
+      "refund_due": { "source": { "kind": "user_supplied" } },
+      "is_claimable": { "source": { "kind": "user_supplied" } }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

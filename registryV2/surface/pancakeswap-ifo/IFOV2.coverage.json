@@ -1,0 +1,14 @@
+{
+  "contract": "IFOV2",
+  "chainId": 56,
+  "address": "0x6137b571f7f1e44839ae10310a08be86d1a4d03b",
+  "snapshot": "IFOV2.abi.json",
+  "functions": {
+    "0x7f1bdd76": { "name": "depositPool", "decision": "cover", "reason": "launchpad Commit — subscribe _amount of the raising LP token to pool _pid (0=Basic/capped, 1=Unlimited/overflow). Retail pre-sign sale action. selector keccak-verified (cast sig) + confirmed on the BscScan-verified IFOV2 instance." },
+    "0x2374876c": { "name": "harvestPool", "decision": "cover", "reason": "launchpad ClaimAllocation — claim the offering-token allocation for pool _pid AND receive the oversubscription overflow refund (minus tax) in one msg.sender call. Retail pre-sign. selector keccak-verified." },
+    "0x9f1b5248": { "name": "finalWithdraw", "decision": "exclude", "reason": "onlyOwner admin sweep of raised LP + leftover offering tokens to the admin. Not a retail pre-sign action." },
+    "0x3f138d4b": { "name": "recoverWrongTokens", "decision": "exclude", "reason": "onlyOwner token-rescue. Not retail." },
+    "0x45b8bf91": { "name": "setPool", "decision": "exclude", "reason": "onlyOwner pool config (offering/raising amount, per-user cap, hasTax, pid). Admin." },
+    "0x7edd5e34": { "name": "updatePointParameters", "decision": "exclude", "reason": "onlyOwner PancakeProfile points config. Admin." }
+  }
+}

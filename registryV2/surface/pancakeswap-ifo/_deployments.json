@@ -1,0 +1,44 @@
+{
+  "protocol": "pancakeswap-ifo",
+  "source": "BscScan-verified contracts (Etherscan V2 getsourcecode chainid=56, ContractName=IFOV2, CompilerVersion v0.6.12, Exact Match) + on-chain immutable reads (IFO.lpToken()/offeringToken()/numberPools() via BSC eth_call) — 1st-party. PancakeSwap open-source IFO contracts (github.com/pancakeswap/pancake-smart-contracts/projects/ifo) and official docs (docs.pancakeswap.finance) corroborate the retail write surface depositPool/harvestPool.",
+  "url": "https://bscscan.com/address/0x6137b571f7f1e44839ae10310a08be86d1a4d03b#code",
+  "fetchedAt": "2026-06-16",
+  "note": "PancakeSwap IFO (Initial Farm Offering / CAKE.PAD) on BNB Chain (chainId 56) — representative-chain onboarding. SCOPE: the retail OVERFLOW-COMMITMENT sale surface of ONE verified IFO sale instance (Horizon Protocol IFOV2, 0x6137b571...). depositPool(uint256,uint8) = launchpad Commit (subscribe the raising LP token to pool 0 Basic/capped or pool 1 Unlimited/overflow); harvestPool(uint8) = launchpad ClaimAllocation (claims the offering-token allocation AND returns the oversubscription overflow refund to msg.sender in one call). Both credit msg.sender only (NO recipient/beneficiary arg). EXCLUDE: finalWithdraw/recoverWrongTokens/setPool/updatePointParameters (onlyOwner admin); all view functions (read-only); the raising-token PancakePair and the offering ProxyERC20 (standard ERC-20, covered by the token-standard adapter — not a launchpad action); ICake allocation oracle and the legacy IFOPool CAKE-credit staking vault (not user-signed sale actions; IFOPool is staking-domain). DEFER (out of THIS scope, evidence below): (1) the full IFO address universe — every IFO is a fresh CREATE2 clone deployed by IFODeployerV8 (currIFOAddress()/previousIFOAddress()); covering all past+active sales needs a deployer-enumeration resolver (dynamic resolution is not wired) or per-instance manifests — this onboarding seeds ONE verified instance to validate the launchpad decoder end-to-end. (2) claim_vested via releasePool(uint8) — vesting-capable V7/V8 IFOs are timestamp-based and NOT present in this block-based IFOV2 ABI; the releasePool selector must be verified against a live verified V8 sale before shipping a claim-vested manifest. (3) withdraw_commit / standalone refund — STRUCTURALLY ABSENT in PancakeSwap IFO (commits are locked until sale end; the refund is intrinsic to harvestPool, not a separate selector). (4) BSC (eip155:56) price/sanctions enrichment is not configured (core is eip155:1/8453/42161), so the commit-usd-cap USD layer is decode-only here (raw amount/amountNano still emit).",
+  "contracts": [
+    {
+      "name": "IFOV2 (PancakeSwap IFO: Horizon Protocol sale instance)",
+      "chainId": 56,
+      "address": "0x6137b571f7f1e44839ae10310a08be86d1a4d03b",
+      "decision": "cover",
+      "reason": "Primary retail launchpad surface: depositPool(uint256,uint8)=Commit, harvestPool(uint8)=ClaimAllocation. Verified IFOV2 (BscScan Exact Match, 0.6.12). 2-pool overflow model (numberPools()==2). lpToken()=raising token 0xa527a617... (CAKE-BNB PancakePair), offeringToken()=0xc0eff77... (HZN). One CREATE2 sale instance; see note DEFER (1) for the multi-instance universe."
+    },
+    {
+      "name": "ICake (iCAKE allocation oracle)",
+      "chainId": 56,
+      "address": "0x3c458828d1622f5f4d526eb0d24da8c4eb8f07b1",
+      "decision": "exclude",
+      "reason": "Verified read-only oracle (getUserCredit(address) = veCAKE-derived max public-sale commit). NOT a user-signed sale action — it supplies the per-user commit ceiling as context, not a launchpad write."
+    },
+    {
+      "name": "IFOPool (legacy CAKE auto-pool / IFO-credit staking vault)",
+      "chainId": 56,
+      "address": "0x1b2a2f6ed4a1401e8c73b4c2b6172455ce2f78e8",
+      "decision": "exclude",
+      "reason": "CAKE staking vault (deposit/withdraw/harvest CAKE to earn IFO credit). This is staking-domain, not the launchpad sale; out of scope for the launchpad onboarding (would be a separate yield/staking decoder)."
+    },
+    {
+      "name": "Raising token (CAKE-BNB PancakePair LP) — IFO.lpToken()",
+      "chainId": 56,
+      "address": "0xa527a61703d82139f8a06bc30097cc9caa2df5a6",
+      "decision": "exclude",
+      "reason": "The token committed into the sale (an immutable of the sale contract, read via lpToken()). Standard ERC-20/LP — user surface = approve/transfer, covered by the token-standard adapter. Not a launchpad action; referenced as the commit pay_token inside the commit manifest emit.body."
+    },
+    {
+      "name": "Offering token (Horizon HZN ProxyERC20) — IFO.offeringToken()",
+      "chainId": 56,
+      "address": "0xc0eff7749b125444953ef89682201fb8c6a917cd",
+      "decision": "exclude",
+      "reason": "The token being sold/allocated by the IFO (immutable, read via offeringToken()). Standard ERC-20 (proxy). Not a launchpad action; the allocation is modeled inside the claim_allocation live_inputs."
+    }
+  ]
+}

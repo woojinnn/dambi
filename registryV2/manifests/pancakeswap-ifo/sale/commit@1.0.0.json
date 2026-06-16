@@ -1,0 +1,67 @@
+{
+  "type": "adapter_action",
+  "id": "pancakeswap-ifo/sale/commit@1.0.0",
+  "publisher": "pancakeswap",
+  "note": "PancakeSwap IFO depositPool(uint256 _amount, uint8 _pid) — overflow-commitment COMMIT: subscribe _amount of the raising LP token (lpToken() immutable = 0xa527a617... CAKE-BNB PancakePair on this Horizon IFOV2 instance) to pool _pid (0=Basic/capped, 1=Unlimited/overflow). Maps to launchpad::Commit (platform=pancakeswap_ifo, amount=$args._amount, recipient=$from — depositPool credits msg.sender, NO recipient arg). selector 0x7f1bdd76 keccak-verified (cast sig) AND confirmed on the BscScan-verified IFOV2 instance. pay_token is NOT in calldata (raising token is a sale-contract immutable) so it is pinned to this instance's lpToken(); each IFO is a fresh CREATE2 clone with its own lpToken — see surface _deployments note DEFER(1). live_inputs (sale_state/user_cap/user_committed/expected_token_price) are user_supplied placeholders: no IFO sale-state enrichment is wired, so they decode as skeletons (commit-usd-cap stays decode-only, esp. on BSC which is outside the price-enrichment core).",
+  "schema_version": "3",
+  "match": {
+    "selector": "0x7f1bdd76",
+    "chain_to_addresses": {
+      "56": [
+        "0x6137b571f7f1e44839ae10310a08be86d1a4d03b"
+      ]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "depositPool",
+    "abi": {
+      "name": "depositPool",
+      "type": "function",
+      "stateMutability": "nonpayable",
+      "inputs": [
+        { "name": "_amount", "type": "uint256" },
+        { "name": "_pid", "type": "uint8" }
+      ],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "launchpad",
+      "launchpad": {
+        "action": "commit",
+        "commit": {
+          "platform": {
+            "name": "pancakeswap_ifo",
+            "chain": "$chain"
+          },
+          "sale_id": "$to",
+          "pay_token": {
+            "key": {
+              "standard": "erc20",
+              "chain": "$chain",
+              "address": "0xa527a61703d82139f8a06bc30097cc9caa2df5a6"
+            }
+          },
+          "amount": "$args._amount",
+          "recipient": "$tx.from"
+        }
+      }
+    },
+    "live_inputs": {
+      "sale_state": { "source": { "kind": "user_supplied" } },
+      "user_cap": { "source": { "kind": "user_supplied" } },
+      "user_committed": { "source": { "kind": "user_supplied" } },
+      "expected_token_price": { "source": { "kind": "user_supplied" } }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [
+      "token_metadata"
+    ],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}
