@@ -22,8 +22,11 @@ import "./profile.css";
  *  2. Posts this account published to the market (view / open).
  *  3. Reset switches: wipe this account's wallets / policies.
  */
+const LISTINGS_PAGE_SIZE = 8;
+
 export function ProfilePage() {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  const ko = i18n.language.startsWith("ko");
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user, logout } = useAuth();
@@ -43,6 +46,26 @@ export function ProfilePage() {
     : 0;
 
   const [banner, setBanner] = useState<string | null>(null);
+
+  // 올린 게시물 — 정책/패키지 탭 + 페이지네이션.
+  const [listTab, setListTab] = useState<"policy" | "set">("policy");
+  const [listPage, setListPage] = useState(1);
+  const allListings = myListingsQ.data ?? [];
+  const listingPolicyCount = allListings.filter((l) => l.kind === "policy").length;
+  const listingSetCount = allListings.filter((l) => l.kind === "set").length;
+  const tabListings = allListings.filter((l) =>
+    listTab === "set" ? l.kind === "set" : l.kind === "policy",
+  );
+  const listPageCount = Math.max(1, Math.ceil(tabListings.length / LISTINGS_PAGE_SIZE));
+  const listPageSafe = Math.min(listPage, listPageCount);
+  const shownListings = tabListings.slice(
+    (listPageSafe - 1) * LISTINGS_PAGE_SIZE,
+    listPageSafe * LISTINGS_PAGE_SIZE,
+  );
+  const switchTab = (tab: "policy" | "set") => {
+    setListTab(tab);
+    setListPage(1);
+  };
 
   const resetWalletsMut = useMutation({
     mutationFn: async () => {
@@ -119,43 +142,68 @@ export function ProfilePage() {
             <div className="pp-empty">{t("profile.noListings")}</div>
           )}
           {myListingsQ.data && myListingsQ.data.length > 0 && (
-            <ul className="pp-listings">
-              {myListingsQ.data.map((l) => (
-                <li key={l.id} className="pp-listing-row">
-                  <Link to={`/market/${l.slug}`} className="pp-listing">
-                    <div className="pp-listing-main">
-                      <span className="pp-listing-name">
-                        {pickI18n(l.display_name)}
-                      </span>
-                      <span className="pp-listing-slug">{l.slug}</span>
-                    </div>
-                    <div className="pp-listing-stats">
-                      <span title={t("profile.installCount")}>↓ {l.install_count}</span>
-                      {l.current_version && (
-                        <span className="pp-ver">{l.current_version}</span>
-                      )}
-                      <span className={`pp-status ${l.status}`}>{l.status}</span>
-                    </div>
-                  </Link>
-                  <button
-                    type="button"
-                    className="pp-listing-del"
-                    title={t("profile.deleteListingTitle")}
-                    disabled={deleteListingMut.isPending}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          t("profile.deleteListingConfirm", { name: pickI18n(l.display_name) }),
-                        )
-                      )
-                        deleteListingMut.mutate(l.id);
-                    }}
-                  >
-                    {t("delete")}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="pp-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listTab === "policy"}
+                  className={`pp-tab${listTab === "policy" ? " on" : ""}`}
+                  onClick={() => switchTab("policy")}
+                >
+                  {t("profile.tabPolicies")} <span className="pp-tab-n">{listingPolicyCount}</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listTab === "set"}
+                  className={`pp-tab${listTab === "set" ? " on" : ""}`}
+                  onClick={() => switchTab("set")}
+                >
+                  {t("profile.tabPackages")} <span className="pp-tab-n">{listingSetCount}</span>
+                </button>
+              </div>
+              {tabListings.length === 0 ? (
+                <div className="pp-empty">{t("profile.noListings")}</div>
+              ) : (
+                <ul className="pp-listings">
+                  {shownListings.map((l) => (
+                    <li key={l.id} className="pp-listing-row">
+                      <Link to={`/market/${l.slug}`} className="pp-listing">
+                        <div className="pp-listing-main">
+                          <span className="pp-listing-name">{pickI18n(l.display_name)}</span>
+                          <span className="pp-listing-slug">{l.slug}</span>
+                        </div>
+                        <div className="pp-listing-stats">
+                          <span title={t("profile.installCount")}>↓ {l.install_count}</span>
+                          {l.current_version && <span className="pp-ver">{l.current_version}</span>}
+                          <span className={`pp-status ${l.status}`}>{l.status}</span>
+                        </div>
+                      </Link>
+                      <button
+                        type="button"
+                        className="pp-listing-del"
+                        title={t("profile.deleteListingTitle")}
+                        disabled={deleteListingMut.isPending}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              t("profile.deleteListingConfirm", { name: pickI18n(l.display_name) }),
+                            )
+                          )
+                            deleteListingMut.mutate(l.id);
+                        }}
+                      >
+                        {t("delete")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {listPageCount > 1 && (
+                <ProfilePager page={listPageSafe} pageCount={listPageCount} onChange={setListPage} ko={ko} />
+              )}
+            </>
           )}
         </section>
 
@@ -218,5 +266,59 @@ export function ProfilePage() {
         </section>
       </div>
     </>
+  );
+}
+
+/** 숫자 페이지네이션: 이전 · 1 2 3 … N · 다음 (MarketPage 패턴 미러). */
+function ProfilePager({
+  page,
+  pageCount,
+  onChange,
+  ko,
+}: {
+  page: number;
+  pageCount: number;
+  onChange: (p: number) => void;
+  ko: boolean;
+}) {
+  const nums: (number | "gap")[] = [];
+  const lo = Math.max(2, page - 1);
+  const hi = Math.min(pageCount - 1, page + 1);
+  nums.push(1);
+  if (lo > 2) nums.push("gap");
+  for (let p = lo; p <= hi; p++) nums.push(p);
+  if (hi < pageCount - 1) nums.push("gap");
+  if (pageCount > 1) nums.push(pageCount);
+  return (
+    <nav className="pp-pager" aria-label={ko ? "페이지" : "pagination"}>
+      <button type="button" className="pp-pager-nav" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        {ko ? "이전" : "Prev"}
+      </button>
+      {nums.map((n, i) =>
+        n === "gap" ? (
+          <span key={`gap-${i}`} className="pp-pager-gap">
+            …
+          </span>
+        ) : (
+          <button
+            key={n}
+            type="button"
+            className={`pp-pager-num${n === page ? " on" : ""}`}
+            aria-current={n === page ? "page" : undefined}
+            onClick={() => onChange(n)}
+          >
+            {n}
+          </button>
+        ),
+      )}
+      <button
+        type="button"
+        className="pp-pager-nav"
+        disabled={page >= pageCount}
+        onClick={() => onChange(page + 1)}
+      >
+        {ko ? "다음" : "Next"}
+      </button>
+    </nav>
   );
 }

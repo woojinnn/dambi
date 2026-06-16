@@ -48,6 +48,8 @@
     "subtitle": "내 계정",
     "signOut": "로그아웃",
     "myListings": "올린 게시물",
+    "tabPolicies": "정책",
+    "tabPackages": "패키지",
     "noListings": "아직 Policy Hub에 올린 게시물이 없어요. 에디터에서 정책을 만들고 “Policy Hub에 올리기”로 공개해보세요.",
     "installCount": "설치 수",
     "deleteListingTitle": "이 게시물 삭제",
