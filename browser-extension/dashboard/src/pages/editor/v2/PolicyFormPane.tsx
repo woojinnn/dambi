@@ -92,6 +92,9 @@ export interface PolicyFormPaneProps {
   /** 결과 자리의 인라인 심각도 변경(차단↔경고) 콜백. 주어지면 결과가 셀렉트가
    *  된다 — 바인딩 모드 전용. */
   onSeverityChange?: (s: "deny" | "warn") => void;
+  /** 모달 임베드용 — 값 시트에서 다이어그램 카드와 하단 안내를 숨겨 좁은 폭에
+   *  맞춘다(설치 모달의 지갑별 파라미터 편집). */
+  compact?: boolean;
 }
 
 /** FormOp → i18n 키 조각 (sheet.op.* / 연산자 드롭다운). */
@@ -314,7 +317,7 @@ interface EditorSelection {
   registerRow: (n: FormNode, el: HTMLElement | null) => void;
 }
 
-export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = false, onChange, onValidity, resetToken, severityValue, onSeverityChange }: PolicyFormPaneProps) {
+export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = false, onChange, onValidity, resetToken, severityValue, onSeverityChange, compact = false }: PolicyFormPaneProps) {
   const { t } = useTranslation("editor");
   const [model, setModel] = useState<FormModel>(() =>
     initialModel
@@ -580,6 +583,7 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
         triggerAny={trig.kind === "any"}
         severity={severityValue ?? model.severity}
         onSeverity={onSeverityChange}
+        compact={compact}
         reason={model.reason}
         dirty={dirty}
         error={sheetError}
@@ -806,6 +810,7 @@ function ValueSheet({
   triggerAny,
   severity,
   onSeverity,
+  compact,
   reason,
   dirty,
   error,
@@ -823,6 +828,8 @@ function ValueSheet({
   severity: FormModel["severity"];
   /** 주어지면 결과(→ 차단/경고)가 인라인 셀렉트가 된다 — 지갑별 override. */
   onSeverity?: (s: "deny" | "warn") => void;
+  /** 다이어그램 카드·하단 안내를 숨긴다(모달 임베드). */
+  compact?: boolean;
   reason: string;
   dirty: boolean;
   /** 전체 유효성 메시지(없으면 정상). 상단 배너로 보여준다. */
@@ -993,24 +1000,28 @@ function ValueSheet({
         )}
       </div>
 
-      <div className="pv-diagram-card">
-        <div className="pv-diagram-head">
-          {t("sheet.diagramTitle")}
-          <span className="pv-ro-pill">{t("sheet.readonly")}</span>
+      {!compact && (
+        <div className="pv-diagram-card">
+          <div className="pv-diagram-head">
+            {t("sheet.diagramTitle")}
+            <span className="pv-ro-pill">{t("sheet.readonly")}</span>
+          </div>
+          <div className="pv-diagram-body">
+            <PolicyDiagram ir={ir} interactive humanizeLabel={humanizeLabel} />
+          </div>
         </div>
-        <div className="pv-diagram-body">
-          <PolicyDiagram ir={ir} interactive humanizeLabel={humanizeLabel} />
-        </div>
-      </div>
+      )}
       </div>
 
-      <div className="pv-foot">
-        <span className="pv-foot-note">{t("sheet.footNote")}</span>
-        <span className="pv-spacer" />
-        <button type="button" className="pv-revert" onClick={onRevert} disabled={!dirty}>
-          {t("sheet.revert")}
-        </button>
-      </div>
+      {!compact && (
+        <div className="pv-foot">
+          <span className="pv-foot-note">{t("sheet.footNote")}</span>
+          <span className="pv-spacer" />
+          <button type="button" className="pv-revert" onClick={onRevert} disabled={!dirty}>
+            {t("sheet.revert")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

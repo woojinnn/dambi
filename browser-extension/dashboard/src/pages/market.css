@@ -1949,6 +1949,12 @@
   padding-left: 2px;
 }
 .im-wparams .im-holes { margin-top: 6px; }
+/* 임베드된 에디터 ValueSheet(문장형 폼) — 모달 폭에 맞춰 단일 컬럼으로. */
+.im-paramforms { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
+.im-paramform-name { font-size: 12px; font-weight: 700; color: var(--slate-600, #475569); margin: 2px 0; }
+.im-paramforms .pv-sheet { margin: 0; max-width: none; gap: 8px; }
+.im-paramforms .pv-main { grid-template-columns: minmax(0, 1fr); }
+.im-wparams .im-paramforms { margin-top: 6px; }
 .im-noparams {
   margin-top: 14px;
   padding: 22px 16px;
@@ -2525,6 +2531,7 @@
     @keyframes imPop { from { opacity: 0; transform: translateY(8px) scale(0.985); } to { opacity: 1; transform: none; } }
     .im-overlay { background: rgba(13,17,24,0.46); backdrop-filter: blur(2px); }
     .im-box { width: 460px; padding: 0; border-radius: 20px; overflow: hidden; box-shadow: 0 30px 80px rgba(13,17,24,0.28); animation: imPop 0.22s cubic-bezier(0.22,0.61,0.36,1) both; display: flex; flex-direction: column; max-height: 88vh; }
+    .im-box.wide { width: min(620px, 94vw); }
     .im-x { top: 18px; right: 18px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--slate-400); }
     .im-x:hover { background: var(--fog-300); color: var(--slate-700); }
 
