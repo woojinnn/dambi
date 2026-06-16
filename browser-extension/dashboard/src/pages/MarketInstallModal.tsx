@@ -131,6 +131,13 @@ export function MarketInstallModal({
   const walletModelsRef = useRef<Record<string, Record<string, FormModel>>>({});
   const [libValidity, setLibValidity] = useState<Record<string, boolean>>({});
   const [walletValidity, setWalletValidity] = useState<Record<string, Record<string, boolean>>>({});
+  // 지갑·def 별 심각도(차단/경고) — 셀렉트가 즉시 반영되도록 state. 미설정이면
+  // def 선언값을 따른다.
+  const [walletSeverity, setWalletSeverity] = useState<
+    Record<string, Record<string, "deny" | "warn">>
+  >({});
+  // 지갑별 파라미터 탭의 활성 지갑.
+  const [activeTab, setActiveTab] = useState<string | null>(null);
 
   /** 한 def 의 바인딩 params — 기준 모델 대비 바뀐 leaf 값만(diffParamValues). */
   const paramsForModel = (defId: string, edited: FormModel | undefined): Record<string, HoleValue> => {
@@ -192,13 +199,24 @@ export function MarketInstallModal({
           }
         }
         const paramsByAddress: Record<string, InstallParams> = {};
-        for (const addr of picked) paramsByAddress[addr] = walletParamsFor(addr);
+        const severityByAddress: Record<string, Record<string, "deny" | "warn">> = {};
+        for (const addr of picked) {
+          paramsByAddress[addr] = walletParamsFor(addr);
+          // def 선언값과 다른 심각도만 override 로 기록.
+          const sevs: Record<string, "deny" | "warn"> = {};
+          for (const f of formDefs) {
+            const chosen = walletSeverity[addr]?.[f.defId];
+            if (chosen && chosen !== f.model.severity) sevs[f.defId] = chosen;
+          }
+          if (Object.keys(sevs).length) severityByAddress[addr] = sevs;
+        }
         return installListingWalletOnlyV2(detailQ.data!, locale, {
           addresses: [...picked],
           walletPackages,
           snap: snap!,
           params: {},
           paramsByAddress,
+          ...(Object.keys(severityByAddress).length ? { severityByAddress } : {}),
         });
       }
       return installListingV2(detailQ.data!, locale, {
@@ -281,20 +299,35 @@ export function MarketInstallModal({
     };
     return (
       <div className="im-paramforms">
-        {formDefs.map((f) => (
-          <div key={f.defId} className="im-paramform">
-            {formDefs.length > 1 && <div className="im-paramform-name">{f.defName}</div>}
-            <PolicyFormPane
-              key={`${scope ?? "lib"}:${f.defId}`}
-              initialModel={f.model}
-              initialManifest={f.manifest}
-              valuesOnly
-              compact
-              onChange={({ model }) => setModel(f.defId, model)}
-              onValidity={({ valid }) => setValid(f.defId, valid)}
-            />
-          </div>
-        ))}
+        {formDefs.map((f) => {
+          // 탭 전환으로 폼이 언마운트돼도 편집값을 잃지 않게 ref 값으로 다시 연다.
+          const seeded = (scope ? walletModelsRef.current[scope]?.[f.defId] : libModelsRef.current[f.defId]) ?? f.model;
+          // 차단/경고 셀렉트는 지갑 경로에서만, def 선언값이 deny/warn 일 때만.
+          const defSev = f.model.severity;
+          const sevEditable = scope !== undefined && (defSev === "deny" || defSev === "warn");
+          const sevProps = sevEditable
+            ? {
+                severityValue: walletSeverity[scope]?.[f.defId] ?? (defSev as "deny" | "warn"),
+                onSeverityChange: (s: "deny" | "warn") =>
+                  setWalletSeverity((m) => ({ ...m, [scope]: { ...(m[scope] ?? {}), [f.defId]: s } })),
+              }
+            : {};
+          return (
+            <div key={f.defId} className="im-paramform">
+              {formDefs.length > 1 && <div className="im-paramform-name">{f.defName}</div>}
+              <PolicyFormPane
+                key={`${scope ?? "lib"}:${f.defId}`}
+                initialModel={seeded}
+                initialManifest={f.manifest}
+                valuesOnly
+                compact
+                {...sevProps}
+                onChange={({ model }) => setModel(f.defId, model)}
+                onValidity={({ valid }) => setValid(f.defId, valid)}
+              />
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -559,16 +592,33 @@ export function MarketInstallModal({
                     : "This policy has no parameters to set — you can install it directly."}
               </p>
               {hasParams ? (
-                [...picked].map((addr) => {
-                  const w = wallets.find((x) => x.address === addr);
-                  const wname = w?.label?.trim() || shortAddr(addr);
+                (() => {
+                  const tabs = [...picked];
+                  const active = activeTab && tabs.includes(activeTab) ? activeTab : tabs[0];
+                  const nameOf = (a: string) =>
+                    wallets.find((x) => x.address === a)?.label?.trim() || shortAddr(a);
                   return (
-                    <div key={addr} className="im-wparams">
-                      <div className="im-wparams-head">{wname}</div>
-                      {renderParamForm(addr)}
+                    <div className="im-wparams">
+                      {tabs.length > 1 && (
+                        <div className="im-wtabs" role="tablist">
+                          {tabs.map((a) => (
+                            <button
+                              key={a}
+                              type="button"
+                              role="tab"
+                              aria-selected={a === active}
+                              className={`im-wtab${a === active ? " on" : ""}`}
+                              onClick={() => setActiveTab(a)}
+                            >
+                              {nameOf(a)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {active && renderParamForm(active)}
                     </div>
                   );
-                })
+                })()
               ) : (
                 <div className="im-noparams">
                   {ko ? "설정할 파라미터가 없습니다." : "No parameters to set."}

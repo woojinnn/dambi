@@ -1955,6 +1955,22 @@
 .im-paramforms .pv-sheet { margin: 0; max-width: none; gap: 8px; }
 .im-paramforms .pv-main { grid-template-columns: minmax(0, 1fr); }
 .im-wparams .im-paramforms { margin-top: 6px; }
+/* 지갑별 파라미터 탭 (시간순/활동별… 스타일의 알약 탭) */
+.im-wtabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.im-wtab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--slate-400, #94a3b8);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.im-wtab:hover { color: var(--slate-600, #475569); }
+.im-wtab.on { background: var(--fog-500, #eef1f5); color: var(--ink, #0f1720); }
 .im-noparams {
   margin-top: 14px;
   padding: 22px 16px;

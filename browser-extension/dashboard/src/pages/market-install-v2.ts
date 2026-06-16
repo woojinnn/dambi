@@ -88,6 +88,9 @@ export interface WalletOnlyInstallChoice {
   params?: InstallParams;
   /** 지갑별 required hole 값 — 있으면 그 지갑 바인딩엔 이 값을 쓴다(공통보다 우선). */
   paramsByAddress?: Record<string, InstallParams>;
+  /** 지갑·def 별 심각도 override(차단/경고). def 선언값과 다를 때만 넣어 바인딩에
+   *  기록한다 — 에디터 인스턴스 편집의 지갑별 override 와 같은 효과. */
+  severityByAddress?: Record<string, Record<string, "deny" | "warn">>;
 }
 
 /** 지갑 전용 설치: def는 hidden으로 라이브러리에 넣고(카탈로그 비노출), 지갑별
@@ -147,11 +150,13 @@ export async function installListingWalletOnlyV2(
       );
       if (!dup) {
         const params = walletFilled[d.id];
+        const sev = choice.severityByAddress?.[address]?.[d.id];
         await bindDef({
           defId: d.id,
           packageId: pkgId,
           addresses: [address],
           ...(params && Object.keys(params).length ? { params } : {}),
+          ...(sev ? { severity: sev } : {}),
         });
       }
     }
