@@ -42,6 +42,7 @@ import {
   filterForAction,
   isWalletRegistered,
   resolveBundlesForWallet,
+  resolveBundlesForWalletWithFaults,
   type ResolvedBundle,
 } from "./resolve";
 import { readStore } from "./store";
@@ -122,6 +123,29 @@ describe("resolveBundlesForWallet", () => {
     await putDef("u", def("def::good"));
     const out = await resolveBundlesForWallet("u", "0xa1");
     expect(out).toHaveLength(1);
+  });
+
+  it("binding.severity override is threaded to renderDef (re-stamp @severity)", async () => {
+    const { renderDef } = await import("./render");
+    await putDef("u", def("def::a"));
+    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"], severity: "warn" });
+    await resolveBundlesForWallet("u", "0xa1");
+    expect(vi.mocked(renderDef)).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "def::a" }),
+      expect.anything(),
+      "warn",
+    );
+  });
+
+  it("render fault carries the binding severity override (deny-close signal)", async () => {
+    const { renderDef } = await import("./render");
+    vi.mocked(renderDef).mockImplementationOnce(async () => {
+      throw new Error("boom");
+    });
+    await putDef("u", def("def::bad"));
+    await bind("u", { defId: "def::bad", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"], severity: "deny" });
+    const { renderFaults } = await resolveBundlesForWalletWithFaults("u", "0xa1");
+    expect(renderFaults).toEqual([{ defId: "def::bad", severity: "deny" }]);
   });
 });
 

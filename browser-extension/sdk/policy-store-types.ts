@@ -75,6 +75,9 @@ export interface Binding {
   /** 지갑별 별칭 — 없으면 def displayName으로 표시. */
   alias?: string | undefined;
   params?: Record<string, HoleValue> | undefined;
+  /** 지갑별 심각도 override — 없으면 def 의 선언 `@severity` 를 따른다. 평가 시
+   *  렌더 단계에서 cedar `@severity` 를 이 값으로 재스탬프한다. */
+  severity?: "deny" | "warn" | undefined;
   updatedAtMs: number;
 }
 
