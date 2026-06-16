@@ -964,6 +964,21 @@ fn lending_emode_config_skeleton() -> JsonValue {
     })
 }
 
+/// Skeleton `SaleState` (`action/launchpad/mod.rs`) for a launchpad `Commit`
+/// whose IFO sale-state enrichment is not yet wired. Only the non-`Option`
+/// fields must be present or serde rejects the `LiveField<SaleState>` value:
+/// `is_active: bool`, `total_committed: U256` (string), `sale_window: (Time,
+/// Time)`. `Time` is a `#[serde(transparent)] u64`, so the window is two bare
+/// numbers. The `Option` caps (`hard_cap`/`soft_cap`) and `vest_schedule` are
+/// `skip_serializing_if = Option::is_none` → omitted = `None`.
+fn launchpad_sale_state_skeleton() -> JsonValue {
+    serde_json::json!({
+        "is_active": false,
+        "total_committed": "0",
+        "sale_window": [0, 0],
+    })
+}
+
 /// Per-`(domain, action, field)` default `value` for the `LiveField` wrap.
 ///
 /// Each entry encodes the minimal `serde_json` shape needed for
@@ -1130,6 +1145,37 @@ fn live_input_default(domain: Option<&str>, action: Option<&str>, field: &str) -
             Some("pt_swap" | "yt_swap" | "add_market_liquidity" | "remove_market_liquidity"),
             "maturity",
         ) => JsonValue::String("0".into()),
+        // -------- Launchpad (overflow-commitment IFO) --------
+        //
+        // `CommitLiveInputs` (action/launchpad/commit.rs): `sale_state`
+        // (`LiveField<SaleState>`), `user_cap` / `user_committed`
+        // (`LiveField<U256>`), `expected_token_price` (`LiveField<Option<Price>>`
+        // → takes the `_ => Null` fallback = `None`). `ClaimAllocationLiveInputs`
+        // (claim_allocation.rs): `allocated` (`LiveField<(TokenRef, U256)>` → a
+        // 2-element array of the zero-erc20 TokenRef skeleton + `"0"`),
+        // `refund_due` (`LiveField<U256>`), `is_claimable` (`LiveField<bool>`).
+        // No IFO sale-state enrichment is wired (the v3 manifests declare these
+        // `user_supplied`), so the non-`Option` LiveFields take a deserializable
+        // zero/false/empty-token skeleton; a host fills the real values once an
+        // IFO enrichment orchestrator exists.
+        (Some("launchpad"), Some("commit"), "sale_state") => launchpad_sale_state_skeleton(),
+        (Some("launchpad"), Some("commit"), "user_cap" | "user_committed") => {
+            JsonValue::String("0".into())
+        }
+        (Some("launchpad"), Some("claim_allocation"), "allocated") => serde_json::json!([
+            {
+                "key": {
+                    "standard": "erc20",
+                    "chain": "eip155:1",
+                    "address": "0x0000000000000000000000000000000000000000"
+                }
+            },
+            "0"
+        ]),
+        (Some("launchpad"), Some("claim_allocation"), "refund_due") => {
+            JsonValue::String("0".into())
+        }
+        (Some("launchpad"), Some("claim_allocation"), "is_claimable") => JsonValue::Bool(false),
         // Fallback — null lets the per-field type's `Option<T>` (if any) take
         // over; for stricter types serde reports a clear error pointing at the
         // missing catalog entry.

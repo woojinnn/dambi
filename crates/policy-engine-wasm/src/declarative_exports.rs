@@ -603,6 +603,26 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
             );
         }
 
+        // Uniswap V2/V3 CREATE2 pool derivation. Unlike Curve (`venue.pool =
+        // $to`) or Balancer (`pool_id = $args.pool`), a Uniswap ROUTER takes only
+        // `(tokens[, fee])` and computes the pool address INTERNALLY, so it is
+        // never in calldata — leaving `$resolved.pool` unresolved and the
+        // pool-keyed enrichment (`pool.liquidity` → AMM low-liquidity / low-TVL)
+        // dormant. Re-derive the pool statically (CREATE2, no RPC) from the
+        // decoded tokens + fee and inject `$resolved.pool`, so BOTH the venue and
+        // the (dormant) `live_inputs` onchain_view resolve to the real pool.
+        // The single_emit analogue of `maybe_inject_morpho_market_id`: a derived
+        // identity the declarative grammar cannot compute (it cannot keccak /
+        // CREATE2). Generic by venue — a V2/V3 fork onboards by extending the
+        // (factory, init_hash) tables in `maybe_compute_uniswap_pool`. Skipped
+        // when `pool` is already resolved (e.g. an Aave gateway), and shape-gated
+        // on the token arg names so it is a no-op for every non-Uniswap call.
+        if !resolved.contains_key("pool") {
+            if let Some(pool) = maybe_compute_uniswap_pool(input.chain_id, &args_json) {
+                resolved.insert("pool".to_owned(), serde_json::Value::String(pool));
+            }
+        }
+
         // Tier-B synthetic derivations the declarative grammar cannot express
         // (it can index/slice but not hash). Morpho Blue's `market_id` =
         // keccak(MarketParams); inject it as `$derived.morpho_market_id` so the
@@ -2998,6 +3018,143 @@ fn maybe_inject_uniswap_v3_path(
     }
 }
 
+/// Uniswap V3 `UniswapV3Factory` address (lowercase hex) per chain, or `None`
+/// for an unsupported chain. Canonical `0x1F98…F984` on Ethereum / Optimism /
+/// Arbitrum / Polygon; Base differs. 1st-party: Uniswap docs deployment pages.
+fn uniswap_v3_factory(chain_id: u64) -> Option<&'static str> {
+    match chain_id {
+        1 | 10 | 42161 | 137 => Some("0x1f98431c8ad98523631ae4a59f267346ea31f984"),
+        8453 => Some("0x33128a8fc17869897dce68ed026d694621f6fdfd"),
+        _ => None,
+    }
+}
+
+/// Uniswap V3 `POOL_INIT_CODE_HASH` — chain-uniform (keccak of the pool creation
+/// bytecode). 1st-party: v3-periphery `PoolAddress.sol` (main branch). NOTE: the
+/// `0.8` branch carries a different *placeholder* hash that does NOT match
+/// deployed pools — this `main`-branch value is the live one.
+const UNISWAP_V3_POOL_INIT_HASH: &str =
+    "0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54";
+
+/// Uniswap V2 `UniswapV2Factory` (mainnet only). The L2 V2 factories were
+/// deployed by a different deployer and their pair init-code-hash is not
+/// 1st-party documented, so off-mainnet V2 stays dormant rather than risk a
+/// wrong address. 1st-party: v2-periphery `UniswapV2Library.sol`.
+fn uniswap_v2_factory(chain_id: u64) -> Option<&'static str> {
+    match chain_id {
+        1 => Some("0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
+        _ => None,
+    }
+}
+
+/// Uniswap V2 pair init-code-hash (mainnet factory). 1st-party: v2-periphery.
+const UNISWAP_V2_PAIR_INIT_HASH: &str =
+    "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f";
+
+/// Parse a `0x` 20-byte address hex into a fixed array.
+fn parse_addr20(s: &str) -> Option<[u8; 20]> {
+    let bytes = hex::decode(s.strip_prefix("0x").unwrap_or(s)).ok()?;
+    <[u8; 20]>::try_from(bytes.as_slice()).ok()
+}
+
+/// Parse a `0x` 32-byte hash hex into a fixed array.
+fn parse_bytes32(s: &str) -> Option<[u8; 32]> {
+    let bytes = hex::decode(s.strip_prefix("0x").unwrap_or(s)).ok()?;
+    <[u8; 32]>::try_from(bytes.as_slice()).ok()
+}
+
+/// EIP-1014 CREATE2 address = low 20 bytes of
+/// `keccak256(0xff ++ deployer ++ salt ++ init_code_hash)`, as `0x` lowercase.
+fn create2_address(deployer: &[u8; 20], salt: &[u8; 32], init_hash: &[u8; 32]) -> String {
+    let mut pre = [0u8; 85]; // 0xff(1) | factory(20) | salt(32) | hash(32)
+    pre[0] = 0xff;
+    pre[1..21].copy_from_slice(deployer);
+    pre[21..53].copy_from_slice(salt);
+    pre[53..85].copy_from_slice(init_hash);
+    format!("0x{}", hex::encode(&alloy_primitives::keccak256(pre)[12..]))
+}
+
+/// Uniswap V3 pool address (`PoolAddress.computeAddress`):
+/// `CREATE2(factory, keccak256(abi.encode(token0, token1, fee)), INIT_HASH)`
+/// over the SORTED token pair (`fee` as a uint24 right-aligned in a 32-byte
+/// word). `None` on an unsupported chain or malformed token. Generic by fork:
+/// extend [`uniswap_v3_factory`] / the init-hash for any V3 clone.
+fn compute_uniswap_v3_pool(
+    chain_id: u64,
+    token_a: &str,
+    token_b: &str,
+    fee: u64,
+) -> Option<String> {
+    let factory = parse_addr20(uniswap_v3_factory(chain_id)?)?;
+    let init = parse_bytes32(UNISWAP_V3_POOL_INIT_HASH)?;
+    let a = parse_addr20(token_a)?;
+    let b = parse_addr20(token_b)?;
+    let (t0, t1) = if a <= b { (a, b) } else { (b, a) };
+    let mut salt_pre = [0u8; 96];
+    salt_pre[12..32].copy_from_slice(&t0);
+    salt_pre[44..64].copy_from_slice(&t1);
+    salt_pre[88..96].copy_from_slice(&fee.to_be_bytes()); // uint24 fits the low word
+    let salt = alloy_primitives::keccak256(salt_pre);
+    Some(create2_address(&factory, &salt.0, &init))
+}
+
+/// Uniswap V2 pair address (`UniswapV2Library.pairFor`):
+/// `CREATE2(factory, keccak256(token0 ++ token1), INIT_HASH)` over the SORTED
+/// pair (`encodePacked`, raw 20+20 bytes). `None` off-mainnet or on a malformed
+/// token.
+fn compute_uniswap_v2_pair(chain_id: u64, token_a: &str, token_b: &str) -> Option<String> {
+    let factory = parse_addr20(uniswap_v2_factory(chain_id)?)?;
+    let init = parse_bytes32(UNISWAP_V2_PAIR_INIT_HASH)?;
+    let a = parse_addr20(token_a)?;
+    let b = parse_addr20(token_b)?;
+    let (t0, t1) = if a <= b { (a, b) } else { (b, a) };
+    let mut salt_pre = [0u8; 40];
+    salt_pre[0..20].copy_from_slice(&t0);
+    salt_pre[20..40].copy_from_slice(&t1);
+    let salt = alloy_primitives::keccak256(salt_pre);
+    Some(create2_address(&factory, &salt.0, &init))
+}
+
+/// Read a JSON uint as `u64` — number, decimal string, or `0x` hex string.
+fn json_value_to_u64(v: &serde_json::Value) -> Option<u64> {
+    match v {
+        serde_json::Value::Number(n) => n.as_u64(),
+        serde_json::Value::String(s) => s.parse::<u64>().ok().or_else(|| {
+            s.strip_prefix("0x")
+                .and_then(|h| u64::from_str_radix(h, 16).ok())
+        }),
+        _ => None,
+    }
+}
+
+/// Shape-gated `$resolved.pool` computation for a Uniswap V2/V3 ROUTER call
+/// whose pool address is not in calldata. Disambiguates by the decoded token
+/// arg names (`fee` present ⇒ V3): V3 `(token0,token1,fee)` or
+/// `(tokenIn,tokenOut,fee)`, V2 `(tokenA,tokenB)`. Returns `None` (no injection,
+/// dormant) for any other shape or an unsupported chain — never a wrong pool.
+fn maybe_compute_uniswap_pool(chain_id: u64, args: &serde_json::Value) -> Option<String> {
+    let v3_pair = args
+        .get("token0")
+        .and_then(serde_json::Value::as_str)
+        .zip(args.get("token1").and_then(serde_json::Value::as_str))
+        .or_else(|| {
+            args.get("tokenIn")
+                .and_then(serde_json::Value::as_str)
+                .zip(args.get("tokenOut").and_then(serde_json::Value::as_str))
+        });
+    if let Some((t0, t1)) = v3_pair {
+        let fee = args.get("fee").and_then(json_value_to_u64)?;
+        return compute_uniswap_v3_pool(chain_id, t0, t1, fee);
+    }
+    if let (Some(ta), Some(tb)) = (
+        args.get("tokenA").and_then(serde_json::Value::as_str),
+        args.get("tokenB").and_then(serde_json::Value::as_str),
+    ) {
+        return compute_uniswap_v2_pair(chain_id, ta, tb);
+    }
+    None
+}
+
 /// Re-derive the shape-gated `$derived.*` endpoints for a NESTED child leg.
 ///
 /// The route-level injection (the `maybe_inject_*` calls in
@@ -3608,6 +3765,79 @@ mod tests {
             "nonce": 42_u64,
             "block_timestamp": 1_700_000_010_u64
         })
+    }
+
+    // ── Uniswap V2/V3 CREATE2 pool derivation ($resolved.pool injection) ──
+    // Golden anchors verified against on-chain pools (Etherscan); constants are
+    // 1st-party (v2/v3-periphery + Uniswap docs deployment pages).
+    const T_USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    const T_WETH: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+    const V3_USDC_WETH_500: &str = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640";
+    const V2_USDC_WETH: &str = "0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc";
+
+    #[test]
+    fn uniswap_v3_pool_create2_golden() {
+        // Mainnet USDC/WETH 0.05% pool. Token order must not matter (sorted).
+        assert_eq!(
+            compute_uniswap_v3_pool(1, T_USDC, T_WETH, 500).as_deref(),
+            Some(V3_USDC_WETH_500)
+        );
+        assert_eq!(
+            compute_uniswap_v3_pool(1, T_WETH, T_USDC, 500).as_deref(),
+            Some(V3_USDC_WETH_500)
+        );
+        // Base uses a different factory → a different (here just non-equal) pool.
+        assert_ne!(
+            compute_uniswap_v3_pool(8453, T_USDC, T_WETH, 500).as_deref(),
+            Some(V3_USDC_WETH_500)
+        );
+        // Unsupported chain → None (dormant, never a wrong pool).
+        assert_eq!(compute_uniswap_v3_pool(999, T_USDC, T_WETH, 500), None);
+    }
+
+    #[test]
+    fn uniswap_v2_pair_create2_golden() {
+        assert_eq!(
+            compute_uniswap_v2_pair(1, T_USDC, T_WETH).as_deref(),
+            Some(V2_USDC_WETH)
+        );
+        assert_eq!(
+            compute_uniswap_v2_pair(1, T_WETH, T_USDC).as_deref(),
+            Some(V2_USDC_WETH)
+        );
+        // V2 is mainnet-only here (L2 init-hash not 1st-party) → None off-mainnet.
+        assert_eq!(compute_uniswap_v2_pair(10, T_USDC, T_WETH), None);
+    }
+
+    #[test]
+    fn maybe_compute_uniswap_pool_dispatches_by_arg_shape() {
+        // v3-nfpm mint shape: token0/token1/fee → V3 pool.
+        let mint = json!({ "token0": T_USDC, "token1": T_WETH, "fee": 500 });
+        assert_eq!(
+            maybe_compute_uniswap_pool(1, &mint).as_deref(),
+            Some(V3_USDC_WETH_500)
+        );
+        // swap-router exactInputSingle shape: tokenIn/tokenOut/fee → V3 pool.
+        let swap = json!({ "tokenIn": T_WETH, "tokenOut": T_USDC, "fee": 500 });
+        assert_eq!(
+            maybe_compute_uniswap_pool(1, &swap).as_deref(),
+            Some(V3_USDC_WETH_500)
+        );
+        // v2-router addLiquidity shape: tokenA/tokenB (no fee) → V2 pair.
+        let add = json!({ "tokenA": T_USDC, "tokenB": T_WETH });
+        assert_eq!(
+            maybe_compute_uniswap_pool(1, &add).as_deref(),
+            Some(V2_USDC_WETH)
+        );
+        // token0/token1 WITHOUT a fee, and an unrelated shape → None (no inject).
+        assert_eq!(
+            maybe_compute_uniswap_pool(1, &json!({ "token0": T_USDC, "token1": T_WETH })),
+            None
+        );
+        assert_eq!(
+            maybe_compute_uniswap_pool(1, &json!({ "marketParams": [] })),
+            None
+        );
     }
 
     #[test]

@@ -3474,6 +3474,15 @@ fn b1_nfpm_mint_concentrated_mint() {
     assert_eq!(body["domain"], "amm", "{parsed}");
     assert_eq!(body["action"], "add_liquidity", "{parsed}");
     assert_eq!(body["venue"]["name"], "uniswap_v3", "{parsed}");
+    // LOAD-BEARING: `venue.pool` is `$resolved.pool`, which a Uniswap router
+    // never carries in calldata — the route now re-derives it via CREATE2 from
+    // (token0, token1, fee). token0/token1 = USDC/WETH, fee = 3000 → the mainnet
+    // USDC/WETH 0.3% V3 pool. (Before this wiring it fell back to the zero
+    // address, leaving the pool.liquidity enrichment dormant.)
+    assert_eq!(
+        body["venue"]["pool"], "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8",
+        "{parsed}"
+    );
     // fee = uint24 3000 ≤ 64 bits → JSON number → u32 fee_tier_bp.
     assert_eq!(body["venue"]["fee_tier_bp"], 3000u64, "{parsed}");
     assert_eq!(body["params"]["kind"], "concentrated_mint", "{parsed}");
