@@ -125,17 +125,22 @@ function LandingView({ locale }: { locale: MarketLocale }) {
   });
   const all = allQ.data ?? [];
 
-  // Per-category policy counts + how many of them are already installed.
-  const { counts, installed } = useMemo(() => {
+  // Per-category listing counts, split by kind (정책/패키지), + how many are
+  // already installed (hero "gaps in coverage" fallback still uses this).
+  const { counts, policyCounts, pkgCounts, installed } = useMemo(() => {
     const counts = new Map<CategoryKey, number>();
+    const policyCounts = new Map<CategoryKey, number>();
+    const pkgCounts = new Map<CategoryKey, number>();
     const installed = new Map<CategoryKey, number>();
     all.forEach((l) => {
       const c = listingCategoryKey(l);
       if (!c) return;
       counts.set(c, (counts.get(c) ?? 0) + 1);
+      const bucket = l.kind === "set" ? pkgCounts : policyCounts;
+      bucket.set(c, (bucket.get(c) ?? 0) + 1);
       if (l.is_installed) installed.set(c, (installed.get(c) ?? 0) + 1);
     });
-    return { counts, installed };
+    return { counts, policyCounts, pkgCounts, installed };
   }, [all]);
 
   const officialPkgs = useMemo(
@@ -299,7 +304,7 @@ function LandingView({ locale }: { locale: MarketLocale }) {
         </div>
       )}
 
-      <CategoryCoverage counts={counts} installed={installed} locale={locale} />
+      <CategoryCoverage policyCounts={policyCounts} pkgCounts={pkgCounts} locale={locale} />
 
       <div className="rm-cols">
         <div className="rm-sec">
@@ -377,14 +382,15 @@ function LandingView({ locale }: { locale: MarketLocale }) {
   );
 }
 
-/** Coverage-aware category grid — each tile shows installed/total + a bar. */
+/** Category grid — each tile shows how many policies / packages are published
+ *  in that category (catalog volume, not per-wallet install state). */
 function CategoryCoverage({
-  counts,
-  installed,
+  policyCounts,
+  pkgCounts,
   locale,
 }: {
-  counts: Map<CategoryKey, number>;
-  installed: Map<CategoryKey, number>;
+  policyCounts: Map<CategoryKey, number>;
+  pkgCounts: Map<CategoryKey, number>;
   locale: MarketLocale;
 }) {
   const ko = locale === "ko";
@@ -395,38 +401,32 @@ function CategoryCoverage({
           <h2>Category</h2>
           <div className="sub">
             {ko
-              ? "찾는 정책 카테고리가 있나요? 자산·프로토콜 유형별로 골라 둘러보고 빈틈을 채우세요."
-              : "Browse by asset/protocol type and fill the gaps."}
+              ? "자산·프로토콜 유형별로 등록된 정책과 패키지를 둘러보세요."
+              : "Browse published policies and packages by asset/protocol type."}
           </div>
         </div>
       </div>
       <div className="rm-defense" style={{ marginTop: 14 }}>
         {CATEGORY_ORDER.map((c) => {
           const color = CATEGORY_COLOR[c];
-          const n = counts.get(c) ?? 0;
-          const on = installed.get(c) ?? 0;
-          const full = n > 0 && on >= n;
-          const pct = n ? Math.round((on / n) * 100) : 0;
+          const np = policyCounts.get(c) ?? 0;
+          const ng = pkgCounts.get(c) ?? 0;
+          const total = np + ng;
           return (
-            <Link key={c} to={`/market?view=list&category=${c}`} className={`rm-deftile${on ? " has" : ""}`}>
+            <Link key={c} to={`/market?view=list&category=${c}`} className={`rm-deftile${total ? " has" : ""}`}>
               <div className="rm-deftile-top">
                 <span className="ic" style={{ background: color.soft }}>
                   <CategoryGlyph category={c} size={19} color={color.hex} />
                 </span>
-                {full ? (
-                  <span className="rm-defok">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--warn-700)" strokeWidth={2.4} aria-hidden="true">
-                      <path d="M5 12l4 4L19 7" />
-                    </svg>
-                  </span>
-                ) : on ? (
-                  <span className="rm-defpart">{on}/{n}</span>
-                ) : (
-                  <span className="rm-defempty">{ko ? "미설치" : "none"}</span>
-                )}
               </div>
               <div className="rm-deftile-nm" style={{ color: color.ink }}>{categoryNameOf(c, locale)}</div>
-              <div className="rm-defbar"><span style={{ width: `${pct}%`, background: color.hex }} /></div>
+              <div className="rm-defcount">
+                {total === 0
+                  ? (ko ? "등록 없음" : "none yet")
+                  : ko
+                    ? `정책 ${np}개 · 패키지 ${ng}개`
+                    : `${np} ${np === 1 ? "policy" : "policies"} · ${ng} ${ng === 1 ? "package" : "packages"}`}
+              </div>
             </Link>
           );
         })}

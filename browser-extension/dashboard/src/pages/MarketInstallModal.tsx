@@ -119,25 +119,58 @@ export function MarketInstallModal({
     enabled: !!detailQ.data && !!snap,
   });
   const holeReqs = holesQ.data ?? [];
-  /** defId → hole 이름 → 입력 문자열. */
+  /** defId → hole 이름 → 입력 문자열 (공통값 / 라이브러리 경로). */
   const [holeVals, setHoleVals] = useState<Record<string, Record<string, string>>>({});
   const setHoleVal = (defId: string, name: string, v: string) =>
     setHoleVals((m) => ({ ...m, [defId]: { ...(m[defId] ?? {}), [name]: v } }));
-  /** 전부 유효하게 채워졌으면 HoleValue로 변환, 아니면 null. */
-  const filledParams = useMemo<InstallParams | null>(() => {
+  /** 지갑 경로의 지갑별 입력 — address → defId → hole 이름 → 문자열. */
+  const [walletHoleVals, setWalletHoleVals] = useState<
+    Record<string, Record<string, Record<string, string>>>
+  >({});
+  const setWalletHoleVal = (addr: string, defId: string, name: string, v: string) =>
+    setWalletHoleVals((m) => ({
+      ...m,
+      [addr]: {
+        ...(m[addr] ?? {}),
+        [defId]: { ...(m[addr]?.[defId] ?? {}), [name]: v },
+      },
+    }));
+
+  /** 입력 문자열 맵을 HoleValue로 변환 — 전부 유효하면 InstallParams, 아니면 null. */
+  const computeFilled = (vals: Record<string, Record<string, string>>): InstallParams | null => {
     const out: InstallParams = {};
     for (const req of holeReqs) {
       for (const h of req.holes) {
-        const v = holeInputToValue(h.type, holeVals[req.defId]?.[h.name] ?? "");
+        const v = holeInputToValue(h.type, vals[req.defId]?.[h.name] ?? "");
         if (v === null) return null;
         (out[req.defId] ??= {})[h.name] = v;
       }
     }
     return out;
-  }, [holeReqs, holeVals]);
+  };
+  /** 공통(라이브러리) 경로의 채워진 값. */
+  const filledParams = useMemo<InstallParams | null>(
+    () => computeFilled(holeVals),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [holeReqs, holeVals],
+  );
+  /** 지갑별 입력 getter — 미입력 칸은 공통값(holeVals)을 기본값으로 본다. */
+  const walletHoleGet = (addr: string, defId: string, name: string): string =>
+    walletHoleVals[addr]?.[defId]?.[name] ?? holeVals[defId]?.[name] ?? "";
+  /** 한 지갑의 채워진 값(공통값 폴백 포함). */
+  const walletFilledFor = (addr: string): InstallParams | null => {
+    const merged: Record<string, Record<string, string>> = {};
+    for (const req of holeReqs) {
+      for (const h of req.holes) {
+        (merged[req.defId] ??= {})[h.name] = walletHoleGet(addr, req.defId, h.name);
+      }
+    }
+    return computeFilled(merged);
+  };
 
   const [kind, setKind] = useState<"wallet" | "library" | null>(null);
-  // 지갑 경로 — 지갑별 패키지 선택 + 일괄 새 패키지.
+  // 지갑 경로 — 지갑 선택 → (빈칸 있으면) 지갑별 파라미터 설정.
+  const [walletStep, setWalletStep] = useState<"select" | "params">("select");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [walletPkg, setWalletPkg] = useState<Record<string, string>>({});
   const [walletNewName, setWalletNewName] = useState<Record<string, string>>({});
@@ -172,11 +205,14 @@ export function MarketInstallModal({
               sel === "__new__" ? { newName: (walletNewName[addr] ?? "").trim() } : { id: sel };
           }
         }
+        const paramsByAddress: Record<string, InstallParams> = {};
+        for (const addr of picked) paramsByAddress[addr] = walletFilledFor(addr) ?? {};
         return installListingWalletOnlyV2(detailQ.data!, locale, {
           addresses: [...picked],
           walletPackages,
           snap: snap!,
           params: filledParams ?? {},
+          paramsByAddress,
         });
       }
       return installListingV2(detailQ.data!, locale, {
@@ -194,15 +230,17 @@ export function MarketInstallModal({
     },
   });
 
-  const invalid =
-    // required hole이 전부 유효하게 채워지기 전엔 설치 불가 (SW 가드와 동일 기준).
-    filledParams === null ||
-    holesQ.isLoading ||
-    (kind === "wallet" &&
-      (picked.size === 0 ||
-        (bulk
-          ? !bulkName.trim()
-          : [...picked].some((a) => pkgOf(a) === "__new__" && !(walletNewName[a] ?? "").trim()))));
+  const hasHoles = holeReqs.length > 0;
+  // 지갑 선택/패키지 지정이 유효한가 (파라미터는 다음 단계에서 검사).
+  const walletSelectionInvalid =
+    picked.size === 0 ||
+    (bulk
+      ? !bulkName.trim()
+      : [...picked].some((a) => pkgOf(a) === "__new__" && !(walletNewName[a] ?? "").trim()));
+  // 선택한 모든 지갑의 빈칸이 유효하게 채워졌는가.
+  const walletParamsInvalid = [...picked].some((a) => walletFilledFor(a) === null);
+  // 라이브러리 경로: 공통 빈칸이 전부 채워져야 설치 가능 (SW 가드와 동일 기준).
+  const libraryInvalid = filledParams === null || holesQ.isLoading;
 
   const togglePick = (a: string) =>
     setPicked((prev) => {
@@ -232,72 +270,89 @@ export function MarketInstallModal({
     </div>
   );
 
-  // ── required hole 입력 폼 (프로토타입엔 없는 실기능 — im-body 내 스코프 다음).
-  const holeForm = holeReqs.length > 0 && (
-    <div className="im-holes">
-      <div className="im-holes-head">
-        {ko
-          ? "게시자가 비워 둔 칸이 있어요 — 채워야 적용돼요"
-          : "This listing has blanks to fill before it can apply"}
-      </div>
-      {holeReqs.map((req) => (
-        <div key={req.defId} className="im-holes-def">
-          {holeReqs.length > 1 && <div className="im-holes-defname">{req.defName}</div>}
-          {req.holes.map((h) => {
-            const raw = holeVals[req.defId]?.[h.name] ?? "";
-            const bad = raw.trim() !== "" && holeInputToValue(h.type, raw) === null;
-            return (
-              <label key={h.name} className="im-field im-hole">
-                <span className="im-hole-label">{h.label}</span>
-                {h.type === "addressSet" ? (
-                  <textarea
-                    value={raw}
-                    rows={2}
-                    onChange={(e) => setHoleVal(req.defId, h.name, e.target.value)}
-                    placeholder={
-                      ko ? "0x… 주소 (쉼표/줄바꿈으로 여러 개)" : "0x… (comma/newline separated)"
-                    }
-                  />
-                ) : (
-                  <input
-                    value={raw}
-                    onChange={(e) => setHoleVal(req.defId, h.name, e.target.value)}
-                    placeholder={
-                      h.type === "address"
-                        ? "0x…"
+  // ── required hole 입력 폼 (프로토타입엔 없는 실기능). getVal/setVal로 값 소스를
+  //    바꿔 끼워 공통(라이브러리) 폼과 지갑별 폼에 재사용한다. heading=false면
+  //    상단 안내문을 생략(지갑별 카드에선 지갑 이름이 헤딩 역할).
+  const renderHoleForm = (
+    getVal: (defId: string, name: string) => string,
+    setVal: (defId: string, name: string, v: string) => void,
+    opts?: { keyPrefix?: string; heading?: boolean },
+  ) => {
+    if (holeReqs.length === 0) return null;
+    const showHeading = opts?.heading !== false;
+    return (
+      <div className="im-holes">
+        {showHeading && (
+          <div className="im-holes-head">
+            {ko
+              ? "게시자가 비워 둔 칸이 있어요 — 채워야 적용돼요"
+              : "This listing has blanks to fill before it can apply"}
+          </div>
+        )}
+        {holeReqs.map((req) => (
+          <div key={`${opts?.keyPrefix ?? ""}${req.defId}`} className="im-holes-def">
+            {holeReqs.length > 1 && <div className="im-holes-defname">{req.defName}</div>}
+            {req.holes.map((h) => {
+              const raw = getVal(req.defId, h.name);
+              const bad = raw.trim() !== "" && holeInputToValue(h.type, raw) === null;
+              return (
+                <label key={h.name} className="im-field im-hole">
+                  <span className="im-hole-label">{h.label}</span>
+                  {h.type === "addressSet" ? (
+                    <textarea
+                      value={raw}
+                      rows={2}
+                      onChange={(e) => setVal(req.defId, h.name, e.target.value)}
+                      placeholder={
+                        ko ? "0x… 주소 (쉼표/줄바꿈으로 여러 개)" : "0x… (comma/newline separated)"
+                      }
+                    />
+                  ) : (
+                    <input
+                      value={raw}
+                      onChange={(e) => setVal(req.defId, h.name, e.target.value)}
+                      placeholder={
+                        h.type === "address"
+                          ? "0x…"
+                          : h.type === "decimal"
+                            ? ko
+                              ? "예: 3.0"
+                              : "e.g. 3.0"
+                            : h.type === "long"
+                              ? ko
+                                ? "숫자"
+                                : "number"
+                              : ""
+                      }
+                    />
+                  )}
+                  {bad && (
+                    <span className="im-hole-err">
+                      {h.type === "address" || h.type === "addressSet"
+                        ? ko
+                          ? "0x로 시작하는 40자리 주소여야 해요"
+                          : "Must be a 0x… address"
                         : h.type === "decimal"
                           ? ko
-                            ? "예: 3.0"
-                            : "e.g. 3.0"
-                          : h.type === "long"
-                            ? ko
-                              ? "숫자"
-                              : "number"
-                            : ""
-                    }
-                  />
-                )}
-                {bad && (
-                  <span className="im-hole-err">
-                    {h.type === "address" || h.type === "addressSet"
-                      ? ko
-                        ? "0x로 시작하는 40자리 주소여야 해요"
-                        : "Must be a 0x… address"
-                      : h.type === "decimal"
-                        ? ko
-                          ? "소수점 형식이어야 해요 (예: 3.0)"
-                          : "Decimal format (e.g. 3.0)"
-                        : ko
-                          ? "형식이 맞지 않아요"
-                          : "Invalid format"}
-                  </span>
-                )}
-              </label>
-            );
-          })}
-        </div>
-      ))}
-    </div>
+                            ? "소수점 형식이어야 해요 (예: 3.0)"
+                            : "Decimal format (e.g. 3.0)"
+                          : ko
+                            ? "형식이 맞지 않아요"
+                            : "Invalid format"}
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  // 공통(라이브러리/스텝1) 폼.
+  const libraryHoleForm = renderHoleForm(
+    (defId, name) => holeVals[defId]?.[name] ?? "",
+    (defId, name, v) => setHoleVal(defId, name, v),
   );
 
   return (
@@ -351,7 +406,10 @@ export function MarketInstallModal({
                   type="button"
                   className="im-opt"
                   disabled={wallets.length === 0}
-                  onClick={() => setKind("wallet")}
+                  onClick={() => {
+                    setWalletStep("select");
+                    setKind("wallet");
+                  }}
                 >
                   <span className="im-opt-ic">
                     <Glyph
@@ -395,7 +453,6 @@ export function MarketInstallModal({
                   </span>
                 </button>
               </div>
-              {holeForm}
             </div>
             <div className="im-actions">
               <button type="button" className="sec" onClick={onClose}>
@@ -404,6 +461,7 @@ export function MarketInstallModal({
             </div>
           </>
         ) : kind === "wallet" ? (
+          walletStep === "select" ? (
           /* ── 단계 2a: 지갑 선택 ─────────────────────────────────── */
           <>
             {head}
@@ -521,8 +579,9 @@ export function MarketInstallModal({
                     : `Wallets with a same-name package reuse it: ${bulkCollisions.map(shortAddr).join(", ")}`}
                 </div>
               )}
-              {holeForm}
-              {mut.isError && <div className="publish-error">{(mut.error as Error).message}</div>}
+              {!hasHoles && mut.isError && (
+                <div className="publish-error">{(mut.error as Error).message}</div>
+              )}
             </div>
             <div className="im-actions">
               <button type="button" className="sec" onClick={() => setKind(null)}>
@@ -531,13 +590,70 @@ export function MarketInstallModal({
               <button
                 type="button"
                 className="pri"
-                disabled={!detailQ.data || !snap || mut.isPending || invalid}
+                disabled={
+                  !detailQ.data ||
+                  !snap ||
+                  holesQ.isLoading ||
+                  walletSelectionInvalid ||
+                  (!hasHoles && mut.isPending)
+                }
+                onClick={() => (hasHoles ? setWalletStep("params") : mut.mutate())}
+              >
+                {hasHoles
+                  ? ko
+                    ? "다음 →"
+                    : "Next →"
+                  : mut.isPending
+                    ? ko
+                      ? "받는 중…"
+                      : "Installing…"
+                    : ko
+                      ? "받기"
+                      : "Install"}
+              </button>
+            </div>
+          </>
+          ) : (
+          /* ── 단계 2a-2: 지갑별 파라미터 설정 ────────────────────── */
+          <>
+            {head}
+            <div className="im-body">
+              <p className="im-sub">
+                {ko
+                  ? "지갑마다 빈칸을 채워주세요. 지갑별로 다른 값을 넣을 수 있어요."
+                  : "Fill the blanks per wallet — each can use different values."}
+              </p>
+              {[...picked].map((addr) => {
+                const w = wallets.find((x) => x.address === addr);
+                const wname = w?.label?.trim() || shortAddr(addr);
+                return (
+                  <div key={addr} className="im-wparams">
+                    <div className="im-wparams-head">{wname}</div>
+                    {renderHoleForm(
+                      (defId, name) => walletHoleGet(addr, defId, name),
+                      (defId, name, v) => setWalletHoleVal(addr, defId, name, v),
+                      { keyPrefix: `${addr}:`, heading: false },
+                    )}
+                  </div>
+                );
+              })}
+              {mut.isError && <div className="publish-error">{(mut.error as Error).message}</div>}
+            </div>
+            <div className="im-actions">
+              <button type="button" className="sec" onClick={() => setWalletStep("select")}>
+                {ko ? "← 이전" : "← Back"}
+              </button>
+              <button
+                type="button"
+                className="pri"
+                disabled={!detailQ.data || !snap || mut.isPending || walletParamsInvalid}
                 onClick={() => mut.mutate()}
               >
                 {mut.isPending ? (ko ? "받는 중…" : "Installing…") : ko ? "받기" : "Install"}
               </button>
             </div>
           </>
+          )
         ) : (
           /* ── 단계 2b: 라이브러리 옵션 ───────────────────────────── */
           <>
@@ -608,7 +724,7 @@ export function MarketInstallModal({
                   <span className="im-switch" />
                 </label>
               </div>
-              {holeForm}
+              {libraryHoleForm}
               {mut.isError && <div className="publish-error">{(mut.error as Error).message}</div>}
             </div>
             <div className="im-actions">
@@ -618,7 +734,7 @@ export function MarketInstallModal({
               <button
                 type="button"
                 className="pri"
-                disabled={!detailQ.data || !snap || mut.isPending || invalid}
+                disabled={!detailQ.data || !snap || mut.isPending || libraryInvalid}
                 onClick={() => mut.mutate()}
               >
                 {mut.isPending ? (ko ? "받는 중…" : "Installing…") : ko ? "받기" : "Install"}

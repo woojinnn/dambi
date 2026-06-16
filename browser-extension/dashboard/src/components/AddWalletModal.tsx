@@ -75,7 +75,7 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
       title={mut.data ? t("wallet.addResultTitle") : t("wallet.addTitle")}
       footer={
         mut.data ? (
-          <button className="btn primary" onClick={onClose}>{t("close")}</button>
+          <button className="btn primary" onClick={() => window.location.reload()}>{t("confirm")}</button>
         ) : (
           <>
             <button className="btn" type="button" onClick={onClose} disabled={mut.isPending}>
