@@ -14,6 +14,12 @@ vi.mock("../server-api", () => ({
   logout: vi.fn(),
 }));
 
+// NavRail reads `logout` from useAuth(); the unit test renders it without an
+// AuthProvider, so stub the hook.
+vi.mock("../hooks/useAuth", () => ({
+  useAuth: () => ({ logout: vi.fn() }),
+}));
+
 function renderNavRail() {
   const queryClient = new QueryClient({
     defaultOptions: {

@@ -15,6 +15,7 @@ import {
   updateBinding,
   type Binding,
   type PolicyDef,
+  type PolicyDoc,
   type StoreSnapshot,
 } from "../../../server-api/policy-store";
 import { listWallets } from "../../../server-api/wallets";
@@ -281,6 +282,26 @@ function EditorBody({
   });
   const [resetToken, setResetToken] = useState(0);
   const [revertNotice, setRevertNotice] = useState<string | null>(null);
+  // 정책 문서(정의/범위/대상/데이터). 발행 시 함께 올라간다. 빈 칸은 저장 안 함.
+  // EditorBody는 policy.id로 remount되므로 초기값을 storedDef.doc에서 읽으면 충분.
+  const [docDefinition, setDocDefinition] = useState(() => storedDef?.doc?.definition ?? "");
+  const [docScope, setDocScope] = useState(() => storedDef?.doc?.scope ?? "");
+  const [docAudience, setDocAudience] = useState(() => storedDef?.doc?.audience ?? "");
+  const [docUsedData, setDocUsedData] = useState(() => storedDef?.doc?.usedData ?? "");
+  // 기본은 접힘 — 이미 내용이 있는 정책만 펼쳐서 보여준다(빈 새 정책은 깔끔하게).
+  const [docOpen, setDocOpen] = useState(() => {
+    const d = storedDef?.doc;
+    return !!(d && (d.definition || d.scope || d.audience || d.usedData));
+  });
+  const docPayload = (): PolicyDoc | undefined => {
+    const d: PolicyDoc = {
+      definition: docDefinition.trim() || undefined,
+      scope: docScope.trim() || undefined,
+      audience: docAudience.trim() || undefined,
+      usedData: docUsedData.trim() || undefined,
+    };
+    return d.definition || d.scope || d.audience || d.usedData ? d : undefined;
+  };
 
   // Reseed when the parent swaps to a different policy id.
   useEffect(() => {
@@ -512,6 +533,7 @@ function EditorBody({
         scope: null,
         packageId: null,
         applyToNewWallets: null,
+        doc: docPayload(),
       });
       await putDef(def);
       return def.id;
@@ -560,6 +582,7 @@ function EditorBody({
             scope: choice.scope,
             packageId: null,
             applyToNewWallets: false,
+            doc: docPayload(),
             walletOnly: { homeWallet: addr, ...(folderId ? { walletFolderId: folderId } : {}) },
           });
           await putDef(def);
@@ -588,6 +611,7 @@ function EditorBody({
         scope: choice.scope,
         packageId: pkgId,
         applyToNewWallets: choice.applyToNewWallets,
+        doc: docPayload(),
       });
       await putDef(def);
       if (bindPlan) await bindDef(bindPlan);
@@ -633,6 +657,7 @@ function EditorBody({
     policyTree: null,
     suggestedDisplayName: policy.displayName,
     suggestedSlug: stripDashboardId(policy.id),
+    doc: docPayload(),
   };
 
   /** "마켓에 올리기": generate the manifest from the CURRENT editor state
@@ -739,6 +764,48 @@ function EditorBody({
             </span>
           )}
         </div>
+
+        {!bindingCtx && (
+          <div className={`ev2-doc-sec${docOpen ? " open" : ""}`}>
+            <button
+              type="button"
+              className="ev2-doc-toggle"
+              onClick={() => setDocOpen((v) => !v)}
+              aria-expanded={docOpen}
+            >
+              <svg className="ev2-doc-caret" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+              {t("detail.docSectionTitle")}
+            </button>
+            {docOpen && (
+              <div className="ev2-detail-doc">
+                <DocField
+                  label={t("detail.docDefinitionLabel")}
+                  hint={t("detail.docDefinitionHint")}
+                  value={docDefinition}
+                  onChange={setDocDefinition}
+                />
+                <DocField
+                  label={t("detail.docScopeLabel")}
+                  hint={t("detail.docScopeHint")}
+                  value={docScope}
+                  onChange={setDocScope}
+                />
+                <DocField
+                  label={t("detail.docAudienceLabel")}
+                  hint={t("detail.docAudienceHint")}
+                  value={docAudience}
+                  onChange={setDocAudience}
+                />
+                <DocField
+                  label={t("detail.docUsedDataLabel")}
+                  hint={t("detail.docUsedDataHint")}
+                  value={docUsedData}
+                  onChange={setDocUsedData}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="ev2-detail-tabs" role="tablist">
           <TabBtn
@@ -888,6 +955,27 @@ function EditorBody({
         onConfirm={(choice) => finishMut.mutate(choice)}
       />
     </div>
+  );
+}
+
+/** 한 개의 정책 문서 칸(라벨 + textarea). 정의/범위/대상/데이터에 재사용. */
+function DocField(props: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="ev2-doc-field">
+      <span className="ev2-doc-label">{props.label}</span>
+      <textarea
+        className="ev2-doc-input"
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+        rows={2}
+        placeholder={props.hint}
+      />
+    </label>
   );
 }
 

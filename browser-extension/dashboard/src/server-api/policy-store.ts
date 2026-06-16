@@ -18,6 +18,7 @@ export type {
   LibraryDoc,
   PackageDef,
   PolicyDef,
+  PolicyDoc,
   StoreSnapshot,
   WalletFolder,
   WalletPolicyState,

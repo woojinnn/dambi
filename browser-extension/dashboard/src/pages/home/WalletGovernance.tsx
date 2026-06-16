@@ -27,7 +27,6 @@ import { PublishModal, type PublishSource } from "../editor/PublishModal";
 import {
   appliedCount,
   buildFolders,
-  BASELINE_COUNT,
   totalPolicyCount,
   toggledParams,
   type FolderVM,
@@ -59,9 +58,6 @@ const Chevron = () => (
 );
 const Folder = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-);
-const Shield = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 4 6v5c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V6Z" /></svg>
 );
 const Upload = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4m0 0-4 4m4-4 4 4" /><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></svg>
@@ -120,6 +116,7 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
           active={active}
           onSelect={(i) => { setOverview(false); setActive(i); }}
           onActiveClick={() => setOverview((v) => !v)}
+          onAddWallet={onAddWallet}
         />
         <div className="dial-panel">
           {overview ? (
@@ -167,11 +164,13 @@ function WalletDial({
   active,
   onSelect,
   onActiveClick,
+  onAddWallet,
 }: {
   wallets: DialWallet[];
   active: number;
   onSelect: (i: number) => void;
   onActiveClick: () => void;
+  onAddWallet: () => void;
 }) {
   const { t } = useTranslation("home");
   const stageRef = useRef<HTMLDivElement>(null);
@@ -301,6 +300,9 @@ function WalletDial({
           <button key={w.address} type="button" className={i === active ? "on" : ""} aria-label={w.label ?? w.address} onClick={() => onSelect(i)} />
         ))}
       </div>
+      <button type="button" className="wd-add" onClick={onAddWallet}>
+        <span className="wd-add-plus" aria-hidden>+</span> {t("addWallet")}
+      </button>
     </div>
   );
 }
@@ -326,7 +328,7 @@ function WalletPanel({
   const { t } = useTranslation("home");
   const qc = useQueryClient();
   const folders = useMemo(() => (snap ? buildFolders(snap, wallet.address) : []), [snap, wallet.address]);
-  const applied = snap ? appliedCount(snap, wallet.address) : BASELINE_COUNT;
+  const applied = snap ? appliedCount(snap, wallet.address) : 0;
   const polTotal = snap ? totalPolicyCount(snap, wallet.address) : 0;
 
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
@@ -407,8 +409,7 @@ function WalletPanel({
       </div>
 
       <div className="dp-stack">
-        <span className="base-chip"><Shield />Baseline {BASELINE_COUNT}</span>
-        <span className="seg"><span className="arrow">+</span> {t("panel.packages")} <b>{folders.length}</b><span className="mute"> {t("panel.policiesCount", { count: polTotal })}</span></span>
+        <span className="seg">{t("panel.packages")} <b>{folders.length}</b><span className="mute"> {t("panel.policiesCount", { count: polTotal })}</span></span>
         <span className="arrow">→</span>
         <span className="seg">{t("panel.appliedToWallet")} <b>{applied}</b></span>
       </div>
@@ -602,7 +603,7 @@ function WalletOverview({
       <div className="wv-grid">
         {wallets.map((w, i) => {
           const pkgs = snap ? buildFolders(snap, w.address).length : 0;
-          const ap = snap ? appliedCount(snap, w.address) : BASELINE_COUNT;
+          const ap = snap ? appliedCount(snap, w.address) : 0;
           return (
             <button key={w.address} type="button" className={`wv-card${i === active ? " is-active" : ""}`} onClick={() => onPick(i)}>
               <div className="wv-top"><span className="wv-coin" data-tone={w.tone}>{initialOf(w)}</span></div>

@@ -9,6 +9,7 @@
  */
 import type {
   ListingDetail,
+  ListingDoc,
   ListingSummary,
   Review,
   SetMember,
@@ -28,6 +29,8 @@ interface SeedPolicy {
   lineKo: string;
   lineEn: string;
   installs: number;
+  /** 상세 페이지 "정책 설명"(정의/범위/대상/데이터). 없으면 섹션 숨김. */
+  doc?: ListingDoc;
 }
 
 const POLICIES: SeedPolicy[] = [
@@ -41,6 +44,12 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "미승인 컨트랙트가 토큰 무제한 승인을 요청하면 경고합니다.",
     lineEn: "Warn when unapproved contracts request unlimited token approvals.",
     installs: 1280,
+    doc: {
+      definition: "승인되지 않은 컨트랙트가 ERC-20 승인(Approve)을 요청하는 경우 경고합니다.\n\n토큰(ERC-20) 사용을 승인하는 것은 Spender(토큰 사용자)에게 허용 금액만큼 내 토큰 사용 권한을 주는 것과 같습니다. 따라서 허가를 받지 않은 컨트랙트가 토큰을 무제한 승인 요청하는 경우 서명 전에 한 번 더 확인하도록 경고합니다.",
+      scope: "승인되지 않은 컨트랙트가 ERC-20 무제한 승인 요청 시 적용됩니다.",
+      audience: "ERC-20 토큰을 보유중인 모든 사용자",
+      usedData: "승인하는 토큰의 양(context.amount)이 최대값인 경우 토큰 사용자(context.spender)가 승인 목록에 포함되었는지 확인합니다.",
+    },
   },
   {
     slug: "swap-asset-redirect",
@@ -52,6 +61,12 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "스왑한 자산이 제3자에게 전송되면 경고합니다.",
     lineEn: "Alert if swap assets are sent to third parties.",
     installs: 940,
+    doc: {
+      definition: "Swap할 때 토큰을 수령할 주소가 제3자의 것으로 되어 있는 경우, 사용자가 수령할 주소를 검토할 수 있도록 경고합니다.\n\nSwap은 내가 보유한 토큰을 다른 토큰으로 교환하는 것을 말합니다. 이때 토큰을 받는 주소가 다른 주소로 지정되어 있을 수도 있기 때문에, 토큰을 받을 주소가 내 주소가 아닌 다른 것으로 되어 있으면 경고를 표시합니다.",
+      scope: "AMM 기반의 DEX에서 Swap할 때 적용됩니다. (Beta: Uniswap Only)",
+      audience: "DEX를 사용하는 모든 사용자",
+      usedData: "서명에 사용할 지갑의 주소(principal.address)와 Swap을 통해 토큰을 받을 주소",
+    },
   },
   {
     slug: "burn-address-transfer",
@@ -63,6 +78,12 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "토큰이 소각 주소(0x00…00, 0x00…dead)로 전송되면 경고합니다.",
     lineEn: "Warn when tokens transfer to burn addresses.",
     installs: 760,
+    doc: {
+      definition: "토큰이 소각될 수 있는 주소로 전송되는 경우 차단합니다.\n\nERC-20 토큰 소각(Burning)은 토큰을 영구히 파괴하여 유통된 전체 토큰에서 특정 토큰의 수량 일부를 제거하는 행위입니다. 사용자가 소각 주소로 토큰을 전송하려고 하면 서명 자체를 차단합니다.",
+      scope: "모든 ERC-20 transfer에 적용됩니다.",
+      audience: "ERC-20 토큰을 보유중인 모든 사용자",
+      usedData: "토큰을 받을 주소(context.recipient)가 토큰을 소각 시키는 지정된 주소인지 확인합니다.",
+    },
   },
   {
     slug: "unapproved-marketplace-delegation",
@@ -74,6 +95,12 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "미승인 마켓플레이스로 NFT 위임이 일어나면 경고합니다.",
     lineEn: "Alert on NFT delegation to unapproved marketplaces.",
     installs: 610,
+    doc: {
+      definition: "알려진 거래소 위임처가 아닌 곳에 컬렉션 전체를 옮길 권한을 주는 경우 경고를 표시합니다.\n\nNFT의 setApprovalForAll은 특정 토큰 하나가 아니라 그 컬렉션에 든 NFT 전부를 상대가 마음대로 옮길 수 있게 위임하는 것입니다. OpenSea나 Blur 같은 거래소에서 리스팅하려면 한 번씩 거쳐야 하는 정상적인 단계이지만, 같은 위임을 악의적인 사용자가 받아 가면 그 NFT 전부를 가져갈 수 있습니다. 그래서 알려지지 않은 곳에 위임을 할 경우, 정말 그 상대에게 컬렉션 전체를 맡길 것인지 한 번 더 확인하도록 알립니다.",
+      scope: "NFT의 setApprovalForAll 서명에 적용됩니다. 새로운 권한 위임이면서, 받아 가는 주소가 알려진 거래소(OpenSea Conduit, Blur ExecutionDelegate, LooksRare v2 TransferManager, X2Y2 ERC721Delegate)가 아닐 때 발동합니다.",
+      audience: "NFT를 보유하고 거래를 하는 모든 Wallet 사용자",
+      usedData: "* 새로운 권한 위임 여부\n* 위임을 받아 가는 위임처 주소",
+    },
   },
   {
     slug: "unsupported-protocol",
@@ -85,6 +112,11 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "미지원 프로토콜로 서명 요청이 오면 경고합니다.",
     lineEn: "Warn if signing requests use unsupported protocols.",
     installs: 430,
+    doc: {
+      definition: "PASU에서 지원하지 않는 행위 또는 프로토콜의 요청에 서명하는 경우 경고를 표시합니다.\n\nPASU 시스템은 지속적인 업데이트가 예정되어 있지만, 현실적인 문제로 인하여 TVL이 작거나 출시된 지 얼마 되지 않은 프로토콜까지는 모두 곧바로 지원하지 못할 수 있습니다. 이 경우, 안전한 거래를 위해 사용자가 직접 거래 대상을 검토하여야 하므로 이 서명은 PASU의 보호 범위 외에 있음을 명시하는 경고를 표시합니다.",
+      scope: "PASU 지원 범위 외",
+      audience: "PASU 사용자",
+    },
   },
   // ── [Token] Beginner Shield 전용 신규 정책 3종 (Wallet Guardians docs) ──
   {
@@ -97,6 +129,12 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "토큰을 그 토큰의 컨트랙트 주소로 보내면 경고합니다.",
     lineEn: "Warn when tokens are sent to their own contract address.",
     installs: 540,
+    doc: {
+      definition: "토큰을 그 토큰 자신의 컨트랙트 주소로 전송하는 경우 경고합니다.\n\n토큰 주소와 받는 사람 주소를 헷갈려, 보내려는 토큰의 컨트랙트 주소를 수신자 칸에 그대로 붙여넣는 실수가 발생할 수 있습니다. 대부분의 ERC-20 컨트랙트는 이렇게 들어온 토큰을 돌려주는 기능이 없어, 한 번 보내면 자산이 컨트랙트에 묶여버립니다. 토큰을 받는 주소가 바로 그 토큰의 컨트랙트 주소와 같으면 서명 전에 한 번 더 확인하도록 경고합니다.",
+      scope: "토큰을 받는 주소가 전송하려는 토큰의 컨트랙트 주소와 같은 경우에 적용됩니다.",
+      audience: "ERC-20 토큰을 보유중인 모든 사용자",
+      usedData: "보내려는 토큰의 컨트랙트 주소(token.key.address)와 받는 주소(context.recipient)가 동일한지 확인합니다.",
+    },
   },
   {
     slug: "permit2-max-signature-warn",
@@ -108,6 +146,12 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "Permit2 최대 한도 서명 요청이 오면 경고합니다.",
     lineEn: "Warn on maximum Permit2 allowance signing requests.",
     installs: 690,
+    doc: {
+      definition: "Permit2 승인을 무제한 한도로 서명하려는 경우 경고합니다.\n\nPermit2는 토큰 승인 방식으로, 서명 한 번으로 토큰 사용 권한을 위임합니다. 이때 한도를 최대치(무제한)로 설정하면, 위임받은 상대는 그 권한이 살아 있는 동안 내 토큰 잔액 전부를 언제든 옮길 수 있습니다. 무제한 서명이 감지되면 그 대상이 신뢰할 수 있는 대상인지 서명 전에 한 번 더 확인하도록 경고합니다.",
+      scope: "Permit2 승인 한도가 최대치(uint160 max)로 설정된 경우에 적용됩니다.",
+      audience: "ERC-20 토큰을 보유중인 모든 사용자",
+      usedData: "Permit2 서명에 담긴 허용 한도(context.amount)가 최댓값인지 확인합니다.",
+    },
   },
   {
     slug: "malicious-address-approval-deny",
@@ -119,6 +163,12 @@ const POLICIES: SeedPolicy[] = [
     lineKo: "알려진 악성 주소로의 토큰 승인 요청을 차단합니다.",
     lineEn: "Block token approval requests to known malicious addresses.",
     installs: 820,
+    doc: {
+      definition: "악성으로 신고된 주소가 ERC-20 토큰 사용 권한(Approve)을 요청하는 경우, 서명을 차단합니다.\n\n토큰을 승인하면 그 대상(Spender)은 허용한 한도 안에서 언제든 내 토큰을 가져갈 수 있습니다. 악성 주소로 권한을 내어주는 순간 토큰이 드레인될 수 있으므로 서명 자체를 차단합니다.",
+      scope: "승인 대상(Spender)이 악성 주소로 분류됐는지 조회해, 악성이라면 적용됩니다.",
+      audience: "ERC-20 토큰을 보유중인 모든 사용자",
+      usedData: "승인 대상(Spender) 주소의 악성 여부(spenderFlagged )를 확인합니다.",
+    },
   },
 ];
 
@@ -149,6 +199,7 @@ function policySummary(p: SeedPolicy): ListingSummary {
     publisher_email: undefined,
     display_name: { en: p.nameEn, ko: p.nameKo },
     description: { en: p.lineEn, ko: p.lineKo },
+    doc: p.doc,
     category: p.category,
     severity: p.severity,
     status: "published",

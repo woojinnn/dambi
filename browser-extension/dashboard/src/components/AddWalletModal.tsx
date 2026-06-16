@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 
 import { addWallet, ServerError, type AddWalletResp } from "../server-api";
 
@@ -13,7 +13,8 @@ interface AddWalletModalProps {
   onAdded?: (resp: AddWalletResp) => void;
 }
 
-/** Default chain set shown as toggles. Empty selection → server tracks all configured chains. */
+/** Chains tracked for a newly added wallet. The UI tracks ALL of these (no
+ *  per-chain toggle) — the list is shown read-only and sent verbatim. */
 const CHAIN_OPTIONS: Array<{ id: string; label: string }> = [
   { id: "eip155:1", label: "Ethereum" },
   { id: "eip155:42161", label: "Arbitrum" },
@@ -29,24 +30,23 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
   const qc = useQueryClient();
   const [address, setAddress] = useState("");
   const [label, setLabel] = useState("");
-  const [chains, setChains] = useState<Set<string>>(new Set());
   const [touched, setTouched] = useState(false);
 
   const reset = () => {
     setAddress("");
     setLabel("");
-    setChains(new Set());
     setTouched(false);
   };
 
   const addressOk = ADDR_RX.test(address.trim());
+  const labelOk = label.trim().length > 0;
 
   const mut = useMutation({
     mutationFn: () =>
       addWallet({
         address: address.trim().toLowerCase(),
-        chains: chains.size === 0 ? undefined : Array.from(chains),
-        label: label.trim() || undefined,
+        chains: CHAIN_OPTIONS.map((c) => c.id),
+        label: label.trim(),
       }),
     onSuccess: (resp) => {
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -59,17 +59,9 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
-    if (!addressOk) return;
+    if (!addressOk || !labelOk) return;
     mut.mutate();
   };
-
-  const toggleChain = (id: string) =>
-    setChains((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   return (
     <Modal
@@ -89,7 +81,7 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
             <button className="btn" type="button" onClick={onClose} disabled={mut.isPending}>
               {t("cancel")}
             </button>
-            <button className="btn primary" type="submit" form="add-wallet-form" disabled={mut.isPending || !addressOk}>
+            <button className="btn primary" type="submit" form="add-wallet-form" disabled={mut.isPending || !addressOk || !labelOk}>
               {mut.isPending ? t("wallet.adding") : t("add")}
             </button>
           </>
@@ -116,36 +108,18 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
         </div>
 
         <div className="form-row">
-          <label htmlFor="aw-label">{t("wallet.labelOptional")}</label>
+          <label htmlFor="aw-label">{t("wallet.label")}</label>
           <input
             id="aw-label"
             type="text"
             placeholder={t("wallet.labelPlaceholder")}
             value={label}
             onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => setTouched(true)}
           />
-        </div>
-
-        <div className="form-row">
-          <label>{t("wallet.chainsLabel")}</label>
-          <div className="chain-grid">
-            {CHAIN_OPTIONS.map((c) => (
-              <label key={c.id} className={`chain-chip${chains.has(c.id) ? " checked" : ""}`}>
-                <input
-                  type="checkbox"
-                  checked={chains.has(c.id)}
-                  onChange={() => toggleChain(c.id)}
-                />
-                {c.label}
-                <span style={{ marginLeft: "auto", fontFamily: "var(--ff-mono)", fontSize: 10.5, color: "var(--slate-400)" }}>
-                  {c.id}
-                </span>
-              </label>
-            ))}
-          </div>
-          <div className="hint">
-            <Trans i18nKey="wallet.chainsHint" ns="common" components={{ code: <code /> }} />
-          </div>
+          {touched && !labelOk && (
+            <div className="err">{t("wallet.labelRequired")}</div>
+          )}
         </div>
 
         {mut.error && (

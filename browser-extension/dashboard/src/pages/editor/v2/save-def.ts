@@ -1,7 +1,7 @@
 /** 에디터 저장 → ps2 페이로드 변환(순수). 신규 def는 범위 모달 입력을 defaults에 기록. */
 import { attrExprToPath, extractParams } from "../../../cedar/blocks";
 import type { PolicyIR } from "../../../cedar/blocks";
-import type { HoleSpec, HoleValue, PolicyDef } from "../../../server-api/policy-store";
+import type { HoleSpec, HoleValue, PolicyDef, PolicyDoc } from "../../../server-api/policy-store";
 
 /** holed IR에서 def.holes + 기본 파라미터 값을 파생한다. expected → HoleSpec.type
  *  매핑은 입력 위젯 선택용(평가에는 영향 없음). */
@@ -65,6 +65,8 @@ export function buildDefPayload(opts: {
   scope: SaveScope | null; // 기존 def 저장이면 null
   packageId: string | null; // 〃
   applyToNewWallets: boolean | null; // 〃
+  /** 작성자 문서(정의/범위/대상/데이터) — 비면 undefined. */
+  doc?: PolicyDoc | undefined;
   /** 지갑 전용 정책(라이브러리 비노출) — homeWallet 지갑의 전용 폴더에 앵커. */
   walletOnly?: { homeWallet: string; walletFolderId?: string };
 }): { def: PolicyDef; bindPlan: BindPlan | null } {
@@ -76,6 +78,7 @@ export function buildDefPayload(opts: {
         ...opts.existing,
         displayName: opts.displayName,
         cat: opts.cat,
+        doc: opts.doc,
         skeleton,
         holes,
         defaults: { ...opts.existing.defaults, params: paramDefaults },
@@ -95,6 +98,7 @@ export function buildDefPayload(opts: {
       : {}),
     displayName: opts.displayName,
     cat: opts.cat,
+    doc: opts.doc,
     skeleton,
     holes,
     defaults: {

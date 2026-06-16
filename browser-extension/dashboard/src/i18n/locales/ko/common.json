@@ -20,6 +20,8 @@
     "addressLabel": "주소 (0x…)",
     "addressInvalid": "유효한 0x 주소 (40 hex)가 아닙니다",
     "labelOptional": "라벨 (선택)",
+    "label": "라벨",
+    "labelRequired": "라벨을 입력하세요",
     "labelPlaceholder": "예: 메인 지갑, Treasury, Hot",
     "chainsLabel": "체인 (선택 안 하면 서버 설정의 모든 체인)",
     "chainsHint": "전체 선택 안 하면: <code>pasu-sync.toml</code>에 RPC가 설정된 모든 체인을 추적합니다.",
