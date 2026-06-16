@@ -758,13 +758,25 @@ function ListView({
 }) {
   const ko = locale === "ko";
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialCategory = initialParams.get("category") ?? "";
   const initialSort = parseSortParam(initialParams.get("sort"));
   const initialQ = initialParams.get("q") ?? "";
 
   const [cats, setCats] = useState<Set<CategoryKey>>(
-    () => new Set(isCategoryKey(initialCategory) ? [initialCategory] : []),
+    () => new Set(initialCategory.split(",").filter(isCategoryKey)),
   );
+  // URL ↔ 선택 카테고리 동기화 — 칩 제거/모두 해제가 주소창에도 반영되도록
+  // (새로고침·공유·뒤로가기 시 필터 상태가 일치). 다른 파라미터(view/sort/q)는 보존.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    const joined = [...cats].join(",");
+    if (joined) next.set("category", joined);
+    else next.delete("category");
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [cats, searchParams, setSearchParams]);
   const [sort, setSort] = useState<ListingSort>(initialSort);
   const [q, setQ] = useState(initialQ);
   const [search, setSearch] = useState(initialQ);
