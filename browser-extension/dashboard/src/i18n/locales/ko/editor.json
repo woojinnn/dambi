@@ -265,6 +265,7 @@
     "sevDeny": "deny (차단)",
     "sevWarn": "warn (경고)",
     "sevInfo": "info (정보)",
+    "sevBindingTitle": "이 지갑에만 차단/경고를 다르게 적용 (def 기본값과 다르면 override)",
     "draftBadge": "새 정책 · 저장해야 적용됩니다",
     "bindingBadge": "{{addr}} 지갑의 인스턴스 편집 — 값 변경은 이 지갑에만 적용돼요",
     "fromMarket": "Policy Hub에서 가져옴",

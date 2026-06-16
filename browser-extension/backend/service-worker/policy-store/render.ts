@@ -37,9 +37,15 @@ export function substituteHoles(node: unknown, params: Record<string, HoleValue>
   return node;
 }
 
-export async function renderDef(def: PolicyDef, params: Record<string, HoleValue>): Promise<RenderedPolicy> {
+export async function renderDef(
+  def: PolicyDef,
+  params: Record<string, HoleValue>,
+  /** 지갑별 심각도 override — 있으면 cedar `@severity` 를 이 값으로 재스탬프해
+   *  엔진이 처음부터 override 된 severity 로 평가/판정하게 한다. */
+  severityOverride?: "deny" | "warn",
+): Promise<RenderedPolicy> {
   const sortedKeys = Object.keys(params).sort();
-  const key = `${def.id}|${def.updatedAtMs}|${JSON.stringify(params, sortedKeys)}`;
+  const key = `${def.id}|${def.updatedAtMs}|${JSON.stringify(params, sortedKeys)}|${severityOverride ?? ""}`;
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -47,7 +53,17 @@ export async function renderDef(def: PolicyDef, params: Record<string, HoleValue
   if (!filled.ok) {
     throw new Error(`파라미터 오류 (${def.id}): ${filled.errors.map((e) => `${e.name}: ${e.message}`).join(", ")}`);
   }
-  const est = blocksToEst(filled.policy);
+  // 심각도 override: `@severity` annotation 만 교체한 새 IR(복사 — def 뼈대 불변).
+  const policyIr = severityOverride
+    ? {
+        ...filled.policy,
+        annotations: [
+          ...(filled.policy.annotations ?? []).filter((a) => a.name !== "severity"),
+          { name: "severity", value: severityOverride },
+        ],
+      }
+    : filled.policy;
+  const est = blocksToEst(policyIr);
   const raw = JSON.parse(await estToPolicyText(JSON.stringify(est))) as {
     ok: boolean;
     text?: string;

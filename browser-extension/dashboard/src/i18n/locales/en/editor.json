@@ -270,6 +270,7 @@
     "sevDeny": "deny (block)",
     "sevWarn": "warn",
     "sevInfo": "info",
+    "sevBindingTitle": "Override block/warn for this wallet only (differs from the def default)",
     "draftBadge": "New policy · takes effect after saving",
     "bindingBadge": "Editing the instance for wallet {{addr}} — value changes apply only to this wallet",
     "fromMarket": "From Policy Hub",

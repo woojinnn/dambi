@@ -253,8 +253,9 @@ function EditorBody({
 }) {
   const { t } = useTranslation("editor");
   const [name, setName] = useState(() => policy.displayName);
-  const [severity, setSeverity] = useState<PolicySeverity>(() =>
-    severityFromCedar(policy.text),
+  // 바인딩 모드면 그 지갑의 severity override 를 우선 표시(없으면 def 선언값).
+  const [severity, setSeverity] = useState<PolicySeverity>(
+    () => bindingCtx?.binding.severity ?? severityFromCedar(policy.text),
   );
   const [cedarText, setCedarText] = useState(policy.text);
   const [ir, setIr] = useState<PolicyIR | null>(null);
@@ -306,7 +307,7 @@ function EditorBody({
   // Reseed when the parent swaps to a different policy id.
   useEffect(() => {
     setName(policy.displayName);
-    setSeverity(severityFromCedar(policy.text));
+    setSeverity(bindingCtx?.binding.severity ?? severityFromCedar(policy.text));
     setCedarText(policy.text);
     setTab(defaultTab(policy.method));
     setManifestOverride(null);
@@ -486,10 +487,17 @@ function EditorBody({
       : alias !== (ctx.binding.alias ?? undefined)
         ? { alias }
         : {};
+    // 심각도 override: def 선언값과 같으면 override 해제(undefined → def 따름),
+    // 다르면 이 지갑에만 deny/warn 으로 고정. (info 는 override 대상 아님)
+    const defSeverity = severityFromCedar(policy.text);
+    const sevOverride: "deny" | "warn" | undefined =
+      (severity === "deny" || severity === "warn") && severity !== defSeverity
+        ? severity
+        : undefined;
     await updateBinding({
       address: ctx.address,
       bindingId: ctx.binding.id,
-      patch: { params, ...aliasPatch },
+      patch: { params, ...aliasPatch, severity: sevOverride },
     });
     return def.id;
   };
@@ -727,17 +735,19 @@ function EditorBody({
           />
           <span className="ev2-detail-slug">{stripDashboardId(policy.id)}</span>
           {/* 폼 탭은 ③ 심각도가 이 값을 소유(onChange로 동기화)하므로 헤더
-              셀렉트는 Cedar 탭에서만 — 같은 값이 두 군데면 헷갈린다. 바인딩
-              모드의 Cedar 탭은 읽기 전용이라 여기서도 숨긴다. */}
-          {tab !== "form" && !bindingCtx && (
+              셀렉트는 Cedar 탭에서만. 단 바인딩 모드에선 ③가 안 보이고(값 전용
+              폼), 차단/경고를 지갑별로 바꿀 수 있어야 하므로 헤더 셀렉트를 항상
+              노출한다(deny/warn override — info 는 def 전용). */}
+          {(tab !== "form" || bindingCtx) && (
             <select
               value={severity}
               onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
               className="ev2-detail-sev"
+              title={bindingCtx ? t("detail.sevBindingTitle") : undefined}
             >
               <option value="deny">{t("detail.sevDeny")}</option>
               <option value="warn">{t("detail.sevWarn")}</option>
-              <option value="info">{t("detail.sevInfo")}</option>
+              {!bindingCtx && <option value="info">{t("detail.sevInfo")}</option>}
             </select>
           )}
           {policy.cat && (
@@ -913,7 +923,9 @@ function EditorBody({
                 setIr(nextIr);
                 setLastModel(model);
                 // Keep the header severity in sync so save stamps it correctly.
-                setSeverity(model.severity as PolicySeverity);
+                // 단 바인딩 모드(값 전용 폼)에선 헤더 셀렉트가 severity override 를
+                // 소유하므로 폼이 def 선언값으로 덮어쓰지 않게 둔다.
+                if (!bindingCtx) setSeverity(model.severity as PolicySeverity);
                 // Carry the form's manifest override (if any) so save persists it
                 // instead of re-generating.
                 setManifestOverride(manifestOverridden ? { value: manifest } : null);
