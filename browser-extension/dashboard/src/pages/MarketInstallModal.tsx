@@ -136,12 +136,17 @@ export function MarketInstallModal({
       },
     }));
 
-  /** 입력 문자열 맵을 HoleValue로 변환 — 전부 유효하면 InstallParams, 아니면 null. */
+  /** 파라미터 기본 입력값(리터럴/재설치 값) — 미입력 칸의 폴백. */
+  const defaultOf = (defId: string, name: string): string =>
+    holeReqs.find((r) => r.defId === defId)?.defaults[name] ?? "";
+  /** 입력 문자열 맵을 HoleValue로 변환 — 전부 유효하면 InstallParams, 아니면 null.
+   *  미입력 칸은 기본값으로 본다(리터럴은 그대로, required 미충전은 ""→null). */
   const computeFilled = (vals: Record<string, Record<string, string>>): InstallParams | null => {
     const out: InstallParams = {};
     for (const req of holeReqs) {
       for (const h of req.holes) {
-        const v = holeInputToValue(h.type, vals[req.defId]?.[h.name] ?? "");
+        const raw = vals[req.defId]?.[h.name] ?? defaultOf(req.defId, h.name);
+        const v = holeInputToValue(h.type, raw);
         if (v === null) return null;
         (out[req.defId] ??= {})[h.name] = v;
       }
@@ -154,9 +159,9 @@ export function MarketInstallModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [holeReqs, holeVals],
   );
-  /** 지갑별 입력 getter — 미입력 칸은 공통값(holeVals)을 기본값으로 본다. */
+  /** 지갑별 입력 getter — 지갑값 > 공통값(holeVals) > 파라미터 기본값(리터럴). */
   const walletHoleGet = (addr: string, defId: string, name: string): string =>
-    walletHoleVals[addr]?.[defId]?.[name] ?? holeVals[defId]?.[name] ?? "";
+    walletHoleVals[addr]?.[defId]?.[name] ?? holeVals[defId]?.[name] ?? defaultOf(defId, name);
   /** 한 지갑의 채워진 값(공통값 폴백 포함). */
   const walletFilledFor = (addr: string): InstallParams | null => {
     const merged: Record<string, Record<string, string>> = {};
@@ -285,8 +290,8 @@ export function MarketInstallModal({
         {showHeading && (
           <div className="im-holes-head">
             {ko
-              ? "게시자가 비워 둔 칸이 있어요 — 채워야 적용돼요"
-              : "This listing has blanks to fill before it can apply"}
+              ? "값을 확인하고 필요하면 바꿔주세요 — 빈 칸은 채워야 적용돼요"
+              : "Review and adjust the values — fill any blanks to apply"}
           </div>
         )}
         {holeReqs.map((req) => (
@@ -351,7 +356,7 @@ export function MarketInstallModal({
   };
   // 공통(라이브러리/스텝1) 폼.
   const libraryHoleForm = renderHoleForm(
-    (defId, name) => holeVals[defId]?.[name] ?? "",
+    (defId, name) => holeVals[defId]?.[name] ?? defaultOf(defId, name),
     (defId, name, v) => setHoleVal(defId, name, v),
   );
 
@@ -602,8 +607,8 @@ export function MarketInstallModal({
               <p className="im-sub">
                 {hasHoles
                   ? ko
-                    ? "지갑마다 빈칸을 채워주세요. 지갑별로 다른 값을 넣을 수 있어요."
-                    : "Fill the blanks per wallet — each can use different values."
+                    ? "지갑마다 값을 확인하고 필요하면 바꿔주세요. 빈 칸은 채워야 적용돼요."
+                    : "Review the values per wallet and adjust as needed — fill any blanks."
                   : ko
                     ? "이 정책은 설정할 파라미터가 없어요. 바로 받을 수 있어요."
                     : "This policy has no parameters to set — you can install it directly."}

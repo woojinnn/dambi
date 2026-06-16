@@ -18,7 +18,7 @@ import {
   type StoreSnapshot,
 } from "../server-api/policy-store";
 import { textToBlocks } from "../cedar";
-import { listingToDefs, requiredHolesOf, type ListingMeta } from "./market-install-convert";
+import { holeInputToValue, listingToDefs, type ListingMeta } from "./market-install-convert";
 
 export { listingToDefs } from "./market-install-convert";
 
@@ -156,12 +156,23 @@ export async function installListingWalletOnlyV2(
   return { kind: detail.kind, defIds: defs.map((d) => d.id) };
 }
 
-/** 설치 전에 사용자가 채워야 하는 칸 — def별 required hole 목록.
- *  재설치로 이미 값이 있는 칸(기존 def의 defaults.params가 덮는 이름)은 뺀다. */
+/** 설치 전에 사용자가 조정할 수 있는 칸 — def별 파라미터 목록.
+ *  게시자가 비워 둔 required 칸뿐 아니라, 폼 정책의 모든 값(리터럴도 설치 변환
+ *  때 v1..vN 홀로 승격됨)을 노출해 지갑별로 튜닝할 수 있게 한다. 다른 필드를
+ *  가리키는 참조(type "field")는 사용자가 손댈 값이 아니므로 제외. */
 export interface ListingHoleRequirement {
   defId: string;
   defName: string;
   holes: HoleSpec[];
+  /** hole 이름 → 입력칸 기본 문자열(리터럴/재설치 값). required 미충전은 "". */
+  defaults: Record<string, string>;
+}
+
+/** HoleValue → 입력칸 문자열(holeInputToValue 의 역). field 객체는 제외 대상이라 빈칸. */
+function holeValueToInputStr(v: HoleValue): string {
+  if (Array.isArray(v)) return v.join(", ");
+  if (v !== null && typeof v === "object") return "";
+  return String(v);
 }
 
 export async function requiredHoleInputs(
@@ -188,8 +199,21 @@ export async function requiredHoleInputs(
   const out: ListingHoleRequirement[] = [];
   for (const d of defs) {
     const prevParams = snap?.library.defs[d.id]?.defaults.params ?? {};
-    const holes = requiredHolesOf(d).filter((h) => prevParams[h.name] === undefined);
-    if (holes.length) out.push({ defId: d.id, defName: d.displayName, holes });
+    const usable: HoleSpec[] = [];
+    const defaults: Record<string, string> = {};
+    for (const h of d.holes) {
+      if (h.type === "field") continue; // 다른 필드 참조 — 사용자가 손댈 값 아님
+      const val = prevParams[h.name] ?? d.defaults.params[h.name];
+      const str = val === undefined ? "" : holeValueToInputStr(val);
+      // required(게시자가 비운 칸)는 반드시 채워야 하므로 항상 노출. 그 외(리터럴이
+      // v1..vN 홀로 승격된 값)는 기본값이 그 타입으로 유효해 왕복되는 것만 — 주소가
+      // 아닌 집합(eip155 체인ID 등)이 addressSet 으로 오분류돼 설치가 막히는 걸 방지.
+      if (h.required || holeInputToValue(h.type, str) !== null) {
+        usable.push(h);
+        defaults[h.name] = str;
+      }
+    }
+    if (usable.length) out.push({ defId: d.id, defName: d.displayName, holes: usable, defaults });
   }
   return out;
 }
