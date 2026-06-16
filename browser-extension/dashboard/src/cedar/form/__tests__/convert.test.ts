@@ -558,24 +558,37 @@ describe("formToIr / irToForm", () => {
 });
 
 describe("baked day1 shapes (builtin defs must open in the form)", () => {
-  /** unlimited-approval-deny 본문 그대로: has 가드 2단 + bare bool + NOT-contains. */
-  it("has-guarded bare bool + !(set.contains(attr)) round-trips", () => {
+  /** unlimited-approval-deny 본문 그대로: amount sentinel OR-group + NOT-contains. */
+  it("static unlimited amount OR-group + !(set.contains(attr)) round-trips", () => {
     const attr = (of: Expr, name: string): Expr => ({ kind: "attr", of, attr: name });
     const ctx: Expr = { kind: "var", name: "context" };
-    const custom = attr(ctx, "custom");
+    const amount = attr(ctx, "amount");
     const body: Expr = {
       kind: "binary",
       op: "&&",
       left: {
         kind: "binary",
-        op: "&&",
+        op: "||",
         left: {
           kind: "binary",
-          op: "&&",
-          left: { kind: "has", of: ctx, attr: "custom" },
-          right: { kind: "has", of: custom, attr: "approvalIsUnlimited" },
+          op: "==",
+          left: amount,
+          right: {
+            kind: "lit",
+            litType: "string",
+            value: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          },
         },
-        right: attr(custom, "approvalIsUnlimited"),
+        right: {
+          kind: "binary",
+          op: "==",
+          left: amount,
+          right: {
+            kind: "lit",
+            litType: "string",
+            value: "0xffffffffffffffffffffffffffffffffffffffff",
+          },
+        },
       },
       right: {
         kind: "unary",
@@ -605,14 +618,33 @@ describe("baked day1 shapes (builtin defs must open in the form)", () => {
 
     const model = irToForm(ir);
     expect(model).not.toBeNull();
-    expect(model!.when).toEqual([
+    const amountGroup = model!.when[0];
+    expect(amountGroup).toEqual(
       expect.objectContaining({
-        fieldPath: "context.custom.approvalIsUnlimited",
-        op: "==",
-        value: { kind: "bool", value: true },
+        kind: "group",
+        joiner: "and",
+        conds: [
+          expect.objectContaining({
+            fieldPath: "context.amount",
+            op: "==",
+            value: {
+              kind: "string",
+              value: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            },
+          }),
+          expect.objectContaining({
+            fieldPath: "context.amount",
+            op: "==",
+            value: {
+              kind: "string",
+              value: "0xffffffffffffffffffffffffffffffffffffffff",
+            },
+            joiner: "or",
+          }),
+        ],
       }),
-      expect.objectContaining({ fieldPath: "context.spender", op: "notIn" }),
-    ]);
+    );
+    expect(model!.when[1]).toEqual(expect.objectContaining({ fieldPath: "context.spender", op: "notIn" }));
 
     // 폼 → IR 재방출도 폼 호환 (저장 후 다시 열기 안정성)
     const reopened = irToForm(formToIr(model!));

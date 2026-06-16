@@ -6,7 +6,7 @@
 //! Re-running the binary leaves an already-seeded DB unchanged.
 //!
 //! Run:
-//!   cargo run -p policy-server --bin seed-market
+//!   cargo run -p policy-server --bin seed_market
 //!
 //! Requires the same `DATABASE_URL` as the server itself.
 
@@ -561,4 +561,73 @@ fn derive_display_name(slug: &str) -> (String, String) {
         .collect();
     let name = parts.join(" ");
     (name.clone(), name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seed_entries() -> Vec<SeedEntry> {
+        serde_json::from_str(PHASE1_JSON).expect("phase1 seed JSON parses")
+    }
+
+    #[test]
+    fn phase1_seed_json_parses() {
+        let entries = seed_entries();
+        assert!(!entries.is_empty(), "phase1 seed should not be empty");
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.manifest.get("id").and_then(Value::as_str) == Some(&entry.id)),
+            "each seed manifest id must match its listing id",
+        );
+    }
+
+    #[test]
+    fn unlimited_approval_seeds_are_static_not_policy_rpc_dependent() {
+        let entries = seed_entries();
+        for id in [
+            "unlimited-approval-deny",
+            "bridge-unlimited-approval-deny",
+            "nft-bid-weth-unlimited-warn",
+        ] {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .unwrap_or_else(|| panic!("{id} seed exists"));
+
+            assert!(
+                entry.manifest.get("policy_rpc").is_none(),
+                "{id} must not require a policy-rpc fact host",
+            );
+            assert!(
+                entry.manifest.get("custom_context").is_none(),
+                "{id} must not declare custom context for static unlimited checks",
+            );
+            let policy_body = entry.cedar.split("when {").last().unwrap_or(&entry.cedar);
+            assert!(
+                ![
+                    "context.custom has approvalIsUnlimited",
+                    "context.custom.approvalIsUnlimited",
+                    "context.custom has bidApprovalIsUnlimited",
+                    "context.custom.bidApprovalIsUnlimited",
+                ]
+                .iter()
+                .any(|snippet| policy_body.contains(snippet)),
+                "{id} must not hinge on the old custom enrichment expressions",
+            );
+            assert!(
+                entry.cedar.contains(
+                    "context.amount == \"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\""
+                ),
+                "{id} must directly check uint256::MAX",
+            );
+            assert!(
+                entry
+                    .cedar
+                    .contains("context.amount == \"0xffffffffffffffffffffffffffffffffffffffff\""),
+                "{id} must directly check uint160::MAX",
+            );
+        }
+    }
 }

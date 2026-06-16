@@ -813,6 +813,23 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
     };
   }
 
+  // Non-benign / malformed HL actions are converted into the explicit
+  // `hl_unknown` catch-all. Venue traffic is deny-closed, so this must not
+  // depend on a user-installed/default policy being present.
+  if (isHlUnknownAction(action)) {
+    const actionType =
+      typeof action.action_type === "string" ? action.action_type : "unknown";
+    console.warn("[Dambi] HL venue deny-close: unknown action", {
+      requestId: message.requestId,
+      actionType,
+    });
+    return {
+      verdict: venueDenyVerdict(`unknown HL action: ${actionType}`),
+      verdictSource: "fail_closed",
+      declarativeV3: { outcome: "miss", nature, reason: "unknown_hl_action" },
+    };
+  }
+
   const tx = {
     chain_id: "hl-mainnet",
     from: String(meta.submitter ?? HL_TO_SENTINEL),
@@ -1280,6 +1297,13 @@ function venueDenyVerdict(reason: string): VerdictDto {
       },
     ],
   };
+}
+
+function isHlUnknownAction(action: Record<string, unknown>): boolean {
+  return (
+    action.domain === "hyperliquid_core" &&
+    action.action === "hl_unknown"
+  );
 }
 
 /**

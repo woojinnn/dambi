@@ -15,7 +15,7 @@
 //                             Long, but the horizon needs the host clock (Cedar
 //                             has no `now`), so it is computed off-Cedar.
 // The manifest's `permit.allowance_horizon` policy_rpc call emits both fields
-// from one call (record output; precedent `approval.unlimited_over_balance`).
+// from one optional record-output call.
 //
 // `custom` is optional, so each branch `has`-checks its field. `permitAllowanceUsd`
 // is a `decimal` (use `.greaterThan(...)`); `permitExpiryHorizonSec` is a `Long`

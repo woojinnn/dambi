@@ -54,6 +54,12 @@ expect_block "gh variable set"          gh variable set BAR --body y
 expect_block "gh variable delete"       gh variable delete BAR
 expect_block "gh api PUT secret"        gh api -X PUT "repos/o/r/actions/secrets/FOO"
 expect_block "gh api POST variable"     gh api --method POST "repos/o/r/actions/variables"
+# gh forwards the method verbatim, so lower/mixed-case + glued forms must gate too.
+expect_block "gh api lowercase put"     gh api -X put "repos/o/r/actions/secrets/FOO"
+expect_block "gh api lowercase post"    gh api --method post "repos/o/r/actions/variables"
+expect_block "gh api mixed Delete"      gh api -X Delete "repos/o/r/actions/variables/BAR"
+expect_block "gh api glued -Xpost"      gh api -Xpost "repos/o/r/actions/secrets/FOO"
+expect_block "gh api glued --method=patch" gh api --method=patch "repos/o/r/actions/secrets/FOO"
 
 expect_allow "gh secret list"           gh secret list
 expect_allow "gh variable list"         gh variable list

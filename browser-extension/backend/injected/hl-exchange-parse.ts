@@ -234,9 +234,9 @@ function parseOrders(
  * the resulting order.
  *
  * If NO valid order is carried (empty `modifies`, or an order spec HL would
- * itself reject as malformed), the request places no exposure, so it stays
- * benign (`null`, pass-through) — the bypass it closes is an OPENING ORDER,
- * which is only present when a leg decodes.
+ * itself reject as malformed), route to `hl_unknown`. `modify` / `batchModify`
+ * are high-risk order-placement action types, so malformed variants must
+ * deny-close instead of relying on the venue to reject them later.
  */
 function parseModify(
   venue: string,
@@ -250,15 +250,23 @@ function parseModify(
     : [action.order];
 
   const payloads: VenueOrderPayload[] = [];
+  let sawInvalidLeg = false;
   for (const o of legs) {
     const wire = orderWireFrom(o);
     if (wire) {
       payloads.push(
         envelope(venue, endpoint, hostname, { kind: "order", order: wire }, attribution),
       );
+    } else {
+      sawInvalidLeg = true;
     }
   }
-  return payloads.length > 0 ? payloads : null;
+  if (sawInvalidLeg) {
+    payloads.push(unknownPayload(venue, endpoint, hostname, String(action.type), attribution));
+  }
+  return payloads.length > 0
+    ? payloads
+    : [unknownPayload(venue, endpoint, hostname, String(action.type), attribution)];
 }
 
 /**
@@ -311,7 +319,8 @@ export function parseHyperliquidExchangeOrders(
 
     case "modify":
     case "batchModify":
-      // Both re-place a full order spec → decode as order leg(s), never benign.
+      // Both re-place a full order spec → decode as order leg(s); malformed
+      // variants route to hl_unknown so venue order handling remains deny-closed.
       return parseModify(venue, endpoint, hostname, action, attribution);
 
     case "updateLeverage": {
@@ -484,7 +493,7 @@ export function parseHyperliquidExchangeOrders(
     }
 
     default:
-      // BENIGN_PASS_THROUGH (cancel / modify / schedule / admin) is high-frequency
+      // BENIGN_PASS_THROUGH (cancel / schedule / admin) is high-frequency
       // and moves no funds / grants no permission → return null (out of scope, not
       // evaluated). EVERY OTHER unrecognized type falls to the `hl_unknown`
       // catch-all so a fund / permission action we have not modeled can never pass

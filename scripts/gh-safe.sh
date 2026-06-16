@@ -33,19 +33,24 @@ _gh_safe_refuse() {
 # True (exit 0) iff a `gh api …` call uses a write method AND targets a
 # secrets/variables endpoint.
 _gh_safe_api_is_secret_write() {
-  local a prev="" has_write="" hits_target=""
+  local a au prev="" has_write="" hits_target=""
   for a in "$@"; do
-    case "$a" in
-      -X | --method) prev="method" ;;
+    # Uppercase-normalize so a lowercase/mixed method (`-X put`, `--method=post`)
+    # is gated exactly like `PUT`/`POST` — gh forwards the method verbatim, so a
+    # lowercase write would otherwise slip past this guard. `tr` (not bash-4
+    # `${a^^}`) keeps this portable to the zsh profile that sources it.
+    au=$(printf '%s' "$a" | tr '[:lower:]' '[:upper:]')
+    case "$au" in
+      -X | --METHOD) prev="method" ;;
       PUT | POST | PATCH | DELETE)
         [ "$prev" = "method" ] && has_write=1
         prev=""
         ;;
-      -X* | --method=*)
-        case "$a" in *PUT* | *POST* | *PATCH* | *DELETE*) has_write=1 ;; esac
+      -X* | --METHOD=*)
+        case "$au" in *PUT* | *POST* | *PATCH* | *DELETE*) has_write=1 ;; esac
         prev=""
         ;;
-      *secrets* | *variables*)
+      *SECRETS* | *VARIABLES*)
         hits_target=1
         prev=""
         ;;

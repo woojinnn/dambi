@@ -16,7 +16,7 @@
 // The new `external.nft_floor` policy_rpc decodes the order, checks ownership,
 // fetches the floor, and projects `ownedNftListed` (Bool) and
 // `considerationVsFloor` (decimal). This is Aggregator types 1+2+9 fused into
-// one call (precedent: `approval.unlimited_over_balance` emits two fields).
+// one optional record-output call.
 //
 // `custom` is optional and the call is `optional`, so the guards `has`-check the
 // path; the policy no-ops (fail-open) until the decoder/floor host ships. The
