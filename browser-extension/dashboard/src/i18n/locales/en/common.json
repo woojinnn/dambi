@@ -16,6 +16,7 @@
   "wallet": {
     "addTitle": "Add wallet",
     "addResultTitle": "Add wallet result",
+    "addSuccess": "Wallet added.",
     "adding": "Adding…",
     "addressLabel": "Address (0x…)",
     "addressInvalid": "Not a valid 0x address (40 hex)",
