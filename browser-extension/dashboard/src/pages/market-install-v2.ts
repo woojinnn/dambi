@@ -18,9 +18,12 @@ import {
   type StoreSnapshot,
 } from "../server-api/policy-store";
 import { textToBlocks } from "../cedar";
+import type { PolicyIR } from "../cedar/blocks";
+import { irToForm, type FormModel } from "../cedar/form";
 import { holeInputToValue, listingToDefs, type ListingMeta } from "./market-install-convert";
 
 export { listingToDefs } from "./market-install-convert";
+export { diffParamValues } from "../cedar/form/parameterize";
 
 /** defId → (hole 이름 → 값). 설치 모달의 "빈칸 채우기" 출력. */
 export type InstallParams = Record<string, Record<string, HoleValue>>;
@@ -219,6 +222,44 @@ export async function requiredHoleInputs(
 }
 
 export { holeInputToValue } from "./market-install-convert";
+
+/** 설치 모달의 문장형 폼(에디터 ValueSheet)용 — 폼으로 열리는 def 마다 기준
+ *  FormModel + manifest. 설치 변환 def 의 skeleton.ir 은 이미 v1..vN 으로
+ *  파라미터화돼 있어, irToForm 이 리터럴 값을 그대로 가진 모델을 돌려준다.
+ *  바인딩 params 는 편집 후 diffParamValues(baseModel, editedModel) 로 뽑는다. */
+export interface ListingFormDef {
+  defId: string;
+  defName: string;
+  model: FormModel;
+  manifest: unknown;
+}
+
+export async function installFormDefs(
+  detail: ListingDetail,
+  locale: "ko" | "en",
+): Promise<ListingFormDef[]> {
+  const v = detail.latest_version;
+  if (!v || !detail.current_version) return [];
+  const meta: ListingMeta = {
+    id: detail.id,
+    kind: detail.kind,
+    displayName: pickI18n(detail.display_name, locale) || detail.slug,
+    version: detail.current_version,
+    cat: detail.category ?? detail.domain ?? undefined,
+  };
+  const defs = await listingToDefs(
+    meta,
+    { cedar_text: v.cedar_text, manifest: v.manifest, members: v.members },
+    textToBlocks,
+  );
+  const out: ListingFormDef[] = [];
+  for (const d of defs) {
+    const model = irToForm(d.skeleton.ir as PolicyIR);
+    // 폼으로 표현 못 하는 def(수기 Cedar 등)는 설치 모달에서 편집 대상이 아니다.
+    if (model) out.push({ defId: d.id, defName: d.displayName, model, manifest: d.skeleton.manifest });
+  }
+  return out;
+}
 
 /** 공통: 서버 install 기록 → meta + ps2 def 변환. */
 async function convertListing(

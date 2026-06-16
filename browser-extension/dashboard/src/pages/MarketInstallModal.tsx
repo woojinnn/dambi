@@ -1,16 +1,17 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { getListing, pickI18n, type ListingSummary } from "../server-api";
 import { getDashboardSummary } from "../server-api/dashboard";
-import { getOverview, UNCATEGORIZED_PKG } from "../server-api/policy-store";
+import { getOverview, UNCATEGORIZED_PKG, type HoleValue } from "../server-api/policy-store";
 import { listWallets } from "../server-api/wallets";
+import type { FormModel } from "../cedar/form";
 import {
-  holeInputToValue,
+  diffParamValues,
+  installFormDefs,
   installListingV2,
   installListingWalletOnlyV2,
-  requiredHoleInputs,
   type InstallParams,
   type WalletPkgPick,
 } from "./market-install-v2";
@@ -19,9 +20,8 @@ import {
   CategoryGlyph,
   categoryOf,
 } from "./market-domain";
-import { AddressInput, AddressSetInput } from "./editor/v2/AddressPicker";
+import { PolicyFormPane } from "./editor/v2/PolicyFormPane";
 import type { MarketLocale } from "./market-locale";
-import "./editor/v2/policy-form.css";
 
 function shortAddr(a: string): string {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
@@ -114,66 +114,45 @@ export function MarketInstallModal({
   const cat = categoryOf(listing.slug);
   const catColor = CATEGORY_COLOR[cat];
 
-  // 게시 때 블랭킹된 required hole — 채워야 설치(바인딩)가 가능하다.
-  const holesQ = useQuery({
-    queryKey: ["market-required-holes", listing.slug, snap?.rev ?? -1],
-    queryFn: () => requiredHoleInputs(detailQ.data!, locale, snap),
-    enabled: !!detailQ.data && !!snap,
+  // 설치 모달의 문장형 파라미터 폼 — 폼으로 열리는 def 마다 기준 FormModel.
+  // 에디터 ValueSheet 를 그대로 임베드해 값을 편집하고, diffParamValues 로
+  // 바인딩 params 를 뽑는다.
+  const formDefsQ = useQuery({
+    queryKey: ["market-form-defs", listing.slug, detailQ.data?.current_version ?? ""],
+    queryFn: () => installFormDefs(detailQ.data!, locale),
+    enabled: !!detailQ.data,
   });
-  const holeReqs = holesQ.data ?? [];
-  /** defId → hole 이름 → 입력 문자열 (공통값 / 라이브러리 경로). */
-  const [holeVals, setHoleVals] = useState<Record<string, Record<string, string>>>({});
-  const setHoleVal = (defId: string, name: string, v: string) =>
-    setHoleVals((m) => ({ ...m, [defId]: { ...(m[defId] ?? {}), [name]: v } }));
-  /** 지갑 경로의 지갑별 입력 — address → defId → hole 이름 → 문자열. */
-  const [walletHoleVals, setWalletHoleVals] = useState<
-    Record<string, Record<string, Record<string, string>>>
-  >({});
-  const setWalletHoleVal = (addr: string, defId: string, name: string, v: string) =>
-    setWalletHoleVals((m) => ({
-      ...m,
-      [addr]: {
-        ...(m[addr] ?? {}),
-        [defId]: { ...(m[addr]?.[defId] ?? {}), [name]: v },
-      },
-    }));
+  const formDefs = useMemo(() => formDefsQ.data ?? [], [formDefsQ.data]);
+  const baseModelOf = (defId: string): FormModel | undefined =>
+    formDefs.find((f) => f.defId === defId)?.model;
 
-  /** 파라미터 기본 입력값(리터럴/재설치 값) — 미입력 칸의 폴백. */
-  const defaultOf = (defId: string, name: string): string =>
-    holeReqs.find((r) => r.defId === defId)?.defaults[name] ?? "";
-  /** 입력 문자열 맵을 HoleValue로 변환 — 전부 유효하면 InstallParams, 아니면 null.
-   *  미입력 칸은 기본값으로 본다(리터럴은 그대로, required 미충전은 ""→null). */
-  const computeFilled = (vals: Record<string, Record<string, string>>): InstallParams | null => {
+  // 편집된 모델은 ref 에 모은다(키 입력마다 부모 리렌더 방지). 유효성만 state.
+  const libModelsRef = useRef<Record<string, FormModel>>({});
+  const walletModelsRef = useRef<Record<string, Record<string, FormModel>>>({});
+  const [libValidity, setLibValidity] = useState<Record<string, boolean>>({});
+  const [walletValidity, setWalletValidity] = useState<Record<string, Record<string, boolean>>>({});
+
+  /** 한 def 의 바인딩 params — 기준 모델 대비 바뀐 leaf 값만(diffParamValues). */
+  const paramsForModel = (defId: string, edited: FormModel | undefined): Record<string, HoleValue> => {
+    const base = baseModelOf(defId);
+    if (!base || !edited) return {};
+    return diffParamValues(base, edited);
+  };
+  /** 라이브러리 경로 params(defId → params). */
+  const libParams = (): InstallParams => {
     const out: InstallParams = {};
-    for (const req of holeReqs) {
-      for (const h of req.holes) {
-        const raw = vals[req.defId]?.[h.name] ?? defaultOf(req.defId, h.name);
-        const v = holeInputToValue(h.type, raw);
-        if (v === null) return null;
-        (out[req.defId] ??= {})[h.name] = v;
-      }
-    }
+    for (const f of formDefs) out[f.defId] = paramsForModel(f.defId, libModelsRef.current[f.defId]);
     return out;
   };
-  /** 공통(라이브러리) 경로의 채워진 값. */
-  const filledParams = useMemo<InstallParams | null>(
-    () => computeFilled(holeVals),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [holeReqs, holeVals],
-  );
-  /** 지갑별 입력 getter — 지갑값 > 공통값(holeVals) > 파라미터 기본값(리터럴). */
-  const walletHoleGet = (addr: string, defId: string, name: string): string =>
-    walletHoleVals[addr]?.[defId]?.[name] ?? holeVals[defId]?.[name] ?? defaultOf(defId, name);
-  /** 한 지갑의 채워진 값(공통값 폴백 포함). */
-  const walletFilledFor = (addr: string): InstallParams | null => {
-    const merged: Record<string, Record<string, string>> = {};
-    for (const req of holeReqs) {
-      for (const h of req.holes) {
-        (merged[req.defId] ??= {})[h.name] = walletHoleGet(addr, req.defId, h.name);
-      }
-    }
-    return computeFilled(merged);
+  /** 한 지갑의 params(defId → params). */
+  const walletParamsFor = (addr: string): InstallParams => {
+    const out: InstallParams = {};
+    for (const f of formDefs) out[f.defId] = paramsForModel(f.defId, walletModelsRef.current[addr]?.[f.defId]);
+    return out;
   };
+
+  const hasParams = formDefs.length > 0;
+  const libParamsInvalid = formDefs.some((f) => libValidity[f.defId] === false);
 
   const [kind, setKind] = useState<"wallet" | "library" | null>(null);
   // 지갑 경로 — 지갑 선택 → (빈칸 있으면) 지갑별 파라미터 설정.
@@ -213,12 +192,12 @@ export function MarketInstallModal({
           }
         }
         const paramsByAddress: Record<string, InstallParams> = {};
-        for (const addr of picked) paramsByAddress[addr] = walletFilledFor(addr) ?? {};
+        for (const addr of picked) paramsByAddress[addr] = walletParamsFor(addr);
         return installListingWalletOnlyV2(detailQ.data!, locale, {
           addresses: [...picked],
           walletPackages,
           snap: snap!,
-          params: filledParams ?? {},
+          params: {},
           paramsByAddress,
         });
       }
@@ -226,7 +205,7 @@ export function MarketInstallModal({
         scope: applyToAllNow ? { kind: "all" } : { kind: "library-only" },
         applyToNewWallets,
         packageId: isSet ? null : packageId === UNCATEGORIZED_PKG ? null : packageId,
-        params: filledParams ?? {},
+        params: libParams(),
         snap,
       });
     },
@@ -237,17 +216,18 @@ export function MarketInstallModal({
     },
   });
 
-  const hasHoles = holeReqs.length > 0;
   // 지갑 선택/패키지 지정이 유효한가 (파라미터는 다음 단계에서 검사).
   const walletSelectionInvalid =
     picked.size === 0 ||
     (bulk
       ? !bulkName.trim()
       : [...picked].some((a) => pkgOf(a) === "__new__" && !(walletNewName[a] ?? "").trim()));
-  // 선택한 모든 지갑의 빈칸이 유효하게 채워졌는가.
-  const walletParamsInvalid = [...picked].some((a) => walletFilledFor(a) === null);
-  // 라이브러리 경로: 공통 빈칸이 전부 채워져야 설치 가능 (SW 가드와 동일 기준).
-  const libraryInvalid = filledParams === null || holesQ.isLoading;
+  // 선택한 지갑 중 폼이 형식 오류(잘못된 decimal 등)면 설치 불가.
+  const walletParamsInvalid = [...picked].some((a) =>
+    formDefs.some((f) => walletValidity[a]?.[f.defId] === false),
+  );
+  // 라이브러리 경로: 폼 형식 오류가 있으면 설치 불가.
+  const libraryInvalid = libParamsInvalid || formDefsQ.isLoading;
 
   const togglePick = (a: string) =>
     setPicked((prev) => {
@@ -277,93 +257,57 @@ export function MarketInstallModal({
     </div>
   );
 
-  // ── required hole 입력 폼 (프로토타입엔 없는 실기능). getVal/setVal로 값 소스를
-  //    바꿔 끼워 공통(라이브러리) 폼과 지갑별 폼에 재사용한다. heading=false면
-  //    상단 안내문을 생략(지갑별 카드에선 지갑 이름이 헤딩 역할).
-  const renderHoleForm = (
-    getVal: (defId: string, name: string) => string,
-    setVal: (defId: string, name: string, v: string) => void,
-    opts?: { keyPrefix?: string; heading?: boolean },
-  ) => {
-    if (holeReqs.length === 0) return null;
-    const showHeading = opts?.heading !== false;
+  // ── 파라미터 폼: 에디터 ValueSheet(문장형)를 그대로 임베드한다. scope 가
+  //    address(지갑)면 그 지갑 모델로, undefined 면 라이브러리(공통) 모델로 편집.
+  //    diffParamValues 로 바인딩 params 를 뽑으므로 여기선 model 만 ref 에 모은다.
+  const renderParamForm = (scope: string | undefined) => {
+    if (formDefs.length === 0) {
+      return (
+        <div className="im-noparams">
+          {ko ? "설정할 파라미터가 없습니다." : "No parameters to set."}
+        </div>
+      );
+    }
+    const setModel = (defId: string, model: FormModel) => {
+      if (scope) (walletModelsRef.current[scope] ??= {})[defId] = model;
+      else libModelsRef.current[defId] = model;
+    };
+    const setValid = (defId: string, valid: boolean) => {
+      if (scope) {
+        setWalletValidity((m) => ({ ...m, [scope]: { ...(m[scope] ?? {}), [defId]: valid } }));
+      } else {
+        setLibValidity((m) => ({ ...m, [defId]: valid }));
+      }
+    };
     return (
-      <div className="im-holes">
-        {showHeading && (
-          <div className="im-holes-head">
-            {ko
-              ? "값을 확인하고 필요하면 바꿔주세요 — 빈 칸은 채워야 적용돼요"
-              : "Review and adjust the values — fill any blanks to apply"}
-          </div>
-        )}
-        {holeReqs.map((req) => (
-          <div key={`${opts?.keyPrefix ?? ""}${req.defId}`} className="im-holes-def">
-            {holeReqs.length > 1 && <div className="im-holes-defname">{req.defName}</div>}
-            {req.holes.map((h) => {
-              const raw = getVal(req.defId, h.name);
-              // 주소/주소집합은 칩 입력이 자체 검증을 표시하므로 텍스트 오류는 끈다.
-              const bad =
-                raw.trim() !== "" &&
-                h.type !== "address" &&
-                h.type !== "addressSet" &&
-                holeInputToValue(h.type, raw) === null;
-              return (
-                <label key={h.name} className="im-field im-hole">
-                  <span className="im-hole-label">{h.label}</span>
-                  {h.type === "addressSet" ? (
-                    // 에디터와 같은 칩 입력(이름 해석·추가/제거). 내부는 string[] 이라
-                    // 저장 문자열(쉼표 구분)과 양방향 변환한다.
-                    <AddressSetInput
-                      values={raw.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean)}
-                      onChange={(vals) => setVal(req.defId, h.name, vals.join(", "))}
-                    />
-                  ) : h.type === "address" ? (
-                    <AddressInput value={raw} onChange={(v) => setVal(req.defId, h.name, v)} />
-                  ) : (
-                    <input
-                      value={raw}
-                      onChange={(e) => setVal(req.defId, h.name, e.target.value)}
-                      placeholder={
-                        h.type === "decimal"
-                          ? ko
-                            ? "예: 3.0"
-                            : "e.g. 3.0"
-                          : h.type === "long"
-                            ? ko
-                              ? "숫자"
-                              : "number"
-                            : ""
-                      }
-                    />
-                  )}
-                  {bad && (
-                    <span className="im-hole-err">
-                      {h.type === "decimal"
-                        ? ko
-                          ? "소수점 형식이어야 해요 (예: 3.0)"
-                          : "Decimal format (e.g. 3.0)"
-                        : ko
-                          ? "형식이 맞지 않아요"
-                          : "Invalid format"}
-                    </span>
-                  )}
-                </label>
-              );
-            })}
+      <div className="im-paramforms">
+        {formDefs.map((f) => (
+          <div key={f.defId} className="im-paramform">
+            {formDefs.length > 1 && <div className="im-paramform-name">{f.defName}</div>}
+            <PolicyFormPane
+              key={`${scope ?? "lib"}:${f.defId}`}
+              initialModel={f.model}
+              initialManifest={f.manifest}
+              valuesOnly
+              compact
+              onChange={({ model }) => setModel(f.defId, model)}
+              onValidity={({ valid }) => setValid(f.defId, valid)}
+            />
           </div>
         ))}
       </div>
     );
   };
-  // 공통(라이브러리/스텝1) 폼.
-  const libraryHoleForm = renderHoleForm(
-    (defId, name) => holeVals[defId]?.[name] ?? defaultOf(defId, name),
-    (defId, name, v) => setHoleVal(defId, name, v),
-  );
+
+  // 문장형 폼이 보이는 단계에선 모달을 넓혀 가독성을 높인다.
+  const wideForForms =
+    hasParams &&
+    !done &&
+    ((kind === "wallet" && walletStep === "params") || kind === "library");
 
   return (
     <div className="im-overlay" onClick={onClose}>
-      <div className="im-box" onClick={(e) => e.stopPropagation()}>
+      <div className={`im-box${wideForForms ? " wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <button type="button" className="im-x" onClick={onClose} aria-label="close">
           <Glyph d="M6 6l12 12M18 6L6 18" size={16} sw={2} />
         </button>
@@ -593,7 +537,7 @@ export function MarketInstallModal({
               <button
                 type="button"
                 className="pri"
-                disabled={!detailQ.data || !snap || holesQ.isLoading || walletSelectionInvalid}
+                disabled={!detailQ.data || !snap || formDefsQ.isLoading || walletSelectionInvalid}
                 onClick={() => setWalletStep("params")}
               >
                 {ko ? "다음 →" : "Next →"}
@@ -606,7 +550,7 @@ export function MarketInstallModal({
             {head}
             <div className="im-body">
               <p className="im-sub">
-                {hasHoles
+                {hasParams
                   ? ko
                     ? "지갑마다 값을 확인하고 필요하면 바꿔주세요. 빈 칸은 채워야 적용돼요."
                     : "Review the values per wallet and adjust as needed — fill any blanks."
@@ -614,18 +558,14 @@ export function MarketInstallModal({
                     ? "이 정책은 설정할 파라미터가 없어요. 바로 받을 수 있어요."
                     : "This policy has no parameters to set — you can install it directly."}
               </p>
-              {hasHoles ? (
+              {hasParams ? (
                 [...picked].map((addr) => {
                   const w = wallets.find((x) => x.address === addr);
                   const wname = w?.label?.trim() || shortAddr(addr);
                   return (
                     <div key={addr} className="im-wparams">
                       <div className="im-wparams-head">{wname}</div>
-                      {renderHoleForm(
-                        (defId, name) => walletHoleGet(addr, defId, name),
-                        (defId, name, v) => setWalletHoleVal(addr, defId, name, v),
-                        { keyPrefix: `${addr}:`, heading: false },
-                      )}
+                      {renderParamForm(addr)}
                     </div>
                   );
                 })
@@ -721,7 +661,7 @@ export function MarketInstallModal({
                   <span className="im-switch" />
                 </label>
               </div>
-              {libraryHoleForm}
+              {renderParamForm(undefined)}
               {mut.isError && <div className="publish-error">{(mut.error as Error).message}</div>}
             </div>
             <div className="im-actions">
