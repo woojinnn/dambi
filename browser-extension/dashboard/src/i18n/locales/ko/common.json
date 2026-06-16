@@ -16,6 +16,7 @@
   "wallet": {
     "addTitle": "지갑 추가",
     "addResultTitle": "지갑 추가 결과",
+    "addSuccess": "지갑이 추가되었습니다.",
     "adding": "추가 중…",
     "addressLabel": "주소 (0x…)",
     "addressInvalid": "유효한 0x 주소 (40 hex)가 아닙니다",
