@@ -239,6 +239,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
 
   // ── state ──────────────────────────────────────────────────────────────
   let sel: string = D.sel || "all"; // "all" | wallet key
+  let hlSel: string = "all"; // Hyperliquid 패널 전용 지갑 탭 ("all" | wallet key)
   let lens: "assets" | "risk" = "assets";
   let bannerDismissed = false;
   let holdingsFilter = ""; // 토큰 검색어
@@ -701,12 +702,41 @@ export function initAssetsApp(root: HTMLElement): () => void {
   function renderHl(): void {
     const section = el("hl-section");
     if (!section) return;
-    const list = hlList();
-    if (!list.length) {
+    const baseList = hlList();
+    if (!baseList.length) {
       section.style.display = "none";
       return;
     }
     section.style.display = "";
+
+    // 지갑별 탭 — HL 계정이 둘 이상일 때만(전역 sel=all). hlSel 로 그 안에서 한
+    // 지갑만 골라 본다. 매 렌더마다 탭을 새로 그려 active 상태를 반영.
+    const secHead = section.querySelector(".sec-head");
+    const oldTabs = section.querySelector(".hl-tabs");
+    if (oldTabs) oldTabs.remove();
+    const multi = baseList.length > 1;
+    if (!multi) hlSel = "all";
+    if (multi && hlSel !== "all" && !baseList.some((a) => a.wallet === hlSel)) hlSel = "all";
+    if (multi && secHead) {
+      const mk = (key: string, label: string) =>
+        '<button type="button" class="hl-tab' +
+        (hlSel === key ? " on" : "") +
+        '" data-hl="' + key + '">' + label + "</button>";
+      const tabs = document.createElement("div");
+      tabs.className = "hl-tabs";
+      tabs.setAttribute("role", "tablist");
+      tabs.innerHTML = mk("all", "전체") + baseList.map((a) => mk(a.wallet, a.walletLabel)).join("");
+      tabs.querySelectorAll(".hl-tab").forEach((b) =>
+        b.addEventListener("click", function () {
+          hlSel = (b as HTMLElement).getAttribute("data-hl") || "all";
+          renderHl();
+        }),
+      );
+      secHead.insertAdjacentElement("afterend", tabs);
+    }
+
+    const list = multi && hlSel !== "all" ? baseList.filter((a) => a.wallet === hlSel) : baseList;
+
     // The static markup ships a single .hl-card host. Reuse it for the first
     // account and emit one sibling .hl-card per additional account, keeping the
     // exact ASS_v2 card structure (so layout-modes hlSummary() still scrapes it).

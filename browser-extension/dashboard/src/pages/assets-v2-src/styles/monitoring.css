@@ -575,6 +575,24 @@
 
 /* ── Hyperliquid section ──────────────────────────────────────────────── */
 /* ── Hyperliquid — light trading blotter ── */
+/* 지갑별 탭 (Hyperliquid 패널) — 알약 탭으로 한 지갑만 골라 본다 */
+.hl-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 12px; }
+.hl-tab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--slate-400);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color .15s ease, color .15s ease;
+}
+.hl-tab:hover { color: var(--slate-600); }
+.hl-tab.on { background: var(--fog-500, #eef1f5); color: var(--slate-900); }
+
 .hl-card {
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
