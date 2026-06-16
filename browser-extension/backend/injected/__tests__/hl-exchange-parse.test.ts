@@ -36,7 +36,6 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
 
   it("passes a benign high-frequency action through as null (unevaluated)", () => {
     expect(parse({ type: "cancel", cancels: [{ a: 0, o: 123 }] })).toBeNull();
-    expect(parse({ type: "modify", oid: 1, order: {} })).toBeNull();
     expect(parse({ type: "scheduleCancel", time: 0 })).toBeNull();
   });
 
@@ -137,8 +136,30 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
     expect(payloads!.every((p) => p.hlAction.kind === "order")).toBe(true);
   });
 
-  it("keeps an order-less modify / empty batchModify benign (null — no exposure placed)", () => {
-    expect(parse({ type: "modify", oid: 1, order: {} })).toBeNull();
-    expect(parse({ type: "batchModify", modifies: [] })).toBeNull();
+  it("routes order-less modify / empty batchModify to hl_unknown (deny-closed)", () => {
+    expect(parse({ type: "modify", oid: 1, order: {} })![0].hlAction).toEqual({
+      kind: "unknown",
+      actionType: "modify",
+    });
+    expect(parse({ type: "batchModify", modifies: [] })![0].hlAction).toEqual({
+      kind: "unknown",
+      actionType: "batchModify",
+    });
+  });
+
+  it("adds an hl_unknown leg when batchModify mixes valid and malformed orders", () => {
+    const payloads = parse({
+      type: "batchModify",
+      modifies: [
+        { oid: 1, order: { a: 0, b: false, p: "62000", s: "1", r: false, t: { limit: { tif: "Gtc" } } } },
+        { oid: 2, order: { p: "3500", s: "5" } },
+      ],
+    });
+    expect(payloads).toHaveLength(2);
+    expect(payloads![0].hlAction.kind).toBe("order");
+    expect(payloads![1].hlAction).toEqual({
+      kind: "unknown",
+      actionType: "batchModify",
+    });
   });
 });

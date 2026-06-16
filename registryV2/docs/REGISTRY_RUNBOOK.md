@@ -95,8 +95,7 @@ bash scripts/deploy/rotate-signing-key.sh new-version
 
 # 2) extract the NEW pin, ship an extension release pinning it FIRST
 #    (⚠ with DAMBI_REQUIRE_BUNDLE_SIGNATURE=true the fleet pins ONE key — the new-pin
-#    build must roll out before step 3 or installs fail-closed. REQUIRE is staged OFF
-#    today, so a missing/old sig is soft-pass and this ordering is not yet load-bearing.)
+#    build must roll out before step 3 or installs fail-closed.)
 
 # 3) re-sign every bundle with the new version + publish signatures/
 bash scripts/deploy/rotate-signing-key.sh resign --version <NEW>
@@ -124,12 +123,13 @@ One-time repo **Variables** (Settings → Variables — non-secret, baked into t
 ```
 REGISTRY_BASE_URL              = https://registry-api-v3-65uggwflcq-du.a.run.app
 PINNED_BUNDLE_PUBLIC_KEY       = <prod SPKI base64>   (ARCHITECTURE §10)
-DAMBI_REQUIRE_BUNDLE_SIGNATURE = false                (flip true on the staged rollout)
+DAMBI_REQUIRE_BUNDLE_SIGNATURE = true
 ```
 
-**Staged rollout order (do NOT skip — ARCHITECTURE §7):** sign + publish `signatures/` → deploy
-proxy `/signatures/` allowlist → confirm live coverage (`verify-bucket-parity.sh`) → *only then*
-flip `DAMBI_REQUIRE_BUNDLE_SIGNATURE=true` and ship the release.
+**Release prerequisite (do NOT skip — ARCHITECTURE §7):** sign + publish `signatures/` → deploy
+proxy `/signatures/` allowlist → confirm live coverage (`verify-bucket-parity.sh`) → keep
+`DAMBI_REQUIRE_BUNDLE_SIGNATURE=true` and ship the release. The release workflow fails before
+build artifacts are produced if this variable is not exactly `true`.
 
 ---
 

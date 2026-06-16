@@ -124,9 +124,9 @@ pub async fn google_callback(
         Ok(t) => t,
         Err(e) => return server_error(&format!("token exchange failed: {e}")),
     };
-    let email = match decode_email_from_id_token(&id_token) {
+    let email = match verify_email_from_google_id_token(&id_token).await {
         Ok(e) => e,
-        Err(e) => return server_error(&format!("id_token decode: {e}")),
+        Err(e) => return server_error(&format!("id_token verify: {e}")),
     };
 
     let user_id = match global.upsert_user(&email, "google").await {
@@ -267,12 +267,112 @@ async fn exchange_code_for_id_token(code: &str) -> Result<String, String> {
     resp.id_token.ok_or_else(|| "id_token missing".into())
 }
 
-/// Pull the `email` field out of a Google `id_token` (a JWT signed by
-/// Google). We trust the token because we just received it directly from
-/// Google's token endpoint over HTTPS — no need to re-verify the
-/// signature. (For higher assurance, switch to verifying against
-/// `https://www.googleapis.com/oauth2/v3/certs`.)
-fn decode_email_from_id_token(id_token: &str) -> Result<String, String> {
+#[derive(Debug, Deserialize)]
+struct GoogleIdTokenClaims {
+    iss: String,
+    sub: String,
+    aud: GoogleAudience,
+    exp: i64,
+    email: String,
+    email_verified: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum GoogleAudience {
+    One(String),
+    Many(Vec<String>),
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleJwkSet {
+    keys: Vec<GoogleJwk>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleJwk {
+    kid: String,
+    kty: String,
+    alg: Option<String>,
+    #[serde(rename = "use")]
+    key_use: Option<String>,
+    n: String,
+    e: String,
+}
+
+impl GoogleAudience {
+    fn contains(&self, client_id: &str) -> bool {
+        match self {
+            GoogleAudience::One(aud) => aud == client_id,
+            GoogleAudience::Many(audiences) => audiences.iter().any(|aud| aud == client_id),
+        }
+    }
+}
+
+/// Pull the verified `email` field out of a Google `id_token` (a JWT signed by
+/// Google). The token is verified against Google's JWKS and then checked for
+/// issuer, audience, expiry, subject, and verified email before a local session
+/// can be minted.
+async fn verify_email_from_google_id_token(id_token: &str) -> Result<String, String> {
+    let client_id =
+        env::var("GOOGLE_CLIENT_ID").map_err(|_| "GOOGLE_CLIENT_ID unset".to_string())?;
+    let jwks = fetch_google_jwks().await?;
+    verify_email_from_id_token_with_jwks(id_token, &client_id, now_secs(), &jwks)
+}
+
+async fn fetch_google_jwks() -> Result<GoogleJwkSet, String> {
+    reqwest::Client::new()
+        .get("https://www.googleapis.com/oauth2/v3/certs")
+        .send()
+        .await
+        .map_err(|e| format!("jwks HTTP error: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("jwks HTTP status: {e}"))?
+        .json::<GoogleJwkSet>()
+        .await
+        .map_err(|e| format!("jwks JSON decode: {e}"))
+}
+
+fn verify_email_from_id_token_with_jwks(
+    id_token: &str,
+    client_id: &str,
+    now: i64,
+    jwks: &GoogleJwkSet,
+) -> Result<String, String> {
+    let header = jsonwebtoken::decode_header(id_token).map_err(|e| format!("jwt header: {e}"))?;
+    if header.alg != jsonwebtoken::Algorithm::RS256 {
+        return Err("id_token alg is not RS256".into());
+    }
+    let kid = header
+        .kid
+        .as_deref()
+        .ok_or_else(|| "id_token kid missing".to_string())?;
+    let jwk = jwks
+        .keys
+        .iter()
+        .find(|key| {
+            key.kid == kid
+                && key.kty == "RSA"
+                && key.alg.as_deref().is_none_or(|alg| alg == "RS256")
+                && key.key_use.as_deref().is_none_or(|use_| use_ == "sig")
+        })
+        .ok_or_else(|| "id_token signing key not found in Google JWKS".to_string())?;
+    let key = jsonwebtoken::DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
+        .map_err(|e| format!("jwk rsa key: {e}"))?;
+    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+    validation.validate_aud = false;
+    validation.validate_exp = false;
+    let data = jsonwebtoken::decode::<GoogleIdTokenClaims>(id_token, &key, &validation)
+        .map_err(|e| format!("jwt signature: {e}"))?;
+    validate_google_id_token_claims(data.claims, client_id, now)
+}
+
+#[cfg(test)]
+fn decode_email_claims_from_id_token(
+    id_token: &str,
+    client_id: &str,
+    now: i64,
+) -> Result<String, String> {
     use base64::Engine;
     let parts: Vec<&str> = id_token.split('.').collect();
     if parts.len() != 3 {
@@ -282,13 +382,39 @@ fn decode_email_from_id_token(id_token: &str) -> Result<String, String> {
     let payload_json = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload_b64)
         .map_err(|e| format!("base64 decode: {e}"))?;
-    let value: serde_json::Value =
+    let claims: GoogleIdTokenClaims =
         serde_json::from_slice(&payload_json).map_err(|e| format!("json decode: {e}"))?;
-    let email = value
-        .get("email")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "email missing from id_token".to_string())?;
-    Ok(email.to_string())
+    validate_google_id_token_claims(claims, client_id, now)
+}
+
+fn validate_google_id_token_claims(
+    claims: GoogleIdTokenClaims,
+    client_id: &str,
+    now: i64,
+) -> Result<String, String> {
+    if claims.iss != "https://accounts.google.com" && claims.iss != "accounts.google.com" {
+        return Err("id_token issuer is not Google".into());
+    }
+    if !claims.aud.contains(client_id) {
+        return Err("id_token audience mismatch".into());
+    }
+    if claims.exp + 5 < now {
+        return Err("id_token expired".into());
+    }
+    if claims.sub.trim().is_empty() {
+        return Err("sub missing from id_token".into());
+    }
+    if claims.email.trim().is_empty() {
+        return Err("email missing from id_token".into());
+    }
+    if !claims.email_verified {
+        return Err("email is not verified by Google".into());
+    }
+    Ok(claims.email)
+}
+
+fn now_secs() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 // ---------- error helpers ----------
@@ -325,28 +451,79 @@ mod tests {
         format!("{header}.{payload_b64}.signature-not-verified")
     }
 
+    fn valid_claims() -> serde_json::Value {
+        json!({
+            "iss": "https://accounts.google.com",
+            "sub": "1234567890",
+            "aud": "test-client-id",
+            "exp": now_secs() + 300,
+            "email": "alice@example.com",
+            "email_verified": true
+        })
+    }
+
     #[test]
     fn decode_email_happy_path() {
-        let tok = encode_id_token(&json!({
-            "email": "alice@example.com",
-            "email_verified": true,
-            "sub": "1234567890"
-        }));
-        let email = decode_email_from_id_token(&tok).unwrap();
+        let tok = encode_id_token(&valid_claims());
+        let email = decode_email_claims_from_id_token(&tok, "test-client-id", now_secs()).unwrap();
         assert_eq!(email, "alice@example.com");
     }
 
     #[test]
     fn decode_email_missing_field_errors() {
-        let tok = encode_id_token(&json!({ "sub": "1234567890" }));
-        let err = decode_email_from_id_token(&tok).unwrap_err();
-        assert!(err.contains("email missing"));
+        let mut claims = valid_claims();
+        claims.as_object_mut().unwrap().remove("email");
+        let tok = encode_id_token(&claims);
+        let err =
+            decode_email_claims_from_id_token(&tok, "test-client-id", now_secs()).unwrap_err();
+        assert!(err.contains("email"), "got: {err}");
     }
 
     #[test]
     fn decode_email_malformed_token_errors() {
-        let err = decode_email_from_id_token("not.a.jwt.token").unwrap_err();
+        let err =
+            decode_email_claims_from_id_token("not.a.jwt.token", "test-client-id", now_secs())
+                .unwrap_err();
         assert!(err.contains("not 3 segments"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_email_rejects_wrong_audience() {
+        let mut claims = valid_claims();
+        claims["aud"] = json!("other-client-id");
+        let tok = encode_id_token(&claims);
+        let err =
+            decode_email_claims_from_id_token(&tok, "test-client-id", now_secs()).unwrap_err();
+        assert!(err.contains("audience mismatch"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_email_rejects_unverified_email() {
+        let mut claims = valid_claims();
+        claims["email_verified"] = json!(false);
+        let tok = encode_id_token(&claims);
+        let err =
+            decode_email_claims_from_id_token(&tok, "test-client-id", now_secs()).unwrap_err();
+        assert!(err.contains("not verified"), "got: {err}");
+    }
+
+    #[test]
+    fn decode_email_rejects_expired_token() {
+        let mut claims = valid_claims();
+        claims["exp"] = json!(now_secs() - 30);
+        let tok = encode_id_token(&claims);
+        let err =
+            decode_email_claims_from_id_token(&tok, "test-client-id", now_secs()).unwrap_err();
+        assert!(err.contains("expired"), "got: {err}");
+    }
+
+    #[test]
+    fn verify_email_rejects_unsigned_payload_decode_token() {
+        let tok = encode_id_token(&valid_claims());
+        let jwks = GoogleJwkSet { keys: vec![] };
+        let err = verify_email_from_id_token_with_jwks(&tok, "test-client-id", now_secs(), &jwks)
+            .unwrap_err();
+        assert!(err.contains("kid missing"), "got: {err}");
     }
 
     #[test]

@@ -9,9 +9,14 @@
 @id("swap-min-out-zero")
 @severity("warn")
 @reason("This swap accepts any output amount (min-out = 0) — no slippage protection at all")
-forbid(principal, action == Amm::Action::"Swap", resource)
-when {
-  context.direction.kind == "exact_input"
-  && context.direction has minAmountOut
-  && context.direction.minAmountOut == "0x0"
+forbid (
+    principal,
+    action == Amm::Action::"Swap",
+    resource
+)
+when
+{
+    context.direction.kind == "exact_input" &&
+    context.direction has minAmountOut &&
+    context.direction.minAmountOut == "0x0"
 };

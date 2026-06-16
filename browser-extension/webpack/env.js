@@ -30,8 +30,8 @@ function resolvePinnedBundleKey(env = process.env) {
 }
 
 // Whether bundle signatures are ENFORCED on this build channel. Baked verbatim
-// as the string "true"/"false"; the verifier reads `=== "true"`. Off by default
-// so an unsigned dev/staging registry keeps working (staged rollout).
+// as the string "true"/"false"; the verifier reads `=== "true"`. Non-production
+// builds may leave this off, but production builds are guarded below.
 function resolveRequireBundleSig(env = process.env) {
   return env.DAMBI_REQUIRE_BUNDLE_SIGNATURE === "true" ? "true" : "false";
 }

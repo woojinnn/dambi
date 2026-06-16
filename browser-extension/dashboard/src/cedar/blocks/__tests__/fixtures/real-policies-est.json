@@ -3208,43 +3208,35 @@
         {
           "kind": "when",
           "body": {
-            "&&": {
+            "||": {
               "left": {
-                "&&": {
-                  "left": {
-                    "has": {
-                      "left": {
-                        "Var": "context"
-                      },
-                      "attr": "custom"
-                    }
-                  },
-                  "right": {
-                    "has": {
-                      "left": {
-                        ".": {
-                          "left": {
-                            "Var": "context"
-                          },
-                          "attr": "custom"
-                        }
-                      },
-                      "attr": "approvalIsUnlimited"
-                    }
-                  }
-                }
-              },
-              "right": {
-                ".": {
+                "==": {
                   "left": {
                     ".": {
                       "left": {
                         "Var": "context"
                       },
-                      "attr": "custom"
+                      "attr": "amount"
                     }
                   },
-                  "attr": "approvalIsUnlimited"
+                  "right": {
+                    "Value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  }
+                }
+              },
+              "right": {
+                "==": {
+                  "left": {
+                    ".": {
+                      "left": {
+                        "Var": "context"
+                      },
+                      "attr": "amount"
+                    }
+                  },
+                  "right": {
+                    "Value": "0xffffffffffffffffffffffffffffffffffffffff"
+                  }
                 }
               }
             }
@@ -5231,43 +5223,35 @@
         {
           "kind": "when",
           "body": {
-            "&&": {
+            "||": {
               "left": {
-                "&&": {
-                  "left": {
-                    "has": {
-                      "left": {
-                        "Var": "context"
-                      },
-                      "attr": "custom"
-                    }
-                  },
-                  "right": {
-                    "has": {
-                      "left": {
-                        ".": {
-                          "left": {
-                            "Var": "context"
-                          },
-                          "attr": "custom"
-                        }
-                      },
-                      "attr": "bidApprovalIsUnlimited"
-                    }
-                  }
-                }
-              },
-              "right": {
-                ".": {
+                "==": {
                   "left": {
                     ".": {
                       "left": {
                         "Var": "context"
                       },
-                      "attr": "custom"
+                      "attr": "amount"
                     }
                   },
-                  "attr": "bidApprovalIsUnlimited"
+                  "right": {
+                    "Value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  }
+                }
+              },
+              "right": {
+                "==": {
+                  "left": {
+                    ".": {
+                      "left": {
+                        "Var": "context"
+                      },
+                      "attr": "amount"
+                    }
+                  },
+                  "right": {
+                    "Value": "0xffffffffffffffffffffffffffffffffffffffff"
+                  }
                 }
               }
             }
@@ -9120,43 +9104,35 @@
           "body": {
             "&&": {
               "left": {
-                "&&": {
+                "||": {
                   "left": {
-                    "&&": {
-                      "left": {
-                        "has": {
-                          "left": {
-                            "Var": "context"
-                          },
-                          "attr": "custom"
-                        }
-                      },
-                      "right": {
-                        "has": {
-                          "left": {
-                            ".": {
-                              "left": {
-                                "Var": "context"
-                              },
-                              "attr": "custom"
-                            }
-                          },
-                          "attr": "approvalIsUnlimited"
-                        }
-                      }
-                    }
-                  },
-                  "right": {
-                    ".": {
+                    "==": {
                       "left": {
                         ".": {
                           "left": {
                             "Var": "context"
                           },
-                          "attr": "custom"
+                          "attr": "amount"
                         }
                       },
-                      "attr": "approvalIsUnlimited"
+                      "right": {
+                        "Value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                      }
+                    }
+                  },
+                  "right": {
+                    "==": {
+                      "left": {
+                        ".": {
+                          "left": {
+                            "Var": "context"
+                          },
+                          "attr": "amount"
+                        }
+                      },
+                      "right": {
+                        "Value": "0xffffffffffffffffffffffffffffffffffffffff"
+                      }
                     }
                   }
                 }

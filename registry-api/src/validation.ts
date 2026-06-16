@@ -2,10 +2,14 @@
  * registry-api — request-path validation.
  *
  * proxy 는 임의 버킷 object 에 요청이 닿게 두면 안 된다. 익스텐션이 GET 하는
- * 경로는 딱 세 종류:
+ * 경로는 현재 extension/registry-v3 loader surface 로 제한한다:
  *   GET /index/by-callkey/<chainId>__<to>__<selector>.json
  *   GET /index/by-typed-data/<chainId>__<verifyingContract>__<primaryType>.json
+ *   GET /index/by-selector/<chainId>__<selector>.json
  *   GET /tokens/<chainId>/<address>.json
+ *   GET /bundles/<sha>.json
+ *   GET /signatures/<sha>.sig
+ *   GET /contexts/<source...>/<chainId>/<address>.json
  *
  * 이 regex 는 browser-extension/backend/service-worker/registry/client.ts
  * (CALL_KEY_ADDRESS_RE / CALL_KEY_SELECTOR_RE) 를 미러. 단 to/address/selector

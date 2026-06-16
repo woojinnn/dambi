@@ -38,8 +38,9 @@ impl From<Claims> for AuthUser {
 /// Token resolution order:
 /// 1. `Authorization: Bearer <jwt>` header (preferred — used by all
 ///    standard fetch/HTTP clients).
-/// 2. `?token=<jwt>` query string (fallback — the browser `EventSource`
-///    API cannot set custom headers, so SSE callers pass the token here).
+/// 2. `?token=<jwt>` query string for `/events/stream` only (fallback — the
+///    browser `EventSource` API cannot set custom headers, so SSE callers pass
+///    the token here). Other routes must not accept URL tokens.
 pub async fn require_auth(mut req: Request, next: Next) -> Response {
     let user = match extract_user(&req) {
         Ok(u) => u,
@@ -49,21 +50,17 @@ pub async fn require_auth(mut req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
-/// Pulls the bearer token out of either `Authorization` or `?token=…` and
-/// verifies it. Only access tokens are accepted — refresh tokens reach
-/// `/auth/refresh` instead.
+/// Pulls the bearer token out of either `Authorization` or the SSE-only
+/// `?token=…` fallback and verifies it. Only access tokens are accepted —
+/// refresh tokens reach `/auth/refresh` instead.
 fn extract_user(req: &Request) -> Result<AuthUser, Box<Response>> {
     // Prefer the header; fall back to query string for SSE callers.
     let token = match token_from_header(req.headers()) {
         Some(Ok(t)) => t,
         Some(Err(reason)) => return Err(Box::new(reject(reason))),
-        None => match token_from_query(req.uri().query()) {
+        None => match token_from_query(req.uri().path(), req.uri().query()) {
             Some(t) => t,
-            None => {
-                return Err(Box::new(reject(
-                    "missing Authorization header and `token` query param",
-                )))
-            }
+            None => return Err(Box::new(reject("missing Authorization header"))),
         },
     };
 
@@ -91,9 +88,13 @@ fn token_from_header(headers: &HeaderMap) -> Option<Result<String, &'static str>
     })())
 }
 
-/// Pull `token=<jwt>` out of the query string. Returns `None` if the
-/// query is absent or no `token` key is found. URL-decoded.
-fn token_from_query(query: Option<&str>) -> Option<String> {
+/// Pull `token=<jwt>` out of the query string for `/events/stream` only.
+/// Returns `None` if the path is not SSE, query is absent, or no `token` key is
+/// found. URL-decoded.
+fn token_from_query(path: &str, query: Option<&str>) -> Option<String> {
+    if path != "/events/stream" {
+        return None;
+    }
     let q = query?;
     for pair in q.split('&') {
         if let Some(rest) = pair.strip_prefix("token=") {
@@ -179,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn token_via_query_string_accepted() {
+    fn token_via_query_string_accepted_for_sse_only() {
         set_secret();
         let token = issue("u_eve", "eve@e.com", TokenType::Access, None).unwrap();
         let user = extract_user(&req_with(
@@ -188,6 +189,18 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(user.user_id, "u_eve");
+    }
+
+    #[test]
+    fn token_via_query_string_rejected_for_non_sse_routes() {
+        set_secret();
+        let token = issue("u_eve", "eve@e.com", TokenType::Access, None).unwrap();
+        let err = extract_user(&req_with(
+            HeaderMap::new(),
+            &format!("/wallets?token={token}"),
+        ))
+        .unwrap_err();
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[test]

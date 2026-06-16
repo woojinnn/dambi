@@ -254,8 +254,8 @@ const SPECS: Spec[] = [
   // ── benign: high-frequency, fund-/permission-neutral → null ──
   { type: "cancel", category: "benign", action: (g) => ({ type: "cancel", cancels: [{ a: g.perp().assetIndex, o: 1 }] }) },
   { type: "cancelByCloid", category: "benign", action: (g) => ({ type: "cancelByCloid", cancels: [{ asset: g.perp().assetIndex, cloid: "0x1" }] }) },
-  { type: "modify", category: "benign", action: () => ({ type: "modify", oid: 1, order: {} }) },
-  { type: "batchModify", category: "benign", action: () => ({ type: "batchModify", modifies: [] }) },
+  { type: "modify", category: "catch_all", action: () => ({ type: "modify", oid: 1, order: {} }) },
+  { type: "batchModify", category: "catch_all", action: () => ({ type: "batchModify", modifies: [] }) },
   { type: "twapCancel", category: "benign", action: (g) => ({ type: "twapCancel", a: g.perp().assetIndex, t: 1 }) },
   { type: "scheduleCancel", category: "benign", action: () => ({ type: "scheduleCancel", time: 0 }) },
   { type: "noop", category: "benign", action: () => ({ type: "noop" }) },

@@ -64,6 +64,24 @@ describe("formatAuditMatched", () => {
     );
   });
 
+  it("formatAuditMatched preserves __venue::* reason so venue fail-closed rows explain the block", () => {
+    const verdict = {
+      kind: "fail" as const,
+      matched: [
+        {
+          policy_id: "__venue::deny_closed",
+          reason: "Venue order blocked (fail-closed): unknown HL action: noop2",
+          severity: "deny" as const,
+          origin: "engine_error" as const,
+        },
+      ],
+    };
+    const matched = formatAuditMatched(verdict);
+    expect(matched[0].id).toBe("__venue::deny_closed");
+    expect(matched[0].severity).toBe("deny");
+    expect(matched[0].reason).toContain("unknown HL action: noop2");
+  });
+
   it("formatAuditMatched omits reason for ordinary policy matches", () => {
     const verdict = {
       kind: "fail" as const,

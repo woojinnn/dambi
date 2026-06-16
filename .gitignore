@@ -135,6 +135,7 @@ crates/policy-engine-wasm/tests/data/
 # Built extension dist for aave/curve/ethena live e2e (regenerable build output).
 .live-e2e-aave-curve/
 e2e-browser/
+.e2e-tmp/
 # Local dApp playground — assemble tx/typed-sig/HL orders and fire them through
 # the extension to test policies. Local test tooling (same as e2e-browser/).
 playground/

@@ -72,7 +72,8 @@ describe("parseHyperliquidExchangeOrders", () => {
 
   it("returns null for benign/out-of-scope actions and unknown for malformed guarded actions", () => {
     expect(parse({ action: { type: "cancel", cancels: [] } })).toBeNull();
-    expect(parse({ action: { type: "batchModify", modifies: [] } })).toBeNull();
+    expect(parse({ action: { type: "batchModify", modifies: [] } })![0].hlAction)
+      .toEqual({ kind: "unknown", actionType: "batchModify" });
     // updateLeverage missing required isCross: guarded action, not pass-through.
     expect(parse({ action: { type: "updateLeverage", asset: 0, leverage: 10 } })![0].hlAction)
       .toEqual({ kind: "unknown", actionType: "updateLeverage" });

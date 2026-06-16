@@ -36,13 +36,13 @@ thiserror.workspace = true
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 
-# Auth: JWT signing/verification (HS256). Stateless tokens, no Redis.
+# Auth: app JWT signing/verification plus Google id_token verification.
 jsonwebtoken = "9"
-# OAuth callback fetches Google's token endpoint and userinfo.
+# OAuth callback fetches Google's token endpoint and JWKS for RS256 id_token verification.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # URL-encoding query params for the Google authorize redirect.
 urlencoding = "2"
-# Decoding the base64-url payload of Google's id_token.
+# Decoding Google JWT header/JWK coordinates.
 base64 = "0.22"
 # Time math for token expiry.
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }

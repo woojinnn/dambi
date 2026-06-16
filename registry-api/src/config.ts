@@ -41,7 +41,7 @@ export function loadConfig(): RegistryApiConfig {
   return {
     host: stringFromEnv("HOST", "0.0.0.0"),
     port: intFromEnv("PORT", 8080),
-    bucketName: stringFromEnv("REGISTRY_BUCKET", "dambi-registry-seoul"),
+    bucketName: stringFromEnv("REGISTRY_BUCKET", "dambi-registry-v3-seoul"),
     cacheMaxEntries: intFromEnv("CACHE_MAX_ENTRIES", 1024),
     cacheTtlMs: intFromEnv("CACHE_TTL_MS", 300_000),
     cacheNegativeTtlMs,

@@ -226,6 +226,57 @@ describe("registry-api HTTP server", () => {
     expect(reader.reads).toHaveLength(1);
   });
 
+  // A reader whose object set can change between requests — simulates a brand-new
+  // bundle's signature landing in the bucket mid-publish.
+  function mutableReader(
+    objects: Record<string, string>,
+  ): ObjectReader & { reads: string[]; put(name: string, body: string): void } {
+    const reads: string[] = [];
+    return {
+      reads,
+      put(name, body) {
+        objects[name] = body;
+      },
+      async read(name: string): Promise<ObjectResult> {
+        reads.push(name);
+        const body = objects[name];
+        if (body === undefined) return { kind: "not_found" };
+        return {
+          kind: "found",
+          body: Buffer.from(body),
+          contentType: "application/octet-stream",
+        };
+      },
+    };
+  }
+
+  const SIG_OBJ = `signatures/0x${"a".repeat(64)}.sig`;
+  const SIG_PATH = `/${SIG_OBJ}`;
+
+  it("does NOT negative-cache a 404 on a content-addressed signature (re-checks until it lands)", async () => {
+    const reader = mutableReader({});
+    const url = await start(reader);
+    // 1) sig not published yet → 404, and NOT held by an HTTP cache.
+    const res1 = await fetch(`${url}${SIG_PATH}`);
+    expect(res1.status).toBe(404);
+    expect(res1.headers.get("cache-control")).toBe("no-store");
+    // 2) sig lands mid-publish.
+    reader.put(SIG_OBJ, '{"sig_b64":"x"}');
+    // 3) the next request must RE-READ the bucket and serve 200 — no stale 404.
+    const res2 = await fetch(`${url}${SIG_PATH}`);
+    expect(res2.status).toBe(200);
+    expect(reader.reads.filter((r) => r === SIG_OBJ)).toHaveLength(2);
+  });
+
+  it("still negative-caches a 404 on a mutable index pointer (one GCS read)", async () => {
+    const reader = mutableReader({});
+    const url = await start(reader);
+    expect((await fetch(`${url}${CALLKEY_PATH}`)).status).toBe(404);
+    expect((await fetch(`${url}${CALLKEY_PATH}`)).status).toBe(404);
+    // second 404 served from the negative cache → only ONE GCS read.
+    expect(reader.reads).toHaveLength(1);
+  });
+
   it("rejects path traversal with 404 and no GCS read", async () => {
     const reader = fakeReader({});
     const url = await start(reader);

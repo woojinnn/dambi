@@ -264,8 +264,21 @@ async function handleProxy(input: RouteInput, proxyPath: string): Promise<void> 
     return;
   }
   if (result.kind === "not_found") {
-    input.cache.set(cacheKey, { status: 404 });
-    writeProxy404(input.response, input.config.negativeCacheControlValue);
+    // Content-addressed leaves (signatures/<sha>, bundles/<sha>) are immutable by
+    // sha, so a 404 means "not published YET" (a brand-new bundle mid-publish),
+    // never "permanently absent". Caching that 404 — in-process OR via a max-age
+    // header — would keep serving it after the object lands; under
+    // DAMBI_REQUIRE_BUNDLE_SIGNATURE=true that fail-closes the bundle fleet-wide
+    // for the negative TTL. So re-check on every miss and tell caches not to
+    // store the 404 (the per-IP rate limiter still blunts probe floods).
+    const contentAddressed = isContentAddressed(proxyPath);
+    if (!contentAddressed) {
+      input.cache.set(cacheKey, { status: 404 });
+    }
+    writeProxy404(
+      input.response,
+      contentAddressed ? "no-store" : input.config.negativeCacheControlValue,
+    );
     logRequest(input, proxyPath, 404, "miss", startMs);
     return;
   }

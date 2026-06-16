@@ -2,7 +2,7 @@
   "methods": {
     "pool.liquidity": {
       "name": "pool.liquidity",
-      "description": "Market depth (rolling 24h swap volume, USD) of the add-liquidity target AMM pool, via the keyless GeckoTerminal (CoinGecko on-chain) API. Backs lp-low-liquidity (warn on a thinly-traded pool). Active by default; set GECKOTERMINAL_API_URL empty to disable.",
+      "description": "Market depth of an AMM pool via the keyless GeckoTerminal (CoinGecko on-chain) API: rolling 24h swap volume (vol24hUsd) AND total value locked (reserveUsd, USD reserves). Backs lp-low-liquidity / lp-low-tvl / swap-into-thin-pool. Active by default; set GECKOTERMINAL_API_URL empty to disable.",
       "params": {
         "chain_id": {
           "type": "Long",
@@ -12,11 +12,30 @@
         "venue": {
           "type": "AmmVenue",
           "required": true,
-          "description": "The add-liquidity venue (internally-tagged AmmVenue object); the subgraph pool key is read from .pool / .pool_id / .pair by variant.",
+          "description": "The pool venue (internally-tagged AmmVenue object); the subgraph pool key is read from .pool / .pool_id / .pair by variant. Present for add-liquidity and single-pool swaps; absent (dormant) for aggregator/multi-hop routes.",
           "defaultSelector": "$.action.venue"
         }
       },
       "returns": { "kind": "record", "type": "PoolLiquidity" },
+      "origin": "bundled"
+    },
+    "token.market_data": {
+      "name": "token.market_data",
+      "description": "Valuation + liquidity for a token (a swap's OUTPUT/buy token) via the keyless GeckoTerminal token endpoint: fully-diluted valuation (fdvUsd) and total cross-pool liquidity (tokenLiquidityUsd). Backs swap-buy-microcap / swap-buy-thin-token. Complementary to token.security_flags (honeypot/tax) — valuation/liquidity signals, not contract-security ones. Active by default; set GECKOTERMINAL_API_URL empty to disable.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "token": {
+          "type": "String",
+          "required": true,
+          "description": "The swap's decoded output (buy) token address, 0x-hex.",
+          "defaultSelector": "$.action.tokenOut.key.address"
+        }
+      },
+      "returns": { "kind": "record", "type": "TokenMarketData" },
       "origin": "bundled"
     },
     "address.sanctions": {

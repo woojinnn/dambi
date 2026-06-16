@@ -178,14 +178,18 @@ vi.mock("../dashboard/current-user", () => ({
 vi.mock("../policy-rpc", () => ({
   dispatchCallsV2: mocks.dispatchCallsV2,
   // Pass-through so the orchestrator's audit-log builder behaves like
-  // the real `formatAuditMatched`. Mirrors the trivial D9-aware impl.
+  // the real `formatAuditMatched` for synthetic diagnostics.
   formatAuditMatched: (verdict: { matched?: { policy_id: string; severity: string; reason?: string }[] }) =>
     (verdict.matched ?? []).map((m) => {
       const base: { id: string; severity: string; reason?: string } = {
         id: m.policy_id,
         severity: m.severity,
       };
-      if (m.policy_id === "__system__" && typeof m.reason === "string") {
+      const isSynthetic =
+        m.policy_id === "__system__" ||
+        m.policy_id.startsWith("__engine::") ||
+        m.policy_id.startsWith("__venue::");
+      if (isSynthetic && typeof m.reason === "string") {
         base.reason = m.reason;
       }
       return base;
@@ -865,6 +869,29 @@ describe("orchestrator", () => {
     it("falls back to the submitter sentinel when no master is resolvable", async () => {
       await decideMessage(venueMessage("venue-nomaster-1"), { onAwaitingUser: vi.fn() });
       expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith("u-test", SUBMITTER_SENTINEL);
+    });
+
+    it("DENY-CLOSES hl_unknown before policy resolution, even with no bundle installed", async () => {
+      const message = venueMessage("venue-hl-unknown-1", MASTER);
+      (message.data as VenueOrderPayload).hlAction = {
+        kind: "unknown",
+        actionType: "convertToMultiSigUser",
+      };
+
+      const result = await decideMessage(message, { onAwaitingUser: vi.fn() });
+
+      expect(result.ok).toBe(false);
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.verdict.matched?.[0]).toMatchObject({
+        policy_id: "__venue::deny_closed",
+        severity: "deny",
+      });
+      expect(result.verdict.matched?.[0]?.reason).toContain(
+        "unknown HL action: convertToMultiSigUser",
+      );
+      expect(mocks.resolveBundlesForWallet).not.toHaveBeenCalled();
+      expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+      expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
     });
 
     it("DENY-CLOSES when a DENY policy fails to render (must not silently drop → fail-open)", async () => {
