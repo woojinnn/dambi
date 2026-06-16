@@ -525,6 +525,18 @@ function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: M
   const cat = categoryOf(detail.slug);
   const inPkgs = usePackagesContaining(detail.slug);
   const ir = usePolicyIr(cedar);
+  // 작성자 문서(정의/범위/대상/데이터) — 입력된 칸만, 발행된 정책에만 있다.
+  const d = detail.doc;
+  const docRows = (
+    d
+      ? [
+          { label: ko ? "정책 정의" : "Definition", value: d.definition },
+          { label: ko ? "적용 범위" : "Scope", value: d.scope },
+          { label: ko ? "대상 사용자" : "Audience", value: d.audience },
+          { label: ko ? "판정에 사용될 데이터" : "Used data", value: d.usedData },
+        ]
+      : []
+  ).filter((r): r is { label: string; value: string } => !!r.value && r.value.trim().length > 0);
   return (
     <>
       <div className="rm-summary">
@@ -535,6 +547,20 @@ function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: M
           <span className="rm-stat">{categoryNameOf(cat, locale)}</span>
         </div>
       </div>
+
+      {docRows.length > 0 && (
+        <div className="rm-sec">
+          <div className="rm-sec-head"><h2>{ko ? "정책 설명" : "Policy docs"}</h2></div>
+          <div className="rm-doc">
+            {docRows.map((r) => (
+              <div className="rm-doc-field" key={r.label}>
+                <div className="rm-doc-label">{r.label}</div>
+                <p className="rm-doc-body">{r.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {cedar && (
         <div className="rm-sec">

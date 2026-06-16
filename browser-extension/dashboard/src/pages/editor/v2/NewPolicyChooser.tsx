@@ -1,11 +1,13 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 
 import {
   dashboardId,
   type PolicyMethod,
 } from "../../../server-api";
+import { getOverview } from "../../../server-api/policy-store";
 
 import { CaretRightIcon, CheckIcon, ShieldIcon, XIcon } from "./icons";
 
@@ -61,6 +63,17 @@ function seedCedar(id: string): string {
   return `// @id("${id}")\nforbid (\n  principal,\n  action,\n  resource\n);`;
 }
 
+/** "새 정책" 이 이미 있으면 "새 정책 (1)", "새 정책 (2)" … 로 번호를 붙여 중복을
+ *  피한다. 같은 이름이 여러 개 쌓여 구분이 안 되던 문제 해결. 첫 생성이면 base 그대로. */
+function uniqueName(base: string, existing: Iterable<string>): string {
+  const taken = new Set(existing);
+  if (!taken.has(base)) return base;
+  for (let i = 1; ; i++) {
+    const candidate = `${base} (${i})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 interface ChooserProps {
   open: boolean;
   onClose: () => void;
@@ -69,6 +82,8 @@ interface ChooserProps {
 export function NewPolicyChooser({ open, onClose }: ChooserProps) {
   const navigate = useNavigate();
   const { t } = useTranslation("editor");
+  // 기존 정책 이름 목록(중복 회피용) — 리스트 페이지가 이미 캐시해 둔 쿼리를 공유.
+  const overviewQ = useQuery({ queryKey: ["ps2-overview"], queryFn: getOverview });
 
   if (!open) return null;
 
@@ -81,10 +96,12 @@ export function NewPolicyChooser({ open, onClose }: ChooserProps) {
     const stamp = Date.now().toString(36);
     const slug = `new-${method}-${stamp}`;
     const id = dashboardId(slug);
+    const existing = Object.values(overviewQ.data?.library.defs ?? {}).map((d) => d.displayName);
+    const displayName = uniqueName(t("chooser.newPolicyName"), existing);
     onClose();
     navigate(`/editor/${encodeURIComponent(id)}`, {
       state: {
-        newPolicy: { method, cedarText: seedCedar(slug), displayName: t("chooser.newPolicyName") },
+        newPolicy: { method, cedarText: seedCedar(slug), displayName },
       },
     });
   };

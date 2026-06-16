@@ -18,6 +18,19 @@ export interface HoleSpec {
   required?: boolean | undefined;
 }
 
+/** Human-authored policy documentation (정의/범위/대상/데이터). Single-language
+ *  free text; surfaced in the editor and shipped to Policy Hub on publish. */
+export interface PolicyDoc {
+  /** 정책 정의 — what the policy does and why. */
+  definition?: string;
+  /** 적용 범위 — when it triggers (and when it doesn't). */
+  scope?: string;
+  /** 대상 사용자 — who this protects. */
+  audience?: string;
+  /** 판정에 사용될 데이터 — the data the decision reads. */
+  usedData?: string;
+}
+
 export interface PolicyDef {
   id: string; // "def::<slug>"
   /** 지갑 전용 정책 — 라이브러리 카탈로그에 노출하지 않는다. homeWallet
@@ -32,6 +45,9 @@ export interface PolicyDef {
   displayName: string;
   cat?: string;
   memo?: string;
+  /** Authoring docs shown on the policy and carried to Policy Hub on publish.
+   *  Plain single-language text; every field optional. */
+  doc?: PolicyDoc;
   skeleton: { ir: unknown; manifest?: unknown };
   holes: HoleSpec[];
   defaults: { enabled: boolean; params: Record<string, HoleValue>; packageId?: string };

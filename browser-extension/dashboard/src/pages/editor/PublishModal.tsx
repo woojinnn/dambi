@@ -11,6 +11,7 @@ import {
   type SetMember,
 } from "../../server-api";
 import { severityFromCedar } from "./policy-meta";
+import { CATEGORY_ORDER, type CategoryKey } from "../market-domain";
 import { textToBlocks } from "../../cedar";
 import { computeShippedHoles, manifestWithHoles } from "./publish-holes";
 import { PublishPreviewTree } from "./PublishPreviewTree";
@@ -33,6 +34,8 @@ export type PublishSource =
       policyTree?: string | null;
       suggestedDisplayName: string;
       suggestedSlug: string;
+      /** 정책 문서(정의/범위/대상/데이터) — 발행 payload에 그대로 실린다. */
+      doc?: { definition?: string; scope?: string; audience?: string; usedData?: string };
     }
   | {
       kind: "package";
@@ -76,6 +79,8 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  // 발행 시 사용자가 고르는 액션 카테고리(Token/DEX/…). 빈 값이면 미지정.
+  const [category, setCategory] = useState<CategoryKey | "">("");
   // Hole keys the author chose to KEEP public (주소 공개 / 숫자 추천값 남기기).
   // Default = all blanked. 주소를 남기는 건 "특정 주소로 거래되면 차단"처럼
   // 주소가 정책의 본질인 경우 — 공개한 값은 마켓에 그대로 노출된다.
@@ -130,6 +135,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
     setStep(1);
     setName("");
     setDescription("");
+    setCategory("");
     setKept(new Set());
   };
   const close = () => {
@@ -173,6 +179,8 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
           display_name: { en: trimName, ko: trimName },
           description: desc,
           domain: "security",
+          category: category || undefined,
+          doc: source.doc,
           severity: (severityFromCedar(source.cedarText) === "deny"
             ? "deny"
             : "warn") as MarketSeverity,
@@ -258,6 +266,9 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
               onName={setName}
               description={description}
               onDescription={setDescription}
+              category={category}
+              onCategory={setCategory}
+              showCategory={source?.kind === "policy"}
               ruleCount={rules.length}
               blankedAddrCount={blankedAddrCount}
               keptAddrCount={keptAddrCount}
@@ -523,6 +534,9 @@ function Step2(props: {
   onName: (v: string) => void;
   description: string;
   onDescription: (v: string) => void;
+  category: CategoryKey | "";
+  onCategory: (v: CategoryKey | "") => void;
+  showCategory: boolean;
   ruleCount: number;
   blankedAddrCount: number;
   keptAddrCount: number;
@@ -534,6 +548,9 @@ function Step2(props: {
     onName,
     description,
     onDescription,
+    category,
+    onCategory,
+    showCategory,
     ruleCount,
     blankedAddrCount,
     keptAddrCount,
@@ -550,6 +567,24 @@ function Step2(props: {
         onChange={(e) => onName(e.target.value)}
         maxLength={120}
       />
+
+      {showCategory && (
+        <>
+          <label className="pub-l">{t("publish.categoryLabel")}</label>
+          <div className="pub-cat-chips">
+            {CATEGORY_ORDER.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`pub-cat-chip${category === c ? " on" : ""}`}
+                onClick={() => onCategory(category === c ? "" : c)}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <label className="pub-l">{t("publish.descLabel")}</label>
       <textarea

@@ -31,6 +31,16 @@ export interface SetMember {
   manifest?: unknown;
 }
 
+/** Human-authored policy docs (정의/범위/대상/데이터). Single-language plain
+ *  text; every field optional. Authored in the editor, shipped on publish,
+ *  shown on the listing detail page. */
+export interface ListingDoc {
+  definition?: string;
+  scope?: string;
+  audience?: string;
+  usedData?: string;
+}
+
 export interface ListingSummary {
   id: string;
   slug: string;
@@ -39,6 +49,8 @@ export interface ListingSummary {
   publisher_tier: PublisherTier;
   display_name: I18nText;
   description?: I18nText;
+  /** Policy docs shown on the detail page; absent for older/seed listings. */
+  doc?: ListingDoc;
   domain?: string;
   /** Action-based taxonomy (approvals, swap, perps, …); see market-domain. */
   category?: string;
@@ -129,6 +141,10 @@ export interface CreatePolicyListingBody {
   display_name: I18nText;
   description?: I18nText;
   domain: string;
+  /** Action-based taxonomy (Token, DEX, Lending, …); user-picked at publish. */
+  category?: string;
+  /** Policy docs (정의/범위/대상/데이터) authored in the editor. */
+  doc?: ListingDoc;
   intents?: string[];
   severity: Severity;
   version?: string;
