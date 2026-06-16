@@ -105,6 +105,24 @@ spec:
                   name: {{ .Values.existingSecret }}
                   key: COINGECKO_API_KEY
                   optional: true
+            {{- if .Values.oracleRpc.sanctionsUrl }}
+            - name: POLICY_SANCTIONS_RPC_URL
+              value: {{ .Values.oracleRpc.sanctionsUrl | quote }}
+            {{- end }}
+            {{- if .Values.oracleRpc.lendingUrl }}
+            - name: POLICY_LENDING_RPC_URL
+              value: {{ .Values.oracleRpc.lendingUrl | quote }}
+            {{- end }}
+            # Alchemy archive-node RPC (eth_getAssetTransfers etc.) for the
+            # stat_window / similarity class-B enrichers. Carries a private API
+            # key in the URL → secret, NEVER values.yaml. Optional: when the key
+            # is absent the readers stay dormant (fail-open), like the others.
+            - name: ALCHEMY_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: ALCHEMY_RPC_URL
+                  optional: true
           volumeMounts:
             - name: sync-config
               mountPath: /app/dambi-sync.toml
