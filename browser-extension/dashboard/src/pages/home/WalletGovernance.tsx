@@ -87,13 +87,15 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
   const [overview, setOverview] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
 
-  // clamp active when wallets change
+  // 삭제 직후처럼 active 가 범위를 벗어날 수 있다 — effect 가 보정하기 전 렌더에서
+  // wallets[active] 가 undefined 가 되어 크래시하므로 렌더 시점에 clamp 한다.
+  const activeIdx = Math.min(Math.max(active, 0), Math.max(0, wallets.length - 1));
   useEffect(() => {
-    if (active > wallets.length - 1) setActive(Math.max(0, wallets.length - 1));
-  }, [wallets.length, active]);
+    if (active !== activeIdx) setActive(activeIdx);
+  }, [active, activeIdx]);
 
   const { t } = useTranslation("home");
-  const activeWallet = wallets[active];
+  const activeWallet = wallets[activeIdx];
 
   if (wallets.length === 0) {
     return (
@@ -113,7 +115,7 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
       <div className="dial-split" ref={splitRef}>
         <WalletDial
           wallets={wallets}
-          active={active}
+          active={activeIdx}
           onSelect={(i) => { setOverview(false); setActive(i); }}
           onActiveClick={() => setOverview((v) => !v)}
           onAddWallet={onAddWallet}
@@ -123,7 +125,7 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
             <WalletOverview
               wallets={wallets}
               snap={snap}
-              active={active}
+              active={activeIdx}
               onPick={(i) => { setActive(i); setOverview(false); }}
               onAddWallet={onAddWallet}
             />
