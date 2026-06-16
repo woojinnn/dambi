@@ -1949,6 +1949,16 @@
   padding-left: 2px;
 }
 .im-wparams .im-holes { margin-top: 6px; }
+.im-noparams {
+  margin-top: 14px;
+  padding: 22px 16px;
+  border: 1px dashed var(--hairline, #e5e7eb);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--slate-400, #94a3b8);
+  background: var(--surface-2, #fafafa);
+}
 .im-holes-defname { font-size: 12px; font-weight: 600; opacity: 0.75; margin-top: 4px; }
 .im-hole { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .im-hole-label { font-size: 12px; font-weight: 500; }

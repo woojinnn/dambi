@@ -268,6 +268,39 @@
 .pv-verb.warn .pv-verb-act {
   color: var(--warn-600, #d97706);
 }
+/* 인라인 심각도 셀렉트(지갑별 override) — 결과 자리에서 차단↔경고를 바꾼다. */
+.pv-verb-sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.pv-verb-sel {
+  font: inherit;
+  font-weight: 700;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 4px 26px 4px 9px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.pv-verb-sel:focus {
+  border-color: var(--accent, #5b8cff);
+  box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.15);
+}
+.pv-verb.deny .pv-verb-sel {
+  color: var(--danger-600, #dc2626);
+  border-color: var(--danger-300, #fca5a5);
+}
+.pv-verb.warn .pv-verb-sel {
+  color: var(--warn-600, #d97706);
+  border-color: var(--warn-300, #fcd34d);
+}
 .pv-reason {
   color: var(--muted, #6b7280);
   font-weight: 400;
