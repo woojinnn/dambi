@@ -159,6 +159,8 @@ export interface CreateSetListingBody {
   kind: "set";
   display_name: I18nText;
   description?: I18nText;
+  /** Member policies' categories (deduped) — a package spans these. */
+  intents?: string[];
   version?: string;
   members: SetMember[];
   changelog?: I18nText;

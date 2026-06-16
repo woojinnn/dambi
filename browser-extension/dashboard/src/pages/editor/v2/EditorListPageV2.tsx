@@ -27,6 +27,7 @@ import { blocksToText } from "../../../cedar";
 import type { PolicyIR } from "../../../cedar/blocks";
 import { collectPackageMembers } from "../publish-package";
 import { PublishModal, type PublishSource } from "../PublishModal";
+import { toMarketCategory } from "../../market-domain";
 
 import "./editor-v2.css";
 
@@ -235,11 +236,15 @@ function LibraryTab(props: {
           manifest: d.skeleton.manifest,
         })),
       );
+      // 멤버 정책들의 카테고리를 모아 패키지에 자동 태깅 — 발행 시 set 의
+      // intents 로 올라가, 브라우즈에서 각 멤버 카테고리로도 패키지가 잡힌다.
+      const categories = [...new Set(members.map((d) => toMarketCategory(d.cat)))];
       setPublishSrc({
         kind: "package",
         suggestedDisplayName: pkg.displayName,
         suggestedSlug: pkg.id.replace(/^pkg::/, ""),
         members: rendered,
+        categories,
       });
     } catch (err) {
       console.error("[v2 library] publishPackage render failed:", err);
