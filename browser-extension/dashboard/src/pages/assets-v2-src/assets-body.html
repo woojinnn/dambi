@@ -1,0 +1,166 @@
+  <main class="app-content" data-screen-label="Assets (Monitoring) — 전체 합산">
+
+    <!-- Topbar -->
+    <div class="topbar" style="display: flex; align-items: center; justify-content: space-between;">
+      <div class="crumb">
+        <span class="here">Assets</span>
+      </div>
+      <div class="dots">
+        <button class="icon-btn" title="3건 미해결 finding" aria-label="notifications">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+          <span class="unread-dot"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Wallet switcher (좌우 스크롤) -->
+    <div class="ws-wrap">
+      <button class="ws-nav prev" type="button" aria-label="이전 지갑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></button>
+      <div class="wallet-switch" id="wallet-switch" role="group" aria-label="wallet switcher">
+        <button class="ws-chip on" data-wallet="all">전체 합산 <span class="ws-amt">5</span></button>
+        <button class="ws-chip" data-wallet="main"><span class="ws-dot warn"></span>메인 지갑 <span class="ws-amt">0x7a3F···c2D4</span></button>
+        <button class="ws-chip" data-wallet="trade"><span class="ws-dot warn"></span>트레이딩 <span class="ws-amt">0x91bE···77a0</span></button>
+        <button class="ws-chip" data-wallet="cold"><span class="ws-dot fail"></span>콜드 스토리지 <span class="ws-amt">0x04C9···e8B1</span></button>
+        <button class="ws-chip" data-wallet="savings"><span class="ws-dot calm"></span>적립 지갑 <span class="ws-amt">0x3dF2···91Ac</span></button>
+        <button class="ws-chip" data-wallet="airdrop"><span class="ws-dot warn"></span>에어드랍 <span class="ws-amt">0xBe07···5C13</span></button>
+      </div>
+      <button class="ws-nav next" type="button" aria-label="다음 지갑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></button>
+    </div>
+
+    <div class="donut-grid" id="l1-extra">
+    <!-- Wallet asset ratio (donut) — 좌측 -->
+    <div class="chain-card donut-card" id="donut-wallets">
+      <div class="cc-head">
+        <span class="cc-ttl">지갑별 자산 비율</span>
+      </div>
+      <div class="donut-wrap">
+        <div class="donut-figure">
+          <svg class="donut" viewBox="0 0 120 120" aria-label="지갑별 자산 비율 도넛 차트"></svg>
+          <div class="donut-center"></div>
+        </div>
+        <div class="donut-legend"></div>
+      </div>
+    </div>
+
+    <!-- Chain breakdown (donut) — 우측 -->
+    <div class="chain-card donut-card" id="donut-assets">
+      <div class="cc-head">
+        <span class="cc-ttl">자산 분포</span>
+      </div>
+      <div class="donut-wrap">
+        <div class="donut-figure">
+          <svg class="donut" viewBox="0 0 120 120" aria-label="체인별 자산 분포 도넛 차트"></svg>
+          <div class="donut-center"></div>
+        </div>
+        <div class="donut-legend"></div>
+      </div>
+    </div>
+    </div>
+
+    <!-- L2 only: 지갑 헤더 밴드 + 긴급 항목 큐 (JS 렌더) -->
+    <div id="l2-extra"></div>
+
+    <!-- Layout-mode chrome (위험 알럿 스트립 + 세그먼트/점프 내비) — JS 렌더 -->
+    <div id="mode-chrome"></div>
+
+    <!-- Holdings -->
+    <div class="mod-sec" data-sec="holdings">
+    <div class="sec-head">
+      <h3>보유자산</h3>
+      <div class="sec-tools">
+        <div class="hold-search">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+          <input type="text" id="holdings-filter" placeholder="토큰 검색" autocomplete="off" />
+        </div>
+        <span class="meta" id="holdings-meta">3 지갑 · 9 토큰</span>
+      </div>
+    </div>
+    <div id="holdings-host"></div>
+    </div>
+
+    <!-- Approvals -->
+    <div class="mod-sec" data-sec="approvals">
+    <div class="sec-head">
+      <h3>승인 <span class="h3-sub">(risk overlay)</span></h3>
+      <span class="meta" id="approvals-meta">UNLIMITED · KNOWN_VENUE · BLOCKED · OLD</span>
+    </div>
+    <div id="approvals-host"></div>
+    </div>
+
+    <!-- Hyperliquid -->
+    <div id="hl-section" class="mod-sec" data-sec="hl">
+    <div class="sec-head">
+      <h3>Hyperliquid</h3>
+      <span class="meta">포지션 · 레버리지 · 오픈 오더 · 마진</span>
+    </div>
+    <div class="hl-card">
+      <div class="hl-card-head">
+        <span class="hl-wallet"><span class="hl-venue">HL</span>트레이딩</span>
+        <div class="hl-meta">
+          <span class="hl-bal"><span class="bk">Perp</span><span class="bv">$6,128.40</span></span>
+          <span class="hl-bal"><span class="bk">Spot</span><span class="bv">$1,204.12</span></span>
+        </div>
+      </div>
+
+      <div class="hl-cols">
+        <div class="hl-col">
+          <div class="hl-block-label">포지션 <span class="hl-n">2</span></div>
+          <table class="hl-tbl">
+            <thead>
+              <tr><th>종목</th><th>방향</th><th class="num">수량</th><th class="num">진입가</th><th class="num">평가</th></tr>
+            </thead>
+            <tbody>
+              <tr class="long">
+                <td class="sym">ETH</td>
+                <td><span class="hl-side long">long</span><span class="hl-lev">5x 교차</span></td>
+                <td class="num">1.5</td>
+                <td class="num">2,431.5</td>
+                <td class="num val">$3,647</td>
+              </tr>
+              <tr class="short">
+                <td class="sym">BTC</td>
+                <td><span class="hl-side short">short</span><span class="hl-lev">3x 격리</span></td>
+                <td class="num">0.04</td>
+                <td class="num">67,210</td>
+                <td class="num val">$2,688</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="hl-col">
+          <div class="hl-block-label">오픈 오더 <span class="hl-n">2</span></div>
+          <table class="hl-tbl">
+            <thead>
+              <tr><th>종목</th><th>구분</th><th class="num">트리거 → 지정</th><th class="num">조건</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="sym">ETH</td>
+                <td><span class="hl-side short">매도</span><span class="hl-tp">익절</span></td>
+                <td class="num"><b>2,650</b> → <b>2,648</b></td>
+                <td class="cond num">전량 · GTC · 청산전용</td>
+              </tr>
+              <tr>
+                <td class="sym">ETH</td>
+                <td><span class="hl-side short">매도</span><span class="hl-sl">손절</span></td>
+                <td class="num"><b>2,280</b> → <b>2,275</b></td>
+                <td class="cond num">전량 · GTC · 청산전용</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- Pending -->
+    <div id="pending-section" class="mod-sec" data-sec="pending">
+    <div class="sec-head">
+      <h3>대기 주문 <span class="h3-sub">(오프체인 인텐트 · 서명)</span></h3>
+      <span class="meta">UniswapX · CoW · 1inch · Permit2</span>
+    </div>
+    <div id="pending-host" style="margin-bottom: 32px;"></div>
+    </div>
+
+  </main>

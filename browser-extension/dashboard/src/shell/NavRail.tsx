@@ -3,7 +3,8 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { fetchMe, logout, listFindings } from "../server-api";
+import { fetchMe, listFindings } from "../server-api";
+import { useAuth } from "../hooks/useAuth";
 
 /**
  * Persistent left nav. Hover/focus expands to 256px (CSS-driven, no JS state).
@@ -12,6 +13,11 @@ import { fetchMe, logout, listFindings } from "../server-api";
 export function NavRail() {
   const { t } = useTranslation("shell");
   const navigate = useNavigate();
+  // Full sign-out: clears BOTH localStorage and the SW-owned chrome.storage
+  // token, messages the SW, and resets `user`. The server-api `logout` only
+  // drops localStorage, so the next refresh re-hydrates the token from
+  // chrome.storage and the user bounces straight back in.
+  const { logout } = useAuth();
   const meQ = useQuery({ queryKey: ["me"], queryFn: fetchMe, staleTime: Infinity });
   const findingsQ = useQuery({
     queryKey: ["findings", "unresolved-count"],
@@ -57,7 +63,7 @@ export function NavRail() {
         <RailItem to="/" end label="Home" icon={<HomeIcon />} />
         <RailItem to="/editor" label="Editor" icon={<EditorIcon />} />
         <RailItem to="/simulation" label="Simulation" icon={<SimIcon />} />
-        <RailItem to="/monitoring" label="Assets" icon={<MonIcon />} />
+        <RailItem to="/assets" label="Assets" icon={<MonIcon />} />
         <RailItem to="/market" label="Policy Hub" icon={<MarketIcon />} />
       </div>
 

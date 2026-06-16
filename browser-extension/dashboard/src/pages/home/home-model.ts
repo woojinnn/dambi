@@ -50,11 +50,6 @@ export interface FolderVM {
   policies: PolicyVM[];
 }
 
-/** How many baseline (hard-coded, install-time) defs are always applied.
- * Baseline policies are not shown as wallet packages; they count toward the
- * "이 지갑에 적용 N" total. Replace with your real baseline set / flag. */
-export const BASELINE_COUNT = 5;
-
 /** Severity is not a first-class field on PolicyDef yet; derive it from the
  * slug the same way the Market does until the server persists it. */
 export function severityOf(def: PolicyDef | undefined, defId: string): Severity {
@@ -148,13 +143,13 @@ export function totalPolicyCount(snap: StoreSnapshot, address: string): number {
   return ws ? Object.keys(ws.bindings).length : 0;
 }
 
-/** 이 지갑에 적용 = baseline + effective bindings (package ∧ binding on). */
+/** 이 지갑에 적용 = effective bindings (package ∧ binding on). */
 export function appliedCount(snap: StoreSnapshot, address: string): number {
   const ws = snap.wallets.byAddress[address.toLowerCase()];
-  if (!ws) return BASELINE_COUNT;
+  if (!ws) return 0;
   let n = 0;
   for (const b of Object.values(ws.bindings)) if (isEffectiveOn(ws, b)) n++;
-  return BASELINE_COUNT + n;
+  return n;
 }
 
 /** Next params object for a boolean hole toggle. */

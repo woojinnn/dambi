@@ -20,6 +20,8 @@
     "addressLabel": "Address (0x…)",
     "addressInvalid": "Not a valid 0x address (40 hex)",
     "labelOptional": "Label (optional)",
+    "label": "Label",
+    "labelRequired": "Label is required",
     "labelPlaceholder": "e.g. Main wallet, Treasury, Hot",
     "chainsLabel": "Chains (leave empty to track every server-configured chain)",
     "chainsHint": "If none are selected: every chain with an RPC configured in <code>pasu-sync.toml</code> is tracked.",
