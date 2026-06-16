@@ -531,3 +531,90 @@
 }
 .sd-widget .sd-section-head { margin-bottom: 8px; }
 .sd-widget-body { display: flex; flex-direction: column; gap: 2px; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   RESULT POLISH (step 4) — prettier state cards, an animated S-step timeline,
+   and delta badges that pop on each scrub. Visual only.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+@keyframes sw-delta-pop { 0% { transform: scale(.6); opacity: 0; } 55% { transform: scale(1.18); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes sw-card-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* ── state column re-animates on scrub (key={cur}); cards rise in, staggered ── */
+.sw-result-state > .sw-statecard,
+.sw-result-state > .sw-stepbar { animation: sw-card-rise .34s cubic-bezier(.22,.8,.26,1) both; }
+.sw-result-state > *:nth-child(2) { animation-delay: .05s; }
+.sw-result-state > *:nth-child(3) { animation-delay: .10s; }
+.sw-result-state > *:nth-child(n+4) { animation-delay: .14s; }
+
+/* ── state card: softer surface, clearer header, gradient accent strip ── */
+.sw-statecard {
+  border-radius: 14px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15,23,42,.05);
+}
+.sw-statecard-head {
+  margin: 0;
+  padding: 11px 14px;
+  background: linear-gradient(180deg, var(--fog-100, #f6f8fb), var(--surface));
+  border-bottom: 1px solid var(--hairline);
+}
+.sw-statecard-head b { font-size: 14px; letter-spacing: -.01em; }
+.sw-statecard-head b::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--sage-500, var(--pass-500)); margin-right: 8px; vertical-align: middle;
+}
+.sw-statecard .sw-tokens { padding: 6px 8px 8px; }
+.sw-statecard .sw-tokens td { border-bottom: 1px solid var(--fog-200, #eef1f5); padding: 7px 8px; }
+.sw-statecard .sw-tokens tr:last-child td { border-bottom: none; }
+.sw-statecard .sw-tokens tr { transition: background-color .14s ease; }
+.sw-statecard .sw-tokens tr:hover td { background: var(--fog-100, #f6f8fb); }
+.sw-tokens td.sym { font-size: 12.5px; }
+.sw-tokens td.bal { font-size: 13.5px; color: var(--slate-800); }
+
+/* ── delta as a colored pill that pops when present ── */
+.sw-tokens td.delta { padding-right: 12px; }
+.sw-tokens td.delta.up, .sw-tokens td.delta.down { font-size: 12px; font-weight: 700; }
+.sw-tokens td.delta.up:not(:empty),
+.sw-tokens td.delta.down:not(:empty) {
+  animation: sw-delta-pop .4s cubic-bezier(.22,1.2,.4,1) both;
+}
+.sw-tokens td.delta.up::before  { content: "▲ "; font-size: 9px; }
+.sw-tokens td.delta.down::before { content: "▼ "; font-size: 9px; }
+
+/* ── S-step scrubber → connected timeline of round nodes ── */
+.sw-scrub { gap: 0; padding: 4px 2px 16px; flex-wrap: wrap; }
+.sw-scrub-btn {
+  position: relative; width: 38px; height: 38px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; z-index: 1; font-size: 12px;
+}
+.sw-scrub-btn + .sw-scrub-btn { margin-left: 30px; }
+/* connector line into each node from the previous one */
+.sw-scrub-btn + .sw-scrub-btn::after {
+  content: ""; position: absolute; right: 100%; top: 50%; width: 30px; height: 2px;
+  background: var(--hairline); transform: translateY(-50%); z-index: -1;
+}
+.sw-scrub-btn.on { box-shadow: 0 0 0 4px var(--sage-100, var(--pass-100)); transform: scale(1.06); }
+.sw-scrub-btn.on::after, .sw-scrub-btn.on ~ .sw-scrub-btn::after { background: var(--hairline); }
+.sw-scrub .sw-mut { flex-basis: 100%; margin: 8px 0 0 2px; }
+
+/* ── step verdict bar: left accent + lift ── */
+.sw-stepbar { padding: 10px 14px; border-radius: 10px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.sw-stepbar.fail { box-shadow: inset 3px 0 0 var(--fail-500); }
+.sw-stepbar.warn { box-shadow: inset 3px 0 0 var(--warn-500); }
+.sw-stepbar.pass { box-shadow: inset 3px 0 0 var(--pass-500); }
+
+/* ── cumulative-deny header as a chip; empty box friendlier ── */
+.sw-deny-head { display: flex; align-items: baseline; gap: 6px; font-size: 13.5px; font-weight: 600; }
+.sw-deny-head b { font-size: 18px; color: var(--slate-900); font-variant-numeric: tabular-nums; }
+.sw-result-deny .sw-empty.small {
+  border: 1.5px dashed var(--hairline); border-radius: 12px; padding: 28px 16px;
+  color: var(--slate-400); background:
+    repeating-linear-gradient(135deg, transparent, transparent 10px, rgba(148,163,184,.03) 10px, rgba(148,163,184,.03) 20px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-result-state > .sw-statecard, .sw-result-state > .sw-stepbar,
+  .sw-tokens td.delta.up:not(:empty), .sw-tokens td.delta.down:not(:empty) { animation: none !important; }
+}

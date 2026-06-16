@@ -52,8 +52,8 @@ export function Step4Results({ c }: { c: SimController }) {
       </div>
 
       <div className="sw-cols result">
-        {/* ── state sequence + diff ── */}
-        <section className="sw-result-state">
+        {/* ── state sequence + diff ── (key on cursor → re-animates on scrub) */}
+        <section className="sw-result-state" key={`state-${cur}`}>
           {step && (
             <div className={`sw-stepbar ${step.verdict}`}>
               <span className="sw-stepbar-v">{t(`wizard.step4.verdict.${step.verdict}`)}</span>
@@ -70,7 +70,7 @@ export function Step4Results({ c }: { c: SimController }) {
         </section>
 
         {/* ── cumulative deny + diagram ── */}
-        <aside className="sw-result-deny">
+        <aside className="sw-result-deny" key={`deny-${cur}`}>
           <div className="sw-deny-head">
             {t("wizard.step4.cumulativeBlocked")} <b>{denies.length}</b>
             <span className="sw-mut"> · S0~S{cur}</span>
