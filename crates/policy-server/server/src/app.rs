@@ -33,7 +33,7 @@ use crate::dto::EvaluateRequest;
 use crate::events::{EventBus, EventPublisher};
 use crate::handler::{
     evaluate, ExternalEnrichment, HandlerError, NftFloorOracle, OutboundTransfer,
-    PoolLiquidityFacts, PriceBook, PriceFact, SanctionsScreen, TokenSecurityFlags,
+    PoolLiquidityFacts, PriceBook, PriceFact, SanctionsScreen, TokenMarketData, TokenSecurityFlags,
 };
 use crate::market_handlers;
 use crate::read_handlers;
@@ -1145,16 +1145,73 @@ impl ExternalEnrichment for LiveEnrichment {
             return None;
         }
         let body = resp.json::<serde_json::Value>().await.ok()?;
-        let vol = body
-            .get("data")?
-            .get("attributes")?
-            .get("volume_usd")?
-            .get("h24")?
-            .as_str()?
-            .parse::<f64>()
-            .ok()?;
+        let attrs = body.get("data")?.get("attributes")?;
+        // `volume_usd` is an object keyed by window; `reserve_in_usd` is a flat
+        // string. Parse each independently — a brand-new pool may have one but not
+        // the other. Emit iff at least one is present, else dormant (never a 0).
+        let vol_24h_usd = attrs
+            .get("volume_usd")
+            .and_then(|v| v.get("h24"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok());
+        let reserve_usd = attrs
+            .get("reserve_in_usd")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok());
+        if vol_24h_usd.is_none() && reserve_usd.is_none() {
+            return None;
+        }
         Some(PoolLiquidityFacts {
-            vol_24h_usd: Some(vol),
+            vol_24h_usd,
+            reserve_usd,
+        })
+    }
+
+    /// `token.market_data` — FDV + total cross-pool liquidity for a swap's output
+    /// (buy) token, via the keyless `GeckoTerminal` token endpoint
+    /// (`/networks/{net}/tokens/{addr}`). A 404 (token not indexed) or parse miss →
+    /// `None` (dormant), never a fabricated 0.
+    async fn token_market_data(&self, chain_id: i64, token: &str) -> Option<TokenMarketData> {
+        let addr = token.trim_start_matches("0x").to_lowercase();
+        if addr.len() != 40 || !addr.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let network = geckoterminal_network_slug(chain_id)?;
+        let base = self
+            .geckoterminal_base
+            .as_deref()
+            .unwrap_or("https://api.geckoterminal.com/api/v2");
+        if base.is_empty() {
+            return None; // explicitly disabled
+        }
+        let url = format!("{base}/networks/{network}/tokens/0x{addr}");
+        let resp = self
+            .client
+            .get(&url)
+            .header("accept", "application/json")
+            .timeout(Duration::from_millis(2500))
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let body = resp.json::<serde_json::Value>().await.ok()?;
+        let attrs = body.get("data")?.get("attributes")?;
+        let fdv_usd = attrs
+            .get("fdv_usd")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok());
+        let total_reserve_usd = attrs
+            .get("total_reserve_in_usd")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok());
+        if fdv_usd.is_none() && total_reserve_usd.is_none() {
+            return None;
+        }
+        Some(TokenMarketData {
+            fdv_usd,
+            total_reserve_usd,
         })
     }
 

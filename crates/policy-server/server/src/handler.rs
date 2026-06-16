@@ -134,6 +134,13 @@ pub trait ExternalEnrichment: Send + Sync {
         chain_id: i64,
         venue: &serde_json::Value,
     ) -> Option<PoolLiquidityFacts>;
+
+    /// Market-data facts (FDV, total cross-pool liquidity) for `token` — a swap's
+    /// decoded output/buy token (0x-hex) — on `chain_id`. `None` = feed down /
+    /// unsupported chain / token not indexed → the optional policy stays dormant,
+    /// never a fabricated value. Valuation/liquidity signals, complementary to
+    /// `token_security_flags` (honeypot/tax). Backs `token.market_data`.
+    async fn token_market_data(&self, chain_id: i64, token: &str) -> Option<TokenMarketData>;
 }
 
 /// One outbound transfer of the owner, as surfaced by [`ExternalEnrichment`].
@@ -185,6 +192,28 @@ pub struct PoolLiquidityFacts {
     /// Trailing 24h swap volume in USD. `None` when the subgraph reported no
     /// parseable 24h figure (cumulative-only / brand-new pool) — NOT zero.
     pub vol_24h_usd: Option<f64>,
+    /// Total value locked in the pool (USD reserves). `None` when the subgraph
+    /// reported no parseable figure — NOT zero. Backs the `lp-low-tvl` /
+    /// `swap-into-thin-pool` depth checks — distinct from 24h volume (which can be
+    /// wash-inflated); TVL measures real locked depth.
+    pub reserve_usd: Option<f64>,
+}
+
+/// Per-token market-data facts from a DEX-analytics token endpoint, surfaced by
+/// [`ExternalEnrichment::token_market_data`]. Backs `token.market_data` (the
+/// "what am I actually buying" checks on a swap's output token). Every field is
+/// independently `Option`: a value the feed cannot supply is left `None` so the
+/// consuming policy stays dormant rather than comparing against a fabricated
+/// number. Complementary to [`TokenSecurityFlags`] (honeypot/tax) — these are
+/// valuation / liquidity signals, not contract-security ones.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TokenMarketData {
+    /// Fully-diluted valuation in USD. `None` when unreported (token not indexed).
+    /// A very low FDV flags a microcap the buyer may be over-paying into.
+    pub fdv_usd: Option<f64>,
+    /// Total USD liquidity for the token across ALL its pools. `None` when
+    /// unreported. A near-zero figure flags a token you effectively cannot exit.
+    pub total_reserve_usd: Option<f64>,
 }
 
 /// The safe default when no external enrichment is configured: every method
@@ -216,6 +245,9 @@ impl ExternalEnrichment for NoEnrichment {
         _chain_id: i64,
         _venue: &serde_json::Value,
     ) -> Option<PoolLiquidityFacts> {
+        None
+    }
+    async fn token_market_data(&self, _chain_id: i64, _token: &str) -> Option<TokenMarketData> {
         None
     }
 }
@@ -737,6 +769,21 @@ async fn execute_call_specs(
                     call_id: Some(spec.call_id.clone()),
                 }),
             },
+            "token.market_data" => match token_market_data(&spec.params, external).await {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "token.market_data: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "token.market_data: missing token or feed unavailable \
+                         (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
             other => diagnostics.push(Diagnostic {
                 level: "info".to_owned(),
                 message: format!(
@@ -1200,6 +1247,31 @@ async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Op
     Some(Value::Object(out))
 }
 
+/// Server-side `token.market_data`: surface a swap's OUTPUT (buy) token's
+/// valuation + total liquidity (params `{ chain_id?, token }` — `token` is
+/// `$.action.tokenOut.key.address`) via the injected [`ExternalEnrichment`] feed
+/// (the keyless `GeckoTerminal` token endpoint in production). Projects
+/// `{ fdvUsd?, tokenLiquidityUsd? }` as Decimal STRINGs and OMITS a field the
+/// feed could not supply, so the optional policy stays dormant rather than
+/// comparing against a fabricated 0. `None` when the token is missing / the feed
+/// could not answer → result omitted (fail-open for the optional call).
+async fn token_market_data(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
+    let token = params.get("token").and_then(Value::as_str)?;
+    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let f = external.token_market_data(chain_id, token).await?;
+    let mut out = serde_json::Map::new();
+    if let Some(v) = f.fdv_usd {
+        out.insert("fdvUsd".to_owned(), json!(format!("{v:.4}")));
+    }
+    if let Some(v) = f.total_reserve_usd {
+        out.insert("tokenLiquidityUsd".to_owned(), json!(format!("{v:.4}")));
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(Value::Object(out))
+}
+
 /// Extract the DEX-analytics subgraph lookup key from a pre-resolved,
 /// internally-tagged `AmmVenue` object (`{ "name": "<tag>", ... }`): `.pool` for the
 /// address-keyed constant-product / concentrated pools, `.pool_id` for the Uniswap
@@ -1235,6 +1307,9 @@ async fn pool_liquidity(params: &Value, external: &dyn ExternalEnrichment) -> Op
     let mut out = serde_json::Map::new();
     if let Some(v) = f.vol_24h_usd {
         out.insert("vol24hUsd".to_owned(), json!(format!("{v:.4}")));
+    }
+    if let Some(v) = f.reserve_usd {
+        out.insert("reserveUsd".to_owned(), json!(format!("{v:.4}")));
     }
     if out.is_empty() {
         return None;
@@ -1482,6 +1557,9 @@ mod tests {
         ) -> Option<PoolLiquidityFacts> {
             None
         }
+        async fn token_market_data(&self, _c: i64, _t: &str) -> Option<TokenMarketData> {
+            None
+        }
     }
     /// Default: the feed answers nothing → the external methods stay dormant.
     fn no_external() -> StubEnrichment {
@@ -1515,6 +1593,9 @@ mod tests {
             _c: i64,
             _v: &serde_json::Value,
         ) -> Option<PoolLiquidityFacts> {
+            None
+        }
+        async fn token_market_data(&self, _c: i64, _t: &str) -> Option<TokenMarketData> {
             None
         }
     }
@@ -1606,6 +1687,9 @@ mod tests {
         ) -> Option<PoolLiquidityFacts> {
             self.0
         }
+        async fn token_market_data(&self, _c: i64, _t: &str) -> Option<TokenMarketData> {
+            None
+        }
     }
 
     #[tokio::test]
@@ -1620,11 +1704,15 @@ mod tests {
             &params,
             &StubPoolLiq(Some(PoolLiquidityFacts {
                 vol_24h_usd: Some(5000.0),
+                reserve_usd: Some(2_000_000.0),
             })),
         )
         .await
         .unwrap();
-        assert_eq!(v, serde_json::json!({ "vol24hUsd": "5000.0000" }));
+        assert_eq!(
+            v,
+            serde_json::json!({ "vol24hUsd": "5000.0000", "reserveUsd": "2000000.0000" })
+        );
     }
 
     #[tokio::test]
@@ -1661,6 +1749,7 @@ mod tests {
             &params,
             &StubPoolLiq(Some(PoolLiquidityFacts {
                 vol_24h_usd: Some(1.0),
+                reserve_usd: None,
             })),
         )
         .await
@@ -1674,6 +1763,83 @@ mod tests {
         let params = serde_json::json!({ "venue": { "name": "uniswap_v3", "pool": "0x01" } });
         assert!(
             super::pool_liquidity(&params, &StubPoolLiq(Some(PoolLiquidityFacts::default())))
+                .await
+                .is_none()
+        );
+    }
+
+    // ── token.market_data (microcap / thin-token buy) ───────────────────────
+
+    /// A test [`ExternalEnrichment`] returning a fixed token market-data verdict.
+    struct StubTokenMkt(Option<TokenMarketData>);
+    #[async_trait]
+    impl ExternalEnrichment for StubTokenMkt {
+        async fn reputation_flagged(&self, _c: i64, _a: &str) -> Option<bool> {
+            None
+        }
+        async fn recent_outbound(
+            &self,
+            _c: i64,
+            _o: &str,
+            _s: i64,
+        ) -> Option<Vec<OutboundTransfer>> {
+            None
+        }
+        async fn token_security_flags(&self, _c: i64, _t: &str) -> Option<TokenSecurityFlags> {
+            None
+        }
+        async fn pool_liquidity(
+            &self,
+            _c: i64,
+            _v: &serde_json::Value,
+        ) -> Option<PoolLiquidityFacts> {
+            None
+        }
+        async fn token_market_data(&self, _c: i64, _t: &str) -> Option<TokenMarketData> {
+            self.0
+        }
+    }
+
+    #[tokio::test]
+    async fn token_market_data_projects_fdv_and_liquidity_as_decimal_strings() {
+        let params = serde_json::json!({
+            "chain_id": "eip155:1",
+            "token": "0xABCdef0000000000000000000000000000000001"
+        });
+        let v = super::token_market_data(
+            &params,
+            &StubTokenMkt(Some(TokenMarketData {
+                fdv_usd: Some(500_000.0),
+                total_reserve_usd: Some(12_345.0),
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "fdvUsd": "500000.0000", "tokenLiquidityUsd": "12345.0000" })
+        );
+    }
+
+    #[tokio::test]
+    async fn token_market_data_missing_token_is_none() {
+        let params = serde_json::json!({ "chain_id": "eip155:1" });
+        assert!(super::token_market_data(
+            &params,
+            &StubTokenMkt(Some(TokenMarketData {
+                fdv_usd: Some(1.0),
+                ..Default::default()
+            })),
+        )
+        .await
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn token_market_data_empty_facts_is_none() {
+        let params = serde_json::json!({ "token": "0x0000000000000000000000000000000000000001" });
+        assert!(
+            super::token_market_data(&params, &StubTokenMkt(Some(TokenMarketData::default())))
                 .await
                 .is_none()
         );
