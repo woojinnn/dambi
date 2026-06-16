@@ -17,6 +17,10 @@
 #   REGISTRY_DEPLOY_SA     - signer/publisher SA email (needs roles/cloudkms.signerVerifier
 #                       on the key + roles/storage.objectAdmin on the bucket)
 #
+# Required repository variables:
+#   PINNED_BUNDLE_PUBLIC_KEY - prod SPKI base64 baked into extension releases;
+#                       must match the KMS key version used by this workflow.
+#
 # NOTE: deploy the proxy `/signatures/` allowlist (deploy/deploy-proxy.sh) BEFORE
 # flipping the extension's DAMBI_REQUIRE_BUNDLE_SIGNATURE=true, or installs would
 # 404 their signatures and fail-closed.
@@ -89,6 +93,29 @@ jobs:
         run: |
           npm ci
           npx vitest run src/__tests__/materialization-parity.test.ts
+
+      # Gate: the KMS key version used for signing MUST match the public key
+      # pinned into extension release artifacts. Signature coverage alone only
+      # proves every bundle has a sidecar; a stale/mismatched pin would still
+      # make REQUIRE=true clients reject every install.
+      - name: Verify KMS signing key matches extension pin
+        env:
+          PINNED_BUNDLE_PUBLIC_KEY: ${{ vars.PINNED_BUNDLE_PUBLIC_KEY }}
+        run: |
+          : "${PINNED_BUNDLE_PUBLIC_KEY:?set repo Variable PINNED_BUNDLE_PUBLIC_KEY (prod SPKI base64)}"
+          gcloud kms keys versions get-public-key "${KMS_KEY_VERSION}" \
+            --project="${PROJECT_ID}" \
+            --location="${REGION}" \
+            --keyring="${KMS_KEYRING}" \
+            --key="${KMS_KEY}" \
+            --format='value(pem)' > /tmp/registry-kms-public-key.pem
+          KMS_PIN="$(tr -d '\n\r ' < /tmp/registry-kms-public-key.pem | sed 's/-----BEGINPUBLICKEY-----//;s/-----ENDPUBLICKEY-----//')"
+          test "${KMS_PIN}" = "${PINNED_BUNDLE_PUBLIC_KEY}" || {
+            echo "PINNED_BUNDLE_PUBLIC_KEY does not match KMS signing key version ${KMS_KEY_VERSION}"
+            echo "KMS pin length=${#KMS_PIN}; repo pin length=${#PINNED_BUNDLE_PUBLIC_KEY}"
+            exit 1
+          }
+          echo "KMS signing key matches extension pin (len=${#PINNED_BUNDLE_PUBLIC_KEY})."
 
       # Hydrate already-published signatures so the KMS step only signs genuinely
       # NEW bundles. Without this a fresh runner re-signs the WHOLE corpus (30k+)

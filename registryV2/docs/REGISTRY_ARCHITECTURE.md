@@ -5,9 +5,9 @@
 > registry a **trusted supply chain** — a compromised or MITM'd registry cannot inject
 > a decode rule that silently flips a pre-sign verdict.
 >
-> Status: signing implemented + verified end-to-end (Phases 0–4). Enforcement is
-> **staged** — `DAMBI_REQUIRE_BUNDLE_SIGNATURE` ships **off** until the prod registry
-> is signed + the proxy `/signatures/` allowlist is deployed.
+> Status: signing implemented + verified end-to-end (Phases 0–4). Production
+> release artifacts enforce `DAMBI_REQUIRE_BUNDLE_SIGNATURE=true`; unsigned
+> registries are allowed only for explicit local/staging smoke builds.
 
 ---
 
@@ -211,15 +211,15 @@ Object **versioning** is enabled on the bucket. A bad publish rolls back by rest
 prior object versions (or re-publishing a prior `registry-v*` tag), live after the 5-min
 proxy cache TTL — **no extension change**.
 
-### Staged rollout (cutover order — do NOT skip)
+### Release prerequisite (cutover order — do NOT skip)
 1. Sign the prod registry + publish `signatures/` (`registry-publish.yml`).
 2. Deploy the proxy `/signatures/` allowlist (`deploy-proxy.sh`).
 3. Confirm live `.sig` coverage across the corpus.
-4. **Only then** set `DAMBI_REQUIRE_BUNDLE_SIGNATURE=true` (with the prod pinned key) and ship
-   an extension release.
+4. Keep `DAMBI_REQUIRE_BUNDLE_SIGNATURE=true` (with the prod pinned key) and ship an extension
+   release.
 
-Flipping the flag before steps 1–3 would 404 every signature → fail-closed → the extension
-decodes nothing.
+Shipping before steps 1–3 would 404 every signature → fail-closed → the extension decodes
+nothing.
 
 ### Observability + cost guards (Tier D)
 `provision-monitoring.sh` (operator-run, idempotent) wires Cloud Monitoring to the prod proxy:
@@ -337,12 +337,12 @@ The prod **pinned public key differs** from PoC (new HSM key) — see channel pi
   (`registry-publish.yml`, KMS via WIF) once the GitHub secrets above are set.
 - **Custom domain** — DECLINED: the `*.run.app` host is the stable production endpoint (baked into
   the build via DefinePlugin, never user-entered, no project number → no churn).
-- **Extension cutover**: `.env` already targets the prod URL + prod `PINNED_BUNDLE_PUBLIC_KEY`
-  (`DAMBI_REQUIRE_BUNDLE_SIGNATURE` staged OFF). Flipping REQUIRE + shipping a store release is the
-  remaining rollout step (gated on the Tier-B coverage gate + Tier-D monitoring).
+- **Extension cutover**: `.env` targets the prod URL + prod `PINNED_BUNDLE_PUBLIC_KEY`, and release
+  artifacts require `DAMBI_REQUIRE_BUNDLE_SIGNATURE=true` (gated on the Tier-B coverage gate +
+  Tier-D monitoring).
 
 ### Cutover order & rollback
 Provision prod → copy data → re-sign → deploy proxy → smoke → **switch extension `.env`** →
 deprecation window → (optional) decommission PoC. Until the extension `.env` switch, PoC remains
-source-of-truth (**zero risk**). After it, roll back by re-releasing with the PoC URL. With
-`DAMBI_REQUIRE_BUNDLE_SIGNATURE` **off**, a sig gap during transition is soft-pass (no hard break).
+source-of-truth (**zero risk**). After it, roll back by re-releasing with the PoC URL. Production
+release builds keep `DAMBI_REQUIRE_BUNDLE_SIGNATURE` **on**, so signature coverage gaps fail closed.
