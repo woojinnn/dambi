@@ -82,6 +82,82 @@
   font-size: 13px;
   color: var(--slate-500);
 }
+
+/* 정책/패키지 탭 */
+.pp-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.pp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slate-500);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.pp-tab:hover {
+  color: var(--slate-800);
+}
+.pp-tab.on {
+  color: var(--slate-900);
+  border-bottom-color: var(--slate-900);
+}
+.pp-tab-n {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--slate-500);
+  background: var(--fog-300);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 페이지네이션 */
+.pp-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 14px;
+}
+.pp-pager-nav,
+.pp-pager-num {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--slate-700);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.pp-pager-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pp-pager-num:hover:not(.on) {
+  border-color: var(--slate-400);
+}
+.pp-pager-num.on {
+  background: var(--slate-900);
+  border-color: var(--slate-900);
+  color: #fff;
+}
+.pp-pager-gap {
+  padding: 0 4px;
+  color: var(--slate-400);
+}
 .pp-empty {
   font-size: 13px;
   color: var(--slate-500);
