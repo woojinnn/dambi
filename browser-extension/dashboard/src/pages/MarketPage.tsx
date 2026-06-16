@@ -119,21 +119,29 @@ function LandingView({ locale }: { locale: MarketLocale }) {
   // Single 100-item fetch powers everything on the landing page (counts,
   // coverage, official packages, popular policies) — minimal backend calls,
   // all real data. 35 seed policies + a few packages fit under the ceiling.
+  // Count tiles must reflect the WHOLE catalog, so fetch up to the server cap
+  // (LIST_LIMIT_MAX = 500). A small limit truncates by install-count sort and
+  // drops whole categories of brand-new (0-install) listings from the counts.
   const allQ = useQuery({
     queryKey: ["market-all-for-landing"],
-    queryFn: () => listListings({ limit: 100 }),
+    queryFn: () => listListings({ limit: 500 }),
   });
   const all = allQ.data ?? [];
 
   // Per-category listing counts, split by kind (정책/패키지), + how many are
   // already installed (hero "gaps in coverage" fallback still uses this).
+  // The browse list filters by the server `category` column for BOTH kinds, so
+  // count by that same key (sets included) — listingCategoryKey() returns null
+  // for sets and would zero out every package count.
   const { counts, policyCounts, pkgCounts, installed } = useMemo(() => {
     const counts = new Map<CategoryKey, number>();
     const policyCounts = new Map<CategoryKey, number>();
     const pkgCounts = new Map<CategoryKey, number>();
     const installed = new Map<CategoryKey, number>();
+    const catOf = (l: ListingSummary): CategoryKey | null =>
+      isCategoryKey(l.category) ? l.category : l.kind === "policy" ? categoryOf(l.slug) : null;
     all.forEach((l) => {
-      const c = listingCategoryKey(l);
+      const c = catOf(l);
       if (!c) return;
       counts.set(c, (counts.get(c) ?? 0) + 1);
       const bucket = l.kind === "set" ? pkgCounts : policyCounts;
