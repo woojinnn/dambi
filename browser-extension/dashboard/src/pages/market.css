@@ -1940,6 +1940,15 @@
   gap: 8px;
 }
 .im-holes-head { font-size: 13px; font-weight: 600; }
+.im-wparams { margin-top: 12px; }
+.im-wparams-head {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--slate-700, #334155);
+  margin-bottom: 2px;
+  padding-left: 2px;
+}
+.im-wparams .im-holes { margin-top: 6px; }
 .im-holes-defname { font-size: 12px; font-weight: 600; opacity: 0.75; margin-top: 4px; }
 .im-hole { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .im-hole-label { font-size: 12px; font-weight: 500; }
@@ -2047,6 +2056,7 @@
 .rm-defpart { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--warn-700); font-variant-numeric: tabular-nums; }
 .rm-defempty { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--slate-300); }
 .rm-deftile-nm { font-size: 12.5px; font-weight: 700; line-height: 1.25; }
+.rm-defcount { font-size: 11px; font-weight: 600; color: var(--slate-400); font-variant-numeric: tabular-nums; }
 .rm-defbar { height: 4px; border-radius: 2px; background: var(--fog-500); overflow: hidden; }
 .rm-defbar span { display: block; height: 100%; border-radius: 2px; }
 

@@ -81,8 +81,10 @@ export interface WalletOnlyInstallChoice {
   walletPackages: Record<string, WalletPkgPick>;
   /** find-or-create·중복 바인딩 가드용 현재 스토어 스냅샷. */
   snap: StoreSnapshot;
-  /** 채워진 required hole 값. */
+  /** 채워진 required hole 값(모든 지갑 공통 폴백 / 라이브러리 def 기본값). */
   params?: InstallParams;
+  /** 지갑별 required hole 값 — 있으면 그 지갑 바인딩엔 이 값을 쓴다(공통보다 우선). */
+  paramsByAddress?: Record<string, InstallParams>;
 }
 
 /** 지갑 전용 설치: def는 hidden으로 라이브러리에 넣고(카탈로그 비노출), 지갑별
@@ -133,13 +135,15 @@ export async function installListingWalletOnlyV2(
         await putWalletPackage({ address, pkg: { id: pkgId, displayName: pick.newName } });
       }
     }
+    // 지갑별 입력이 있으면 그 지갑 바인딩엔 그 값을, 없으면 공통 값을 쓴다.
+    const walletFilled = choice.paramsByAddress?.[address] ?? filled;
     for (const d of defs) {
       // 같은 패키지에 이미 들어 있으면 줄을 또 만들지 않는다(재설치 멱등).
       const dup = Object.values(w?.bindings ?? {}).some(
         (b) => b.defId === d.id && b.packageId === pkgId,
       );
       if (!dup) {
-        const params = filled[d.id];
+        const params = walletFilled[d.id];
         await bindDef({
           defId: d.id,
           packageId: pkgId,
