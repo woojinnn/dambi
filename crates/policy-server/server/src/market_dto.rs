@@ -100,6 +100,9 @@ pub struct ListingSummary {
     pub domain: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    /// Authoring docs (정의/범위/대상/데이터) — opaque JSON object echoed verbatim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intents: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -215,6 +218,9 @@ pub struct CreateListingReq {
     pub domain: Option<String>,
     #[serde(default)]
     pub category: Option<String>,
+    /// Authoring docs (정의/범위/대상/데이터) — stored verbatim as JSONB.
+    #[serde(default)]
+    pub doc: Option<Value>,
     #[serde(default)]
     pub intents: Option<Vec<String>>,
     #[serde(default)]
