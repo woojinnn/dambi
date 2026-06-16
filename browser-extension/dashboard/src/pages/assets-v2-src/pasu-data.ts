@@ -263,7 +263,23 @@ function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, de
   const out: PasuApprRow[] = [];
   ap.erc20.forEach((a) => {
     const dec = decLookup.get(`${a.chain}|${a.token.toLowerCase()}`) ?? 0;
-    const amount = a.is_unlimited ? "Unlimited" : fmtBal(toHuman(num(a.amount), dec));
+    // 무제한 승인은 서버 is_unlimited 플래그뿐 아니라 원시 금액 크기로도 판정한다.
+    // maxUint256 같은 "사실상 무제한" 센티넬을 서버가 놓치면 raw 정수가 그대로
+    // (또는 decimals 미상이라 더 크게) 출력되는데, 2^255 이상은 정상 승인일 수
+    // 없으므로 무제한으로 본다.
+    const rawBig = (() => {
+      try {
+        return BigInt(a.amount);
+      } catch {
+        return null;
+      }
+    })();
+    const unlimited = a.is_unlimited || (rawBig !== null && rawBig >= 1n << 255n);
+    const amount = unlimited ? "Unlimited" : fmtBal(toHuman(num(a.amount), dec));
+    const riskTags = a.risk as string[];
+    const risk = visibleRisk(
+      unlimited && !riskTags.includes("UNLIMITED") ? [...riskTags, "UNLIMITED"] : riskTags,
+    );
     out.push({
       w: walletAddr,
       type: "erc20",
@@ -271,7 +287,7 @@ function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, de
       spender: shortAddr(a.spender),
       chain: a.chain,
       amount,
-      risk: visibleRisk(a.risk as string[]),
+      risk,
       revoke: true,
     });
   });
