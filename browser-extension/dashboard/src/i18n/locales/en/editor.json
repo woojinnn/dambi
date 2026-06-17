@@ -374,6 +374,7 @@
     "formTab": "Form",
     "llmTab": "LLM",
     "llmBadModel": "The policy the LLM produced isn't in a valid shape. Please try again.",
+    "llmWarnPrefix": "Heads up:",
     "deleteConfirm": "Delete the policy \"{{name}}\"?",
     "deleteConfirmUsed": "Delete the policy \"{{name}}\"?\nIt will also be removed from {{count}} wallet(s).",
     "invalidSaveTitle": "Invalid format — pressing this reverts to the state before your changes",

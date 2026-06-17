@@ -57,6 +57,7 @@ import {
 } from "../../../editor-v9/manifest-gen";
 
 import { CustomFieldModal } from "./CustomFieldModal";
+import { methodDerivedFields } from "./custom-field-methods";
 import { FieldCombobox, ROLE_ORDER, roleColor, roleLabel, typeChip } from "./FieldCombobox";
 
 import "./policy-form.css";
@@ -350,13 +351,29 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
     userFieldsFromManifest(initialManifest, actionTagOf((initialModel ?? emptyFormModel()).trigger)),
   );
   const [fieldModalOpen, setFieldModalOpen] = useState(false);
+
+  const baseFields = useMemo(() => fieldsForTrigger(model.trigger), [model.trigger]);
+  // 이 액션에 적용 가능한 실구현(real) 메서드를 보강 필드로 전개. 폼·LLM·서버가
+  // 같은 deterministic 이름을 쓰므로, LLM 이 생성한 정책이든 수동 선택이든 동일하게
+  // manifest 가 만들어진다(아래 registry 에 합침). mock 은 여기서 제외(경고는 LLM 측).
+  const derivedReal = useMemo(() => {
+    const tag = actionTagOf(model.trigger);
+    if (!tag) return [];
+    const paths = baseFields.filter((f) => f.source === "base").map((f) => f.path);
+    return methodDerivedFields(tag, paths).filter((d) => !d.mock);
+  }, [model.trigger, baseFields]);
+
   const registry = useMemo<EnrichmentRegistry>(
-    () => ({ ...ENRICHMENT_FIELDS, ...userFields }),
-    [userFields],
+    () => ({
+      ...ENRICHMENT_FIELDS,
+      ...Object.fromEntries(derivedReal.map((d) => [d.name, d.field])),
+      ...userFields,
+    }),
+    [derivedReal, userFields],
   );
 
   const fields = useMemo(() => {
-    const extra: FieldOption[] = Object.entries(userFields).map(([name, def]) => ({
+    const toOption = (name: string, def: EnrichmentRegistry[string]): FieldOption => ({
       path: `context.custom.${name}`,
       label: def.label.ko,
       fieldKind: KIND_BY_TYPE[def.type],
@@ -364,9 +381,21 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
       source: "custom" as const,
       optional: true,
       desc: t("form.callValueDesc", { method: def.method }),
-    }));
-    return [...fieldsForTrigger(model.trigger), ...extra];
-  }, [model.trigger, userFields, t]);
+    });
+    const extra = Object.entries(userFields).map(([name, def]) => toOption(name, def));
+    // 이 액션에 쓸 수 있는 내장 보강 필드 + 실구현 메서드-파생 필드도 후보로 노출
+    // (LLM/수동 작성 모두). userFields 와 중복 제외. 적용 여부는 manifest-gen 과 동일.
+    const tag = actionTagOf(model.trigger);
+    const builtin = tag
+      ? Object.entries(ENRICHMENT_FIELDS)
+          .filter(([name, def]) => !(name in userFields) && def.appliesTo.includes(tag))
+          .map(([name, def]) => toOption(name, def))
+      : [];
+    const derived = derivedReal
+      .filter((d) => !(d.name in userFields))
+      .map((d) => toOption(d.name, d.field));
+    return [...baseFields, ...extra, ...builtin, ...derived];
+  }, [baseFields, userFields, t, derivedReal, model.trigger]);
   const rhsFields = useMemo(() => [principalAddressField(), ...fields], [fields]);
   const fieldByPath = useMemo(() => {
     const m = new Map<string, FieldOption>();

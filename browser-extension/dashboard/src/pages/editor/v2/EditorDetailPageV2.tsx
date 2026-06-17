@@ -281,6 +281,8 @@ function EditorBody({
   });
   const [resetToken, setResetToken] = useState(0);
   const [revertNotice, setRevertNotice] = useState<string | null>(null);
+  // LLM 이 남긴 경고(예: mock 메서드라 표현 못 한 부분) — 폼 탭으로 넘어가도 보이게.
+  const [llmWarn, setLlmWarn] = useState<string | null>(null);
   // 정책 문서(정의/범위/대상/데이터). 발행 시 함께 올라간다. 빈 칸은 저장 안 함.
   // EditorBody는 policy.id로 remount되므로 초기값을 storedDef.doc에서 읽으면 충분.
   const [docDefinition, setDocDefinition] = useState(() => storedDef?.doc?.definition ?? "");
@@ -729,7 +731,7 @@ function EditorBody({
   /** LLM 탭에서 생성한 FormModel 을 폼 탭에 적용한다. 헤더가 소유한 slug/severity 를
    *  주입하고, 변환 가능 여부를 로컬에서 한번 검증(WASM 불필요)한 뒤 폼 탭으로 전환한다.
    *  부분집합 밖이면 throw → LlmPane 이 에러를 보여준다. */
-  const applyLlmModel = async (model: FormModel) => {
+  const applyLlmModel = async (model: FormModel, warnings: string[] = []) => {
     // LLM 산출물은 신뢰하지 않고 최소 형태를 보정한다(누락 필드로 변환기가 죽는 것 방지).
     const m = (model ?? {}) as Partial<FormModel>;
     const normalized: FormModel = {
@@ -752,6 +754,7 @@ function EditorBody({
     setFormKey((k) => k + 1);
     setLastModel(normalized);
     setSeverity(normalized.severity as PolicySeverity);
+    setLlmWarn(warnings.length > 0 ? warnings.join(" · ") : null);
     setTab("form");
   };
 
@@ -938,6 +941,12 @@ function EditorBody({
         <div className="ev2-err-banner warn">
           <WarnIcon />
           {revertNotice}
+        </div>
+      )}
+      {llmWarn && (
+        <div className="ev2-err-banner warn">
+          <WarnIcon />
+          {t("detail.llmWarnPrefix")} {llmWarn}
         </div>
       )}
 
@@ -1141,7 +1150,7 @@ function CedarPane({
 
 /** LLM 탭 — 자연어 의도를 적으면 LLM 이 FormModel 을 만들어 폼 탭으로 넘긴다.
  *  생성 성공 시 onModel 이 폼 탭으로 전환하므로 여기선 입력/진행/에러만 다룬다. */
-function LlmPane({ onModel }: { onModel: (m: FormModel) => Promise<void> }) {
+function LlmPane({ onModel }: { onModel: (m: FormModel, warnings: string[]) => Promise<void> }) {
   const { t } = useTranslation("editor");
   const [intent, setIntent] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1155,8 +1164,8 @@ function LlmPane({ onModel }: { onModel: (m: FormModel) => Promise<void> }) {
     setBusy(true);
     setError(null);
     try {
-      const model = await llmDraftPolicy({ intent: text });
-      await onModel(model);
+      const { model, warnings } = await llmDraftPolicy({ intent: text });
+      await onModel(model, warnings);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
