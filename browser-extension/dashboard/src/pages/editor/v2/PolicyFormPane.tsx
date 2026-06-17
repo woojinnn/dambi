@@ -57,7 +57,7 @@ import {
 } from "../../../editor-v9/manifest-gen";
 
 import { CustomFieldModal } from "./CustomFieldModal";
-import { FieldCombobox } from "./FieldCombobox";
+import { FieldCombobox, ROLE_ORDER, roleColor, roleLabel, typeChip } from "./FieldCombobox";
 
 import "./policy-form.css";
 import "./policy-value-sheet.css";
@@ -269,7 +269,13 @@ function actionTagOf(trigger: FormTrigger): string | null {
 }
 
 /** 저장된 manifest에서 사용자 정의 보강 필드(기본 레지스트리에 없는
- *  policy_rpc 항목)를 복원한다. 형태가 어긋나는 항목은 조용히 건너뜀. */
+ *  policy_rpc 출력)를 복원한다. 형태가 어긋나는 항목은 조용히 건너뜀.
+ *
+ *  `context.custom.<X>`는 rpc.id가 아니라 출력의 `field`(=context 출력 이름)에
+ *  매인다 — rpc.id는 호출 식별자일 뿐이라 필드 이름과 다를 수 있다(예:
+ *  id "session-fill-stats" → field "lossStreak"). 그래서 rpc.id가 아니라 각
+ *  출력의 `field`를 키로 등록하고, 한 호출이 여러 context 필드를 내보내면
+ *  필드마다 따로 등록한다. */
 function userFieldsFromManifest(manifest: unknown, actionTag: string | null): EnrichmentRegistry {
   const out: EnrichmentRegistry = {};
   const m = manifest as
@@ -283,24 +289,27 @@ function userFieldsFromManifest(manifest: unknown, actionTag: string | null): En
   const types = m.custom_context?.fields ?? {};
   for (const raw of m.policy_rpc) {
     const rpc = raw as {
-      id?: unknown;
       method?: unknown;
       params?: unknown;
-      outputs?: { from?: unknown }[];
+      outputs?: { kind?: unknown; field?: unknown; type?: unknown; from?: unknown }[];
     };
-    if (typeof rpc?.id !== "string" || typeof rpc?.method !== "string") continue;
-    if (rpc.id in ENRICHMENT_FIELDS) continue; // 내장 필드는 레지스트리가 원본
-    const type = types[rpc.id];
-    if (type !== "decimal" && type !== "Long" && type !== "Bool" && type !== "String") continue;
-    const from = rpc.outputs?.[0]?.from;
-    out[rpc.id] = {
-      type,
-      label: { ko: rpc.id, en: rpc.id },
-      appliesTo: actionTag ? [actionTag] : [],
-      method: rpc.method,
-      projection: typeof from === "string" ? from : "$.result.value",
-      params: (rpc.params ?? {}) as EnrichmentRegistry[string]["params"],
-    };
+    if (typeof rpc?.method !== "string" || !Array.isArray(rpc.outputs)) continue;
+    for (const o of rpc.outputs) {
+      if (o?.kind !== "context" || typeof o.field !== "string") continue;
+      const field = o.field;
+      if (field in ENRICHMENT_FIELDS) continue; // 내장 필드는 레지스트리가 원본
+      // 타입은 출력에 박힌 값을 우선하고, 없으면 custom_context.fields에서 찾는다.
+      const type = typeof o.type === "string" ? o.type : types[field];
+      if (type !== "decimal" && type !== "Long" && type !== "Bool" && type !== "String") continue;
+      out[field] = {
+        type,
+        label: { ko: field, en: field },
+        appliesTo: actionTag ? [actionTag] : [],
+        method: rpc.method,
+        projection: typeof o.from === "string" ? o.from : "$.result.value",
+        params: (rpc.params ?? {}) as EnrichmentRegistry[string]["params"],
+      };
+    }
   }
   return out;
 }
@@ -1493,7 +1502,6 @@ function ConditionRow({
   // 필드-비교 RHS는 LHS와 값 타입이 맞는 필드만 — 하나도 없으면 토글 자체를 숨김.
   const rhsOptions = compatibleRhsFields(ctx.rhsFields, field);
   const canField = SCALAR_OPS.has(cond.op) && rhsOptions.length > 0;
-  const fieldMode = cond.value.kind === "field";
   return (
     <div
       className={`pf-cond${selected ? " is-selected" : ""}`}
@@ -1544,27 +1552,16 @@ function ConditionRow({
             </select>
           </>
         )}
-        {canField && (
-          <button
-            type="button"
-            className="pf-ctl pf-mode"
-            onClick={() =>
-              onValue(
-                fieldMode
-                  ? defaultValueOfKind(valueKindFor(field, cond.op))
-                  : { kind: "field", path: rhsOptions[0]?.path ?? "principal.address" },
-              )
-            }
-            title={fieldMode ? t("form.toValueTitle") : t("form.toFieldTitle")}
-          >
-            {fieldMode ? t("form.fieldWord") : t("form.valueWord")}
-          </button>
-        )}
-        {fieldMode ? (
-          <FieldCombobox
-            value={cond.value.kind === "field" ? cond.value.path : ""}
-            fields={rhsOptions}
-            onChange={(p) => onValue({ kind: "field", path: p })}
+        {canField ? (
+          // 값/필드 토글을 없애고 하나의 콤보박스로 합쳤다 — 드롭다운 상단에서
+          // 값을 직접 입력하거나, 아래 목록에서 비교할 필드를 고른다.
+          <RhsCombobox
+            value={cond.value}
+            field={field}
+            op={cond.op}
+            rhsOptions={rhsOptions}
+            ctx={ctx}
+            onChange={onValue}
           />
         ) : (
           <ValueInput value={cond.value} field={field} onChange={onValue} />
@@ -1593,6 +1590,164 @@ function ConditionRow({
         )}
       </div>
       {cond.fieldPath && <div className="pf-cond-chip">{chip}</div>}
+    </div>
+  );
+}
+
+/**
+ * RhsCombobox — 비교 대상(RHS) 입력. 예전의 "필드/값" 토글 + 별도 위젯을 하나의
+ * 콤보박스로 합쳤다: 버튼을 누르면 드롭다운 상단에서 값을 직접 입력하거나,
+ * 그 아래 목록에서 비교할 다른 필드를 고른다. 값을 입력하면 리터럴 비교가 되고,
+ * 필드를 고르면 필드-대-필드 비교가 된다.
+ */
+function RhsCombobox({
+  value,
+  field,
+  op,
+  rhsOptions,
+  ctx,
+  onChange,
+}: {
+  value: FormValue;
+  field: FieldOption | undefined;
+  op: FormOp;
+  rhsOptions: FieldOption[];
+  ctx: EditorCtx;
+  onChange: (v: FormValue) => void;
+}) {
+  const { t } = useTranslation("editor");
+  const book = useAddressBook();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const fieldMode = value.kind === "field";
+  const selected = fieldMode ? rhsOptions.find((f) => f.path === value.path) : undefined;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  // 값 입력 위젯에 채울 값 — 필드 모드면 빈 리터럴부터 시작(입력 즉시 값 비교로).
+  const literal: FormValue = fieldMode ? defaultValueOfKind(valueKindFor(field, op)) : value;
+  const btnText = fieldMode ? "" : valueText(value, ctx, field);
+
+  // 이 필드가 가진 추천 값 — 목록에서 바로 고른다. 주소 필드는 주소록(내 지갑·
+  // 보유 토큰), enum 필드는 어휘 목록(uniswap_v2…). 둘 다 같은 행 모양으로 그린다.
+  const valueSel = !fieldMode && value.kind === "string" ? value.value : null;
+  const suggestions: { value: string; label: string; sub?: string; kind?: AddressEntry["kind"] }[] =
+    useMemo(() => {
+      if (field && stringFlavor(field) === "address") {
+        return book.suggestions.map((m) => ({
+          value: m.address,
+          label: m.name,
+          sub: `${m.sub} · ${shortAddress(m.address)}`,
+          kind: m.kind,
+        }));
+      }
+      const enums = field ? ENUM_SUGGESTIONS[field.path] : undefined;
+      return enums ? enums.map((s) => ({ value: s, label: s })) : [];
+    }, [field, book.suggestions]);
+
+  // 비교 가능한 필드 목록을 역할별로 묶는다(콤보박스와 동일한 분류·색 점).
+  const groups = useMemo(() => {
+    const m = new Map<FieldOption["role"], FieldOption[]>();
+    for (const f of rhsOptions) {
+      const arr = m.get(f.role) ?? [];
+      arr.push(f);
+      m.set(f.role, arr);
+    }
+    return ROLE_ORDER.filter((r) => m.has(r)).map((r) => ({ role: r, items: m.get(r)! }));
+  }, [rhsOptions]);
+
+  return (
+    <div className="fc" ref={rootRef}>
+      <button
+        type="button"
+        className={`fc-btn${selected || btnText ? "" : " empty"}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {selected ? (
+          <>
+            <span className="fc-dot" style={{ background: roleColor(selected.role) }} />
+            <span className="fc-btn-label">{selected.label}</span>
+            {selected.source === "custom" && <span className="fc-badge">{t("combobox.enrichBadge")}</span>}
+          </>
+        ) : (
+          <span className="fc-btn-label">{btnText || t("combobox.pickField")}</span>
+        )}
+        <span className="fc-caret">▾</span>
+      </button>
+
+      {open && (
+        <div className="fc-pop">
+          <div className="fc-valbox">
+            <span className="fc-valbox-h">{t("combobox.literalHead")}</span>
+            <ValueInput value={literal} field={field} noDatalist onChange={onChange} />
+          </div>
+          {(suggestions.length > 0 || groups.length > 0) && (
+            <div className="fc-list">
+              {suggestions.length > 0 && (
+                <div className="fc-group">
+                  <div className="fc-cmp-h">{t("combobox.suggestHead")}</div>
+                  {suggestions.map((s) => (
+                    <button
+                      type="button"
+                      key={s.value}
+                      className={`fc-opt${valueSel === s.value ? " sel" : ""}`}
+                      onClick={() => {
+                        onChange({ kind: "string", value: s.value });
+                        setOpen(false);
+                      }}
+                    >
+                      <div className="fc-opt-top">
+                        {s.kind && <span className={`pf-addr-dot ${s.kind}`} aria-hidden />}
+                        <span className="fc-opt-label">{s.label}</span>
+                        {s.sub && <span className="fc-opt-sub">{s.sub}</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {groups.length > 0 && (
+                <details className="fc-cmp-more" open={suggestions.length === 0}>
+                  <summary>{t("combobox.fieldsHead")}</summary>
+                  {groups.map((g) => (
+                    <div key={g.role} className="fc-group">
+                      <div className="fc-group-h">
+                        <span className="fc-dot" style={{ background: roleColor(g.role) }} />
+                        {roleLabel(g.role)}
+                      </div>
+                      {g.items.map((f) => (
+                        <button
+                          type="button"
+                          key={f.path}
+                          className={`fc-opt${fieldMode && f.path === value.path ? " sel" : ""}`}
+                          onClick={() => {
+                            onChange({ kind: "field", path: f.path });
+                            setOpen(false);
+                          }}
+                        >
+                          <div className="fc-opt-top">
+                            <span className="fc-opt-label">{f.label}</span>
+                            {f.source === "custom" && <span className="fc-badge">{t("combobox.enrichBadge")}</span>}
+                            {f.unit && <span className="fc-unit">{f.unit}</span>}
+                            <span className="fc-chip">{typeChip(f, t)}</span>
+                          </div>
+                          {f.desc && <div className="fc-opt-desc">{f.desc}</div>}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1655,12 +1810,16 @@ function ValueInput({
   value,
   field,
   invalid,
+  noDatalist,
   onChange,
 }: {
   value: FormValue;
   field: FieldOption | undefined;
   /** 형식 오류 표시(빨간 테두리) — 값 시트에서 잘못된 decimal 등에 쓰임. */
   invalid?: boolean;
+  /** 네이티브 추천 datalist를 끈다 — RhsCombobox가 추천 값을 직접 그릴 때 중복
+   *  드롭다운을 막으려고 쓴다. */
+  noDatalist?: boolean;
   onChange: (v: FormValue) => void;
 }) {
   const { t } = useTranslation("editor");
@@ -1742,13 +1901,14 @@ function ValueInput({
         return (
           <AddressInput
             value={value.value}
+            suppressSuggest={noDatalist}
             onChange={(v) => onChange({ kind: "string", value: v })}
           />
         );
       }
       // A suggestion list applies whenever we know one for the path (e.g.
       // venue names), not only for role-"enum" fields.
-      const sugg = field ? ENUM_SUGGESTIONS[field.path] : undefined;
+      const sugg = field && !noDatalist ? ENUM_SUGGESTIONS[field.path] : undefined;
       if (flavor === "enum" || sugg) {
         const listId = `enum-${field?.path ?? ""}`;
         return (

@@ -65,8 +65,12 @@
   },
   "combobox": {
     "enrichBadge": "enriched",
-    "pickField": "Pick a field…",
+    "pickField": "Enter a value or pick a field…",
     "searchPlaceholder": "Search fields…",
+    "valuePlaceholder": "Enter a value…",
+    "literalHead": "Enter a value",
+    "suggestHead": "Suggested values",
+    "fieldsHead": "Compare to a field",
     "noMatch": "No matching fields",
     "hideAdvanced": "▾ Hide advanced fields",
     "showAdvanced": "▸ Show advanced fields ({{count}})"
@@ -318,6 +322,20 @@
     "folderDeletedToast": "Folder deleted — its policies moved to Uncategorized",
     "defRowTitle": "Click to edit the template · drag to apply to a package / move to a dedicated folder"
   },
+  "llm": {
+    "title": "Describe the policy in plain language",
+    "hint": "An LLM turns your intent into a policy, then drops it into the Form tab for review. ⌘/Ctrl + Enter to generate.",
+    "placeholder": "e.g. Block swaps whose output goes to an address other than my own wallet",
+    "generate": "Generate",
+    "generating": "Generating…",
+    "examplesLabel": "Examples",
+    "examples": [
+      "Block swaps whose output goes to an address other than my own wallet",
+      "Block token transfers to a burn address (0x0…0 / 0x…dead)",
+      "Block unlimited approvals (uint256/uint160 max), except when the spender is Permit2",
+      "Warn on unidentified blind-signature requests"
+    ]
+  },
   "detail": {
     "backToList": "← List",
     "notFoundTitle": "Policy not found",
@@ -354,6 +372,8 @@
     "fromMarket": "From Policy Hub",
     "readOnlyBadge": "Read-only",
     "formTab": "Form",
+    "llmTab": "LLM",
+    "llmBadModel": "The policy the LLM produced isn't in a valid shape. Please try again.",
     "deleteConfirm": "Delete the policy \"{{name}}\"?",
     "deleteConfirmUsed": "Delete the policy \"{{name}}\"?\nIt will also be removed from {{count}} wallet(s).",
     "invalidSaveTitle": "Invalid format — pressing this reverts to the state before your changes",

@@ -1,6 +1,7 @@
 {
   "loading": "Loading…",
   "save": "Save",
+  "saving": "Saving…",
   "cancel": "Cancel",
   "delete": "Delete",
   "close": "Close",
@@ -42,7 +43,15 @@
     "languageTitle": "Language",
     "languageDesc": "Choose the language for the dashboard UI.",
     "languageKo": "한국어",
-    "languageEn": "English"
+    "languageEn": "English",
+    "openaiTitle": "OpenAI API key",
+    "openaiDesc": "Used server-side to draft policies from natural language in the editor's LLM tab. Stored on the server and never shown again — only that a key is set.",
+    "openaiPlaceholder": "sk-…",
+    "openaiPlaceholderSet": "A key is set — enter a new one to replace it",
+    "openaiStatusSet": "Configured",
+    "openaiClear": "Clear",
+    "openaiSaved": "Saved",
+    "openaiSaveError": "Failed to save the API key: {{error}}"
   },
   "profile": {
     "title": "Profile",

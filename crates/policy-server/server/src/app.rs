@@ -256,6 +256,15 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
             patch(market_handlers::update_report_status),
         )
         .route("/market/watches", get(market_handlers::list_watches))
+        // ---- Settings + LLM policy drafting --------------------------------
+        .route(
+            "/v2/settings",
+            get(crate::llm_handlers::get_settings).put(crate::llm_handlers::put_settings),
+        )
+        .route(
+            "/v2/policy/llm-draft",
+            post(crate::llm_handlers::draft_policy),
+        )
         // Selector decode + revoke calldata builder + Cedar sequence sim
         // all moved to the dashboard (apps/web/src/tools/* + cedar/).
         // The server holds only wallet state and sync lifecycle data.

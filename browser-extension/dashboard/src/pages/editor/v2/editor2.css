@@ -222,6 +222,10 @@
 .e2 .pcard { perspective:1500px; height:258px; }
 .e2 .pcard-in { position:relative; width:100%; height:100%; transition:transform .52s cubic-bezier(.34,.9,.28,1); transform-style:preserve-3d; }
 .e2 .pcard.flip .pcard-in { transform:rotateY(180deg); }
+/* 안 보이는 면이 클릭을 가로채지 못하게 — 뒤집힌 상태에서 ← 화살표/o·x 가 안
+   먹던 버그 방지(홈 카드와 동일 처리). 보이는 면만 상호작용. */
+.e2 .pcard:not(.flip) .pback { pointer-events:none; }
+.e2 .pcard.flip .pfront { pointer-events:none; }
 .e2 .pface { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden;
   border:1px solid var(--line); border-radius:16px; background:var(--surface);
   box-shadow:0 1px 2px rgba(20,30,25,.04), 0 8px 22px -18px rgba(20,30,25,.4); display:flex; flex-direction:column; overflow:hidden; }

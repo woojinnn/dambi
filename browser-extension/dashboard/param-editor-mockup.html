@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>파라미터 에디터 목업 — 3안 비교</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1d212b;
+    --line: #2a2f3a;
+    --line-soft: #232834;
+    --ink: #e8ebf1;
+    --ink-2: #aab2c0;
+    --ink-3: #707888;
+    --accent: #5b8cff;
+    --accent-soft: #1e2942;
+    --danger: #ff6b6b;
+    --danger-soft: #3a1f23;
+    --ok: #3fcf8e;
+    --warn: #ffb454;
+    --chip: #232a38;
+    --radius: 12px;
+    --shadow: 0 8px 30px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1200px 600px at 50% -10%, #1a1e28 0%, var(--bg) 60%);
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", Roboto, "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 1320px; margin: 0 auto; }
+  h1.page { font-size: 22px; margin: 0 0 4px; letter-spacing: -.01em; }
+  p.sub { color: var(--ink-2); margin: 0 0 8px; }
+  p.note { color: var(--ink-3); margin: 0 0 32px; font-size: 12.5px; }
+  .note code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; color: var(--ink-2); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+
+  .col-head {
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 0 12px;
+  }
+  .badge {
+    width: 26px; height: 26px; border-radius: 8px;
+    display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent);
+    font-weight: 700; font-size: 13px;
+  }
+  .col-head h2 { font-size: 15px; margin: 0; }
+  .col-head .tag { margin-left: auto; font-size: 11.5px; color: var(--ink-3); }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  /* ---- shared sheet header ---- */
+  .sheet-top {
+    display: flex; align-items: center; gap: 10px;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .sheet-title { font-weight: 650; font-size: 15px; letter-spacing: -.01em; }
+  .sheet-top .spacer { flex: 1; }
+
+  /* enable toggle */
+  .toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--ink-2);
+  }
+  .switch {
+    width: 38px; height: 22px; border-radius: 999px;
+    background: linear-gradient(90deg, var(--ok), #2fae77);
+    position: relative; cursor: pointer; border: none;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 18px;
+    width: 18px; height: 18px; border-radius: 50%; background: #fff;
+    transition: left .15s;
+  }
+  .switch.off { background: var(--line); }
+  .switch.off::after { left: 2px; }
+
+  /* read-only "what it checks" line */
+  .whatline {
+    padding: 11px 18px;
+    background: var(--panel-2);
+    color: var(--ink-2);
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--line-soft);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .whatline .lk { color: var(--ink-3); font-size: 11px; }
+  .ro-pill {
+    margin-left: auto; font-size: 10.5px; color: var(--ink-3);
+    border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+  }
+
+  .sheet-body { padding: 18px; }
+
+  /* footer */
+  .sheet-foot {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px;
+    border-top: 1px solid var(--line-soft);
+    background: var(--panel-2);
+  }
+  .sheet-foot .spacer { flex: 1; }
+  .btn {
+    border: 1px solid var(--line); background: transparent; color: var(--ink-2);
+    padding: 8px 14px; border-radius: 9px; font-size: 13px; cursor: pointer;
+  }
+  .btn:hover { border-color: #3a4150; color: var(--ink); }
+  .btn.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+  .btn.primary:hover { background: #6d99ff; }
+
+  /* editable value input */
+  .vinput {
+    background: var(--panel-2);
+    border: 1px solid #36405a;
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font: inherit; font-weight: 600;
+    width: 96px; text-align: right;
+    outline: none;
+  }
+  .vinput:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91,140,255,.15); }
+  .unit { color: var(--ink-2); font-size: 12.5px; }
+  .changed-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); display: inline-block; }
+
+  /* ============ OPTION A: sentence fill-in-the-blank ============ */
+  .sentence {
+    font-size: 16px; line-height: 2.1; color: var(--ink);
+    letter-spacing: -.01em;
+  }
+  .sentence .soft { color: var(--ink-2); }
+  .sentence .verb {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--danger-soft); color: #ff8f8f;
+    padding: 2px 10px; border-radius: 7px; font-weight: 600; font-size: 14px;
+  }
+  .blank {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent-soft);
+    border: 1px solid #2f3e63;
+    border-radius: 8px; padding: 2px 4px 2px 8px; margin: 0 2px;
+    vertical-align: middle;
+  }
+  .blank .vinput { width: 82px; padding: 4px 8px; }
+  .blank select.vinput { width: auto; text-align: left; }
+  .triggerchip {
+    background: var(--chip); border: 1px solid var(--line);
+    padding: 2px 10px; border-radius: 7px; font-weight: 600; font-size: 13.5px;
+  }
+  .hint-row {
+    margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--line);
+    font-size: 12px; color: var(--ink-3); display: flex; gap: 16px; flex-wrap: wrap;
+  }
+  .hint-row b { color: var(--ink-2); font-weight: 600; }
+
+  /* ============ OPTION B: parameter cards ============ */
+  .pcard {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    background: var(--panel-2);
+  }
+  .pcard:last-child { margin-bottom: 0; }
+  .pcard-head {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  }
+  .pcard-label { font-weight: 600; font-size: 13.5px; }
+  .pcard-typechip {
+    margin-left: auto; font-size: 10.5px; color: var(--ink-3);
+    background: var(--chip); border-radius: 999px; padding: 2px 9px;
+  }
+  .pcard-row { display: flex; align-items: center; gap: 10px; }
+  .pcard .vinput { width: 120px; }
+  .pcard .vselect {
+    background: var(--panel); border: 1px solid #36405a; color: var(--ink);
+    border-radius: 8px; padding: 7px 10px; font: inherit; font-weight: 600; outline: none;
+  }
+  .pcard-hint { margin-top: 8px; font-size: 11.5px; color: var(--ink-3); }
+  .pcard-hint b { color: var(--ink-2); font-weight: 600; }
+
+  /* ============ OPTION C: sentence + diagram ============ */
+  .split { display: grid; grid-template-columns: 1fr 200px; gap: 0; }
+  .split .left { padding: 18px; }
+  .split .right {
+    border-left: 1px solid var(--line-soft);
+    background: var(--panel-2);
+    padding: 16px 14px;
+  }
+  .diag-title { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
+  .tree { font-size: 12.5px; color: var(--ink-2); }
+  .tnode { display: flex; align-items: center; gap: 7px; padding: 4px 0; }
+  .tnode .ic { width: 16px; color: var(--ink-3); text-align: center; }
+  .tnode.lit .ic { color: var(--accent); }
+  .tnode.act { color: var(--ink); font-weight: 600; }
+  .tnode.deny { color: #ff8f8f; }
+  .tindent { padding-left: 18px; border-left: 1px solid var(--line); margin-left: 7px; }
+  .ro-note { margin-top: 14px; font-size: 10.5px; color: var(--ink-3); }
+
+  .legend {
+    margin-top: 40px; padding: 18px 20px;
+    border: 1px solid var(--line-soft); border-radius: 10px;
+    background: var(--panel); color: var(--ink-2); font-size: 12.5px;
+  }
+  .legend b { color: var(--ink); }
+  .legend ul { margin: 8px 0 0; padding-left: 18px; }
+  .legend li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="page">파라미터 에디터 — 3안 목업</h1>
+  <p class="sub">지갑별 정책의 <b>파라미터만</b> 조정하는 화면. 뼈대(구조·트리거·심각도)는 잠기고 값만 편집.</p>
+  <p class="note">
+    예시 정책: <b>큰 금액 스왑 차단</b> · 파라미터 2개 — <code>한도 금액(Long, USD)</code>, <code>대상 토큰(Token addr)</code>.
+    구조 변경은 라이브러리 에디터(<code>/editor/:id</code>)에서, 여기선 <code>?wallet=&binding=</code> 로 들어온 인스턴스의 값만.
+  </p>
+
+  <div class="grid">
+
+    <!-- ============================ OPTION A ============================ -->
+    <div>
+      <div class="col-head">
+        <span class="badge">A</span>
+        <h2>문장형 빈칸 채우기</h2>
+        <span class="tag">가장 직관적 · 빌더와 확실히 다름</span>
+      </div>
+      <div class="card">
+        <div class="sheet-top">
+          <span class="sheet-title">큰 금액 스왑 차단</span>
+          <span class="spacer"></span>
+          <span class="toggle">켜짐 <button class="switch" aria-label="enable"></button></span>
+        </div>
+        <div class="whatline">
+          <span class="lk">감시:</span> 스왑 1회 출금액이 한도를 넘는지
+          <span class="ro-pill">뼈대 · 읽기전용</span>
+        </div>
+        <div class="sheet-body">
+          <div class="sentence">
+            <span class="soft">이 지갑에서</span> <span class="triggerchip">스왑(Swap)</span> <span class="soft">1회에</span>
+            <span class="blank"><input class="vinput" value="10,000" /><span class="unit">USD</span></span>
+            <span class="soft">보다 많이 나가고</span>,
+            <br/>
+            <span class="soft">대상 토큰이</span>
+            <span class="blank"><select class="vinput"><option>USDC</option><option>USDT</option><option>DAI</option></select></span>
+            <span class="soft">이면</span> <span class="verb">🚫 차단</span>
+          </div>
+          <div class="hint-row">
+            <span><b>한도</b> 기본값 5,000 USD <span class="changed-dot"></span> 변경됨</span>
+            <span><b>토큰</b> 기본값 USDC</span>
+          </div>
+        </div>
+        <div class="sheet-foot">
+          <button class="btn">기본값으로</button>
+          <span class="spacer"></span>
+          <button class="btn primary">저장</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================ OPTION B ============================ -->
+    <div>
+      <div class="col-head">
+        <span class="badge">B</span>
+        <h2>파라미터 카드 리스트</h2>
+        <span class="tag">파라미터 많을 때 정돈됨</span>
+      </div>
+      <div class="card">
+        <div class="sheet-top">
+          <span class="sheet-title">큰 금액 스왑 차단</span>
+          <span class="spacer"></span>
+          <span class="toggle">켜짐 <button class="switch" aria-label="enable"></button></span>
+        </div>
+        <div class="whatline">
+          <span class="lk">감시:</span> 스왑 1회 출금액 · 차단 정책
+          <span class="ro-pill">뼈대 · 읽기전용</span>
+        </div>
+        <div class="sheet-body">
+          <div class="pcard">
+            <div class="pcard-head">
+              <span class="pcard-label">한도 금액</span>
+              <span class="changed-dot" title="변경됨"></span>
+              <span class="pcard-typechip">금액 · USD</span>
+            </div>
+            <div class="pcard-row">
+              <input class="vinput" value="10,000" />
+              <span class="unit">USD</span>
+            </div>
+            <div class="pcard-hint">기본 <b>5,000</b> · 1회 스왑이 이 금액을 넘으면 차단돼요</div>
+          </div>
+
+          <div class="pcard">
+            <div class="pcard-head">
+              <span class="pcard-label">대상 토큰</span>
+              <span class="pcard-typechip">토큰 주소</span>
+            </div>
+            <div class="pcard-row">
+              <select class="vselect"><option>USDC</option><option>USDT</option><option>DAI</option></select>
+            </div>
+            <div class="pcard-hint">기본 <b>USDC</b> · 이 토큰을 내보낼 때만 정책이 적용돼요</div>
+          </div>
+        </div>
+        <div class="sheet-foot">
+          <button class="btn">기본값으로</button>
+          <span class="spacer"></span>
+          <button class="btn primary">저장</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================ OPTION C ============================ -->
+    <div>
+      <div class="col-head">
+        <span class="badge">C</span>
+        <h2>문장형 + 다이어그램</h2>
+        <span class="tag">맥락 풍부 · 화면 더 차지</span>
+      </div>
+      <div class="card">
+        <div class="sheet-top">
+          <span class="sheet-title">큰 금액 스왑 차단</span>
+          <span class="spacer"></span>
+          <span class="toggle">켜짐 <button class="switch" aria-label="enable"></button></span>
+        </div>
+        <div class="split">
+          <div class="left">
+            <div class="sentence" style="font-size:15px; line-height:2;">
+              <span class="soft">스왑 1회에</span>
+              <span class="blank"><input class="vinput" value="10,000" style="width:74px" /><span class="unit">USD</span></span>
+              <span class="soft">넘게,</span><br/>
+              <span class="blank"><select class="vinput"><option>USDC</option><option>USDT</option></select></span>
+              <span class="soft">를 내보내면</span> <span class="verb">🚫</span>
+            </div>
+            <div class="hint-row" style="margin-top:14px;">
+              <span><b>기본</b> 5,000 USD <span class="changed-dot"></span></span>
+            </div>
+          </div>
+          <div class="right">
+            <div class="diag-title">정책 흐름도</div>
+            <div class="tree">
+              <div class="tnode act"><span class="ic">▸</span> Swap</div>
+              <div class="tindent">
+                <div class="tnode"><span class="ic">·</span> amountOut</div>
+                <div class="tnode lit"><span class="ic">&gt;</span> 10,000 USD</div>
+                <div class="tnode"><span class="ic">·</span> token</div>
+                <div class="tnode lit"><span class="ic">=</span> USDC</div>
+                <div class="tnode deny"><span class="ic">↳</span> 차단</div>
+              </div>
+            </div>
+            <div class="ro-note">뼈대 구조는 읽기전용</div>
+          </div>
+        </div>
+        <div class="sheet-foot">
+          <button class="btn">기본값으로</button>
+          <span class="spacer"></span>
+          <button class="btn primary">저장</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <b>세 안 모두 공통:</b> 상단 정책명+켜기토글 · "감시" 한 줄 요약(read-only) · 본문은 <b>편집 가능한 파라미터만</b> · 하단 기본값으로/저장.
+    구조·트리거·심각도는 안 보임(라이브러리에서 수정 유도).
+    <ul>
+      <li><b>A 문장형</b> — 파라미터 1~3개일 때 최고. 빌더와 가장 다르게 보임. 단, 파라미터 많으면 문장이 길어짐.</li>
+      <li><b>B 카드</b> — 파라미터 개수에 안정적. 각 값에 라벨·단위·힌트 충분. 살짝 "설정창" 느낌.</li>
+      <li><b>C 문장+흐름도</b> — 맥락 최강(뼈대 시각화). 폭이 넓고 구현량 가장 큼(<code>PolicyDiagram</code> 읽기전용 임베드).</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

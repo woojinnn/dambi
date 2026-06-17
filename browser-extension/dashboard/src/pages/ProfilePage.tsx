@@ -11,6 +11,7 @@ import {
   pickI18n,
 } from "../server-api";
 import { deleteDef, deletePackage, getOverview, UNCATEGORIZED_PKG } from "../server-api/policy-store";
+import { getSettings, putOpenaiKey } from "../server-api/settings";
 import { useAuth } from "../hooks/useAuth";
 import { Topbar } from "../shell/Topbar";
 
@@ -87,6 +88,24 @@ export function ProfilePage() {
     }
     setServerSaved(true);
   };
+
+  // OpenAI API 키 — 서버에 유저별로 저장(LLM 정책 생성에 사용). 값은 서버가
+  // 절대 돌려주지 않고 "설정됨" 여부만 받는다.
+  const settingsQ = useQuery({
+    queryKey: ["app-settings", user?.user_id],
+    queryFn: getSettings,
+    enabled: !!user?.user_id,
+  });
+  const [openaiKey, setOpenaiKey] = useState("");
+  const saveOpenaiMut = useMutation({
+    mutationFn: (key: string) => putOpenaiKey(key),
+    onSuccess: () => {
+      setOpenaiKey("");
+      void qc.invalidateQueries({ queryKey: ["app-settings"] });
+    },
+    onError: (e: unknown) =>
+      setBanner(t("settings.openaiSaveError", { error: e instanceof Error ? e.message : String(e) })),
+  });
 
   // 올린 게시물 — 정책/패키지 탭 + 페이지네이션.
   const [listTab, setListTab] = useState<"policy" | "set">("policy");
@@ -293,6 +312,62 @@ export function ProfilePage() {
                   ns="common"
                   components={{ reload: <a onClick={() => window.location.reload()} className="pp-link" /> }}
                 />
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* settings — OpenAI API key (server-stored, used for LLM drafting) */}
+        <section className="pp-card">
+          <div className="pp-sec-head">
+            <h2>{t("settings.openaiTitle")}</h2>
+            {settingsQ.data?.openai_api_key_set && (
+              <span className="pp-badge-ok">{t("settings.openaiStatusSet")}</span>
+            )}
+          </div>
+          <p className="pp-muted">{t("settings.openaiDesc")}</p>
+          <input
+            type="password"
+            className="pp-set-input"
+            value={openaiKey}
+            placeholder={
+              settingsQ.data?.openai_api_key_set
+                ? t("settings.openaiPlaceholderSet")
+                : t("settings.openaiPlaceholder")
+            }
+            autoComplete="off"
+            onChange={(e) => setOpenaiKey(e.target.value)}
+          />
+          <div className="pp-set-save">
+            <button
+              type="button"
+              className="pp-btn"
+              onClick={() => saveOpenaiMut.mutate(openaiKey.trim())}
+              disabled={saveOpenaiMut.isPending || !openaiKey.trim()}
+            >
+              {saveOpenaiMut.isPending ? t("saving") : t("save")}
+            </button>
+            {settingsQ.data?.openai_api_key_set && (
+              <button
+                type="button"
+                className="pp-btn ghost"
+                onClick={() => saveOpenaiMut.mutate("")}
+                disabled={saveOpenaiMut.isPending}
+              >
+                {t("settings.openaiClear")}
+              </button>
+            )}
+            {saveOpenaiMut.isSuccess && (
+              <span className="pp-muted">{t("settings.openaiSaved")}</span>
+            )}
+            {saveOpenaiMut.isError && (
+              <span className="pp-err-inline">
+                {t("settings.openaiSaveError", {
+                  error:
+                    saveOpenaiMut.error instanceof Error
+                      ? saveOpenaiMut.error.message
+                      : String(saveOpenaiMut.error),
+                })}
               </span>
             )}
           </div>

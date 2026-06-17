@@ -61,8 +61,12 @@
   },
   "combobox": {
     "enrichBadge": "보강",
-    "pickField": "필드 선택…",
+    "pickField": "값 입력 또는 필드 선택…",
     "searchPlaceholder": "필드 검색…",
+    "valuePlaceholder": "값 입력…",
+    "literalHead": "값 직접 입력",
+    "suggestHead": "추천 값",
+    "fieldsHead": "다른 필드와 비교",
     "noMatch": "일치하는 필드 없음",
     "hideAdvanced": "▾ 고급 필드 숨기기",
     "showAdvanced": "▸ 고급 필드 보기 ({{count}})"
@@ -313,6 +317,20 @@
     "folderDeletedToast": "폴더를 삭제했어요 — 정책은 미분류로 옮겼어요",
     "defRowTitle": "클릭해서 템플릿 편집 · 끌어서 패키지에 적용 / 전용 폴더로 이동"
   },
+  "llm": {
+    "title": "정책을 자연어로 설명하세요",
+    "hint": "LLM이 의도를 정책으로 변환한 뒤 폼 탭에 넣어 검토할 수 있게 해줘요. ⌘/Ctrl + Enter 로 생성.",
+    "placeholder": "예: 스왑으로 산 토큰이 내 지갑이 아닌 다른 주소로 가면 차단",
+    "generate": "생성",
+    "generating": "생성 중…",
+    "examplesLabel": "예시",
+    "examples": [
+      "스왑으로 산 토큰이 내 지갑이 아닌 다른 주소로 가면 차단",
+      "토큰을 소각 주소(0x0…0 / 0x…dead)로 전송하면 차단",
+      "무제한 승인(uint256/uint160 max)은 차단, 단 spender가 Permit2면 예외",
+      "정체불명 블라인드 서명 요청은 경고"
+    ]
+  },
   "detail": {
     "backToList": "← 목록",
     "notFoundTitle": "정책을 찾을 수 없습니다",
@@ -349,6 +367,8 @@
     "fromMarket": "Policy Hub에서 가져옴",
     "readOnlyBadge": "읽기 전용",
     "formTab": "폼",
+    "llmTab": "LLM",
+    "llmBadModel": "LLM이 만든 정책 형식이 올바르지 않습니다. 다시 시도해 주세요.",
     "deleteConfirm": "정책 \"{{name}}\"을 삭제할까요?",
     "deleteConfirmUsed": "정책 \"{{name}}\"을 삭제할까요?\n{{count}}개 지갑에서 함께 제거됩니다.",
     "invalidSaveTitle": "형식이 맞지 않아요 — 누르면 변경 전 상태로 되돌립니다",

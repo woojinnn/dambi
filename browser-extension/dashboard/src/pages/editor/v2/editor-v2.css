@@ -1483,6 +1483,83 @@
   line-height: 1.55;
 }
 
+/* ── LLM tab ───────────────────────────────────────────────────────────── */
+.ev2-llm-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+.ev2-llm-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ev2-llm-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--slate-900);
+}
+.ev2-llm-sub {
+  font-size: 12.5px;
+  color: var(--slate-500);
+  line-height: 1.5;
+}
+.ev2-llm-textarea {
+  min-height: 160px;
+  appearance: none;
+  resize: vertical;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md, 10px);
+  outline: none;
+  background: var(--surface);
+  font-family: var(--ff-sans, inherit);
+  font-size: 14px;
+  color: var(--slate-900);
+  padding: 14px 16px;
+  line-height: 1.6;
+}
+.ev2-llm-textarea:focus {
+  border-color: var(--sage-400, #9bb29b);
+}
+.ev2-llm-textarea:disabled {
+  opacity: 0.6;
+}
+.ev2-llm-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ev2-llm-examples .lbl {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  margin-right: 2px;
+}
+.ev2-llm-chip {
+  font-size: 12px;
+  color: var(--slate-700);
+  background: var(--fog-200);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+  text-align: left;
+}
+.ev2-llm-chip:hover:not(:disabled) {
+  background: var(--fog-300, #e7e9ee);
+  color: var(--slate-900);
+}
+.ev2-llm-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ev2-llm-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .ev2-manifest {
   flex-shrink: 0;
   border-top: 1px solid var(--hairline-soft);

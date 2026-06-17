@@ -53,7 +53,8 @@ import "../../market.css";
 import { catLabel, catStyle } from "./categories";
 import { CatIcon, ShieldIcon, WarnIcon } from "./icons";
 import { blocksToText, textToBlocks } from "../../../cedar";
-import { concretizeIr } from "../../../cedar/blocks";
+import { blocksToEst, concretizeIr } from "../../../cedar/blocks";
+import { llmDraftPolicy } from "../../../server-api/llm-draft";
 import { PolicyFormPane } from "./PolicyFormPane";
 import {
   emptyFormModel,
@@ -64,7 +65,7 @@ import {
   type FormModel,
 } from "../../../cedar/form";
 
-type Tab = "cedar" | "form";
+type Tab = "cedar" | "form" | "llm";
 
 function defaultTab(method: PolicyMethod | undefined): Tab {
   // Legacy `block`-method policies fall through to Cedar — they keep their full
@@ -213,23 +214,12 @@ export function EditorDetailPageV2() {
             snap={overviewQ.data ?? null}
             bindingCtx={bindingCtx}
             isNew={isNew}
-            onSaved={(savedId) => {
+            onSaved={() => {
               void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
-              if (bindingCtx) {
-                navigate("/editor"); // 지갑별 정책(기본 탭)으로 복귀
-                return;
-              }
-              if (isNew) {
-                // 새 정책 저장 완료 → "+ 새 정책"을 눌렀던 목록으로 복귀.
-                // (상세에 머무르지 않는다 — 저장이 끝났다는 감각 + 다음 작업 동선)
-                navigate("/editor", { replace: true });
-                return;
-              }
-              if (savedId !== id) {
-                navigate(`/editor/${encodeURIComponent(savedId)}`, {
-                  replace: true,
-                });
-              }
+              // 저장 완료 → 항상 목록(/editor)으로 복귀해 "저장됐다"는 화면 전환을
+              // 준다(기존 def 수정도 포함 — 예전엔 같은 페이지에 머물러 변화가 없었음).
+              // 새 정책/바인딩 저장은 뒤로가기로 미저장 상태에 돌아가지 않게 replace.
+              navigate("/editor", { replace: isNew || !!bindingCtx });
             }}
             onDeleted={() => {
               void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
@@ -736,6 +726,35 @@ function EditorBody({
     setTab(next);
   };
 
+  /** LLM 탭에서 생성한 FormModel 을 폼 탭에 적용한다. 헤더가 소유한 slug/severity 를
+   *  주입하고, 변환 가능 여부를 로컬에서 한번 검증(WASM 불필요)한 뒤 폼 탭으로 전환한다.
+   *  부분집합 밖이면 throw → LlmPane 이 에러를 보여준다. */
+  const applyLlmModel = async (model: FormModel) => {
+    // LLM 산출물은 신뢰하지 않고 최소 형태를 보정한다(누락 필드로 변환기가 죽는 것 방지).
+    const m = (model ?? {}) as Partial<FormModel>;
+    const normalized: FormModel = {
+      trigger: m.trigger ?? { kind: "any" },
+      when: Array.isArray(m.when) ? m.when : [],
+      unless: Array.isArray(m.unless) ? m.unless : [],
+      id: stripDashboardId(policy.id),
+      severity: (m.severity ?? severity) as FormModel["severity"],
+      reason: m.reason ?? "",
+    };
+    // 변환 가능성 사전 검증(폼 부분집합 안인지). 깨지면 원본을 콘솔에 남기고 깔끔한
+    // 메시지로 throw → LlmPane 이 표시.
+    try {
+      blocksToEst(concretizeIr(formToIr(normalized)));
+    } catch (err) {
+      console.error("[llm] FormModel 변환 실패:", model, err); // i18n-ok
+      throw new Error(t("detail.llmBadModel"));
+    }
+    setFormEntry({ kind: "ok", model: normalized });
+    setFormKey((k) => k + 1);
+    setLastModel(normalized);
+    setSeverity(normalized.severity as PolicySeverity);
+    setTab("form");
+  };
+
   // Open the form on first mount when it is the default tab (method === "form").
   useEffect(() => {
     if (tab === "form" && formEntry === null) void openForm();
@@ -849,6 +868,13 @@ function EditorBody({
             active={tab === "form"}
             onClick={() => handleTabChange("form")}
           />
+          {!bindingCtx && (
+            <TabBtn
+              label={t("detail.llmTab")}
+              active={tab === "llm"}
+              onClick={() => handleTabChange("llm")}
+            />
+          )}
           <span className="ev2-spc" />
           {!bindingCtx && (
             <button
@@ -974,6 +1000,7 @@ function EditorBody({
               <div className="sm">{t("detail.formLoading")}</div>
             </div>
           ))}
+        {tab === "llm" && !bindingCtx && <LlmPane onModel={applyLlmModel} />}
       </div>
 
       <PublishModal
@@ -1108,6 +1135,87 @@ function CedarPane({
         autoCorrect="off"
         autoCapitalize="off"
       />
+    </div>
+  );
+}
+
+/** LLM 탭 — 자연어 의도를 적으면 LLM 이 FormModel 을 만들어 폼 탭으로 넘긴다.
+ *  생성 성공 시 onModel 이 폼 탭으로 전환하므로 여기선 입력/진행/에러만 다룬다. */
+function LlmPane({ onModel }: { onModel: (m: FormModel) => Promise<void> }) {
+  const { t } = useTranslation("editor");
+  const [intent, setIntent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const examples = t("llm.examples", { returnObjects: true }) as string[];
+
+  const submit = async () => {
+    const text = intent.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const model = await llmDraftPolicy({ intent: text });
+      await onModel(model);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="ev2-llm-pane">
+      <div className="ev2-llm-head">
+        <div className="ev2-llm-title">{t("llm.title")}</div>
+        <div className="ev2-llm-sub">{t("llm.hint")}</div>
+      </div>
+      <textarea
+        className="ev2-llm-textarea"
+        value={intent}
+        onChange={(e) => setIntent(e.target.value)}
+        placeholder={t("llm.placeholder")}
+        disabled={busy}
+        onKeyDown={(e) => {
+          // ⌘/Ctrl + Enter 로 생성.
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+      />
+      {Array.isArray(examples) && examples.length > 0 && (
+        <div className="ev2-llm-examples">
+          <span className="lbl">{t("llm.examplesLabel")}</span>
+          {examples.map((ex, i) => (
+            <button
+              key={i}
+              type="button"
+              className="ev2-llm-chip"
+              disabled={busy}
+              onClick={() => setIntent(ex)}
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
+      {error && (
+        <div className="ev2-err-banner">
+          <WarnIcon />
+          {error}
+        </div>
+      )}
+      <div className="ev2-llm-actions">
+        <button
+          type="button"
+          className="ev2-pri"
+          onClick={() => void submit()}
+          disabled={busy || !intent.trim()}
+        >
+          {busy ? t("llm.generating") : t("llm.generate")}
+        </button>
+      </div>
     </div>
   );
 }
