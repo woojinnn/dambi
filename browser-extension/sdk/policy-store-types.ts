@@ -86,6 +86,8 @@ export interface Binding {
 export interface WalletPackage {
   id: string;
   displayName: string;
+  /** 사용자가 자유롭게 적는 패키지 설명(이 지갑에서 무엇을 막는지). 카드 앞면에 보인다. */
+  desc?: string;
   updatedAtMs: number;
 }
 

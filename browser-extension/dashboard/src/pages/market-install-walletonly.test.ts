@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   bindDef: vi.fn(
     async (_arg: {
       addresses: string[];
+      packageId?: string;
       params?: Record<string, unknown>;
       severity?: "deny" | "warn";
     }) => undefined,
@@ -70,17 +71,17 @@ beforeEach(() => {
   mocks.installMarket.mockClear();
 });
 
-describe("installListingWalletOnlyV2 per-wallet params", () => {
-  it("binds each address with its own params from paramsByAddress", async () => {
+describe("installListingWalletOnlyV2 per-package params", () => {
+  it("binds each (wallet,package) combo with its own params from paramsByAddressPkg", async () => {
     const A = "0xaaaa000000000000000000000000000000000001";
     const B = "0xbbbb000000000000000000000000000000000002";
     await installListingWalletOnlyV2(detail, "ko", {
       addresses: [A, B],
-      walletPackages: { [A]: { id: "pkg::uncat" }, [B]: { id: "pkg::uncat" } },
+      walletPackages: { [A]: ["pkg::uncat"], [B]: ["pkg::uncat"] },
       snap: emptySnap,
-      paramsByAddress: {
-        [A]: { "def::market.L1": { v1: "0xa1" } },
-        [B]: { "def::market.L1": { v1: "0xb2" } },
+      paramsByAddressPkg: {
+        [A]: { "pkg::uncat": { "def::market.L1": { v1: "0xa1" } } },
+        [B]: { "pkg::uncat": { "def::market.L1": { v1: "0xb2" } } },
       },
     });
     const byAddr = new Map(
@@ -90,28 +91,58 @@ describe("installListingWalletOnlyV2 per-wallet params", () => {
     expect(byAddr.get(B)).toEqual({ v1: "0xb2" });
   });
 
-  it("falls back to common params when an address has no per-wallet entry", async () => {
+  it("binds the same def to multiple packages of one wallet, each with its own params", async () => {
     const A = "0xaaaa000000000000000000000000000000000001";
     await installListingWalletOnlyV2(detail, "ko", {
       addresses: [A],
-      walletPackages: { [A]: { id: "pkg::uncat" } },
+      walletPackages: { [A]: ["pkg::uncat", "pkg::p2"] },
+      snap: emptySnap,
+      paramsByAddressPkg: {
+        [A]: {
+          "pkg::uncat": { "def::market.L1": { v1: "0x1" } },
+          "pkg::p2": { "def::market.L1": { v1: "0x2" } },
+        },
+      },
+    });
+    const byPkg = new Map(
+      mocks.bindDef.mock.calls.map(([arg]) => [arg.packageId, arg.params]),
+    );
+    expect(byPkg.get("pkg::uncat")).toEqual({ v1: "0x1" });
+    expect(byPkg.get("pkg::p2")).toEqual({ v1: "0x2" });
+  });
+
+  it("falls back to common params when a combo has no per-package entry", async () => {
+    const A = "0xaaaa000000000000000000000000000000000001";
+    await installListingWalletOnlyV2(detail, "ko", {
+      addresses: [A],
+      walletPackages: { [A]: ["pkg::uncat"] },
       snap: emptySnap,
       params: { "def::market.L1": { v1: "0xcommon" } },
-      paramsByAddress: {},
+      paramsByAddressPkg: {},
     });
     expect(mocks.bindDef).toHaveBeenCalledWith(
       expect.objectContaining({ addresses: [A], params: { v1: "0xcommon" } }),
     );
   });
 
-  it("threads per-wallet severity override to the binding", async () => {
+  it("creates no bindings for a wallet with no selected package (library only)", async () => {
+    const A = "0xaaaa000000000000000000000000000000000001";
+    await installListingWalletOnlyV2(detail, "ko", {
+      addresses: [A],
+      walletPackages: { [A]: [] },
+      snap: emptySnap,
+    });
+    expect(mocks.bindDef).not.toHaveBeenCalled();
+  });
+
+  it("threads per-package severity override to the binding", async () => {
     const A = "0xaaaa000000000000000000000000000000000001";
     const B = "0xbbbb000000000000000000000000000000000002";
     await installListingWalletOnlyV2(detail, "ko", {
       addresses: [A, B],
-      walletPackages: { [A]: { id: "pkg::uncat" }, [B]: { id: "pkg::uncat" } },
+      walletPackages: { [A]: ["pkg::uncat"], [B]: ["pkg::uncat"] },
       snap: emptySnap,
-      severityByAddress: { [A]: { "def::market.L1": "warn" } },
+      severityByAddressPkg: { [A]: { "pkg::uncat": { "def::market.L1": "warn" } } },
     });
     const sevByAddr = new Map(
       mocks.bindDef.mock.calls.map(([arg]) => [arg.addresses[0], arg.severity]),

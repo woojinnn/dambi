@@ -13,7 +13,6 @@ import {
   installListingV2,
   installListingWalletOnlyV2,
   type InstallParams,
-  type WalletPkgPick,
 } from "./market-install-v2";
 import {
   CATEGORY_COLOR,
@@ -151,10 +150,10 @@ export function MarketInstallModal({
     for (const f of formDefs) out[f.defId] = paramsForModel(f.defId, libModelsRef.current[f.defId]);
     return out;
   };
-  /** 한 지갑의 params(defId → params). */
-  const walletParamsFor = (addr: string): InstallParams => {
+  /** 한 (지갑·패키지) 조합의 params(defId → params). 키 = `${addr}|${pkgKey}`. */
+  const comboParamsFor = (comboKey: string): InstallParams => {
     const out: InstallParams = {};
-    for (const f of formDefs) out[f.defId] = paramsForModel(f.defId, walletModelsRef.current[addr]?.[f.defId]);
+    for (const f of formDefs) out[f.defId] = paramsForModel(f.defId, walletModelsRef.current[comboKey]?.[f.defId]);
     return out;
   };
 
@@ -162,61 +161,63 @@ export function MarketInstallModal({
   const libParamsInvalid = formDefs.some((f) => libValidity[f.defId] === false);
 
   const [kind, setKind] = useState<"wallet" | "library" | null>(null);
-  // 지갑 경로 — 지갑 선택 → (빈칸 있으면) 지갑별 파라미터 설정.
+  // 지갑 경로 — 지갑 선택(+패키지 다중선택) → (값 있으면) 패키지별 파라미터 설정.
   const [walletStep, setWalletStep] = useState<"select" | "params">("select");
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [walletPkg, setWalletPkg] = useState<Record<string, string>>({});
+  // 지갑별 선택 패키지 키 목록(다중). 빈 배열 = 라이브러리에만 저장.
+  const [walletPkgSel, setWalletPkgSel] = useState<Record<string, string[]>>({});
   const [walletNewName, setWalletNewName] = useState<Record<string, string>>({});
-  const [bulk, setBulk] = useState(false);
-  const [bulkName, setBulkName] = useState(name); // 기본값 = 리스팅 이름
   // 라이브러리 경로.
   const [packageId, setPackageId] = useState(UNCATEGORIZED_PKG);
   const [applyToAllNow, setApplyToAllNow] = useState(false);
   const [applyToNewWallets, setApplyToNewWallets] = useState(true);
   const [done, setDone] = useState(false);
 
-  const pkgOf = (addr: string) => walletPkg[addr] ?? UNCATEGORIZED_PKG;
-
-  const bulkCollisions = useMemo(() => {
-    const n = bulkName.trim();
-    if (!bulk || !n) return [];
-    return [...picked].filter((a) =>
-      (wallets.find((w) => w.address === a)?.packages ?? []).some((p) => p.displayName === n),
-    );
-  }, [bulk, bulkName, picked, wallets]);
+  const selOf = (addr: string) => walletPkgSel[addr] ?? [];
+  const toggleWalletPkg = (addr: string, key: string) =>
+    setWalletPkgSel((m) => {
+      const cur = m[addr] ?? [];
+      return { ...m, [addr]: cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key] };
+    });
+  // (지갑·패키지) 조합 목록 — 선택한 지갑 × 그 지갑이 고른 패키지들.
+  const combos = useMemo(
+    () => [...picked].flatMap((a) => selOf(a).map((key) => ({ addr: a, key }))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [picked, walletPkgSel],
+  );
+  const comboKey = (addr: string, key: string) => `${addr}|${key}`;
+  const pkgLabelOf = (addr: string, key: string) => {
+    if (key === "__new__") return (walletNewName[addr] ?? "").trim() || (ko ? "새 패키지" : "New package");
+    if (key === UNCATEGORIZED_PKG) return ko ? "미분류" : "Uncategorized";
+    return wallets.find((w) => w.address === addr)?.packages.find((p) => p.id === key)?.displayName ?? key;
+  };
+  const walletNameOf = (a: string) => wallets.find((x) => x.address === a)?.label?.trim() || shortAddr(a);
 
   const mut = useMutation({
     mutationFn: async () => {
       if (kind === "wallet") {
-        const walletPackages: Record<string, WalletPkgPick> = {};
-        for (const addr of picked) {
-          if (bulk) {
-            walletPackages[addr] = { newName: bulkName.trim() };
-          } else {
-            const sel = pkgOf(addr);
-            walletPackages[addr] =
-              sel === "__new__" ? { newName: (walletNewName[addr] ?? "").trim() } : { id: sel };
-          }
-        }
-        const paramsByAddress: Record<string, InstallParams> = {};
-        const severityByAddress: Record<string, Record<string, "deny" | "warn">> = {};
-        for (const addr of picked) {
-          paramsByAddress[addr] = walletParamsFor(addr);
-          // def 선언값과 다른 심각도만 override 로 기록.
+        const walletPackages: Record<string, string[]> = {};
+        for (const addr of picked) walletPackages[addr] = selOf(addr);
+        const paramsByAddressPkg: Record<string, Record<string, InstallParams>> = {};
+        const severityByAddressPkg: Record<string, Record<string, Record<string, "deny" | "warn">>> = {};
+        for (const { addr, key } of combos) {
+          const ck = comboKey(addr, key);
+          (paramsByAddressPkg[addr] ??= {})[key] = comboParamsFor(ck);
           const sevs: Record<string, "deny" | "warn"> = {};
           for (const f of formDefs) {
-            const chosen = walletSeverity[addr]?.[f.defId];
+            const chosen = walletSeverity[ck]?.[f.defId];
             if (chosen && chosen !== f.model.severity) sevs[f.defId] = chosen;
           }
-          if (Object.keys(sevs).length) severityByAddress[addr] = sevs;
+          if (Object.keys(sevs).length) (severityByAddressPkg[addr] ??= {})[key] = sevs;
         }
         return installListingWalletOnlyV2(detailQ.data!, locale, {
           addresses: [...picked],
           walletPackages,
+          walletNewName,
           snap: snap!,
           params: {},
-          paramsByAddress,
-          ...(Object.keys(severityByAddress).length ? { severityByAddress } : {}),
+          paramsByAddressPkg,
+          ...(Object.keys(severityByAddressPkg).length ? { severityByAddressPkg } : {}),
         });
       }
       return installListingV2(detailQ.data!, locale, {
@@ -234,15 +235,14 @@ export function MarketInstallModal({
     },
   });
 
-  // 지갑 선택/패키지 지정이 유효한가 (파라미터는 다음 단계에서 검사).
+  // 지갑 선택이 유효한가 — 지갑은 하나 이상, "새 패키지"를 골랐으면 이름 필수.
+  // 패키지를 하나도 안 고른 지갑은 OK(그 지갑은 라이브러리에만 저장).
   const walletSelectionInvalid =
     picked.size === 0 ||
-    (bulk
-      ? !bulkName.trim()
-      : [...picked].some((a) => pkgOf(a) === "__new__" && !(walletNewName[a] ?? "").trim()));
-  // 선택한 지갑 중 폼이 형식 오류(잘못된 decimal 등)면 설치 불가.
-  const walletParamsInvalid = [...picked].some((a) =>
-    formDefs.some((f) => walletValidity[a]?.[f.defId] === false),
+    [...picked].some((a) => selOf(a).includes("__new__") && !(walletNewName[a] ?? "").trim());
+  // 선택한 조합 중 폼이 형식 오류(잘못된 decimal 등)면 설치 불가.
+  const walletParamsInvalid = combos.some(({ addr, key }) =>
+    formDefs.some((f) => walletValidity[comboKey(addr, key)]?.[f.defId] === false),
   );
   // 라이브러리 경로: 폼 형식 오류가 있으면 설치 불가.
   const libraryInvalid = libParamsInvalid || formDefsQ.isLoading;
@@ -451,17 +451,13 @@ export function MarketInstallModal({
             <div className="im-body">
               <p className="im-sub">
                 {ko
-                  ? "어느 지갑에 적용할까요? 패키지는 지갑마다 따로 골라요."
-                  : "Pick wallets — each wallet gets its own package."}
+                  ? "어느 지갑에 적용할까요? 패키지는 여러 개 고를 수 있고, 안 고르면 라이브러리에만 저장돼요."
+                  : "Pick wallets — choose any number of packages each (none = library only)."}
               </p>
               <div className="im-wallets">
                 {wallets.map((w) => {
                   const on = picked.has(w.address);
-                  const sel = pkgOf(w.address);
-                  // Prototype 2-line hierarchy: name (지갑 이름) over a SHORT
-                  // address (0x6f1c…a3e2), never the full 42-char hex (which
-                  // overflows the row). With a label → name=label + 단축주소
-                  // 보조줄. Without → name=단축주소만, 보조줄 생략(동어반복 방지).
+                  const sels = selOf(w.address);
                   const label = w.label?.trim();
                   const short = shortAddr(w.address);
                   const name = label || short;
@@ -482,22 +478,15 @@ export function MarketInstallModal({
                           <span className="im-wname">{name}</span>
                           {subAddr && <span className="im-waddr">{subAddr}</span>}
                         </span>
-                        {w.packages.length > 0 && (
-                          <span className="im-wtag">
-                            {ko ? `패키지 ${w.packages.length}` : `${w.packages.length} pkg`}
-                          </span>
-                        )}
                       </div>
-                      {on && !bulk && (
+                      {on && (
                         <div className="im-pkgrow">
                           <span className="im-pkglabel">{ko ? "패키지" : "Package"}</span>
                           <div className="im-pkgchips">
                             <button
                               type="button"
-                              className={`im-pkgchip${sel === UNCATEGORIZED_PKG ? " on" : ""}`}
-                              onClick={() =>
-                                setWalletPkg((m) => ({ ...m, [w.address]: UNCATEGORIZED_PKG }))
-                              }
+                              className={`im-pkgchip${sels.includes(UNCATEGORIZED_PKG) ? " on" : ""}`}
+                              onClick={() => toggleWalletPkg(w.address, UNCATEGORIZED_PKG)}
                             >
                               {ko ? "미분류" : "Uncategorized"}
                             </button>
@@ -505,21 +494,21 @@ export function MarketInstallModal({
                               <button
                                 key={p.id}
                                 type="button"
-                                className={`im-pkgchip${sel === p.id ? " on" : ""}`}
-                                onClick={() => setWalletPkg((m) => ({ ...m, [w.address]: p.id }))}
+                                className={`im-pkgchip${sels.includes(p.id) ? " on" : ""}`}
+                                onClick={() => toggleWalletPkg(w.address, p.id)}
                               >
                                 {p.displayName}
                               </button>
                             ))}
                             <button
                               type="button"
-                              className={`im-pkgchip new${sel === "__new__" ? " on" : ""}`}
-                              onClick={() => setWalletPkg((m) => ({ ...m, [w.address]: "__new__" }))}
+                              className={`im-pkgchip new${sels.includes("__new__") ? " on" : ""}`}
+                              onClick={() => toggleWalletPkg(w.address, "__new__")}
                             >
                               {ko ? "+ 새 패키지" : "+ New"}
                             </button>
                           </div>
-                          {sel === "__new__" && (
+                          {sels.includes("__new__") && (
                             <input
                               className="im-textfield sm"
                               value={walletNewName[w.address] ?? ""}
@@ -529,39 +518,17 @@ export function MarketInstallModal({
                               placeholder={ko ? "새 패키지 이름" : "Package name"}
                             />
                           )}
+                          {sels.length === 0 && (
+                            <span className="im-libnote">
+                              {ko ? "패키지 미선택 — 라이브러리에만 저장돼요" : "No package — library only"}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
                   );
                 })}
               </div>
-              <label className="im-check">
-                <input
-                  type="checkbox"
-                  checked={bulk}
-                  onChange={(e) => {
-                    setBulk(e.target.checked);
-                    // 일괄 모드를 켜면 모든 지갑을 선택해 준다(편의 기능).
-                    if (e.target.checked) setPicked(new Set(wallets.map((w) => w.address)));
-                  }}
-                />
-                <span>{ko ? "모든 지갑에 새 패키지를 만들어 넣기" : "Create one new package on every wallet"}</span>
-              </label>
-              {bulk && (
-                <input
-                  className="im-textfield"
-                  value={bulkName}
-                  onChange={(e) => setBulkName(e.target.value)}
-                  placeholder={ko ? "새 패키지 이름" : "Package name"}
-                />
-              )}
-              {bulk && bulkCollisions.length > 0 && (
-                <div className="im-note">
-                  {ko
-                    ? `같은 이름의 패키지가 이미 있는 지갑은 그 패키지에 넣어요: ${bulkCollisions.map(shortAddr).join(", ")}`
-                    : `Wallets with a same-name package reuse it: ${bulkCollisions.map(shortAddr).join(", ")}`}
-                </div>
-              )}
             </div>
             <div className="im-actions">
               <button type="button" className="sec" onClick={() => setKind(null)}>
@@ -583,46 +550,55 @@ export function MarketInstallModal({
             {head}
             <div className="im-body">
               <p className="im-sub">
-                {hasParams
+                {combos.length === 0
                   ? ko
-                    ? "지갑마다 값을 확인하고 필요하면 바꿔주세요. 빈 칸은 채워야 적용돼요."
-                    : "Review the values per wallet and adjust as needed — fill any blanks."
-                  : ko
-                    ? "이 정책은 설정할 파라미터가 없어요. 바로 받을 수 있어요."
-                    : "This policy has no parameters to set — you can install it directly."}
+                    ? "패키지를 안 골라서 라이브러리에만 저장돼요. 그대로 받아도 돼요."
+                    : "No package chosen — it'll be saved to the library only."
+                  : hasParams
+                    ? ko
+                      ? "선택한 패키지마다 값을 확인하고 필요하면 바꿔주세요. 빈 칸은 채워야 적용돼요."
+                      : "Review values per selected package and fill any blanks."
+                    : ko
+                      ? "이 정책은 설정할 파라미터가 없어요. 바로 받을 수 있어요."
+                      : "This policy has no parameters to set — you can install it directly."}
               </p>
-              {hasParams ? (
+              {combos.length === 0 ? (
+                <div className="im-noparams">
+                  {ko ? "선택한 패키지가 없어 라이브러리에만 저장돼요." : "No package selected — saved to the library only."}
+                </div>
+              ) : !hasParams ? (
+                <div className="im-noparams">
+                  {ko ? "설정할 파라미터가 없습니다." : "No parameters to set."}
+                </div>
+              ) : (
                 (() => {
-                  const tabs = [...picked];
-                  const active = activeTab && tabs.includes(activeTab) ? activeTab : tabs[0];
-                  const nameOf = (a: string) =>
-                    wallets.find((x) => x.address === a)?.label?.trim() || shortAddr(a);
+                  const tabKeys = combos.map((c) => comboKey(c.addr, c.key));
+                  const active = activeTab && tabKeys.includes(activeTab) ? activeTab : tabKeys[0];
                   return (
                     <div className="im-wparams">
-                      {tabs.length > 1 && (
+                      {tabKeys.length > 1 && (
                         <div className="im-wtabs" role="tablist">
-                          {tabs.map((a) => (
-                            <button
-                              key={a}
-                              type="button"
-                              role="tab"
-                              aria-selected={a === active}
-                              className={`im-wtab${a === active ? " on" : ""}`}
-                              onClick={() => setActiveTab(a)}
-                            >
-                              {nameOf(a)}
-                            </button>
-                          ))}
+                          {combos.map((c) => {
+                            const ck = comboKey(c.addr, c.key);
+                            return (
+                              <button
+                                key={ck}
+                                type="button"
+                                role="tab"
+                                aria-selected={ck === active}
+                                className={`im-wtab${ck === active ? " on" : ""}`}
+                                onClick={() => setActiveTab(ck)}
+                              >
+                                {walletNameOf(c.addr)} · {pkgLabelOf(c.addr, c.key)}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                       {active && renderParamForm(active)}
                     </div>
                   );
                 })()
-              ) : (
-                <div className="im-noparams">
-                  {ko ? "설정할 파라미터가 없습니다." : "No parameters to set."}
-                </div>
               )}
               {mut.isError && <div className="publish-error">{(mut.error as Error).message}</div>}
             </div>
