@@ -11,7 +11,7 @@ import {
   getOverview,
   putDef,
   putPackage,
-  putWalletFolder,
+  putWalletPackage,
   updateBinding,
   type Binding,
   type PolicyDef,
@@ -20,7 +20,7 @@ import {
 } from "../../../server-api/policy-store";
 import { listWallets } from "../../../server-api/wallets";
 import { buildDefPayload } from "./save-def";
-import { SaveScopeModal, WALLET_FOLDER_UNCAT, type SaveScopeChoice } from "./SaveScopeModal";
+import { SaveScopeModal, type SaveScopeChoice } from "./SaveScopeModal";
 import { defUsageCount } from "./wallet-policies-derive";
 import {
   canonicalizeModel,
@@ -556,47 +556,52 @@ function EditorBody({
     mutationFn: async (choice: SaveScopeChoice): Promise<string> => {
       if (!scopeAsk) throw new Error(t("detail.internalNoPrepared"));
 
-      // 지갑 전용 경로(모델 A): 지갑마다 **독립 def 사본**을 만들어 그 지갑의
-      // 전용 폴더에 앵커한다. 바인딩(적용)은 만들지 않는다 — 적용은 지갑별
-      // 정책에서 패키지에 끌어다 놓는 동선. {newName} 폴더는 find-or-create.
+      // 지갑 경로(숨김 폐기): 템플릿 def 1개를 **라이브러리에 보이게** 저장하고,
+      // 선택한 (지갑·패키지) 조합마다 값(params)을 따로 채워 바인딩한다. 패키지를
+      // 안 고른 지갑은 바인딩 없이 라이브러리에만 둔다. {__new__} 패키지는
+      // find-or-create.
       if (choice.scope.kind === "wallets") {
-        let lastId = "";
+        const { def } = buildDefPayload({
+          existing: null,
+          displayName: choice.name || name.trim() || "untitled",
+          cat: policy.cat,
+          ir: scopeAsk.ir,
+          manifest: scopeAsk.manifest,
+          scope: { kind: "library-only" },
+          packageId: null,
+          applyToNewWallets: false,
+          doc: docPayload(),
+        });
+        await putDef(def);
+
         for (const address of choice.scope.addresses) {
           const addr = address.toLowerCase();
-          const pick = choice.walletFolders?.[address] ?? { id: WALLET_FOLDER_UNCAT };
-          let folderId: string | undefined;
-          if ("newName" in pick) {
-            const existing = Object.values(
-              snap?.wallets.byAddress[addr]?.folders ?? {},
-            ).find((f) => f.displayName === pick.newName);
-            if (existing) {
-              folderId = existing.id;
+          const w = snap?.wallets.byAddress[addr];
+          const keys = choice.walletPackages?.[address] ?? [];
+          for (const key of keys) {
+            let pkgId: string;
+            if (key === "__new__") {
+              const nm = (choice.walletNewName?.[address] ?? "").trim();
+              const existing = Object.values(w?.packages ?? {}).find((p) => p.displayName === nm);
+              if (existing) {
+                pkgId = existing.id;
+              } else {
+                pkgId = `pkg::${crypto.randomUUID()}`;
+                await putWalletPackage({ address: addr, pkg: { id: pkgId, displayName: nm } });
+              }
             } else {
-              folderId = `fold::${crypto.randomUUID()}`;
-              await putWalletFolder({
-                address: addr,
-                folder: { id: folderId, displayName: pick.newName },
-              });
+              pkgId = key; // UNCATEGORIZED_PKG 또는 기존 패키지 id
             }
-          } else if (pick.id !== WALLET_FOLDER_UNCAT) {
-            folderId = pick.id;
+            const params = choice.paramsByCombo?.[`${address}|${key}`] ?? {};
+            await bindDef({
+              defId: def.id,
+              packageId: pkgId,
+              addresses: [addr],
+              ...(Object.keys(params).length ? { params } : {}),
+            });
           }
-          const { def } = buildDefPayload({
-            existing: null,
-            displayName: choice.name || name.trim() || "untitled",
-            cat: policy.cat,
-            ir: scopeAsk.ir,
-            manifest: scopeAsk.manifest,
-            scope: choice.scope,
-            packageId: null,
-            applyToNewWallets: false,
-            doc: docPayload(),
-            walletOnly: { homeWallet: addr, ...(folderId ? { walletFolderId: folderId } : {}) },
-          });
-          await putDef(def);
-          lastId = def.id;
         }
-        return lastId;
+        return def.id;
       }
 
       // 라이브러리 경로.
@@ -646,8 +651,8 @@ function EditorBody({
     ]);
     return [...addrs].sort().map((address) => ({
       address,
-      folders: Object.values(snap?.wallets.byAddress[address]?.folders ?? {})
-        .map((f) => ({ id: f.id, displayName: f.displayName }))
+      packages: Object.values(snap?.wallets.byAddress[address]?.packages ?? {})
+        .map((p) => ({ id: p.id, displayName: p.displayName }))
         .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko")),
     }));
   }, [walletsQ.data, snap]);
@@ -968,6 +973,8 @@ function EditorBody({
         policyName={name.trim() || "untitled"}
         wallets={modalWallets}
         packages={modalPackages}
+        baseModel={scopeAsk ? irToForm(scopeAsk.ir) : null}
+        baseManifest={scopeAsk?.manifest ?? null}
         busy={finishMut.isPending}
         onCancel={() => setScopeAsk(null)}
         onConfirm={(choice) => finishMut.mutate(choice)}

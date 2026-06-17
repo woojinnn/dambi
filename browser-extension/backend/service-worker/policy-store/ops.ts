@@ -104,7 +104,7 @@ export function deletePackage(uid: string, pkgId: string): Promise<void> {
 /** 지갑 패키지 생성/이름변경 — 지갑 안에서만 존재, 라이브러리 불변. */
 export function putWalletPackage(
   uid: string,
-  opts: { address: string; pkg: { id: string; displayName: string } },
+  opts: { address: string; pkg: { id: string; displayName: string; desc?: string } },
 ): Promise<void> {
   return mutate(uid, (d) => {
     if (opts.pkg.id === UNCATEGORIZED_PKG) throw new Error("미분류는 이름을 바꿀 수 없습니다");

@@ -10,7 +10,6 @@ import {
   bindDef,
   installMarket,
   putWalletPackage,
-  UNCATEGORIZED_PKG,
   type HoleSpec,
   type HoleValue,
   type MarketInstallScope,
@@ -75,27 +74,32 @@ export async function installListingV2(
   return { kind: detail.kind, defIds: defs.map((d) => d.id) };
 }
 
-/** 지갑 전용 설치의 지갑별 패키지 결정 — 기존 패키지 id 또는 "이 이름의
- *  패키지에 넣기"(같은 이름이 이미 있으면 재사용, 없으면 생성). */
+/** 패키지 선택 키 — 기존 패키지 id, 미분류 센티널(UNCATEGORIZED_PKG), 또는
+ *  "__new__"(그 지갑에 새 패키지 만들기, 이름은 walletNewName). */
+export type WalletPkgKey = string;
+/** (구) 단일 패키지 결정 — 호환용. */
 export type WalletPkgPick = { id: string } | { newName: string };
 
 export interface WalletOnlyInstallChoice {
   addresses: string[];
-  walletPackages: Record<string, WalletPkgPick>;
+  /** 지갑별 선택 패키지 키 목록(다중). 빈 배열 = 그 지갑은 적용 안 함(라이브러리만). */
+  walletPackages: Record<string, WalletPkgKey[]>;
+  /** "__new__" 키 해석용 — 지갑별 새 패키지 이름. */
+  walletNewName?: Record<string, string>;
   /** find-or-create·중복 바인딩 가드용 현재 스토어 스냅샷. */
   snap: StoreSnapshot;
-  /** 채워진 required hole 값(모든 지갑 공통 폴백 / 라이브러리 def 기본값). */
+  /** 채워진 required hole 값(모든 바인딩 공통 폴백 / 라이브러리 def 기본값). */
   params?: InstallParams;
-  /** 지갑별 required hole 값 — 있으면 그 지갑 바인딩엔 이 값을 쓴다(공통보다 우선). */
-  paramsByAddress?: Record<string, InstallParams>;
-  /** 지갑·def 별 심각도 override(차단/경고). def 선언값과 다를 때만 넣어 바인딩에
-   *  기록한다 — 에디터 인스턴스 편집의 지갑별 override 와 같은 효과. */
-  severityByAddress?: Record<string, Record<string, "deny" | "warn">>;
+  /** 지갑·패키지키별 params — 선택한 패키지마다 값을 따로 채운다(공통보다 우선). */
+  paramsByAddressPkg?: Record<string, Record<WalletPkgKey, InstallParams>>;
+  /** 지갑·패키지키·def별 심각도 override(차단/경고). */
+  severityByAddressPkg?: Record<string, Record<WalletPkgKey, Record<string, "deny" | "warn">>>;
 }
 
-/** 지갑 전용 설치: def는 hidden으로 라이브러리에 넣고(카탈로그 비노출), 지갑별
- *  패키지를 find-or-create한 뒤 주소마다 바인딩한다. 이미 라이브러리에 보이는
- *  def(이전에 라이브러리로 설치)는 hidden을 덮지 않고 그대로 바인딩만 한다. */
+/** 지갑 전용 설치(이름 유지, 동작 변경): 템플릿 def는 **라이브러리에 보이게**
+ *  넣고(숨김 개념 폐기), 지갑마다 선택한 **여러 패키지**에 각각 바인딩한다 —
+ *  패키지별로 채운 값(params)을 따로 적용. 선택 패키지가 없는 지갑은 바인딩 없이
+ *  라이브러리에만 둔다. */
 export async function installListingWalletOnlyV2(
   detail: ListingDetail,
   locale: "ko" | "en",
@@ -107,14 +111,14 @@ export async function installListingWalletOnlyV2(
   for (const d of defs) {
     const prev = choice.snap.library.defs[d.id];
     if (prev) {
-      // 재설치(업데이트): 기존 노출 상태·기본값을 보존하고 새로 채운 값만 얹는다.
+      // 재설치(업데이트): 기존 노출 상태·기본값 보존, 새로 채운 값만 얹는다.
       if (prev.hidden) d.hidden = true;
       d.defaults = {
         ...prev.defaults,
         params: { ...d.defaults.params, ...prev.defaults.params, ...(filled[d.id] ?? {}) },
       };
     } else {
-      d.hidden = true;
+      // 숨김 저장 폐기 — 템플릿은 라이브러리에 그대로 보인다.
       d.defaults = {
         enabled: false,
         params: { ...d.defaults.params, ...(filled[d.id] ?? {}) },
@@ -126,38 +130,38 @@ export async function installListingWalletOnlyV2(
 
   for (const address of choice.addresses) {
     const w = choice.snap.wallets.byAddress[address];
-    const pick = choice.walletPackages[address] ?? { id: UNCATEGORIZED_PKG };
-    let pkgId: string;
-    if ("id" in pick) {
-      pkgId = pick.id;
-    } else {
-      const existing = Object.values(w?.packages ?? {}).find(
-        (p) => p.displayName === pick.newName,
-      );
-      if (existing) {
-        pkgId = existing.id;
+    const keys = choice.walletPackages[address] ?? [];
+    for (const key of keys) {
+      let pkgId: string;
+      if (key === "__new__") {
+        const newName = (choice.walletNewName?.[address] ?? "").trim();
+        const existing = Object.values(w?.packages ?? {}).find((p) => p.displayName === newName);
+        if (existing) {
+          pkgId = existing.id;
+        } else {
+          pkgId = `pkg::${crypto.randomUUID()}`;
+          await putWalletPackage({ address, pkg: { id: pkgId, displayName: newName } });
+        }
       } else {
-        pkgId = `pkg::${crypto.randomUUID()}`;
-        await putWalletPackage({ address, pkg: { id: pkgId, displayName: pick.newName } });
+        pkgId = key; // UNCATEGORIZED_PKG 또는 기존 패키지 id
       }
-    }
-    // 지갑별 입력이 있으면 그 지갑 바인딩엔 그 값을, 없으면 공통 값을 쓴다.
-    const walletFilled = choice.paramsByAddress?.[address] ?? filled;
-    for (const d of defs) {
-      // 같은 패키지에 이미 들어 있으면 줄을 또 만들지 않는다(재설치 멱등).
-      const dup = Object.values(w?.bindings ?? {}).some(
-        (b) => b.defId === d.id && b.packageId === pkgId,
-      );
-      if (!dup) {
-        const params = walletFilled[d.id];
-        const sev = choice.severityByAddress?.[address]?.[d.id];
-        await bindDef({
-          defId: d.id,
-          packageId: pkgId,
-          addresses: [address],
-          ...(params && Object.keys(params).length ? { params } : {}),
-          ...(sev ? { severity: sev } : {}),
-        });
+      const pkgFilled = choice.paramsByAddressPkg?.[address]?.[key] ?? filled;
+      for (const d of defs) {
+        // 같은 패키지에 이미 들어 있으면 줄을 또 만들지 않는다(재설치 멱등).
+        const dup = Object.values(w?.bindings ?? {}).some(
+          (b) => b.defId === d.id && b.packageId === pkgId,
+        );
+        if (!dup) {
+          const params = pkgFilled[d.id];
+          const sev = choice.severityByAddressPkg?.[address]?.[key]?.[d.id];
+          await bindDef({
+            defId: d.id,
+            packageId: pkgId,
+            addresses: [address],
+            ...(params && Object.keys(params).length ? { params } : {}),
+            ...(sev ? { severity: sev } : {}),
+          });
+        }
       }
     }
   }

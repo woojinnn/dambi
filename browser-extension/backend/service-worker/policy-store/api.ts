@@ -51,7 +51,7 @@ export type Ps2Request =
     }
   | { type: "ps2:remove-binding"; address: string; bindingId: string }
   | { type: "ps2:remove-wallet-package"; address: string; packageId: string }
-  | { type: "ps2:put-wallet-package"; address: string; pkg: { id: string; displayName: string } }
+  | { type: "ps2:put-wallet-package"; address: string; pkg: { id: string; displayName: string; desc?: string } }
   | { type: "ps2:put-wallet-folder"; address: string; folder: { id: string; displayName: string } }
   | { type: "ps2:remove-wallet-folder"; address: string; folderId: string }
   | { type: "ps2:copy-bindings"; fromAddress: string; toAddress: string; bindingIds: string[] }
