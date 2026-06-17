@@ -2597,6 +2597,11 @@
     .im-check + .im-check { border-top: 1px solid var(--hairline-soft); }
     .im-textfield { width: 100%; border: 1px solid var(--hairline); border-radius: 9px; padding: 9px 12px; font: inherit; font-size: 13px; outline: none; margin-top: 2px; }
     .im-textfield:focus { border-color: var(--warn-400); }
+    .im-libnote { font-size: 11px; color: var(--slate-400); }
+    .im-name { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
+    .im-name > span { font-size: 11px; font-weight: 700; color: var(--slate-500); }
+    .im-name > input { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 11px; font: inherit; font-size: 13px; outline: none; }
+    .im-name > input:focus { border-color: var(--sage-400, var(--sage-300)); }
     .im-selfield { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 6px; font-size: 12px; }
     .im-sellabel { font-weight: 700; color: var(--slate-500); }
     .im-selfield select { font: inherit; font-size: 13px; border: 1px solid var(--hairline); border-radius: 9px; padding: 9px 12px; outline: none; background: var(--surface); }
