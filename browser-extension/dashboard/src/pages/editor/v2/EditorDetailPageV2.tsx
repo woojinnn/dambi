@@ -20,7 +20,15 @@ import {
 } from "../../../server-api/policy-store";
 import { listWallets } from "../../../server-api/wallets";
 import { buildDefPayload } from "./save-def";
-import { SaveScopeModal, type SaveScopeChoice } from "./SaveScopeModal";
+import {
+  ScopeInstallModal,
+  type LibraryApply,
+  type WalletApply,
+} from "../../ScopeInstallModal";
+
+/** 신규 정책은 def 하나뿐 — 모달이 파라미터/심각도를 이 키로 묶어 돌려준다. */
+const SCOPE_DEF_KEY = "new";
+type SavePayload = { kind: "wallets"; a: WalletApply } | { kind: "library"; a: LibraryApply };
 import { defUsageCount } from "./wallet-policies-derive";
 import {
   canonicalizeModel,
@@ -251,7 +259,7 @@ function EditorBody({
   onSaved: (id: string) => void;
   onDeleted: () => void;
 }) {
-  const { t } = useTranslation("editor");
+  const { t, i18n } = useTranslation("editor");
   const [name, setName] = useState(() => policy.displayName);
   // 바인딩 모드면 그 지갑의 severity override 를 우선 표시(없으면 def 선언값).
   const [severity, setSeverity] = useState<PolicySeverity>(
@@ -551,19 +559,21 @@ function EditorBody({
     },
   });
 
-  // 범위 모달 confirm → (필요시 패키지/폴더 생성) → put-def + bind.
+  // 공유 ScopeInstallModal 의 결과 → (필요시 패키지/폴더 생성) → put-def + bind.
+  // 모달의 단일 def 키(파라미터/심각도가 이 키로 묶여 온다).
   const finishMut = useMutation({
-    mutationFn: async (choice: SaveScopeChoice): Promise<string> => {
+    mutationFn: async (p: SavePayload): Promise<string> => {
       if (!scopeAsk) throw new Error(t("detail.internalNoPrepared"));
+      const displayName = name.trim() || "untitled";
 
-      // 지갑 경로(숨김 폐기): 템플릿 def 1개를 **라이브러리에 보이게** 저장하고,
-      // 선택한 (지갑·패키지) 조합마다 값(params)을 따로 채워 바인딩한다. 패키지를
-      // 안 고른 지갑은 바인딩 없이 라이브러리에만 둔다. {__new__} 패키지는
-      // find-or-create.
-      if (choice.scope.kind === "wallets") {
+      // 지갑 경로: 템플릿 def 1개를 라이브러리에 보이게 저장하고, 선택한
+      // (지갑·패키지) 조합마다 값을 따로 채워 바인딩한다. 패키지 미선택 지갑은
+      // 바인딩 없이 라이브러리에만. {__new__} 패키지는 find-or-create.
+      if (p.kind === "wallets") {
+        const a = p.a;
         const { def } = buildDefPayload({
           existing: null,
-          displayName: choice.name || name.trim() || "untitled",
+          displayName,
           cat: policy.cat,
           ir: scopeAsk.ir,
           manifest: scopeAsk.manifest,
@@ -574,15 +584,14 @@ function EditorBody({
         });
         await putDef(def);
 
-        for (const address of choice.scope.addresses) {
+        for (const address of a.addresses) {
           const addr = address.toLowerCase();
           const w = snap?.wallets.byAddress[addr];
-          const keys = choice.walletPackages?.[address] ?? [];
-          for (const key of keys) {
+          for (const key of a.walletPackages[address] ?? []) {
             let pkgId: string;
             if (key === "__new__") {
-              const nm = (choice.walletNewName?.[address] ?? "").trim();
-              const existing = Object.values(w?.packages ?? {}).find((p) => p.displayName === nm);
+              const nm = (a.walletNewName[address] ?? "").trim();
+              const existing = Object.values(w?.packages ?? {}).find((q) => q.displayName === nm);
               if (existing) {
                 pkgId = existing.id;
               } else {
@@ -590,14 +599,17 @@ function EditorBody({
                 await putWalletPackage({ address: addr, pkg: { id: pkgId, displayName: nm } });
               }
             } else {
-              pkgId = key; // UNCATEGORIZED_PKG 또는 기존 패키지 id
+              pkgId = key;
             }
-            const params = choice.paramsByCombo?.[`${address}|${key}`] ?? {};
+            const ck = `${address}|${key}`;
+            const params = a.paramsByCombo[ck]?.[SCOPE_DEF_KEY] ?? {};
+            const sev = a.severityByCombo[ck]?.[SCOPE_DEF_KEY];
             await bindDef({
               defId: def.id,
               packageId: pkgId,
               addresses: [addr],
               ...(Object.keys(params).length ? { params } : {}),
+              ...(sev ? { severity: sev } : {}),
             });
           }
         }
@@ -605,29 +617,34 @@ function EditorBody({
       }
 
       // 라이브러리 경로.
-      let pkgId = choice.packageId;
+      const a = p.a;
+      let pkgId = a.packageId;
       if (pkgId === "__new__") {
         pkgId = `pkg::${crypto.randomUUID()}`;
         await putPackage({
           id: pkgId,
-          displayName: choice.newPackageName ?? t("list.newFolderName"),
+          displayName: a.newPackageName || t("list.newFolderName"),
           source: "mine",
           updatedAtMs: Date.now(),
         });
       }
+      const allAddrs = modalWallets.map((w) => w.address);
       const { def, bindPlan } = buildDefPayload({
         existing: null,
-        displayName: choice.name || name.trim() || "untitled",
+        displayName,
         cat: policy.cat,
         ir: scopeAsk.ir,
         manifest: scopeAsk.manifest,
-        scope: choice.scope,
+        scope: a.applyToAllNow ? { kind: "all-wallets", addresses: allAddrs } : { kind: "library-only" },
         packageId: pkgId,
-        applyToNewWallets: choice.applyToNewWallets,
+        applyToNewWallets: a.applyToNewWallets,
         doc: docPayload(),
       });
       await putDef(def);
-      if (bindPlan) await bindDef(bindPlan);
+      if (bindPlan) {
+        const params = a.libParams[SCOPE_DEF_KEY] ?? {};
+        await bindDef({ ...bindPlan, ...(Object.keys(params).length ? { params } : {}) });
+      }
       return def.id;
     },
     onSuccess: (savedId) => {
@@ -968,17 +985,44 @@ function EditorBody({
         }}
       />
 
-      <SaveScopeModal
-        open={scopeAsk !== null}
-        policyName={name.trim() || "untitled"}
-        wallets={modalWallets}
-        packages={modalPackages}
-        baseModel={scopeAsk ? irToForm(scopeAsk.ir) : null}
-        baseManifest={scopeAsk?.manifest ?? null}
-        busy={finishMut.isPending}
-        onCancel={() => setScopeAsk(null)}
-        onConfirm={(choice) => finishMut.mutate(choice)}
-      />
+      {scopeAsk && (
+        <ScopeInstallModal
+          open
+          ko={i18n.language.startsWith("ko")}
+          icon={
+            <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="var(--slate-500)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" />
+            </svg>
+          }
+          kindLabel={i18n.language.startsWith("ko") ? "정책" : "Policy"}
+          title={name.trim() || "untitled"}
+          name={{
+            value: name,
+            onChange: setName,
+            label: t("saveScope.nameLabel"),
+            placeholder: t("saveScope.namePlaceholder"),
+          }}
+          walletOptTitle={t("saveScope.walletOptTitle")}
+          walletOptDesc={t("saveScope.walletOptDesc")}
+          libraryOptTitle={t("saveScope.libOptTitle")}
+          libraryOptDesc={t("saveScope.libOptDesc")}
+          formDefs={[
+            {
+              defId: SCOPE_DEF_KEY,
+              defName: name.trim() || "untitled",
+              model: irToForm(scopeAsk.ir),
+              manifest: scopeAsk.manifest,
+            },
+          ]}
+          wallets={modalWallets}
+          libPackages={modalPackages}
+          busy={finishMut.isPending}
+          error={finishMut.isError ? (finishMut.error as Error).message : null}
+          onApplyWallets={(a) => finishMut.mutate({ kind: "wallets", a })}
+          onApplyLibrary={(a) => finishMut.mutate({ kind: "library", a })}
+          onClose={() => setScopeAsk(null)}
+        />
+      )}
     </div>
   );
 }
