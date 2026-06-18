@@ -51,7 +51,7 @@ export function EditorListPageV2() {
   return (
     <>
       <Topbar
-        here="Policy Editor"
+        here={t("nav.editor", { ns: "shell" })}
         subtitle={defCount === null ? "…" : t("list.subtitle", { defs: defCount, pkgs: pkgCount })}
       />
 

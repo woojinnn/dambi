@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { fetchMe, listFindings } from "../server-api";
+import { listFindings } from "../server-api";
 import { useAuth } from "../hooks/useAuth";
 
 /**
@@ -17,8 +17,9 @@ export function NavRail() {
   // token, messages the SW, and resets `user`. The server-api `logout` only
   // drops localStorage, so the next refresh re-hydrates the token from
   // chrome.storage and the user bounces straight back in.
-  const { logout } = useAuth();
-  const meQ = useQuery({ queryKey: ["me"], queryFn: fetchMe, staleTime: Infinity });
+  // 로그인된 계정은 useAuth().user 로 읽는다(재로그인 시 즉시 반영). 예전엔 별도
+  // ["me"] 쿼리를 staleTime:Infinity 로 캐시해, 계정 전환 후에도 옛 계정이 떴다.
+  const { logout, user } = useAuth();
   const findingsQ = useQuery({
     queryKey: ["findings", "unresolved-count"],
     queryFn: () => listFindings({ limit: 50 }),
@@ -26,7 +27,7 @@ export function NavRail() {
   });
   const pendingCount = findingsQ.data?.filter((f) => f.user_decision === null).length ?? 0;
 
-  const initials = (meQ.data?.email ?? "??").slice(0, 2).toUpperCase();
+  const initials = (user?.email ?? "??").slice(0, 2).toUpperCase();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -61,7 +62,9 @@ export function NavRail() {
 
       <div className="nav-group">
         <RailItem to="/" end label={t("nav.home")} icon={<HomeIcon />} />
-        <RailItem to="/editor" label={t("nav.editor")} icon={<EditorIcon />} />
+        {/* 기존 '정책 관리'(/editor)는 탭에서 숨김 — 라우트/코드는 유지(상세 편집 진입에 계속 사용). */}
+        {/* 새 에디터가 '정책 관리'를 대체. 탭 라벨은 nav.editor("정책 관리")를 그대로 사용. */}
+        <RailItem to="/editor2" label={t("nav.editor")} icon={<EditorIcon />} activePrefixes={["/editor"]} />
         <RailItem to="/simulation" label={t("nav.simulation")} icon={<SimIcon />} />
         <RailItem to="/assets" label={t("nav.assets")} icon={<MonIcon />} />
         <RailItem to="/market" label={t("nav.market")} icon={<MarketIcon />} />
@@ -101,8 +104,8 @@ export function NavRail() {
         >
           <span className="av">{initials}</span>
           <div className="meta">
-            <div className="nm">{meQ.data?.email ?? "—"}</div>
-            <div className="em">{meQ.data?.user_id ?? ""}</div>
+            <div className="nm">{user?.email ?? "—"}</div>
+            <div className="em">{user?.user_id ?? ""}</div>
           </div>
           <span className="nav-user-caret"><CaretUpIcon /></span>
         </button>
@@ -119,10 +122,15 @@ interface RailItemProps {
   disabled?: boolean;
   badge?: string;
   showDot?: boolean;
+  /** Extra path prefixes that should also mark this item active (e.g. the new
+   *  '정책 관리' tab stays active while editing a policy on the legacy /editor route). */
+  activePrefixes?: string[];
 }
 
-function RailItem({ to, label, icon, end, disabled, badge, showDot }: RailItemProps) {
+function RailItem({ to, label, icon, end, disabled, badge, showDot, activePrefixes }: RailItemProps) {
   const { t } = useTranslation("shell");
+  const { pathname } = useLocation();
+  const prefixActive = (activePrefixes ?? []).some((p) => pathname === p || pathname.startsWith(p + "/"));
   if (disabled) {
     return (
       <span className="nav-item disabled" title={t("nav.comingSoon")}>
@@ -135,7 +143,7 @@ function RailItem({ to, label, icon, end, disabled, badge, showDot }: RailItemPr
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+      className={({ isActive }) => `nav-item${isActive || prefixActive ? " active" : ""}`}
       onPointerUp={(event) => {
         event.currentTarget.blur();
       }}

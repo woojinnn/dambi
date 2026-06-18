@@ -2493,6 +2493,11 @@
 
 /* 페이지 프레임 — 최대폭 + 가운데 정렬 + 여백 (이게 빠져서 full-bleed 였음). */
 .rm-page { max-width: 1180px; margin: 0 auto; padding: 28px 32px 64px; }
+/* 랜딩은 홈/시뮬레이션과 동일하게 풀-와이드 좌측 정렬 — 가운데 정렬 auto
+   여백 때문에 제목이 우측으로 밀리고, 너비 상한(1180px)을 유지하면 우측에
+   빈 공간이 생겨 좌우 균형이 깨졌다. 상한을 풀어 좌우 32px 패딩으로 폭을
+   꽉 채워 홈과 동일한 균형/제목 위치를 만든다. */
+.rm-page.rm-landing { max-width: none; margin: 0; padding-top: 24px; }
 
 /* ── shell ↔ market 브릿지 (Market.html inline <style> L19-33 1:1 이식) ──
    프로토타입은 .app-content{padding:0} 으로 셸 패딩을 죽이고 .rm-page 가

@@ -82,20 +82,27 @@ export function deleteDef(uid: string, defId: string): Promise<void> {
 }
 
 /** 명시적 분기: 정의를 복제해 독립 정의로. 바인딩은 복사하지 않는다. */
-export function duplicateDef(uid: string, defId: string): Promise<string> {
+/** 정의를 복제한다. `packageId`를 주면 사본을 그 폴더(라이브러리 패키지)에 넣고,
+ *  `UNCATEGORIZED_PKG`면 폴더 없음(개별)으로 둔다. 안 주면 원본 폴더를 따른다. */
+export function duplicateDef(uid: string, defId: string, packageId?: string): Promise<string> {
   return mutate(uid, (d) => {
     const src = d.library.defs[defId];
     if (!src) throw new Error(`정의가 없습니다: ${defId}`);
     const newId = `def::${crypto.randomUUID()}`;
-    d.library.defs[newId] = {
+    const clone = {
       ...structuredClone(src),
       id: newId,
       displayName: `${src.displayName} (복제)`,
-      source: "mine",
+      source: "mine" as const,
       sourceListingId: undefined,
       sourceVersion: undefined,
       updatedAtMs: Date.now(),
     };
+    if (packageId !== undefined) {
+      if (packageId === UNCATEGORIZED_PKG) delete clone.defaults.packageId;
+      else clone.defaults = { ...clone.defaults, packageId };
+    }
+    d.library.defs[newId] = clone;
     return newId;
   });
 }

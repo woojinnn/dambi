@@ -66,13 +66,13 @@ export function MarketDetailPage() {
   // `.rm-pagehead` crumb is the listing's display name, back returns to the
   // list view (label says 목록, so route to ?view=list, not the bare home).
   const crumb = detailQ.data
-    ? pickI18n(detailQ.data.display_name, locale) || detailQ.data.slug
+    ? pickI18n(detailQ.data.display_name) || detailQ.data.slug
     : slug || "…";
   return (
     <>
       <MarketPagehead
         crumb={crumb}
-        back={{ to: "/market?view=list", label: locale === "ko" ? "← Policy Hub 목록" : "← Policy Hub" }}
+        back={{ to: "/market?view=list", label: locale === "ko" ? "← 정책허브 목록" : "← Policy Hub" }}
       />
 
       <div className="market-detail-wrap">
@@ -122,7 +122,7 @@ function DetailBody({
   onInstall: () => void;
 }) {
   const ko = locale === "ko";
-  const name = pickI18n(detail.display_name, locale) || detail.slug;
+  const name = pickI18n(detail.display_name) || detail.slug;
   const isSet = detail.kind === "set";
   const members = isSet ? detail.latest_version?.members ?? [] : [];
   // Prefer the server-stored category (authoritative for DB listings); fall
@@ -276,7 +276,7 @@ function Reviews({ detail, locale }: { detail: ListingDetail; locale: MarketLoca
   return (
     <div className="rm-sec rm-reviews">
       <div className="rm-rev-head">
-        <h2>Review</h2>
+        <h2>{ko ? "리뷰" : "Review"}</h2>
         <span className="div">|</span>
         <span className="sub">
           {hasReviews
@@ -389,7 +389,7 @@ function Reviews({ detail, locale }: { detail: ListingDetail; locale: MarketLoca
                     <span className="dt">{formatYmd(r.created_at)}</span>
                     <span className="vc">v{r.version}</span>
                   </div>
-                  <div className="tx">{pickI18n(r.body, locale)}</div>
+                  <div className="tx">{pickI18n(r.body)}</div>
                 </div>
               </div>
             );
@@ -419,7 +419,7 @@ function SetSummary({
   locale: MarketLocale;
 }) {
   const ko = locale === "ko";
-  const why = pickI18n(detail.description, locale);
+  const why = pickI18n(detail.description);
   const copy = packageCopy(detail.slug);
   const counts = new Map<CategoryKey, number>();
   members.forEach((m) => {
@@ -523,7 +523,7 @@ function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: M
   const cedar = detail.latest_version?.cedar_text ?? "";
   const manifest = detail.latest_version?.manifest;
   const copy = policyCopy(detail.slug);
-  const summary = copy?.title || pickI18n(detail.description, locale) || (cedar ? leadingComment(cedar) : "");
+  const summary = copy?.title || pickI18n(detail.description) || (cedar ? leadingComment(cedar) : "");
   const sev = cedar ? severityFromCedar(cedar) : detail.severity ?? "deny";
   const cat = isCategoryKey(detail.category) ? detail.category : categoryOf(detail.slug);
   const inPkgs = usePackagesContaining(detail.slug);

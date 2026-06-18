@@ -30,7 +30,7 @@ export type Ps2Request =
   | { type: "ps2:get-overview" }
   | { type: "ps2:put-def"; def: PolicyDef }
   | { type: "ps2:delete-def"; defId: string }
-  | { type: "ps2:duplicate-def"; defId: string }
+  | { type: "ps2:duplicate-def"; defId: string; packageId?: string }
   | { type: "ps2:put-package"; pkg: PackageDef }
   | { type: "ps2:delete-package"; packageId: string }
   | {
@@ -104,7 +104,7 @@ export async function handlePs2Request(req: Ps2Request): Promise<unknown> {
     case "ps2:delete-def":
       return deleteDef(uid, req.defId);
     case "ps2:duplicate-def":
-      return duplicateDef(uid, req.defId);
+      return duplicateDef(uid, req.defId, req.packageId);
     case "ps2:put-package":
       return putPackage(uid, req.pkg);
     case "ps2:delete-package":

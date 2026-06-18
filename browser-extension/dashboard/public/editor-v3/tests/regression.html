@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Policy Editor — 회귀 테스트 (②③)</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, "SF Mono", monospace; background: #14110d; color: #e8e2d6; margin: 0; padding: 24px; }
+  h1 { font-size: 16px; color: #d8c89a; }
+  h2 { font-size: 13px; color: #9fb4c8; margin: 22px 0 6px; border-bottom: 1px solid #2e2a22; padding-bottom: 4px; }
+  .case { display: flex; gap: 10px; padding: 4px 0; align-items: baseline; }
+  .case .st { flex: none; width: 56px; font-weight: 700; }
+  .pass .st { color: #6fcf97; }
+  .fail .st { color: #ff6b53; }
+  .case .desc { flex: 1; }
+  .case .detail { color: #8a8275; font-size: 12px; }
+  .fail .detail { color: #ffb4a6; }
+  #summary { margin-top: 20px; padding: 12px 14px; border-radius: 8px; font-weight: 700; }
+  .ok { background: #16351f; color: #8ff0ad; }
+  .bad { background: #3a1610; color: #ff9b86; }
+</style>
+</head>
+<body>
+<h1>Policy Editor 회귀 테스트 — ② 지갑 전용 정책 적용 · ③ 색 크로스워크</h1>
+<div id="out"></div>
+<div id="summary">실행 중…</div>
+
+<!-- React+babel only so icons.jsx (color crosswalk fns) can load -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="../js/icons.jsx"></script>
+<script src="store-test.js"></script>
+
+<script type="text/babel">
+// defUsageCount: list.jsx와 동일 정의 (테스트 페이지엔 list.jsx 미로드)
+function defUsageCount(snap, defId) {
+  let n = 0;
+  for (const w of Object.values(snap.wallets.byAddress)) {
+    if (Object.values(w.bindings).some((b) => b.defId === defId)) n += 1;
+  }
+  return n;
+}
+window.defUsageCount = defUsageCount;
+const out = document.getElementById("out");
+let total = 0, passed = 0;
+function group(t) { const h = document.createElement("h2"); h.textContent = t; out.appendChild(h); }
+function check(desc, cond, detail) {
+  total++; if (cond) passed++;
+  const row = document.createElement("div");
+  row.className = "case " + (cond ? "pass" : "fail");
+  row.innerHTML = `<span class="st">${cond ? "PASS" : "FAIL"}</span><span class="desc">${desc}${detail ? ` <span class="detail">${detail}</span>` : ""}</span>`;
+  out.appendChild(row);
+}
+
+async function run() {
+  const PS = window.PSTEST;
+  const WA = PS.WALLET_A, WB = PS.WALLET_B, UNCAT = PS.UNCATEGORIZED_PKG;
+
+  /* ───────── ③ 색 크로스워크 (권위 매핑) ───────── */
+  group("③ 카테고리 → 3계열 크로스워크 (market-domain.tsx 기준)");
+  const fam = window.catFam;
+  check("token → gold(자산)", fam("token") === "gold", `got ${fam("token")}`);
+  check("nft → gold(자산)", fam("nft") === "gold", `got ${fam("nft")}`);
+  check("airdrop → gold(자산)", fam("airdrop") === "gold", `got ${fam("airdrop")}`);
+  check("swap → cyan(거래)", fam("swap") === "cyan", `got ${fam("swap")}`);
+  check("amm → cyan(거래) [이전 추측 asset 교정]", fam("amm") === "cyan", `got ${fam("amm")}`);
+  check("perp → cyan(거래)", fam("perp") === "cyan", `got ${fam("perp")}`);
+  check("bridge → cyan(거래)", fam("bridge") === "cyan", `got ${fam("bridge")}`);
+  check("lending → slate [이전 추측 asset 교정]", fam("lending") === "slate", `got ${fam("lending")}`);
+  check("security → slate (크로스워크 미정의 → Others)", fam("security") === "slate", `got ${fam("security")}`);
+  check("core → slate (폴백)", fam("core") === "slate", `got ${fam("core")}`);
+  check("unknown → slate (폴백)", fam("zzz") === "slate", `got ${fam("zzz")}`);
+  check("famStyle(token).tile 채움색 존재", !!window.famStyle("token").tile.background);
+  check("심각도 라벨: deny=차단 / warn=경고", window.sevLabel("deny") === "차단" && window.sevLabel("warn") === "경고");
+  check("심각도: 알 수 없는 값은 라벨 없음(null)", window.sevLabel("xyz") == null);
+
+  // 시드 확인: permit2/approval의 실제 cat → family
+  check("시드 permit2-sign-allowance-confirm cat=token → gold",
+    fam("token") === "gold", "시드 cat: token");
+  check("시드 unlimited-approval-deny cat=security → slate",
+    fam("security") === "slate", "시드 cat: security");
+
+  /* ───────── ② 데이터 모델: 지갑 전용 정책 적용 ───────── */
+  group("② finishScope(wallets) 동작 — bindDef 추가");
+  PS.resetSeed();
+  let snap = PS.getOverview();
+  const baseBindCount = (s, a) => Object.keys(s.wallets.byAddress[a].bindings).length;
+  const before = baseBindCount(snap, WA);
+  check("리셋 후 WALLET_A 바인딩 6개 (기본 안전팩)", before === 6, `got ${before}`);
+
+  // 시뮬레이션: '지금 켜기' ON + 단일 지갑(WA) + 미분류 패키지
+  // (finishScope의 applyNow 경로와 동일한 호출 순서)
+  const defId1 = "def::test-oneoff-" + WA.slice(2, 6);
+  await PS.putDef({
+    id: defId1, displayName: "3달러 초과 스왑", cat: "swap", method: "cedar",
+    source: "mine", hidden: true, homeWallet: WA, walletFolderId: undefined,
+    enabled: false, defaults: { packageId: undefined },
+    skeleton: { model: { id: "x", action: { ns: "Token", name: "Swap" }, conditions: [], effect: "forbid", severity: "warn", reason: "" }, manifest: {} },
+    doc: {}, updatedAtMs: Date.now(),
+  });
+  await PS.bindDef({ defId: defId1, packageId: UNCAT, addresses: [WA], enabled: true });
+  snap = PS.getOverview();
+
+  check("지금 켜기 → WALLET_A 바인딩 7개 (6+1)", baseBindCount(snap, WA) === before + 1, `got ${baseBindCount(snap, WA)}`);
+  const wa = snap.wallets.byAddress[WA];
+  const newBind = Object.values(wa.bindings).find((b) => b.defId === defId1);
+  check("생성된 바인딩 enabled=true (곧장 적용)", !!newBind && newBind.enabled === true);
+  check("바인딩 packageId = 미분류(UNCAT)", !!newBind && newBind.packageId === UNCAT, newBind && newBind.packageId);
+  check("def는 hidden+homeWallet (전용 패널에 회수 가능)", snap.library.defs[defId1].hidden === true && snap.library.defs[defId1].homeWallet === WA);
+  check("isEffectiveOn(바인딩) = true", PS.isEffectiveOn(wa, newBind) === true);
+  check("다른 지갑(WALLET_B)엔 적용 안 됨 (일회용 격리)",
+    !Object.values(snap.wallets.byAddress[WB].bindings).some((b) => b.defId === defId1));
+
+  group("② 결정A — 여러 지갑 선택 시 각 지갑에 bindDef N개");
+  PS.resetSeed();
+  const defId2 = "def::multi-oneoff";
+  // 두 지갑 모두에 적용 (finishScope 루프와 동일)
+  for (const a of [WA, WB]) {
+    await PS.putDef({ id: defId2 + "-" + a.slice(2, 6), displayName: "멀티", cat: "swap", method: "cedar", source: "mine", hidden: true, homeWallet: a, enabled: false, defaults: {}, skeleton: { model: { severity: "deny" }, manifest: {} }, doc: {}, updatedAtMs: Date.now() });
+    await PS.bindDef({ defId: defId2 + "-" + a.slice(2, 6), packageId: UNCAT, addresses: [a], enabled: true });
+  }
+  snap = PS.getOverview();
+  check("WALLET_A에 바인딩 +1", baseBindCount(snap, WA) === 7, `got ${baseBindCount(snap, WA)}`);
+  check("WALLET_B에 바인딩 +1", baseBindCount(snap, WB) === 7, `got ${baseBindCount(snap, WB)}`);
+  check("각 지갑은 독립 def 사본 보유 (현재 구조 유지)",
+    !!snap.library.defs[defId2 + "-" + WA.slice(2, 6)] && !!snap.library.defs[defId2 + "-" + WB.slice(2, 6)]);
+
+  group("② 결정C — 체크 해제 = 초안만, bindDef 호출 안 함");
+  PS.resetSeed();
+  const before3 = baseBindCount(PS.getOverview(), WA);
+  const defId3 = "def::draft-only-" + WA.slice(2, 6);
+  await PS.putDef({ id: defId3, displayName: "초안", cat: "swap", method: "cedar", source: "mine", hidden: true, homeWallet: WA, walletFolderId: undefined, enabled: false, defaults: {}, skeleton: { model: { severity: "warn" }, manifest: {} }, doc: {}, updatedAtMs: Date.now() });
+  // applyNow=false → bindDef 미호출
+  snap = PS.getOverview();
+  check("초안 저장 후 바인딩 수 불변 (적용 안 됨)", baseBindCount(snap, WA) === before3, `got ${baseBindCount(snap, WA)} / base ${before3}`);
+  check("초안 def는 전용 패널에 존재 (hidden+homeWallet)", snap.library.defs[defId3].hidden === true && snap.library.defs[defId3].homeWallet === WA);
+  const draftBinds = Object.values(snap.wallets.byAddress[WA].bindings).filter((b) => b.defId === defId3);
+  check("초안 def에 대한 바인딩 0개 → '미적용 초안' 배지 조건 충족", draftBinds.length === 0);
+
+  group("② 끄기/제거 동선 — ③ 토글과 일관");
+  PS.resetSeed();
+  const defId4 = "def::toggle-" + WA.slice(2, 6);
+  await PS.putDef({ id: defId4, displayName: "토글", cat: "swap", method: "cedar", source: "mine", hidden: true, homeWallet: WA, enabled: false, defaults: {}, skeleton: { model: { severity: "warn" }, manifest: {} }, doc: {}, updatedAtMs: Date.now() });
+  await PS.bindDef({ defId: defId4, packageId: UNCAT, addresses: [WA], enabled: true });
+  let bid = Object.values(PS.getOverview().wallets.byAddress[WA].bindings).find((b) => b.defId === defId4).id;
+  // 끄기 = enabled=false (인스턴스 유지)
+  await PS.updateBinding({ address: WA, bindingId: bid, patch: { enabled: false } });
+  snap = PS.getOverview();
+  let b4 = snap.wallets.byAddress[WA].bindings[bid];
+  check("끄기: 바인딩 enabled=false, 인스턴스는 유지", !!b4 && b4.enabled === false);
+  check("끄기 후 def는 여전히 전용 패널에 (회수 가능)", !!snap.library.defs[defId4]);
+  check("끄기 후 isEffectiveOn=false", PS.isEffectiveOn(snap.wallets.byAddress[WA], b4) === false);
+  // 완전 제거 = removeBinding
+  await PS.removeBinding({ address: WA, bindingId: bid });
+  snap = PS.getOverview();
+  check("제거: 바인딩 인스턴스 삭제", !snap.wallets.byAddress[WA].bindings[bid]);
+  check("제거 후에도 def(초안)는 남음", !!snap.library.defs[defId4]);
+
+  group("회귀: 라이브러리 경로(all-wallets)는 기존대로");
+  PS.resetSeed();
+  const defL = "def::lib-policy";
+  await PS.putDef({ id: defL, displayName: "라이브러리", cat: "token", method: "cedar", source: "mine", enabled: true, defaults: { packageId: undefined }, skeleton: { model: { severity: "deny" }, manifest: {} }, doc: {}, updatedAtMs: Date.now() });
+  for (const a of [WA, WB]) await PS.bindDef({ defId: defL, packageId: UNCAT, addresses: [a], enabled: true });
+  snap = PS.getOverview();
+  check("라이브러리 def는 hidden 아님 (공유 가능)", snap.library.defs[defL].hidden !== true);
+  check("all-wallets: 두 지갑 모두 바인딩됨",
+    Object.values(snap.wallets.byAddress[WA].bindings).some((b) => b.defId === defL) &&
+    Object.values(snap.wallets.byAddress[WB].bindings).some((b) => b.defId === defL));
+  check("defUsageCount(라이브러리 def) = 2", window.defUsageCount(snap, defL) === 2, `got ${window.defUsageCount ? window.defUsageCount(snap, defL) : "no fn"}`);
+
+  // cleanup: 테스트 전용 키 비우기(내가 이번 턴에 쓴 키)
+  PS.resetSeed();
+
+  const sm = document.getElementById("summary");
+  sm.textContent = `${passed} / ${total} 통과` + (passed === total ? " ✓ 전부 통과" : " ✗ 실패 있음");
+  sm.className = passed === total ? "ok" : "bad";
+}
+run().catch((e) => {
+  const sm = document.getElementById("summary");
+  sm.textContent = "테스트 하니스 오류: " + (e.message || e);
+  sm.className = "bad";
+  console.error(e);
+});
+</script>
+</body>
+</html>

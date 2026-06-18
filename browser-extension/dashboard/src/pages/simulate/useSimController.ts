@@ -101,6 +101,8 @@ export interface SimController {
   txRows: TxRow[];
   setTxRows: (rows: TxRow[]) => void;
   addRow: () => void;
+  /** 예시 트랜잭션 한 줄을 채워 넣는다(무제한 ERC-20 승인 — 기본 정책이 잡는 케이스). */
+  addExampleRow: () => void;
   removeRow: (id: string) => void;
   updateRow: (id: string, patch: Partial<TxRow>) => void;
 
@@ -320,6 +322,24 @@ export function useSimController(provider: SimProvider): SimController {
       },
     ]);
   }, [selected, t]);
+  // 예시: USDC(0xA0b8…eB48)에 무제한 approve(0x095ea7b3, spender + uint256 max).
+  // 흔한 위험 패턴이라 기본 안전팩의 "무제한 승인" 정책이 바로 잡아 데모하기 좋다.
+  const addExampleRow = useCallback(() => {
+    setTxRowsState((rows) => [
+      ...rows,
+      {
+        id: `tx-ex-${rows.length + 1}-${rows.length}`,
+        label: t("wizard.step3.exampleLabel"),
+        fromWallet: [...selected][0] ?? "",
+        to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        calldata:
+          "0x095ea7b3" +
+          "0000000000000000000000001111111111111111111111111111111111111111" +
+          "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        value: "0",
+      },
+    ]);
+  }, [selected, t]);
   const removeRow = useCallback((id: string) => setTxRowsState((rows) => rows.filter((r) => r.id !== id)), []);
   const updateRow = useCallback(
     (id: string, patch: Partial<TxRow>) =>
@@ -370,7 +390,7 @@ export function useSimController(provider: SimProvider): SimController {
     isPolicyOn, togglePolicy, togglePackage, packageState,
     walletRelatedPolicies, relevantTokens, isTokenRelevant,
     relevantProtocols, isProtocolRelevant, relevantWidgets, isWidgetRelevant, hasRelevanceFilter,
-    txRows, setTxRows, addRow, removeRow, updateRow,
+    txRows, setTxRows, addRow, addExampleRow, removeRow, updateRow,
     run, running, result, cursorIdx, setCursorIdx, cumulativeDenies,
   };
 }

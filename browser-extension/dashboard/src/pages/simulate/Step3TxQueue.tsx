@@ -74,9 +74,14 @@ export function Step3TxQueue({ c }: { c: SimController }) {
         ))}
       </datalist>
 
-      <button type="button" className="sw-btn ghost add" onClick={c.addRow}>
-        {t("wizard.step3.addTx")}
-      </button>
+      <div className="sw-tx-actions">
+        <button type="button" className="sw-btn ghost add" onClick={c.addRow}>
+          {t("wizard.step3.addTx")}
+        </button>
+        <button type="button" className="sw-btn ghost" onClick={c.addExampleRow}>
+          {t("wizard.step3.addExample")}
+        </button>
+      </div>
     </div>
   );
 }

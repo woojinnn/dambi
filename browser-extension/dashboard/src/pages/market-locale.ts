@@ -1,39 +1,25 @@
 /**
- * Market-scoped locale state. Persisted to localStorage so the choice
- * sticks across reloads. Kept as a tiny module (no Context) — the market
- * pages read/write directly via the hook.
+ * Market-scoped locale state. Historically this was a SEPARATE preference
+ * (its own localStorage key), which meant the Policy Hub never followed the
+ * app-wide language toggle — switching the app to English left the market in
+ * Korean. It now simply tracks the app i18n language so every `ko ? … : …`
+ * branch in the market pages switches with the rest of the app.
  */
 
-import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export type MarketLocale = "ko" | "en";
 
-const STORAGE_KEY = "dambi:market-locale";
-
-function read(): MarketLocale {
-  if (typeof window === "undefined") return "ko";
-  const v = window.localStorage.getItem(STORAGE_KEY);
-  return v === "en" ? "en" : "ko";
-}
-
 /**
- * Read the active market locale and a setter. Setting persists to localStorage
- * and broadcasts a custom event so sibling pages re-render.
+ * Read the active market locale (derived from the app i18n language) and a
+ * setter that changes the app language. Using `useTranslation()` subscribes
+ * the caller to `languageChanged`, so the market re-renders on every toggle.
  */
 export function useMarketLocale(): [MarketLocale, (next: MarketLocale) => void] {
-  const [locale, setLocaleState] = useState<MarketLocale>(read);
-
-  useEffect(() => {
-    const onChange = () => setLocaleState(read());
-    window.addEventListener("dambi:locale-change", onChange);
-    return () => window.removeEventListener("dambi:locale-change", onChange);
-  }, []);
-
+  const { i18n } = useTranslation();
+  const locale: MarketLocale = (i18n.language ?? "ko").startsWith("en") ? "en" : "ko";
   const setLocale = (next: MarketLocale) => {
-    window.localStorage.setItem(STORAGE_KEY, next);
-    window.dispatchEvent(new Event("dambi:locale-change"));
-    setLocaleState(next);
+    void i18n.changeLanguage(next);
   };
-
   return [locale, setLocale];
 }

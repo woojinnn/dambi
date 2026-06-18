@@ -94,7 +94,7 @@ export function HomePage() {
 
   return (
     <>
-      <Topbar here="Dambi Home" subtitle={subtitle} showSearch={false} />
+      <Topbar here={`Dambi ${t("nav.home", { ns: "shell" })}`} subtitle={subtitle} showSearch={false} />
 
       <WalletGovernance
         wallets={dialWallets}

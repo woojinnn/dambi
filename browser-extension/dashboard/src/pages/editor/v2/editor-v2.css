@@ -1657,6 +1657,75 @@
   z-index: 150;
   padding: 20px;
 }
+
+/* 복제-편집 폴더 선택 모달 */
+.ev2-dup {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  width: min(440px, 100%);
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+.ev2-dup-h {
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev2-dup-h .t {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--slate-900);
+}
+.ev2-dup-h .s {
+  font-size: 12.5px;
+  color: var(--slate-500);
+  margin-top: 4px;
+}
+.ev2-dup-list {
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ev2-dup-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-input);
+  background: var(--surface);
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+.ev2-dup-opt:hover:not(:disabled) {
+  background: var(--fog-300);
+  border-color: var(--slate-300);
+}
+.ev2-dup-opt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ev2-dup-opt .nm {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--slate-900);
+}
+.ev2-dup-opt .sub {
+  font-size: 11.5px;
+  color: var(--slate-500);
+}
+.ev2-dup-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--hairline-soft);
+}
 .ev2-mpc {
   background: var(--surface);
   border-radius: var(--r-lg);

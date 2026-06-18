@@ -18,19 +18,22 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 
+import { useMarketLocale } from "./market-locale";
+
 export function MarketPagehead({
   crumb,
   back,
 }: {
-  /** Path segment shown after "Market /". Omit on the bare home view. */
+  /** Path segment shown after the logo. Omit on the bare home view. */
   crumb?: string;
   /** Right-aligned back link: where to go + its label. */
   back?: { to: string; label: string };
 }) {
+  const [locale] = useMarketLocale();
   return (
     <div className="rm-pagehead">
       <Link to="/market" className="logo">
-        Market
+        {locale === "ko" ? "정책허브" : "Policy Hub"}
       </Link>
       {crumb && (
         <>

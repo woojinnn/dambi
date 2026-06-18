@@ -241,6 +241,17 @@
   background:repeating-linear-gradient(45deg,#eef1ef,#eef1ef 4px,#f6f8f7 4px,#f6f8f7 8px);
   border:1px dashed var(--slate-soft); border-radius:5px; padding:2px 8px; }
 
+/* 기본 안전팩(builtin) — 개별(회색 점선)과 다른, 보호된 기본 정책용 옅은 파랑 솔리드 톤 */
+.e2 .pcard.builtin .pface { background:#f2f6fd; border-color:#cdd9f1; }
+.e2 .pcard.builtin .pf-ic { background:#e2ebfb; color:#5b73b6; }
+.e2 .pcard.builtin .pf-nm { color:var(--ink-2); }
+.e2 .pcard.builtin .pf-top .uncat-tag { color:#4f6bb0; background:#e2ebfb; border:1px solid #cdd9f1; }
+.e2 .sgroup.builtin .sghead { background:#f2f6fd; }
+.e2 .sgroup.builtin .sghead:hover { background:#e9f0fb; }
+.e2 .sgroup.builtin .sghead .ic { color:#5b73b6; }
+.e2 .sgroup.builtin .sghead .nm { color:var(--ink-2); }
+.e2 .sgroup.builtin .sitem { background:#f8fbff; border-color:#e7eefb; }
+
 .e2 .pfront { padding:17px 16px 15px; cursor:pointer; transition:transform .16s, box-shadow .18s, border-color .16s; }
 .e2 .pcard:not(.flip) .pfront:hover { transform:translateY(-3px); border-color:#d3e0da;
   box-shadow:0 1px 2px rgba(20,30,25,.04), 0 18px 34px -20px rgba(20,30,25,.45); }

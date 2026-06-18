@@ -225,7 +225,7 @@ export function HistoryPage() {
   return (
     <>
       <Topbar
-        here="History"
+        here={t("nav.history", { ns: "shell" })}
         subtitle={t("loadedCount", { count: allRows.length })}
       />
 

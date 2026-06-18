@@ -1,0 +1,3129 @@
+.ev3 /* Editor v2 — list view styles. Cloudy Pond tokens come from tokens.css.
+ * Selectors are `.ev2-*` to keep the namespace fenced off from the legacy
+ * `.policy-grid-*` rules in editor.css so the flag can flip both ways. */
+
+.ev2-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px 16px;
+}
+.ev3 .ev2-2col {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+}
+.ev3 /* ── LEFT: package panel ── */
+.ev2-left {
+  width: 296px;
+  flex-shrink: 0;
+  /* 오른쪽 정책 목록이 길어져도 왼쪽 패키지 패널은 내용 높이만큼만 — 같이
+   * 늘어나지 않게 위쪽에 고정(끈적이게)한다. */
+  align-self: flex-start;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.ev3 .ev2-left-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 12px 16px;
+}
+.ev3 .ev2-left-grp {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ev3 .ev2-left-sec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 4px 9px;
+}
+.ev3 .ev2-left-sec .t {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+}
+.ev3 .ev2-left-sec .ct {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--slate-300);
+}
+.ev3 .ev2-left-sec .ev2-spc {
+  flex: 1;
+}
+.ev3 .ev2-pkg-add {
+  appearance: none;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--slate-500);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: var(--r-pill);
+  padding: 3px 9px 3px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.ev3 .ev2-pkg-add:hover {
+  background: var(--sage-100);
+  border-color: var(--sage-300);
+  color: var(--sage-800);
+}
+.ev3 .ev2-pkg-add svg {
+  width: 12px;
+  height: 12px;
+}
+.ev3 /* package row is now a div[role=button] (so it can host a toggle + drop) */
+.ev2-pk {
+  cursor: pointer;
+}
+.ev3 .ev2-pk.dragover {
+  outline: 2px dashed var(--sage-500);
+  outline-offset: -2px;
+  background: var(--sage-100);
+}
+.ev3 .ev2-pk-rename, .ev3 .ev2-scope-rename {
+  font: inherit;
+  font-weight: 700;
+  border: 1px solid var(--sage-400);
+  border-radius: 6px;
+  padding: 1px 5px;
+  min-width: 0;
+  width: 100%;
+  background: var(--surface);
+  color: var(--ink);
+}
+.ev3 .ev2-scope-rename {
+  font-size: 16px;
+}
+.ev3 /* package on/off switch in the left panel */
+.ev2-pk-tg {
+  appearance: none;
+  width: 32px;
+  height: 18px;
+  border-radius: var(--r-pill);
+  background: var(--fog-600);
+  border: 0;
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.ev3 .ev2-pk-tg .sw {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform 120ms ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+}
+.ev3 .ev2-pk-tg.on {
+  background: var(--pass-500);
+}
+.ev3 .ev2-pk-tg.partial {
+  background: var(--warn-400, #e8b84b);
+}
+.ev3 .ev2-pk-tg.on .sw, .ev3 .ev2-pk-tg.partial .sw {
+  transform: translateX(14px);
+}
+.ev3 .ev2-pk-tg.partial .sw {
+  transform: translateX(7px);
+}
+.ev3 /* "N개 패키지" shared-membership badge on a policy row */
+.ev2-badge-pkg {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--slate-500);
+  background: var(--fog-300);
+  border-radius: var(--r-pill);
+  padding: 1px 7px 1px 5px;
+  white-space: nowrap;
+}
+.ev3 .ev2-badge-pkg svg {
+  width: 10px;
+  height: 10px;
+}
+.ev3 .ev2-badge-pkg { position: relative; cursor: default; }
+.ev3 /* hover tooltip: which packages contain this policy, .ev3 and each one's on/off.
+   position:fixed so it escapes the scroll container's overflow clipping. */
+.ev2-pkgtip {
+  position: fixed;
+  z-index: 200;
+  min-width: 180px;
+  background: var(--slate-900, #0f172a);
+  color: var(--fog-50, #f8fafc);
+  border-radius: 9px;
+  padding: 7px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-weight: 500;
+  pointer-events: none;
+}
+.ev3 .ev2-pkgtip-h {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--slate-400, #94a3b8);
+  padding: 3px 7px 5px;
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+.ev3 .ev2-pkgtip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.ev3 .ev2-pkgtip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--slate-500, #64748b);
+  flex-shrink: 0;
+}
+.ev3 .ev2-pkgtip-row.on .ev2-pkgtip-dot {
+  background: var(--pass-500, #22c55e);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+.ev3 .ev2-pkgtip-nm {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fog-100, #f1f5f9);
+}
+.ev3 .ev2-pkgtip-st {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--slate-400, #94a3b8);
+  flex-shrink: 0;
+}
+.ev3 .ev2-pkgtip-row.on .ev2-pkgtip-st {
+  color: var(--pass-400, #4ade80);
+}
+.ev3 .ev2-trow {
+  cursor: grab;
+}
+.ev3 /* per-row delete (hover-revealed) */
+.ev2-del {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--slate-300);
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+}
+.ev3 .ev2-trow:hover .ev2-del {
+  opacity: 1;
+}
+.ev3 .ev2-del:hover {
+  background: var(--fail-100, #fde8e8);
+  color: var(--fail-500, #d14343);
+}
+.ev3 .ev2-del svg {
+  width: 15px;
+  height: 15px;
+}
+.ev3 /* delete-package action in the expanded dropdown */
+.ev2-pkg-del {
+  margin-top: 4px;
+  align-self: flex-start;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--slate-400);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 7px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ev3 .ev2-pkg-del:hover {
+  background: var(--fail-100, #fde8e8);
+  color: var(--fail-500, #d14343);
+}
+.ev3 .ev2-pkg-del svg {
+  width: 13px;
+  height: 13px;
+}
+.ev3 /* expandable package: caret + in-panel member dropdown */
+.ev2-pkg-item {
+  display: flex;
+  flex-direction: column;
+}
+.ev3 .ev2-pk-caret {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--slate-300);
+  transition: transform 120ms ease;
+}
+.ev3 .ev2-pk-caret.open {
+  transform: rotate(90deg);
+}
+.ev3 .ev2-pk-caret svg {
+  width: 12px;
+  height: 12px;
+}
+.ev3 .ev2-pkg-members {
+  margin: 2px 0 6px 14px;
+  padding-left: 8px;
+  border-left: 1.5px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ev3 .ev2-pkg-mini-empty {
+  font-size: 11px;
+  color: var(--slate-400);
+  padding: 6px 8px;
+}
+.ev3 .ev2-pkg-mrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ev3 .ev2-pkg-mrow:hover {
+  background: var(--fog-200, var(--fog-300));
+}
+.ev3 /* per-member status dot: reflects whether the policy is currently on (the
+   package is on, or it is kept on by another package). Read-only — package
+   on/off is the control. */
+.ev2-pkg-mdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fog-600);
+  flex-shrink: 0;
+}
+.ev3 .ev2-pkg-mdot.on {
+  background: var(--pass-500);
+}
+.ev3 .ev2-pkg-mrow.muted .ev2-pkg-mnm {
+  color: var(--slate-300);
+  text-decoration: line-through;
+}
+.ev3 .ev2-pk-muted {
+  color: var(--slate-300);
+  font-weight: 400;
+}
+.ev3 .ev2-pkg-mnm {
+  cursor: pointer;
+}
+.ev3 .ev2-pkg-mnm {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--slate-600);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ev3 .ev2-pkg-mrm {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--slate-300);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+}
+.ev3 .ev2-pkg-mrow:hover .ev2-pkg-mrm {
+  opacity: 1;
+}
+.ev3 .ev2-pkg-mrm:hover {
+  background: var(--fail-100, #fde8e8);
+  color: var(--fail-500, #d14343);
+}
+.ev3 .ev2-pkg-mrm svg {
+  width: 12px;
+  height: 12px;
+}
+.ev3 .ev2-left-empty {
+  margin: 12px 4px;
+  padding: 12px;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--slate-400);
+  text-align: center;
+}
+.ev3 .ev2-pk {
+  appearance: none;
+  text-align: left;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 11px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.ev3 .ev2-pk:hover {
+  background: var(--fog-200);
+}
+.ev3 .ev2-pk.active {
+  background: var(--sage-50);
+  border-color: var(--sage-300);
+}
+.ev3 .ev2-pk-ic {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--fog-300);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--slate-500);
+}
+.ev3 .ev2-pk.active .ev2-pk-ic {
+  background: var(--surface);
+}
+.ev3 .ev2-pk-ic svg {
+  width: 16px;
+  height: 16px;
+}
+.ev3 .ev2-pk-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ev3 .ev2-pk-nm {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slate-900);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  line-height: 1.3;
+  min-width: 0;
+}
+.ev3 .ev2-pk-nm > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .ev2-pk-sub {
+  font-size: 11px;
+  color: var(--slate-500);
+  font-family: var(--ff-mono);
+}
+.ev3 .ev2-pk-sub b {
+  color: var(--pass-700);
+  font-weight: 700;
+}
+.ev3 .ev2-pk-src {
+  font-size: 10.5px;
+  color: var(--slate-400);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .ev2-pk-src svg {
+  width: 11px;
+  height: 11px;
+  color: var(--slate-300);
+  flex-shrink: 0;
+}
+.ev3 .ev2-pk-right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+}
+.ev3 .ev2-pk-ct {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--slate-400);
+  background: var(--fog-300);
+  border-radius: var(--r-pill);
+  padding: 2px 9px;
+}
+.ev3 .ev2-pk.active .ev2-pk-ct {
+  color: var(--sage-800);
+  background: var(--sage-100);
+}
+.ev3 /* ── RIGHT: policy list ── */
+.ev2-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.ev3 /* control bar (search + status seg + density) */
+.ev2-ctrl {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-spc {
+  flex: 1;
+}
+.ev3 .ev2-search {
+  flex: 0 1 360px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--fog-100);
+  border-radius: var(--r-input);
+  padding: 6px 11px;
+}
+.ev3 .ev2-search svg {
+  width: 15px;
+  height: 15px;
+  color: var(--slate-400);
+  flex-shrink: 0;
+}
+.ev3 .ev2-search input {
+  flex: 1;
+  appearance: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--slate-900);
+}
+.ev3 .ev2-search input::placeholder {
+  color: var(--slate-400);
+}
+.ev3 .ev2-seg {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-input);
+  overflow: hidden;
+}
+.ev3 .ev2-seg button {
+  appearance: none;
+  border: 0;
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate-500);
+  padding: 7px 13px;
+  border-right: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-seg button:last-child {
+  border-right: 0;
+}
+.ev3 .ev2-seg button.on {
+  background: var(--slate-900);
+  color: var(--fog-50);
+}
+.ev3 .ev2-density {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--fog-300);
+  border: 1px solid var(--hairline-soft);
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.ev3 .ev2-density button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--slate-500);
+  padding: 5px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.ev3 .ev2-density button.on {
+  background: var(--surface);
+  color: var(--slate-900);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+}
+.ev3 /* category chips */
+.ev2-catbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-catchip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--slate-600);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--r-pill);
+}
+.ev3 .ev2-catchip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.ev3 .ev2-catchip.on {
+  background: var(--slate-900);
+  color: var(--fog-50);
+  border-color: var(--slate-900);
+}
+.ev3 /* scope header */
+.ev2-scopehd {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-scope-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ev3 .ev2-scope-title .t {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--slate-900);
+  white-space: nowrap;
+}
+.ev3 .ev2-scope-title .ct {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--slate-400);
+}
+.ev3 .ev2-scope-prov {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--slate-500);
+  white-space: nowrap;
+}
+.ev3 .ev2-scope-prov svg {
+  width: 12px;
+  height: 12px;
+  color: var(--cyan-700);
+}
+.ev3 .ev2-scope-prov.mine svg {
+  color: var(--slate-300);
+}
+.ev3 .ev2-scope-clear {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--slate-500);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 6px 11px;
+  border-radius: 8px;
+}
+.ev3 .ev2-scope-clear:hover {
+  background: var(--fog-300);
+  color: var(--slate-800);
+}
+.ev3 .ev2-scope-clear svg {
+  width: 12px;
+  height: 12px;
+}
+.ev3 /* status row + scroll body */
+.ev2-status {
+  padding: 28px 0;
+  text-align: center;
+  color: var(--slate-400);
+  font-size: 13px;
+}
+.ev3 .ev2-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 20px 18px;
+}
+.ev3 /* table */
+.ev2-table {
+  --tpl: 44px minmax(0, 1fr) 96px 82px 118px 92px 112px;
+}
+.ev3 .ev2-thead, .ev3 .ev2-trow {
+  display: grid;
+  grid-template-columns: var(--tpl);
+  align-items: center;
+  gap: 11px;
+}
+.ev3 .ev2-thead {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--hairline);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 3;
+}
+.ev3 .ev2-thead > div {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+  white-space: nowrap;
+}
+.ev3 .ev2-thead .ev2-c-act, .ev3 .ev2-trow .ev2-c-act {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ev3 .ev2-trow {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--hairline-soft);
+  cursor: pointer;
+  position: relative;
+  transition: background 110ms ease;
+}
+.ev3 .ev2-trow:hover {
+  background: var(--fog-100);
+}
+.ev3 .ev2-trow.sel {
+  background: var(--sage-50);
+}
+.ev3 .ev2-trow.sel::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--sage-500);
+}
+.ev3 .ev2-trow.off {
+  opacity: 0.6;
+}
+.ev3 .ev2-table.compact .ev2-trow {
+  padding: 7px 16px;
+}
+.ev3 /* col 1 — select + grip */
+.ev2-c-sel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ev3 .ev2-selbox {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--hairline);
+  background: var(--surface);
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  color: var(--surface);
+}
+.ev3 .ev2-selbox svg {
+  width: 13px;
+  height: 13px;
+}
+.ev3 .ev2-selbox.on {
+  background: var(--slate-900);
+  border-color: var(--slate-900);
+  color: var(--fog-50);
+}
+.ev3 .ev2-selbox.head.on {
+  background: var(--sage-700);
+  border-color: var(--sage-700);
+}
+.ev3 .ev2-grip {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--slate-300);
+  cursor: grab;
+}
+.ev3 .ev2-grip svg {
+  width: 14px;
+  height: 14px;
+}
+.ev3 /* col 2 — name */
+.ev2-c-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ev3 .ev2-cat-ic {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.ev3 .ev2-cat-ic svg {
+  width: 16px;
+  height: 16px;
+}
+.ev3 .ev2-nm-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ev3 .ev2-nm-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--slate-900);
+  min-width: 0;
+}
+.ev3 .ev2-nm-line .nm-t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .ev2-nm-slug {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--slate-400);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .ev2-badge-draft {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--warn-100);
+  color: var(--warn-800);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+}
+.ev3 .ev2-badge-draft svg {
+  width: 11px;
+  height: 11px;
+}
+.ev3 .ev2-badge-draft.clickable {
+  cursor: pointer; border: 0; font: inherit; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+  transition: background 140ms ease, color 140ms ease;
+}
+.ev3 .ev2-badge-draft.clickable:hover { background: var(--warn-200, #fde68a); color: var(--warn-900, #78350f); }
+.ev3 .ev2-badge-caret { transition: transform 160ms ease; margin-left: 1px; }
+.ev3 .ev2-badge-draft.clickable.open .ev2-badge-caret { transform: rotate(180deg); }
+.ev3 .ev2-badge-fork {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #fdecea;
+  color: #b3402f;
+  border: 1px solid #f3c7c0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 4px 11px;
+  border-radius: var(--r-pill);
+  line-height: 1.45;
+}
+.ev3 /* col 3 — cat tag */
+.ev2-c-cat {
+  display: inline-flex;
+}
+.ev3 .ev2-cat-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+}
+.ev3 /* col 4 — severity */
+.ev2-c-sev {
+  display: inline-flex;
+}
+.ev3 .ev2-sevtag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+  letter-spacing: 0.02em;
+}
+.ev3 .ev2-sevtag .dt {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.ev3 .ev2-sevtag.fail {
+  background: var(--fail-100);
+  color: var(--fail-800);
+}
+.ev3 .ev2-sevtag.fail .dt {
+  background: var(--fail-500);
+}
+.ev3 .ev2-sevtag.warn {
+  background: var(--warn-100);
+  color: var(--warn-800);
+}
+.ev3 .ev2-sevtag.warn .dt {
+  background: var(--warn-500);
+}
+.ev3 .ev2-sevtag.info {
+  background: var(--cyan-100);
+  color: var(--cyan-800);
+}
+.ev3 .ev2-sevtag.info .dt {
+  background: var(--cyan-600);
+}
+.ev3 /* col 5 — flag (conflict / update) */
+.ev2-c-flag {
+  font-size: 11px;
+  color: var(--slate-400);
+}
+.ev3 .ev2-fl-upd {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--warn-100);
+  color: var(--warn-800);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+.ev3 .ev2-fl-upd svg {
+  width: 11px;
+  height: 11px;
+}
+.ev3 /* col 6 — last edited */
+.ev2-c-time {
+  font-family: var(--ff-mono);
+  font-size: 11.5px;
+  color: var(--slate-500);
+  white-space: nowrap;
+}
+.ev3 /* col 7 — actions (toggle + open) */
+.ev2-tg {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--r-pill);
+  background: var(--fog-600);
+  border: 0;
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.ev3 .ev2-tg .sw {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform 120ms ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+}
+.ev3 .ev2-tg.on {
+  background: var(--pass-500);
+}
+.ev3 .ev2-tg.on .sw {
+  transform: translateX(16px);
+}
+.ev3 .ev2-tg:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ev3 .ev2-open {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--slate-400);
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+}
+.ev3 .ev2-open:hover {
+  background: var(--fog-300);
+  color: var(--slate-900);
+}
+.ev3 .ev2-open svg {
+  width: 14px;
+  height: 14px;
+}
+.ev3 /* empty state */
+.ev2-empty {
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--slate-500);
+}
+.ev3 .ev2-empty .big {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--slate-700);
+}
+.ev3 .ev2-empty .sm {
+  font-size: 12px;
+  color: var(--slate-400);
+  margin-top: 6px;
+}
+.ev3 /* selection action bar (floating bottom) */
+.ev2-selbar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--slate-900);
+  color: var(--fog-50);
+  border-top: 1px solid var(--slate-800);
+}
+.ev3 .ev2-selbar .ct {
+  font-family: var(--ff-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ev3 .ev2-selbar .spc {
+  flex: 1;
+}
+.ev3 .ev2-selbar button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fog-50);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: var(--r-input);
+}
+.ev3 .ev2-selbar button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.ev3 .ev2-selbar button.ghost {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--slate-200);
+}
+.ev3 .ev2-selbar button.go {
+  background: var(--sage-500);
+  border-color: var(--sage-500);
+  color: var(--slate-900);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ev3 .ev2-selbar button.go svg {
+  width: 14px;
+  height: 14px;
+}
+.ev3 /* primary topbar button */
+.ev2-pri {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--slate-800);
+  background: var(--slate-900);
+  color: var(--fog-50);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 15px;
+  border-radius: 9px;
+}
+.ev3 .ev2-pri:hover {
+  background: var(--slate-800);
+}
+.ev3 .ev2-pri svg {
+  width: 14px;
+  height: 14px;
+}
+.ev3 /* 저장 "빨간불" — 값 시트 형식오류 시. 누르면 변경 전으로 되돌림. */
+.ev2-pri.invalid {
+  background: var(--fail-600, #dc2626);
+  border-color: var(--fail-600, #dc2626);
+  box-shadow: 0 0 0 3px var(--fail-100, #fee2e2);
+}
+.ev3 .ev2-pri.invalid::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+.ev3 .ev2-pri.invalid:hover {
+  background: var(--fail-700, #b91c1c);
+}
+.ev3 /* ════════════ DETAIL VIEW (Phase 3) ════════════ */
+.ev2-detail-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px 16px;
+}
+.ev3 .ev2-detail {
+  flex: 1;
+  /* 바깥 패널이 콘텐츠 높이에 쪼그라들지 않고 화면을 채우도록 — 상단 앱바/탭
+   * 여백을 빼고 뷰포트 높이만큼 최소 높이를 준다. */
+  min-height: calc(100vh - 150px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  /* WorkspaceV9 sets its own `calc(100vh - 200px)` + `minHeight: 600` —
+   * we let it overflow the tab body and rely on the inner scroll
+   * instead of clipping it, otherwise the bottom "Cedar 가져오기 /
+   * 불러오기" details panel disappears. */
+  overflow: visible;
+}
+.ev3 .ev2-back {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--slate-600);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 13px;
+  border-radius: 9px;
+}
+.ev3 .ev2-back:hover {
+  background: var(--fog-300);
+  color: var(--slate-900);
+}
+.ev3 .ev2-detail-head {
+  flex-shrink: 0;
+  padding: 16px 20px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ev3 .ev2-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ev3 .ev2-detail-title {
+  appearance: none;
+  flex: 1 1 240px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--slate-900);
+  letter-spacing: -0.01em;
+  padding: 4px 6px;
+  border-radius: var(--r-input);
+}
+.ev3 .ev2-detail-title:hover, .ev3 .ev2-detail-title:focus {
+  background: var(--fog-200);
+  outline: none;
+}
+.ev3 .ev2-detail-slug {
+  font-family: var(--ff-mono);
+  font-size: 11.5px;
+  color: var(--slate-400);
+  background: var(--fog-300);
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+}
+.ev3 .ev2-detail-sev {
+  appearance: none;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate-700);
+  padding: 6px 28px 6px 10px;
+  border-radius: var(--r-input);
+}
+.ev3 .ev2-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--slate-500);
+  padding-left: 6px;
+}
+.ev3 .ev2-detail-meta .ev2-badge-draft {
+  padding: 3px 9px;
+}
+.ev3 .ev2-detail-prov {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--cyan-800);
+}
+.ev3 .ev2-detail-prov svg {
+  width: 12px;
+  height: 12px;
+  color: var(--cyan-700);
+}
+.ev3 .ev2-detail-memo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px;
+}
+.ev3 .ev2-detail-memo-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+}
+.ev3 .ev2-detail-memo {
+  appearance: none;
+  flex: 1;
+  border: 1px solid var(--hairline);
+  background: var(--fog-100);
+  font-size: 12.5px;
+  color: var(--slate-700);
+  padding: 7px 10px;
+  border-radius: var(--r-input);
+}
+.ev3 .ev2-detail-memo::placeholder {
+  color: var(--slate-400);
+}
+.ev3 .ev2-detail-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 0;
+}
+.ev3 .ev2-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--slate-500);
+  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ev3 .ev2-tab:hover {
+  color: var(--slate-900);
+}
+.ev3 .ev2-tab.on {
+  color: var(--slate-900);
+  border-bottom-color: var(--sage-600);
+}
+.ev3 .ev2-tab.is-disabled {
+  color: var(--slate-300);
+  cursor: not-allowed;
+}
+.ev3 .ev2-tab-soon {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn-700);
+  background: var(--warn-100);
+  border-radius: var(--r-pill);
+  padding: 1px 6px;
+}
+.ev3 .ev2-pri.ghost {
+  background: var(--surface);
+  color: var(--slate-700);
+  border-color: var(--hairline);
+}
+.ev3 .ev2-pri.ghost:hover {
+  background: var(--fog-300);
+  color: var(--slate-900);
+}
+.ev3 .ev2-pri.danger {
+  background: var(--surface);
+  color: var(--fail-700);
+  border-color: var(--fail-300);
+}
+.ev3 .ev2-pri.danger:hover {
+  background: var(--fail-50);
+}
+.ev3 .ev2-err-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 16px;
+  padding: 10px 14px;
+  background: var(--fail-50);
+  border: 1px solid var(--fail-200);
+  color: var(--fail-800);
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+.ev3 .ev2-err-banner svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--fail-700);
+}
+.ev3 /* 형식오류 → 되돌림 안내 (오류 아님, 경고 톤) */
+.ev2-err-banner.warn {
+  background: var(--warn-50, #fffbeb);
+  border-color: var(--warn-200, #fde68a);
+  color: var(--warn-800, #92400e);
+}
+.ev3 .ev2-err-banner.warn svg {
+  color: var(--warn-600, #d97706);
+}
+.ev3 .ev2-detail-tabbody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* Inner WorkspaceV9 is taller than the tab body in most viewports —
+   * scroll within the body rather than letting it punch through the
+   * page chrome. */
+  overflow-y: auto;
+}
+.ev3 /* 다이어그램 tab: read-only policy structure diagram. */
+.ev2-diagram-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline-soft, #e6e9ed);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.ev3 .ev2-diagram-pane .pdiagram {
+  flex: 1;
+  min-height: 0;
+}
+.ev3 .ev2-diagram-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hairline-soft, #e6e9ed);
+  background: var(--surface-raised, #fff);
+}
+.ev3 .ev2-diagram-msg {
+  font-size: 12px;
+  color: var(--slate-600);
+}
+.ev3 .ev2-diagram-clear {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--slate-500);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.ev3 .ev2-diagram-clear:hover { color: var(--slate-800); }
+.ev3 .ev2-cedar-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ev3 .ev2-cedar-toolbar {
+  padding: 10px 18px;
+  background: var(--fog-200);
+  border-bottom: 1px solid var(--hairline-soft);
+  font-size: 11.5px;
+  color: var(--slate-500);
+}
+.ev3 .ev2-cedar-toolbar code {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+.ev3 .ev2-cedar-textarea {
+  flex: 1;
+  min-height: 320px;
+  appearance: none;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: var(--fog-100);
+  font-family: var(--ff-mono);
+  font-size: 13px;
+  color: var(--slate-900);
+  padding: 14px 18px;
+  line-height: 1.55;
+}
+.ev3 .ev2-manifest {
+  flex-shrink: 0;
+  border-top: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-manifest-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--slate-700);
+  background: var(--fog-200);
+}
+.ev3 .ev2-manifest-head::-webkit-details-marker {
+  display: none;
+}
+.ev3 .ev2-manifest-head svg {
+  width: 13px;
+  height: 13px;
+  color: var(--slate-500);
+  transition: transform 120ms ease;
+}
+.ev3 .ev2-manifest-head svg.rot {
+  transform: rotate(90deg);
+}
+.ev3 .ev2-manifest-body {
+  margin: 0;
+  padding: 12px 18px;
+  background: var(--fog-100);
+  font-family: var(--ff-mono);
+  font-size: 11.5px;
+  color: var(--slate-700);
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 240px;
+}
+.ev3 /* ── New Policy Chooser modal ── */
+.ev2-modal-bd {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 150;
+  padding: 20px;
+}
+.ev3 .ev2-mpc {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  width: min(1240px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+}
+.ev3 .ev2-mpc-h {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 22px 24px 14px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-mpc-h .t {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--slate-900);
+  letter-spacing: -0.01em;
+}
+.ev3 .ev2-mpc-h .s {
+  font-size: 13px;
+  color: var(--slate-500);
+  margin-top: 4px;
+  max-width: 720px;
+}
+.ev3 .ev2-mpc-x {
+  appearance: none;
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border-radius: var(--r-input);
+  display: grid;
+  place-items: center;
+  color: var(--slate-500);
+}
+.ev3 .ev2-mpc-x:hover {
+  background: var(--fog-300);
+  color: var(--slate-900);
+}
+.ev3 .ev2-mpc-x svg {
+  width: 14px;
+  height: 14px;
+}
+.ev3 .ev2-mpc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 18px 24px 24px;
+}
+@media (max-width: 680px) {
+.ev3 .ev2-mpc-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.ev3 .ev2-mpc-card {
+  appearance: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  border-radius: var(--r-md);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.ev3 .ev2-mpc-card:not(:disabled):hover {
+  border-color: var(--sage-500);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+.ev3 .ev2-mpc-card.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.ev3 .ev2-mpc-card.is-busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+.ev3 .ev2-mpc-card.cyan {
+  --accent: var(--cyan-700);
+}
+.ev3 .ev2-mpc-card.sage {
+  --accent: var(--sage-700);
+}
+.ev3 .ev2-mpc-card.slate {
+  --accent: var(--slate-700);
+}
+.ev3 .ev2-mpc-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ev3 .ev2-mpc-ic {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--sage-50);
+  color: var(--accent, var(--slate-700));
+  display: grid;
+  place-items: center;
+}
+.ev3 .ev2-mpc-ic svg {
+  width: 18px;
+  height: 18px;
+}
+.ev3 .ev2-mpc-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--slate-900);
+}
+.ev3 .ev2-mpc-soon {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn-800);
+  background: var(--warn-100);
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+}
+.ev3 .ev2-mpc-prev {
+  height: 78px;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--fog-100);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ev3 .ev2-mpc-prev.form .row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+}
+.ev3 .ev2-mpc-prev.form .cap {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--cyan-200);
+}
+.ev3 .ev2-mpc-prev.form .fld {
+  width: 80px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--slate-200);
+}
+.ev3 .ev2-mpc-prev.form .fld.w2 {
+  width: 60px;
+}
+.ev3 .ev2-mpc-prev.form .op {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--slate-500);
+  font-weight: 700;
+}
+.ev3 .ev2-mpc-prev.form .val {
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  font-family: var(--ff-mono);
+  font-size: 10.5px;
+  color: var(--slate-700);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+}
+.ev3 .ev2-mpc-prev.form .val.ref {
+  background: var(--sage-50);
+  border-color: var(--sage-300);
+  color: var(--sage-800);
+}
+.ev3 .ev2-mpc-prev.form .and {
+  font-family: var(--ff-mono);
+  font-size: 9.5px;
+  color: var(--slate-400);
+  letter-spacing: 0.06em;
+  padding-left: 8px;
+}
+.ev3 .ev2-mpc-prev.block {
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.ev3 .ev2-mpc-prev.block .hat {
+  height: 12px;
+  border-radius: 3px;
+  background: var(--sage-200);
+}
+.ev3 .ev2-mpc-prev.block .or {
+  position: relative;
+  padding-left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+.ev3 .ev2-mpc-prev.block .or .spine {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--sage-400);
+}
+.ev3 .ev2-mpc-prev.block .or .chip {
+  height: 14px;
+  width: 90px;
+  border-radius: var(--r-pill);
+  background: var(--sage-100);
+}
+.ev3 .ev2-mpc-prev.block .or .chip.w2 {
+  width: 64px;
+}
+.ev3 .ev2-mpc-prev.cedar {
+  font-family: var(--ff-mono);
+}
+.ev3 .ev2-mpc-prev.cedar .ln {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 12px;
+}
+.ev3 .ev2-mpc-prev.cedar .g {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  color: var(--slate-300);
+  width: 14px;
+  display: inline-block;
+}
+.ev3 .ev2-mpc-prev.cedar .t {
+  flex: 1;
+  height: 8px;
+  background: var(--slate-200);
+  border-radius: var(--r-pill);
+}
+.ev3 .ev2-mpc-prev.cedar .t.kw {
+  width: 38%;
+  flex: 0 0 38%;
+  background: var(--slate-300);
+}
+.ev3 .ev2-mpc-prev.cedar .t.guard {
+  background: var(--cyan-200);
+}
+.ev3 .ev2-mpc-prev.cedar .t.s {
+  width: 8%;
+  flex: 0 0 8%;
+}
+.ev3 /* LLM 프리뷰 — sage 프롬프트 바 + 화살표 + 결과 행 */
+.ev2-mpc-prev.llm { height: auto; min-height: 78px; justify-content: center; align-items: stretch; gap: 4px; }
+.ev3 .ev2-mpc-prev.llm .prompt { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; background: var(--sage-50, #eef3ee); border: 1px solid var(--sage-200, #cdddcd); border-radius: 8px; padding: 6px 8px; }
+.ev3 .ev2-mpc-prev.llm .prompt .spark { color: var(--sage-600, #5f7d5f); font-size: 11px; flex: none; }
+.ev3 .ev2-mpc-prev.llm .prompt .ln { height: 7px; border-radius: var(--r-pill); background: var(--sage-300, #b9ccb9); }
+.ev3 .ev2-mpc-prev.llm .prompt .ln.l1 { flex: 1; }
+.ev3 .ev2-mpc-prev.llm .prompt .ln.l2 { width: 28px; flex: none; }
+.ev3 .ev2-mpc-prev.llm .and { font-family: var(--ff-mono); font-size: 11px; color: var(--slate-400); }
+.ev3 .ev2-mpc-prev.llm .row { display: flex; align-items: center; gap: 6px; height: 18px; }
+.ev3 .ev2-mpc-prev.llm .cap { width: 16px; height: 16px; border-radius: 5px; background: var(--sage-200, #cdddcd); }
+.ev3 .ev2-mpc-prev.llm .fld { width: 80px; height: 10px; border-radius: var(--r-pill); background: var(--slate-200); }
+.ev3 .ev2-mpc-prev.llm .op { font-family: var(--ff-mono); font-size: 11px; color: var(--slate-500); font-weight: 700; }
+.ev3 .ev2-mpc-prev.llm .val { background: var(--slate-50); border: 1px solid var(--slate-200); font-family: var(--ff-mono); font-size: 10px; padding: 1px 7px; border-radius: var(--r-pill); }
+.ev3 .ev2-mpc-summary {
+  font-size: 12.5px;
+  color: var(--slate-600);
+  line-height: 1.55;
+}
+.ev3 .ev2-mpc-rec {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ev3 .ev2-mpc-rec .lbl {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+  font-size: 10px;
+}
+.ev3 .ev2-mpc-pc {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.ev3 .ev2-mpc-pc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ev3 .ev2-mpc-pc li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+}
+.ev3 .ev2-mpc-pc li svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+.ev3 .ev2-mpc-pc .pros li {
+  color: var(--pass-800);
+}
+.ev3 .ev2-mpc-pc .cons li {
+  color: var(--slate-500);
+}
+.ev3 .ev2-mpc-go {
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent, var(--slate-700));
+}
+.ev3 .ev2-mpc-go svg {
+  width: 13px;
+  height: 13px;
+}
+.ev3 /* toast */
+.ev2-toaststack {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 200;
+  pointer-events: none;
+}
+.ev3 .ev2-toast {
+  background: var(--slate-900);
+  color: var(--fog-50);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: var(--r-input);
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18);
+  animation: ev3-ev2-toast-in 200ms ease-out;
+}
+@keyframes ev3-ev2-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ev3 /* ── policy-in-package toggle ask modal ── */
+.ptm-bd {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid; place-items: center; padding: 24px;
+}
+.ev3 .ptm {
+  width: min(440px, 100%);
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+.ev3 .ptm-h { padding: 20px 22px 14px; }
+.ev3 .ptm-t { font-size: 16px; font-weight: 800; color: var(--slate-900); }
+.ev3 .ptm-s { font-size: 13px; color: var(--slate-500); margin-top: 5px; line-height: 1.5; }
+.ev3 .ptm-s b { color: var(--slate-800); }
+.ev3 .ptm-opts { display: flex; flex-direction: column; gap: 8px; padding: 0 18px 18px; }
+.ev3 .ptm-opt {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  text-align: left; width: 100%;
+  border: 1px solid var(--hairline); border-radius: 11px;
+  padding: 12px 14px; background: var(--surface); cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.ev3 .ptm-opt:hover { background: var(--fog-200, var(--fog-300)); border-color: var(--sage-300); }
+.ev3 .ptm-opt.primary { border-color: var(--slate-900); background: var(--slate-900); }
+.ev3 .ptm-opt.primary .ptm-opt-t { color: #fff; }
+.ev3 .ptm-opt.primary .ptm-opt-d { color: var(--slate-300); }
+.ev3 .ptm-opt.primary:hover { background: #000; }
+.ev3 .ptm-opt-t { font-size: 13.5px; font-weight: 700; color: var(--slate-900); }
+.ev3 .ptm-opt-d { font-size: 11.5px; color: var(--slate-500); }
+.ev3 .ptm-cancel {
+  border: 0; background: transparent; color: var(--slate-500);
+  font-size: 13px; font-weight: 600; padding: 9px; border-radius: 9px; cursor: pointer;
+}
+.ev3 .ptm-cancel:hover { background: var(--fog-300); color: var(--slate-700); }
+.ev3 /* select sub-step */
+.ptm-select { padding: 0 18px 16px; }
+.ev3 .ptm-select-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
+.ev3 .ptm-pkg {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 11px; border-radius: 9px; cursor: pointer; font-size: 13px;
+}
+.ev3 .ptm-pkg:hover { background: var(--fog-200, var(--fog-300)); }
+.ev3 .ptm-pkg input { width: 15px; height: 15px; accent-color: var(--slate-800); }
+.ev3 .ptm-pkg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--slate-400); flex-shrink: 0; }
+.ev3 .ptm-pkg-dot.on { background: var(--pass-500); }
+.ev3 .ptm-pkg-nm { flex: 1; min-width: 0; color: var(--slate-800); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev3 .ptm-pkg-st { font-size: 11px; font-weight: 600; color: var(--slate-400); }
+.ev3 .ptm-select-foot { display: flex; align-items: center; margin-top: 12px; }
+.ev3 .ptm-spc { flex: 1; }
+.ev3 .ptm-opt.inline {
+  flex-direction: row; width: auto; align-items: center;
+  padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 700;
+}
+.ev3 .ptm-opt.inline:disabled { opacity: 0.45; cursor: not-allowed; }
+.ev3 /* ─────────────── P2: 라이브러리/적용 현황 탭 ─────────────── */
+
+.ev2-pagetabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 14px;
+}
+.ev3 /* 정의 테이블 컬럼: 이름 / 카테고리 / 파라미터 / 적용 지갑 / 새 지갑 기본 / 수정 / 액션 */
+.ev2-table.lib {
+  --tpl: minmax(0, 1fr) 110px 76px 76px 96px 92px 118px;
+}
+.ev3 .ev2-c-holes, .ev3 .ev2-c-use, .ev3 .ev2-c-defon {
+  font-size: 12px;
+  color: var(--slate-500);
+  white-space: nowrap;
+}
+.ev3 .ev2-catchip.mini {
+  pointer-events: none;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.ev3 .ev2-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--slate-500);
+  cursor: pointer;
+}
+.ev3 .ev2-iconbtn svg {
+  width: 14px;
+  height: 14px;
+}
+.ev3 .ev2-iconbtn:hover {
+  border-color: var(--sage-300);
+  color: var(--slate-800);
+}
+.ev3 .ev2-iconbtn.danger:hover {
+  border-color: #e8b4b4;
+  color: #b54545;
+}
+.ev3 .ev2-leftsec {
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.ev3 .ev2-lefthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-pkglist {
+  display: flex;
+  flex-direction: column;
+}
+.ev3 .ev2-pkgrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--hairline-soft);
+  font-size: 13px;
+}
+.ev3 .ev2-pkgrow svg {
+  width: 14px;
+  height: 14px;
+  color: var(--slate-400);
+  flex: none;
+}
+.ev3 .ev2-pkgrow .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--slate-800);
+}
+.ev3 .ev2-pkgrow input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 2px 6px;
+  border: 1px solid var(--sage-300);
+  border-radius: 6px;
+}
+.ev3 .ev2-pkgrow .cnt {
+  font-size: 11px;
+  color: var(--slate-400);
+  font-variant-numeric: tabular-nums;
+}
+.ev3 .ev2-pkgrow .acts {
+  display: none;
+  gap: 4px;
+}
+.ev3 .ev2-pkgrow:hover .acts {
+  display: inline-flex;
+}
+.ev3 .ev2-lefthint {
+  padding: 10px 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--slate-400);
+}
+.ev3 .ev2-lefthint b {
+  color: var(--slate-600);
+}
+.ev3 .ptm-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--slate-800);
+  padding: 4px 2px;
+}
+.ev3 .ptm-field select {
+  flex: 1;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.ev3 .ptm-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+}
+.ev3 .ev2-sec {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--slate-700);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ev3 .ev2-sec:hover {
+  border-color: var(--sage-300);
+}
+.ev3 /* ─────────────── P2: 적용 현황 매트릭스 ─────────────── */
+
+.pm-wrap {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  min-height: 0;
+}
+.ev3 .pm-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.ev3 .pm-grid {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.ev3 .pm-grid th, .ev3 .pm-grid td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline-soft);
+  text-align: center;
+  white-space: nowrap;
+}
+.ev3 .pm-grid thead th {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+}
+.ev3 .pm-walletcol {
+  text-align: left !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--slate-800);
+  font-weight: 600;
+}
+.ev3 .pm-grid td.on {
+  background: var(--fog-100);
+}
+.ev3 .pm-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ev3 .pm-empty {
+  border: none;
+  background: none;
+  color: var(--slate-300);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 10px;
+}
+.ev3 .pm-empty:hover {
+  color: var(--slate-600);
+}
+.ev3 .pm-count {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 9px;
+  color: var(--slate-600);
+  cursor: pointer;
+}
+.ev3 .pm-count:hover {
+  border-color: var(--sage-300);
+  color: var(--slate-900);
+}
+.ev3 .pm-switch {
+  position: relative;
+  display: inline-block;
+  width: 30px;
+  height: 18px;
+  cursor: pointer;
+}
+.ev3 .pm-switch input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.ev3 .pm-switch .trk {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--slate-300);
+  transition: background 120ms ease;
+}
+.ev3 .pm-switch .trk::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 120ms ease;
+}
+.ev3 .pm-switch input:checked + .trk {
+  background: var(--sage-500, #4c7a5e);
+}
+.ev3 .pm-switch input:checked + .trk::after {
+  transform: translateX(12px);
+}
+.ev3 .pm-switch.sm {
+  width: 26px;
+  height: 16px;
+}
+.ev3 .pm-switch.sm .trk::after {
+  width: 12px;
+  height: 12px;
+}
+.ev3 .pm-switch.sm input:checked + .trk::after {
+  transform: translateX(10px);
+}
+.ev3 .pm-panel {
+  width: 320px;
+  flex: none;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.ev3 .pm-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.ev3 .pm-panel-head .t {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slate-900);
+}
+.ev3 .pm-panel-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 70vh;
+  overflow: auto;
+}
+.ev3 .pm-none {
+  font-size: 12.5px;
+  color: var(--slate-400);
+}
+.ev3 .pm-card {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ev3 .pm-card.off {
+  opacity: 0.55;
+}
+.ev3 .pm-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ev3 .pm-card-head .nm {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-800);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .pm-card-move {
+  display: flex;
+  gap: 6px;
+}
+.ev3 .pm-card-move select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+}
+.ev3 .pm-card-move .ev2-sec {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.ev3 .pm-add {
+  display: flex;
+  gap: 6px;
+  padding-top: 2px;
+}
+.ev3 .pm-add select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+.ev3 .pm-holes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ev3 .pm-hole {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.ev3 .pm-hole .lb {
+  width: 96px;
+  flex: none;
+  color: var(--slate-500);
+}
+.ev3 .pm-hole input, .ev3 .pm-hole select, .ev3 .pm-hole textarea {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+}
+.ev3 .pm-hole .err {
+  color: #b54545;
+  font-size: 11px;
+}
+.ev3 /* 첫 저장 모달의 정책 이름 입력 */
+.ssm-name {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 12px;
+}
+.ev3 .ssm-name span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-600);
+}
+.ev3 .ssm-name input {
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--slate-900);
+}
+.ev3 .ssm-name input:focus {
+  outline: none;
+  border-color: var(--sage-400, var(--sage-300));
+}
+.ev3 .ssm-wallets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 24px;
+  max-height: 180px;
+  overflow: auto;
+}
+.ev3 .ssm-addr {
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+}
+.ev3 .ssm-none {
+  font-size: 12px;
+  color: var(--slate-400);
+}
+.ev3 /* 선택한 지갑 아래 들여쓴 지갑별 패키지 선택 줄. */
+.ssm-pkgrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px 26px;
+}
+.ev3 .ssm-pkgrow select, .ev3 .ssm-pkgrow input {
+  font-size: 12.5px;
+  padding: 4px 8px;
+}
+.ev3 .ssm-pkglabel {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  flex: none;
+}
+.ev3 /* 일괄 새 패키지의 이름 충돌(재사용) 안내. */
+.ssm-info {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  margin-left: 24px;
+  line-height: 1.5;
+}
+.ev3 /* ─────────────── P3+: 지갑별 워크스페이스 ─────────────── */
+
+.wd-modes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.ev3 .wd-walletsel, .ev3 .wd-addsel {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--surface);
+  max-width: 320px;
+}
+.ev3 .wd-scopelabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slate-800);
+}
+.ev3 .ev2-pkgrow.wd-scope {
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border-left: 2px solid transparent;
+}
+.ev3 .ev2-pkgrow.wd-scope.on {
+  background: var(--fog-100);
+  border-left-color: var(--slate-900);
+}
+.ev3 .ev2-pkgrow.wd-scope.dim {
+  opacity: 0.45;
+}
+.ev3 .ev2-pkgrow.wd-scope.droptarget {
+  background: var(--sage-100, #eaf3ee);
+  border-left-color: var(--sage-500, #4c7a5e);
+  opacity: 1;
+}
+.ev3 .wd-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px;
+}
+.ev3 .wd-cards [draggable] {
+  cursor: grab;
+}
+.ev3 .pm-pkgchip {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  color: var(--slate-500);
+  background: var(--fog-100);
+}
+.ev3 /* ─────────────── P3+: 라이브러리 디렉토리 ─────────────── */
+
+.ld-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.ev3 .ld {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 초광폭 화면에서 정책 리스트가 끝없이 늘어나지 않도록 편안한 컬럼 폭으로 */
+  max-width: 1000px;
+}
+.ev3 .ld-folder {
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.ev3 .ld-folder.droptarget {
+  border-color: var(--sage-500, #4c7a5e);
+  background: var(--sage-100, #eaf3ee);
+}
+.ev3 .ld-folderhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.ev3 .ld-folderhead svg {
+  width: 15px;
+  height: 15px;
+  color: var(--slate-400);
+  flex: none;
+}
+.ev3 .ld-caret svg {
+  transition: transform 120ms ease;
+}
+.ev3 .ld-caret.open svg {
+  transform: rotate(90deg);
+}
+.ev3 .ld-folderhead .nm {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--slate-900);
+}
+.ev3 .ld-folderhead input {
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 8px;
+  border: 1px solid var(--sage-300);
+  border-radius: 6px;
+}
+.ev3 .ld-folderhead .cnt {
+  font-size: 11.5px;
+  color: var(--slate-400);
+  font-variant-numeric: tabular-nums;
+}
+.ev3 .ld-folderhead .acts {
+  display: none;
+  gap: 4px;
+  margin-left: auto;
+}
+.ev3 /* 지갑 전용 폴더 헤더에 템플릿을 드래그해 폴더 이동 */
+.ld-folderhead.droptarget {
+  background: var(--sage-100, #eaf3ee);
+  outline: 1.5px dashed var(--sage-500, #4c7a5e);
+  outline-offset: -1.5px;
+}
+.ev3 .ld-folderhead:hover .acts {
+  display: inline-flex;
+}
+.ev3 .ld-defs {
+  border-top: 1px solid var(--hairline-soft);
+}
+.ev3 .ld-empty {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--slate-300);
+}
+.ev3 .ld-def {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px 9px 36px;
+  border-bottom: 1px solid var(--hairline-soft);
+  cursor: grab;
+  font-size: 13px;
+}
+.ev3 .ld-def:last-child {
+  border-bottom: none;
+}
+.ev3 .ld-def:hover {
+  background: var(--fog-100);
+}
+.ev3 /* 지갑 뷰의 정책 행 게시 버튼 — BindingRow의 액션들처럼 항상 보인다
+ * (hover 전용으로 숨기면 동선 자체를 발견하지 못한다) */
+.ld-def .wt-pub {
+  margin-left: auto;
+}
+.ev3 .ld-cat {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.ev3 .ld-def .nm {
+  font-weight: 600;
+  color: var(--slate-800);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .ld-src {
+  flex: none;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  color: var(--slate-400);
+}
+.ev3 .ld-meta {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--slate-400);
+  white-space: nowrap;
+}
+.ev3 .ld-meta.time {
+  margin-left: auto;
+}
+.ev3 /* 새 지갑 기본 적용 토글 칩 — 끔은 흐리게, .ev3 켬은 pass 톤. */
+.ld-defaultchip {
+  flex: none;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--slate-400);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ev3 .ld-defaultchip:hover {
+  border-color: var(--slate-400);
+  color: var(--slate-600);
+}
+.ev3 .ld-defaultchip.on {
+  border-color: var(--pass-500, #22c55e);
+  color: var(--pass-700, #15803d);
+}
+.ev3 .ld-def .acts {
+  display: none;
+  gap: 4px;
+}
+.ev3 .ld-def:hover .acts {
+  display: inline-flex;
+}
+.ev3 .ld.pick .ld-def {
+  padding-left: 28px;
+}
+.ev3 .wd-libdrawer {
+  width: 300px;
+  flex: none;
+}
+.ev3 .wd-libdrawer-body {
+  max-height: 64vh;
+  overflow: auto;
+  padding: 8px;
+}
+.ev3 .wd-libdrawer .ld-folder {
+  border-radius: 9px;
+  margin-bottom: 8px;
+}
+.ev3 /* ─────────────── P3+: 지갑별 정책 트리 (def → 패키지별 바인딩 줄) ─────────────── */
+
+.wt-def {
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev3 .wt-def:last-child {
+  border-bottom: none;
+}
+.ev3 .wt-def .ld-def {
+  border-bottom: none;
+}
+.ev3 .wt-def .ld-def .nm.dim {
+  color: var(--slate-300);
+  font-weight: 500;
+}
+.ev3 .wt-binding {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px 14px 6px 58px;
+  font-size: 12.5px;
+}
+.ev3 .wt-binding.off .wt-pkg {
+  color: var(--slate-300);
+}
+.ev3 .wt-pkg {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--slate-600);
+}
+.ev3 .wt-pkg::before {
+  content: "└";
+  color: var(--slate-300);
+  font-size: 11px;
+}
+.ev3 .wt-pkgoff {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  color: var(--slate-400);
+}
+.ev3 /* 지갑별 바인딩 줄: 별칭 + 설정(파라미터) */
+.wt-binding-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.ev3 .wt-alias {
+  /* 패키지명 바로 옆(왼쪽 묶음)에 두고, 이후 아이콘들은 오른쪽으로 민다. */
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--slate-700);
+  padding: 1px 4px;
+  border-radius: 6px;
+}
+.ev3 .wt-alias svg {
+  width: 11px;
+  height: 11px;
+  opacity: 0;
+}
+.ev3 .wt-binding:hover .wt-alias svg {
+  opacity: 0.6;
+}
+.ev3 .wt-alias.empty {
+  color: var(--slate-300);
+}
+.ev3 .wt-alias-input {
+  margin-right: auto;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 7px;
+  border: 1px solid var(--sage-300);
+  border-radius: 6px;
+  width: 160px;
+}
+.ev3 .pm-count.on {
+  border-color: var(--sage-500, #4c7a5e);
+  color: var(--sage-600, #3c6a4e);
+}
+.ev3 .wt-params {
+  padding: 6px 14px 10px 72px;
+}
+.ev3 .wt-binding-main.clickable {
+  cursor: pointer;
+  border-radius: 7px;
+}
+.ev3 .wt-binding-main.clickable:hover {
+  background: var(--fog-100);
+}
+.ev3 /* 바인딩 on/off — home과 동일한 o/x 토글 */
+.ev2-ox {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--slate-400);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.ev3 .ev2-ox.on {
+  border-color: var(--pass-300, #86efac);
+  background: var(--pass-50, #f0fdf4);
+  color: var(--pass-600, #16a34a);
+}
+.ev3 .ev2-ox:hover {
+  border-color: var(--slate-400);
+}
+.ev3 /* 정책(def) 행의 동작 — 뼈대 수정 / 정책 삭제 */
+.ld-def-acts {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.ev3 .ld-def:hover .ld-def-acts {
+  opacity: 1;
+}
+.ev3 /* 지갑별 정책 우측: 전용/공유 대섹션 */
+.wt-section {
+  margin-bottom: 22px;
+}
+.ev3 .wt-section-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--slate-400);
+  margin: 2px 2px 8px;
+}
+.ev3 .wt-section-h::before, .ev3 .wt-section-h::after {
+  content: "";
+  height: 1px;
+  background: var(--fog-300, #e3e7e3);
+  flex: 0 0 28px;
+}
+.ev3 .wt-section-h::after {
+  flex: 1;
+}
+.ev3 /* ═══════════════ ③ 용어·아이콘 통일 + 역할 중심 행 (Step ③) ═══════════════ */
+
+/* 좌패널 "전체 보기" 필터 — 패키지 행과 시각적으로 분리(메타 필터). */
+.wd-viewfilter {
+  padding: 9px 10px 4px;
+}
+.ev3 .wd-vf {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--slate-600);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.ev3 .wd-vf:hover {
+  background: var(--fog-200);
+}
+.ev3 .wd-vf.on {
+  background: var(--slate-900);
+  border-color: var(--slate-900);
+  color: var(--fog-50);
+}
+.ev3 .wd-vf .nm {
+  flex: 1;
+  text-align: left;
+}
+.ev3 .wd-vf-ct {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--fog-300);
+  color: var(--slate-500);
+}
+.ev3 .wd-vf.on .wd-vf-ct {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--fog-50);
+}
+.ev3 /* 좌패널 헤더 + "패키지" 리스트 (필터 아래로 한 단계 낮춤) */
+.wd-pkghead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 12px 6px;
+  margin-top: 2px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+}
+.ev3 /* 패키지(pkg::) 행 — 박스 아이콘 + 적용 가능 액센트(좌측 sage 띠) */
+.ev2-pkgrow.wd-pkg {
+  border-left: 2px solid var(--sage-300);
+}
+.ev3 .ev2-pkgrow.wd-pkg.on {
+  border-left-color: var(--slate-900);
+}
+.ev3 .ev2-pkgrow.wd-pkg svg.wd-pkgico {
+  color: var(--sage-600, #4c7a5e);
+}
+.ev3 .ev2-pkgrow.wd-pkg.dim svg.wd-pkgico {
+  color: var(--slate-300);
+}
+.ev3 /* ── 역할 중심 정책 행 (ld-def 내부 재구성) ── */
+.ld-def {
+  align-items: center;
+  gap: 11px;
+  padding: 9px 14px 9px 30px;
+}
+.ev3 .pol-ic {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.ev3 .pol-ic svg {
+  width: 16px;
+  height: 16px;
+}
+.ev3 .pol-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ev3 .pol-nm {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-800);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .pol-nm.dim {
+  color: var(--slate-400);
+  font-weight: 500;
+}
+.ev3 .pol-desc {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .pol-desc.add {
+  color: var(--slate-300);
+  font-style: italic;
+}
+.ev3 .ld-def:hover .pol-desc.add {
+  color: var(--sage-600, #4c7a5e);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ev3 /* 심각도 — 회색 강등(카테고리 색과 분리) */
+.pol-sev {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--slate-400);
+  white-space: nowrap;
+}
+.ev3 .pol-sev::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--slate-300);
+}
+.ev3 .pol-sev.deny::before {
+  background: var(--slate-500);
+}
+.ev3 /* 라이브러리 디렉토리(관리 탭)에서도 패키지 폴더헤드 박스 아이콘 + 액센트 */
+.ld-folder.is-pkg > .ld-folderhead svg.ld-pkgico {
+  color: var(--sage-600, #4c7a5e);
+}
+.ev3 .ld-folder.is-pkg {
+  border-left: 2px solid var(--sage-200, #cfe2d6);
+}
+.ev3 /* ── ② 배지: 미적용 초안 / 공유 ── */
+.pol-badge {
+  flex: none;
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.ev3 .pol-badge.draft {
+  background: #f6ead0;
+  color: #946410;
+}
+.ev3 .pol-badge.share {
+  background: #e2eaf2;
+  color: #3a5a78;
+}
+.ev3 /* ── ② 저장 모달 "지금 켜기" ── */
+.ptm-field.ssm-applynow {
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 11px;
+  margin-top: 4px;
+  background: var(--sage-50, #eef4ef);
+  border: 1px solid var(--sage-200, #cfe2d6);
+  border-radius: 9px;
+}
+.ev3 .ptm-field.ssm-applynow input {
+  margin-top: 2px;
+}
+.ev3 .ptm-field.ssm-applynow span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ev3 .ptm-field.ssm-applynow b {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sage-700, #2f5840);
+}
+.ev3 .ptm-field.ssm-applynow small {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  line-height: 1.4;
+}
+.ev3 /* ════════════ 정책 편집기 헤더 — 디자인 다듬기 (기능 변화 없음, 순수 비주얼) ════════════ */
+.ev2-detail {
+  border-color: var(--hairline-soft);
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 24px 48px -32px rgba(15, 23, 42, 0.22);
+}
+.ev3 .ev2-detail-head {
+  padding: 18px 22px 0;
+  gap: 14px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ev3 .ev2-detail-title-row {
+  gap: 11px;
+}
+.ev3 .ev2-cat-ic {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
+}
+.ev3 .ev2-cat-ic svg { width: 17px; height: 17px; }
+.ev3 .ev2-detail-title {
+  font-size: 21px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  padding: 5px 8px;
+  transition: background 140ms ease;
+}
+.ev3 .ev2-detail-slug {
+  font-size: 11px;
+  color: var(--slate-500);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  padding: 3px 9px;
+  border-radius: 8px;
+  letter-spacing: -0.01em;
+}
+.ev3 /* 메타 배지 — 부드러운 알약 */
+.ev2-detail-meta { gap: 8px; padding-left: 2px; }
+.ev3 .ev2-detail-meta .ev2-badge-draft {
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.ev3 /* 탭 줄 — 아래 가는 트랙선으로 깔끔하게 구분 */
+.ev2-detail-tabs {
+  gap: 4px;
+  padding: 4px 0 0;
+  position: relative;
+}
+.ev3 .ev2-detail-tabs::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1px;
+  background: var(--hairline-soft);
+}
+.ev3 .ev2-tab {
+  font-size: 13px;
+  font-weight: 650;
+  padding: 9px 15px;
+  border-bottom-width: 2.5px;
+  border-radius: 8px 8px 0 0;
+  position: relative;
+  z-index: 1;
+  transition: color 140ms ease, background 140ms ease;
+}
+.ev3 .ev2-tab:hover { background: var(--fog-200); }
+.ev3 .ev2-tab.on { border-bottom-color: var(--sage-600); }
+.ev3 /* 우측 액션 버튼 — 둥글고 또렷하게 */
+.ev2-pri {
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+  transition: background 140ms ease, transform 80ms ease;
+}
+.ev3 .ev2-pri:active { transform: translateY(0.5px); }
+.ev3 .ev2-pri.ghost, .ev3 .ev2-pri.danger { box-shadow: none; }
+.ev3 .ev2-back { border-radius: 10px; }
+.ev3 /* 정책 소개(문서) — 토글·필드 정돈 */
+.ev2-doc-toggle { font-size: 12px; letter-spacing: -0.01em; padding: 5px 4px; }
+.ev3 .ev2-detail-doc { gap: 12px; margin-top: 4px; }
+.ev3 /* 정책 소개 탭 본문 */
+.ev2-doc-pane { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; overflow: auto; }
+.ev3 .ev2-doc-pane-head { display: flex; flex-direction: column; gap: 3px; }
+.ev3 .ev2-doc-pane-head .t { font-size: 15px; font-weight: 720; letter-spacing: -0.01em; color: var(--slate-900); }
+.ev3 .ev2-doc-pane-head .s { font-size: 12.5px; color: var(--slate-500); line-height: 1.5; }
+.ev3 .ev2-doc-pane .ev2-detail-doc { margin-top: 0; }
+.ev3 /* ── LLM 탭 ── */
+.ev2-llm-pane { flex: 1; display: block; padding: 16px 18px; overflow: auto; }
+.ev3 .ev2-llm-card { width: 100%; max-width: none; display: flex; flex-direction: column; gap: 14px; }
+.ev3 .ev2-llm-head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline-soft); }
+.ev3 .ev2-llm-spark {
+  flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff;
+  background: linear-gradient(145deg, #7d9b7d, #5f7d5f); box-shadow: 0 4px 10px -5px rgba(95, 125, 95, 0.5);
+}
+.ev3 .ev2-llm-spark svg { width: 17px; height: 17px; }
+.ev3 .ev2-llm-headtext { display: flex; flex-direction: column; gap: 3px; padding-top: 1px; }
+.ev3 .ev2-llm-title { font-size: 15px; font-weight: 720; color: var(--slate-900); letter-spacing: -0.01em; }
+.ev3 .ev2-llm-sub { font-size: 12.5px; color: var(--slate-500); line-height: 1.55; }
+.ev3 .ev2-llm-inputwrap {
+  border: 1px solid var(--hairline); border-radius: 16px; background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 18px 40px -30px rgba(15, 23, 42, 0.25);
+  overflow: hidden; transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.ev3 .ev2-llm-inputwrap:focus-within { border-color: var(--sage-500, #7d9b7d); box-shadow: 0 0 0 4px var(--sage-100, #e8efe8); }
+.ev3 .ev2-llm-inputwrap.busy { opacity: 0.85; }
+.ev3 .ev2-llm-textarea {
+  display: block; width: 100%; min-height: 150px; appearance: none; resize: vertical;
+  border: 0; outline: none; background: transparent; font-family: inherit; font-size: 14.5px;
+  color: var(--slate-900); padding: 16px 18px 6px; line-height: 1.65;
+}
+.ev3 .ev2-llm-textarea::placeholder { color: var(--slate-400); }
+.ev3 .ev2-llm-inputbar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 12px 18px; }
+.ev3 .ev2-llm-kbd { font-size: 11.5px; color: var(--slate-400); display: inline-flex; align-items: center; gap: 5px; }
+.ev3 .ev2-llm-kbd kbd {
+  font-family: inherit; font-size: 11px; color: var(--slate-500); background: var(--fog-200);
+  border: 1px solid var(--hairline); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; min-width: 18px; text-align: center;
+}
+.ev3 .ev2-llm-gen {
+  margin-left: auto; appearance: none; display: inline-flex; align-items: center; gap: 7px;
+  border: 0; background: var(--slate-900); color: var(--fog-50); font-size: 13px; font-weight: 650;
+  letter-spacing: -0.01em; padding: 9px 17px; border-radius: 10px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18); transition: background 140ms ease, transform 80ms ease, opacity 140ms ease;
+}
+.ev3 .ev2-llm-gen svg { width: 15px; height: 15px; }
+.ev3 .ev2-llm-gen:hover:not(:disabled) { background: var(--slate-800); }
+.ev3 .ev2-llm-gen:active:not(:disabled) { transform: translateY(0.5px); }
+.ev3 .ev2-llm-gen:disabled { opacity: 0.45; cursor: default; }
+.ev3 .ev2-llm-spin {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff; animation: ev3-ev2-llm-spin 0.7s linear infinite;
+}
+@keyframes ev3-ev2-llm-spin { to { transform: rotate(360deg); } }
+.ev3 .ev2-llm-error {
+  display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600;
+  color: #b3402f; background: #fdece9; border: 1px solid #f3c7c0; border-radius: 11px; padding: 10px 13px;
+}
+.ev3 .ev2-llm-error svg { width: 15px; height: 15px; flex: none; }
+.ev3 .ev2-llm-examples { display: flex; flex-direction: column; gap: 9px; }
+.ev3 .ev2-llm-examples .lbl { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--slate-400); }
+.ev3 .ev2-llm-chips { display: flex; flex-direction: column; gap: 7px; }
+.ev3 .ev2-llm-chip {
+  display: flex; align-items: center; gap: 9px; text-align: left; width: 100%;
+  font-size: 13px; color: var(--slate-700); background: var(--fog-100);
+  border: 1px solid var(--hairline-soft); border-radius: 11px; padding: 10px 13px; cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 80ms ease;
+}
+.ev3 .ev2-llm-chip .plus {
+  flex: none; width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center;
+  font-size: 14px; line-height: 1; color: var(--sage-700, #5f7d5f); background: var(--sage-100, #e8efe8);
+}
+.ev3 .ev2-llm-chip:hover:not(:disabled) { background: #fff; border-color: var(--sage-300, #b9ccb9); color: var(--slate-900); transform: translateX(2px); }
+.ev3 .ev2-llm-chip:disabled { opacity: 0.5; cursor: default; }

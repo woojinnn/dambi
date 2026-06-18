@@ -130,6 +130,7 @@
     "failed": "실패: {{error}}"
   },
   "assets": {
+    "here": "자산",
     "screenAll": "Assets — 전체 합산",
     "screenWallet": "Assets — {{label}}",
     "notif": "{{count}}건 미해결 finding",

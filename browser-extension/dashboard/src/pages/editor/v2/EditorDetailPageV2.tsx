@@ -13,6 +13,7 @@ import {
   putDef,
   putPackage,
   putWalletPackage,
+  UNCATEGORIZED_PKG,
   updateBinding,
   type Binding,
   type PolicyDef,
@@ -192,7 +193,7 @@ export function EditorDetailPageV2() {
   return (
     <>
       <Topbar
-        here="Policy Editor"
+        here={t("nav.editor", { ns: "shell" })}
         subtitle={policy ? policy.displayName : id || "…"}
         right={
           <Link to="/editor" className="ev2-back">
@@ -335,9 +336,14 @@ function EditorBody({
   const lockEdit = !!bindingCtx || isBuiltin;
   const cstyle = catStyle(policy.cat);
 
+  // 복제-편집: 어느 폴더(라이브러리 패키지)에 사본을 저장할지 먼저 고른다.
+  const [dupOpen, setDupOpen] = useState(false);
   const duplicateMut = useMutation({
-    mutationFn: () => duplicateDef(policy.id),
-    onSuccess: (newId) => onDuplicated(newId),
+    mutationFn: (packageId: string) => duplicateDef(policy.id, packageId),
+    onSuccess: (newId) => {
+      setDupOpen(false);
+      onDuplicated(newId);
+    },
   });
 
   // 신규 def 첫 저장의 범위 모달 — prepare()가 만든 페이로드를 들고 띄운다.
@@ -890,7 +896,7 @@ function EditorBody({
             <button
               type="button"
               className="ev2-pri"
-              onClick={() => duplicateMut.mutate()}
+              onClick={() => setDupOpen(true)}
               disabled={duplicateMut.isPending}
               title={t("detail.builtinLockNote")}
             >
@@ -1046,6 +1052,15 @@ function EditorBody({
           setPublishManifest(null); // next publish recomputes from current state
         }}
       />
+
+      {dupOpen && (
+        <DuplicateFolderModal
+          folders={modalPackages.map((p) => ({ id: p.id, displayName: p.displayName }))}
+          busy={duplicateMut.isPending}
+          onPick={(pkgId) => duplicateMut.mutate(pkgId)}
+          onClose={() => setDupOpen(false)}
+        />
+      )}
 
       {scopeAsk && (
         <ScopeInstallModal
@@ -1254,6 +1269,53 @@ function LlmPane({ onModel }: { onModel: (m: FormModel, warnings: string[]) => P
             {error}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** 복제-편집 시 사본을 저장할 폴더(라이브러리 패키지)를 고르는 작은 모달.
+ *  "개별"(폴더 없음) + 기존 폴더 목록. 고르면 그 폴더로 복제한다. */
+function DuplicateFolderModal({
+  folders,
+  busy,
+  onPick,
+  onClose,
+}: {
+  folders: { id: string; displayName: string }[];
+  busy: boolean;
+  onPick: (packageId: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("editor");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="ev2-modal-bd" role="dialog" aria-modal onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="ev2-dup">
+        <div className="ev2-dup-h">
+          <div className="t">{t("detail.dupTitle")}</div>
+          <div className="s">{t("detail.dupHint")}</div>
+        </div>
+        <div className="ev2-dup-list">
+          <button type="button" className="ev2-dup-opt" disabled={busy} onClick={() => onPick(UNCATEGORIZED_PKG)}>
+            <span className="nm">{t("editor2.uncatName")}</span>
+            <span className="sub">{t("detail.dupUncatSub")}</span>
+          </button>
+          {folders.map((f) => (
+            <button key={f.id} type="button" className="ev2-dup-opt" disabled={busy} onClick={() => onPick(f.id)}>
+              <span className="nm">{f.displayName}</span>
+            </button>
+          ))}
+        </div>
+        <div className="ev2-dup-actions">
+          <button type="button" className="ev2-pri ghost" onClick={onClose} disabled={busy}>
+            {t("common:cancel")}
+          </button>
+        </div>
       </div>
     </div>
   );

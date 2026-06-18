@@ -60,7 +60,9 @@
       "labelPlaceholder": "Label",
       "fromWallet": "from (wallet)",
       "toContract": "to (contract)",
-      "addTx": "+ Add transaction"
+      "addTx": "+ Add transaction",
+      "addExample": "Insert example",
+      "exampleLabel": "Example · unlimited USDC approval"
     },
     "step4": {
       "title": "④ Results",

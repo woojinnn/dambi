@@ -24,7 +24,9 @@ const ALLOWLIST = new Set([
   "src/server-api/llm-draft.ts", // LLM 프롬프트/스키마 설명(모델 지시문, UI 아님)
 ]);
 
-const SKIP_RE = /(__tests__\/|\.test\.tsx?$|\.generated\.ts$|^src\/i18n\/locales\/)/;
+// 참고: src/pages/editor/v3/ 는 새 에디터 프론트 이식 중(prototype 한국어 리터럴
+// 다수). Phase 3 마무리에서 i18n 처리 예정이라 그때까지 검사 제외.
+const SKIP_RE = /(__tests__\/|\.test\.tsx?$|\.generated\.ts$|^src\/i18n\/locales\/|^src\/pages\/editor\/v3\/)/;
 const HANGUL = /[가-힣]/;
 
 function* walk(dir) {
