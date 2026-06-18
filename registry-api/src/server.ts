@@ -56,6 +56,13 @@ const CORS_HEADERS: Record<string, string> = {
   "access-control-max-age": "86400",
 };
 
+const DEBUG_RESPONSE_HEADERS: Record<string, string> = {
+  "cache-control": "no-store",
+  "referrer-policy": "no-referrer",
+  "vary": "x-debug-token",
+  "x-content-type-options": "nosniff",
+};
+
 export function createRegistryApiServer(
   options: RegistryApiServerOptions,
 ): Server {
@@ -96,11 +103,13 @@ export function createRegistryApiServer(
         nowMs,
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unexpected server error";
+      logServerError("internal_error", error);
       writeJson(response, 500, {
         ok: false,
-        error: { code: "internal_error", message },
+        error: {
+          code: "internal_error",
+          message: "Internal server error",
+        },
       });
     }
   });
@@ -138,16 +147,26 @@ async function routeRequest(input: RouteInput): Promise<void> {
     const want = input.config.debugToken;
     const got = input.request.headers["x-debug-token"];
     if (!want || got !== want) {
-      writeJson(input.response, 404, {
-        ok: false,
-        error: { code: "not_found", message: "Route not found" },
-      });
+      writeJson(
+        input.response,
+        404,
+        {
+          ok: false,
+          error: { code: "not_found", message: "Route not found" },
+        },
+        DEBUG_RESPONSE_HEADERS,
+      );
       return;
     }
-    writeJson(input.response, 200, {
-      entries: input.logStore.recent(),
-      cache: input.cache.stats(),
-    });
+    writeJson(
+      input.response,
+      200,
+      {
+        entries: input.logStore.recent(),
+        cache: input.cache.stats(),
+      },
+      DEBUG_RESPONSE_HEADERS,
+    );
     return;
   }
 
@@ -242,6 +261,9 @@ async function handleProxy(input: RouteInput, proxyPath: string): Promise<void> 
     try {
       value = await materializeIfRefIndex(input, target.objectName, result);
     } catch (error) {
+      logServerError("ref_materialization_failed", error, {
+        object: target.objectName,
+      });
       input.response.writeHead(502, {
         ...CORS_HEADERS,
         "content-type": "application/json; charset=utf-8",
@@ -251,7 +273,7 @@ async function handleProxy(input: RouteInput, proxyPath: string): Promise<void> 
           ok: false,
           error: {
             code: "ref_materialization_failed",
-            message: error instanceof Error ? error.message : String(error),
+            message: "Registry reference materialization failed",
           },
         }),
       );
@@ -284,6 +306,9 @@ async function handleProxy(input: RouteInput, proxyPath: string): Promise<void> 
   }
   // upstream_error — 캐시 안 함; 502 → 익스텐션이 transient network error
   // (30 s negative cache 후 retry) 로 취급.
+  logServerError("upstream_error", result.message, {
+    object: target.objectName,
+  });
   input.response.writeHead(502, {
     ...CORS_HEADERS,
     "content-type": "application/json; charset=utf-8",
@@ -291,7 +316,10 @@ async function handleProxy(input: RouteInput, proxyPath: string): Promise<void> 
   input.response.end(
     JSON.stringify({
       ok: false,
-      error: { code: "upstream_error", message: result.message },
+      error: {
+        code: "upstream_error",
+        message: "Registry upstream read failed",
+      },
     }),
   );
   logRequest(input, proxyPath, 502, "miss", startMs);
@@ -347,11 +375,22 @@ function parseJsonBuffer<T>(body: Buffer, label: string): T {
   }
 }
 
-function normalizeObjectRef(ref: string): string {
+type GeneratedRefKind = "bundle" | "context";
+
+function normalizeGeneratedObjectRef(
+  ref: string,
+  kind: GeneratedRefKind,
+): string {
   const path = ref.startsWith("/") ? ref : `/${ref}`;
   const target = parseProxyTarget(path);
   if (!target.ok) {
     throw new Error(`invalid generated object ref ${JSON.stringify(ref)}`);
+  }
+  const expectedPrefix = kind === "bundle" ? "bundles/" : "contexts/";
+  if (!target.objectName.startsWith(expectedPrefix)) {
+    throw new Error(
+      `invalid generated ${kind} ref ${JSON.stringify(ref)}: expected ${expectedPrefix}`,
+    );
   }
   return target.objectName;
 }
@@ -359,8 +398,9 @@ function normalizeObjectRef(ref: string): string {
 async function readGeneratedJson<T>(
   input: RouteInput,
   ref: string,
+  kind: GeneratedRefKind,
 ): Promise<T> {
-  const objectName = normalizeObjectRef(ref);
+  const objectName = normalizeGeneratedObjectRef(ref, kind);
 
   // Cache only CONTENT-ADDRESSED sub-reads: bundles/<sha256>.json are immutable
   // by hash, so a sibling callkey reusing a cached template is always byte-
@@ -521,7 +561,11 @@ async function materializeIfRefIndex(
     };
   }
 
-  const template = await readGeneratedJson<unknown>(input, entry.bundle_ref);
+  const template = await readGeneratedJson<unknown>(
+    input,
+    entry.bundle_ref,
+    "bundle",
+  );
   if (entry.context_ref === undefined) {
     const response = {
       matched: true,
@@ -539,6 +583,7 @@ async function materializeIfRefIndex(
   const contextDoc = await readGeneratedJson<SourceContextDocument>(
     input,
     entry.context_ref,
+    "context",
   );
   const bundle = materializeSourceBundle(template, contextDoc);
   const response = {
@@ -670,14 +715,36 @@ function logRequest(
   );
 }
 
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function logServerError(
+  code: "internal_error" | "ref_materialization_failed" | "upstream_error",
+  error: unknown,
+  fields: Record<string, unknown> = {},
+): void {
+  console.error(
+    JSON.stringify({
+      event: "registry_api_error",
+      code,
+      message: errorMessage(error),
+      ...fields,
+    }),
+  );
+}
+
 function writeJson(
   response: ServerResponse,
   statusCode: number,
   body: unknown,
+  extraHeaders: Record<string, string> = {},
 ): void {
   response.writeHead(statusCode, {
     ...CORS_HEADERS,
     "content-type": "application/json; charset=utf-8",
+    ...extraHeaders,
   });
   response.end(JSON.stringify(body));
 }

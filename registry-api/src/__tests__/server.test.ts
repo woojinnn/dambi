@@ -180,6 +180,74 @@ describe("registry-api HTTP server", () => {
     );
   });
 
+  it("rejects a 3-ref entry whose bundle_ref is not a bundle object", async () => {
+    const invalidBundleRef =
+      "tokens/1/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json";
+    const reader = fakeReader({
+      "index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json":
+        JSON.stringify({
+          matched: true,
+          schema_version: "3-ref",
+          bundle_id: "curve/stableswap-ng/source/exchange@1.0.0",
+          manifest_path: "manifests/curve/exchange.json",
+          bundle_sha256: "0x" + "b".repeat(64),
+          bundle_ref: invalidBundleRef,
+        }),
+      [invalidBundleRef]: '{"kind":"erc20"}',
+    });
+    const url = await start(reader);
+
+    const res = await fetch(`${url}${CALLKEY_PATH}`);
+    expect(res.status).toBe(502);
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain(invalidBundleRef);
+    expect(JSON.parse(bodyText)).toMatchObject({
+      error: {
+        code: "ref_materialization_failed",
+        message: "Registry reference materialization failed",
+      },
+    });
+    expect(reader.reads).not.toContain(invalidBundleRef);
+  });
+
+  it("rejects a 3-ref entry whose context_ref is not a context object", async () => {
+    const bundleRef =
+      "bundles/0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json";
+    const invalidContextRef =
+      "tokens/1/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json";
+    const reader = fakeReader({
+      "index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json":
+        JSON.stringify({
+          matched: true,
+          schema_version: "3-ref",
+          bundle_id: "curve/stableswap-ng/source/exchange@1.0.0",
+          manifest_path: "manifests/curve/exchange.json",
+          bundle_sha256: "0x" + "b".repeat(64),
+          bundle_ref: bundleRef,
+          context_ref: invalidContextRef,
+        }),
+      [bundleRef]: JSON.stringify({
+        type: "adapter_action",
+        id: "curve/stableswap-ng/source/exchange@1.0.0",
+      }),
+      [invalidContextRef]: '{"kind":"erc20"}',
+    });
+    const url = await start(reader);
+
+    const res = await fetch(`${url}${CALLKEY_PATH}`);
+    expect(res.status).toBe(502);
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain(invalidContextRef);
+    expect(JSON.parse(bodyText)).toMatchObject({
+      error: {
+        code: "ref_materialization_failed",
+        message: "Registry reference materialization failed",
+      },
+    });
+    expect(reader.reads).toContain(bundleRef);
+    expect(reader.reads).not.toContain(invalidContextRef);
+  });
+
   it("fetches a shared bundle template only once across sibling callkeys (sub-read cache)", async () => {
     const bundleRef =
       "bundles/0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.json";
@@ -304,10 +372,40 @@ describe("registry-api HTTP server", () => {
   it("returns 502 on a GCS upstream error", async () => {
     const url = await start({
       async read() {
-        return { kind: "upstream_error", message: "boom" };
+        return {
+          kind: "upstream_error",
+          message: "boom secret-token=do-not-echo",
+        };
       },
     });
-    expect((await fetch(`${url}${CALLKEY_PATH}`)).status).toBe(502);
+    const res = await fetch(`${url}${CALLKEY_PATH}`);
+    expect(res.status).toBe(502);
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain("secret-token");
+    expect(JSON.parse(bodyText)).toMatchObject({
+      error: {
+        code: "upstream_error",
+        message: "Registry upstream read failed",
+      },
+    });
+  });
+
+  it("does not echo unexpected internal error details", async () => {
+    const url = await start({
+      async read() {
+        throw new Error("internal-secret=do-not-echo");
+      },
+    });
+    const res = await fetch(`${url}${CALLKEY_PATH}`);
+    expect(res.status).toBe(500);
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain("internal-secret");
+    expect(JSON.parse(bodyText)).toMatchObject({
+      error: {
+        code: "internal_error",
+        message: "Internal server error",
+      },
+    });
   });
 
   it("returns 429 when the per-IP rate limit is exceeded", async () => {
@@ -356,11 +454,13 @@ describe("registry-api HTTP server", () => {
       }),
     );
     await fetch(`${url}${CALLKEY_PATH}`);
-    const body = (await (
-      await fetch(`${url}/debug/recent`, {
-        headers: { "x-debug-token": "test-debug-token" },
-      })
-    ).json()) as { entries: unknown[] };
+    const res = await fetch(`${url}/debug/recent`, {
+      headers: { "x-debug-token": "test-debug-token" },
+    });
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("vary")).toBe("x-debug-token");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    const body = (await res.json()) as { entries: unknown[] };
     expect(body.entries.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -428,14 +528,17 @@ describe("registry-api HTTP server", () => {
 
   it("gates /debug/recent behind the debug token (no / wrong token → 404)", async () => {
     const url = await start(fakeReader({}));
-    expect((await fetch(`${url}/debug/recent`)).status).toBe(404);
-    expect(
-      (
-        await fetch(`${url}/debug/recent`, {
-          headers: { "x-debug-token": "wrong" },
-        })
-      ).status,
-    ).toBe(404);
+    const noToken = await fetch(`${url}/debug/recent`);
+    expect(noToken.status).toBe(404);
+    expect(noToken.headers.get("cache-control")).toBe("no-store");
+    expect(noToken.headers.get("vary")).toBe("x-debug-token");
+
+    const wrongToken = await fetch(`${url}/debug/recent`, {
+      headers: { "x-debug-token": "wrong" },
+    });
+    expect(wrongToken.status).toBe(404);
+    expect(wrongToken.headers.get("cache-control")).toBe("no-store");
+    expect(wrongToken.headers.get("vary")).toBe("x-debug-token");
   });
 
   it("404 responses carry a short negative Cache-Control (probe-flood blunting)", async () => {
