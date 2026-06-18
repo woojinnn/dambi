@@ -59,6 +59,10 @@ import {
   noteHlLeverageUpdate,
 } from "./venue/collect-hl-leverage";
 import { collectOrderEnrichment } from "./venue/collect-order-enrichment";
+import {
+  leverageCapUnevaluated,
+  leverageUnevaluatedVerdict,
+} from "./venue/leverage-cap-guard";
 import { resolveOrderSymbol } from "./venue/resolve-order-symbol";
 import { resolveHlMaster } from "./venue/resolve-hl-master";
 import {
@@ -959,7 +963,7 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
             ...(master !== null ? { walletAddress: master } : {}),
           })
         : {};
-    const verdict = await evaluateActionV2({
+    let verdict = await evaluateActionV2({
       action,
       meta,
       tx,
@@ -968,6 +972,26 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
       account_leverage,
       order_enrichment,
     });
+    // Fail-soft VISIBILITY: an order-leverage cap reads the OPTIONAL
+    // `context.leverage` enrichment. If it could not be resolved for this order
+    // (empty `account_leverage`) yet a leverage-reading policy is installed and
+    // the engine returned pass, the cap silently did not apply — convert that
+    // silent pass into a user-approvable WARN so an unevaluated guard is visible
+    // (not a silent under-block). See `venue/leverage-cap-guard.ts`.
+    if (
+      leverageCapUnevaluated({
+        verdictKind: verdict.kind,
+        action,
+        accountLeverage: account_leverage,
+        bundles,
+      })
+    ) {
+      verdict = leverageUnevaluatedVerdict();
+      console.info("[Dambi] HL venue leverage cap unevaluated → warn", {
+        requestId: message.requestId,
+        evalAddress,
+      });
+    }
     console.info("[Dambi] venue-order-verdict", {
       requestId: message.requestId,
       venue: message.data.venue,
