@@ -41,16 +41,17 @@ export type Ps2Request =
       params?: Record<string, HoleValue>;
       enabled?: boolean;
       alias?: string;
+      severity?: "deny" | "warn";
     }
   | {
       type: "ps2:update-binding";
       address: string;
       bindingId: string;
-      patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias">>;
+      patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias" | "severity">>;
     }
   | { type: "ps2:remove-binding"; address: string; bindingId: string }
   | { type: "ps2:remove-wallet-package"; address: string; packageId: string }
-  | { type: "ps2:put-wallet-package"; address: string; pkg: { id: string; displayName: string } }
+  | { type: "ps2:put-wallet-package"; address: string; pkg: { id: string; displayName: string; desc?: string } }
   | { type: "ps2:put-wallet-folder"; address: string; folder: { id: string; displayName: string } }
   | { type: "ps2:remove-wallet-folder"; address: string; folderId: string }
   | { type: "ps2:copy-bindings"; fromAddress: string; toAddress: string; bindingIds: string[] }

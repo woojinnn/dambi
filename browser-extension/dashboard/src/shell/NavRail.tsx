@@ -53,18 +53,18 @@ export function NavRail() {
   return (
     <nav className="nav-rail" tabIndex={0} aria-label="Dambi global nav">
       <div className="nav-logo">
-        <div className="mark">sb</div>
+        <img className="mark" src="logo.png" alt="dambi" />
         <div className="word">dambi</div>
       </div>
 
       <div className="nav-divider" />
 
       <div className="nav-group">
-        <RailItem to="/" end label="Home" icon={<HomeIcon />} />
-        <RailItem to="/editor" label="Editor" icon={<EditorIcon />} />
-        <RailItem to="/simulation" label="Simulation" icon={<SimIcon />} />
-        <RailItem to="/assets" label="Assets" icon={<MonIcon />} />
-        <RailItem to="/market" label="Policy Hub" icon={<MarketIcon />} />
+        <RailItem to="/" end label={t("nav.home")} icon={<HomeIcon />} />
+        <RailItem to="/editor" label={t("nav.editor")} icon={<EditorIcon />} />
+        <RailItem to="/simulation" label={t("nav.simulation")} icon={<SimIcon />} />
+        <RailItem to="/assets" label={t("nav.assets")} icon={<MonIcon />} />
+        <RailItem to="/market" label={t("nav.market")} icon={<MarketIcon />} />
       </div>
 
       <div className="nav-divider" />
@@ -72,12 +72,11 @@ export function NavRail() {
       <div className="nav-group">
         <RailItem
           to="/history"
-          label="History"
+          label={t("nav.history")}
           icon={<HistoryIcon />}
           badge={pendingCount > 0 ? String(pendingCount) : undefined}
           showDot={pendingCount > 0}
         />
-        <RailItem to="/settings" label="Settings" icon={<SettingsIcon />} />
       </div>
 
       <div className="nav-bottom" ref={menuRef}>
@@ -186,12 +185,6 @@ const MarketIcon = () => (
   <svg viewBox="0 0 24 24" {...stroke}>
     <path d="M3 8h18l-2 12H5z" />
     <path d="M8 8V5a4 4 0 0 1 8 0v3" />
-  </svg>
-);
-const SettingsIcon = () => (
-  <svg viewBox="0 0 24 24" {...stroke}>
-    <circle cx="12" cy="12" r="3" />
-    <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" />
   </svg>
 );
 const ProfileIcon = () => (

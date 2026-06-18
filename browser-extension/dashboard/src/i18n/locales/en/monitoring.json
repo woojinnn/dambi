@@ -132,5 +132,182 @@
     "target": "Target",
     "building": "Building calldata…",
     "failed": "Failed: {{error}}"
+  },
+  "assets": {
+    "screenAll": "Assets — all wallets",
+    "screenWallet": "Assets — {{label}}",
+    "notif": "{{count}} unresolved findings",
+    "prevWallet": "Previous wallet",
+    "nextWallet": "Next wallet",
+    "allWallets": "All wallets",
+    "donut": {
+      "walletTitle": "Asset share by wallet",
+      "walletChart": "Asset share by wallet donut chart",
+      "assetTitle": "Asset distribution",
+      "assetChart": "Asset distribution by chain donut chart",
+      "walletCenter": "Combined assets",
+      "assetCenter": "Total assets",
+      "walletAssets": "{{label}} assets",
+      "includedAssets": "Included assets",
+      "holdingWallets": "Holding wallets",
+      "ctxBasis": "by {{label}}"
+    },
+    "sections": {
+      "holdings": "Holdings",
+      "approvals": "Approvals",
+      "pending": "Pending orders"
+    },
+    "holdings": {
+      "search": "Search tokens",
+      "metaAll": "{{wallets}} wallets · {{tokens}} tokens",
+      "metaOne": "1 wallet · {{tokens}} tokens",
+      "searchEmpty": "No results for \"{{q}}\".",
+      "groupAtRisk": "Assets needing attention",
+      "groupClean": "Holdings",
+      "count": "{{count}}",
+      "exposureN": "Exposure {{amount}}"
+    },
+    "cols": {
+      "asset": "Asset",
+      "wallet": "Wallet",
+      "balance": "Balance",
+      "usd": "USD",
+      "riskExposure": "Risk exposure",
+      "type": "Type",
+      "tokenOrCollection": "Token / collection",
+      "spenderOperator": "spender / operator",
+      "amount": "Amount",
+      "risk": "Risk",
+      "action": "Action",
+      "summary": "Summary",
+      "signedAt": "Signed at"
+    },
+    "exposure": {
+      "pendingEval": "Pending valuation",
+      "prefix": "Exposure",
+      "legendTitle": "Risk exposure",
+      "legendDesc": "The amount that could actually be drained right now via approvals on this asset (on-chain).",
+      "warnK": "High",
+      "warnV": "Unlimited approval — fully exposed",
+      "lowK": "Low",
+      "lowV": "Capped approval · old · expired",
+      "noneK": "None",
+      "noneV": "No active approval — safe",
+      "failK": "Critical",
+      "failV": "Blocked malicious address — revoke now",
+      "foot": "Malicious-address blocking activates once a reputation registry is connected · per-type detail in the Approvals table below"
+    },
+    "risk": {
+      "unlimited": "Unlimited approval",
+      "knownVenue": "Known venue",
+      "blocked": "Blocked",
+      "old": "Old approval",
+      "expired": "Expired",
+      "capped": "Capped approval",
+      "descUnlimited": "An approval that can pull tokens with no cap — your full balance is exposed.",
+      "descKnownVenue": "Approval to a verified venue/protocol — low risk (informational).",
+      "descBlocked": "Approval to a blocklisted malicious/risky address — revoke immediately.",
+      "descOld": "An approval unused for a long time — a cleanup candidate.",
+      "descExpired": "An approval past its expiry."
+    },
+    "approvals": {
+      "empty": "No approvals to show",
+      "metaUnlimited": "Unlimited · old · expired",
+      "metaBlocked": "Blocked · unlimited · old",
+      "metaCount": "{{count}}"
+    },
+    "pending": {
+      "empty": "No pending orders",
+      "subhead": "(off-chain intents · signatures)",
+      "sellMax": "Sell max",
+      "buyMin": "Buy min",
+      "allowance": "Allowance",
+      "tokenApproval": "Token approval",
+      "offchainOrder": "Off-chain order",
+      "perpOrder": "Perp order",
+      "signature": "Signature"
+    },
+    "hl": {
+      "meta": "Positions · leverage · open orders · margin",
+      "tabAll": "All",
+      "positions": "Positions",
+      "openOrders": "Open orders",
+      "sym": "Symbol",
+      "side": "Side",
+      "size": "Size",
+      "entry": "Entry",
+      "value": "Value",
+      "kind": "Type",
+      "triggerLimit": "Trigger → limit",
+      "cond": "Condition",
+      "posEmpty": "No positions",
+      "ordEmpty": "No open orders",
+      "buy": "Buy",
+      "sell": "Sell",
+      "tp": "TP",
+      "sl": "SL",
+      "liquidation": "Liquidation",
+      "limit": "Limit",
+      "cross": "cross",
+      "isolated": "isolated",
+      "fullSize": "all",
+      "reduceOnly": "reduce-only",
+      "new": "new"
+    },
+    "l2": {
+      "overview": "Wallet overview",
+      "totalAssets": "Total assets",
+      "riskExposure": "Risk exposure",
+      "currentVar": "Current exposure · VaR",
+      "unlimitedApprovals": "Unlimited approvals",
+      "pendingOrders": "Pending orders",
+      "countCases": "{{count}}",
+      "calm": "✓ No exposed risk — this wallet looks healthy"
+    },
+    "banner": {
+      "blocked": "<b>{{count}} blocked approvals</b> detected. Switch to risk view to bring exposed assets to the top.",
+      "unlimited": "<b>{{count}} unlimited approvals</b> leave your assets fully exposed. Switch to risk view to bring exposed assets to the top.",
+      "switch": "Switch to risk view"
+    },
+    "chrome": {
+      "sortRisk": "Sort: risk priority",
+      "sortUsd": "Sort: USD value"
+    },
+    "alert": {
+      "actionNeeded": "Action needed",
+      "blocked": "Blocked",
+      "unlimited": "Unlimited approvals",
+      "exposure": "Current exposure",
+      "pending": "Pending orders",
+      "calm": "All clear — nothing urgent to handle",
+      "calmExtra": " · {{count}} pending orders"
+    },
+    "overview": {
+      "holdings": "Holdings",
+      "tokens": "{{count}} tokens",
+      "apprRisk": "Approval risk",
+      "noExposure": "No exposure",
+      "unlimitedN": "{{count}} unlimited",
+      "blockedN": " · {{count}} blocked",
+      "cases": "{{count}}",
+      "positions": "{{count}} positions",
+      "pending": "Pending orders",
+      "signWaiting": "Awaiting signature",
+      "none": "None"
+    },
+    "acc": {
+      "tokens": "{{count}} tokens",
+      "exposureN": "Exposure {{amount}}",
+      "cases": "{{count}}",
+      "blockedN": "{{count}} blocked",
+      "unlimitedN": "{{count}} unlimited",
+      "cleanupN": "{{count}} to clean up",
+      "noRisk": "No risk",
+      "positions": "{{count}} positions",
+      "signWaiting": "Awaiting signature",
+      "none": "None",
+      "expandAll": "Expand all",
+      "collapseAll": "Collapse all"
+    }
   }
 }

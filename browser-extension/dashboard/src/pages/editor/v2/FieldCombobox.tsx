@@ -19,20 +19,20 @@ import {
 import { i18n } from "../../../i18n";
 import type { FieldOption } from "../../../cedar/form";
 
-const ROLE_ORDER: Role[] = ["address", "ref", "numeric", "enum", "auth", "derived"];
+export const ROLE_ORDER: Role[] = ["address", "ref", "numeric", "enum", "auth", "derived"];
 
-function roleColor(role: Role): string {
+export function roleColor(role: Role): string {
   return `hsl(${ROLE_COLOUR[role]} 60% 52%)`;
 }
 
 /** Role group heading — gloss carries ko/en label tables. */
-function roleLabel(role: Role): string {
+export function roleLabel(role: Role): string {
   return (i18n.language?.startsWith("en") ? ROLE_LABEL_EN : ROLE_LABEL_KO)[role];
 }
 
 /** The TYPE chip — one fixed vocabulary, independent of unit (Rule 2). The
  *  unit (USD / bp / 토큰 / …) is rendered as a separate pill, never here. */
-function typeChip(f: FieldOption, t: TFunction): string {
+export function typeChip(f: FieldOption, t: TFunction): string {
   const k: FieldKind = f.fieldKind;
   switch (k) {
     case "primitive.Bool":

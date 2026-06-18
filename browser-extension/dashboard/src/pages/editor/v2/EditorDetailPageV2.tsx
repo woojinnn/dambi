@@ -8,10 +8,11 @@ import type { PolicySeverity } from "../../../server-api";
 import {
   bindDef,
   deleteDef,
+  duplicateDef,
   getOverview,
   putDef,
   putPackage,
-  putWalletFolder,
+  putWalletPackage,
   updateBinding,
   type Binding,
   type PolicyDef,
@@ -20,7 +21,15 @@ import {
 } from "../../../server-api/policy-store";
 import { listWallets } from "../../../server-api/wallets";
 import { buildDefPayload } from "./save-def";
-import { SaveScopeModal, WALLET_FOLDER_UNCAT, type SaveScopeChoice } from "./SaveScopeModal";
+import {
+  ScopeInstallModal,
+  type LibraryApply,
+  type WalletApply,
+} from "../../ScopeInstallModal";
+
+/** 신규 정책은 def 하나뿐 — 모달이 파라미터/심각도를 이 키로 묶어 돌려준다. */
+const SCOPE_DEF_KEY = "new";
+type SavePayload = { kind: "wallets"; a: WalletApply } | { kind: "library"; a: LibraryApply };
 import { defUsageCount } from "./wallet-policies-derive";
 import {
   canonicalizeModel,
@@ -45,7 +54,8 @@ import "../../market.css";
 import { catLabel, catStyle } from "./categories";
 import { CatIcon, ShieldIcon, WarnIcon } from "./icons";
 import { blocksToText, textToBlocks } from "../../../cedar";
-import { concretizeIr } from "../../../cedar/blocks";
+import { blocksToEst, concretizeIr } from "../../../cedar/blocks";
+import { llmDraftPolicy } from "../../../server-api/llm-draft";
 import { PolicyFormPane } from "./PolicyFormPane";
 import {
   emptyFormModel,
@@ -56,7 +66,7 @@ import {
   type FormModel,
 } from "../../../cedar/form";
 
-type Tab = "cedar" | "form";
+type Tab = "cedar" | "form" | "llm";
 
 function defaultTab(method: PolicyMethod | undefined): Tab {
   // Legacy `block`-method policies fall through to Cedar — they keep their full
@@ -79,6 +89,8 @@ interface NewPolicySeed {
   method: PolicyMethod;
   cedarText: string;
   displayName: string;
+  /** Force the initial editor tab (e.g. "llm" when started from the LLM card). */
+  initialTab?: Tab;
 }
 
 /** 에디터 본문이 다루는 뷰모델 — 저장된 def(IR→텍스트 변환) 또는 새 정책 시드. */
@@ -90,6 +102,8 @@ interface EditorPolicy {
    *  바인딩 파라미터가 적용된 구체 IR(이 지갑의 실제 값). */
   initialIr?: PolicyIR | undefined;
   method: PolicyMethod;
+  /** Forced initial tab for a new draft (e.g. "llm"); else derived from method. */
+  initialTab?: Tab;
   cat?: string | undefined;
   source: PolicyDef["source"];
   sourceVersion?: string | undefined;
@@ -166,6 +180,7 @@ export function EditorDetailPageV2() {
         displayName: seed.displayName,
         text: seed.cedarText,
         method: seed.method,
+        initialTab: seed.initialTab,
         source: "mine",
       };
     }
@@ -205,27 +220,20 @@ export function EditorDetailPageV2() {
             snap={overviewQ.data ?? null}
             bindingCtx={bindingCtx}
             isNew={isNew}
-            onSaved={(savedId) => {
+            onSaved={() => {
               void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
-              if (bindingCtx) {
-                navigate("/editor"); // 지갑별 정책(기본 탭)으로 복귀
-                return;
-              }
-              if (isNew) {
-                // 새 정책 저장 완료 → "+ 새 정책"을 눌렀던 목록으로 복귀.
-                // (상세에 머무르지 않는다 — 저장이 끝났다는 감각 + 다음 작업 동선)
-                navigate("/editor", { replace: true });
-                return;
-              }
-              if (savedId !== id) {
-                navigate(`/editor/${encodeURIComponent(savedId)}`, {
-                  replace: true,
-                });
-              }
+              // 저장 완료 → 항상 목록(/editor)으로 복귀해 "저장됐다"는 화면 전환을
+              // 준다(기존 def 수정도 포함 — 예전엔 같은 페이지에 머물러 변화가 없었음).
+              // 새 정책/바인딩 저장은 뒤로가기로 미저장 상태에 돌아가지 않게 replace.
+              navigate("/editor", { replace: isNew || !!bindingCtx });
             }}
             onDeleted={() => {
               void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
               navigate("/editor");
+            }}
+            onDuplicated={(newId) => {
+              void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
+              navigate(`/editor/${encodeURIComponent(newId)}`);
             }}
           />
         )}
@@ -242,6 +250,7 @@ function EditorBody({
   isNew,
   onSaved,
   onDeleted,
+  onDuplicated,
 }: {
   policy: EditorPolicy;
   storedDef: PolicyDef | null;
@@ -250,11 +259,13 @@ function EditorBody({
   isNew: boolean;
   onSaved: (id: string) => void;
   onDeleted: () => void;
+  onDuplicated: (newId: string) => void;
 }) {
-  const { t } = useTranslation("editor");
+  const { t, i18n } = useTranslation("editor");
   const [name, setName] = useState(() => policy.displayName);
-  const [severity, setSeverity] = useState<PolicySeverity>(() =>
-    severityFromCedar(policy.text),
+  // 바인딩 모드면 그 지갑의 severity override 를 우선 표시(없으면 def 선언값).
+  const [severity, setSeverity] = useState<PolicySeverity>(
+    () => bindingCtx?.binding.severity ?? severityFromCedar(policy.text),
   );
   const [cedarText, setCedarText] = useState(policy.text);
   const [ir, setIr] = useState<PolicyIR | null>(null);
@@ -262,7 +273,7 @@ function EditorBody({
   // A hand-edited manifest from the form, wrapped so `null` = no override
   // (auto-generate) is distinct from an override whose value is `undefined`.
   const [manifestOverride, setManifestOverride] = useState<{ value: unknown } | null>(null);
-  const [tab, setTab] = useState<Tab>(() => defaultTab(policy.method));
+  const [tab, setTab] = useState<Tab>(() => policy.initialTab ?? defaultTab(policy.method));
   const [publishOpen, setPublishOpen] = useState(false);
   // Manifest computed at publish time so an UNSAVED policy still ships its
   // auto-generated manifest to the market (otherwise the listing carries
@@ -282,6 +293,8 @@ function EditorBody({
   });
   const [resetToken, setResetToken] = useState(0);
   const [revertNotice, setRevertNotice] = useState<string | null>(null);
+  // LLM 이 남긴 경고(예: mock 메서드라 표현 못 한 부분) — 폼 탭으로 넘어가도 보이게.
+  const [llmWarn, setLlmWarn] = useState<string | null>(null);
   // 정책 문서(정의/범위/대상/데이터). 발행 시 함께 올라간다. 빈 칸은 저장 안 함.
   // EditorBody는 policy.id로 remount되므로 초기값을 storedDef.doc에서 읽으면 충분.
   const [docDefinition, setDocDefinition] = useState(() => storedDef?.doc?.definition ?? "");
@@ -306,9 +319,9 @@ function EditorBody({
   // Reseed when the parent swaps to a different policy id.
   useEffect(() => {
     setName(policy.displayName);
-    setSeverity(severityFromCedar(policy.text));
+    setSeverity(bindingCtx?.binding.severity ?? severityFromCedar(policy.text));
     setCedarText(policy.text);
-    setTab(defaultTab(policy.method));
+    setTab(policy.initialTab ?? defaultTab(policy.method));
     setManifestOverride(null);
     setFormEntry(null);
     setFormValidity({ valid: true, error: null });
@@ -316,7 +329,16 @@ function EditorBody({
   }, [policy.id]);
 
   const fromMarket = policy.source === "market";
+  // 기본 안전팩(builtin)은 읽기 전용 — 삭제·수정 불가(ops.ts가 강제). 편집은
+  // "복제해서 내 정책으로"로 유도한다.
+  const isBuiltin = policy.source === "builtin";
+  const lockEdit = !!bindingCtx || isBuiltin;
   const cstyle = catStyle(policy.cat);
+
+  const duplicateMut = useMutation({
+    mutationFn: () => duplicateDef(policy.id),
+    onSuccess: (newId) => onDuplicated(newId),
+  });
 
   // 신규 def 첫 저장의 범위 모달 — prepare()가 만든 페이로드를 들고 띄운다.
   const [scopeAsk, setScopeAsk] = useState<{ ir: PolicyIR; manifest: unknown } | null>(null);
@@ -486,10 +508,17 @@ function EditorBody({
       : alias !== (ctx.binding.alias ?? undefined)
         ? { alias }
         : {};
+    // 심각도 override: def 선언값과 같으면 override 해제(undefined → def 따름),
+    // 다르면 이 지갑에만 deny/warn 으로 고정. (info 는 override 대상 아님)
+    const defSeverity = severityFromCedar(policy.text);
+    const sevOverride: "deny" | "warn" | undefined =
+      (severity === "deny" || severity === "warn") && severity !== defSeverity
+        ? severity
+        : undefined;
     await updateBinding({
       address: ctx.address,
       bindingId: ctx.binding.id,
-      patch: { params, ...aliasPatch },
+      patch: { params, ...aliasPatch, severity: sevOverride },
     });
     return def.id;
   };
@@ -543,78 +572,92 @@ function EditorBody({
     },
   });
 
-  // 범위 모달 confirm → (필요시 패키지/폴더 생성) → put-def + bind.
+  // 공유 ScopeInstallModal 의 결과 → (필요시 패키지/폴더 생성) → put-def + bind.
+  // 모달의 단일 def 키(파라미터/심각도가 이 키로 묶여 온다).
   const finishMut = useMutation({
-    mutationFn: async (choice: SaveScopeChoice): Promise<string> => {
+    mutationFn: async (p: SavePayload): Promise<string> => {
       if (!scopeAsk) throw new Error(t("detail.internalNoPrepared"));
+      const displayName = name.trim() || "untitled";
 
-      // 지갑 전용 경로(모델 A): 지갑마다 **독립 def 사본**을 만들어 그 지갑의
-      // 전용 폴더에 앵커한다. 바인딩(적용)은 만들지 않는다 — 적용은 지갑별
-      // 정책에서 패키지에 끌어다 놓는 동선. {newName} 폴더는 find-or-create.
-      if (choice.scope.kind === "wallets") {
-        let lastId = "";
-        for (const address of choice.scope.addresses) {
+      // 지갑 경로: 템플릿 def 1개를 라이브러리에 보이게 저장하고, 선택한
+      // (지갑·패키지) 조합마다 값을 따로 채워 바인딩한다. 패키지 미선택 지갑은
+      // 바인딩 없이 라이브러리에만. {__new__} 패키지는 find-or-create.
+      if (p.kind === "wallets") {
+        const a = p.a;
+        const { def } = buildDefPayload({
+          existing: null,
+          displayName,
+          cat: policy.cat,
+          ir: scopeAsk.ir,
+          manifest: scopeAsk.manifest,
+          scope: { kind: "library-only" },
+          packageId: null,
+          applyToNewWallets: false,
+          doc: docPayload(),
+        });
+        await putDef(def);
+
+        for (const address of a.addresses) {
           const addr = address.toLowerCase();
-          const pick = choice.walletFolders?.[address] ?? { id: WALLET_FOLDER_UNCAT };
-          let folderId: string | undefined;
-          if ("newName" in pick) {
-            const existing = Object.values(
-              snap?.wallets.byAddress[addr]?.folders ?? {},
-            ).find((f) => f.displayName === pick.newName);
-            if (existing) {
-              folderId = existing.id;
+          const w = snap?.wallets.byAddress[addr];
+          for (const key of a.walletPackages[address] ?? []) {
+            let pkgId: string;
+            if (key === "__new__") {
+              const nm = (a.walletNewName[address] ?? "").trim();
+              const existing = Object.values(w?.packages ?? {}).find((q) => q.displayName === nm);
+              if (existing) {
+                pkgId = existing.id;
+              } else {
+                pkgId = `pkg::${crypto.randomUUID()}`;
+                await putWalletPackage({ address: addr, pkg: { id: pkgId, displayName: nm } });
+              }
             } else {
-              folderId = `fold::${crypto.randomUUID()}`;
-              await putWalletFolder({
-                address: addr,
-                folder: { id: folderId, displayName: pick.newName },
-              });
+              pkgId = key;
             }
-          } else if (pick.id !== WALLET_FOLDER_UNCAT) {
-            folderId = pick.id;
+            const ck = `${address}|${key}`;
+            const params = a.paramsByCombo[ck]?.[SCOPE_DEF_KEY] ?? {};
+            const sev = a.severityByCombo[ck]?.[SCOPE_DEF_KEY];
+            await bindDef({
+              defId: def.id,
+              packageId: pkgId,
+              addresses: [addr],
+              ...(Object.keys(params).length ? { params } : {}),
+              ...(sev ? { severity: sev } : {}),
+            });
           }
-          const { def } = buildDefPayload({
-            existing: null,
-            displayName: choice.name || name.trim() || "untitled",
-            cat: policy.cat,
-            ir: scopeAsk.ir,
-            manifest: scopeAsk.manifest,
-            scope: choice.scope,
-            packageId: null,
-            applyToNewWallets: false,
-            doc: docPayload(),
-            walletOnly: { homeWallet: addr, ...(folderId ? { walletFolderId: folderId } : {}) },
-          });
-          await putDef(def);
-          lastId = def.id;
         }
-        return lastId;
+        return def.id;
       }
 
       // 라이브러리 경로.
-      let pkgId = choice.packageId;
+      const a = p.a;
+      let pkgId = a.packageId;
       if (pkgId === "__new__") {
         pkgId = `pkg::${crypto.randomUUID()}`;
         await putPackage({
           id: pkgId,
-          displayName: choice.newPackageName ?? t("list.newFolderName"),
+          displayName: a.newPackageName || t("list.newFolderName"),
           source: "mine",
           updatedAtMs: Date.now(),
         });
       }
+      const allAddrs = modalWallets.map((w) => w.address);
       const { def, bindPlan } = buildDefPayload({
         existing: null,
-        displayName: choice.name || name.trim() || "untitled",
+        displayName,
         cat: policy.cat,
         ir: scopeAsk.ir,
         manifest: scopeAsk.manifest,
-        scope: choice.scope,
+        scope: a.applyToAllNow ? { kind: "all-wallets", addresses: allAddrs } : { kind: "library-only" },
         packageId: pkgId,
-        applyToNewWallets: choice.applyToNewWallets,
+        applyToNewWallets: a.applyToNewWallets,
         doc: docPayload(),
       });
       await putDef(def);
-      if (bindPlan) await bindDef(bindPlan);
+      if (bindPlan) {
+        const params = a.libParams[SCOPE_DEF_KEY] ?? {};
+        await bindDef({ ...bindPlan, ...(Object.keys(params).length ? { params } : {}) });
+      }
       return def.id;
     },
     onSuccess: (savedId) => {
@@ -638,8 +681,8 @@ function EditorBody({
     ]);
     return [...addrs].sort().map((address) => ({
       address,
-      folders: Object.values(snap?.wallets.byAddress[address]?.folders ?? {})
-        .map((f) => ({ id: f.id, displayName: f.displayName }))
+      packages: Object.values(snap?.wallets.byAddress[address]?.packages ?? {})
+        .map((p) => ({ id: p.id, displayName: p.displayName }))
         .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko")),
     }));
   }, [walletsQ.data, snap]);
@@ -706,6 +749,36 @@ function EditorBody({
     setTab(next);
   };
 
+  /** LLM 탭에서 생성한 FormModel 을 폼 탭에 적용한다. 헤더가 소유한 slug/severity 를
+   *  주입하고, 변환 가능 여부를 로컬에서 한번 검증(WASM 불필요)한 뒤 폼 탭으로 전환한다.
+   *  부분집합 밖이면 throw → LlmPane 이 에러를 보여준다. */
+  const applyLlmModel = async (model: FormModel, warnings: string[] = []) => {
+    // LLM 산출물은 신뢰하지 않고 최소 형태를 보정한다(누락 필드로 변환기가 죽는 것 방지).
+    const m = (model ?? {}) as Partial<FormModel>;
+    const normalized: FormModel = {
+      trigger: m.trigger ?? { kind: "any" },
+      when: Array.isArray(m.when) ? m.when : [],
+      unless: Array.isArray(m.unless) ? m.unless : [],
+      id: stripDashboardId(policy.id),
+      severity: (m.severity ?? severity) as FormModel["severity"],
+      reason: m.reason ?? "",
+    };
+    // 변환 가능성 사전 검증(폼 부분집합 안인지). 깨지면 원본을 콘솔에 남기고 깔끔한
+    // 메시지로 throw → LlmPane 이 표시.
+    try {
+      blocksToEst(concretizeIr(formToIr(normalized)));
+    } catch (err) {
+      console.error("[llm] FormModel 변환 실패:", model, err); // i18n-ok
+      throw new Error(t("detail.llmBadModel"));
+    }
+    setFormEntry({ kind: "ok", model: normalized });
+    setFormKey((k) => k + 1);
+    setLastModel(normalized);
+    setSeverity(normalized.severity as PolicySeverity);
+    setLlmWarn(warnings.length > 0 ? warnings.join(" · ") : null);
+    setTab("form");
+  };
+
   // Open the form on first mount when it is the default tab (method === "form").
   useEffect(() => {
     if (tab === "form" && formEntry === null) void openForm();
@@ -726,20 +799,6 @@ function EditorBody({
             placeholder={t("detail.namePlaceholder")}
           />
           <span className="ev2-detail-slug">{stripDashboardId(policy.id)}</span>
-          {/* 폼 탭은 ③ 심각도가 이 값을 소유(onChange로 동기화)하므로 헤더
-              셀렉트는 Cedar 탭에서만 — 같은 값이 두 군데면 헷갈린다. 바인딩
-              모드의 Cedar 탭은 읽기 전용이라 여기서도 숨긴다. */}
-          {tab !== "form" && !bindingCtx && (
-            <select
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
-              className="ev2-detail-sev"
-            >
-              <option value="deny">{t("detail.sevDeny")}</option>
-              <option value="warn">{t("detail.sevWarn")}</option>
-              <option value="info">{t("detail.sevInfo")}</option>
-            </select>
-          )}
           {policy.cat && (
             <span className="ev2-cat-tag" style={cstyle.tag}>
               {catLabel(policy.cat)}
@@ -765,7 +824,7 @@ function EditorBody({
           )}
         </div>
 
-        {!bindingCtx && (
+        {!lockEdit && (
           <div className={`ev2-doc-sec${docOpen ? " open" : ""}`}>
             <button
               type="button"
@@ -811,7 +870,7 @@ function EditorBody({
           <TabBtn
             label="Cedar"
             active={tab === "cedar"}
-            badge={bindingCtx ? t("detail.readOnlyBadge") : undefined}
+            badge={lockEdit ? t("detail.readOnlyBadge") : undefined}
             onClick={() => handleTabChange("cedar")}
           />
           <TabBtn
@@ -819,8 +878,26 @@ function EditorBody({
             active={tab === "form"}
             onClick={() => handleTabChange("form")}
           />
+          {!lockEdit && (
+            <TabBtn
+              label={t("detail.llmTab")}
+              active={tab === "llm"}
+              onClick={() => handleTabChange("llm")}
+            />
+          )}
           <span className="ev2-spc" />
-          {!bindingCtx && (
+          {isBuiltin && (
+            <button
+              type="button"
+              className="ev2-pri"
+              onClick={() => duplicateMut.mutate()}
+              disabled={duplicateMut.isPending}
+              title={t("detail.builtinLockNote")}
+            >
+              {duplicateMut.isPending ? t("saving") : t("detail.duplicateToEdit")}
+            </button>
+          )}
+          {!bindingCtx && !isBuiltin && (
             <button
               type="button"
               className="ev2-pri ghost"
@@ -830,7 +907,7 @@ function EditorBody({
               <ShieldIcon /> {t("publish.title")}
             </button>
           )}
-          {!bindingCtx && (
+          {!bindingCtx && !isBuiltin && (
           <button
             type="button"
             className="ev2-pri danger"
@@ -847,6 +924,7 @@ function EditorBody({
             {t("common:delete")}
           </button>
           )}
+          {!isBuiltin && (
           <button
             type="button"
             className={`ev2-pri${bindingCtx && !formValidity.valid ? " invalid" : ""}`}
@@ -869,6 +947,7 @@ function EditorBody({
           >
             {saveMut.isPending ? t("saving") : t("common:save")}
           </button>
+          )}
         </div>
       </div>
 
@@ -884,12 +963,24 @@ function EditorBody({
           {revertNotice}
         </div>
       )}
+      {isBuiltin && (
+        <div className="ev2-err-banner info">
+          <ShieldIcon />
+          {t("detail.builtinLockNote")}
+        </div>
+      )}
+      {llmWarn && (
+        <div className="ev2-err-banner warn">
+          <WarnIcon />
+          {t("detail.llmWarnPrefix")} {llmWarn}
+        </div>
+      )}
 
       <div className="ev2-detail-tabbody">
         {tab === "cedar" && (
           <CedarPane
             value={cedarText}
-            readOnly={!!bindingCtx}
+            readOnly={lockEdit}
             onChange={(next) => {
               setCedarText(next);
               // Drop the cached IR. Otherwise the form tab (openForm) and
@@ -905,15 +996,25 @@ function EditorBody({
               key={formKey}
               initialModel={formEntry.model}
               initialManifest={policy.manifest}
-              valuesOnly={!!bindingCtx}
+              valuesOnly={lockEdit}
               onValidity={setFormValidity}
               resetToken={resetToken}
+              {...(bindingCtx
+                ? {
+                    // 바인딩 모드: 값 시트의 결과 자리에서 차단/경고를 인라인 편집.
+                    // 헤더 셀렉트 대신 이 상태가 override 의 source of truth.
+                    severityValue: severity,
+                    onSeverityChange: (s: "deny" | "warn") => setSeverity(s),
+                  }
+                : {})}
               onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden }) => {
                 setCedarText(c);
                 setIr(nextIr);
                 setLastModel(model);
                 // Keep the header severity in sync so save stamps it correctly.
-                setSeverity(model.severity as PolicySeverity);
+                // 단 바인딩 모드(값 전용 폼)에선 헤더 셀렉트가 severity override 를
+                // 소유하므로 폼이 def 선언값으로 덮어쓰지 않게 둔다.
+                if (!bindingCtx) setSeverity(model.severity as PolicySeverity);
                 // Carry the form's manifest override (if any) so save persists it
                 // instead of re-generating.
                 setManifestOverride(manifestOverridden ? { value: manifest } : null);
@@ -934,6 +1035,7 @@ function EditorBody({
               <div className="sm">{t("detail.formLoading")}</div>
             </div>
           ))}
+        {tab === "llm" && !bindingCtx && <LlmPane onModel={applyLlmModel} />}
       </div>
 
       <PublishModal
@@ -945,15 +1047,44 @@ function EditorBody({
         }}
       />
 
-      <SaveScopeModal
-        open={scopeAsk !== null}
-        policyName={name.trim() || "untitled"}
-        wallets={modalWallets}
-        packages={modalPackages}
-        busy={finishMut.isPending}
-        onCancel={() => setScopeAsk(null)}
-        onConfirm={(choice) => finishMut.mutate(choice)}
-      />
+      {scopeAsk && (
+        <ScopeInstallModal
+          open
+          ko={i18n.language.startsWith("ko")}
+          icon={
+            <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="var(--slate-500)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" />
+            </svg>
+          }
+          kindLabel={i18n.language.startsWith("ko") ? "정책" : "Policy"}
+          title={name.trim() || "untitled"}
+          name={{
+            value: name,
+            onChange: setName,
+            label: t("saveScope.nameLabel"),
+            placeholder: t("saveScope.namePlaceholder"),
+          }}
+          walletOptTitle={t("saveScope.walletOptTitle")}
+          walletOptDesc={t("saveScope.walletOptDesc")}
+          libraryOptTitle={t("saveScope.libOptTitle")}
+          libraryOptDesc={t("saveScope.libOptDesc")}
+          formDefs={[
+            {
+              defId: SCOPE_DEF_KEY,
+              defName: name.trim() || "untitled",
+              model: irToForm(scopeAsk.ir),
+              manifest: scopeAsk.manifest,
+            },
+          ]}
+          wallets={modalWallets}
+          libPackages={modalPackages}
+          busy={finishMut.isPending}
+          error={finishMut.isError ? (finishMut.error as Error).message : null}
+          onApplyWallets={(a) => finishMut.mutate({ kind: "wallets", a })}
+          onApplyLibrary={(a) => finishMut.mutate({ kind: "library", a })}
+          onClose={() => setScopeAsk(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1039,6 +1170,91 @@ function CedarPane({
         autoCorrect="off"
         autoCapitalize="off"
       />
+    </div>
+  );
+}
+
+/** LLM 탭 — 자연어 의도를 적으면 LLM 이 FormModel 을 만들어 폼 탭으로 넘긴다.
+ *  생성 성공 시 onModel 이 폼 탭으로 전환하므로 여기선 입력/진행/에러만 다룬다. */
+/** LLM 탭 아이콘 — 작은 sparkle/wand. */
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
+      <path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
+    </svg>
+  );
+}
+
+function LlmPane({ onModel }: { onModel: (m: FormModel, warnings: string[]) => Promise<void> }) {
+  const { t } = useTranslation("editor");
+  const [intent, setIntent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const text = intent.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { model, warnings } = await llmDraftPolicy({ intent: text });
+      await onModel(model, warnings);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="ev2-llm-pane">
+      <div className="ev2-llm-card">
+        <div className="ev2-llm-head">
+          <span className="ev2-llm-badge">
+            <SparkleIcon />
+          </span>
+          <div>
+            <div className="ev2-llm-title">{t("llm.title")}</div>
+            <div className="ev2-llm-sub">{t("llm.hint")}</div>
+          </div>
+        </div>
+
+        <div className="ev2-llm-field">
+          <textarea
+            className="ev2-llm-textarea"
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            placeholder={t("llm.placeholder")}
+            disabled={busy}
+            autoFocus
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+          />
+          <div className="ev2-llm-bar">
+            <button
+              type="button"
+              className="ev2-pri ev2-llm-gen"
+              onClick={() => void submit()}
+              disabled={busy || !intent.trim()}
+            >
+              {busy ? <span className="ev2-llm-spin" /> : <SparkleIcon />}
+              {busy ? t("llm.generating") : t("llm.generate")}
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="ev2-llm-error">
+            <WarnIcon />
+            {error}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
   CategoryGlyph,
   categoryNameOf,
   categoryOf,
+  isCategoryKey,
   type CategoryKey,
 } from "./market-domain";
 import { CodeTabs, leadingComment } from "./market-code";
@@ -124,7 +125,9 @@ function DetailBody({
   const name = pickI18n(detail.display_name, locale) || detail.slug;
   const isSet = detail.kind === "set";
   const members = isSet ? detail.latest_version?.members ?? [] : [];
-  const cat = !isSet ? categoryOf(detail.slug) : null;
+  // Prefer the server-stored category (authoritative for DB listings); fall
+  // back to the slug map only for seeds without one. (List view does the same.)
+  const cat = !isSet ? (isCategoryKey(detail.category) ? detail.category : categoryOf(detail.slug)) : null;
   const catColor = cat ? CATEGORY_COLOR[cat] : null;
 
   return (
@@ -522,7 +525,7 @@ function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: M
   const copy = policyCopy(detail.slug);
   const summary = copy?.title || pickI18n(detail.description, locale) || (cedar ? leadingComment(cedar) : "");
   const sev = cedar ? severityFromCedar(cedar) : detail.severity ?? "deny";
-  const cat = categoryOf(detail.slug);
+  const cat = isCategoryKey(detail.category) ? detail.category : categoryOf(detail.slug);
   const inPkgs = usePackagesContaining(detail.slug);
   const ir = usePolicyIr(cedar);
   // 작성자 문서(정의/범위/대상/데이터) — 입력된 칸만, 발행된 정책에만 있다.

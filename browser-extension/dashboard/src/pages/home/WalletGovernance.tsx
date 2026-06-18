@@ -18,17 +18,12 @@ import { useTranslation } from "react-i18next";
 import {
   setPackageEnabled,
   updateBinding,
-  type PolicyDef,
   type StoreSnapshot,
 } from "../../server-api/policy-store";
-import { blocksToText } from "../../cedar";
-import type { PolicyIR } from "../../cedar/blocks";
-import { PublishModal, type PublishSource } from "../editor/PublishModal";
 import {
   appliedCount,
   buildFolders,
   totalPolicyCount,
-  toggledParams,
   type FolderVM,
   type PolicyVM,
 } from "./home-model";
@@ -53,17 +48,8 @@ interface Props {
 }
 
 // ── tiny icons ────────────────────────────────────────────────────────────
-const Chevron = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-);
 const Folder = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-);
-const Upload = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4m0 0-4 4m4-4 4 4" /><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></svg>
-);
-const Edit = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
 );
 const Sync = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M3 21v-5h5" /></svg>
@@ -77,6 +63,12 @@ const Trash = () => (
 const ArrowOut = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
 );
+const Flip = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>
+);
+const Back = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+);
 
 const initialOf = (w: DialWallet) => (w.label ?? w.address).slice(0, 1).toUpperCase();
 const usd = (n: number) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -87,13 +79,15 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
   const [overview, setOverview] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
 
-  // clamp active when wallets change
+  // 삭제 직후처럼 active 가 범위를 벗어날 수 있다 — effect 가 보정하기 전 렌더에서
+  // wallets[active] 가 undefined 가 되어 크래시하므로 렌더 시점에 clamp 한다.
+  const activeIdx = Math.min(Math.max(active, 0), Math.max(0, wallets.length - 1));
   useEffect(() => {
-    if (active > wallets.length - 1) setActive(Math.max(0, wallets.length - 1));
-  }, [wallets.length, active]);
+    if (active !== activeIdx) setActive(activeIdx);
+  }, [active, activeIdx]);
 
   const { t } = useTranslation("home");
-  const activeWallet = wallets[active];
+  const activeWallet = wallets[activeIdx];
 
   if (wallets.length === 0) {
     return (
@@ -113,7 +107,7 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
       <div className="dial-split" ref={splitRef}>
         <WalletDial
           wallets={wallets}
-          active={active}
+          active={activeIdx}
           onSelect={(i) => { setOverview(false); setActive(i); }}
           onActiveClick={() => setOverview((v) => !v)}
           onAddWallet={onAddWallet}
@@ -123,7 +117,7 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
             <WalletOverview
               wallets={wallets}
               snap={snap}
-              active={active}
+              active={activeIdx}
               onPick={(i) => { setActive(i); setOverview(false); }}
               onAddWallet={onAddWallet}
             />
@@ -331,59 +325,14 @@ function WalletPanel({
   const applied = snap ? appliedCount(snap, wallet.address) : 0;
   const polTotal = snap ? totalPolicyCount(snap, wallet.address) : 0;
 
-  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
-  const [openPolicies, setOpenPolicies] = useState<Set<string>>(new Set());
-  const [publishSrc, setPublishSrc] = useState<PublishSource | null>(null);
+  // 카드 클릭 → 뒤집어 내부 정책(o/x)을 보여준다.
+  const [flipped, setFlipped] = useState<Set<string>>(new Set());
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["ps2-overview"] });
   const pkgMut = useMutation({ mutationFn: setPackageEnabled, onSettled: invalidate });
-  const paramMut = useMutation({ mutationFn: updateBinding, onSettled: invalidate });
+  const bindMut = useMutation({ mutationFn: updateBinding, onSettled: invalidate });
 
-  const toggleFolder = (id: string) => setOpenFolders((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const togglePolicy = (id: string) => setOpenPolicies((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-
-  // 지갑 패키지 게시 — 멤버는 화면에 보이는 그대로(이 지갑의 바인딩, defId 중복
-  // 제거, on/off 무관). 에디터의 라이브러리 폴더 발행과 같은 PublishSource 모양.
-  const publishFolder = async (f: FolderVM) => {
-    const defs = [
-      ...new Map(f.policies.map((p) => [p.defId, snap?.library.defs[p.defId]])).values(),
-    ].filter((d): d is PolicyDef => !!d);
-    if (defs.length === 0) return;
-    try {
-      const members = await Promise.all(
-        defs.map(async (d) => ({
-          slug: d.id.replace(/^def::/, ""),
-          title: d.displayName,
-          cedarText: await blocksToText(d.skeleton.ir as PolicyIR),
-          manifest: d.skeleton.manifest,
-        })),
-      );
-      setPublishSrc({
-        kind: "package",
-        suggestedDisplayName: f.name,
-        suggestedSlug: f.packageId.replace(/^pkg::/, ""),
-        members,
-      });
-    } catch (err) {
-      console.error("[Pasu] 패키지 게시 준비 실패", err); // i18n-ok
-    }
-  };
-
-  const publishPolicy = async (p: PolicyVM) => {
-    const d = snap?.library.defs[p.defId];
-    if (!d) return;
-    try {
-      setPublishSrc({
-        kind: "policy",
-        cedarText: await blocksToText(d.skeleton.ir as PolicyIR),
-        manifest: d.skeleton.manifest,
-        suggestedDisplayName: d.displayName,
-        suggestedSlug: d.id.replace(/^def::/, ""),
-      });
-    } catch (err) {
-      console.error("[Pasu] 정책 게시 준비 실패", err); // i18n-ok
-    }
-  };
+  const toggleFlip = (id: string) => setFlipped((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
     <div className="dp-fade">
@@ -420,161 +369,100 @@ function WalletPanel({
           <Link className="btn" to="/market">{t("panel.getPackages")}</Link>
         </div>
       ) : (
-        <div className="dp-policies dp-folders">
+        <div className="dp-policies dp-cardgrid">
           {folders.map((f) => (
-            <FolderRow
+            <FolderCard
               key={f.packageId}
               folder={f}
-              open={openFolders.has(f.packageId)}
-              openPolicies={openPolicies}
-              onToggleFolder={() => toggleFolder(f.packageId)}
-              onTogglePolicy={togglePolicy}
+              flipped={flipped.has(f.packageId)}
+              onFlip={() => toggleFlip(f.packageId)}
               onTogglePackage={(on) => pkgMut.mutate({ address: wallet.address, packageId: f.packageId, enabled: on })}
-              onToggleParam={(p, holeName, on) =>
-                paramMut.mutate({
-                  address: wallet.address,
-                  bindingId: p.bindingId,
-                  patch: { params: toggledParams(snap?.wallets.byAddress[wallet.address.toLowerCase()]?.bindings[p.bindingId]?.params, holeName, on) },
-                })
-              }
-              onPublishFolder={() => void publishFolder(f)}
-              onPublishPolicy={(p) => void publishPolicy(p)}
               onToggleEnabled={(p, on) =>
-                paramMut.mutate({ address: wallet.address, bindingId: p.bindingId, patch: { enabled: on } })
+                bindMut.mutate({ address: wallet.address, bindingId: p.bindingId, patch: { enabled: on } })
               }
             />
           ))}
         </div>
       )}
-
-      <PublishModal open={publishSrc !== null} source={publishSrc} onClose={() => setPublishSrc(null)} />
     </div>
   );
 }
 
-function FolderRow({
+/** 패키지(폴더) = 뒤집기 카드. 앞: 아이콘·이름·요약·패키지 on/off 토글. 뒤(클릭
+ *  하면 뒤집힘): 내부 정책 목록(각 정책 o/x 만 — 게시·수정 없음). */
+function FolderCard({
   folder,
-  open,
-  openPolicies,
-  onToggleFolder,
-  onTogglePolicy,
+  flipped,
+  onFlip,
   onTogglePackage,
-  onToggleParam,
-  onPublishFolder,
-  onPublishPolicy,
   onToggleEnabled,
 }: {
   folder: FolderVM;
-  open: boolean;
-  openPolicies: Set<string>;
-  onToggleFolder: () => void;
-  onTogglePolicy: (id: string) => void;
+  flipped: boolean;
+  onFlip: () => void;
   onTogglePackage: (on: boolean) => void;
-  onToggleParam: (p: PolicyVM, holeName: string, on: boolean) => void;
-  onPublishFolder: () => void;
-  onPublishPolicy: (p: PolicyVM) => void;
   onToggleEnabled: (p: PolicyVM, on: boolean) => void;
 }) {
   const { t } = useTranslation("home");
+  const activeN = folder.policies.filter((p) => p.effective).length;
   return (
-    <div className={`pk-folder${open ? "" : " collapsed"}${folder.on ? "" : " off"}`}>
-      <div className="pk-folder-head" onClick={onToggleFolder}>
-        <span className="pk-chev"><Chevron /></span>
-        <span className="pk-folder-ic"><Folder /></span>
-        <span className="pk-folder-name">{folder.name}</span>
-        <span className="pk-folder-count"><b>{folder.policies.length}</b> {t("folder.policies")}</span>
-        {folder.policies.length > 0 && (
-          <button
-            className="pk-pub"
-            type="button"
-            title={t("folder.publishTitle")}
-            onClick={(e) => { e.stopPropagation(); onPublishFolder(); }}
-          >
-            <Upload />
-          </button>
-        )}
-        <Switch checked={folder.on} onChange={onTogglePackage} className="pk-sw" />
-      </div>
-      <div className="pk-folder-body" style={{ height: open ? "auto" : 0 }}>
-        <div className="pk-folder-inner">
-          {folder.policies.map((p) => (
-            <PolicyRow
-              key={p.bindingId}
-              policy={p}
-              open={openPolicies.has(p.bindingId)}
-              onToggle={() => onTogglePolicy(p.bindingId)}
-              onToggleParam={(holeName, on) => onToggleParam(p, holeName, on)}
-              onPublish={() => onPublishPolicy(p)}
-              onToggleEnabled={(on) => onToggleEnabled(p, on)}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PolicyRow({
-  policy,
-  open,
-  onToggle,
-  onToggleEnabled,
-  onToggleParam,
-  onPublish,
-}: {
-  policy: PolicyVM;
-  open: boolean;
-  onToggle: () => void;
-  onToggleEnabled: (on: boolean) => void;
-  onToggleParam: (holeName: string, on: boolean) => void;
-  onPublish: () => void;
-}) {
-  const { t } = useTranslation("home");
-  const hasParams = policy.params.length > 0;
-  const onN = policy.params.filter((p) => p.on).length;
-  return (
-    <div className={`pol2${open ? " expanded" : ""}${policy.enabled ? "" : " off"}`}>
-      <div className="pol2-head" onClick={() => hasParams && onToggle()}>
-        <span className={`pol2-chev${hasParams ? "" : " empty"}`}>{hasParams && <Chevron />}</span>
-        <span className={`pr-dot ${policy.severity}`} />
-        <span className="pol2-name">{policy.name}</span>
-        {/* 실제 적용 표시등 — 패키지 on AND 정책 o 일 때만 '적용중' */}
-        <span className={`pol2-state${policy.effective ? " on" : ""}`}>
-          {policy.effective ? t("policy.active") : t("policy.off")}
-        </span>
-        {/* 정책별 o/x — 패키지를 켰을 때 이 정책을 포함(o)/제외(x) */}
-        <button
-          type="button"
-          className={`pol2-ox${policy.enabled ? " on" : ""}`}
-          title={policy.enabled ? t("policy.excludeTitle") : t("policy.includeTitle")}
-          aria-label={policy.enabled ? t("policy.exclude") : t("policy.include")}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleEnabled(!policy.enabled);
-          }}
-        >
-          {policy.enabled ? "○" : "✕"}
-        </button>
-        <button className="pol2-edit" type="button" title={t("policy.publish")} onClick={(e) => { e.stopPropagation(); onPublish(); }}><Upload /></button>
-        <Link className="pol2-edit" title={t("policy.openInEditor")} to={`/editor/${encodeURIComponent(policy.defId)}`} onClick={(e) => e.stopPropagation()}><Edit /></Link>
-      </div>
-      {hasParams && (
-        <div className="pol2-body" style={{ height: open ? "auto" : 0 }}>
-          <div className="pol2-inner">
-            <div className="param-head">{t("policy.params")} <b>{onN}</b>/{policy.params.length}</div>
-            {policy.params.map((pr) => (
-              <div className="param-row" key={pr.holeName}>
-                <span className="param-name">{pr.label}</span>
-                {pr.isBool ? (
-                  <Switch checked={pr.on} onChange={(on) => onToggleParam(pr.holeName, on)} className="param-sw" small />
-                ) : (
-                  <span className="pk-folder-count" title={pr.type}>{pr.display}</span>
-                )}
-              </div>
-            ))}
+    <div className={`pkc${flipped ? " flip" : ""}${folder.on ? "" : " off"}`}>
+      <div className="pkc-in">
+        {/* front */}
+        <div className="pkc-face pkc-front" onClick={onFlip}>
+          <div className="pkc-ftop">
+            <span className="pkc-ic"><Folder /></span>
+            <span className="pkc-name">{folder.name}</span>
+            <Switch checked={folder.on} onChange={onTogglePackage} className="pkc-sw" />
+          </div>
+          <div className="pkc-fmeta">
+            <span className="pkc-mline"><b>{folder.policies.length}</b> {t("folder.policies")}</span>
+            <span className="pkc-dot">·</span>
+            <span className="pkc-active">{t("folder.activeCount", { count: activeN })}</span>
+          </div>
+          <div className="pkc-ffoot">
+            <span className="pkc-fliphint"><Flip /> {t("folder.flip")}</span>
           </div>
         </div>
-      )}
+        {/* back */}
+        <div className="pkc-face pkc-back">
+          <div className="pkc-bhead">
+            <button
+              type="button"
+              className="pkc-bback"
+              aria-label={t("folder.flip")}
+              onClick={(e) => { e.stopPropagation(); onFlip(); }}
+            >
+              <Back />
+            </button>
+            <span className="pkc-bname">{folder.name}</span>
+          </div>
+          <div className="pkc-blist">
+            {folder.policies.length === 0 ? (
+              <div className="pkc-empty">{t("folder.emptyPackage")}</div>
+            ) : (
+              folder.policies.map((p) => (
+                <div className={`pkc-pol${p.enabled ? "" : " off"}`} key={p.bindingId}>
+                  <span className={`pr-dot ${p.severity}`} />
+                  <span className="pkc-pol-name" title={p.name}>{p.name}</span>
+                  <span className={`pkc-pol-state${p.effective ? " on" : ""}`}>
+                    {p.effective ? t("policy.active") : t("policy.off")}
+                  </span>
+                  <button
+                    type="button"
+                    className={`pkc-ox${p.enabled ? " on" : ""}`}
+                    title={p.enabled ? t("policy.excludeTitle") : t("policy.includeTitle")}
+                    aria-label={p.enabled ? t("policy.exclude") : t("policy.include")}
+                    onClick={(e) => { e.stopPropagation(); onToggleEnabled(p, !p.enabled); }}
+                  >
+                    {p.enabled ? "○" : "✕"}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

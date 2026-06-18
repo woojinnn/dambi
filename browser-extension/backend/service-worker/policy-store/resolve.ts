@@ -128,7 +128,7 @@ export async function resolveBundlesForWalletWithFaults(
   const addr = fromAddress.toLowerCase();
   const w = s.wallets.byAddress[addr];
 
-  const wanted: { defId: string; params: Record<string, HoleValue> }[] = [];
+  const wanted: { defId: string; params: Record<string, HoleValue>; severity?: "deny" | "warn" | undefined }[] = [];
   // 정의 수정으로 사라진 홀의 잔존 파라미터 키는 렌더 실패(unknown param)를
   // 일으키므로 현재 holes 목록으로 거른다.
   const knownParams = (def: { holes: { name: string }[] }, merged: Record<string, HoleValue>) => {
@@ -153,7 +153,11 @@ export async function resolveBundlesForWalletWithFaults(
       const def = s.library.defs[b.defId];
       if (!def) continue; // validate가 막지만 방어적으로
       if (!holesOk(def, b.params)) continue;
-      wanted.push({ defId: b.defId, params: knownParams(def, { ...def.defaults.params, ...b.params }) });
+      wanted.push({
+        defId: b.defId,
+        params: knownParams(def, { ...def.defaults.params, ...b.params }),
+        severity: b.severity,
+      });
     }
   } else {
     // 미등록 지갑: defaults.enabled 정의를 기본 파라미터로 (안전 우선)
@@ -166,10 +170,10 @@ export async function resolveBundlesForWalletWithFaults(
 
   const out: ResolvedBundle[] = [];
   const renderFaults: ResolveResult["renderFaults"] = [];
-  for (const { defId, params } of wanted) {
+  for (const { defId, params, severity } of wanted) {
     const def = s.library.defs[defId];
     try {
-      const r = await renderDef(def, params);
+      const r = await renderDef(def, params, severity);
       // 보강 필드가 없는 정책은 manifest가 없다 — 엔진의 plan/evaluate 입력은
       // ManifestV2 구조체가 필수라(null이 섞이면 invalid_input_json으로 그 지갑의
       // 평가 전체가 죽는다) 빈 manifest(트리거 없음=항상 평가, 호출 없음)를 합성한다.
@@ -180,7 +184,9 @@ export async function resolveBundlesForWalletWithFaults(
       // tx/sig에선 baseline으로 degrade). 단 fault를 severity와 함께 surface해서
       // venue deny-closed 경로가 "평가 못 한 DENY 정책"엔 차단(fail-open 금지)하도록.
       console.warn(`[Dambi] 정책 렌더 실패 — 건너뜀: ${defId}`, err);
-      renderFaults.push({ defId, severity: defSeverity(def) });
+      // 바인딩 override 가 있으면 그 severity 로 fault 를 신고 — deny-close 판단이
+      // override 된 차단 정책을 올바르게 반영한다.
+      renderFaults.push({ defId, severity: severity ?? defSeverity(def) });
     }
   }
   return { bundles: out, renderFaults };

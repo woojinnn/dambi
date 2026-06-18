@@ -1,6 +1,7 @@
 {
   "loading": "Loading…",
   "save": "Save",
+  "saving": "Saving…",
   "cancel": "Cancel",
   "delete": "Delete",
   "close": "Close",
@@ -16,6 +17,7 @@
   "wallet": {
     "addTitle": "Add wallet",
     "addResultTitle": "Add wallet result",
+    "addSuccess": "Wallet added.",
     "adding": "Adding…",
     "addressLabel": "Address (0x…)",
     "addressInvalid": "Not a valid 0x address (40 hex)",
@@ -41,13 +43,23 @@
     "languageTitle": "Language",
     "languageDesc": "Choose the language for the dashboard UI.",
     "languageKo": "한국어",
-    "languageEn": "English"
+    "languageEn": "English",
+    "openaiTitle": "OpenAI API key",
+    "openaiDesc": "Used server-side to draft policies from natural language in the editor's LLM tab. Stored on the server and never shown again — only that a key is set.",
+    "openaiPlaceholder": "sk-…",
+    "openaiPlaceholderSet": "A key is set — enter a new one to replace it",
+    "openaiStatusSet": "Configured",
+    "openaiClear": "Clear",
+    "openaiSaved": "Saved",
+    "openaiSaveError": "Failed to save the API key: {{error}}"
   },
   "profile": {
     "title": "Profile",
     "subtitle": "My account",
     "signOut": "Sign out",
     "myListings": "Published listings",
+    "tabPolicies": "Policies",
+    "tabPackages": "Packages",
     "noListings": "You haven't published anything to Policy Hub yet. Create a policy in the editor and share it with \"Publish to Policy Hub\".",
     "installCount": "Installs",
     "deleteListingTitle": "Delete this listing",

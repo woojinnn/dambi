@@ -27,7 +27,7 @@ import {
   type ClassifiedApprovals,
   type Position,
 } from "../../server-api";
-import { getOverview, getWalletState, isEffectiveOn } from "../../server-api/policy-store";
+import { getOverview, getWalletState, UNCATEGORIZED_PKG } from "../../server-api/policy-store";
 import type { PolicyDef } from "../../server-api/policy-store";
 import {
   decodeCalldataLocal,
@@ -40,7 +40,7 @@ import {
 import { parseStateDelta, formatSignedDelta } from "../simulation/state-view";
 
 import { TOKENS } from "./humanize";
-import type { SimData, SimProvider, RunInput } from "./provider";
+import { bindingKey, type SimData, type SimProvider, type RunInput } from "./provider";
 import type {
   ApprovalView,
   DenyView,
@@ -231,8 +231,9 @@ function relevanceOf(def: PolicyDef): { tokens: string[]; protocols: string[] } 
 
 function buildPolicyData(snap: Awaited<ReturnType<typeof getOverview>>): {
   policies: PolicyView[];
-  packages: PackageView[];
-  enabledByWallet: Record<string, string[]>;
+  packagesByWallet: Record<string, PackageView[]>;
+  policyEnabledByWallet: Record<string, string[]>;
+  packageEnabledByWallet: Record<string, string[]>;
 } {
   const defs = Object.values(snap.library.defs);
   const policies: PolicyView[] = defs.map((d) => {
@@ -240,27 +241,54 @@ function buildPolicyData(snap: Awaited<ReturnType<typeof getOverview>>): {
     return { id: d.id, name: d.displayName, action: actionLabelOf(d), tokens: rel.tokens, protocols: rel.protocols };
   });
 
-  const pkgMembers = new Map<string, Set<string>>();
-  const addMember = (pkgId: string, defId: string) => {
-    let s = pkgMembers.get(pkgId);
-    if (!s) pkgMembers.set(pkgId, (s = new Set()));
-    s.add(defId);
-  };
-  for (const ws of Object.values(snap.wallets.byAddress))
-    for (const b of Object.values(ws.bindings)) addMember(b.packageId, b.defId);
-  for (const d of defs) if (d.defaults.packageId) addMember(d.defaults.packageId, d.id);
+  const uncatLabel = i18n.t("simulation:wizard.step2.uncategorized");
+  const pkgName = (ws: (typeof snap.wallets.byAddress)[string], pkgId: string): string =>
+    pkgId === UNCATEGORIZED_PKG
+      ? uncatLabel
+      : snap.library.packages[pkgId]?.displayName ?? ws.packages?.[pkgId]?.displayName ?? pkgId;
 
-  const packages: PackageView[] = Object.values(snap.library.packages)
-    .map((p) => ({ id: p.id, name: p.displayName, policyIds: [...(pkgMembers.get(p.id) ?? [])] }))
-    .filter((p) => p.policyIds.length > 0);
-
-  const enabledByWallet: Record<string, string[]> = {};
+  // Packages PER WALLET: the packages a wallet actually has = its own package
+  // instances (w.packages) ∪ any package its bindings reference. The builtin
+  // safety pack(s) and the "개별"/uncategorized bucket are ALWAYS shown for every
+  // wallet (they're universal), even with no bindings. Each package's policyIds
+  // are that wallet's bindings in it.
+  const builtinPkgIds = Object.values(snap.library.packages)
+    .filter((p) => p.source === "builtin")
+    .map((p) => p.id);
+  const packagesByWallet: Record<string, PackageView[]> = {};
+  const policyEnabledByWallet: Record<string, string[]> = {};
+  const packageEnabledByWallet: Record<string, string[]> = {};
   for (const [addr, ws] of Object.entries(snap.wallets.byAddress)) {
-    const ids = new Set<string>();
-    for (const b of Object.values(ws.bindings)) if (isEffectiveOn(ws, b)) ids.add(b.defId);
-    enabledByWallet[addr.toLowerCase()] = [...ids];
+    const byPkg = new Map<string, Set<string>>();
+    const checked: string[] = []; // binding keys with binding.enabled (checkbox on)
+    for (const b of Object.values(ws.bindings)) {
+      let s = byPkg.get(b.packageId);
+      if (!s) byPkg.set(b.packageId, (s = new Set()));
+      s.add(b.defId);
+      if (b.enabled) checked.push(bindingKey(b.packageId, b.defId));
+    }
+    const pkgIds = new Set<string>([
+      ...builtinPkgIds,
+      UNCATEGORIZED_PKG,
+      ...Object.keys(ws.packages ?? {}),
+      ...byPkg.keys(),
+    ]);
+    const list: PackageView[] = [...pkgIds].map((pkgId) => ({
+      id: pkgId,
+      name: pkgName(ws, pkgId),
+      policyIds: [...(byPkg.get(pkgId) ?? [])],
+    }));
+    // Named packages first (by name), the "개별" bucket last.
+    list.sort((a, b) =>
+      a.id === UNCATEGORIZED_PKG ? 1 : b.id === UNCATEGORIZED_PKG ? -1 : a.name.localeCompare(b.name),
+    );
+    // Package gate: on by default (mirrors w.packageEnabled[pkgId] ?? true).
+    const gateOn = [...pkgIds].filter((pkgId) => ws.packageEnabled?.[pkgId] ?? true);
+    packagesByWallet[addr.toLowerCase()] = list;
+    policyEnabledByWallet[addr.toLowerCase()] = checked;
+    packageEnabledByWallet[addr.toLowerCase()] = gateOn;
   }
-  return { policies, packages, enabledByWallet };
+  return { policies, packagesByWallet, policyEnabledByWallet, packageEnabledByWallet };
 }
 
 // ── Phase 3: run — real evaluation via sim-bridge ────────────────────────────
@@ -358,8 +386,9 @@ const EMPTY: SimData = {
   wallets: [],
   statesByAddr: {},
   policies: [],
-  packages: [],
-  enabledByWallet: {},
+  packagesByWallet: {},
+  policyEnabledByWallet: {},
+  packageEnabledByWallet: {},
   txRows: [],
 };
 
@@ -411,8 +440,9 @@ export const realProvider: SimProvider = {
 
     let policyData = {
       policies: [] as PolicyView[],
-      packages: [] as PackageView[],
-      enabledByWallet: {} as Record<string, string[]>,
+      packagesByWallet: {} as Record<string, PackageView[]>,
+      policyEnabledByWallet: {} as Record<string, string[]>,
+      packageEnabledByWallet: {} as Record<string, string[]>,
     };
     try {
       policyData = buildPolicyData(await getOverview());

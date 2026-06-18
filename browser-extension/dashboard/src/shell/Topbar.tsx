@@ -48,7 +48,7 @@ export function Topbar({
   showNotifications = true,
   showShortcutHint = true,
   searchSlot,
-  showSearch = true,
+  showSearch = false,
 }: TopbarProps) {
   return (
     <div className="topbar">

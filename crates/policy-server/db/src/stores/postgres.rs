@@ -548,6 +548,46 @@ impl PostgresGlobalDb {
         Ok(())
     }
 
+    /// Read the user's stored `OpenAI` API key (`None` when unset).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] if the lookup query fails.
+    pub async fn get_openai_key(&self, user_id: &str) -> DbResult<Option<String>> {
+        let row = query("SELECT openai_api_key FROM user_settings WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        row.map_or(Ok(None), |r| {
+            r.try_get::<Option<String>, _>("openai_api_key")
+                .map_err(|e| DbError::Invariant(e.to_string()))
+        })
+    }
+
+    /// Upsert the user's `OpenAI` API key. An empty string clears it (stored as
+    /// `NULL`) so [`Self::get_openai_key`] reports "unset".
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] if the upsert query fails.
+    pub async fn set_openai_key(&self, user_id: &str, key: &str) -> DbResult<()> {
+        let now = unix_now_or_default();
+        let value: Option<&str> = if key.is_empty() { None } else { Some(key) };
+        query(
+            "INSERT INTO user_settings (user_id, openai_api_key, updated_at)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id) DO UPDATE SET openai_api_key = $2, updated_at = $3",
+        )
+        .bind(user_id)
+        .bind(value)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+        Ok(())
+    }
+
     /// Rotate an active refresh session from `old_jti` to `new_jti`.
     ///
     /// Returns `Ok(false)` when the old token id is missing, expired, already

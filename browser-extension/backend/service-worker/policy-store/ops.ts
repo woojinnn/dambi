@@ -13,6 +13,22 @@ import {
 
 const newBindingId = () => `bind::${crypto.randomUUID()}`;
 
+/** 기본 안전팩(source==="builtin") 보호: 삭제·수정·이름변경을 막는다. 이 함수들이
+ *  모든 쓰기가 지나는 단일 choke point라 여기서 막아야 우회가 안 된다(UI 가림은
+ *  2차 방어선). 시드(ensureSeeded)·마켓 설치·복제는 putDef/putPackage가 아니라
+ *  mutate를 직접 쓰므로 영향받지 않는다. 잠긴 정책을 바꾸려면 duplicateDef로
+ *  "내 정책" 사본을 만들어 편집한다. */
+function assertNotBuiltinDef(d: StoreSnapshot, defId: string): void {
+  if (d.library.defs[defId]?.source === "builtin") {
+    throw new Error("기본 안전팩 정책은 삭제·수정할 수 없어요 (복제해서 내 정책으로 편집하세요)");
+  }
+}
+function assertNotBuiltinPackage(d: StoreSnapshot, pkgId: string): void {
+  if (d.library.packages[pkgId]?.source === "builtin") {
+    throw new Error("기본 안전팩은 삭제·수정할 수 없어요");
+  }
+}
+
 /** 마켓 게시 때 블랭킹된 required hole이 안 채워진 def는 지갑에 바인딩
  *  (패키지 적용)할 수 없다 — 플레이스홀더(제로주소/0)로 평가되면 조용히
  *  무용지물이거나(양성 비교) 모든 거래에 오발화한다(부정 비교). */
@@ -47,6 +63,7 @@ function ensureWalletPackage(d: StoreSnapshot, w: WalletPolicyState, packageId: 
 
 export function putDef(uid: string, def: PolicyDef): Promise<void> {
   return mutate(uid, (d) => {
+    assertNotBuiltinDef(d, def.id); // 기존 builtin 덮어쓰기(=수정) 금지
     d.library.defs[def.id] = def;
   });
 }
@@ -54,6 +71,7 @@ export function putDef(uid: string, def: PolicyDef): Promise<void> {
 /** 정의 삭제 — 모든 지갑의 해당 바인딩도 함께 삭제(cascade). */
 export function deleteDef(uid: string, defId: string): Promise<void> {
   return mutate(uid, (d) => {
+    assertNotBuiltinDef(d, defId);
     delete d.library.defs[defId];
     for (const w of Object.values(d.wallets.byAddress)) {
       for (const [bid, b] of Object.entries(w.bindings)) {
@@ -84,6 +102,7 @@ export function duplicateDef(uid: string, defId: string): Promise<string> {
 
 export function putPackage(uid: string, pkg: PackageDef): Promise<void> {
   return mutate(uid, (d) => {
+    assertNotBuiltinPackage(d, pkg.id); // 기존 builtin 덮어쓰기(=이름변경 등) 금지
     d.library.packages[pkg.id] = pkg;
   });
 }
@@ -92,6 +111,7 @@ export function putPackage(uid: string, pkg: PackageDef): Promise<void> {
 export function deletePackage(uid: string, pkgId: string): Promise<void> {
   return mutate(uid, (d) => {
     if (pkgId === UNCATEGORIZED_PKG) throw new Error("미분류 패키지는 삭제할 수 없습니다");
+    assertNotBuiltinPackage(d, pkgId);
     delete d.library.packages[pkgId];
     // 라이브러리 폴더 소속도 미분류로 — 죽은 패키지를 가리키는 def는 디렉토리
     // 뷰에서 통째로 사라져 보인다. 지갑 패키지는 별개 객체라 건드리지 않는다.
@@ -104,7 +124,7 @@ export function deletePackage(uid: string, pkgId: string): Promise<void> {
 /** 지갑 패키지 생성/이름변경 — 지갑 안에서만 존재, 라이브러리 불변. */
 export function putWalletPackage(
   uid: string,
-  opts: { address: string; pkg: { id: string; displayName: string } },
+  opts: { address: string; pkg: { id: string; displayName: string; desc?: string } },
 ): Promise<void> {
   return mutate(uid, (d) => {
     if (opts.pkg.id === UNCATEGORIZED_PKG) throw new Error("미분류는 이름을 바꿀 수 없습니다");
@@ -120,6 +140,8 @@ export function removePackageFromWallet(
   opts: { address: string; packageId: string },
 ): Promise<void> {
   return mutate(uid, (d) => {
+    // 기본 안전팩은 모든 지갑에 상주해야 한다 — 지갑에서 빼기 금지.
+    assertNotBuiltinPackage(d, opts.packageId);
     const w = d.wallets.byAddress[opts.address.toLowerCase()];
     if (!w) return;
     for (const b of Object.values(w.bindings)) {
@@ -174,6 +196,7 @@ export function bind(
     params?: Record<string, HoleValue>;
     enabled?: boolean;
     alias?: string;
+    severity?: "deny" | "warn";
   },
 ): Promise<void> {
   return mutate(uid, (d) => {
@@ -188,6 +211,7 @@ export function bind(
         enabled: opts.enabled ?? true,
         alias: opts.alias,
         params: opts.params,
+        severity: opts.severity,
         updatedAtMs: Date.now(),
       };
       w.bindings[b.id] = b;
@@ -197,7 +221,7 @@ export function bind(
 
 export function updateBinding(
   uid: string,
-  opts: { address: string; bindingId: string; patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias">> },
+  opts: { address: string; bindingId: string; patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias" | "severity">> },
 ): Promise<void> {
   return mutate(uid, (d) => {
     const w = d.wallets.byAddress[opts.address.toLowerCase()];

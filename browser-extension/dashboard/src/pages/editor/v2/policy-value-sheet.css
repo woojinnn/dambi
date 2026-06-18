@@ -145,6 +145,18 @@
   font-weight: 600;
   padding: 0 2px 0 0;
 }
+/* 좁은 값 시트/모달에서 RHS 콤보박스 팝업이 오른쪽으로 넘쳐 잘리지 않게 —
+   버튼 오른쪽 끝에 맞춰 안쪽(왼쪽)으로 펼치고, 폭을 시트 안에 맞춘다. */
+.pv-blank .fc-pop {
+  left: auto;
+  right: 0;
+  width: 280px;
+  max-width: min(280px, 78vw);
+}
+.pv-blank .fc-list {
+  max-height: 240px;
+}
+
 /* 형식 오류 빈칸 — 빨갛게 */
 .pv-blank.invalid {
   background: var(--danger-50, #fef2f2);
@@ -267,6 +279,39 @@
 }
 .pv-verb.warn .pv-verb-act {
   color: var(--warn-600, #d97706);
+}
+/* 인라인 심각도 셀렉트(지갑별 override) — 결과 자리에서 차단↔경고를 바꾼다. */
+.pv-verb-sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.pv-verb-sel {
+  font: inherit;
+  font-weight: 700;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 4px 26px 4px 9px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.pv-verb-sel:focus {
+  border-color: var(--accent, #5b8cff);
+  box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.15);
+}
+.pv-verb.deny .pv-verb-sel {
+  color: var(--danger-600, #dc2626);
+  border-color: var(--danger-300, #fca5a5);
+}
+.pv-verb.warn .pv-verb-sel {
+  color: var(--warn-600, #d97706);
+  border-color: var(--warn-300, #fcd34d);
 }
 .pv-reason {
   color: var(--muted, #6b7280);

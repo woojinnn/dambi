@@ -1,6 +1,7 @@
 {
   "loading": "불러오는 중…",
   "save": "저장",
+  "saving": "저장 중…",
   "cancel": "취소",
   "delete": "삭제",
   "close": "닫기",
@@ -16,6 +17,7 @@
   "wallet": {
     "addTitle": "지갑 추가",
     "addResultTitle": "지갑 추가 결과",
+    "addSuccess": "지갑이 추가되었습니다.",
     "adding": "추가 중…",
     "addressLabel": "주소 (0x…)",
     "addressInvalid": "유효한 0x 주소 (40 hex)가 아닙니다",
@@ -41,13 +43,23 @@
     "languageTitle": "언어",
     "languageDesc": "대시보드 UI에 사용할 언어를 선택하세요.",
     "languageKo": "한국어",
-    "languageEn": "English"
+    "languageEn": "English",
+    "openaiTitle": "OpenAI API 키",
+    "openaiDesc": "에디터 LLM 탭에서 자연어로 정책을 만들 때 서버에서 사용합니다. 서버에 저장되며 다시 보여주지 않고, 설정 여부만 표시합니다.",
+    "openaiPlaceholder": "sk-…",
+    "openaiPlaceholderSet": "키가 설정됨 — 새 키를 입력하면 교체됩니다",
+    "openaiStatusSet": "설정됨",
+    "openaiClear": "지우기",
+    "openaiSaved": "저장됨",
+    "openaiSaveError": "API 키 저장 실패: {{error}}"
   },
   "profile": {
     "title": "프로필",
     "subtitle": "내 계정",
     "signOut": "로그아웃",
     "myListings": "올린 게시물",
+    "tabPolicies": "정책",
+    "tabPackages": "패키지",
     "noListings": "아직 Policy Hub에 올린 게시물이 없어요. 에디터에서 정책을 만들고 “Policy Hub에 올리기”로 공개해보세요.",
     "installCount": "설치 수",
     "deleteListingTitle": "이 게시물 삭제",

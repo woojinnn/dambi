@@ -10,7 +10,6 @@
 
 import { i18n } from "../i18n";
 import { request } from "./client";
-import { seedDetail, seedListings } from "./market-seed-beginner";
 
 export type ListingKind = "policy" | "set";
 export type PublisherTier = "official" | "verified" | "community";
@@ -159,6 +158,8 @@ export interface CreateSetListingBody {
   kind: "set";
   display_name: I18nText;
   description?: I18nText;
+  /** Member policies' categories (deduped) — a package spans these. */
+  intents?: string[];
   version?: string;
   members: SetMember[];
   changelog?: I18nText;
@@ -211,8 +212,7 @@ export async function listListings(
   if (params.offset != null) search.set("offset", String(params.offset));
   const qs = search.toString();
   const path = qs ? `/market/listings?${qs}` : "/market/listings";
-  const rows = await request<ListingSummary[]>(path);
-  return mergeSeedListings(rows, params); // ⚠️ 임시 시드 폴백 — market-seed-beginner.ts
+  return request<ListingSummary[]>(path);
 }
 
 /** One listing's recent-install rollup from `GET /market/activity-summary`.
@@ -258,56 +258,7 @@ export async function getActivitySummary(
 
 /** `GET /market/listings/:slug` — listing detail + latest version + recent reviews. */
 export async function getListing(slug: string): Promise<ListingDetail> {
-  try {
-    return await request<ListingDetail>(`/market/listings/${encodeURIComponent(slug)}`);
-  } catch (e) {
-    // ⚠️ 임시 시드 폴백 — 서버에 없는 slug 면 데모 시드로 본다.
-    const seeded = getSeedDetail(slug);
-    if (seeded) return seeded;
-    throw e;
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════
-// ⚠️ 임시 시드 폴백 (PASU Beginner Pack V1) — 실제 데이터 올라오면 제거.
-//    market-seed-beginner.ts 와 이 두 헬퍼, 그리고 listListings/getListing
-//    의 호출 지점만 지우면 원복된다.
-// ════════════════════════════════════════════════════════════════════
-
-/** 서버 결과가 시드 slug 를 아직 포함하지 않을 때만 시드를 끼워 넣고,
- *  요청 파라미터(kind/category/q/sort/limit)로 시드도 동일하게 거른다. */
-function mergeSeedListings(
-  rows: ListingSummary[],
-  params: ListListingsParams,
-): ListingSummary[] {
-  const have = new Set(rows.map((r) => r.slug));
-  let seed = seedListings().filter((s) => !have.has(s.slug));
-  if (seed.length === 0) return rows;
-
-  if (params.kind) seed = seed.filter((s) => s.kind === params.kind);
-  if (params.category) seed = seed.filter((s) => s.category === params.category);
-  if (params.publisher_tier) seed = seed.filter((s) => s.publisher_tier === params.publisher_tier);
-  if (params.q) {
-    const q = params.q.toLowerCase();
-    seed = seed.filter(
-      (s) =>
-        s.slug.includes(q) ||
-        (s.display_name.ko ?? "").toLowerCase().includes(q) ||
-        s.display_name.en.toLowerCase().includes(q),
-    );
-  }
-
-  let merged = [...rows, ...seed];
-  if (params.sort === "new") merged = merged.sort((a, b) => b.created_at - a.created_at);
-  else if (params.sort === "rating") merged = merged.sort((a, b) => (b.rating_avg ?? 0) - (a.rating_avg ?? 0));
-  else merged = merged.sort((a, b) => b.install_count - a.install_count); // popular(기본)
-  if (params.limit != null) merged = merged.slice(0, params.limit);
-  return merged;
-}
-
-/** 시드 slug 의 상세를 돌려준다(없으면 null). getListing 의 404 폴백. */
-function getSeedDetail(slug: string): ListingDetail | null {
-  return seedDetail(slug);
+  return request<ListingDetail>(`/market/listings/${encodeURIComponent(slug)}`);
 }
 
 /** `GET /market/listings/id/:id/versions/:ver` — fetch a specific version body. */

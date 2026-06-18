@@ -1,5 +1,5 @@
 {
-  "addWallet": "Add wallet +",
+  "addWallet": "Add wallet",
   "head": {
     "title": "Per-wallet policies",
     "scopeWallet": "wallet scope",
@@ -32,7 +32,10 @@
   "folder": {
     "policies": "policies",
     "publishTitle": "Publish this package to Policy Hub",
-    "uncategorized": "Uncategorized"
+    "uncategorized": "Uncategorized",
+    "activeCount": "{{count}} active",
+    "emptyPackage": "No policies in this package",
+    "flip": "Flip"
   },
   "policy": {
     "active": "Active",

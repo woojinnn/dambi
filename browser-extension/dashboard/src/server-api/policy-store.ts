@@ -23,7 +23,7 @@ export type {
   WalletFolder,
   WalletPolicyState,
 } from "../../../sdk/policy-store-types";
-export { isEffectiveOn, UNCATEGORIZED_PKG } from "../../../sdk/policy-store-types";
+export { isEffectiveOn, missingRequiredHoles, UNCATEGORIZED_PKG } from "../../../sdk/policy-store-types";
 
 export const getLibrary = () =>
   sendToExtension<{ library: LibraryDoc; rev: number }>({ type: "ps2:get-library" });
@@ -46,12 +46,13 @@ export const bindDef = (opts: {
   params?: Record<string, HoleValue>;
   enabled?: boolean;
   alias?: string;
+  severity?: "deny" | "warn";
 }) => sendToExtension<null>({ type: "ps2:bind", ...opts });
 
 export const updateBinding = (opts: {
   address: string;
   bindingId: string;
-  patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias">>;
+  patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias" | "severity">>;
 }) => sendToExtension<null>({ type: "ps2:update-binding", ...opts });
 
 export const removeBinding = (opts: { address: string; bindingId: string }) =>
@@ -64,7 +65,7 @@ export const removeWalletPackage = (opts: { address: string; packageId: string }
 /** 지갑 패키지 생성/이름변경 — 지갑 안에서만 존재, 라이브러리 불변. */
 export const putWalletPackage = (opts: {
   address: string;
-  pkg: { id: string; displayName: string };
+  pkg: { id: string; displayName: string; desc?: string };
 }) => sendToExtension<null>({ type: "ps2:put-wallet-package", ...opts });
 
 /** 지갑 전용 폴더(템플릿 정리 축) 생성/이름변경 — 패키지(인스턴스 묶음)와 별개. */

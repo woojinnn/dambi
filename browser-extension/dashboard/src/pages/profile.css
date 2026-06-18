@@ -68,6 +68,19 @@
   color: var(--slate-900);
   margin: 0;
 }
+.pp-badge-ok {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--sage-700, #4a6a4a);
+  background: var(--sage-100, #e8f0e8);
+  border: 1px solid var(--sage-300, #c5d8c5);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.pp-err-inline {
+  font-size: 12.5px;
+  color: var(--danger-600, #dc2626);
+}
 .pp-count {
   font-size: 12px;
   font-weight: 700;
@@ -81,6 +94,82 @@
 .pp-muted {
   font-size: 13px;
   color: var(--slate-500);
+}
+
+/* 정책/패키지 탭 */
+.pp-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.pp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--slate-500);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.pp-tab:hover {
+  color: var(--slate-800);
+}
+.pp-tab.on {
+  color: var(--slate-900);
+  border-bottom-color: var(--slate-900);
+}
+.pp-tab-n {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--slate-500);
+  background: var(--fog-300);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 페이지네이션 */
+.pp-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 14px;
+}
+.pp-pager-nav,
+.pp-pager-num {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--slate-700);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.pp-pager-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pp-pager-num:hover:not(.on) {
+  border-color: var(--slate-400);
+}
+.pp-pager-num.on {
+  background: var(--slate-900);
+  border-color: var(--slate-900);
+  color: #fff;
+}
+.pp-pager-gap {
+  padding: 0 4px;
+  color: var(--slate-400);
 }
 .pp-empty {
   font-size: 13px;
@@ -245,4 +334,57 @@
 .pp-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* settings (moved from /settings) — server env + language */
+.pp-set-presets {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+.pp-set-preset {
+  flex: 1;
+  min-width: 180px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.pp-set-preset:hover { border-color: var(--slate-300, #cbd5e1); }
+.pp-set-preset.on {
+  border-color: var(--accent, #5b8cff);
+  background: var(--accent-soft, #eef3ff);
+}
+.pp-set-preset-name { font-weight: 600; font-size: 13.5px; margin-bottom: 2px; }
+.pp-set-preset code { font-size: 11px; opacity: 0.7; }
+.pp-set-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  box-sizing: border-box;
+}
+.pp-set-input:focus {
+  outline: none;
+  border-color: var(--accent, #5b8cff);
+  box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.15);
+}
+.pp-set-save {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pp-link {
+  color: var(--accent, #5b8cff);
+  cursor: pointer;
+  text-decoration: underline;
 }

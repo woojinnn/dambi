@@ -9,6 +9,8 @@
  * is best-effort and must never throw — opaque/unknown fields degrade to "—".
  */
 
+import i18n from "i18next";
+
 import {
   hlAccountOf,
   type ClassifiedApprovals,
@@ -82,6 +84,7 @@ export interface PasuPendRow {
   buy?: string;
   line?: string;
   amount?: string;
+  spender?: string;
   at: string;
 }
 export interface PasuHlPos {
@@ -134,6 +137,14 @@ export interface AssetsDataLike {
   pendingQs: Array<QueryLike<PendingTx[]>>;
   indexes: Map<string, ApprovalIndex>;
   donutData: DonutData | null;
+}
+
+// i18n display helper (monitoring namespace). Order/position side + kind are
+// emitted as SEMANTIC keys ("buy"/"sell"/"tp"/…) so assets-app can pick CSS
+// classes; only the free-text display strings (leverage, condition, pending
+// types) are localized here. Model rebuilds on language change (Assets2Page).
+function T(key: string, vars?: Record<string, unknown>): string {
+  return i18n.t(`monitoring:${key}`, vars ?? {});
 }
 
 // ── formatting ──────────────────────────────────────────────────────────────
@@ -263,7 +274,23 @@ function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, de
   const out: PasuApprRow[] = [];
   ap.erc20.forEach((a) => {
     const dec = decLookup.get(`${a.chain}|${a.token.toLowerCase()}`) ?? 0;
-    const amount = a.is_unlimited ? "Unlimited" : fmtBal(toHuman(num(a.amount), dec));
+    // 무제한 승인은 서버 is_unlimited 플래그뿐 아니라 원시 금액 크기로도 판정한다.
+    // maxUint256 같은 "사실상 무제한" 센티넬을 서버가 놓치면 raw 정수가 그대로
+    // (또는 decimals 미상이라 더 크게) 출력되는데, 2^255 이상은 정상 승인일 수
+    // 없으므로 무제한으로 본다.
+    const rawBig = (() => {
+      try {
+        return BigInt(a.amount);
+      } catch {
+        return null;
+      }
+    })();
+    const unlimited = a.is_unlimited || (rawBig !== null && rawBig >= 1n << 255n);
+    const amount = unlimited ? "Unlimited" : fmtBal(toHuman(num(a.amount), dec));
+    const riskTags = a.risk as string[];
+    const risk = visibleRisk(
+      unlimited && !riskTags.includes("UNLIMITED") ? [...riskTags, "UNLIMITED"] : riskTags,
+    );
     out.push({
       w: walletAddr,
       type: "erc20",
@@ -271,7 +298,7 @@ function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, de
       spender: shortAddr(a.spender),
       chain: a.chain,
       amount,
-      risk: visibleRisk(a.risk as string[]),
+      risk,
       revoke: true,
     });
   });
@@ -305,8 +332,9 @@ function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, de
 // ── pending → PEND rows ─────────────────────────────────────────────────────
 function pendRowsFor(walletAddr: string, pending: PendingTx[] | undefined): PasuPendRow[] {
   if (!pending) return [];
+  const locale = i18n.language === "en" ? "en-US" : "ko-KR";
   return pending.map((pt) => {
-    const at = pt.signed_at ? new Date(pt.signed_at * 1000).toLocaleString("ko-KR") : "—";
+    const at = pt.signed_at ? new Date(pt.signed_at * 1000).toLocaleString(locale) : "—";
     const k = pt.kind;
     switch (k.kind) {
       case "offchain_limit_order": {
@@ -315,7 +343,7 @@ function pendRowsFor(walletAddr: string, pending: PendingTx[] | undefined): Pasu
         return {
           w: walletAddr,
           kind: "intent",
-          type: "오프체인 주문",
+          type: T("assets.pending.offchainOrder"),
           venue: labelOf(k.venue) || undefined,
           sell: (k.sell_max ? k.sell_max + " " : "") + sell || "—",
           buy: (k.buy_min ? k.buy_min + " " : "") + buy || "—",
@@ -327,7 +355,7 @@ function pendRowsFor(walletAddr: string, pending: PendingTx[] | undefined): Pasu
         return {
           w: walletAddr,
           kind: "intent",
-          type: "퍼프 주문",
+          type: T("assets.pending.perpOrder"),
           venue: labelOf(k.venue) || undefined,
           sell: (k.side ? k.side + " " : "") + (k.size_base || "") + (market ? " " + market : "") || "—",
           buy: k.price ? "@ " + k.price : "—",
@@ -343,14 +371,14 @@ function pendRowsFor(walletAddr: string, pending: PendingTx[] | undefined): Pasu
           w: walletAddr,
           kind: "permit",
           type: k.kind === "signed_e_i_p2612" ? "Permit (EIP-2612)" : "Permit2",
-          venue: "토큰 승인",
-          line: "한도 " + amount + " · spender " + spender,
+          venue: T("assets.pending.tokenApproval"),
           amount,
+          spender,
           at,
         };
       }
       default:
-        return { w: walletAddr, kind: "permit", type: "서명", venue: "—", line: "—", at };
+        return { w: walletAddr, kind: "permit", type: T("assets.pending.signature"), venue: "—", line: "—", at };
     }
   });
 }
@@ -362,7 +390,7 @@ function levForFactory(hl: HlAccount): (assetIndex: number) => string {
   return (assetIndex: number) => {
     const s = map.get(assetIndex);
     if (!s) return "";
-    return s.leverage + "x " + (s.is_cross ? "교차" : "격리");
+    return s.leverage + "x " + T("assets.hl." + (s.is_cross ? "cross" : "isolated"));
   };
 }
 
@@ -383,17 +411,18 @@ function hlAccountView(walletAddr: string, walletLabel: string, hl: HlAccount): 
   const orders: PasuHlOrder[] = (hl.open_orders ?? []).map((o) => {
     const trig = o.trigger_price ? num(o.trigger_price) : num(o.price);
     const limit = num(o.price);
-    // TP/SL classification: a reduce-only sell trigger above mark ≈ 익절, else 손절.
-    // Without a live mark we fall back to is_trigger-only labeling.
-    const kind = o.is_trigger ? (o.reduce_only ? "익절" : "손절") : o.reduce_only ? "청산" : "지정가";
+    // TP/SL classification: a reduce-only trigger ≈ take-profit, else stop-loss.
+    // Without a live mark we fall back to is_trigger-only labeling. Emitted as a
+    // SEMANTIC key — assets-app translates + picks the CSS class.
+    const kind = o.is_trigger ? (o.reduce_only ? "tp" : "sl") : o.reduce_only ? "liquidation" : "limit";
     const cond =
-      (o.is_position_tpsl ? "전량" : o.reduce_only ? "청산전용" : "신규") +
+      T("assets.hl." + (o.is_position_tpsl ? "fullSize" : o.reduce_only ? "reduceOnly" : "new")) +
       " · " +
       (o.tif || "GTC") +
-      (o.reduce_only ? " · 청산전용" : "");
+      (o.reduce_only ? " · " + T("assets.hl.reduceOnly") : "");
     return {
       sym: o.symbol ?? "#" + o.asset_index,
-      side: o.is_buy ? "매수" : "매도",
+      side: o.is_buy ? "buy" : "sell",
       kind,
       trigger: o.trigger_price ? String(trig) : String(limit),
       limit: String(limit),

@@ -119,23 +119,36 @@ function LandingView({ locale }: { locale: MarketLocale }) {
   // Single 100-item fetch powers everything on the landing page (counts,
   // coverage, official packages, popular policies) — minimal backend calls,
   // all real data. 35 seed policies + a few packages fit under the ceiling.
+  // Count tiles must reflect the WHOLE catalog, so fetch up to the server cap
+  // (LIST_LIMIT_MAX = 500). A small limit truncates by install-count sort and
+  // drops whole categories of brand-new (0-install) listings from the counts.
   const allQ = useQuery({
     queryKey: ["market-all-for-landing"],
-    queryFn: () => listListings({ limit: 100 }),
+    queryFn: () => listListings({ limit: 500 }),
   });
   const all = allQ.data ?? [];
 
-  // Per-category policy counts + how many of them are already installed.
-  const { counts, installed } = useMemo(() => {
+  // Per-category listing counts, split by kind (정책/패키지), + how many are
+  // already installed (hero "gaps in coverage" fallback still uses this).
+  // The browse list filters by the server `category` column for BOTH kinds, so
+  // count by that same key (sets included) — listingCategoryKey() returns null
+  // for sets and would zero out every package count.
+  const { counts, policyCounts, pkgCounts, installed } = useMemo(() => {
     const counts = new Map<CategoryKey, number>();
+    const policyCounts = new Map<CategoryKey, number>();
+    const pkgCounts = new Map<CategoryKey, number>();
     const installed = new Map<CategoryKey, number>();
+    const catOf = (l: ListingSummary): CategoryKey | null =>
+      isCategoryKey(l.category) ? l.category : l.kind === "policy" ? categoryOf(l.slug) : null;
     all.forEach((l) => {
-      const c = listingCategoryKey(l);
+      const c = catOf(l);
       if (!c) return;
       counts.set(c, (counts.get(c) ?? 0) + 1);
+      const bucket = l.kind === "set" ? pkgCounts : policyCounts;
+      bucket.set(c, (bucket.get(c) ?? 0) + 1);
       if (l.is_installed) installed.set(c, (installed.get(c) ?? 0) + 1);
     });
-    return { counts, installed };
+    return { counts, policyCounts, pkgCounts, installed };
   }, [all]);
 
   const officialPkgs = useMemo(
@@ -299,7 +312,7 @@ function LandingView({ locale }: { locale: MarketLocale }) {
         </div>
       )}
 
-      <CategoryCoverage counts={counts} installed={installed} locale={locale} />
+      <CategoryCoverage policyCounts={policyCounts} pkgCounts={pkgCounts} locale={locale} />
 
       <div className="rm-cols">
         <div className="rm-sec">
@@ -377,14 +390,15 @@ function LandingView({ locale }: { locale: MarketLocale }) {
   );
 }
 
-/** Coverage-aware category grid — each tile shows installed/total + a bar. */
+/** Category grid — each tile shows how many policies / packages are published
+ *  in that category (catalog volume, not per-wallet install state). */
 function CategoryCoverage({
-  counts,
-  installed,
+  policyCounts,
+  pkgCounts,
   locale,
 }: {
-  counts: Map<CategoryKey, number>;
-  installed: Map<CategoryKey, number>;
+  policyCounts: Map<CategoryKey, number>;
+  pkgCounts: Map<CategoryKey, number>;
   locale: MarketLocale;
 }) {
   const ko = locale === "ko";
@@ -395,38 +409,32 @@ function CategoryCoverage({
           <h2>Category</h2>
           <div className="sub">
             {ko
-              ? "찾는 정책 카테고리가 있나요? 자산·프로토콜 유형별로 골라 둘러보고 빈틈을 채우세요."
-              : "Browse by asset/protocol type and fill the gaps."}
+              ? "자산·프로토콜 유형별로 등록된 정책과 패키지를 둘러보세요."
+              : "Browse published policies and packages by asset/protocol type."}
           </div>
         </div>
       </div>
       <div className="rm-defense" style={{ marginTop: 14 }}>
         {CATEGORY_ORDER.map((c) => {
           const color = CATEGORY_COLOR[c];
-          const n = counts.get(c) ?? 0;
-          const on = installed.get(c) ?? 0;
-          const full = n > 0 && on >= n;
-          const pct = n ? Math.round((on / n) * 100) : 0;
+          const np = policyCounts.get(c) ?? 0;
+          const ng = pkgCounts.get(c) ?? 0;
+          const total = np + ng;
           return (
-            <Link key={c} to={`/market?view=list&category=${c}`} className={`rm-deftile${on ? " has" : ""}`}>
+            <Link key={c} to={`/market?view=list&category=${c}`} className={`rm-deftile${total ? " has" : ""}`}>
               <div className="rm-deftile-top">
                 <span className="ic" style={{ background: color.soft }}>
                   <CategoryGlyph category={c} size={19} color={color.hex} />
                 </span>
-                {full ? (
-                  <span className="rm-defok">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--warn-700)" strokeWidth={2.4} aria-hidden="true">
-                      <path d="M5 12l4 4L19 7" />
-                    </svg>
-                  </span>
-                ) : on ? (
-                  <span className="rm-defpart">{on}/{n}</span>
-                ) : (
-                  <span className="rm-defempty">{ko ? "미설치" : "none"}</span>
-                )}
               </div>
               <div className="rm-deftile-nm" style={{ color: color.ink }}>{categoryNameOf(c, locale)}</div>
-              <div className="rm-defbar"><span style={{ width: `${pct}%`, background: color.hex }} /></div>
+              <div className="rm-defcount">
+                {total === 0
+                  ? (ko ? "등록 없음" : "none yet")
+                  : ko
+                    ? `정책 ${np}개 · 패키지 ${ng}개`
+                    : `${np} ${np === 1 ? "policy" : "policies"} · ${ng} ${ng === 1 ? "package" : "packages"}`}
+              </div>
             </Link>
           );
         })}
@@ -750,13 +758,25 @@ function ListView({
 }) {
   const ko = locale === "ko";
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialCategory = initialParams.get("category") ?? "";
   const initialSort = parseSortParam(initialParams.get("sort"));
   const initialQ = initialParams.get("q") ?? "";
 
   const [cats, setCats] = useState<Set<CategoryKey>>(
-    () => new Set(isCategoryKey(initialCategory) ? [initialCategory] : []),
+    () => new Set(initialCategory.split(",").filter(isCategoryKey)),
   );
+  // URL ↔ 선택 카테고리 동기화 — 칩 제거/모두 해제가 주소창에도 반영되도록
+  // (새로고침·공유·뒤로가기 시 필터 상태가 일치). 다른 파라미터(view/sort/q)는 보존.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    const joined = [...cats].join(",");
+    if (joined) next.set("category", joined);
+    else next.delete("category");
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [cats, searchParams, setSearchParams]);
   const [sort, setSort] = useState<ListingSort>(initialSort);
   const [q, setQ] = useState(initialQ);
   const [search, setSearch] = useState(initialQ);
@@ -807,11 +827,18 @@ function ListView({
   const metaFor = (i: number) => {
     const members = setDetailQs[i]?.data?.latest_version?.members ?? [];
     const catCount = new Map<CategoryKey, number>();
-    members.forEach((m) => {
-      const c = categoryOf(m.slug);
-      catCount.set(c, (catCount.get(c) ?? 0) + 1);
-    });
-    return { count: members.length, catCount, ready: members.length > 0 };
+    // 서버가 저장한 멤버 카테고리(intents) 우선 — pasu 카탈로그 슬러그까지 정확.
+    // 없으면(구 패키지) 멤버 슬러그 기반 추정으로 폴백.
+    const intents = (sets[i]?.intents ?? []).filter(isCategoryKey);
+    if (intents.length) {
+      intents.forEach((c) => catCount.set(c, catCount.get(c) ?? 1));
+    } else {
+      members.forEach((m) => {
+        const c = categoryOf(m.slug);
+        catCount.set(c, (catCount.get(c) ?? 0) + 1);
+      });
+    }
+    return { count: members.length, catCount, ready: members.length > 0 || intents.length > 0 };
   };
 
   const polList =

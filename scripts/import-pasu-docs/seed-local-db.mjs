@@ -91,24 +91,31 @@ for (const p of policies) {
 
 for (const pkg of packages) {
   if (seenSlugs.has(pkg.slug)) continue;
-  const members = (pkg.members || [])
-    .map((m) => bySlug.get(m.slug))
-    .filter(Boolean)
-    .map((pol) => ({
-      slug: pol.slug,
-      display_name: cleanKo(pol.name_ko) || pol.slug,
-      cedar_text: pol.cedar,
-      manifest: pol.manifest || null,
-    }));
+  const memberPols = (pkg.members || []).map((m) => bySlug.get(m.slug)).filter(Boolean);
+  const members = memberPols.map((pol) => ({
+    slug: pol.slug,
+    display_name: cleanKo(pol.name_ko) || pol.slug,
+    cedar_text: pol.cedar,
+    manifest: pol.manifest || null,
+  }));
   if (members.length === 0) continue; // set version requires non-empty members
   seenSlugs.add(pkg.slug);
   const category = CAT_BY_DIR[pkg.category] || "Others";
+  // Distinct member categories → the package's `intents`, so browse surfaces
+  // it under each member's category (mirrors publish-time auto-tagging).
+  const intents = [
+    ...new Set(
+      memberPols.map(
+        (pol) => CAT_BY_POLDIR[pol.category] || CAT_BY_PREFIX[(pol.code || "").split("-")[0]] || "Others",
+      ),
+    ),
+  ];
   const id = uuid("pkg:" + pkg.slug);
   const dn = { en: pkg.name_en || pkg.name_ko || pkg.slug, ko: pkg.name_ko || pkg.slug };
   const desc = { en: pkg.description_ko || dn.en, ko: pkg.description_ko || dn.ko };
   lines.push(
-    `INSERT INTO market_listings(id,slug,kind,publisher_id,publisher_tier,display_name,description,category,status,current_version,created_at,updated_at) ` +
-      `VALUES ('${id}',${Q(pkg.slug)},'set','${PUB}','official',${J(dn)},${J(desc)},${Q(category)},'published','1.0.0',${TS},${TS});`,
+    `INSERT INTO market_listings(id,slug,kind,publisher_id,publisher_tier,display_name,description,category,intents,status,current_version,created_at,updated_at) ` +
+      `VALUES ('${id}',${Q(pkg.slug)},'set','${PUB}','official',${J(dn)},${J(desc)},${Q(category)},${J(intents)},'published','1.0.0',${TS},${TS});`,
   );
   lines.push(
     `INSERT INTO market_listing_versions(listing_id,version,major,minor,patch,members,published_at) ` +

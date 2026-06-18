@@ -72,10 +72,10 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
           onClose();
         }
       }}
-      title={mut.data ? t("wallet.addResultTitle") : t("wallet.addTitle")}
+      title={t("wallet.addTitle")}
       footer={
         mut.data ? (
-          <button className="btn primary" onClick={onClose}>{t("close")}</button>
+          <button className="btn primary" onClick={() => window.location.reload()}>{t("confirm")}</button>
         ) : (
           <>
             <button className="btn" type="button" onClick={onClose} disabled={mut.isPending}>
@@ -88,6 +88,11 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
         )
       }
     >
+      {mut.data ? (
+        <div style={{ padding: "8px 0 4px", textAlign: "center", fontSize: 15, fontWeight: 600 }}>
+          {t("wallet.addSuccess")}
+        </div>
+      ) : (
       <form id="add-wallet-form" onSubmit={onSubmit}>
         <div className="form-row">
           <label htmlFor="aw-addr">{t("wallet.addressLabel")}</label>
@@ -131,6 +136,7 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
           </div>
         )}
       </form>
+      )}
     </Modal>
   );
 }

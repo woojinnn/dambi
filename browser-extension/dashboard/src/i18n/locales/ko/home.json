@@ -1,5 +1,5 @@
 {
-  "addWallet": "지갑 추가 +",
+  "addWallet": "지갑 추가",
   "head": {
     "title": "지갑별 정책",
     "scopeWallet": "지갑 단위",
@@ -30,7 +30,10 @@
   "folder": {
     "policies": "정책",
     "publishTitle": "이 패키지를 Policy Hub에 게시",
-    "uncategorized": "미분류"
+    "uncategorized": "미분류",
+    "activeCount": "활성 {{count}}",
+    "emptyPackage": "이 패키지에 정책이 없어요",
+    "flip": "뒤집기"
   },
   "policy": {
     "active": "적용중",

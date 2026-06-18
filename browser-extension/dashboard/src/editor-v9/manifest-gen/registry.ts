@@ -83,6 +83,22 @@ const HAND_AUTHORED_FIELDS: EnrichmentRegistry = {
       asset: "$.action.tokenIn.key.address",
     },
   },
+
+  // 오늘 연속으로 난 손실 거래 수(보복매매 쿨다운용). 서버 `perp.session_fill_stats`
+  // 가 채운다. 시장 시드 정책 PERP-016(order-loss-streak-cooldown-warn)의 매니페스트
+  // 바인딩과 동일 — phase1A-seed 에는 없어 hand-author 로 노출한다.
+  lossStreak: {
+    type: "Long",
+    label: { ko: "연속 손실 횟수", en: "Loss streak" },
+    appliesTo: ["place_order"],
+    method: "perp.session_fill_stats",
+    projection: "$.result.lossStreak",
+    params: {
+      chain_id: "$.root.chain_id",
+      min_loss_usd: { literal: "1" },
+    },
+    note: "오늘 연속으로 발생한 손실 거래 수(스크래치/소액 청산은 카운트 안 함)",
+  },
 };
 
 /** All enrichment fields the editor knows. Hand-authored entries win on a

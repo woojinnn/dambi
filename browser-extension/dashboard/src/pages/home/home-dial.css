@@ -256,6 +256,105 @@
 .dp-folders { padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .dp-folders > .pk-folder { flex-shrink: 0; }
 
+/* ════════ 패키지 뒤집기 카드 그리드 (홈 메인) ════════ */
+.dp-cardgrid {
+  padding: 10px 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+.pkc { height: 192px; perspective: 1400px; }
+.pkc-in { position: relative; width: 100%; height: 100%; transition: transform 520ms cubic-bezier(.34,.9,.28,1); transform-style: preserve-3d; }
+.pkc.flip .pkc-in { transform: rotateY(180deg); }
+/* 보이는 면만 상호작용 가능하게 한다. pointer-events:none 만으로는 두 면이 3D
+   동일 평면(preserve-3d)에 겹쳐 있어, 보이는 뒷면을 눌러도 클릭이 안 보이는
+   앞면(pointer-events:none)으로 해석돼 빈 부모로 흘러버리는 경우가 있었다 — 그래서
+   화살표를 눌러도 안 돌아가던 버그. visibility 로 안 보이는 면을 hit-test 에서
+   완전히 제거하되, 회전(520ms)이 끝난 뒤에 적용되도록 지연해 애니메이션은 그대로
+   보이게 한다(시각적 가림은 backface-visibility 가 이미 처리). */
+.pkc:not(.flip) .pkc-back { pointer-events: none; visibility: hidden; transition: visibility 0s linear 520ms; }
+.pkc.flip .pkc-front { pointer-events: none; visibility: hidden; transition: visibility 0s linear 520ms; }
+.pkc-face {
+  position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--surface);
+  box-shadow: 0 1px 2px rgba(72,90,94,0.05), 0 8px 22px -18px rgba(72,90,94,0.5);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pkc.off { opacity: 0.62; }
+
+/* front */
+.pkc-front { padding: 15px 15px 13px; cursor: pointer; transition: transform 150ms ease, box-shadow 170ms ease, border-color 150ms ease, visibility 0s; }
+.pkc:not(.flip) .pkc-front:hover { transform: translateY(-2px); border-color: var(--cyan-300, #a9c8cf); box-shadow: 0 1px 2px rgba(72,90,94,0.05), 0 16px 30px -20px rgba(72,90,94,0.5); }
+.pkc-ftop { display: flex; align-items: center; gap: 9px; }
+.pkc-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--fog-200); color: var(--slate-500); flex-shrink: 0; }
+.pkc-ic svg { width: 16px; height: 16px; }
+.pkc-name { font-size: 14px; font-weight: 720; color: var(--slate-800); letter-spacing: -0.01em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-sw { flex-shrink: 0; }
+.pkc-fmeta { margin-top: 14px; font-size: 12px; color: var(--slate-400); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
+.pkc-fmeta b { color: var(--slate-700); font-weight: 700; }
+.pkc-dot { color: var(--slate-300); }
+.pkc-active { color: var(--pass-600, #16a34a); font-weight: 650; }
+.pkc.off .pkc-active { color: var(--slate-400); }
+.pkc-ffoot { margin-top: auto; display: flex; align-items: center; gap: 8px; }
+.pkc-pub {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  border: 0; background: none; cursor: pointer; padding: 0; color: var(--slate-300); flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+.pkc-pub:hover { background: var(--fog-300); color: var(--slate-700); }
+.pkc-pub svg { width: 15px; height: 15px; }
+.pkc-fliphint { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--slate-400); opacity: 0; transition: opacity 150ms ease, color 150ms ease; }
+.pkc-fliphint svg { width: 14px; height: 14px; }
+.pkc:not(.flip) .pkc-front:hover .pkc-fliphint { opacity: 1; }
+.pkc-fliphint:hover { color: var(--cyan-600, var(--slate-700)); }
+
+/* back */
+.pkc-back { transform: rotateY(180deg); transition: visibility 0s; }
+.pkc-bhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--hairline-soft); }
+.pkc-bback { display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; cursor: pointer; padding: 0; color: var(--slate-400); flex-shrink: 0; }
+.pkc-bback:hover { color: var(--slate-700); }
+.pkc-bback svg { width: 16px; height: 16px; }
+.pkc-bname { font-size: 13px; font-weight: 720; color: var(--slate-800); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-blist { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
+.pkc-empty { color: var(--slate-400); font-size: 12px; text-align: center; padding: 18px 8px; }
+.pkc-pol {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 7px; border-radius: 8px; transition: background 120ms ease, opacity 120ms ease;
+}
+.pkc-pol:hover { background: var(--fog-100); }
+.pkc-pol.off { opacity: 0.5; }
+.pkc-pol .pr-dot { width: 7px; height: 7px; }
+.pkc-pol-name { font-size: 12px; font-weight: 600; color: var(--slate-700); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-pol-state {
+  flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 2px 6px; border-radius: 999px; background: var(--fog-200); color: var(--slate-400);
+}
+.pkc-pol-state.on { background: var(--pass-50, #f0fdf4); color: var(--pass-600, #16a34a); }
+.pkc-ox {
+  flex-shrink: 0; width: 23px; height: 23px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface); color: var(--slate-400);
+  font-size: 12.5px; font-weight: 700; line-height: 1; cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.pkc-ox.on { border-color: var(--pass-300, #86efac); background: var(--pass-50, #f0fdf4); color: var(--pass-600, #16a34a); }
+.pkc-ox:hover { border-color: var(--slate-400); }
+.pkc-pol.off .pkc-ox { opacity: 1; }
+button.pkc-edit { border: 0; background: none; padding: 0; }
+.pkc-edit {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px;
+  color: var(--slate-300); flex-shrink: 0; cursor: pointer; opacity: 0; transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.pkc-pol:hover .pkc-edit { opacity: 1; }
+.pkc-edit:hover { background: var(--fog-300); color: var(--slate-700); }
+.pkc-edit svg { width: 13px; height: 13px; }
+@media (prefers-reduced-motion: reduce) {
+  .pkc-in { transition: none; }
+  /* 회전이 즉시면 visibility 지연도 없앤다(안 보이는 면이 잠깐 클릭 먹는 것 방지). */
+  .pkc:not(.flip) .pkc-back,
+  .pkc.flip .pkc-front { transition-delay: 0s; }
+}
+
 .pk-folder {
   border: 1px solid var(--hairline-soft);
   border-radius: var(--r-sm);

@@ -8,7 +8,8 @@ publish = false
 
 [dependencies]
 # The service operates on the pure simulation types + reducer. NO cedar /
-# policy-engine dependency: the extension owns Cedar evaluation.
+# policy-engine dependency: the extension owns Cedar evaluation (LLM-drafted
+# policies are validated client-side via the WASM pipeline).
 policy-state.workspace = true
 policy-transition.workspace = true
 # Sync orchestrator hooks live RPC/oracle fetchers into `LiveField` refresh.

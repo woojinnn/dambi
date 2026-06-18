@@ -62,6 +62,7 @@ interface PendRow {
   buy?: string;
   line?: string;
   amount?: string;
+  spender?: string;
   at: string;
 }
 interface HlPos {
@@ -105,6 +106,12 @@ export function initAssetsApp(root: HTMLElement): () => void {
 
   let D: PasuDataShape = (window.PASU_DATA as PasuDataShape) || {};
 
+  // i18n bridge (set by Assets2Page before boot). Read at render time so language
+  // switches reflect without re-init. Falls back to the key in the standalone
+  // prototype (PASU_T absent).
+  const T = (k: string, vars?: Record<string, unknown>): string =>
+    window.PASU_T ? window.PASU_T(k, vars) : k;
+
   let WLABEL: Record<string, string> =
     D.WLABEL || { main: "메인 지갑", trade: "트레이딩", cold: "콜드 스토리지", savings: "적립 지갑", airdrop: "에어드랍" };
 
@@ -118,29 +125,39 @@ export function initAssetsApp(root: HTMLElement): () => void {
     });
   }
 
-  const RISK_LABEL: Record<string, string> = {
-    UNLIMITED: "무제한 승인",
-    KNOWN_VENUE: "검증된 거래소",
-    BLOCKED: "차단 대상",
-    OLD: "오래된 승인",
-    EXPIRED: "만료됨",
+  // Render-time (not init-time) so language switches re-translate without re-boot.
+  const RISK_LABEL_KEY: Record<string, string> = {
+    UNLIMITED: "assets.risk.unlimited",
+    KNOWN_VENUE: "assets.risk.knownVenue",
+    BLOCKED: "assets.risk.blocked",
+    OLD: "assets.risk.old",
+    EXPIRED: "assets.risk.expired",
   };
-  const RISK_DESC: Record<string, string> = {
-    UNLIMITED: "한도 없이 토큰을 꺼내갈 수 있는 승인 — 자산 전액이 노출됩니다.",
-    KNOWN_VENUE: "검증된 거래소·프로토콜에 대한 승인 — 위험 낮음(정보).",
-    BLOCKED: "차단 목록에 오른 악성/위험 주소에 대한 승인 — 즉시 철회 권장.",
-    OLD: "오래 사용하지 않은 승인 — 정리 대상.",
-    EXPIRED: "기한이 지난 승인.",
+  const RISK_DESC_KEY: Record<string, string> = {
+    UNLIMITED: "assets.risk.descUnlimited",
+    KNOWN_VENUE: "assets.risk.descKnownVenue",
+    BLOCKED: "assets.risk.descBlocked",
+    OLD: "assets.risk.descOld",
+    EXPIRED: "assets.risk.descExpired",
   };
-  const RISK_LEGEND =
-    "<b>위험 노출</b>" +
-    "<em>이 자산에 걸린 승인으로 지금 실제 빠져나갈 수 있는 금액 (온체인 기준)</em>" +
-    '<i><span class="exp-dot warn"></span><span class="lg-k">주의</span> 무제한 승인 — 전액 노출</i>' +
-    '<i><span class="exp-dot low"></span><span class="lg-k">낮음</span> 한도 승인 · 오래됨 · 만료</i>' +
-    '<i><span class="exp-dot none"></span><span class="lg-k">없음</span> 활성 승인 없음 — 안전</i>' +
-    (REPUTATION_CONNECTED
-      ? '<i><span class="exp-dot fail"></span><span class="lg-k">위험</span> 차단된 악성 주소 — 즉시 철회</i>'
-      : '<em class="lg-foot">악성 주소 차단은 평판 레지스트리 연결 시 활성화 · 종류별 상세는 아래 Approvals 표</em>');
+  function riskLabel(tag: string): string {
+    return RISK_LABEL_KEY[tag] ? T(RISK_LABEL_KEY[tag]) : tag;
+  }
+  function riskDesc(tag: string): string {
+    return RISK_DESC_KEY[tag] ? T(RISK_DESC_KEY[tag]) : "";
+  }
+  function riskLegend(): string {
+    return (
+      "<b>" + T("assets.exposure.legendTitle") + "</b>" +
+      "<em>" + T("assets.exposure.legendDesc") + "</em>" +
+      '<i><span class="exp-dot warn"></span><span class="lg-k">' + T("assets.exposure.warnK") + "</span> " + T("assets.exposure.warnV") + "</i>" +
+      '<i><span class="exp-dot low"></span><span class="lg-k">' + T("assets.exposure.lowK") + "</span> " + T("assets.exposure.lowV") + "</i>" +
+      '<i><span class="exp-dot none"></span><span class="lg-k">' + T("assets.exposure.noneK") + "</span> " + T("assets.exposure.noneV") + "</i>" +
+      (REPUTATION_CONNECTED
+        ? '<i><span class="exp-dot fail"></span><span class="lg-k">' + T("assets.exposure.failK") + "</span> " + T("assets.exposure.failV") + "</i>"
+        : '<em class="lg-foot">' + T("assets.exposure.foot") + "</em>")
+    );
+  }
 
   function expSeverity(r: AggRow): string {
     const risk = r.risk;
@@ -151,19 +168,19 @@ export function initAssetsApp(root: HTMLElement): () => void {
   }
   function expLabel(r: AggRow): string {
     const risk = r.risk;
-    if (REPUTATION_CONNECTED && risk.indexOf("BLOCKED") >= 0) return "차단 대상";
-    if (risk.indexOf("UNLIMITED") >= 0) return "무제한 승인";
-    if (risk.indexOf("OLD") >= 0) return "오래된 승인";
-    if (risk.indexOf("EXPIRED") >= 0) return "만료됨";
-    if (r.varNum > 0) return "한도 승인";
+    if (REPUTATION_CONNECTED && risk.indexOf("BLOCKED") >= 0) return T("assets.risk.blocked");
+    if (risk.indexOf("UNLIMITED") >= 0) return T("assets.risk.unlimited");
+    if (risk.indexOf("OLD") >= 0) return T("assets.risk.old");
+    if (risk.indexOf("EXPIRED") >= 0) return T("assets.risk.expired");
+    if (r.varNum > 0) return T("assets.risk.capped");
     return "";
   }
   function exposureCell(r: AggRow): string {
     const sev = expSeverity(r);
     if (sev === "none") return '<span class="r-safe">—</span>';
-    const amt = r.varNum > 0 ? r.varTxt : "평가 보류";
+    const amt = r.varNum > 0 ? r.varTxt : T("assets.exposure.pendingEval");
     return (
-      '<div class="exp-cell ' + sev + '" title="' + expLabel(r) + " · 노출 " + amt + '">' +
+      '<div class="exp-cell ' + sev + '" title="' + expLabel(r) + " · " + T("assets.exposure.prefix") + " " + amt + '">' +
       '<span class="exp-dot ' + sev + '"></span>' +
       '<span class="exp-amt">' + amt + "</span>" +
       '<span class="exp-lbl">' + expLabel(r) + "</span>" +
@@ -239,6 +256,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
 
   // ── state ──────────────────────────────────────────────────────────────
   let sel: string = D.sel || "all"; // "all" | wallet key
+  let hlSel: string = "all"; // Hyperliquid 패널 전용 지갑 탭 ("all" | wallet key)
   let lens: "assets" | "risk" = "assets";
   let bannerDismissed = false;
   let holdingsFilter = ""; // 토큰 검색어
@@ -392,7 +410,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
       '<tr class="grp-head ' + cls + '"><td colspan="5"><div class="gh-row">' +
       (cls === "warn" ? '<span class="gh-ic">⚠</span>' : "") +
       '<span class="gh-t">' + title + "</span>" +
-      '<span class="gh-n">' + n + "개</span>" +
+      '<span class="gh-n">' + T("assets.holdings.count", { count: n }) + "</span>" +
       '<span class="gh-m">' + amountText + "</span>" +
       "</div></td></tr>"
     );
@@ -428,7 +446,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
               return rowHtml(r, isAll);
             })
             .join("")
-        : '<tr><td colspan="5" class="lens-empty-note">"' + esc(holdingsFilter) + '" 검색 결과가 없습니다.</td></tr>';
+        : '<tr><td colspan="5" class="lens-empty-note">' + T("assets.holdings.searchEmpty", { q: esc(holdingsFilter) }) + "</td></tr>";
     } else {
       const atRisk = all.filter(function (r) {
         return expSeverity(r) !== "none";
@@ -452,7 +470,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
           const riskUsd = atRisk.reduce(function (s, r) {
             return s + r.varNum;
           }, 0);
-          bodyRows += groupHead("warn", "주의가 필요한 자산", atRisk.length, "노출 " + money2(riskUsd));
+          bodyRows += groupHead("warn", T("assets.holdings.groupAtRisk"), atRisk.length, T("assets.holdings.exposureN", { amount: money2(riskUsd) }));
           bodyRows += atRisk
             .map(function (r) {
               return rowHtml(r, isAll);
@@ -463,7 +481,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
           const cleanUsd = clean.reduce(function (s, r) {
             return s + r.usdNum;
           }, 0);
-          bodyRows += groupHead("", "보유 자산", clean.length, money2(cleanUsd));
+          bodyRows += groupHead("", T("assets.holdings.groupClean"), clean.length, money2(cleanUsd));
           bodyRows += clean
             .map(function (r) {
               return rowHtml(r, isAll);
@@ -479,11 +497,11 @@ export function initAssetsApp(root: HTMLElement): () => void {
       host.innerHTML =
         '<div class="tbl-wrap lens-' + lens + scrollCls + '">' +
         "<table><thead><tr>" +
-        "<th>자산</th><th>지갑</th>" +
-        '<th class="num">잔고</th>' +
-        '<th class="num' + usdEmph + '">USD</th>' +
-        '<th class="' + ovEmph.trim() + '"><span class="th-help">위험 노출<span class="th-q">?</span><span class="th-tip">' +
-        RISK_LEGEND +
+        "<th>" + T("assets.cols.asset") + "</th><th>" + T("assets.cols.wallet") + "</th>" +
+        '<th class="num">' + T("assets.cols.balance") + "</th>" +
+        '<th class="num' + usdEmph + '">' + T("assets.cols.usd") + "</th>" +
+        '<th class="' + ovEmph.trim() + '"><span class="th-help">' + T("assets.cols.riskExposure") + '<span class="th-q">?</span><span class="th-tip">' +
+        riskLegend() +
         "</span></span></th>" +
         "</tr></thead><tbody>" +
         bodyRows +
@@ -500,7 +518,10 @@ export function initAssetsApp(root: HTMLElement): () => void {
     const allKeys = Object.keys(PW);
     const tokens = isAll ? all.length : (PW[sel] || []).length;
     const meta = el("holdings-meta");
-    if (meta) meta.textContent = (isAll ? allKeys.length + " 지갑 · " : "1 지갑 · ") + tokens + " 토큰";
+    if (meta)
+      meta.textContent = isAll
+        ? T("assets.holdings.metaAll", { wallets: allKeys.length, tokens })
+        : T("assets.holdings.metaOne", { tokens });
   }
 
   // ── approvals table ──────────────────────────────────────────────────────
@@ -535,7 +556,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
                 return v.length
                   ? v
                       .map(function (t) {
-                        return '<span class="risk-tag ' + t + '" title="' + (RISK_DESC[t] || "") + '">' + (RISK_LABEL[t] || t) + "</span>";
+                        return '<span class="risk-tag ' + t + '" title="' + riskDesc(t) + '">' + riskLabel(t) + "</span>";
                       })
                       .join("")
                   : '<span class="r-safe">—</span>';
@@ -546,14 +567,14 @@ export function initAssetsApp(root: HTMLElement): () => void {
             );
           })
           .join("")
-      : '<tr><td colspan="7" class="empty-cell">표시할 approval이 없습니다</td></tr>';
+      : '<tr><td colspan="7" class="empty-cell">' + T("assets.approvals.empty") + "</td></tr>";
 
     const host = el("approvals-host");
     if (host) {
       host.innerHTML =
         '<div class="tbl-wrap"><table><thead><tr>' +
-        "<th>유형</th><th>토큰 / 컬렉션</th><th>지갑</th><th>spender / operator</th><th>금액</th><th>위험</th>" +
-        '<th style="width:80px;">액션</th>' +
+        "<th>" + T("assets.cols.type") + "</th><th>" + T("assets.cols.tokenOrCollection") + "</th><th>" + T("assets.cols.wallet") + "</th><th>" + T("assets.cols.spenderOperator") + "</th><th>" + T("assets.cols.amount") + "</th><th>" + T("assets.cols.risk") + "</th>" +
+        '<th style="width:80px;">' + T("assets.cols.action") + "</th>" +
         "</tr></thead><tbody>" +
         body +
         "</tbody></table></div>";
@@ -563,9 +584,9 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (meta)
       meta.textContent = isAll
         ? REPUTATION_CONNECTED
-          ? "차단 대상 · 무제한 승인 · 오래된 승인"
-          : "무제한 승인 · 오래된 승인 · 만료"
-        : rows.length + "건";
+          ? T("assets.approvals.metaBlocked")
+          : T("assets.approvals.metaUnlimited")
+        : T("assets.approvals.metaCount", { count: rows.length });
   }
 
   // ── pending table ────────────────────────────────────────────────────────
@@ -579,9 +600,9 @@ export function initAssetsApp(root: HTMLElement): () => void {
       if (host0)
         host0.innerHTML =
           '<div class="tbl-wrap"><table><thead><tr>' +
-          '<th>유형</th><th>지갑</th><th>요약</th><th class="num">서명 시각</th>' +
+          "<th>" + T("assets.cols.type") + "</th><th>" + T("assets.cols.wallet") + "</th><th>" + T("assets.cols.summary") + "</th><th class=\"num\">" + T("assets.cols.signedAt") + "</th>" +
           "</tr></thead><tbody>" +
-          '<tr><td colspan="4" class="empty-cell">대기 중인 주문이 없습니다</td></tr>' +
+          '<tr><td colspan="4" class="empty-cell">' + T("assets.pending.empty") + "</td></tr>" +
           "</tbody></table></div>";
       return;
     }
@@ -594,13 +615,13 @@ export function initAssetsApp(root: HTMLElement): () => void {
         const ic = p.kind === "intent" ? icIntent : icPermit;
         const summary =
           p.kind === "intent"
-            ? '<span class="ps-leg"><span class="ps-k">최대매도</span><b>' + p.sell + "</b></span>" +
+            ? '<span class="ps-leg"><span class="ps-k">' + T("assets.pending.sellMax") + "</span><b>" + p.sell + "</b></span>" +
               '<span class="ps-arrow"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></span>' +
-              '<span class="ps-leg"><span class="ps-k">최소매수</span><b>' + p.buy + "</b></span>"
-            : '<span class="ps-leg"><span class="ps-k">한도</span><b>' +
-              (p.amount || (p.line || "").replace(/^한도\s*/, "").split(" · ")[0]) +
+              '<span class="ps-leg"><span class="ps-k">' + T("assets.pending.buyMin") + "</span><b>" + p.buy + "</b></span>"
+            : '<span class="ps-leg"><span class="ps-k">' + T("assets.pending.allowance") + "</span><b>" +
+              (p.amount || "—") +
               "</b></span>" +
-              '<span class="ps-spender">spender ' + ((p.line || "").split("spender ")[1] || "—") + "</span>";
+              '<span class="ps-spender">spender ' + (p.spender || "—") + "</span>";
         const venue = p.venue ? '<span class="pend-venue">' + p.venue + "</span>" : "";
         return (
           "<tr>" +
@@ -617,7 +638,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (host)
       host.innerHTML =
         '<div class="tbl-wrap"><table><thead><tr>' +
-        '<th>유형</th><th>지갑</th><th>요약</th><th class="num">서명 시각</th>' +
+        "<th>" + T("assets.cols.type") + "</th><th>" + T("assets.cols.wallet") + "</th><th>" + T("assets.cols.summary") + "</th><th class=\"num\">" + T("assets.cols.signedAt") + "</th>" +
         "</tr></thead><tbody>" +
         body +
         "</tbody></table></div>";
@@ -644,7 +665,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
             return (
               '<tr class="' + sideCls + '">' +
               '<td class="sym">' + p.sym + "</td>" +
-              '<td><span class="hl-side ' + sideCls + '">' + p.side + '</span><span class="hl-lev">' + p.leverage + "</span></td>" +
+              '<td><span class="hl-side ' + sideCls + '">' + (p.side === "long" ? T("hl.long") : T("hl.short")) + '</span><span class="hl-lev">' + p.leverage + "</span></td>" +
               '<td class="num">' + p.size + "</td>" +
               '<td class="num">' + p.entry + "</td>" +
               '<td class="num val">' + money2int(p.value) + "</td>" +
@@ -652,24 +673,24 @@ export function initAssetsApp(root: HTMLElement): () => void {
             );
           })
           .join("")
-      : '<tr><td colspan="5" class="empty-cell">포지션 없음</td></tr>';
+      : '<tr><td colspan="5" class="empty-cell">' + T("assets.hl.posEmpty") + "</td></tr>";
 
     const ordRows = a.orders.length
       ? a.orders
           .map(function (o) {
-            const sideCls = o.side === "매수" ? "long" : "short";
-            const kindCls = o.kind === "익절" ? "hl-tp" : "hl-sl";
+            const sideCls = o.side === "buy" ? "long" : "short";
+            const kindCls = o.kind === "tp" ? "hl-tp" : "hl-sl";
             return (
               "<tr>" +
               '<td class="sym">' + o.sym + "</td>" +
-              '<td><span class="hl-side ' + sideCls + '">' + o.side + '</span><span class="' + kindCls + '">' + o.kind + "</span></td>" +
+              '<td><span class="hl-side ' + sideCls + '">' + T("assets.hl." + (o.side === "buy" ? "buy" : "sell")) + '</span><span class="' + kindCls + '">' + T("assets.hl." + o.kind) + "</span></td>" +
               '<td class="num"><b>' + o.trigger + "</b> → <b>" + o.limit + "</b></td>" +
               '<td class="cond num">' + o.cond + "</td>" +
               "</tr>"
             );
           })
           .join("")
-      : '<tr><td colspan="4" class="empty-cell">오픈 오더 없음</td></tr>';
+      : '<tr><td colspan="4" class="empty-cell">' + T("assets.hl.ordEmpty") + "</td></tr>";
 
     return (
       '<div class="hl-card-head">' +
@@ -681,15 +702,15 @@ export function initAssetsApp(root: HTMLElement): () => void {
       "</div>" +
       '<div class="hl-cols">' +
       '<div class="hl-col">' +
-      '<div class="hl-block-label">포지션 <span class="hl-n">' + a.positions.length + "</span></div>" +
+      '<div class="hl-block-label">' + T("assets.hl.positions") + ' <span class="hl-n">' + a.positions.length + "</span></div>" +
       '<table class="hl-tbl">' +
-      "<thead><tr><th>종목</th><th>방향</th><th class=\"num\">수량</th><th class=\"num\">진입가</th><th class=\"num\">평가</th></tr></thead>" +
+      "<thead><tr><th>" + T("assets.hl.sym") + "</th><th>" + T("assets.hl.side") + "</th><th class=\"num\">" + T("assets.hl.size") + "</th><th class=\"num\">" + T("assets.hl.entry") + "</th><th class=\"num\">" + T("assets.hl.value") + "</th></tr></thead>" +
       "<tbody>" + posRows + "</tbody></table>" +
       "</div>" +
       '<div class="hl-col">' +
-      '<div class="hl-block-label">오픈 오더 <span class="hl-n">' + a.orders.length + "</span></div>" +
+      '<div class="hl-block-label">' + T("assets.hl.openOrders") + ' <span class="hl-n">' + a.orders.length + "</span></div>" +
       '<table class="hl-tbl">' +
-      "<thead><tr><th>종목</th><th>구분</th><th class=\"num\">트리거 → 지정</th><th class=\"num\">조건</th></tr></thead>" +
+      "<thead><tr><th>" + T("assets.hl.sym") + "</th><th>" + T("assets.hl.kind") + "</th><th class=\"num\">" + T("assets.hl.triggerLimit") + "</th><th class=\"num\">" + T("assets.hl.cond") + "</th></tr></thead>" +
       "<tbody>" + ordRows + "</tbody></table>" +
       "</div>" +
       "</div>"
@@ -701,12 +722,41 @@ export function initAssetsApp(root: HTMLElement): () => void {
   function renderHl(): void {
     const section = el("hl-section");
     if (!section) return;
-    const list = hlList();
-    if (!list.length) {
+    const baseList = hlList();
+    if (!baseList.length) {
       section.style.display = "none";
       return;
     }
     section.style.display = "";
+
+    // 지갑별 탭 — HL 계정이 둘 이상일 때만(전역 sel=all). hlSel 로 그 안에서 한
+    // 지갑만 골라 본다. 매 렌더마다 탭을 새로 그려 active 상태를 반영.
+    const secHead = section.querySelector(".sec-head");
+    const oldTabs = section.querySelector(".hl-tabs");
+    if (oldTabs) oldTabs.remove();
+    const multi = baseList.length > 1;
+    if (!multi) hlSel = "all";
+    if (multi && hlSel !== "all" && !baseList.some((a) => a.wallet === hlSel)) hlSel = "all";
+    if (multi && secHead) {
+      const mk = (key: string, label: string) =>
+        '<button type="button" class="hl-tab' +
+        (hlSel === key ? " on" : "") +
+        '" data-hl="' + key + '">' + label + "</button>";
+      const tabs = document.createElement("div");
+      tabs.className = "hl-tabs";
+      tabs.setAttribute("role", "tablist");
+      tabs.innerHTML = mk("all", T("assets.hl.tabAll")) + baseList.map((a) => mk(a.wallet, a.walletLabel)).join("");
+      tabs.querySelectorAll(".hl-tab").forEach((b) =>
+        b.addEventListener("click", function () {
+          hlSel = (b as HTMLElement).getAttribute("data-hl") || "all";
+          renderHl();
+        }),
+      );
+      secHead.insertAdjacentElement("afterend", tabs);
+    }
+
+    const list = multi && hlSel !== "all" ? baseList.filter((a) => a.wallet === hlSel) : baseList;
+
     // The static markup ships a single .hl-card host. Reuse it for the first
     // account and emit one sibling .hl-card per additional account, keeping the
     // exact ASS_v2 card structure (so layout-modes hlSummary() still scrapes it).
@@ -752,28 +802,28 @@ export function initAssetsApp(root: HTMLElement): () => void {
 
     const riskRows =
       '<div class="wrisk-row' + (varNum > 0 ? " on" : "") + '">' +
-      '<span class="wr-dot warn"></span><span class="wr-k">현재 노출 · VaR</span>' +
+      '<span class="wr-dot warn"></span><span class="wr-k">' + T("assets.l2.currentVar") + "</span>" +
       '<span class="wr-v' + (varNum > 0 ? " warn" : "") + '">' + m.varUsd + "</span></div>" +
       '<div class="wrisk-row' + (m.unlimited > 0 ? " on" : "") + '">' +
-      '<span class="wr-dot warn"></span><span class="wr-k">무제한 승인</span>' +
-      '<span class="wr-v' + (m.unlimited > 0 ? " warn" : "") + '">' + m.unlimited + "건</span></div>" +
+      '<span class="wr-dot warn"></span><span class="wr-k">' + T("assets.l2.unlimitedApprovals") + "</span>" +
+      '<span class="wr-v' + (m.unlimited > 0 ? " warn" : "") + '">' + T("assets.l2.countCases", { count: m.unlimited }) + "</span></div>" +
       (m.pending > 0
-        ? '<div class="wrisk-row"><span class="wr-dot slate"></span><span class="wr-k">대기 주문</span><span class="wr-v">' + m.pending + "건</span></div>"
+        ? '<div class="wrisk-row"><span class="wr-dot slate"></span><span class="wr-k">' + T("assets.l2.pendingOrders") + '</span><span class="wr-v">' + T("assets.l2.countCases", { count: m.pending }) + "</span></div>"
         : "");
 
     const wriskBody = calm
-      ? '<div class="wrisk-calm">✓ 노출된 위험이 없어요 — 이 지갑은 정상입니다</div>'
+      ? '<div class="wrisk-calm">' + T("assets.l2.calm") + "</div>"
       : '<div class="wrisk-rows">' + riskRows + "</div>";
 
     const band =
       '<div class="wsum-grid">' +
       '<div class="chain-card wsum-card">' +
-      '<div class="cc-head"><span class="cc-ttl">지갑 개요</span>' + statusChips + "</div>" +
-      '<div class="wsum-total"><span class="wsum-k">총 자산</span><span class="wsum-v">' + m.totalUsd + "</span></div>" +
+      '<div class="cc-head"><span class="cc-ttl">' + T("assets.l2.overview") + "</span>" + statusChips + "</div>" +
+      '<div class="wsum-total"><span class="wsum-k">' + T("assets.l2.totalAssets") + '</span><span class="wsum-v">' + m.totalUsd + "</span></div>" +
       '<div class="wsum-id"><span class="wsum-name">' + m.label + '</span><span class="wsum-addr mono">' + short + "</span></div>" +
       "</div>" +
       '<div class="chain-card wrisk-card">' +
-      '<div class="cc-head"><span class="cc-ttl">위험 노출</span></div>' +
+      '<div class="cc-head"><span class="cc-ttl">' + T("assets.l2.riskExposure") + "</span></div>" +
       wriskBody +
       "</div>" +
       "</div>";
@@ -803,13 +853,13 @@ export function initAssetsApp(root: HTMLElement): () => void {
     const n = bannerHit();
     if (lens === "assets" && !bannerDismissed && n > 0) {
       const msg = REPUTATION_CONNECTED
-        ? "<b>차단 대상 승인 " + n + "건</b>이 감지됐어요. 위험 보기로 전환하면 노출된 자산이 상단으로 올라옵니다."
-        : "<b>무제한 승인 " + n + "건</b>으로 자산이 전액 노출돼 있어요. 위험 보기로 전환하면 노출 자산이 상단으로 올라옵니다.";
+        ? T("assets.banner.blocked", { count: n })
+        : T("assets.banner.unlimited", { count: n });
       host.innerHTML =
         '<div class="risk-suggest">' +
         '<span class="rs-ic">⚠</span>' +
         '<span class="rs-txt">' + msg + "</span>" +
-        '<button class="rs-act" id="banner-switch">위험 보기로 전환</button>' +
+        '<button class="rs-act" id="banner-switch">' + T("assets.banner.switch") + "</button>" +
         '<button class="rs-dismiss" id="banner-x" aria-label="dismiss">✕</button>' +
         "</div>";
       const bs = el("banner-switch");
@@ -838,7 +888,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (!track) return;
     const keys = Object.keys(WMETA);
     const total = keys.length;
-    let html = '<button class="ws-chip" data-wallet="all">전체 합산 <span class="ws-amt">' + total + "</span></button>";
+    let html = '<button class="ws-chip" data-wallet="all">' + T("assets.allWallets") + ' <span class="ws-amt">' + total + "</span></button>";
     keys.forEach(function (k) {
       const m = WMETA[k];
       const dot = m.fail > 0 ? "fail" : m.warn > 0 ? "warn" : "calm";
@@ -873,10 +923,10 @@ export function initAssetsApp(root: HTMLElement): () => void {
     const lm = el("lens-meta");
     if (lm) {
       lm.style.display = isAll ? "" : "none";
-      lm.textContent = "정렬: " + (lens === "risk" ? "위험 우선순위" : "USD 평가액");
+      lm.textContent = lens === "risk" ? T("assets.chrome.sortRisk") : T("assets.chrome.sortUsd");
     }
     const main = root.querySelector(".app-content");
-    if (main) main.setAttribute("data-screen-label", isAll ? "Assets — 전체 합산" : "Assets — " + WLABEL[sel]);
+    if (main) main.setAttribute("data-screen-label", isAll ? T("assets.screenAll") : T("assets.screenWallet", { label: WLABEL[sel] }));
   }
 
   // ── summary for layout-mode chrome (alert strip / segment counts) ────────
@@ -913,7 +963,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     }).length;
     return {
       sel: sel,
-      walletLabel: isAll ? "전체 합산" : WLABEL[sel],
+      walletLabel: isAll ? T("assets.allWallets") : WLABEL[sel],
       unlimited: unlimited,
       blocked: blocked,
       old: oldCnt,

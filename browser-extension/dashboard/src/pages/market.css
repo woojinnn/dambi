@@ -1940,6 +1940,47 @@
   gap: 8px;
 }
 .im-holes-head { font-size: 13px; font-weight: 600; }
+.im-wparams { margin-top: 12px; }
+.im-wparams-head {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--slate-700, #334155);
+  margin-bottom: 2px;
+  padding-left: 2px;
+}
+.im-wparams .im-holes { margin-top: 6px; }
+/* 임베드된 에디터 ValueSheet(문장형 폼) — 모달 폭에 맞춰 단일 컬럼으로. */
+.im-paramforms { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
+.im-paramform-name { font-size: 12px; font-weight: 700; color: var(--slate-600, #475569); margin: 2px 0; }
+.im-paramforms .pv-sheet { margin: 0; max-width: none; gap: 8px; }
+.im-paramforms .pv-main { grid-template-columns: minmax(0, 1fr); }
+.im-wparams .im-paramforms { margin-top: 6px; }
+/* 지갑별 파라미터 탭 (시간순/활동별… 스타일의 알약 탭) */
+.im-wtabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.im-wtab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--slate-400, #94a3b8);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.im-wtab:hover { color: var(--slate-600, #475569); }
+.im-wtab.on { background: var(--fog-500, #eef1f5); color: var(--ink, #0f1720); }
+.im-noparams {
+  margin-top: 14px;
+  padding: 22px 16px;
+  border: 1px dashed var(--hairline, #e5e7eb);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--slate-400, #94a3b8);
+  background: var(--surface-2, #fafafa);
+}
 .im-holes-defname { font-size: 12px; font-weight: 600; opacity: 0.75; margin-top: 4px; }
 .im-hole { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
 .im-hole-label { font-size: 12px; font-weight: 500; }
@@ -2047,6 +2088,7 @@
 .rm-defpart { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--warn-700); font-variant-numeric: tabular-nums; }
 .rm-defempty { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--slate-300); }
 .rm-deftile-nm { font-size: 12.5px; font-weight: 700; line-height: 1.25; }
+.rm-defcount { font-size: 11px; font-weight: 600; color: var(--slate-400); font-variant-numeric: tabular-nums; }
 .rm-defbar { height: 4px; border-radius: 2px; background: var(--fog-500); overflow: hidden; }
 .rm-defbar span { display: block; height: 100%; border-radius: 2px; }
 
@@ -2505,6 +2547,7 @@
     @keyframes imPop { from { opacity: 0; transform: translateY(8px) scale(0.985); } to { opacity: 1; transform: none; } }
     .im-overlay { background: rgba(13,17,24,0.46); backdrop-filter: blur(2px); }
     .im-box { width: 460px; padding: 0; border-radius: 20px; overflow: hidden; box-shadow: 0 30px 80px rgba(13,17,24,0.28); animation: imPop 0.22s cubic-bezier(0.22,0.61,0.36,1) both; display: flex; flex-direction: column; max-height: 88vh; }
+    .im-box.wide { width: min(620px, 94vw); }
     .im-x { top: 18px; right: 18px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--slate-400); }
     .im-x:hover { background: var(--fog-300); color: var(--slate-700); }
 
@@ -2554,6 +2597,11 @@
     .im-check + .im-check { border-top: 1px solid var(--hairline-soft); }
     .im-textfield { width: 100%; border: 1px solid var(--hairline); border-radius: 9px; padding: 9px 12px; font: inherit; font-size: 13px; outline: none; margin-top: 2px; }
     .im-textfield:focus { border-color: var(--warn-400); }
+    .im-libnote { font-size: 11px; color: var(--slate-400); }
+    .im-name { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
+    .im-name > span { font-size: 11px; font-weight: 700; color: var(--slate-500); }
+    .im-name > input { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 11px; font: inherit; font-size: 13px; outline: none; }
+    .im-name > input:focus { border-color: var(--sage-400, var(--sage-300)); }
     .im-selfield { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 6px; font-size: 12px; }
     .im-sellabel { font-weight: 700; color: var(--slate-500); }
     .im-selfield select { font: inherit; font-size: 13px; border: 1px solid var(--hairline); border-radius: 9px; padding: 9px 12px; outline: none; background: var(--surface); }

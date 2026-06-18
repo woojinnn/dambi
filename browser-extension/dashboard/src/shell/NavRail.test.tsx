@@ -42,7 +42,7 @@ describe("NavRail", () => {
   it("removes focus from a pointer-clicked nav item so the rail can collapse on mouse leave", () => {
     renderNavRail();
 
-    const simulationLink = screen.getByRole("link", { name: "Simulation" });
+    const simulationLink = screen.getByRole("link", { name: "시뮬레이션" });
     simulationLink.focus();
     expect(document.activeElement).toBe(simulationLink);
 

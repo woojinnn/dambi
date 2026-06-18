@@ -21,4 +21,8 @@ interface Window {
   PASU_TOKEN_LOGOS?: Record<string, string>;
   PASU_imgFail?: (img: HTMLImageElement) => void;
   PASU_badgeFail?: (img: HTMLImageElement) => void;
+  // i18n bridge: React sets this to a bound i18next `t` (monitoring namespace) so
+  // the prototype's render functions can translate at render time. Reads the live
+  // language on every call; absent only in the standalone prototype.
+  PASU_T?: (key: string, vars?: Record<string, unknown>) => string;
 }

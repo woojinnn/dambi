@@ -282,6 +282,7 @@ function WalletWorkspace(props: {
   const removePackage = (pkgId: string) => {
     const pkg = wallet.packages?.[pkgId];
     if (!pkg) return;
+    if (snap.library.packages[pkgId]?.source === "builtin") return void onToast(t("list.builtinLocked"));
     const n = Object.values(wallet.bindings).filter((b) => b.packageId === pkgId).length;
     if (!window.confirm(t("wallet.removePackageConfirm", { name: pkg.displayName, count: n })))
       return;
@@ -295,6 +296,7 @@ function WalletWorkspace(props: {
 
   /** 정책 자체를 라이브러리에서 삭제 — 모든 지갑에서 함께 제거된다. */
   const deletePolicy = (d: PolicyDef) => {
+    if (d.source === "builtin") return void onToast(t("list.builtinLocked"));
     const uses = Object.values(snap.wallets.byAddress).reduce(
       (n, w) => n + Object.values(w.bindings).filter((b) => b.defId === d.id).length,
       0,

@@ -128,5 +128,182 @@
     "target": "대상",
     "building": "calldata 빌드 중…",
     "failed": "실패: {{error}}"
+  },
+  "assets": {
+    "screenAll": "Assets — 전체 합산",
+    "screenWallet": "Assets — {{label}}",
+    "notif": "{{count}}건 미해결 finding",
+    "prevWallet": "이전 지갑",
+    "nextWallet": "다음 지갑",
+    "allWallets": "전체 합산",
+    "donut": {
+      "walletTitle": "지갑별 자산 비율",
+      "walletChart": "지갑별 자산 비율 도넛 차트",
+      "assetTitle": "자산 분포",
+      "assetChart": "체인별 자산 분포 도넛 차트",
+      "walletCenter": "합산 자산",
+      "assetCenter": "총 자산",
+      "walletAssets": "{{label}} 자산",
+      "includedAssets": "포함 자산군",
+      "holdingWallets": "보유 지갑",
+      "ctxBasis": "{{label}} 기준"
+    },
+    "sections": {
+      "holdings": "보유자산",
+      "approvals": "승인",
+      "pending": "대기 주문"
+    },
+    "holdings": {
+      "search": "토큰 검색",
+      "metaAll": "{{wallets}} 지갑 · {{tokens}} 토큰",
+      "metaOne": "1 지갑 · {{tokens}} 토큰",
+      "searchEmpty": "\"{{q}}\" 검색 결과가 없습니다.",
+      "groupAtRisk": "주의가 필요한 자산",
+      "groupClean": "보유 자산",
+      "count": "{{count}}개",
+      "exposureN": "노출 {{amount}}"
+    },
+    "cols": {
+      "asset": "자산",
+      "wallet": "지갑",
+      "balance": "잔고",
+      "usd": "USD",
+      "riskExposure": "위험 노출",
+      "type": "유형",
+      "tokenOrCollection": "토큰 / 컬렉션",
+      "spenderOperator": "spender / operator",
+      "amount": "금액",
+      "risk": "위험",
+      "action": "액션",
+      "summary": "요약",
+      "signedAt": "서명 시각"
+    },
+    "exposure": {
+      "pendingEval": "평가 보류",
+      "prefix": "노출",
+      "legendTitle": "위험 노출",
+      "legendDesc": "이 자산에 걸린 승인으로 지금 실제 빠져나갈 수 있는 금액 (온체인 기준)",
+      "warnK": "주의",
+      "warnV": "무제한 승인 — 전액 노출",
+      "lowK": "낮음",
+      "lowV": "한도 승인 · 오래됨 · 만료",
+      "noneK": "없음",
+      "noneV": "활성 승인 없음 — 안전",
+      "failK": "위험",
+      "failV": "차단된 악성 주소 — 즉시 철회",
+      "foot": "악성 주소 차단은 평판 레지스트리 연결 시 활성화 · 종류별 상세는 아래 Approvals 표"
+    },
+    "risk": {
+      "unlimited": "무제한 승인",
+      "knownVenue": "검증된 거래소",
+      "blocked": "차단 대상",
+      "old": "오래된 승인",
+      "expired": "만료됨",
+      "capped": "한도 승인",
+      "descUnlimited": "한도 없이 토큰을 꺼내갈 수 있는 승인 — 자산 전액이 노출됩니다.",
+      "descKnownVenue": "검증된 거래소·프로토콜에 대한 승인 — 위험 낮음(정보).",
+      "descBlocked": "차단 목록에 오른 악성/위험 주소에 대한 승인 — 즉시 철회 권장.",
+      "descOld": "오래 사용하지 않은 승인 — 정리 대상.",
+      "descExpired": "기한이 지난 승인."
+    },
+    "approvals": {
+      "empty": "표시할 approval이 없습니다",
+      "metaUnlimited": "무제한 승인 · 오래된 승인 · 만료",
+      "metaBlocked": "차단 대상 · 무제한 승인 · 오래된 승인",
+      "metaCount": "{{count}}건"
+    },
+    "pending": {
+      "empty": "대기 중인 주문이 없습니다",
+      "subhead": "(오프체인 인텐트 · 서명)",
+      "sellMax": "최대매도",
+      "buyMin": "최소매수",
+      "allowance": "한도",
+      "tokenApproval": "토큰 승인",
+      "offchainOrder": "오프체인 주문",
+      "perpOrder": "퍼프 주문",
+      "signature": "서명"
+    },
+    "hl": {
+      "meta": "포지션 · 레버리지 · 오픈 오더 · 마진",
+      "tabAll": "전체",
+      "positions": "포지션",
+      "openOrders": "오픈 오더",
+      "sym": "종목",
+      "side": "방향",
+      "size": "수량",
+      "entry": "진입가",
+      "value": "평가",
+      "kind": "구분",
+      "triggerLimit": "트리거 → 지정",
+      "cond": "조건",
+      "posEmpty": "포지션 없음",
+      "ordEmpty": "오픈 오더 없음",
+      "buy": "매수",
+      "sell": "매도",
+      "tp": "익절",
+      "sl": "손절",
+      "liquidation": "청산",
+      "limit": "지정가",
+      "cross": "교차",
+      "isolated": "격리",
+      "fullSize": "전량",
+      "reduceOnly": "청산전용",
+      "new": "신규"
+    },
+    "l2": {
+      "overview": "지갑 개요",
+      "totalAssets": "총 자산",
+      "riskExposure": "위험 노출",
+      "currentVar": "현재 노출 · VaR",
+      "unlimitedApprovals": "무제한 승인",
+      "pendingOrders": "대기 주문",
+      "countCases": "{{count}}건",
+      "calm": "✓ 노출된 위험이 없어요 — 이 지갑은 정상입니다"
+    },
+    "banner": {
+      "blocked": "<b>차단 대상 승인 {{count}}건</b>이 감지됐어요. 위험 보기로 전환하면 노출된 자산이 상단으로 올라옵니다.",
+      "unlimited": "<b>무제한 승인 {{count}}건</b>으로 자산이 전액 노출돼 있어요. 위험 보기로 전환하면 노출 자산이 상단으로 올라옵니다.",
+      "switch": "위험 보기로 전환"
+    },
+    "chrome": {
+      "sortRisk": "정렬: 위험 우선순위",
+      "sortUsd": "정렬: USD 평가액"
+    },
+    "alert": {
+      "actionNeeded": "조치 필요",
+      "blocked": "차단 대상",
+      "unlimited": "무제한 승인",
+      "exposure": "현재 노출",
+      "pending": "대기 주문",
+      "calm": "정상 — 처리할 긴급 항목이 없어요",
+      "calmExtra": " · 대기 주문 {{count}}건"
+    },
+    "overview": {
+      "holdings": "보유 자산",
+      "tokens": "{{count}} 토큰",
+      "apprRisk": "승인 위험",
+      "noExposure": "노출 없음",
+      "unlimitedN": "무제한 {{count}}",
+      "blockedN": " · 차단 {{count}}",
+      "cases": "{{count}}건",
+      "positions": "{{count}} 포지션",
+      "pending": "대기 주문",
+      "signWaiting": "서명 대기",
+      "none": "없음"
+    },
+    "acc": {
+      "tokens": "{{count}} 토큰",
+      "exposureN": "노출 {{amount}}",
+      "cases": "{{count}}건",
+      "blockedN": "차단 {{count}}",
+      "unlimitedN": "무제한 {{count}}",
+      "cleanupN": "정리 대상 {{count}}",
+      "noRisk": "위험 없음",
+      "positions": "{{count}} 포지션",
+      "signWaiting": "서명 대기",
+      "none": "없음",
+      "expandAll": "모두 펼치기",
+      "collapseAll": "모두 접기"
+    }
   }
 }

@@ -292,6 +292,26 @@ export function categoryOf(slug: string | undefined): CategoryKey {
   return "Others";
 }
 
+/** Editor-taxonomy (`PolicyDef.cat`: swap/amm/perp/…) → market CategoryKey.
+ *  Used when publishing a package to tag it with its members' categories. */
+const EDITOR_CAT_TO_MARKET: Record<string, CategoryKey> = {
+  token: "Token",
+  swap: "DEX",
+  amm: "DEX",
+  perp: "Perp",
+  bridge: "Bridge",
+  lending: "Lending",
+  nft: "NFT",
+  airdrop: "Airdrop",
+};
+
+/** Normalize any `cat` value to a market CategoryKey: pass through if already
+ *  a market key, else map from the editor taxonomy, else `Others`. */
+export function toMarketCategory(cat: string | undefined): CategoryKey {
+  if (isCategoryKey(cat)) return cat;
+  return (cat && EDITOR_CAT_TO_MARKET[cat.toLowerCase()]) || "Others";
+}
+
 export function categoryNameOf(c: string | undefined, locale: "en" | "ko"): string {
   if (isCategoryKey(c)) return CATEGORY_NAME[c][locale];
   return c ?? "";
