@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { fetchMe, listFindings } from "../server-api";
+import { listFindings } from "../server-api";
 import { useAuth } from "../hooks/useAuth";
 
 /**
@@ -17,8 +17,9 @@ export function NavRail() {
   // token, messages the SW, and resets `user`. The server-api `logout` only
   // drops localStorage, so the next refresh re-hydrates the token from
   // chrome.storage and the user bounces straight back in.
-  const { logout } = useAuth();
-  const meQ = useQuery({ queryKey: ["me"], queryFn: fetchMe, staleTime: Infinity });
+  // 로그인된 계정은 useAuth().user 로 읽는다(재로그인 시 즉시 반영). 예전엔 별도
+  // ["me"] 쿼리를 staleTime:Infinity 로 캐시해, 계정 전환 후에도 옛 계정이 떴다.
+  const { logout, user } = useAuth();
   const findingsQ = useQuery({
     queryKey: ["findings", "unresolved-count"],
     queryFn: () => listFindings({ limit: 50 }),
@@ -26,7 +27,7 @@ export function NavRail() {
   });
   const pendingCount = findingsQ.data?.filter((f) => f.user_decision === null).length ?? 0;
 
-  const initials = (meQ.data?.email ?? "??").slice(0, 2).toUpperCase();
+  const initials = (user?.email ?? "??").slice(0, 2).toUpperCase();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -62,6 +63,8 @@ export function NavRail() {
       <div className="nav-group">
         <RailItem to="/" end label={t("nav.home")} icon={<HomeIcon />} />
         <RailItem to="/editor" label={t("nav.editor")} icon={<EditorIcon />} />
+        {/* 정책 관리 2 — 새 에디터 프론트(이식 중). 백엔드 연동 후 기존 '정책 관리'를 대체. */}
+        <RailItem to="/editor2" label={t("nav.editor2")} icon={<EditorIcon />} />
         <RailItem to="/simulation" label={t("nav.simulation")} icon={<SimIcon />} />
         <RailItem to="/assets" label={t("nav.assets")} icon={<MonIcon />} />
         <RailItem to="/market" label={t("nav.market")} icon={<MarketIcon />} />
@@ -101,8 +104,8 @@ export function NavRail() {
         >
           <span className="av">{initials}</span>
           <div className="meta">
-            <div className="nm">{meQ.data?.email ?? "—"}</div>
-            <div className="em">{meQ.data?.user_id ?? ""}</div>
+            <div className="nm">{user?.email ?? "—"}</div>
+            <div className="em">{user?.user_id ?? ""}</div>
           </div>
           <span className="nav-user-caret"><CaretUpIcon /></span>
         </button>

@@ -61,6 +61,9 @@
 .sw-btn.primary:disabled { opacity: 0.45; cursor: not-allowed; }
 .sw-btn.ghost:disabled { opacity: 0.4; cursor: not-allowed; }
 .sw-btn.add { margin-top: 12px; }
+/* 트랜잭션 추가/예시 넣기 버튼 줄 */
+.sw-tx-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.sw-tx-actions .sw-btn.add { margin-top: 0; }
 
 /* ── wallet picker (step 1) ───────────────────────────────────────────────── */
 .sw-pick { border: 1px solid var(--hairline); border-radius: var(--r-md); padding: 10px; background: var(--surface); align-self: start; }

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Policy Editor — dambi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/tokens.css" />
+<link rel="stylesheet" href="css/shell.css" />
+<link rel="stylesheet" href="css/editor-v2.css" />
+<link rel="stylesheet" href="css/editor2.css" />
+<link rel="stylesheet" href="css/policy-form.css" />
+<link rel="stylesheet" href="css/policy-value-sheet.css" />
+<link rel="stylesheet" href="css/market.css" />
+<link rel="stylesheet" href="css/extra.css" />
+<style>html,body{margin:0;height:100%}</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- React (vendored locally — MV3 CSP blocks external CDN + Babel eval) -->
+<script src="vendor/react.js"></script>
+<script src="vendor/react-dom.js"></script>
+
+<!-- plain-JS infrastructure -->
+<script src="js/store.js"></script>
+<script src="js/cedar.js"></script>
+
+<!-- React components (pre-transpiled JSX → JS via esbuild; shared via window globals) -->
+<script src="js/icons.js"></script>
+<script src="js/shell.js"></script>
+<script src="js/list.js"></script>
+<script src="js/form.js"></script>
+<script src="js/extras.js"></script>
+<script src="js/formpane.js"></script>
+<script src="js/modals.js"></script>
+<script src="js/wallet.js"></script>
+<script src="js/preview.js"></script>
+<script src="js/editor2.js"></script>
+<script src="js/listpage.js"></script>
+<script src="js/detail.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

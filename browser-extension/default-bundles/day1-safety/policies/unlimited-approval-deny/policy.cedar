@@ -22,7 +22,7 @@
 // as a Cedar set literal; the entry below is the canonical Permit2 contract.
 // Addresses are lowercase hex.
 @id("unlimited-approval-deny")
-@severity("deny")
+@severity("warn")
 forbid(principal, action == Token::Action::"Erc20Approve", resource)
 when {
   (context.amount == "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"

@@ -58,7 +58,9 @@
       "labelPlaceholder": "라벨",
       "fromWallet": "from (지갑)",
       "toContract": "to (컨트랙트)",
-      "addTx": "+ 트랜잭션 추가"
+      "addTx": "+ 트랜잭션 추가",
+      "addExample": "예시 넣기",
+      "exampleLabel": "예시 · 무제한 USDC 승인"
     },
     "step4": {
       "title": "④ 결과",

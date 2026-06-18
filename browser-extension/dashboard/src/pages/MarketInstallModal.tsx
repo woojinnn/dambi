@@ -75,13 +75,13 @@ export function MarketInstallModal({
   );
 
   const isSet = listing.kind === "set";
-  const name = pickI18n(listing.display_name, locale) || listing.slug;
+  const name = pickI18n(listing.display_name) || listing.slug;
   const cat = categoryOf(listing.slug);
   const catColor = CATEGORY_COLOR[cat];
 
   const formDefsQ = useQuery({
     queryKey: ["market-form-defs", listing.slug, detailQ.data?.current_version ?? ""],
-    queryFn: () => installFormDefs(detailQ.data!, locale),
+    queryFn: () => installFormDefs(detailQ.data!),
     enabled: !!detailQ.data,
   });
   const formDefs: ScopeFormDef[] = useMemo(

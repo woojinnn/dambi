@@ -134,6 +134,7 @@
     "failed": "Failed: {{error}}"
   },
   "assets": {
+    "here": "Assets",
     "screenAll": "Assets — all wallets",
     "screenWallet": "Assets — {{label}}",
     "notif": "{{count}} unresolved findings",

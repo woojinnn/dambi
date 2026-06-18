@@ -498,7 +498,7 @@ function SimulationPageInner() {
   return (
     <>
       <Topbar
-        here="Simulation"
+        here={t("nav.simulation", { ns: "shell" })}
         subtitle={`${rows.length} / ${MAX_TX} TX`}
       />
 

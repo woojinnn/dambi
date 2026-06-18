@@ -26,8 +26,6 @@ interface TopbarProps {
   searchPlaceholder?: string;
   counts?: { pass: number; warn: number; fail: number };
   right?: ReactNode;
-  /** Show the notification bell. Default true; pages like Market opt out. */
-  showNotifications?: boolean;
   /** Show the ⌘K / Ctrl K shortcut hint in the search box. Default true. */
   showShortcutHint?: boolean;
   /** Replace the global jump-search with a page-specific search element.
@@ -45,7 +43,6 @@ export function Topbar({
   searchPlaceholder,
   counts,
   right,
-  showNotifications = true,
   showShortcutHint = true,
   searchSlot,
   showSearch = false,
@@ -75,7 +72,6 @@ export function Topbar({
             </span>
           </>
         )}
-        {showNotifications && <NotificationButton />}
         {right}
       </div>
     </div>
@@ -258,33 +254,6 @@ function GlobalSearch({
         </div>
       )}
     </div>
-  );
-}
-
-// ── Notification button (C11) ───────────────────────────────────────────
-
-function NotificationButton() {
-  const { t } = useTranslation("shell");
-  const navigate = useNavigate();
-  const findingsQ = useQuery({
-    queryKey: ["findings", "topbar"],
-    queryFn: () => import("../server-api").then((m) => m.listFindings({ limit: 50 })),
-    refetchInterval: 30_000,
-  });
-  const unread = findingsQ.data?.filter((f) => f.user_decision === null).length ?? 0;
-  return (
-    <button
-      className="icon-btn"
-      onClick={() => navigate("/history")}
-      title={unread > 0 ? t("notifications.unresolved", { count: unread }) : t("notifications.none")}
-      aria-label="notifications"
-    >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9" />
-        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-      </svg>
-      {unread > 0 && <span className="unread-dot" />}
-    </button>
   );
 }
 

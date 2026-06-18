@@ -189,7 +189,6 @@ function holeValueToInputStr(v: HoleValue): string {
 
 export async function requiredHoleInputs(
   detail: ListingDetail,
-  locale: "ko" | "en",
   snap: StoreSnapshot | null,
 ): Promise<ListingHoleRequirement[]> {
   // 미리보기 변환 — installListing(POST /install)은 설치 이벤트를 기록하므로
@@ -199,7 +198,7 @@ export async function requiredHoleInputs(
   const meta: ListingMeta = {
     id: detail.id,
     kind: detail.kind,
-    displayName: pickI18n(detail.display_name, locale) || detail.slug,
+    displayName: pickI18n(detail.display_name) || detail.slug,
     version: detail.current_version,
     cat: detail.category ?? detail.domain ?? undefined,
   };
@@ -245,14 +244,13 @@ export interface ListingFormDef {
 
 export async function installFormDefs(
   detail: ListingDetail,
-  locale: "ko" | "en",
 ): Promise<ListingFormDef[]> {
   const v = detail.latest_version;
   if (!v || !detail.current_version) return [];
   const meta: ListingMeta = {
     id: detail.id,
     kind: detail.kind,
-    displayName: pickI18n(detail.display_name, locale) || detail.slug,
+    displayName: pickI18n(detail.display_name) || detail.slug,
     version: detail.current_version,
     cat: detail.category ?? detail.domain ?? undefined,
   };
@@ -284,7 +282,7 @@ async function convertListing(
   const meta: ListingMeta = {
     id: detail.id,
     kind: detail.kind,
-    displayName: pickI18n(detail.display_name, locale) || detail.slug,
+    displayName: pickI18n(detail.display_name) || detail.slug,
     version: detail.current_version,
     cat: detail.category ?? detail.domain ?? undefined,
   };

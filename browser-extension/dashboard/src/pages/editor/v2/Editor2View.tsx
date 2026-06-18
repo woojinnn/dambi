@@ -410,12 +410,12 @@ function Workspace(props: {
   // 이름 동률은 id 로 안정 정렬해 검색/지우기 후 순서가 흔들리지 않게 한다.
   const folders = useMemo(() => {
     const seen = new Set<string>();
-    const list: { id: string; displayName: string; locked?: boolean }[] = Object.values(
+    const list: { id: string; displayName: string; locked?: boolean; builtin?: boolean }[] = Object.values(
       snap.library.packages,
     )
       .filter((p) => p.id !== UNCATEGORIZED_PKG && !seen.has(p.id) && seen.add(p.id))
       .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko") || a.id.localeCompare(b.id))
-      .map((p) => ({ id: p.id, displayName: p.displayName }));
+      .map((p) => ({ id: p.id, displayName: p.displayName, builtin: p.source === "builtin" }));
     if (defsByFolder.has(UNCATEGORIZED_PKG))
       list.push({ id: UNCATEGORIZED_PKG, displayName: t("editor2.uncatName"), locked: true });
     return list;
@@ -728,7 +728,10 @@ function Workspace(props: {
               // 기본 접힘. 검색 중엔 매칭을 보여주려 강제로 펼친다.
               const open = searching || expanded.has(f.id);
               return (
-                <div key={f.id} className={`sgroup${open ? "" : " collapsed"}${f.locked ? " uncat" : ""}`}>
+                <div
+                  key={f.id}
+                  className={`sgroup${open ? "" : " collapsed"}${f.locked ? " uncat" : ""}${f.builtin ? " builtin" : ""}`}
+                >
                   <div
                     className={`sghead${folderDrop === f.id ? " droptarget" : ""}`}
                     draggable={!f.locked}
@@ -767,32 +770,35 @@ function Workspace(props: {
                     ) : (
                       <>
                         <span className="cnt">{all.length}</span>
-                        <span className="facts" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className="ib xs"
-                            title={t("editor2.publish")}
-                            onClick={() => void publishLibFolder(f.id, f.displayName)}
-                          >
-                            <Ic id="shield" cls="sm" />
-                          </button>
-                          <button
-                            type="button"
-                            className="ib xs"
-                            title={t("editor2.rename")}
-                            onClick={() => renameLibFolder(f.id)}
-                          >
-                            <Ic id="edit" cls="sm" />
-                          </button>
-                          <button
-                            type="button"
-                            className="ib xs danger"
-                            title={t("editor2.delete")}
-                            onClick={() => deleteLibFolder(f.id)}
-                          >
-                            <Ic id="trash" cls="sm" />
-                          </button>
-                        </span>
+                        {/* 기본 안전팩(builtin) 폴더는 수정 불가 — 게시·이름변경·삭제 숨김. */}
+                        {!f.builtin && (
+                          <span className="facts" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="ib xs"
+                              title={t("editor2.publish")}
+                              onClick={() => void publishLibFolder(f.id, f.displayName)}
+                            >
+                              <Ic id="shield" cls="sm" />
+                            </button>
+                            <button
+                              type="button"
+                              className="ib xs"
+                              title={t("editor2.rename")}
+                              onClick={() => renameLibFolder(f.id)}
+                            >
+                              <Ic id="edit" cls="sm" />
+                            </button>
+                            <button
+                              type="button"
+                              className="ib xs danger"
+                              title={t("editor2.delete")}
+                              onClick={() => deleteLibFolder(f.id)}
+                            >
+                              <Ic id="trash" cls="sm" />
+                            </button>
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
@@ -817,32 +823,36 @@ function Workspace(props: {
                               <Ic id="box" cls="sm" />
                               {usedIn}
                             </span>
-                            <span className="acts">
-                              <button
-                                type="button"
-                                className="ib xs"
-                                title={t("wallet.editSkeletonTitle")}
-                                onClick={() => navigate(`/editor/${encodeURIComponent(d.id)}`)}
-                              >
-                                <Ic id="edit" cls="sm" />
-                              </button>
-                              <button
-                                type="button"
-                                className="ib xs"
-                                title={t("editor2.publishHub")}
-                                onClick={() => void publishDef(d)}
-                              >
-                                <Ic id="shield" cls="sm" />
-                              </button>
-                              <button
-                                type="button"
-                                className="ib xs danger"
-                                title={t("editor2.delete")}
-                                onClick={() => onDeleteDef(d)}
-                              >
-                                <Ic id="trash" cls="sm" />
-                              </button>
-                            </span>
+                            {/* 기본 안전팩(builtin)은 수정 불가 — 편집·게시·삭제 액션을
+                                통째로 숨긴다(바꾸려면 복제해서 내 정책으로). */}
+                            {d.source !== "builtin" && (
+                              <span className="acts">
+                                <button
+                                  type="button"
+                                  className="ib xs"
+                                  title={t("wallet.editSkeletonTitle")}
+                                  onClick={() => navigate(`/editor/${encodeURIComponent(d.id)}`)}
+                                >
+                                  <Ic id="edit" cls="sm" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ib xs"
+                                  title={t("editor2.publishHub")}
+                                  onClick={() => void publishDef(d)}
+                                >
+                                  <Ic id="shield" cls="sm" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ib xs danger"
+                                  title={t("editor2.delete")}
+                                  onClick={() => onDeleteDef(d)}
+                                >
+                                  <Ic id="trash" cls="sm" />
+                                </button>
+                              </span>
+                            )}
                             <Ic id="grip" cls="sm grip" />
                           </span>
                         </div>
@@ -1030,6 +1040,11 @@ function PackageCard(props: {
   useEffect(() => setDraftDesc(pkg.desc ?? ""), [pkg.desc]);
 
   const locked = pkg.id === UNCATEGORIZED_PKG;
+  // 기본 안전팩(builtin)은 구조 편집 불가 — 이름변경/게시/설명/삭제/바인딩삭제/파라미터
+  // 이동을 막고, 색을 개별처럼 다르게 준다(toggle 만 가능). builtin 패키지 id는
+  // `pkg::builtin.*`(시드의 BUILTIN_PKG) 규칙을 따른다.
+  const isBuiltin = pkg.id.startsWith("pkg::builtin.");
+  const readOnly = locked || isBuiltin;
   const empty = members.length === 0;
   const activeN = members.filter((b) => isEffectiveOn(wallet, b)).length;
   const displayedOn = packageDisplayOn(
@@ -1041,7 +1056,7 @@ function PackageCard(props: {
 
   return (
     <div
-      className={`pcard${flip ? " flip" : ""}${drop ? " drop" : ""}${locked ? " uncat" : ""}`}
+      className={`pcard${flip ? " flip" : ""}${drop ? " drop" : ""}${locked ? " uncat" : ""}${isBuiltin ? " builtin" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDrop(true);
@@ -1066,6 +1081,7 @@ function PackageCard(props: {
               {pkg.displayName}
             </span>
             {locked && <span className="uncat-tag">{t("editor2.uncatCardTag")}</span>}
+            {isBuiltin && <span className="uncat-tag">{t("editor2.builtinTag")}</span>}
             {!empty && (
               <label className="sw sm" onClick={(e) => e.stopPropagation()}>
                 <input
@@ -1077,10 +1093,12 @@ function PackageCard(props: {
               </label>
             )}
           </div>
-          <p className={`pf-intent${locked || !pkg.desc ? " muted" : ""}`}>
+          <p className={`pf-intent${readOnly || !pkg.desc ? " muted" : ""}`}>
             {locked
               ? t("editor2.uncatCardDesc")
-              : pkg.desc || t("editor2.cardDescEmpty")}
+              : isBuiltin
+                ? t("editor2.builtinCardDesc")
+                : pkg.desc || t("editor2.cardDescEmpty")}
           </p>
           <div className="pf-foot">
             {!empty && (
@@ -1134,7 +1152,7 @@ function PackageCard(props: {
             ) : (
               <span className="pb-nm">{pkg.displayName}</span>
             )}
-            {!locked && (
+            {!readOnly && (
               <>
                 <button
                   type="button"
@@ -1160,7 +1178,7 @@ function PackageCard(props: {
               </>
             )}
           </div>
-          {!locked && (
+          {!readOnly && (
             <input
               className="pb-desc-input"
               value={draftDesc}
@@ -1189,6 +1207,7 @@ function PackageCard(props: {
                   address={address}
                   run={run}
                   onOpen={() => onOpenBinding(b.defId, b.id)}
+                  readOnly={isBuiltin}
                 />
               ))
             )}
@@ -1198,7 +1217,7 @@ function PackageCard(props: {
               {t("editor2.policyCount", { count: members.length })}
             </span>
             <span className="spacer" />
-            {!locked && (
+            {!readOnly && (
               <button
                 type="button"
                 className="ib danger"
@@ -1222,22 +1241,28 @@ function BindingItem(props: {
   address: string;
   run: RunFn;
   onOpen: () => void;
+  /** 기본 안전팩(builtin) — 파라미터 수정 진입과 제거를 막는다(토글만 가능). */
+  readOnly?: boolean;
 }) {
-  const { binding: b, def, address, run, onOpen } = props;
+  const { binding: b, def, address, run, onOpen, readOnly } = props;
   const { t } = useTranslation("editor");
   const cat = catKey(def?.cat);
   const name = b.alias ?? def?.displayName ?? b.defId;
   return (
     <div className={`pb-item${b.enabled ? "" : " off"}`}>
       <span className="dot" style={{ background: catStyle(cat).hex }} />
-      <span
-        className="nm"
-        title={t("wallet.bindingEditTitle")}
-        style={{ cursor: "pointer" }}
-        onClick={onOpen}
-      >
-        {name}
-      </span>
+      {readOnly ? (
+        <span className="nm">{name}</span>
+      ) : (
+        <span
+          className="nm"
+          title={t("wallet.bindingEditTitle")}
+          style={{ cursor: "pointer" }}
+          onClick={onOpen}
+        >
+          {name}
+        </span>
+      )}
       {b.alias && <span className="alias">{b.alias}</span>}
       <button
         type="button"
@@ -1252,14 +1277,16 @@ function BindingItem(props: {
       >
         <Ic id={b.enabled ? "check" : "x"} />
       </button>
-      <button
-        type="button"
-        className="ib danger"
-        title={t("wallet.removeBindingTitle")}
-        onClick={() => void run(t("actions.remove"), () => removeBinding({ address, bindingId: b.id }))}
-      >
-        <Ic id="trash" cls="sm" />
-      </button>
+      {!readOnly && (
+        <button
+          type="button"
+          className="ib danger"
+          title={t("wallet.removeBindingTitle")}
+          onClick={() => void run(t("actions.remove"), () => removeBinding({ address, bindingId: b.id }))}
+        >
+          <Ic id="trash" cls="sm" />
+        </button>
+      )}
     </div>
   );
 }

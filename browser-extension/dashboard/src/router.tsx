@@ -28,6 +28,7 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { HomePage } from "./pages/HomePage";
 import { EditorListPage } from "./pages/editor/EditorListPage";
 import { EditorDetailPage } from "./pages/editor/EditorDetailPage";
+import { EditorV3ListPage, EditorV3DetailPage } from "./pages/editor/v3/EditorV3Pages";
 import { SimulateWizardPage } from "./pages/simulate/SimulateWizardPage";
 import { Assets2Page } from "./pages/Assets2Page";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -56,6 +57,8 @@ const router = createRouter([
           { path: "editor", element: <EditorListPage /> },
           { path: "editor/new", element: <Navigate to="/editor" replace /> },
           { path: "editor/:id", element: <EditorDetailPage /> },
+          { path: "editor2", element: <EditorV3ListPage /> },
+          { path: "editor2/:id", element: <EditorV3DetailPage /> },
           { path: "simulation", element: <SimulateWizardPage /> },
           { path: "simulate", element: <Navigate to="/simulation" replace /> },
           { path: "assets", element: <Assets2Page /> },

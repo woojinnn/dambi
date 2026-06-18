@@ -15,7 +15,7 @@
     {
       "id": "unlimited-approval-deny",
       "dir": "policies/unlimited-approval-deny",
-      "severity": "deny",
+      "severity": "warn",
       "trigger": { "action.tag": "erc20_approve" },
       "requires_facts": [],
       "summary": "허용목록 밖 spender에게 주는 무제한 ERC20 approve를 차단 (토큰 전액 드레인 1차 차단)"
@@ -51,14 +51,6 @@
       "trigger": { "action.tag": "swap" },
       "requires_facts": [],
       "summary": "스왑 산출 토큰의 수령처가 내 지갑이 아니면 차단 (fund-redirect)"
-    },
-    {
-      "id": "sweep-recipient-not-self-warn",
-      "dir": "policies/sweep-recipient-not-self-warn",
-      "severity": "warn",
-      "trigger": { "action.tag": "erc20_transfer" },
-      "requires_facts": [],
-      "summary": "라우터 sweep/unwrap(Uniswap sweepToken·unwrapWETH9)의 수령처가 내 지갑이 아니면 경고 — 스왑 산출이 멀티콜에 숨은 egress로 redirect되는 것 차단"
     }
   ],
   "fact_dependencies": [],

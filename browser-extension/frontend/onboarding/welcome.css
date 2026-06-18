@@ -106,8 +106,8 @@ body { font-family: var(--ff-sans); }
 .ob-check .box { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 auto; border: 1.5px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.04); display: grid; place-items: center; color: transparent; transition: background .12s, border-color .12s, color .12s; }
 .ob-check.on .box { background: var(--pass-500); border-color: var(--pass-500); color: #fff; }
 .ob-check .cmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ob-check .cn { font-size: 13px; font-weight: 700; color: #fff; }
-.ob-check .cd { font-family: var(--ff-mono); font-size: 10.5px; color: var(--brand-300); margin-top: 2px; }
+.ob-check .cn { font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-check .cd { font-family: var(--ff-mono); font-size: 10.5px; color: var(--brand-300); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ob-check .sev { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .ob-check .sev.deny { background: var(--fail-500); } .ob-check .sev.warn { background: var(--warn-500); } .ob-check .sev.unknown { background: var(--slate-300); }
 

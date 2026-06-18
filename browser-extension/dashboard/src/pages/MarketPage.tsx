@@ -65,7 +65,7 @@ export function MarketPage() {
         <>
           <MarketPagehead
             crumb={locale === "ko" ? "전체 목록" : "All listings"}
-            back={{ to: "/market", label: locale === "ko" ? "← Policy Hub 홈" : "← Policy Hub home" }}
+            back={{ to: "/market", label: locale === "ko" ? "← 정책허브 홈" : "← Policy Hub home" }}
           />
           <ListView locale={locale} initialParams={params} />
         </>
@@ -247,10 +247,10 @@ function LandingView({ locale }: { locale: MarketLocale }) {
   };
 
   return (
-    <div className="rm-page">
+    <div className="rm-page rm-landing">
       <div className="rm-shead">
         <div>
-          <div className="rm-shead-ttl">Policy Hub</div>
+          <div className="rm-shead-ttl">{ko ? "정책허브" : "Policy Hub"}</div>
           <div className="rm-shead-sub">
             {ko ? "지갑을 지키는 정책과 패키지를 둘러보세요" : "Browse policies and packages that protect your wallet"}
           </div>
@@ -357,7 +357,7 @@ function LandingView({ locale }: { locale: MarketLocale }) {
                     {c && <CategoryGlyph category={c} size={14} color={color!.hex} />}
                   </span>
                   <span className="meta">
-                    <span className="nm">{pickI18n(p.display_name, locale) || p.slug}</span>
+                    <span className="nm">{pickI18n(p.display_name) || p.slug}</span>
                     <span className="pub">
                       <InstallCount n={p.install_count} /> {ko ? "다운로드" : "installs"}
                     </span>
@@ -406,7 +406,7 @@ function CategoryCoverage({
     <div className="rm-sec">
       <div className="rm-sec-head between">
         <div>
-          <h2>Category</h2>
+          <h2>{ko ? "카테고리" : "Category"}</h2>
           <div className="sub">
             {ko
               ? "자산·프로토콜 유형별로 등록된 정책과 패키지를 둘러보세요."
@@ -542,8 +542,8 @@ function ListSearchPalette({
   const text = v.toLowerCase();
   const matchT = (l: ListingSummary) => {
     if (!text) return true;
-    const name = (pickI18n(l.display_name, locale) || l.slug).toLowerCase();
-    const line = (policyCopy(l.slug)?.title || pickI18n(l.description, locale) || "").toLowerCase();
+    const name = (pickI18n(l.display_name) || l.slug).toLowerCase();
+    const line = (policyCopy(l.slug)?.title || pickI18n(l.description) || "").toLowerCase();
     return name.includes(text) || line.includes(text) || l.slug.toLowerCase().includes(text);
   };
   const hitPkgs = packages.filter(matchT).slice(0, 3);
@@ -591,7 +591,7 @@ function ListSearchPalette({
                 {hitPkgs.map((pk) => (
                   <button key={pk.id} type="button" className="rm-srch-hit" onClick={() => { submit(q); onOpenDetail(pk.slug); }}>
                     <span className="hic pkg"><PackageGlyphSm /></span>
-                    <span className="nm">{pickI18n(pk.display_name, locale) || pk.slug}</span>
+                    <span className="nm">{pickI18n(pk.display_name) || pk.slug}</span>
                     <span className="k">{pk.publisher_tier === "official" ? (ko ? "공식" : "Official") : ko ? "커뮤니티" : "Community"}</span>
                     <span className="hn">{pk.install_count.toLocaleString()}</span>
                   </button>
@@ -606,7 +606,7 @@ function ListSearchPalette({
                   return (
                     <button key={p2.id} type="button" className="rm-srch-hit" onClick={() => { submit(q); onOpenDetail(p2.slug); }}>
                       <span className={`hic ${p2.severity ?? "warn"}`}>{p2.severity && <SeveritySymbol sev={p2.severity} size={12} />}</span>
-                      <span className="nm">{pickI18n(p2.display_name, locale) || p2.slug}</span>
+                      <span className="nm">{pickI18n(p2.display_name) || p2.slug}</span>
                       <span className="k">{c ? categoryNameOf(c, locale) : ""}</span>
                       <span className="hn">{p2.install_count.toLocaleString()}</span>
                     </button>
@@ -931,7 +931,7 @@ function ListView({
       {loading && <div className="market-status">{ko ? "불러오는 중…" : "Loading…"}</div>}
       {policiesQ.isError && (
         <div className="market-status market-error">
-          {ko ? "Policy Hub 로드 실패" : "Policy Hub load failed"}
+          {ko ? "정책허브 로드 실패" : "Policy Hub load failed"}
         </div>
       )}
 
@@ -1111,11 +1111,11 @@ function PolicyListCard({
   onInstall: (l: ListingSummary) => void;
 }) {
   const ko = locale === "ko";
-  const name = pickI18n(listing.display_name, locale) || listing.slug;
+  const name = pickI18n(listing.display_name) || listing.slug;
   const cat = listingCategoryKey(listing);
   const color = listingColor(listing);
   const sev = listing.severity;
-  const oneLine = policyCopy(listing.slug)?.title || pickI18n(listing.description, locale) || "";
+  const oneLine = policyCopy(listing.slug)?.title || pickI18n(listing.description) || "";
   return (
     <Link
       to={`/market/${encodeURIComponent(listing.slug)}`}
@@ -1159,7 +1159,7 @@ function PackageListCard({
   onInstall: (l: ListingSummary) => void;
 }) {
   const ko = locale === "ko";
-  const name = pickI18n(listing.display_name, locale) || listing.slug;
+  const name = pickI18n(listing.display_name) || listing.slug;
   // How many of this package's policies match the active category filter.
   const match = categories.reduce((s, c) => s + (meta.catCount.get(c) ?? 0), 0);
   const matchColor = categories.length === 1 ? CATEGORY_COLOR[categories[0]] : null;

@@ -33,7 +33,12 @@ export const getOverview = () => sendToExtension<StoreSnapshot>({ type: "ps2:get
 
 export const putDef = (def: PolicyDef) => sendToExtension<null>({ type: "ps2:put-def", def });
 export const deleteDef = (defId: string) => sendToExtension<null>({ type: "ps2:delete-def", defId });
-export const duplicateDef = (defId: string) => sendToExtension<string>({ type: "ps2:duplicate-def", defId });
+export const duplicateDef = (defId: string, packageId?: string) =>
+  sendToExtension<string>({
+    type: "ps2:duplicate-def",
+    defId,
+    ...(packageId !== undefined ? { packageId } : {}),
+  });
 
 export const putPackage = (pkg: PackageDef) => sendToExtension<null>({ type: "ps2:put-package", pkg });
 export const deletePackage = (packageId: string) =>

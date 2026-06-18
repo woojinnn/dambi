@@ -1,0 +1,1019 @@
+.ev3 /* PolicyFormPane — two-column form (left) + live cedar (right). Clean, .ev3 uniform
+ * controls (32px tall), .ev3 subtle separators, .ev3 and the Cedar preview on its own
+ * muted line under each condition row. */
+
+.pf-pane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+.ev3 .pf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.ev3 /* ── sections ───────────────────────────────────────────────────────────── */
+.pf-section {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: var(--surface, #fff);
+}
+.ev3 .pf-h {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ev3 .pf-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #111827;
+  color: #fff;
+  font-size: 13px;
+}
+.ev3 .pf-sub {
+  font-weight: 400;
+  font-size: 12.5px;
+  color: var(--muted, #6b7280);
+}
+.ev3 /* label + control rows (trigger / notify) */
+.pf-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+}
+.ev3 .pf-label {
+  width: 88px;
+  flex: none;
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+}
+.ev3 .pf-input, .ev3 .pf-select {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+}
+.ev3 .pf-readonly {
+  background: #f3f4f6;
+  color: var(--muted, #6b7280);
+  cursor: not-allowed;
+}
+.ev3 /* severity toggle */
+.pf-sev {
+  display: flex;
+  gap: 8px;
+}
+.ev3 .pf-sev-btn {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  color: var(--muted, #6b7280);
+}
+.ev3 .pf-sev-btn.warn.on {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #b45309;
+}
+.ev3 .pf-sev-btn.deny.on {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.ev3 /* ── condition list ─────────────────────────────────────────────────────── */
+.pf-empty-cond {
+  font-size: 12.5px;
+  color: var(--muted, #9ca3af);
+  padding: 6px 2px;
+}
+.ev3 .pf-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.ev3 .pf-add-cond {
+  border: 1px dashed var(--border, #d1d5db);
+  background: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.ev3 .pf-add-cond:hover {
+  border-color: #9ca3af;
+  color: #374151;
+}
+.ev3 /* ── 위험 상황 카드 (AND-run) ──────────────────────────────────────────── */
+.pf-sit {
+  border: 1px solid var(--hairline, #d7dbe0);
+  border-radius: 12px;
+  background: var(--surface-raised, #fff);
+  padding: 10px 12px 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.ev3 .pf-sit.droppable {
+  outline: 2px dashed var(--info-300, #93c5fd);
+  outline-offset: 2px;
+}
+.ev3 .pf-sit-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ev3 .pf-sit-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-800, #1e293b);
+}
+.ev3 .pf-sit-mode {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--slate-500, #64748b);
+  background: var(--fog-200, #eef1f5);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.ev3 /* 카드 사이의 "또는" 구분선 */
+.pf-or-div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 4px;
+  color: var(--warn-700, #8a6d3b);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ev3 .pf-or-div::before, .ev3 .pf-or-div::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--warn-300, #d8c08a);
+}
+.ev3 .pf-bullet {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  color: var(--slate-400, #94a3b8);
+  user-select: none;
+}
+.ev3 .pf-bullet.alt {
+  color: var(--warn-600, #a07d2c);
+}
+.ev3 .pf-add-cond.sm {
+  font-size: 12px;
+  padding: 4px 10px;
+  margin-top: 6px;
+}
+.ev3 .pf-box-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ev3 /* 패리티 틴트: OR 묶음(하나라도)은 따뜻한 톤, .ev3 AND 묶음(모두)은 차가운 톤.
+   중첩 박스는 자연스럽게 들여쓰기. */
+.pf-box.or {
+  background: var(--warn-50, #fffbeb);
+  border-color: var(--warn-300, #d8c08a);
+}
+.ev3 .pf-box.or > .pf-box-head .pf-box-label {
+  color: var(--warn-800, #92400e);
+}
+.ev3 .pf-box.and {
+  background: var(--info-50, #eef2f7);
+  border-color: var(--info-300, #aab8c8);
+}
+.ev3 .pf-box.and > .pf-box-head .pf-box-label {
+  color: var(--info-800, #1e40af);
+}
+.ev3 .pf-box .pf-box {
+  margin: 6px 0 6px 18px;
+}
+.ev3 /* 클릭 동기화: 선택된 행/묶음/카드 (다이어그램의 파란 선택과 짝) */
+.pf-cond.is-selected, .ev3 .pf-box.is-selected {
+  outline: 2px solid var(--info-400, #60a5fa);
+  outline-offset: 1px;
+  border-radius: 8px;
+  animation: ev3-pf-flash 0.5s ease-out;
+}
+.ev3 .pf-sit.is-selected {
+  border-color: var(--info-400, #60a5fa);
+  box-shadow: 0 0 0 1px var(--info-400, #60a5fa);
+}
+.ev3 .pf-sit-head, .ev3 .pf-box-head {
+  cursor: pointer;
+}
+@keyframes ev3-pf-flash {
+  from {
+    background: var(--info-50, #eff6ff);
+  }
+  to {
+    background: transparent;
+  }
+}
+.ev3 /* a single condition row: a control line + a muted cedar line */
+.pf-cond {
+  padding: 4px 0;
+}
+.ev3 .pf-cond + .pf-cond {
+  border-top: 1px solid #f3f4f6;
+}
+.ev3 .pf-cond-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ev3 .pf-cond-chip {
+  margin: 3px 0 0 26px;
+  font-size: 12px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .pf-cond-chip::before {
+  content: "↳ ";
+  color: #cbd5e1;
+}
+.ev3 .pf-grow {
+  flex: 1;
+}
+.ev3 /* uniform 32px controls */
+.pf-ctl, .ev3 .pf-val, .ev3 .fc-btn {
+  height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+}
+.ev3 .pf-ctl {
+  padding: 0 9px;
+  cursor: pointer;
+}
+.ev3 /* 인스턴스(값만) 편집의 읽기 전용 구조 칩 — 필드·연산자 자리. */
+.pf-ctl.pf-ro {
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+  background: var(--fog-200, #f1f5f9);
+  color: var(--slate-600, #475569);
+  white-space: nowrap;
+}
+.ev3 .pf-drag {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  cursor: grab;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1;
+  user-select: none;
+}
+.ev3 .pf-drag:hover {
+  color: #94a3b8;
+}
+.ev3 .pf-drag:active {
+  cursor: grabbing;
+}
+.ev3 .pf-leaf-op {
+  width: 112px;
+  flex: none;
+  font-weight: 600;
+}
+.ev3 .pf-mode {
+  flex: none;
+  color: #475569;
+  background: #f8fafc;
+}
+.ev3 /* value inputs */
+.pf-val {
+  width: 150px;
+  padding: 0 10px;
+}
+.ev3 .pf-val.num {
+  width: 92px;
+}
+.ev3 .pf-val.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  width: 220px;
+}
+.ev3 .pf-val.wide {
+  width: 240px;
+}
+.ev3 .pf-val.invalid {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+.ev3 .pf-val-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ev3 .pf-unit {
+  font-size: 11.5px;
+  color: var(--muted, #6b7280);
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+.ev3 /* row action icon buttons */
+.pf-iconbtn {
+  flex: none;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 7px;
+  background: var(--surface, #fff);
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.ev3 .pf-iconbtn:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+.ev3 .pf-iconbtn.danger:hover {
+  color: #ef4444;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.ev3 /* ── (…) group box ──────────────────────────────────────────────────────── */
+.pf-box {
+  border: 1px solid #dbe1fe;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: #f8f9ff;
+}
+.ev3 .pf-box.droppable {
+  border-style: dashed;
+  border-color: #818cf8;
+  background: #eef2ff;
+}
+.ev3 .pf-box-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ev3 .pf-box-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4f46e5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ev3 .pf-spc {
+  flex: 1;
+}
+.ev3 .pf-box-act {
+  flex: none;
+  height: 28px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--surface, #fff);
+  border-radius: 7px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  color: #4f46e5;
+  cursor: pointer;
+}
+.ev3 .pf-box-act:hover {
+  background: #eef2ff;
+}
+.ev3 .pf-or-btn {
+  margin-top: 6px;
+  border: 1px dashed var(--border, #d1d5db);
+  background: none;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.ev3 .pf-or-btn:hover {
+  border-color: #9ca3af;
+  color: #374151;
+}
+.ev3 /* drag-out target */
+.pf-dropstrip {
+  border: 1.5px dashed #c7d2fe;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+  font-size: 12.5px;
+  color: #6366f1;
+  background: #f5f7ff;
+  margin: 6px 0;
+}
+.ev3 /* ── field combobox ─────────────────────────────────────────────────────── */
+.fc {
+  position: relative;
+  flex: 1 1 150px;
+  min-width: 130px;
+}
+.ev3 .fc-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 0 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.ev3 .fc-btn.empty {
+  color: var(--muted, #9ca3af);
+}
+.ev3 .fc-btn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .fc-caret {
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 10px;
+}
+.ev3 .fc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.ev3 .fc-pop {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 320px;
+  max-width: 80vw;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+.ev3 .fc-search {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border, #eee);
+  padding: 10px 12px;
+  font-size: 13px;
+  outline: none;
+}
+.ev3 .fc-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.ev3 .fc-none {
+  padding: 14px;
+  color: var(--muted, #9ca3af);
+  font-size: 12.5px;
+  text-align: center;
+}
+.ev3 .fc-group-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #6b7280);
+}
+.ev3 .fc-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.ev3 .fc-opt.active {
+  background: #f3f4f6;
+}
+.ev3 .fc-opt.sel {
+  background: #eff6ff;
+}
+.ev3 .fc-opt-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.ev3 .fc-opt-label {
+  font-size: 13px;
+  color: #111827;
+}
+.ev3 .fc-opt-desc {
+  font-size: 11.5px;
+  color: var(--muted, #9ca3af);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ev3 .fc-chip {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 1px 6px;
+  flex: none;
+}
+.ev3 .fc-badge {
+  font-size: 10px;
+  color: #7c3aed;
+  background: #f5f3ff;
+  border-radius: 5px;
+  padding: 1px 5px;
+  flex: none;
+}
+.ev3 /* unit pill — sits right before the type chip; muted, .ev3 distinct from it */
+.fc-unit {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 5px;
+  padding: 1px 6px;
+  flex: none;
+}
+.ev3 .fc-unit + .fc-chip {
+  margin-left: 5px;
+}
+.ev3 /* "고급 필드 보기" expander at the bottom of the list */
+.fc-adv {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-top: 1px solid var(--border, #eee);
+  background: none;
+  margin-top: 4px;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+  cursor: pointer;
+}
+.ev3 .fc-adv:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+.ev3 /* ── validity badge ─────────────────────────────────────────────────────── */
+.pf-status {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ev3 .pf-status.ok {
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  color: #15803d;
+}
+.ev3 .pf-status.bad {
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #b91c1c;
+}
+.ev3 .pf-status-main {
+  font-weight: 600;
+}
+.ev3 .pf-status-meta {
+  color: var(--muted, #6b7280);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+.ev3 /* ── live cedar pane ────────────────────────────────────────────────────── */
+.pf-cedar {
+  position: sticky;
+  top: 8px;
+  border-radius: 12px;
+  background: #0b1020;
+  color: #e5e7eb;
+  overflow: hidden;
+  min-height: 220px;
+}
+.ev3 .pf-cedar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ev3 .pf-sync {
+  font-size: 11px;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.ev3 .pf-sync.err {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+.ev3 .pf-cedar-body {
+  margin: 0;
+  padding: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c7d2fe;
+}
+.ev3 /* ── address picker (name-resolving 0x input) ── */
+.pf-addr { position: relative; display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.ev3 .pf-val.resolved { border-color: var(--pass-400, #4ade80); background: var(--pass-50, #f0fdf4); }
+.ev3 .pf-addr-name {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; color: var(--pass-800, #166534);
+  background: var(--pass-100, #dcfce7); border-radius: var(--r-pill, 999px);
+  padding: 2px 9px; white-space: nowrap; flex-shrink: 0;
+}
+.ev3 .pf-addr-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.ev3 .pf-addr-dot.wallet { background: var(--cyan-500, #06b6d4); }
+.ev3 .pf-addr-dot.token { background: var(--warn-500, #f59e0b); }
+.ev3 .pf-addr-pop {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+  min-width: 240px; max-width: 340px; max-height: 280px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--hairline);
+  border-radius: 10px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+  padding: 5px; display: flex; flex-direction: column; gap: 1px;
+}
+.ev3 .pf-addr-opt {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px;
+  width: 100%; text-align: left; border: 0; background: transparent; cursor: pointer;
+  padding: 7px 9px; border-radius: 7px;
+}
+.ev3 .pf-addr-opt:hover { background: var(--fog-300); }
+.ev3 .pf-addr-opt .nm { font-size: 13px; font-weight: 600; color: var(--slate-900); }
+.ev3 .pf-addr-opt .sub {
+  font-family: var(--ff-mono); font-size: 10.5px; color: var(--slate-400); white-space: nowrap;
+}
+.ev3 /* multi-address (allowlist) */
+.pf-addrset { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.ev3 .pf-addrset-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.ev3 .pf-addrchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; color: var(--slate-700);
+  background: var(--fog-300); border: 1px solid var(--hairline);
+  border-radius: var(--r-pill, 999px); padding: 2px 4px 2px 9px;
+}
+.ev3 .pf-addrchip.invalid { border-color: var(--fail-300, #fca5a5); color: var(--fail-700, #b91c1c); }
+.ev3 .pf-addrchip .t { font-family: var(--ff-mono); }
+.ev3 .pf-addrchip .x {
+  border: 0; background: transparent; cursor: pointer; color: var(--slate-400);
+  font-size: 15px; line-height: 1; padding: 0 4px; border-radius: 4px;
+}
+.ev3 .pf-addrchip .x:hover { background: var(--fail-100, #fee2e2); color: var(--fail-600, #dc2626); }
+.ev3 /* ── "+ 새 보강 필드 만들기" — 조건 섹션 버튼 + 모달 ──────────────────── */
+.pf-add-cond.accent {
+  border-color: var(--info-300, #93c5fd);
+  color: var(--info-700, #1d4ed8);
+  background: var(--info-50, #eff6ff);
+}
+.ev3 .pf-add-cond.accent:hover {
+  border-color: var(--info-400, #60a5fa);
+  color: var(--info-800, #1e40af);
+}
+.ev3 .pf-add-cond.accent:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ev3 .pf-add-cond.accent:disabled:hover {
+  border-color: var(--info-300, #93c5fd);
+  color: var(--info-700, #1d4ed8);
+}
+.ev3 .cfm-bd {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.ev3 .cfm {
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  background: var(--surface-raised, #fff);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.25);
+}
+.ev3 .cfm-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--slate-900, #0f172a);
+}
+.ev3 .cfm-sub {
+  margin: 6px 0 14px;
+  font-size: 12.5px;
+  color: var(--slate-500, #64748b);
+}
+.ev3 .cfm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.ev3 .cfm-label {
+  flex: none;
+  width: 88px;
+  font-size: 12px;
+  color: var(--slate-600, #475569);
+}
+.ev3 .cfm-label.mono { font-family: var(--ff-mono, ui-monospace, monospace); }
+.ev3 .cfm-step {
+  margin-top: 14px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--slate-800, #1e293b);
+}
+.ev3 .cfm-params > .cfm-step { margin-top: 0; }
+.ev3 .cfm-autoname {
+  margin: 6px 0 0 98px;
+  font-size: 11.5px;
+  color: var(--slate-400, #94a3b8);
+}
+.ev3 .cfm-autoname code { font-size: 11px; color: var(--slate-500, #64748b); }
+.ev3 .cfm-block {
+  margin: 8px 0 0 98px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn-800, #92400e);
+  background: var(--warn-50, #fffbeb);
+  border: 1px solid var(--warn-300, #fcd34d);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.ev3 .cfm-desc {
+  margin: 6px 0 0 98px;
+  font-size: 12px;
+  color: var(--slate-500, #64748b);
+}
+.ev3 .cfm-mock { color: var(--warn-700, #8a6d3b); font-weight: 600; }
+.ev3 .cfm-params {
+  margin-top: 14px;
+  border: 1px solid var(--hairline, #d7dbe0);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+  background: var(--fog-200, #eef1f5);
+}
+.ev3 .cfm-params-h {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-700, #334155);
+}
+.ev3 .cfm-hint { font-weight: 500; color: var(--slate-400, #94a3b8); margin-left: 6px; }
+.ev3 .cfm-params .pf-val.mono, .ev3 .pf-val.mono { font-family: var(--ff-mono, ui-monospace, monospace); font-size: 12px; }
+.ev3 .cfm-pick {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.ev3 .cfm-pick .pf-select { flex: 1; min-width: 0; }
+.ev3 .cfm-pick .pf-val { flex: 1; min-width: 0; }
+.ev3 .cfm-adv {
+  margin-top: 10px;
+  border-top: 1px dashed var(--hairline, #d7dbe0);
+  padding-top: 8px;
+}
+.ev3 .cfm-adv summary {
+  font-size: 11.5px;
+  color: var(--slate-400, #94a3b8);
+  cursor: pointer;
+  user-select: none;
+}
+.ev3 .cfm-type { font-size: 12.5px; color: var(--slate-700, #334155); font-weight: 600; }
+.ev3 .cfm-kind {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-raised, #fff);
+  border: 1px solid var(--hairline, #d7dbe0);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--slate-500, #64748b);
+}
+.ev3 .cfm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.ev3 .cfm-create {
+  border: 0;
+  border-radius: 8px;
+  background: var(--slate-900, #0f172a);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.ev3 .cfm-create:disabled { opacity: 0.4; cursor: default; }
+.ev3 /* 문장형 프레임: 다이어그램 위(무엇에서)/아래(어떻게) 고정 스트립 */
+.pf-sentence {
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--fog-200, #eef1f5);
+  color: var(--slate-700, #334155);
+}
+.ev3 .pf-sentence.top {
+  border-bottom: 1px solid var(--hairline, #d7dbe0);
+}
+.ev3 .pf-sentence.bottom {
+  border-top: 1px solid var(--hairline, #d7dbe0);
+}
+.ev3 .pf-sentence.bottom.deny {
+  background: var(--fail-50, #faeae6);
+  color: var(--fail-700, #7f4740);
+}
+.ev3 .pf-sentence.bottom.warn {
+  background: var(--warn-50, #fffbeb);
+  color: var(--warn-800, #92400e);
+}
+.ev3 /* structure diagram preview (replaces the live cedar pane) — fixed-height
+   pan/zoom canvas (the diagram is interactive on this surface) */
+.pf-diagram-body {
+  background: var(--surface, #fff);
+  padding: 0;
+  overflow: hidden;
+  height: clamp(320px, 52vh, 640px);
+  display: flex;
+}
+.ev3 .pf-diagram-body .pdiagram {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+.ev3 .pf-diagram-body .pdiagram-empty {
+  color: var(--slate-400);
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+.ev3 /* collapsible manifest preview under the diagram */
+.pf-manifest {
+  border-top: 1px solid var(--hairline);
+  background: var(--surface, #fff);
+}
+.ev3 .pf-manifest-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--slate-700);
+  font-family: var(--ff-mono, ui-monospace, monospace);
+}
+.ev3 .pf-manifest-head:hover { background: var(--fog-200, var(--fog-300)); }
+.ev3 .pf-manifest-caret {
+  font-size: 9px;
+  color: var(--slate-400);
+  transition: transform 120ms ease;
+}
+.ev3 .pf-manifest-caret.open { transform: rotate(90deg); }
+.ev3 .pf-manifest-tag {
+  margin-left: auto;
+  font-family: var(--ff-sans, system-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--slate-500);
+  background: var(--fog-300);
+  border-radius: var(--r-pill, 999px);
+  padding: 1px 9px;
+}
+.ev3 .pf-manifest-body {
+  padding: 0 14px 14px;
+  max-height: 320px;
+  overflow: auto;
+}
+.ev3 .pf-manifest-json {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--slate-800);
+  background: var(--fog-100, #f6f7f9);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 10px 12px;
+  white-space: pre;
+}
+.ev3 .pf-manifest-empty {
+  font-size: 12px;
+  color: var(--slate-500);
+  line-height: 1.6;
+}
+.ev3 .pf-manifest-empty code {
+  font-family: var(--ff-mono, ui-monospace, monospace);
+  font-size: 11px;
+  background: var(--fog-300);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.ev3 .pf-manifest-err {
+  font-size: 12px;
+  color: var(--fail-700, #b91c1c);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ev3 /* manifest edit bar + textarea */
+.pf-manifest-tag.edited { background: var(--warn-100, #fef3c7); color: var(--warn-800, #92400e); }
+.ev3 .pf-manifest-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ev3 .pf-manifest-status {
+  font-size: 11px;
+  color: var(--slate-500);
+}
+.ev3 .pf-manifest-status.ok { color: var(--pass-700, #15803d); }
+.ev3 .pf-manifest-status.err { color: var(--fail-700, #b91c1c); }
+.ev3 .pf-manifest-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--hairline);
+  background: var(--surface, #fff);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--slate-600);
+  cursor: pointer;
+}
+.ev3 .pf-manifest-btn:hover { background: var(--fog-300); }
+.ev3 .pf-manifest-edit {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--slate-900);
+  background: var(--fog-100, #f6f7f9);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+.ev3 .pf-manifest-edit:focus { outline: none; border-color: var(--sage-400, var(--sage-300)); }
+.ev3 .pf-manifest-edit.invalid { border-color: var(--fail-400, #f87171); background: var(--fail-50, #fef2f2); }
+.ev3 /* 지갑별 설정(파라미터) 승격 토글 */
+.pf-param {
+  flex: none;
+  font-size: 11px;
+  color: var(--slate-400);
+  border-style: dashed;
+}
+.ev3 .pf-param.on {
+  border-style: solid;
+  border-color: var(--sage-500, #4c7a5e);
+  color: var(--sage-600, #3c6a4e);
+  background: var(--sage-100, #eaf3ee);
+}
+.ev3 .pf-param-label {
+  flex: none;
+  width: 130px;
+  font-size: 12px;
+}
