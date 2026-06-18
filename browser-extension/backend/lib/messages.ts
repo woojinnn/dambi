@@ -1,7 +1,6 @@
 import type { WindowPostMessageStream } from "@metamask/post-message-stream";
 import objectHash from "object-hash";
 import type Browser from "webextension-polyfill";
-import { RequestType } from "./types";
 import type { AwaitingUserMessage, MessageData, StreamResponse } from "./types";
 import type { VerdictReceiver } from "./verdict-channel";
 
@@ -25,38 +24,25 @@ const isAwaitingUser = (
 ): response is AwaitingUserMessage =>
   "kind" in response && response.kind === "awaiting-user";
 
-export function generateRequestId(data: MessageData): string {
-  switch (data.type) {
-    case RequestType.TRANSACTION:
-      return objectHash(data.transaction);
-    case RequestType.TYPED_SIGNATURE:
-      return objectHash(data.typedData as object);
-    case RequestType.UNTYPED_SIGNATURE:
-      return objectHash({ message: data.message });
-    case RequestType.VENUE_ORDER:
-      return objectHash({
-        venue: data.venue,
-        endpoint: data.endpoint,
-        hlAction: data.hlAction,
-      });
-    case RequestType.EXECUTION_REPORT:
-      return objectHash({
-        wallet_id: data.wallet_id,
-        evaluation_id: data.evaluation_id,
-        action_index: data.action_index,
-        outcome: data.outcome,
-      });
-    case "raw-transaction-advisory":
-      return objectHash({
-        hostname: data.hostname,
-        rawPreview: data.rawPreview,
-      });
-    case "provider-frozen-warning":
-      return objectHash({
-        hostname: data.hostname,
-        providerName: data.providerName,
-      });
+let monotonicRequestId = 0;
+
+function nextRequestNonce(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
   }
+  monotonicRequestId += 1;
+  return `${Date.now().toString(36)}:${monotonicRequestId.toString(36)}`;
+}
+
+function requestFingerprint(data: MessageData): string {
+  return objectHash(data);
+}
+
+export function generateRequestId(data: MessageData): string {
+  return `${data.type}:${nextRequestNonce()}:${requestFingerprint(data)}`;
 }
 
 export function sendToStreamAndDisregard(

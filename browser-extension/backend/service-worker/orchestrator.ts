@@ -64,6 +64,8 @@ import { resolveHlMaster } from "./venue/resolve-hl-master";
 import {
   normalizeTypedDataPayload,
   routeTypedSignaturePayload,
+  TypedDataRouteError,
+  typedDataDomainChainId,
 } from "./sig-routing";
 
 /**
@@ -387,8 +389,8 @@ async function tapVenueVerdict(
     >;
     if (!flag["dambi_e2e_tap"]) return;
     // Key by the resolved MASTER (the e2e gives each case a unique synthetic
-    // master), not requestId — identical order bodies (differing only by
-    // vaultAddress) hash to the SAME requestId, which would clobber the row.
+    // master) so the high-volume e2e can read the latest verdict for each case
+    // without a read-modify-write race.
     await Browser.storage.local.set({
       [`dambi:e2e-tap:${master ?? requestId}`]: {
         master: master ?? null,
@@ -534,6 +536,12 @@ function inferContractSelector(message: Message): {
   return {};
 }
 
+function effectiveTypedDataChainId(message: Message): number {
+  return isTypedSignature(message)
+    ? (typedDataDomainChainId(message.data.typedData) ?? message.data.chainId)
+    : 1;
+}
+
 function logIncoming(message: Message): void {
   const common = {
     requestId: message.requestId,
@@ -561,6 +569,7 @@ function logIncoming(message: Message): void {
     console.info("[Dambi] typed-sig.incoming", {
       ...common,
       chainId: message.data.chainId,
+      domainChainId: typedDataDomainChainId(message.data.typedData),
       address: message.data.address,
       primaryType: typedData?.primaryType,
       typedData: message.data.typedData,
@@ -609,6 +618,7 @@ function logDecision(message: Message, verdict: VerdictDto): void {
     console.info("[Dambi] typed-sig", {
       ...common,
       chainId: message.data.chainId,
+      domainChainId: typedDataDomainChainId(message.data.typedData),
       primaryType: typedData?.primaryType,
     });
     return;
@@ -830,22 +840,24 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
     };
   }
 
-  const tx = {
-    chain_id: "hl-mainnet",
-    from: String(meta.submitter ?? HL_TO_SENTINEL),
-    to: HL_TO_SENTINEL,
-  } as const;
-
-  // 주문 제출자 지갑의 effective 바인딩을 가져온다. HL 주문은 sentinel
-  // submitter(`meta.submitter`)로 들어오므로 그대로 쓰면 미등록 지갑 →
-  // defaults.enabled 전역 폴백이 걸려 per-wallet 토글이 무시된다. fetch-hook이
-  // `eth_accounts`에서 읽어 payload에 stamp한 연결 master(또는 vaultAddress /
-  // per-origin store)를 해석해 그 지갑의 effective 바인딩으로 평가한다 →
-  // 대시보드의 per-policy 토글이 HL 주문에도 적용된다. 해석 실패 시 sentinel로
-  // degrade(= 기존 defaults.enabled 폴백, best-effort, never throws).
+  // 주문 제출자 지갑의 effective 바인딩을 가져온다. HL /exchange 원문은
+  // agent-key signature라 master address를 직접 담지 않지만, fetch-hook이
+  // `eth_accounts`에서 읽은 trusted wallet_id를 stamp한다. 그 master가 있으면
+  // policy-set selection뿐 아니라 v2 lowering의 Cedar principal(`tx.from`)과
+  // `context.meta.submitter`도 같은 actor로 맞춘다. 해석 실패 시에만 sentinel로
+  // degrade(= defaults.enabled 폴백, best-effort, never throws).
+  const fallbackSubmitter = String(meta.submitter ?? HL_TO_SENTINEL);
   const venueUid = (await getCurrentUserId()) ?? "anonymous";
   const master = await resolveHlMaster(message.data);
-  const evalAddress = master ?? tx.from;
+  const evalAddress = master ?? fallbackSubmitter;
+  if (master !== null) {
+    meta = { ...meta, submitter: master };
+  }
+  const tx = {
+    chain_id: "hl-mainnet",
+    from: evalAddress,
+    to: HL_TO_SENTINEL,
+  } as const;
   const { bundles: resolved, renderFaults } =
     await resolveBundlesForWalletWithFaults(venueUid, evalAddress);
   // DENY-CLOSED: venue 주문은 "평가 못 한 DENY 정책"이 있으면 통과시키면 안 된다.
@@ -934,12 +946,10 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
       account_leverage,
       order_enrichment,
     });
-    // Server state-load identity: the eval `tx.from` is the submitter
-    // SENTINEL, but a server-state method (`perp.*`) must read the MASTER's
-    // synced wallet — pass the resolved master as the dispatch identity
-    // override. No master → omit the key (server falls back to tx.from →
-    // empty wallet → methods return nothing → stateful policies dormant,
-    // never blocking).
+    // Server state-load identity: pass the resolved master explicitly for
+    // authenticated `/evaluate` enrichment. With a master, this matches
+    // `tx.from`; without one, omit the key so the server falls back to the
+    // sentinel and stateful methods stay dormant rather than blocking.
     const results =
       planned.length > 0
         ? await dispatchCallsV2(planned, policyRpcUrl, {
@@ -986,6 +996,8 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
         meta,
         tx,
         results,
+        account_leverage,
+        order_enrichment,
       }).catch((err) =>
         console.warn(
           "[Dambi] diagnosis-context append failed (venue order)",
@@ -1128,8 +1140,13 @@ async function typedSignatureLifecycle(
       submittedAt: Math.floor(Date.now() / 1000),
     });
   } catch (err) {
+    const reason =
+      err instanceof TypedDataRouteError
+        ? err.reason
+        : "typed_sig_route_threw";
     console.warn("[Dambi] typed-sig route threw", {
       requestId: message.requestId,
+      reason,
       err: err instanceof Error ? err.message : String(err),
     });
     return {
@@ -1138,7 +1155,7 @@ async function typedSignatureLifecycle(
       declarativeV3: {
         outcome: "fault",
         nature,
-        reason: "typed_sig_route_threw",
+        reason,
       },
     };
   }
@@ -1162,20 +1179,6 @@ async function typedSignatureLifecycle(
     action_count: routed.actions.length,
   };
 
-  // 서명자 지갑의 effective 바인딩을 가져온다.
-  const sigUid = (await getCurrentUserId()) ?? "anonymous";
-  const resolved = await resolveBundlesForWallet(sigUid, message.data.address);
-  // No policies ⇒ baseline pass (blocking requires an explicit deny policy).
-  if (resolved.length === 0) {
-    // Report any permit/permit2 sig for tracking (fire-and-forget; never blocks signing).
-    void reportPermitIfApplicable(routed.actions, message);
-    return {
-      verdict: { kind: "pass" },
-      verdictSource: "declarative-v2",
-      declarativeV3,
-    };
-  }
-
   // Skip `Unknown` bodies — only real ActionBody variants drive a verdict.
   const realActions = routed.actions.filter((a) => {
     const body = (a as { body?: unknown }).body;
@@ -1193,6 +1196,20 @@ async function typedSignatureLifecycle(
     };
   }
 
+  // 서명자 지갑의 effective 바인딩을 가져온다.
+  const sigUid = (await getCurrentUserId()) ?? "anonymous";
+  const resolved = await resolveBundlesForWallet(sigUid, message.data.address);
+  // No policies ⇒ baseline pass (blocking requires an explicit deny policy).
+  if (resolved.length === 0) {
+    // Report any permit/permit2 sig for tracking (fire-and-forget; never blocks signing).
+    void reportPermitIfApplicable(routed.actions, message);
+    return {
+      verdict: { kind: "pass" },
+      verdictSource: "declarative-v2",
+      declarativeV3,
+    };
+  }
+
   // v2 `tx` context for a signature: `to` is the EIP-712 verifyingContract,
   // `from` the signer. Only `{chain_id, from, to}` is consumed by the WASM;
   // a missing verifyingContract degrades to the zero sentinel without affecting
@@ -1202,8 +1219,9 @@ async function typedSignatureLifecycle(
       message.data.typedData,
     )?.domain.verifyingContract?.toLowerCase() ??
     "0x" + "0".repeat(40);
+  const signedChainId = effectiveTypedDataChainId(message);
   const tx = {
-    chain_id: `eip155:${message.data.chainId}`,
+    chain_id: `eip155:${signedChainId}`,
     from: message.data.address,
     to: verifyingContract,
   } as const;
@@ -1225,7 +1243,7 @@ async function typedSignatureLifecycle(
       // `amountNano` sibling (non-fatal — a miss just omits that token's nano).
       const tokenDecimals = await collectTokenDecimals(
         action,
-        message.data.chainId,
+        signedChainId,
       );
       verdicts.push(
         ...(await evaluateBodyTree(
@@ -1373,6 +1391,7 @@ async function evaluateBodyTree(
         meta,
         tx,
         results,
+        token_decimals: tokenDecimals,
       }).catch((err) =>
         console.warn(
           "[Dambi] diagnosis-context append failed",

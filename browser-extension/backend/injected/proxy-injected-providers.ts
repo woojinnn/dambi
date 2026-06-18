@@ -99,6 +99,8 @@ const chainIdListeners = new WeakSet<object>();
 const wrappedProviders = new WeakSet<object>();
 const unwrappableProviders = new WeakSet<object>();
 const reannouncedProviders = new WeakSet<object>();
+const transactionActors = new WeakMap<object, string>();
+const walletSendCallsActors = new WeakMap<object, string>();
 
 function asProvider(value: unknown): Eip1193Provider | undefined {
   return value && typeof value === "object"
@@ -182,6 +184,29 @@ async function readChainId(
   }
 }
 
+async function readConnectedAccount(
+  provider: Eip1193Provider,
+  request: ProviderRequest | undefined = provider.request,
+): Promise<string | undefined> {
+  try {
+    if (typeof request !== "function") return undefined;
+    const result = await Promise.race([
+      Reflect.apply(request, provider, [{ method: "eth_accounts" }]),
+      new Promise<never>((_, reject) => {
+        window.setTimeout(
+          () => reject(new Error("Dambi: accounts timeout")),
+          1_500,
+        );
+      }),
+    ]);
+    if (!Array.isArray(result)) return undefined;
+    const account = result.find(looksLikeAddress);
+    return typeof account === "string" ? account : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function checkTransaction(
   provider: Eip1193Provider,
   params: unknown[],
@@ -189,13 +214,26 @@ async function checkTransaction(
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
   const [transaction] = params;
-  if (!transaction || typeof transaction !== "object") return true;
+  const tx = asRecord(transaction);
+  if (!tx) return false;
+  const from = looksLikeAddress(tx.from)
+    ? String(tx.from)
+    : await readConnectedAccount(provider, readRequest);
+  if (!from) return false;
+  transactionActors.set(tx, from);
+  const policyTransaction =
+    tx.from === from
+      ? tx
+      : {
+          ...tx,
+          from,
+        };
 
   const data = {
     type: RequestType.TRANSACTION,
     chainId: chainIdOverride ?? (await readChainId(provider, readRequest)),
     hostname: location.hostname,
-    transaction,
+    transaction: policyTransaction,
   } as MessageData;
 
   return sendRequestAndAwaitVerdict(stream, verdictReceiver, data);
@@ -207,22 +245,31 @@ async function checkWalletSendCalls(
   readRequest?: ProviderRequest,
 ): Promise<boolean> {
   const envelope = asRecord(params[0]);
-  const calls = Array.isArray(envelope?.calls) ? envelope.calls : [];
+  if (!envelope) return false;
+  const calls = Array.isArray(envelope.calls) ? envelope.calls : null;
+  if (!calls) return false;
   if (calls.length === 0) return true;
 
   const chainId =
     parseChainId(envelope?.chainId) ??
     (await readChainId(provider, readRequest));
+  const walletFrom = looksLikeAddress(envelope.from)
+    ? String(envelope.from)
+    : await readConnectedAccount(provider, readRequest);
+  if (!walletFrom) return false;
+  walletSendCallsActors.set(envelope, walletFrom);
 
   for (let i = 0; i < calls.length; i++) {
     const call = asRecord(calls[i]);
     if (!call) {
-      continue;
+      return false;
     }
+    const callFields = { ...call };
+    delete callFields.from;
 
     const transaction: Record<string, unknown> = {
-      ...call,
-      from: call.from ?? envelope?.from,
+      ...callFields,
+      from: walletFrom,
     };
     const isCallAllowed = await checkTransaction(
       provider,
@@ -265,14 +312,22 @@ async function checkTypedSignature(
   });
 }
 
-async function checkUntypedSignature(params: unknown[]): Promise<boolean> {
+function untypedSignatureMessage(params: unknown[]): unknown {
   const [first, second] = params;
-  if (first === undefined || second === undefined) return true;
+  if (looksLikeAddress(first)) return second;
+  if (first !== undefined && first !== null) return first;
+  if (!looksLikeAddress(second)) return second;
+  return undefined;
+}
+
+async function checkUntypedSignature(params: unknown[]): Promise<boolean> {
+  const message = untypedSignatureMessage(params);
+  if (message === undefined || message === null) return true;
 
   return sendRequestAndAwaitVerdict(stream, verdictReceiver, {
     type: RequestType.UNTYPED_SIGNATURE,
     hostname: location.hostname,
-    message: String(looksLikeAddress(first) ? second : first),
+    message: String(message),
   });
 }
 
@@ -403,10 +458,20 @@ function signatureAddress(params: unknown[]): string | undefined {
   return undefined;
 }
 
-function transactionAddress(params: unknown[]): string | undefined {
+function evaluatedTransactionAddress(params: unknown[]): string | undefined {
   const tx = asRecord(params[0]);
-  const from = tx?.from;
-  return looksLikeAddress(from) ? String(from) : undefined;
+  if (!tx) return undefined;
+  const from = tx.from;
+  if (looksLikeAddress(from)) return String(from);
+  return transactionActors.get(tx);
+}
+
+function evaluatedWalletSendCallsAddress(params: unknown[]): string | undefined {
+  const envelope = asRecord(params[0]);
+  if (!envelope) return undefined;
+  const from = envelope.from;
+  if (looksLikeAddress(from)) return String(from);
+  return walletSendCallsActors.get(envelope);
 }
 
 function reportWalletId(
@@ -416,9 +481,9 @@ function reportWalletId(
 ): ExecutionReportPayload["wallet_id"] | undefined {
   const address =
     method === "eth_sendTransaction"
-      ? transactionAddress(params)
+      ? evaluatedTransactionAddress(params)
       : method === "wallet_sendCalls"
-      ? transactionAddress(params)
+      ? evaluatedWalletSendCallsAddress(params)
       : method &&
           (TYPED_SIGNATURE_METHODS.has(method) ||
             UNTYPED_SIGNATURE_METHODS.has(method))

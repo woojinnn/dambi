@@ -29,7 +29,10 @@ vi.mock("../wasm-bridge", () => ({
   declarativeRouteTypedDataV3: mocks.declarativeRouteTypedDataV3,
 }));
 
-import { routeTypedSignaturePayload } from "../sig-routing";
+import {
+  routeTypedSignaturePayload,
+  TypedDataRouteError,
+} from "../sig-routing";
 import { RequestType, type TypedSignaturePayload } from "@lib/types";
 
 // ── Fixture addresses ──────────────────────────────────────────────────
@@ -151,6 +154,32 @@ describe("routeTypedSignaturePayload — manifest-driven typed-data router", () 
     const result = await routeTypedSignaturePayload(payload("{not json"));
 
     expect(result).toBeNull();
+    expect(mocks.installDeclarativeBundleV3ByTypedData).not.toHaveBeenCalled();
+    expect(mocks.declarativeRouteTypedDataV3).not.toHaveBeenCalled();
+  });
+
+  it("returns null for malformed domain.chainId strings instead of coercing them onto another chain", async () => {
+    const base = {
+      domain: {
+        name: "Permit2",
+        verifyingContract: PERMIT2,
+      },
+      primaryType: "PermitSingle",
+      types: { PermitSingle: [{ name: "spender", type: "address" }] },
+      message: { spender: UNISWAPX_REACTOR, sigDeadline: "1700000000" },
+    };
+
+    await expect(
+      routeTypedSignaturePayload(
+        payload({ ...base, domain: { ...base.domain, chainId: "1-mainnet" } }),
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      routeTypedSignaturePayload(
+        payload({ ...base, domain: { ...base.domain, chainId: "0x1g" } }),
+      ),
+    ).resolves.toBeNull();
+
     expect(mocks.installDeclarativeBundleV3ByTypedData).not.toHaveBeenCalled();
     expect(mocks.declarativeRouteTypedDataV3).not.toHaveBeenCalled();
   });
@@ -404,5 +433,53 @@ describe("routeTypedSignaturePayload — manifest-driven typed-data router", () 
 
     expect(result).toBeNull();
     expect(mocks.declarativeRouteTypedDataV3).not.toHaveBeenCalled();
+  });
+
+  it("throws a typed route fault when typed-data install fails for a non-miss reason", async () => {
+    mocks.installDeclarativeBundleV3ByTypedData.mockResolvedValue({
+      ok: false,
+      reason: "verify_failed",
+    });
+
+    const typedData = {
+      domain: {
+        name: "Permit2",
+        chainId: 1,
+        verifyingContract: PERMIT2,
+      },
+      primaryType: "PermitSingle",
+      types: { PermitSingle: [{ name: "spender", type: "address" }] },
+      message: { spender: UNISWAPX_REACTOR, sigDeadline: "1700000000" },
+    };
+
+    await expect(routeTypedSignaturePayload(payload(typedData))).rejects.toMatchObject({
+      name: "TypedDataRouteError",
+      reason: "typed_sig_install_verify_failed",
+    });
+    expect(mocks.declarativeRouteTypedDataV3).not.toHaveBeenCalled();
+  });
+
+  it("throws a typed route fault when WASM typed-data routing fails after install", async () => {
+    mocks.declarativeRouteTypedDataV3.mockResolvedValue({
+      ok: false,
+      error: { kind: "no_mapper", message: "typed data mapper missing" },
+    });
+
+    const typedData = {
+      domain: {
+        name: "Permit2",
+        chainId: 1,
+        verifyingContract: PERMIT2,
+      },
+      primaryType: "PermitSingle",
+      types: { PermitSingle: [{ name: "spender", type: "address" }] },
+      message: { spender: UNISWAPX_REACTOR, sigDeadline: "1700000000" },
+    };
+
+    const routed = routeTypedSignaturePayload(payload(typedData));
+    await expect(routed).rejects.toBeInstanceOf(TypedDataRouteError);
+    await expect(routed).rejects.toMatchObject({
+      reason: "typed_sig_wasm_no_mapper",
+    });
   });
 });

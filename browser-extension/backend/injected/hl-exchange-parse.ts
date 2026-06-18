@@ -569,11 +569,17 @@ export async function decideVenueBody(
   if (bodyStr === null) {
     return { kind: "deny", reason: "unreadable_body", payloads: null };
   }
+  let bodyJson: unknown;
+  try {
+    bodyJson = JSON.parse(bodyStr);
+  } catch {
+    return { kind: "deny", reason: "unreadable_body", payloads: null };
+  }
   const payloads = parseHyperliquidExchangeOrders(
     venue,
     endpoint,
     hostname,
-    bodyStr,
+    bodyJson,
   );
   if (!payloads) return { kind: "passthrough" };
   const allowed = await evaluate(payloads);

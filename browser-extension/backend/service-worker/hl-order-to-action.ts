@@ -293,12 +293,11 @@ export function hlOrderToAction(payload: VenueOrderPayload): HlActionInput {
       ? Math.floor(payload.nonce / 1000)
       : HL_SUBMITTED_AT_FALLBACK;
 
-  // NOTE: `submitter` stays a sentinel. The /exchange body carries no master
-  // account address (only an agent signature + nonce), and the SW does not track
-  // the connected account for the HL path. Recovering the real submitter (e.g.
-  // ec-recover on user-signed actions) is deferred; for a single-user pre-sign
-  // analyzer the high-value scoping fields are destination / amount, which ARE
-  // modeled. See memory `project_hl_order_audit` (#2b).
+  // Fallback submitter. The /exchange body itself carries only an agent
+  // signature + nonce, so the pure converter cannot know the master account.
+  // The service-worker venue lifecycle replaces this with the trusted
+  // fetch-hook-stamped `wallet_id` when one is available; otherwise the sentinel
+  // is kept so the policy path degrades to the default binding set.
   const meta: Record<string, unknown> = {
     submitted_at: submittedAt,
     submitter: "0x000000000000000000000000000000000000a01c",
