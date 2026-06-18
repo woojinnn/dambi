@@ -300,7 +300,7 @@ impl PostgresGlobalDb {
 
     /// Insert or refresh an OAuth user by provider subject.
     ///
-    /// OpenID Connect guarantees `iss + sub` stability, while email can change
+    /// `OpenID` Connect guarantees `iss + sub` stability, while email can change
     /// or be reused. New OAuth users therefore get a provider-subject-derived
     /// id. Existing pre-subject rows are linked on first login when the provider
     /// and email match, preserving the user's previous email-derived id.
@@ -309,6 +309,7 @@ impl PostgresGlobalDb {
     ///
     /// Returns [`DbError`] if the upsert query fails or an email is already
     /// linked to a different OAuth subject/provider.
+    #[allow(clippy::too_many_lines)]
     pub async fn upsert_oauth_user(
         &self,
         email: &str,
@@ -1240,9 +1241,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_status_is_ready_for_current_schema() {
-        let url = match std::env::var("TEST_DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => return,
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+            return;
         };
         let pool = sqlx_postgres::PgPool::connect(&url).await.unwrap();
         let db = PostgresGlobalDb::new(pool);
@@ -1258,9 +1258,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_status_detects_pending_binary_migration() {
-        let url = match std::env::var("TEST_DATABASE_URL") {
-            Ok(url) => url,
-            Err(_) => return,
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+            return;
         };
         let pool = sqlx_postgres::PgPool::connect(&url).await.unwrap();
         let db = PostgresGlobalDb::new(pool);

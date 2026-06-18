@@ -319,6 +319,7 @@ fn not_found(reason: &str) -> Response {
     (StatusCode::NOT_FOUND, reason.to_owned()).into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn tracked_wallet_id(known: Vec<WalletId>, addr: Address) -> Result<WalletId, Response> {
     known
         .into_iter()

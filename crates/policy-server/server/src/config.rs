@@ -28,6 +28,7 @@ impl LogFormat {
 
 /// Typed runtime configuration shared by the API server and worker processes.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ServerConfig {
     /// Socket address the API process binds to.
     pub bind_addr: String,
@@ -89,7 +90,7 @@ impl ServerConfig {
                 .map(str::to_owned)
                 .collect(),
             allow_private_network: env::var("CORS_ALLOW_PRIVATE_NETWORK")
-                .map_or(false, |v| v == "1" || v.eq_ignore_ascii_case("true")),
+                .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true")),
             database_url: env::var("DATABASE_URL").ok(),
             redis_url: env::var("REDIS_URL").ok(),
             require_redis: env_bool("REQUIRE_REDIS", false),

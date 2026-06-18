@@ -1023,7 +1023,7 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
         && swaps.len() == 1
         && first
             .map(|s| {
-                s.first().is_some()
+                !s.is_empty()
                     && s.get(3).is_some()
                     && index_in_bounds(s.get(1))
                     && index_in_bounds(s.get(2))

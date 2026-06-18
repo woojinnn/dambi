@@ -137,9 +137,8 @@ pub async fn google_callback(
         return user_error("missing `state` parameter");
     };
     // Verify CSRF state and bind it to the browser flow that initiated login.
-    let oauth_state = match verify_oauth_state(&state) {
-        Ok(state) => state,
-        Err(_) => return user_error("invalid or expired `state`"),
+    let Ok(oauth_state) = verify_oauth_state(&state) else {
+        return user_error("invalid or expired `state`");
     };
     let Some(cookie_nonce) = oauth_state_nonce_from_headers(&headers) else {
         return user_error("missing OAuth state cookie");

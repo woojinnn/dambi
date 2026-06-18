@@ -1078,6 +1078,7 @@ fn unprocessable(reason: &str) -> Response {
     (StatusCode::UNPROCESSABLE_ENTITY, reason.to_owned()).into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn owned_wallet_id(
     metadata: Vec<PostgresWalletMetadata>,
     addr: Address,

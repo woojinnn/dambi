@@ -14,8 +14,7 @@ pub const DEFAULT_SYNC_CONFIG: &str = "./dambi-sync.toml";
 #[must_use]
 pub fn sync_config_path_from_env() -> PathBuf {
     std::env::var("DAMBI_SYNC_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_SYNC_CONFIG))
+        .map_or_else(|_| PathBuf::from(DEFAULT_SYNC_CONFIG), PathBuf::from)
 }
 
 /// Load the runtime sync config.
@@ -91,9 +90,8 @@ mod tests {
         let mut config = ServerConfig::for_tests();
         config.require_sync_config = true;
 
-        let err = match load_sync_config(&config) {
-            Ok(_) => panic!("required missing config rejects startup"),
-            Err(err) => err,
+        let Err(err) = load_sync_config(&config) else {
+            panic!("required missing config rejects startup");
         };
         assert!(err.to_string().contains("sync config required"));
 

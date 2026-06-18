@@ -411,6 +411,7 @@ fn plan(
 /// lower→plan→materialize sequence (which inlines its own copy — the two are NOT
 /// shared and must be kept in sync) so a diagnosis probe sees the identical
 /// environment as the verdict.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn materialized_context(
     action: &ActionBody,
     meta: &ActionMeta,

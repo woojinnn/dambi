@@ -182,7 +182,7 @@ fn validate_secret_value(raw: &str) -> Result<(), AuthError> {
     if bytes.len() < MIN_JWT_SECRET_BYTES {
         return Err(AuthError::WeakSecret(MIN_JWT_SECRET_BYTES));
     }
-    if bytes.iter().all(|b| b.is_ascii_whitespace()) {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
         return Err(AuthError::WeakSecret(MIN_JWT_SECRET_BYTES));
     }
     if bytes.windows(2).all(|pair| pair[0] == pair[1]) {
