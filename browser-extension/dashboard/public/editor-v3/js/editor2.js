@@ -45,22 +45,7 @@ let e2Drag = null;
 function Editor2View({ onNewPolicy }) {
   const snap = useOverview();
   const rows = React.useMemo(() => {
-    const real = Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: void 0 }));
-    const MOCK = [
-      { address: "0x7a3f9c2e8b1d4a6f0c5e2d9b8a4f1c3e7d6b0a92", label: "\uBA54\uC778 \uD2B8\uB808\uC774\uB529" },
-      { address: "0xc1e8b4a7f2d9036c5b1a8e4d7f0c3b6a9e2d5f81", label: "\uC5D0\uC5B4\uB4DC\uB78D \uD5CC\uD130" },
-      { address: "0x4d2a9f7e1c8b5306a4f9d2e7b0c3a6f1e8d5b274", label: "\uB514\uD30C\uC774 \uBCFC\uD2B8" },
-      { address: "0x9b6e3a1d8f4c70526e1b9a4d2f8c0e3b7a6d5198", label: "\uCF5C\uB4DC \uC2A4\uD1A0\uB9AC\uC9C0" },
-      { address: "0x2f8c5b1e9a4d70c36b2e8f1a9d4c0b3e6a7d5f40", label: "NFT \uC9C0\uAC11" },
-      { address: "0x8e1d4b7a2f9c0356d8b1e4a7f2c9b0e3d6a5f172", label: "\uC2A4\uD14C\uC774\uD0B9" },
-      { address: "0x3c9f2e7b1a8d4056f3c9e2b7a0d4c1f8e6b5a930", label: "\uAC70\uBC84\uB10C\uC2A4" },
-      { address: "0x6a2d8f4e1c9b30576a2d8f4e1c9b0e35d7b6a214", label: "\uB300\uCD9C \uC6B4\uC6A9" },
-      { address: "0x5f1e9c3a7d2b40586f1e9c3a7d2b0e46c8a5f307", label: "\uD37C\uD504 \uACC4\uC88C" },
-      { address: "0x1b7e4a2f9d6c30591b7e4a2f9d6c0e58a3f5b271", label: "\uC608\uBE44 \uC9C0\uAC11" },
-      { address: "0xa4d7f2e8b1c9305aa4d7f2e8b1c90e63d9b6a482", label: "\uCD9C\uAE08 \uC804\uC6A9" }
-    ];
-    const need = Math.max(0, 5 - real.length);
-    return [...real, ...MOCK.slice(0, need)];
+    return Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: void 0 }));
   }, [snap]);
   const [addr, setAddr] = React.useState(null);
   const rowAddrs = React.useMemo(() => new Set(rows.map((r) => r.address)), [rows]);

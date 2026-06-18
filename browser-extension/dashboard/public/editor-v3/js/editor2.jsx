@@ -59,23 +59,8 @@ let e2Drag = null;
 function Editor2View({ onNewPolicy }) {
   const snap = useOverview();
   const rows = React.useMemo(() => {
-    const real = Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: undefined }));
-    // 데모 — 지갑이 6개 있다고 가정. 실제 지갑 뒤에 목업 지갑을 채운다.
-    const MOCK = [
-      { address: "0x7a3f9c2e8b1d4a6f0c5e2d9b8a4f1c3e7d6b0a92", label: "메인 트레이딩" },
-      { address: "0xc1e8b4a7f2d9036c5b1a8e4d7f0c3b6a9e2d5f81", label: "에어드랍 헌터" },
-      { address: "0x4d2a9f7e1c8b5306a4f9d2e7b0c3a6f1e8d5b274", label: "디파이 볼트" },
-      { address: "0x9b6e3a1d8f4c70526e1b9a4d2f8c0e3b7a6d5198", label: "콜드 스토리지" },
-      { address: "0x2f8c5b1e9a4d70c36b2e8f1a9d4c0b3e6a7d5f40", label: "NFT 지갑" },
-      { address: "0x8e1d4b7a2f9c0356d8b1e4a7f2c9b0e3d6a5f172", label: "스테이킹" },
-      { address: "0x3c9f2e7b1a8d4056f3c9e2b7a0d4c1f8e6b5a930", label: "거버넌스" },
-      { address: "0x6a2d8f4e1c9b30576a2d8f4e1c9b0e35d7b6a214", label: "대출 운용" },
-      { address: "0x5f1e9c3a7d2b40586f1e9c3a7d2b0e46c8a5f307", label: "퍼프 계좌" },
-      { address: "0x1b7e4a2f9d6c30591b7e4a2f9d6c0e58a3f5b271", label: "예비 지갑" },
-      { address: "0xa4d7f2e8b1c9305aa4d7f2e8b1c90e63d9b6a482", label: "출금 전용" },
-    ];
-    const need = Math.max(0, 5 - real.length);
-    return [...real, ...MOCK.slice(0, need)];
+    // 실제 ps2 지갑만 사용(목업 채우기 제거). 라벨은 ps2에 없어 주소로 표시.
+    return Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: undefined }));
   }, [snap]);
   const [addr, setAddr] = React.useState(null);
   const rowAddrs = React.useMemo(() => new Set(rows.map((r) => r.address)), [rows]);
