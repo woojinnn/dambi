@@ -1150,13 +1150,21 @@ function CedarPane({
 
 /** LLM 탭 — 자연어 의도를 적으면 LLM 이 FormModel 을 만들어 폼 탭으로 넘긴다.
  *  생성 성공 시 onModel 이 폼 탭으로 전환하므로 여기선 입력/진행/에러만 다룬다. */
+/** LLM 탭 아이콘 — 작은 sparkle/wand. */
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
+      <path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
+    </svg>
+  );
+}
+
 function LlmPane({ onModel }: { onModel: (m: FormModel, warnings: string[]) => Promise<void> }) {
   const { t } = useTranslation("editor");
   const [intent, setIntent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const examples = t("llm.examples", { returnObjects: true }) as string[];
 
   const submit = async () => {
     const text = intent.trim();
@@ -1175,55 +1183,51 @@ function LlmPane({ onModel }: { onModel: (m: FormModel, warnings: string[]) => P
 
   return (
     <div className="ev2-llm-pane">
-      <div className="ev2-llm-head">
-        <div className="ev2-llm-title">{t("llm.title")}</div>
-        <div className="ev2-llm-sub">{t("llm.hint")}</div>
-      </div>
-      <textarea
-        className="ev2-llm-textarea"
-        value={intent}
-        onChange={(e) => setIntent(e.target.value)}
-        placeholder={t("llm.placeholder")}
-        disabled={busy}
-        onKeyDown={(e) => {
-          // ⌘/Ctrl + Enter 로 생성.
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-      />
-      {Array.isArray(examples) && examples.length > 0 && (
-        <div className="ev2-llm-examples">
-          <span className="lbl">{t("llm.examplesLabel")}</span>
-          {examples.map((ex, i) => (
+      <div className="ev2-llm-card">
+        <div className="ev2-llm-head">
+          <span className="ev2-llm-badge">
+            <SparkleIcon />
+          </span>
+          <div>
+            <div className="ev2-llm-title">{t("llm.title")}</div>
+            <div className="ev2-llm-sub">{t("llm.hint")}</div>
+          </div>
+        </div>
+
+        <div className="ev2-llm-field">
+          <textarea
+            className="ev2-llm-textarea"
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            placeholder={t("llm.placeholder")}
+            disabled={busy}
+            autoFocus
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+          />
+          <div className="ev2-llm-bar">
             <button
-              key={i}
               type="button"
-              className="ev2-llm-chip"
-              disabled={busy}
-              onClick={() => setIntent(ex)}
+              className="ev2-pri ev2-llm-gen"
+              onClick={() => void submit()}
+              disabled={busy || !intent.trim()}
             >
-              {ex}
+              {busy ? <span className="ev2-llm-spin" /> : <SparkleIcon />}
+              {busy ? t("llm.generating") : t("llm.generate")}
             </button>
-          ))}
+          </div>
         </div>
-      )}
-      {error && (
-        <div className="ev2-err-banner">
-          <WarnIcon />
-          {error}
-        </div>
-      )}
-      <div className="ev2-llm-actions">
-        <button
-          type="button"
-          className="ev2-pri"
-          onClick={() => void submit()}
-          disabled={busy || !intent.trim()}
-        >
-          {busy ? t("llm.generating") : t("llm.generate")}
-        </button>
+
+        {error && (
+          <div className="ev2-llm-error">
+            <WarnIcon />
+            {error}
+          </div>
+        )}
       </div>
     </div>
   );

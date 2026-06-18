@@ -261,7 +261,7 @@
     "walletOptDesc": "Apply customized settings per wallet package — the template is still saved to the Library.",
     "noWalletsSuffix": " (no registered wallets)",
     "libOptTitle": "Save to Library (shared)",
-    "libOptDesc": "A shared policy reusable across wallets. Kept in the Library; apply it to any wallet/package when needed. Usually the right choice.",
+    "libOptDesc": "A shared policy reusable across wallets. Kept in the Library; apply it to any wallet/package when needed.",
     "title2Wallet": "Which wallets / packages?",
     "title2Library": "Library settings",
     "sub2Wallet": "The template is saved to the Library and applied to the packages you pick. Wallets with no package go to the Library only.",
@@ -324,7 +324,7 @@
   },
   "llm": {
     "title": "Describe the policy in plain language",
-    "hint": "An LLM turns your intent into a policy, then drops it into the Form tab for review. ⌘/Ctrl + Enter to generate.",
+    "hint": "An LLM turns your intent into a policy, then drops it into the Form tab for review.",
     "placeholder": "e.g. Block swaps whose output goes to an address other than my own wallet",
     "generate": "Generate",
     "generating": "Generating…",

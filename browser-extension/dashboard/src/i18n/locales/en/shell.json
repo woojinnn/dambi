@@ -1,5 +1,11 @@
 {
   "nav": {
+    "home": "Home",
+    "editor": "Editor",
+    "simulation": "Simulation",
+    "assets": "Assets",
+    "market": "Policy Hub",
+    "history": "History",
     "profile": "Profile",
     "signOut": "Sign out",
     "account": "Account",

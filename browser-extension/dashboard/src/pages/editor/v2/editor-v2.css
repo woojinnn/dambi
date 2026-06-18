@@ -1487,78 +1487,116 @@
 .ev2-llm-pane {
   flex: 1;
   display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 24px;
+  overflow-y: auto;
+}
+/* 중앙 정렬된 카드 — 넓은 화면에서 폭이 흩어지지 않게. */
+.ev2-llm-card {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px;
+  gap: 18px;
 }
 .ev2-llm-head {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 13px;
 }
+.ev2-llm-badge {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--sage-500, #6f9a76), var(--cyan-600, #3f7d8a));
+  box-shadow: 0 6px 16px -8px rgba(72, 90, 94, 0.6);
+}
+.ev2-llm-badge svg { width: 20px; height: 20px; }
 .ev2-llm-title {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: -0.01em;
   color: var(--slate-900);
 }
 .ev2-llm-sub {
+  margin-top: 3px;
   font-size: 12.5px;
   color: var(--slate-500);
-  line-height: 1.5;
+  line-height: 1.55;
+}
+/* 텍스트영역을 카드처럼 — 포커스 시 은은한 링. */
+.ev2-llm-field {
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(72, 90, 94, 0.04), 0 12px 28px -22px rgba(72, 90, 94, 0.5);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  overflow: hidden;
+}
+.ev2-llm-field:focus-within {
+  border-color: var(--sage-400, #9bb29b);
+  box-shadow: 0 0 0 3px var(--sage-100, #e8f0e8), 0 12px 28px -22px rgba(72, 90, 94, 0.5);
 }
 .ev2-llm-textarea {
-  min-height: 160px;
+  display: block;
+  width: 100%;
+  min-height: 200px;
   appearance: none;
   resize: vertical;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md, 10px);
+  border: 0;
   outline: none;
-  background: var(--surface);
+  background: transparent;
   font-family: var(--ff-sans, inherit);
-  font-size: 14px;
+  font-size: 14.5px;
   color: var(--slate-900);
-  padding: 14px 16px;
-  line-height: 1.6;
+  padding: 16px 18px;
+  line-height: 1.65;
 }
-.ev2-llm-textarea:focus {
-  border-color: var(--sage-400, #9bb29b);
-}
-.ev2-llm-textarea:disabled {
-  opacity: 0.6;
-}
-.ev2-llm-examples {
+.ev2-llm-textarea::placeholder { color: var(--slate-400); }
+.ev2-llm-textarea:disabled { opacity: 0.55; }
+/* 텍스트영역 하단 바: 단축키 힌트 + 생성 버튼. */
+.ev2-llm-bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-}
-.ev2-llm-examples .lbl {
-  font-size: 11.5px;
-  color: var(--slate-500);
-  margin-right: 2px;
-}
-.ev2-llm-chip {
-  font-size: 12px;
-  color: var(--slate-700);
-  background: var(--fog-200);
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  padding: 5px 11px;
-  cursor: pointer;
-  text-align: left;
-}
-.ev2-llm-chip:hover:not(:disabled) {
-  background: var(--fog-300, #e7e9ee);
-  color: var(--slate-900);
-}
-.ev2-llm-chip:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.ev2-llm-actions {
-  display: flex;
   justify-content: flex-end;
+  gap: 12px;
+  padding: 9px 11px;
+  border-top: 1px solid var(--hairline-soft);
+  background: var(--fog-100);
 }
+.ev2-llm-gen {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ev2-llm-gen svg { width: 15px; height: 15px; }
+.ev2-llm-spin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  animation: ev2-llm-spin 0.7s linear infinite;
+}
+@keyframes ev2-llm-spin { to { transform: rotate(360deg); } }
+.ev2-llm-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--danger-600, #dc2626);
+  background: var(--danger-50, #fef2f2);
+  border: 1px solid var(--danger-200, #fecaca);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.ev2-llm-error svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }
 
 .ev2-manifest {
   flex-shrink: 0;
