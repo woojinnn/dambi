@@ -12,10 +12,11 @@
  * - It returns the final redirect URL to us, even if the URL is not
  *   reachable by the browser (we control the redirect target).
  *
- * The redirect target is the dashboard's `/auth/callback` URL by
- * default. The server sends `#access_token=…&refresh_token=…` in the
- * fragment; `launchWebAuthFlow` reports that URL back to us, and we
- * never actually navigate the dashboard tab.
+ * The redirect target is this extension's chromiumapp.org URL. The server
+ * sends `#access_token=…&refresh_token=…` only for that explicit allowlisted
+ * extension redirect; the default web-dashboard login is access-token only.
+ * `launchWebAuthFlow` reports the final URL back to us, and we never actually
+ * navigate the dashboard tab.
  */
 
 import Browser from "webextension-polyfill";

@@ -74,11 +74,22 @@ describe("isManifestRequest", () => {
 });
 
 describe("handleManifestRequest", () => {
+  const originalLegacyV1Flag = process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
+
   beforeEach(() => {
     mocks.localStore.clear();
     mocks.localStore.set("dashboard:current-user-id", "test-user");
     vi.clearAllMocks();
     vi.stubGlobal("fetch", mocks.fetch);
+    delete process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
+  });
+
+  afterAll(() => {
+    if (originalLegacyV1Flag === undefined) {
+      delete process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
+    } else {
+      process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = originalLegacyV1Flag;
+    }
   });
 
   it("manifest:get returns null for an absent action", async () => {
@@ -206,6 +217,7 @@ describe("handleManifestRequest", () => {
     });
 
     it("merges bundled catalog with dynamic catalog from daemon", async () => {
+      process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
       // Endpoint URL is set → handler will try to fetch from daemon too.
       await store.setEndpointUrl("http://localhost:8787");
 
@@ -277,6 +289,37 @@ describe("handleManifestRequest", () => {
       expect(cat.methods["oracle.usd_value"].description).toBe("NEW daemon desc");
       // Plugin entry passes through with its origin tag intact.
       expect(cat.methods["risk.score"].origin).toBe("plugin");
+    });
+
+    it("skips dynamic catalog fetch when the legacy sidecar flag is disabled", async () => {
+      await store.setEndpointUrl("http://localhost:8787");
+      globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+        const u = typeof url === "string" ? url : url.toString();
+        if (u.includes("method-catalog.json")) {
+          return new Response(
+            JSON.stringify({
+              methods: {
+                "oracle.usd_value": {
+                  name: "oracle.usd_value",
+                  params: {},
+                  returns: { kind: "record", type: "UsdValuation" },
+                  origin: "bundled",
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected dynamic fetch: ${u}`);
+      }) as unknown as typeof fetch;
+
+      const r = await handleManifestRequest({
+        type: "manifest:get-method-catalog",
+      });
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      const cat = r.data as { methods: Record<string, unknown> };
+      expect(Object.keys(cat.methods)).toEqual(["oracle.usd_value"]);
     });
 
     it("returns bundled-only when no endpoint URL is configured", async () => {
@@ -364,6 +407,7 @@ describe("handleManifestRequest", () => {
   });
 
   it("manifest:ping returns reachable=true on HTTP 200", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
     await store.setEndpointUrl("http://localhost:8787");
     mocks.fetch.mockResolvedValue({ ok: true, status: 200 } as Response);
     const r = await handleManifestRequest({ type: "manifest:ping" });
@@ -373,6 +417,23 @@ describe("handleManifestRequest", () => {
       expect(d.reachable).toBe(true);
       expect(d.url).toBe("http://localhost:8787");
     }
+  });
+
+  it("manifest:ping reports disabled without fetching when legacy sidecar flag is off", async () => {
+    await store.setEndpointUrl("http://localhost:8787");
+    const r = await handleManifestRequest({ type: "manifest:ping" });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const d = r.data as {
+        reachable: boolean;
+        disabled?: boolean;
+        reason?: string;
+      };
+      expect(d.reachable).toBe(false);
+      expect(d.disabled).toBe(true);
+      expect(d.reason).toBe("legacy_v1_rpc_disabled");
+    }
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 
   it("manifest:ping returns reachable=false when no endpoint is configured", async () => {

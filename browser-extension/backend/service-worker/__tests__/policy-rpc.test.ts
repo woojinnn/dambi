@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dispatchCallsV2, formatAuditMatched } from "../policy-rpc";
 import type { PlannedCallV2Dto } from "../wasm-bridge.types";
@@ -109,9 +109,21 @@ describe("formatAuditMatched", () => {
 
 // ── Phase 1 / P2 — v2 (ActionBody) dispatch ───────────────────────────────
 describe("dispatchCallsV2", () => {
+  const originalLegacyV1Flag = process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal("fetch", vi.fn());
+    authMocks.getAccessToken.mockResolvedValue("jwt");
+    delete process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
+  });
+
+  afterAll(() => {
+    if (originalLegacyV1Flag === undefined) {
+      delete process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
+    } else {
+      process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = originalLegacyV1Flag;
+    }
   });
 
   function plannedRemote(optional = false): PlannedCallV2Dto {
@@ -131,7 +143,35 @@ describe("dispatchCallsV2", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("omits remote calls when signed out and legacy /v1/rpc fallback is disabled", async () => {
+    const call = plannedRemote();
+    const results = await dispatchCallsV2([call], "http://127.0.0.1:8787");
+
+    expect(results).toEqual({});
+    expect(fetch).not.toHaveBeenCalled();
+    expect(authMocks.serverEvaluate).not.toHaveBeenCalled();
+  });
+
+  it("omits remote calls when ctx is present but there is no authenticated server session", async () => {
+    authMocks.getAccessToken.mockResolvedValueOnce(null);
+    const call = plannedRemote();
+    const results = await dispatchCallsV2([call], "http://127.0.0.1:8787", {
+      action: { domain: "amm", action: "swap" },
+      meta: {},
+      tx: {
+        chain_id: "eip155:1",
+        from: "0x1111111111111111111111111111111111111111",
+        to: "0x2222222222222222222222222222222222222222",
+      },
+    });
+
+    expect(results).toEqual({});
+    expect(fetch).not.toHaveBeenCalled();
+    expect(authMocks.serverEvaluate).not.toHaveBeenCalled();
+  });
+
   it("posts remote calls keyed by call_id and folds ok results to unwrapped values", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
     const call = plannedRemote();
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -178,6 +218,7 @@ describe("dispatchCallsV2", () => {
   });
 
   it("OMITS failed remote results (fail-closed; no error stub)", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
     const call = plannedRemote();
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -200,6 +241,7 @@ describe("dispatchCallsV2", () => {
   });
 
   it("OMITS all remote calls when the daemon is unreachable (fail-closed)", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
     const call = plannedRemote();
     vi.mocked(fetch).mockRejectedValue(new Error("ECONNREFUSED"));
 
@@ -210,6 +252,7 @@ describe("dispatchCallsV2", () => {
   });
 
   it("merges local + remote results into one map", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
     const local: PlannedCallV2Dto = {
       manifest_id: "m",
       call_id: "m::nano",
@@ -246,10 +289,9 @@ describe("dispatchCallsV2", () => {
   });
 
   // ── SW prereq — authenticated /evaluate path: wallet_id identity ─────────
-  // The server loads wallet state by `wallet_id.address`. A venue order's
-  // `tx.from` is the HL submitter SENTINEL, so the resolved master must be
-  // able to override it — otherwise every HL server-state method reads an
-  // empty wallet and stays dormant.
+  // The server loads wallet state by `wallet_id.address`. The dispatcher also
+  // supports an explicit state identity override so venue-order callers can
+  // force authenticated enrichment to use the resolved master account.
   describe("authenticated /evaluate wallet identity", () => {
     const ctxBase = {
       action: { domain: "perp", action: "place_order" },

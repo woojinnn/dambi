@@ -1,7 +1,10 @@
 /**
- * `/transactions` — tx lifecycle log from the server's `state_deltas`
- * table. Each row is one action attempt: predicted → pending →
- * confirmed / failed (or `historical` when discovered via backfill).
+ * `/transactions` — retained for legacy server compatibility.
+ *
+ * The active dashboard reads verdict/history and state-delta details from the
+ * extension bridge, not from a policy-server state_deltas table. The server
+ * endpoint currently returns an empty array until a dedicated lifecycle read
+ * model is reintroduced.
  */
 
 import { request } from "./client";
@@ -9,7 +12,7 @@ import type { TxRow } from "./types";
 
 export type { TxRow };
 
-/** `GET /transactions?wallet=<addr>&limit=<n>` — recent tx log. */
+/** `GET /transactions?wallet=<addr>&limit=<n>` — legacy empty compatibility list. */
 export async function listTransactions(
   opts: { wallet?: string; limit?: number } = {},
 ): Promise<TxRow[]> {

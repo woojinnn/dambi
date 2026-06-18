@@ -30,7 +30,9 @@ describe("dashboard server-api client", () => {
   it("refreshes the access token once and retries after a 401", async () => {
     window.localStorage.setItem("dambi_jwt", "old-access");
     window.localStorage.setItem("dambi_jwt_refresh", "refresh-token");
-    const { request } = await import("./client");
+    const { request, setTokenRefreshObserver } = await import("./client");
+    const tokenRefreshObserver = vi.fn();
+    setTokenRefreshObserver(tokenRefreshObserver);
 
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -53,6 +55,7 @@ describe("dashboard server-api client", () => {
     );
     expect(window.localStorage.getItem("dambi_jwt")).toBe("new-access");
     expect(window.localStorage.getItem("dambi_jwt_refresh")).toBe("new-refresh");
+    expect(tokenRefreshObserver).toHaveBeenCalledWith("new-access", "new-refresh");
     expect(fetchMock.mock.calls[2][1]).toMatchObject({
       headers: {
         Authorization: "Bearer new-access",
@@ -76,5 +79,22 @@ describe("dashboard server-api client", () => {
       status: 400,
       body: "no chains configured on the server",
     } satisfies Partial<InstanceType<typeof ServerError>>);
+  });
+
+  it("builds token query URLs only for the SSE stream endpoint", async () => {
+    const { urlWithTokenQuery } = await import("./client");
+
+    expect(urlWithTokenQuery("/events/stream", "access token")).toBe(
+      "https://dambi-policy.duckdns.org/events/stream?token=access%20token",
+    );
+    expect(urlWithTokenQuery("/events/stream?lastEventId=42", "access-token")).toBe(
+      "https://dambi-policy.duckdns.org/events/stream?lastEventId=42&token=access-token",
+    );
+    expect(() => urlWithTokenQuery("/wallets", "access-token")).toThrow(
+      "/events/stream",
+    );
+    expect(() => urlWithTokenQuery("/events/stream/extra", "access-token")).toThrow(
+      "/events/stream",
+    );
   });
 });

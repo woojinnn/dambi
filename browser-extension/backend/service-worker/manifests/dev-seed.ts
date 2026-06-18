@@ -1,12 +1,14 @@
 // Dev-build endpoint seeding.
 //
-// In dev, ensures the local policy-rpc endpoint URL is set so the new-user
-// experience has a working target without requiring any manifest claims.
+// In dev, optionally seeds the retired local `/v1/rpc` sidecar endpoint for
+// engineers explicitly experimenting with that legacy path.
 // The bundled manifests are an explicit opt-in ("Install starter pack") —
 // not auto-seeded — so user storage stays decoupled from the bundled set.
 //
-// Skipped entirely in `NODE_ENV === "production"`.
+// Skipped unless `POLICY_RPC_ENABLE_LEGACY_V1_RPC=true`; always skipped in
+// `NODE_ENV === "production"`.
 
+import { legacyV1RpcFallbackEnabled } from "../legacy-v1-rpc";
 import * as store from "./store";
 
 export interface DevSeedDeps {
@@ -23,6 +25,7 @@ export const DEFAULT_DEV_ENDPOINT_URL = "http://localhost:8787";
 
 export async function devSeed(_deps: DevSeedDeps): Promise<void> {
   if (process.env.NODE_ENV === "production") return;
+  if (!legacyV1RpcFallbackEnabled()) return;
   if (!(await store.getEndpointUrl())) {
     await store.setEndpointUrl(DEFAULT_DEV_ENDPOINT_URL);
   }

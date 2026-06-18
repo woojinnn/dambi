@@ -48,15 +48,22 @@ function manifest(id: string): store.PolicyManifest {
 // starter pack" button (see Step 6).
 describe("devSeed", () => {
   const originalNodeEnv = process.env.NODE_ENV;
+  const originalLegacyV1Flag = process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
 
   beforeEach(async () => {
     mocks.localStore.clear();
     vi.clearAllMocks();
     process.env.NODE_ENV = "development";
+    delete process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
   });
 
   afterAll(() => {
     process.env.NODE_ENV = originalNodeEnv;
+    if (originalLegacyV1Flag === undefined) {
+      delete process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC;
+    } else {
+      process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = originalLegacyV1Flag;
+    }
   });
 
   it("never installs a bundled manifest into storage", async () => {
@@ -81,12 +88,19 @@ describe("devSeed", () => {
     expect(all.swap.id).toBe("user::swap-existing");
   });
 
-  it("sets the dev endpoint when none is configured", async () => {
+  it("does not seed the retired dev endpoint unless the legacy sidecar flag is enabled", async () => {
+    await devSeed({});
+    expect(await store.getEndpointUrl()).toBeNull();
+  });
+
+  it("sets the dev endpoint when the legacy sidecar flag is enabled", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
     await devSeed({});
     expect(await store.getEndpointUrl()).toBe("http://localhost:8787");
   });
 
   it("does not overwrite an existing endpoint URL", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
     await store.setEndpointUrl("http://custom.example:9999");
     await devSeed({});
     expect(await store.getEndpointUrl()).toBe("http://custom.example:9999");

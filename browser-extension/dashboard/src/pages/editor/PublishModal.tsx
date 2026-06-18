@@ -53,7 +53,7 @@ export interface PublishModalProps {
 }
 
 const SEMVER = "1.0.0";
-const SLUG_RE = /^[A-Za-z0-9_./()-]{1,128}$/;
+const SLUG_RE = /^[A-Za-z0-9_.()-]{1,120}$/;
 
 /** A policy being published, with its de-identification analysis. */
 interface PublishRule {

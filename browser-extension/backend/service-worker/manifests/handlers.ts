@@ -20,6 +20,7 @@ import {
   loadCurrentEnabledPolicySet,
   reinstallAllPolicies,
 } from "../policies-loader";
+import { legacyV1RpcFallbackEnabled } from "../legacy-v1-rpc";
 import {
   applyEnabledIds,
   getEnabledIds,
@@ -115,20 +116,14 @@ async function installWith(
 }
 
 /**
- * Hybrid method catalog discovery for the manifest editor.
+ * Method catalog discovery for the manifest editor.
  *
- * Reads the bundled `method-catalog.json` and merges any catalog the
- * configured policy-rpc daemon exposes over `GET /v1/methods`. The
- * dynamic catalog wins on key collision so:
- *  - A newer daemon catalog (post-extension-build update) surfaces
- *    correctly.
- *  - Plugin and sidecar methods added at daemon startup show up
- *    alongside the bundled set.
- *  - Existing bundled-only callers never break: empty merge is a
- *    no-op.
+ * Reads the bundled `method-catalog.json`. The old unauthenticated sidecar
+ * catalog (`GET /v1/methods`) is retired in production and stays disabled unless
+ * a local build explicitly sets `POLICY_RPC_ENABLE_LEGACY_V1_RPC=true`.
  *
  * Returns `{ methods: {} }` on total failure (bundle missing AND
- * daemon unreachable) so the manifest editor degrades to free-text
+ * optional sidecar unreachable) so the manifest editor degrades to free-text
  * mode instead of crashing.
  */
 async function fetchHybridMethodCatalog(): Promise<{
@@ -153,10 +148,10 @@ async function fetchHybridMethodCatalog(): Promise<{
     // catalog can still seed the UI.
   }
 
-  // 2) Optional dynamic catalog from the configured daemon.
+  // 2) Optional dynamic catalog from the retired local sidecar.
   let dynamic: { methods: Record<string, unknown> } = { methods: {} };
   const endpointUrl = await store.getEndpointUrl();
-  if (endpointUrl) {
+  if (endpointUrl && legacyV1RpcFallbackEnabled()) {
     try {
       const url = `${endpointUrl.replace(/\/+$/, "")}/v1/methods`;
       const response = await fetch(url);
@@ -190,6 +185,17 @@ async function pingEndpoint(): Promise<ManifestResponse> {
   const url = await store.getEndpointUrl();
   if (!url) {
     return { ok: true, data: { reachable: false, url: null } };
+  }
+  if (!legacyV1RpcFallbackEnabled()) {
+    return {
+      ok: true,
+      data: {
+        reachable: false,
+        url,
+        disabled: true,
+        reason: "legacy_v1_rpc_disabled",
+      },
+    };
   }
   try {
     const response = await fetch(`${url.replace(/\/+$/, "")}/v1/healthz`, {
