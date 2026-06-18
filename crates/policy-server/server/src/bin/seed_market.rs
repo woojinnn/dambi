@@ -571,6 +571,37 @@ mod tests {
         serde_json::from_str(PHASE1_JSON).expect("phase1 seed JSON parses")
     }
 
+    fn server_served_policy_rpc_methods() -> BTreeSet<String> {
+        let source = include_str!("../handler.rs");
+        let start = source
+            .find("match spec.method.as_str()")
+            .expect("handler.rs keeps policy-rpc dispatch match");
+        let dispatch = &source[start..];
+        let end = dispatch
+            .find("other => diagnostics.push")
+            .expect("handler.rs keeps unknown-method diagnostic arm");
+        let dispatch = &dispatch[..end];
+
+        let methods: BTreeSet<String> = dispatch
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim_start();
+                let after_open = trimmed.strip_prefix('"')?;
+                let (method, suffix) = after_open.split_once('"')?;
+                suffix
+                    .trim_start()
+                    .starts_with("=>")
+                    .then(|| method.to_owned())
+            })
+            .collect();
+
+        assert!(
+            methods.contains("oracle.usd_value"),
+            "handler method scrape should include a known served method"
+        );
+        methods
+    }
+
     #[test]
     fn phase1_seed_json_parses() {
         let entries = seed_entries();
@@ -628,6 +659,83 @@ mod tests {
                     .contains("context.amount == \"0xffffffffffffffffffffffffffffffffffffffff\""),
                 "{id} must directly check uint160::MAX",
             );
+        }
+    }
+
+    #[test]
+    fn phase1_seed_never_requires_unserved_policy_rpc_methods() {
+        let served = server_served_policy_rpc_methods();
+        for entry in seed_entries() {
+            let Some(policy_rpc) = entry.manifest.get("policy_rpc").and_then(Value::as_array)
+            else {
+                continue;
+            };
+            for spec in policy_rpc {
+                let method = spec.get("method").and_then(Value::as_str).unwrap_or("");
+                if served.contains(method) {
+                    continue;
+                }
+
+                assert!(
+                    spec.get("optional").and_then(Value::as_bool) == Some(true),
+                    "{} uses unserved method `{method}`; it must be optional until the server serves it",
+                    entry.id,
+                );
+
+                for output in spec
+                    .get("outputs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    assert!(
+                        output.get("required").and_then(Value::as_bool) != Some(true),
+                        "{} uses unserved method `{method}` with required output `{}`",
+                        entry.id,
+                        output
+                            .get("field")
+                            .and_then(Value::as_str)
+                            .unwrap_or("<missing-field>"),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn phase1_optional_unserved_policy_rpc_fields_are_has_guarded() {
+        let served = server_served_policy_rpc_methods();
+        for entry in seed_entries() {
+            let Some(policy_rpc) = entry.manifest.get("policy_rpc").and_then(Value::as_array)
+            else {
+                continue;
+            };
+            for spec in policy_rpc {
+                let method = spec.get("method").and_then(Value::as_str).unwrap_or("");
+                if served.contains(method) {
+                    continue;
+                }
+                let outputs = spec
+                    .get("outputs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|output| output.get("field").and_then(Value::as_str));
+
+                assert!(
+                    entry.cedar.contains("context has custom"),
+                    "{} uses dormant method `{method}` but does not guard `context.custom`",
+                    entry.id,
+                );
+                for field in outputs {
+                    let guard = format!("context.custom has {field}");
+                    assert!(
+                        entry.cedar.contains(&guard),
+                        "{} uses dormant method `{method}` but does not guard `{guard}`",
+                        entry.id,
+                    );
+                }
+            }
         }
     }
 }

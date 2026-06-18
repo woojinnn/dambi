@@ -17,6 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::Serialize;
 
+use policy_db::PostgresWalletMetadata;
 use policy_state::position::{HlAccount, HlSpotBalance, PositionKind};
 use policy_state::primitives::ChainId;
 use policy_state::{WalletId, WalletStore};
@@ -79,12 +80,15 @@ pub async fn get_summary(
     let mut wallet_summaries: Vec<WalletSummary> = Vec::with_capacity(wallet_rows.len());
 
     for (idx, w_row) in wallet_rows.into_iter().enumerate() {
-        let wallet_id = match parse_addr(&w_row.address) {
-            Some(addr) => WalletId::new(addr, w_row.chains.clone()),
-            None => continue,
+        let wallet_id = match wallet_id_from_metadata(&w_row) {
+            Ok(wallet_id) => wallet_id,
+            Err(e) => return internal(&e),
         };
-        let Ok(mut s) = store.load(&wallet_id).await else {
-            continue; // best-effort: skip on per-wallet load failure
+        let mut s = match store.load(&wallet_id).await {
+            Ok(state) => state,
+            Err(e) => {
+                return internal(&format!("dashboard wallet state {}: {e}", w_row.address));
+            }
         };
         let unlimited = count_unlimited_approvals(&s);
         let pending = i64::try_from(s.pending.len()).unwrap_or(i64::MAX);
@@ -168,6 +172,16 @@ fn parse_addr(addr_lower: &str) -> Option<policy_state::primitives::Address> {
     policy_state::primitives::Address::from_str(addr_lower).ok()
 }
 
+fn wallet_id_from_metadata(row: &PostgresWalletMetadata) -> Result<WalletId, String> {
+    let addr = parse_addr(&row.address).ok_or_else(|| {
+        format!(
+            "dashboard wallet metadata has invalid address `{}`",
+            row.address
+        )
+    })?;
+    Ok(WalletId::new(addr, row.chains.clone()))
+}
+
 fn key_chain(k: &policy_state::token::TokenKey) -> &ChainId {
     k.chain()
 }
@@ -238,18 +252,67 @@ fn decimal_to_f64(decimal: &policy_state::Decimal) -> Option<f64> {
 }
 
 fn internal(reason: &str) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, reason.to_owned()).into_response()
+    tracing::error!(error = %reason, "dashboard handler internal error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
-    use super::{fmt6, hyperliquid_assets_usd};
+    use super::{fmt6, hyperliquid_assets_usd, internal, wallet_id_from_metadata};
+    use axum::http::StatusCode;
+    use policy_db::PostgresWalletMetadata;
     use policy_state::live_field::DataSource;
     use policy_state::position::{HlAccount, HlSpotBalance, HlVaultEquity, Position, PositionKind};
     use policy_state::primitives::{Address, ChainId, Decimal, Time};
     use policy_state::{ProtocolRef, WalletId, WalletState};
+
+    #[tokio::test]
+    async fn internal_errors_do_not_echo_reason() {
+        let response = internal("dashboard db secret");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "Internal server error");
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn wallet_metadata_resolution_rejects_invalid_address() {
+        let row = PostgresWalletMetadata {
+            address: "not-an-address".to_owned(),
+            chains: vec![ChainId::ethereum_mainnet()],
+            label: None,
+            owned: true,
+            archived: false,
+        };
+
+        let err = wallet_id_from_metadata(&row).unwrap_err();
+
+        assert!(err.contains("invalid address"), "got: {err}");
+    }
+
+    #[test]
+    fn wallet_metadata_resolution_preserves_chain_set() {
+        let chains = vec![ChainId::ethereum_mainnet(), ChainId::arbitrum()];
+        let row = PostgresWalletMetadata {
+            address: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045".to_owned(),
+            chains: chains.clone(),
+            label: Some("vitalik".to_owned()),
+            owned: true,
+            archived: false,
+        };
+
+        let wallet_id = wallet_id_from_metadata(&row).expect("valid metadata");
+
+        assert_eq!(wallet_id.chains.len(), chains.len());
+        for chain in chains {
+            assert!(wallet_id.chains.contains(&chain));
+        }
+    }
 
     fn state_with_hyperliquid_account(account: HlAccount) -> WalletState {
         let mut state = WalletState::new(WalletId::new(

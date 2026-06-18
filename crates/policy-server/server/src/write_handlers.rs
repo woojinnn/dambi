@@ -7,6 +7,7 @@
 //! stream so a dashboard or extension subscribed to the activity feed
 //! sees the refresh in real time.
 
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,6 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 
+use policy_db::PostgresWalletMetadata;
 use policy_state::live_field::{DataSource, LiveField, OracleProvider};
 use policy_state::primitives::{Address, ChainId, Duration, Price, Time, U256};
 use policy_state::token::{Balance, TokenHolding, TokenKey, TokenKind, TokenRef};
@@ -30,6 +32,18 @@ use policy_transition::{apply, Action, ActionBody, ActionMeta, ActionNature, Eip
 use crate::app::AppState;
 use crate::auth::AuthUser;
 use crate::events::types::{Event, WalletSync};
+
+/// User-supplied explicit chain sets drive synchronous discovery/sync work.
+/// Keep this comfortably above supported production networks, but low enough
+/// that one request cannot fan out across an arbitrary CAIP-2 list.
+const MAX_EXPLICIT_WALLET_CHAINS: usize = 16;
+/// Active wallets are a recurring sync/dashboard workload, not just one DB row.
+/// Keep the product cap high enough for power users while bounding per-user
+/// background work and unpaginated wallet views.
+const MAX_ACTIVE_WALLETS_PER_USER: usize = 128;
+const MAX_WALLET_LABEL_CHARS: usize = 80;
+const ADD_WALLET_DISCOVERY_PUBLIC_ERROR: &str = "wallet discovery failed; retry sync later";
+const ADD_WALLET_SYNC_PUBLIC_ERROR: &str = "wallet sync failed; retry sync later";
 
 /// `POST /wallets` body.
 #[derive(Debug, Deserialize)]
@@ -74,6 +88,36 @@ pub async fn add_wallet(
     Extension(user): Extension<AuthUser>,
     Json(req): Json<AddWalletReq>,
 ) -> Response {
+    let lock_key = format!("sync:user:{}", user.user_id);
+    let lock = match state
+        .coordinator
+        .try_lock(&lock_key, state.sync_lock_ttl)
+        .await
+    {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            return (
+                StatusCode::CONFLICT,
+                "wallet operation already running for this user",
+            )
+                .into_response()
+        }
+        Err(e) => return internal(&format!("wallet add lock: {e}")),
+    };
+
+    let response = add_wallet_locked(state.clone(), user, req).await;
+    if let Err(e) = state.coordinator.release_lock(lock).await {
+        tracing::warn!(error = %e, "failed to release wallet add lock");
+    }
+    response
+}
+
+async fn add_wallet_locked(state: AppState, user: AuthUser, req: AddWalletReq) -> Response {
+    let label = match normalize_add_wallet_label(req.label.clone()) {
+        Ok(label) => label,
+        Err(e) => return bad_request(&e),
+    };
+
     let id = match build_wallet_id(&req, &state) {
         Ok(id) => id,
         Err(e) => return *e,
@@ -83,6 +127,19 @@ pub async fn add_wallet(
         Ok(s) => s,
         Err(e) => return internal(&format!("open user store: {e}")),
     };
+
+    let id_address = format!("{:#x}", id.address);
+    let active_wallets = match store.list_wallet_metadata().await {
+        Ok(wallets) => wallets,
+        Err(e) => return internal(&format!("list_wallet_metadata: {e}")),
+    };
+    if active_wallet_quota_exceeded(&active_wallets, &id_address) {
+        return (
+            StatusCode::CONFLICT,
+            format!("too many active wallets: max {MAX_ACTIVE_WALLETS_PER_USER}"),
+        )
+            .into_response();
+    }
 
     // Seed: if the wallet is brand-new, discover what it holds (native
     // gas + ERC-20s via Etherscan when configured) and pre-populate the
@@ -94,7 +151,7 @@ pub async fn add_wallet(
         Err(e) => return internal(&format!("load: {e}")),
     };
     let is_new = existing == WalletState::new(id.clone());
-    let mut discovery_err = None;
+    let mut discovery_failed = false;
     let discovered_count = if is_new {
         let mut seeded = existing.clone();
         let n = match seed_holdings(&mut seeded, &id, &state).await {
@@ -107,7 +164,8 @@ pub async fn add_wallet(
                 if let Err(save_err) = store.save(&existing).await {
                     return internal(&format!("save: {save_err}"));
                 }
-                discovery_err = Some(format!("discovery: {e}"));
+                tracing::warn!(error = %e, "add wallet discovery failed");
+                discovery_failed = true;
                 0
             }
         };
@@ -118,19 +176,18 @@ pub async fn add_wallet(
     } else {
         // Re-adding a previously deleted (soft-archived) wallet. `load` reads
         // `wallet_states`, which has no archived filter, so an archived row
-        // looks "not new" here. Persist the existing state to flip the
-        // `wallets` row back to `archived = FALSE` *before* the label write —
-        // otherwise `update_wallet_metadata` (WHERE archived = FALSE) silently
-        // no-ops and the stale label from before deletion survives.
-        if let Err(e) = store.save(&existing).await {
-            return internal(&format!("save: {e}"));
+        // looks "not new" here. Reactivate explicitly before the label write —
+        // plain state saves preserve `archived` so in-flight syncs cannot
+        // resurrect a user-deleted wallet.
+        if let Err(e) = store.reactivate_wallet(&existing).await {
+            return internal(&format!("reactivate wallet: {e}"));
         }
         0
     };
 
-    if req.label.is_some() {
+    if label.is_some() {
         match store
-            .update_wallet_metadata(&format!("{:#x}", id.address), Some(req.label.clone()), None)
+            .update_wallet_metadata(&format!("{:#x}", id.address), Some(label.clone()), None)
             .await
         {
             Ok(true) => {}
@@ -146,7 +203,7 @@ pub async fn add_wallet(
 
     // Best-effort sync. Failures here aren't fatal — the caller can
     // POST /sync later, and stale state is better than no wallet row.
-    let (synced, sync_err) = match run_sync(&*store, &id, &state.orchestrator).await {
+    let (synced, sync_failed) = match run_sync(&*store, &id, &state.orchestrator).await {
         Ok(counts) => {
             state
                 .publisher
@@ -162,15 +219,13 @@ pub async fn add_wallet(
                 .await;
             (true, None)
         }
-        Err(e) => (false, Some(e)),
+        Err(e) => {
+            tracing::warn!(error = %e, "add wallet initial sync failed");
+            (false, Some(()))
+        }
     };
 
-    let error = match (discovery_err, sync_err) {
-        (Some(discovery), Some(sync)) => Some(format!("{discovery}; sync: {sync}")),
-        (Some(discovery), None) => Some(discovery),
-        (None, Some(sync)) => Some(sync),
-        (None, None) => None,
-    };
+    let error = add_wallet_public_error(discovery_failed, sync_failed.is_some());
 
     Json(AddWalletResp {
         wallet_id: id,
@@ -526,7 +581,10 @@ pub async fn patch_wallet(
         Err(e) => return internal(&format!("open user store: {e}")),
     };
     let addr_str = format!("{addr:#x}");
-    let label = req.label;
+    let label = match normalize_patch_wallet_label(req.label) {
+        Ok(label) => label,
+        Err(e) => return bad_request(&e),
+    };
     let is_owned = req.is_owned;
     match store
         .update_wallet_metadata(&addr_str, label, is_owned)
@@ -795,14 +853,16 @@ pub async fn ingest_permit(
 
     // Resolve the canonical (multi-chain) WalletId by address — never key the
     // store by the permit's single chain, which would risk a load-miss /
-    // clobber the stored chain set. Tracking-only: a permit for an untracked
-    // wallet is a 404, not a wallet-mint.
-    let known = match store.list_wallets().await {
+    // clobber the stored chain set. Signed permits are ownership-bearing state:
+    // a watch-only wallet may be synced/read, but it must not accept a locally
+    // asserted permit report.
+    let metadata = match store.list_wallet_metadata().await {
         Ok(w) => w,
-        Err(e) => return internal(&format!("list_wallets: {e}")),
+        Err(e) => return internal(&format!("list_wallet_metadata: {e}")),
     };
-    let Some(id) = known.into_iter().find(|w| w.address == addr) else {
-        return not_found("wallet not tracked for this user");
+    let id = match owned_wallet_id(metadata, addr) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
 
     // Build the matching off-chain-sig action, run the reducer, and pull the
@@ -813,7 +873,11 @@ pub async fn ingest_permit(
         Ok(a) => a,
         Err(e) => return bad_request(&e),
     };
-    let ctx = EvalContext::new(action_chain(&action), now, RequestKind::Transaction);
+    let permit_chain = action_chain(&action);
+    if let Err(e) = ensure_wallet_tracks_chain(&id, &permit_chain) {
+        return bad_request(&e);
+    }
+    let ctx = EvalContext::new(permit_chain, now, RequestKind::Transaction);
     let delta = match apply(&WalletState::new(id.clone()), &action, &ctx) {
         Ok(d) => d,
         Err(e) => return unprocessable(&format!("reducer rejected permit: {e}")),
@@ -841,6 +905,14 @@ fn action_chain(action: &Action) -> ChainId {
         ActionBody::Token(TokenAction::Permit2SignAllowance(p)) => p.token.key.chain().clone(),
         ActionBody::Token(TokenAction::Permit2SignTransfer(p)) => p.token.key.chain().clone(),
         _ => ChainId::ethereum_mainnet(),
+    }
+}
+
+fn ensure_wallet_tracks_chain(id: &WalletId, chain: &ChainId) -> Result<(), String> {
+    if id.chains.contains(chain) {
+        Ok(())
+    } else {
+        Err("permit chain is not tracked for this wallet".to_owned())
     }
 }
 
@@ -988,7 +1060,7 @@ fn erc20_token_ref(chain_id: &str, token: &str) -> Result<TokenRef, String> {
     let address = parse_addr("token", token)?;
     Ok(TokenRef {
         key: TokenKey::Erc20 {
-            chain: ChainId::new(chain_id),
+            chain: parse_eip155_chain_id(chain_id)?,
             address,
         },
     })
@@ -1004,6 +1076,22 @@ fn parse_u256(field: &str, raw: &str) -> Result<U256, String> {
 
 fn unprocessable(reason: &str) -> Response {
     (StatusCode::UNPROCESSABLE_ENTITY, reason.to_owned()).into_response()
+}
+
+fn owned_wallet_id(
+    metadata: Vec<PostgresWalletMetadata>,
+    addr: Address,
+) -> Result<WalletId, Response> {
+    let addr_str = format!("{addr:#x}");
+    let Some(row) = metadata.into_iter().find(|w| w.address == addr_str) else {
+        return Err(not_found("wallet not tracked for this user"));
+    };
+    if !row.owned {
+        return Err(forbidden(
+            "signed permits can only be recorded for owned wallets",
+        ));
+    }
+    Ok(WalletId::new(addr, row.chains))
 }
 
 // ---------- internals ----------
@@ -1095,7 +1183,14 @@ fn build_wallet_id(req: &AddWalletReq, state: &AppState) -> Result<WalletId, Box
             None => Vec::new(),
         }
     } else {
-        req.chains.iter().cloned().map(ChainId::new).collect()
+        let supported = state
+            .orchestrator
+            .router_arc()
+            .map(|router| router.chains().cloned().collect::<BTreeSet<_>>());
+        match resolve_explicit_wallet_chains(&req.chains, supported.as_ref()) {
+            Ok(chains) => chains,
+            Err(e) => return Err(Box::new(bad_request(&e))),
+        }
     };
     if chains.is_empty() {
         return Err(Box::new(bad_request(
@@ -1103,6 +1198,89 @@ fn build_wallet_id(req: &AddWalletReq, state: &AppState) -> Result<WalletId, Box
         )));
     }
     Ok(WalletId::new(address, chains))
+}
+
+fn resolve_explicit_wallet_chains(
+    raw_chains: &[String],
+    supported: Option<&BTreeSet<ChainId>>,
+) -> Result<Vec<ChainId>, String> {
+    if raw_chains.len() > MAX_EXPLICIT_WALLET_CHAINS {
+        return Err(format!("too many chains: max {MAX_EXPLICIT_WALLET_CHAINS}"));
+    }
+
+    let mut chains = Vec::with_capacity(raw_chains.len());
+    for raw in raw_chains {
+        let chain = parse_eip155_chain_id(raw)?;
+        if let Some(supported) = supported {
+            if !supported.is_empty() && !supported.contains(&chain) {
+                return Err(format!("unsupported chain `{raw}`"));
+            }
+        }
+        chains.push(chain);
+    }
+    Ok(chains)
+}
+
+fn parse_eip155_chain_id(raw: &str) -> Result<ChainId, String> {
+    let Some(rest) = raw.strip_prefix("eip155:") else {
+        return Err(format!("unsupported chain `{raw}`: expected eip155:<id>"));
+    };
+    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!("invalid chain `{raw}`: expected eip155:<id>"));
+    }
+    let id = rest
+        .parse::<u64>()
+        .map_err(|_| format!("invalid chain `{raw}`: eip155 id is too large"))?;
+    if raw != format!("eip155:{id}") {
+        return Err(format!("invalid chain `{raw}`: non-canonical eip155 id"));
+    }
+    Ok(ChainId::new(raw.to_owned()))
+}
+
+fn normalize_add_wallet_label(label: Option<String>) -> Result<Option<String>, String> {
+    label.map(|raw| normalize_wallet_label(&raw)).transpose()
+}
+
+#[allow(clippy::option_option)]
+fn normalize_patch_wallet_label(
+    label: Option<Option<String>>,
+) -> Result<Option<Option<String>>, String> {
+    match label {
+        None => Ok(None),
+        Some(None) => Ok(Some(None)),
+        Some(Some(raw)) => normalize_wallet_label(&raw).map(|label| Some(Some(label))),
+    }
+}
+
+fn normalize_wallet_label(raw: &str) -> Result<String, String> {
+    let label = raw.trim();
+    if label.is_empty() {
+        return Err("wallet label must not be blank".to_owned());
+    }
+    if label.chars().count() > MAX_WALLET_LABEL_CHARS {
+        return Err(format!(
+            "wallet label must be at most {MAX_WALLET_LABEL_CHARS} characters"
+        ));
+    }
+    Ok(label.to_owned())
+}
+
+fn active_wallet_quota_exceeded(active_wallets: &[PostgresWalletMetadata], address: &str) -> bool {
+    active_wallets.len() >= MAX_ACTIVE_WALLETS_PER_USER
+        && !active_wallets
+            .iter()
+            .any(|wallet| wallet.address.eq_ignore_ascii_case(address))
+}
+
+fn add_wallet_public_error(discovery_failed: bool, sync_failed: bool) -> Option<String> {
+    match (discovery_failed, sync_failed) {
+        (true, true) => Some(format!(
+            "{ADD_WALLET_DISCOVERY_PUBLIC_ERROR}; {ADD_WALLET_SYNC_PUBLIC_ERROR}"
+        )),
+        (true, false) => Some(ADD_WALLET_DISCOVERY_PUBLIC_ERROR.to_owned()),
+        (false, true) => Some(ADD_WALLET_SYNC_PUBLIC_ERROR.to_owned()),
+        (false, false) => None,
+    }
 }
 
 fn bad_request(reason: &str) -> Response {
@@ -1113,8 +1291,13 @@ fn not_found(reason: &str) -> Response {
     (StatusCode::NOT_FOUND, reason.to_owned()).into_response()
 }
 
+fn forbidden(reason: &str) -> Response {
+    (StatusCode::FORBIDDEN, reason.to_owned()).into_response()
+}
+
 fn internal(reason: &str) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, reason.to_owned()).into_response()
+    tracing::error!(error = %reason, "write handler internal error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 fn unix_now() -> i64 {
@@ -1131,6 +1314,106 @@ fn unix_now_u64() -> u64 {
 mod tests {
     use super::*;
     use policy_state::U256;
+
+    #[tokio::test]
+    async fn internal_errors_do_not_echo_reason() {
+        let response = internal("store password=secret");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "Internal server error");
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn explicit_wallet_chains_reject_excessive_request_fanout() {
+        let chains = (0..=MAX_EXPLICIT_WALLET_CHAINS)
+            .map(|i| format!("eip155:{}", i + 1))
+            .collect::<Vec<_>>();
+
+        let err = resolve_explicit_wallet_chains(&chains, None).unwrap_err();
+
+        assert!(err.contains("too many chains"), "got: {err}");
+    }
+
+    #[test]
+    fn explicit_wallet_chains_reject_non_evm_or_noncanonical_ids() {
+        for raw in ["solana:mainnet", "eip155:", "eip155:abc", "eip155:01"] {
+            let err = parse_eip155_chain_id(raw).unwrap_err();
+            assert!(err.contains("chain"), "got: {err}");
+        }
+    }
+
+    #[test]
+    fn explicit_wallet_chains_reject_unsupported_configured_chain() {
+        let supported = BTreeSet::from([ChainId::ethereum_mainnet()]);
+        let chains = vec!["eip155:42161".to_owned()];
+
+        let err = resolve_explicit_wallet_chains(&chains, Some(&supported)).unwrap_err();
+
+        assert!(err.contains("unsupported chain"), "got: {err}");
+    }
+
+    #[test]
+    fn explicit_wallet_chains_allow_supported_and_empty_router_sets() {
+        let chains = vec!["eip155:1".to_owned(), "eip155:42161".to_owned()];
+        let supported = BTreeSet::from([ChainId::ethereum_mainnet(), ChainId::arbitrum()]);
+
+        let resolved = resolve_explicit_wallet_chains(&chains, Some(&supported))
+            .expect("configured chains should pass");
+        assert_eq!(resolved.len(), 2);
+
+        let empty = BTreeSet::new();
+        assert!(
+            resolve_explicit_wallet_chains(&chains, Some(&empty)).is_ok(),
+            "empty router configs are accepted for local compatibility"
+        );
+    }
+
+    #[test]
+    fn wallet_label_normalization_trims_and_preserves_clear_semantics() {
+        assert_eq!(
+            normalize_add_wallet_label(Some("  main wallet  ".to_owned())).unwrap(),
+            Some("main wallet".to_owned())
+        );
+        assert_eq!(
+            normalize_patch_wallet_label(Some(None)).unwrap(),
+            Some(None)
+        );
+        assert_eq!(normalize_patch_wallet_label(None).unwrap(), None);
+    }
+
+    #[test]
+    fn wallet_label_normalization_rejects_blank_and_too_long_values() {
+        assert!(normalize_add_wallet_label(Some("   ".to_owned())).is_err());
+
+        let too_long = "a".repeat(MAX_WALLET_LABEL_CHARS + 1);
+        let err = normalize_patch_wallet_label(Some(Some(too_long))).unwrap_err();
+        assert!(err.contains("at most"), "got: {err}");
+    }
+
+    #[test]
+    fn add_wallet_public_error_messages_do_not_echo_internal_reasons() {
+        assert_eq!(
+            add_wallet_public_error(true, false),
+            Some("wallet discovery failed; retry sync later".to_owned())
+        );
+        assert_eq!(
+            add_wallet_public_error(false, true),
+            Some("wallet sync failed; retry sync later".to_owned())
+        );
+        let both = add_wallet_public_error(true, true).expect("combined error");
+        assert!(both.contains("wallet discovery failed"), "got: {both}");
+        assert!(both.contains("wallet sync failed"), "got: {both}");
+        for leaked in ["http", "secret", "api", "postgres", "rpc"] {
+            assert!(
+                !both.to_ascii_lowercase().contains(leaked),
+                "leaked {leaked}: {both}"
+            );
+        }
+    }
 
     #[test]
     fn seed_approvals_writes_allowances_to_primitive_state() {
@@ -1199,6 +1482,74 @@ mod tests {
 
     fn usdc_hex() -> &'static str {
         "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    }
+
+    fn wallet_metadata(
+        address: Address,
+        owned: bool,
+        chains: Vec<ChainId>,
+    ) -> PostgresWalletMetadata {
+        PostgresWalletMetadata {
+            address: format!("{address:#x}"),
+            chains,
+            label: None,
+            owned,
+            archived: false,
+        }
+    }
+
+    #[test]
+    fn permit_ingest_wallet_resolution_rejects_untracked_wallet() {
+        let response = owned_wallet_id(Vec::new(), wallet_addr()).unwrap_err();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn permit_ingest_wallet_resolution_rejects_watch_only_wallet() {
+        let response = owned_wallet_id(
+            vec![wallet_metadata(
+                wallet_addr(),
+                false,
+                vec![ChainId::ethereum_mainnet()],
+            )],
+            wallet_addr(),
+        )
+        .unwrap_err();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn permit_ingest_wallet_resolution_preserves_stored_chain_set() {
+        let chains = vec![ChainId::ethereum_mainnet(), ChainId::new("eip155:42161")];
+        let id = owned_wallet_id(
+            vec![wallet_metadata(wallet_addr(), true, chains.clone())],
+            wallet_addr(),
+        )
+        .expect("owned tracked wallet");
+
+        assert_eq!(id.address, wallet_addr());
+        assert_eq!(id.chains.len(), chains.len());
+        for chain in chains {
+            assert!(id.chains.contains(&chain));
+        }
+    }
+
+    #[test]
+    fn permit_ingest_rejects_untracked_chain() {
+        let id = WalletId::new(wallet_addr(), [ChainId::ethereum_mainnet()]);
+        let err = ensure_wallet_tracks_chain(&id, &ChainId::arbitrum()).unwrap_err();
+
+        assert_eq!(err, "permit chain is not tracked for this wallet");
+    }
+
+    #[test]
+    fn permit_token_ref_requires_canonical_eip155_chain() {
+        for raw in ["1", "solana:mainnet", "eip155:01"] {
+            let err = erc20_token_ref(raw, usdc_hex()).unwrap_err();
+            assert!(err.contains("chain"), "got: {err}");
+        }
     }
 
     /// Mirror `ingest_permit`'s core: build the action, run the reducer, upsert

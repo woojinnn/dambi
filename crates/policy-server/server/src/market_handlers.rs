@@ -42,6 +42,16 @@ use crate::market_dto::{
     UpdateReportStatusReq,
 };
 
+const MARKET_SLUG_MAX_CHARS: usize = 120;
+const MARKET_SHORT_TEXT_MAX_CHARS: usize = 120;
+const MARKET_LONG_TEXT_MAX_CHARS: usize = 2_000;
+const MARKET_INTENTS_MAX: usize = 16;
+const MARKET_DOC_MAX_BYTES: usize = 64 * 1024;
+const MARKET_MANIFEST_MAX_BYTES: usize = 128 * 1024;
+const MARKET_CEDAR_TEXT_MAX_BYTES: usize = 256 * 1024;
+const MARKET_POLICY_TREE_MAX_BYTES: usize = 256 * 1024;
+const MARKET_SET_MEMBERS_MAX: usize = 100;
+
 // ---------------------------------------------------------------------------
 // Read endpoints
 // ---------------------------------------------------------------------------
@@ -81,9 +91,10 @@ pub async fn list_listings(
 /// `GET /market/activity-summary` — per-listing install counts within a
 /// look-back window (default 7 days), most-installed first.
 ///
-/// Powers the landing "최근 인기" recommendation hero. The counts are real
-/// install events from `market_installs` (no personalization, no mock data);
-/// the dashboard buckets the returned slugs by its own category taxonomy.
+/// Powers the landing "최근 인기" recommendation hero. The counts are unique
+/// installers derived from real `market_installs` events (no personalization,
+/// no mock data); the dashboard buckets the returned slugs by its own category
+/// taxonomy.
 pub async fn activity_summary(
     State(state): State<AppState>,
     Extension(_user): Extension<AuthUser>,
@@ -209,7 +220,7 @@ pub async fn list_reports(
     Extension(user): Extension<AuthUser>,
     Query(q): Query<ListReportsQuery>,
 ) -> Response {
-    if let Some(resp) = require_market_admin(&user) {
+    if let Some(resp) = require_market_admin(&state, &user).await {
         return resp;
     }
     let status = q.status.map(serde_report_status);
@@ -299,11 +310,8 @@ pub async fn create_listing(
         Ok(row) => Json(listing_row_to_summary(&row)).into_response(),
         Err(e) => {
             let msg = e.to_string();
-            // Surface duplicate-slug / SemVer / CHECK violations as 400, the
-            // rest as 500. The store wraps both as DbError::Invariant, so we
-            // pattern-match on substring — coarser than ideal but stable.
-            if msg.contains("duplicate key") || msg.contains("UNIQUE") || msg.contains("CHECK") {
-                (StatusCode::BAD_REQUEST, msg).into_response()
+            if let Some(resp) = db_constraint_bad_request(&msg) {
+                resp
             } else {
                 server_error(&msg)
             }
@@ -342,40 +350,39 @@ pub async fn create_version(
         )
             .into_response();
     }
+    if let Err(msg) = validate_version_req(&listing.kind, &req) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
 
     // Match body kind to listing kind
     let body = match listing.kind.as_str() {
-        "policy" => {
-            if req.cedar_text.is_none() {
-                return (StatusCode::BAD_REQUEST, "policy version needs cedar_text")
-                    .into_response();
-            }
-            VersionBody {
-                cedar_text: req.cedar_text,
-                manifest: req.manifest,
-                policy_tree: req.policy_tree,
-                members: None,
-                changelog: req.changelog.as_ref().map(i18n_to_json),
-            }
-        }
-        "set" => {
-            if req.members.as_ref().is_none_or(std::vec::Vec::is_empty) {
-                return (StatusCode::BAD_REQUEST, "set version needs members[]").into_response();
-            }
-            VersionBody {
-                cedar_text: None,
-                manifest: None,
-                policy_tree: None,
-                members: req.members.as_deref().map(members_to_json),
-                changelog: req.changelog.as_ref().map(i18n_to_json),
-            }
-        }
+        "policy" => VersionBody {
+            cedar_text: req.cedar_text,
+            manifest: req.manifest,
+            policy_tree: req.policy_tree,
+            members: None,
+            changelog: req.changelog.as_ref().map(i18n_to_json),
+        },
+        "set" => VersionBody {
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: req.members.as_deref().map(members_to_json),
+            changelog: req.changelog.as_ref().map(i18n_to_json),
+        },
         other => return server_error(&format!("unknown listing kind: {other}")),
     };
 
     match db_create_version(pool, listing_id, &req.version, body, now_secs()).await {
         Ok(v) => Json(version_row_to_dto(v)).into_response(),
-        Err(e) => server_error(&e.to_string()),
+        Err(e) => {
+            let msg = e.to_string();
+            if let Some(resp) = db_constraint_bad_request(&msg) {
+                resp
+            } else {
+                server_error(&msg)
+            }
+        }
     }
 }
 
@@ -394,13 +401,16 @@ pub async fn create_install(
         Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
         Err(e) => return server_error(&e.to_string()),
     };
-    // Recording the install event (popularity counts) is non-critical
-    // telemetry. Never fail the actual download because of it — e.g. a user
-    // row missing from `users` (FK) must not block copy-to-editor.
-    if let Err(e) =
-        db_record_install(pool, listing_id, &req.version, &user.user_id, now_secs()).await
-    {
-        tracing::warn!(error = %e, user_id = %user.user_id, "market install record failed; returning body anyway");
+    // Recording the install event (popularity counts) is non-critical telemetry,
+    // but `None` means the version is no longer a published install target.
+    // Never fail the actual download for write errors such as transient DB/FK
+    // failures, but do not return a body after the listing was hidden.
+    match db_record_install(pool, listing_id, &req.version, &user.user_id, now_secs()).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, user_id = %user.user_id, "market install record failed; returning body anyway");
+        }
     }
     Json(version_row_to_dto(version)).into_response()
 }
@@ -418,6 +428,9 @@ pub async fn create_review(
     if req.body.en.trim().is_empty() {
         return (StatusCode::BAD_REQUEST, "review body.en is required").into_response();
     }
+    if let Err(msg) = validate_i18n("review body", &req.body, MARKET_LONG_TEXT_MAX_CHARS) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
     let body_json = i18n_to_json(&req.body);
     match db_upsert_review(
         state.global_db.pool(),
@@ -430,7 +443,8 @@ pub async fn create_review(
     )
     .await
     {
-        Ok(r) => Json(review_row_to_dto(&r)).into_response(),
+        Ok(Some(r)) => Json(review_row_to_dto(&r)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "published version not found").into_response(),
         Err(e) => server_error(&e.to_string()),
     }
 }
@@ -498,7 +512,7 @@ pub async fn update_report_status(
     Path(report_id): Path<Uuid>,
     Json(req): Json<UpdateReportStatusReq>,
 ) -> Response {
-    if let Some(resp) = require_market_admin(&user) {
+    if let Some(resp) = require_market_admin(&state, &user).await {
         return resp;
     }
     let status = serde_report_status(req.status);
@@ -524,7 +538,8 @@ pub async fn vote_helpful(
     Path(review_id): Path<Uuid>,
 ) -> Response {
     match db_vote_helpful(state.global_db.pool(), review_id, &user.user_id, now_secs()).await {
-        Ok(inserted) => Json(serde_json::json!({ "newly_voted": inserted })).into_response(),
+        Ok(Some(inserted)) => Json(serde_json::json!({ "newly_voted": inserted })).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "review not found").into_response(),
         Err(e) => server_error(&e.to_string()),
     }
 }
@@ -543,7 +558,8 @@ pub async fn watch(
     )
     .await
     {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, "listing not found").into_response(),
         Err(e) => server_error(&e.to_string()),
     }
 }
@@ -581,43 +597,258 @@ pub async fn delete_listing(
 // ---------------------------------------------------------------------------
 
 fn validate_create_req(req: &CreateListingReq) -> Result<(), String> {
-    if req.slug.trim().is_empty() {
-        return Err("slug is required".into());
-    }
-    if req.display_name.en.trim().is_empty() {
-        return Err("display_name.en is required".into());
-    }
+    validate_slug("slug", &req.slug)?;
+    validate_i18n(
+        "display_name",
+        &req.display_name,
+        MARKET_SHORT_TEXT_MAX_CHARS,
+    )?;
+    validate_optional_i18n(
+        "description",
+        req.description.as_ref(),
+        MARKET_LONG_TEXT_MAX_CHARS,
+    )?;
+    validate_optional_short_text("category", req.category.as_deref())?;
+    validate_optional_json_size("doc", req.doc.as_ref(), MARKET_DOC_MAX_BYTES)?;
+    validate_intents(req.intents.as_deref())?;
+    validate_optional_i18n(
+        "changelog",
+        req.changelog.as_ref(),
+        MARKET_LONG_TEXT_MAX_CHARS,
+    )?;
     if let Err(e) = validate_semver(&req.version) {
         return Err(e.to_string());
     }
     match req.kind {
         ListingKind::Policy => {
-            if req.cedar_text.as_deref().is_none_or(str::is_empty) {
-                return Err("policy listing needs cedar_text".into());
-            }
-            if req.domain.as_deref().is_none_or(str::is_empty) {
-                return Err("policy listing needs domain".into());
-            }
+            validate_policy_body(
+                req.cedar_text.as_deref(),
+                req.manifest.as_ref(),
+                req.policy_tree.as_deref(),
+                req.members.as_deref(),
+            )?;
+            validate_required_short_text("domain", req.domain.as_deref())?;
             if req.severity.is_none() {
                 return Err("policy listing needs severity".into());
             }
-            if req.members.is_some() {
-                return Err("policy listing must not carry members[]".into());
-            }
         }
         ListingKind::Set => {
-            if req.members.as_ref().is_none_or(std::vec::Vec::is_empty) {
-                return Err("set listing needs at least one member".into());
-            }
-            if req.cedar_text.is_some() {
-                return Err("set listing must not carry cedar_text".into());
-            }
+            validate_set_body(
+                req.cedar_text.as_deref(),
+                req.manifest.as_ref(),
+                req.policy_tree.as_deref(),
+                req.members.as_deref(),
+            )?;
         }
     }
     Ok(())
 }
 
 const REPORT_DETAILS_MAX_CHARS: usize = 1_000;
+
+fn validate_version_req(listing_kind: &str, req: &CreateVersionReq) -> Result<(), String> {
+    validate_optional_i18n(
+        "changelog",
+        req.changelog.as_ref(),
+        MARKET_LONG_TEXT_MAX_CHARS,
+    )?;
+    match listing_kind {
+        "policy" => validate_policy_body(
+            req.cedar_text.as_deref(),
+            req.manifest.as_ref(),
+            req.policy_tree.as_deref(),
+            req.members.as_deref(),
+        ),
+        "set" => validate_set_body(
+            req.cedar_text.as_deref(),
+            req.manifest.as_ref(),
+            req.policy_tree.as_deref(),
+            req.members.as_deref(),
+        ),
+        other => Err(format!("unknown listing kind: {other}")),
+    }
+}
+
+fn validate_policy_body(
+    cedar_text: Option<&str>,
+    manifest: Option<&Value>,
+    policy_tree: Option<&str>,
+    members: Option<&[SetMember]>,
+) -> Result<(), String> {
+    if members.is_some() {
+        return Err("policy version must not carry members[]".into());
+    }
+    validate_required_bytes("cedar_text", cedar_text, MARKET_CEDAR_TEXT_MAX_BYTES)?;
+    validate_optional_json_size("manifest", manifest, MARKET_MANIFEST_MAX_BYTES)?;
+    validate_optional_bytes("policy_tree", policy_tree, MARKET_POLICY_TREE_MAX_BYTES)?;
+    Ok(())
+}
+
+fn validate_set_body(
+    cedar_text: Option<&str>,
+    manifest: Option<&Value>,
+    policy_tree: Option<&str>,
+    members: Option<&[SetMember]>,
+) -> Result<(), String> {
+    if cedar_text.is_some() {
+        return Err("set version must not carry cedar_text".into());
+    }
+    if manifest.is_some() {
+        return Err("set version must not carry manifest".into());
+    }
+    if policy_tree.is_some() {
+        return Err("set version must not carry policy_tree".into());
+    }
+    validate_set_members(members)
+}
+
+fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
+    let Some(members) = members else {
+        return Err("set version needs members[]".into());
+    };
+    if members.is_empty() {
+        return Err("set version needs members[]".into());
+    }
+    if members.len() > MARKET_SET_MEMBERS_MAX {
+        return Err(format!(
+            "set version members[] must contain at most {MARKET_SET_MEMBERS_MAX} entries"
+        ));
+    }
+    for (idx, member) in members.iter().enumerate() {
+        validate_slug(&format!("members[{idx}].slug"), &member.slug)?;
+        validate_required_chars(
+            &format!("members[{idx}].display_name"),
+            Some(member.display_name.as_str()),
+            MARKET_SHORT_TEXT_MAX_CHARS,
+        )?;
+        validate_required_bytes(
+            &format!("members[{idx}].cedar_text"),
+            Some(member.cedar_text.as_str()),
+            MARKET_CEDAR_TEXT_MAX_BYTES,
+        )?;
+        validate_optional_json_size(
+            &format!("members[{idx}].manifest"),
+            member.manifest.as_ref(),
+            MARKET_MANIFEST_MAX_BYTES,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_slug(field: &str, raw: &str) -> Result<(), String> {
+    validate_required_chars(field, Some(raw), MARKET_SLUG_MAX_CHARS)?;
+    if raw.trim() != raw {
+        return Err(format!("{field} must not have surrounding whitespace"));
+    }
+    if !raw
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'(' | b')'))
+    {
+        return Err(format!(
+            "{field} must contain only ASCII letters, digits, '.', '_', '-', '(' or ')'"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_i18n(field: &str, value: &I18nText, max_chars: usize) -> Result<(), String> {
+    validate_required_chars(&format!("{field}.en"), Some(value.en.as_str()), max_chars)?;
+    if let Some(ko) = &value.ko {
+        validate_required_chars(&format!("{field}.ko"), Some(ko.as_str()), max_chars)?;
+    }
+    Ok(())
+}
+
+fn validate_optional_i18n(
+    field: &str,
+    value: Option<&I18nText>,
+    max_chars: usize,
+) -> Result<(), String> {
+    match value {
+        Some(value) => validate_i18n(field, value, max_chars),
+        None => Ok(()),
+    }
+}
+
+fn validate_required_short_text(field: &str, raw: Option<&str>) -> Result<(), String> {
+    validate_required_chars(field, raw, MARKET_SHORT_TEXT_MAX_CHARS)
+}
+
+fn validate_optional_short_text(field: &str, raw: Option<&str>) -> Result<(), String> {
+    match raw {
+        Some(raw) => validate_required_chars(field, Some(raw), MARKET_SHORT_TEXT_MAX_CHARS),
+        None => Ok(()),
+    }
+}
+
+fn validate_intents(intents: Option<&[String]>) -> Result<(), String> {
+    let Some(intents) = intents else {
+        return Ok(());
+    };
+    if intents.len() > MARKET_INTENTS_MAX {
+        return Err(format!(
+            "intents must contain at most {MARKET_INTENTS_MAX} entries"
+        ));
+    }
+    for (idx, intent) in intents.iter().enumerate() {
+        validate_required_chars(
+            &format!("intents[{idx}]"),
+            Some(intent.as_str()),
+            MARKET_SHORT_TEXT_MAX_CHARS,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_required_chars(field: &str, raw: Option<&str>, max_chars: usize) -> Result<(), String> {
+    let Some(raw) = raw else {
+        return Err(format!("{field} is required"));
+    };
+    if raw.trim().is_empty() {
+        return Err(format!("{field} must not be blank"));
+    }
+    if raw.chars().count() > max_chars {
+        return Err(format!("{field} must be at most {max_chars} characters"));
+    }
+    Ok(())
+}
+
+fn validate_required_bytes(field: &str, raw: Option<&str>, max_bytes: usize) -> Result<(), String> {
+    let Some(raw) = raw else {
+        return Err(format!("{field} is required"));
+    };
+    if raw.trim().is_empty() {
+        return Err(format!("{field} must not be blank"));
+    }
+    if raw.len() > max_bytes {
+        return Err(format!("{field} must be at most {max_bytes} bytes"));
+    }
+    Ok(())
+}
+
+fn validate_optional_bytes(field: &str, raw: Option<&str>, max_bytes: usize) -> Result<(), String> {
+    match raw {
+        Some(raw) => validate_required_bytes(field, Some(raw), max_bytes),
+        None => Ok(()),
+    }
+}
+
+fn validate_optional_json_size(
+    field: &str,
+    value: Option<&Value>,
+    max_bytes: usize,
+) -> Result<(), String> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let len = serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .map_err(|_| format!("{field} must be serializable JSON"))?;
+    if len > max_bytes {
+        return Err(format!("{field} must be at most {max_bytes} bytes"));
+    }
+    Ok(())
+}
 
 fn validate_report_req(req: &CreateReportReq) -> Result<(), String> {
     match req.details.as_deref() {
@@ -635,9 +866,16 @@ fn validate_report_req(req: &CreateReportReq) -> Result<(), String> {
     Ok(())
 }
 
-fn require_market_admin(user: &AuthUser) -> Option<Response> {
+async fn require_market_admin(state: &AppState, user: &AuthUser) -> Option<Response> {
     let admin_emails = std::env::var("MARKET_ADMIN_EMAILS").unwrap_or_default();
-    if is_market_admin_email(&user.email, &admin_emails) {
+    let current_email = match state.global_db.get_user_by_id(&user.user_id).await {
+        Ok(Some(row)) => row.email,
+        Ok(None) => {
+            return Some((StatusCode::FORBIDDEN, "market admin access required").into_response())
+        }
+        Err(e) => return Some(server_error(&e.to_string())),
+    };
+    if is_market_admin_email(&current_email, &admin_emails) {
         None
     } else {
         Some((StatusCode::FORBIDDEN, "market admin access required").into_response())
@@ -872,8 +1110,33 @@ fn now_secs() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
+fn db_constraint_bad_request(msg: &str) -> Option<Response> {
+    if !is_db_constraint_error(msg) {
+        return None;
+    }
+    tracing::warn!(error = %msg, "market request violated database constraint");
+    Some(
+        (
+            StatusCode::BAD_REQUEST,
+            "marketplace request violates a uniqueness, schema, or visibility constraint",
+        )
+            .into_response(),
+    )
+}
+
+fn is_db_constraint_error(msg: &str) -> bool {
+    let msg = msg.to_ascii_lowercase();
+    msg.contains("duplicate key")
+        || msg.contains("unique constraint")
+        || msg.contains("violates unique constraint")
+        || msg.contains("check constraint")
+        || msg.contains("violates check constraint")
+        || msg.contains("forked_from listing must reference a published listing")
+}
+
 fn server_error(msg: &str) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, msg.to_owned()).into_response()
+    tracing::error!(error = %msg, "market handler internal error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 // `Deserialize` flag used by axum's Query extractor — needed because the
@@ -885,6 +1148,145 @@ struct _QueryProbe;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn i18n(en: &str) -> I18nText {
+        I18nText {
+            en: en.to_owned(),
+            ko: None,
+        }
+    }
+
+    fn set_member() -> SetMember {
+        SetMember {
+            slug: "member-policy".to_owned(),
+            display_name: "Member policy".to_owned(),
+            cedar_text: "permit(principal, action, resource);".to_owned(),
+            manifest: None,
+        }
+    }
+
+    fn policy_listing_req() -> CreateListingReq {
+        CreateListingReq {
+            slug: "safe-policy".to_owned(),
+            kind: ListingKind::Policy,
+            display_name: i18n("Safe policy"),
+            description: None,
+            domain: Some("token".to_owned()),
+            category: Some("approvals".to_owned()),
+            doc: None,
+            intents: None,
+            severity: Some(Severity::Warn),
+            version: "1.0.0".to_owned(),
+            cedar_text: Some("permit(principal, action, resource);".to_owned()),
+            manifest: Some(json!({"trigger": {"where": {"action.domain": {"eq": "token"}}}})),
+            policy_tree: None,
+            members: None,
+            changelog: None,
+            forked_from: None,
+        }
+    }
+
+    fn policy_version_req() -> CreateVersionReq {
+        CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: Some("permit(principal, action, resource);".to_owned()),
+            manifest: None,
+            policy_tree: None,
+            members: None,
+            changelog: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn server_error_does_not_echo_internal_reason() {
+        let response = server_error("duplicate key includes secret");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "Internal server error");
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[tokio::test]
+    async fn db_constraint_bad_request_does_not_echo_internal_reason() {
+        let response =
+            db_constraint_bad_request("duplicate key value violates UNIQUE secret=token")
+                .expect("constraint error should map to 400");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(
+            text,
+            "marketplace request violates a uniqueness, schema, or visibility constraint"
+        );
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn market_create_validation_rejects_unsafe_slug_and_blank_policy_body() {
+        let mut req = policy_listing_req();
+        req.slug = "Bad/Slug".to_owned();
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("slug"), "got: {err}");
+
+        let mut req = policy_listing_req();
+        req.cedar_text = Some("   ".to_owned());
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("cedar_text"), "got: {err}");
+
+        let mut req = policy_listing_req();
+        req.domain = Some("   ".to_owned());
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("domain"), "got: {err}");
+    }
+
+    #[test]
+    fn market_version_validation_rejects_empty_or_mixed_body_shapes() {
+        let mut req = policy_version_req();
+        req.cedar_text = Some(" ".to_owned());
+        let err = validate_version_req("policy", &req).unwrap_err();
+        assert!(err.contains("cedar_text"), "got: {err}");
+
+        let mut req = policy_version_req();
+        req.members = Some(vec![set_member()]);
+        let err = validate_version_req("policy", &req).unwrap_err();
+        assert!(err.contains("members"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: Some("permit(principal, action, resource);".to_owned()),
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![set_member()]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("cedar_text"), "got: {err}");
+    }
+
+    #[test]
+    fn market_validation_caps_user_controlled_json_and_member_fanout() {
+        let mut req = policy_listing_req();
+        req.doc = Some(json!({ "body": "x".repeat(MARKET_DOC_MAX_BYTES) }));
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("doc"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![set_member(); MARKET_SET_MEMBERS_MAX + 1]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("members"), "got: {err}");
+    }
 
     #[test]
     fn report_request_validation_requires_details_for_other() {

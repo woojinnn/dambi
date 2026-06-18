@@ -11,9 +11,12 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::Extension;
-use futures::stream::{self, Stream, StreamExt};
+use futures::stream::{self, StreamExt};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::app::ShutdownRx;
@@ -29,7 +32,7 @@ pub async fn stream(
     State(bus): State<EventBus>,
     Extension(user): Extension<AuthUser>,
     shutdown: Option<Extension<ShutdownRx>>,
-) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+) -> Response {
     let rx = bus.subscribe();
     let stream = BroadcastStream::new(rx)
         // BroadcastStream yields `Result<T, RecvError>` — drop lag errors
@@ -63,5 +66,42 @@ pub async fn stream(
             None => std::future::pending::<()>().await,
         }
     });
-    Sse::new(body).keep_alive(KeepAlive::new().interval(Duration::from_secs(30)))
+    let mut response = Sse::new(body)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(30)))
+        .into_response();
+    insert_sse_headers(response.headers_mut());
+    response
+}
+
+fn insert_sse_headers(headers: &mut HeaderMap) {
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
+    );
+    headers.insert(
+        HeaderName::from_static("referrer-policy"),
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sse_headers_disable_caching_and_proxy_buffering() {
+        let mut headers = HeaderMap::new();
+
+        insert_sse_headers(&mut headers);
+
+        assert_eq!(headers.get(CACHE_CONTROL).unwrap(), "no-store");
+        assert_eq!(headers.get("x-accel-buffering").unwrap(), "no");
+        assert_eq!(headers.get("referrer-policy").unwrap(), "no-referrer");
+        assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
+    }
 }

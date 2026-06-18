@@ -69,6 +69,35 @@ pub struct PostgresGlobalDb {
     pool: PgPool,
 }
 
+/// Migration readiness snapshot for the current binary's migration directory.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PostgresMigrationStatus {
+    /// Highest migration version known to the current binary.
+    pub expected_latest_version: Option<i64>,
+    /// Highest successfully applied migration version in the database.
+    pub applied_latest_version: Option<i64>,
+    /// Versions known to the current binary but absent from the database.
+    pub pending_versions: Vec<i64>,
+    /// Versions whose `_sqlx_migrations` row is marked unsuccessful.
+    pub dirty_versions: Vec<i64>,
+    /// Versions whose applied checksum differs from the current migration file.
+    pub checksum_mismatch_versions: Vec<i64>,
+    /// Applied versions absent from the current binary's migration directory.
+    pub unknown_applied_versions: Vec<i64>,
+}
+
+impl PostgresMigrationStatus {
+    /// True when the database schema matches the current binary's migrations.
+    #[must_use]
+    pub fn is_ready(&self) -> bool {
+        self.pending_versions.is_empty()
+            && self.dirty_versions.is_empty()
+            && self.checksum_mismatch_versions.is_empty()
+            && self.unknown_applied_versions.is_empty()
+            && self.applied_latest_version >= self.expected_latest_version
+    }
+}
+
 /// Per-user wallet store factory backed by `PostgreSQL`.
 #[derive(Clone, Debug)]
 pub struct PostgresMultiUserStore {
@@ -149,13 +178,94 @@ impl PostgresGlobalDb {
         Ok(())
     }
 
-    /// Insert or refresh an OAuth user, returning the deterministic user id.
+    async fn migration_status_from_dir(
+        &self,
+        migrations_path: PathBuf,
+    ) -> DbResult<PostgresMigrationStatus> {
+        let migrator = Migrator::new(migrations_path)
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        let expected: std::collections::BTreeMap<i64, Vec<u8>> = migrator
+            .iter()
+            .filter(|m| !m.migration_type.is_down_migration())
+            .map(|m| (m.version, m.checksum.to_vec()))
+            .collect();
+        let expected_latest_version = expected.keys().next_back().copied();
+
+        let rows = query(
+            "SELECT version, success, checksum
+             FROM _sqlx_migrations
+             ORDER BY version",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+        let mut applied_success = std::collections::BTreeMap::new();
+        let mut dirty_versions = Vec::new();
+        let mut checksum_mismatch_versions = Vec::new();
+        let mut unknown_applied_versions = Vec::new();
+        for row in rows {
+            let version: i64 = row.get("version");
+            let success: bool = row.get("success");
+            let checksum: Vec<u8> = row.get("checksum");
+            if !expected.contains_key(&version) {
+                unknown_applied_versions.push(version);
+            }
+            if success {
+                if let Some(expected_checksum) = expected.get(&version) {
+                    if expected_checksum != &checksum {
+                        checksum_mismatch_versions.push(version);
+                    }
+                }
+                applied_success.insert(version, checksum);
+            } else {
+                dirty_versions.push(version);
+            }
+        }
+
+        let pending_versions = expected
+            .keys()
+            .copied()
+            .filter(|version| !applied_success.contains_key(version))
+            .collect();
+        let applied_latest_version = applied_success.keys().next_back().copied();
+
+        Ok(PostgresMigrationStatus {
+            expected_latest_version,
+            applied_latest_version,
+            pending_versions,
+            dirty_versions,
+            checksum_mismatch_versions,
+            unknown_applied_versions,
+        })
+    }
+
+    /// Verify that every migration known to the current binary is applied.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] if migration files cannot be read or the migration
+    /// metadata query fails.
+    pub async fn migration_status(&self) -> DbResult<PostgresMigrationStatus> {
+        self.migration_status_from_dir(postgres_migrations_path())
+            .await
+    }
+
+    /// Insert or refresh a legacy/test user by email, returning the
+    /// deterministic email-derived user id.
     ///
     /// # Errors
     ///
     /// Returns [`DbError`] if the upsert query fails.
     pub async fn upsert_user(&self, email: &str, provider: &str) -> DbResult<String> {
-        let email = email.to_lowercase();
+        let email = canonical_email(email);
+        let provider = canonical_provider(provider);
+        if email.is_empty() || provider.is_empty() {
+            return Err(DbError::Invariant(
+                "user email and provider are required".to_owned(),
+            ));
+        }
         let user_id = derive_user_id(&email);
         let now = unix_now_or_default();
         // `users` has two unique constraints — users_pkey (user_id) and
@@ -174,7 +284,7 @@ impl PostgresGlobalDb {
         )
         .bind(&user_id)
         .bind(&email)
-        .bind(provider)
+        .bind(&provider)
         .bind(now)
         .execute(&self.pool)
         .await
@@ -188,13 +298,160 @@ impl PostgresGlobalDb {
         Ok(user_id)
     }
 
+    /// Insert or refresh an OAuth user by provider subject.
+    ///
+    /// OpenID Connect guarantees `iss + sub` stability, while email can change
+    /// or be reused. New OAuth users therefore get a provider-subject-derived
+    /// id. Existing pre-subject rows are linked on first login when the provider
+    /// and email match, preserving the user's previous email-derived id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] if the upsert query fails or an email is already
+    /// linked to a different OAuth subject/provider.
+    pub async fn upsert_oauth_user(
+        &self,
+        email: &str,
+        provider: &str,
+        provider_subject: &str,
+    ) -> DbResult<String> {
+        let email = canonical_email(email);
+        let provider = canonical_provider(provider);
+        let provider_subject = provider_subject.trim();
+        if email.is_empty() || provider.is_empty() || provider_subject.is_empty() {
+            return Err(DbError::Invariant(
+                "oauth user email, provider, and subject are required".to_owned(),
+            ));
+        }
+        let now = unix_now_or_default();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        // Row locks do not protect the "row absent" path. Serialize OAuth
+        // identity claims by both mutable email and stable provider subject so
+        // concurrent first logins cannot race into unique-constraint errors.
+        let mut lock_keys = [
+            format!("oauth-email:{email}"),
+            format!("oauth-subject:{provider}:{provider_subject}"),
+        ];
+        lock_keys.sort_unstable();
+        for lock_key in lock_keys {
+            query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+                .bind(lock_key)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| DbError::Invariant(e.to_string()))?;
+        }
+
+        if let Some(row) = query(
+            "SELECT user_id
+             FROM users
+             WHERE provider = $1 AND provider_subject = $2
+             FOR UPDATE",
+        )
+        .bind(&provider)
+        .bind(provider_subject)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?
+        {
+            let user_id: String = row.get("user_id");
+            query(
+                "UPDATE users
+                 SET email = $1, last_login_at = $2
+                 WHERE user_id = $3",
+            )
+            .bind(&email)
+            .bind(now)
+            .bind(&user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+            tx.commit()
+                .await
+                .map_err(|e| DbError::Invariant(e.to_string()))?;
+            return Ok(user_id);
+        }
+
+        if let Some(row) = query(
+            "SELECT user_id, provider, provider_subject
+             FROM users
+             WHERE email = $1
+             FOR UPDATE",
+        )
+        .bind(&email)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?
+        {
+            let user_id: String = row.get("user_id");
+            let existing_provider: String = row.get("provider");
+            let existing_subject: Option<String> = row.get("provider_subject");
+            if existing_provider != provider {
+                return Err(DbError::Invariant(
+                    "email already linked to another OAuth provider".to_owned(),
+                ));
+            }
+            if existing_subject
+                .as_deref()
+                .is_some_and(|existing| existing != provider_subject)
+            {
+                return Err(DbError::Invariant(
+                    "email already linked to another OAuth subject".to_owned(),
+                ));
+            }
+            query(
+                "UPDATE users
+                 SET provider_subject = $1, last_login_at = $2
+                 WHERE user_id = $3",
+            )
+            .bind(provider_subject)
+            .bind(now)
+            .bind(&user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+            tx.commit()
+                .await
+                .map_err(|e| DbError::Invariant(e.to_string()))?;
+            return Ok(user_id);
+        }
+
+        let user_id = derive_oauth_user_id(&provider, provider_subject);
+        query(
+            "INSERT INTO users (
+                user_id,
+                email,
+                provider,
+                provider_subject,
+                created_at,
+                last_login_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $5)",
+        )
+        .bind(&user_id)
+        .bind(&email)
+        .bind(&provider)
+        .bind(provider_subject)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        Ok(user_id)
+    }
+
     /// Look up a user by email.
     ///
     /// # Errors
     ///
     /// Returns [`DbError`] if the lookup query fails.
     pub async fn get_user_by_email(&self, email: &str) -> DbResult<Option<PostgresUser>> {
-        let email = email.to_lowercase();
+        let email = canonical_email(email);
         query(
             "SELECT user_id, email, provider, created_at, last_login_at
              FROM users WHERE email = $1",
@@ -237,6 +494,121 @@ impl PostgresGlobalDb {
         .await
         .map(|rows| rows.iter().map(row_to_required_user).collect())
         .map_err(|e| DbError::Invariant(e.to_string()))
+    }
+
+    /// Return user ids that currently have at least one active wallet.
+    ///
+    /// Background sync workers use this instead of all OAuth users so login-only
+    /// accounts and fully archived accounts do not consume per-user locks,
+    /// schedulers, and empty wallet scans on every tick.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] if the list query fails.
+    pub async fn list_user_ids_with_active_wallets(&self) -> DbResult<Vec<String>> {
+        let rows = query(
+            "SELECT DISTINCT user_id
+             FROM wallets
+             WHERE archived = FALSE
+             ORDER BY user_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+        Ok(rows.iter().map(|row| row.get("user_id")).collect())
+    }
+
+    /// Persist a newly issued refresh token id as the currently active session
+    /// token. The raw token is never stored; `jti` is a random identifier signed
+    /// inside the JWT and useless without the JWT signature.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] when the insert fails.
+    pub async fn create_refresh_session(
+        &self,
+        user_id: &str,
+        jti: &str,
+        issued_at: i64,
+        expires_at: i64,
+    ) -> DbResult<()> {
+        query(
+            "INSERT INTO refresh_sessions (jti, user_id, issued_at, expires_at, created_at)
+             VALUES ($1, $2, $3, $4, $3)",
+        )
+        .bind(jti)
+        .bind(user_id)
+        .bind(issued_at)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Rotate an active refresh session from `old_jti` to `new_jti`.
+    ///
+    /// Returns `Ok(false)` when the old token id is missing, expired, already
+    /// revoked, or belongs to another user. The update predicate makes replayed
+    /// old refresh tokens fail after the first successful rotation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DbError`] for database failures while updating or inserting.
+    pub async fn rotate_refresh_session(
+        &self,
+        user_id: &str,
+        old_jti: &str,
+        new_jti: &str,
+        issued_at: i64,
+        expires_at: i64,
+    ) -> DbResult<bool> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+        let updated = query(
+            "UPDATE refresh_sessions
+             SET revoked_at = $3, replaced_by = $4
+             WHERE user_id = $1
+               AND jti = $2
+               AND revoked_at IS NULL
+               AND expires_at > $3",
+        )
+        .bind(user_id)
+        .bind(old_jti)
+        .bind(issued_at)
+        .bind(new_jti)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+        if updated.rows_affected() != 1 {
+            tx.commit()
+                .await
+                .map_err(|e| DbError::Invariant(e.to_string()))?;
+            return Ok(false);
+        }
+
+        query(
+            "INSERT INTO refresh_sessions (jti, user_id, issued_at, expires_at, created_at)
+             VALUES ($1, $2, $3, $4, $3)",
+        )
+        .bind(new_jti)
+        .bind(user_id)
+        .bind(issued_at)
+        .bind(expires_at)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        Ok(true)
     }
 
     /// Verify the underlying `PostgreSQL` pool can execute a trivial query.
@@ -416,6 +788,66 @@ impl PostgresWalletStore {
     #[must_use]
     pub fn user_id(&self) -> &str {
         &self.user_id
+    }
+
+    /// Persist state and mark the wallet active. This is intentionally separate
+    /// from [`WalletStore::save`]: sync/status writes must not resurrect a
+    /// wallet the user archived while the write was in flight.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] when the state or metadata write fails.
+    pub async fn reactivate_wallet(&self, state: &WalletState) -> Result<(), StoreError> {
+        self.save_state(state, true).await
+    }
+
+    async fn save_state(&self, state: &WalletState, reactivate: bool) -> Result<(), StoreError> {
+        let address = format!("{:#x}", state.wallet_id.address);
+        let chains = serde_json::to_value(&state.wallet_id.chains)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let state_json =
+            serde_json::to_value(state).map_err(|e| StoreError::Backend(e.to_string()))?;
+        let now = unix_now_or_default();
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        query(
+            "INSERT INTO wallets (user_id, address, chains, owned, created_at, updated_at)
+             VALUES ($1, $2, $3, TRUE, $4, $4)
+             ON CONFLICT(user_id, address) DO UPDATE
+             SET chains = excluded.chains,
+                 archived = CASE WHEN $5 THEN FALSE ELSE wallets.archived END,
+                 updated_at = excluded.updated_at",
+        )
+        .bind(&self.user_id)
+        .bind(&address)
+        .bind(&chains)
+        .bind(now)
+        .bind(reactivate)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        query(
+            "INSERT INTO wallet_states (user_id, address, state_json, updated_at)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT(user_id, address) DO UPDATE
+             SET state_json = excluded.state_json, updated_at = excluded.updated_at",
+        )
+        .bind(&self.user_id)
+        .bind(&address)
+        .bind(&state_json)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| StoreError::Backend(e.to_string()))
     }
 
     /// Return active wallet metadata for dashboard/list views.
@@ -648,51 +1080,7 @@ impl WalletStore for PostgresWalletStore {
     }
 
     async fn save(&self, state: &WalletState) -> Result<(), StoreError> {
-        let address = format!("{:#x}", state.wallet_id.address);
-        let chains = serde_json::to_value(&state.wallet_id.chains)
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        let state_json =
-            serde_json::to_value(state).map_err(|e| StoreError::Backend(e.to_string()))?;
-        let now = unix_now_or_default();
-
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| StoreError::Backend(e.to_string()))?;
-        query(
-            "INSERT INTO wallets (user_id, address, chains, owned, created_at, updated_at)
-             VALUES ($1, $2, $3, TRUE, $4, $4)
-             ON CONFLICT(user_id, address) DO UPDATE
-             SET chains = excluded.chains,
-                 archived = FALSE,
-                 updated_at = excluded.updated_at",
-        )
-        .bind(&self.user_id)
-        .bind(&address)
-        .bind(&chains)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| StoreError::Backend(e.to_string()))?;
-
-        query(
-            "INSERT INTO wallet_states (user_id, address, state_json, updated_at)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT(user_id, address) DO UPDATE
-             SET state_json = excluded.state_json, updated_at = excluded.updated_at",
-        )
-        .bind(&self.user_id)
-        .bind(&address)
-        .bind(&state_json)
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| StoreError::Backend(e.to_string()))?;
-
-        tx.commit()
-            .await
-            .map_err(|e| StoreError::Backend(e.to_string()))
+        self.save_state(state, false).await
     }
 
     async fn mark_wallet_sync_due_at(
@@ -787,9 +1175,26 @@ pub fn derive_user_id(email_lower: &str) -> String {
     format!("u_{}", &hex[..12])
 }
 
+fn canonical_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+fn canonical_provider(provider: &str) -> String {
+    provider.trim().to_ascii_lowercase()
+}
+
+fn derive_oauth_user_id(provider: &str, provider_subject: &str) -> String {
+    let h = blake3::hash(format!("{provider}:{provider_subject}").as_bytes());
+    let hex = hex::encode(h.as_bytes());
+    format!("u_{}", &hex[..12])
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{derive_user_id, migrations_dir, postgres_migrations_path};
+    use super::{
+        derive_oauth_user_id, derive_user_id, migrations_dir, postgres_migrations_path,
+        PostgresGlobalDb,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -797,6 +1202,17 @@ mod tests {
         let a = derive_user_id("alice@example.com");
         let b = derive_user_id("alice@example.com");
         assert_eq!(a, b);
+        assert!(a.starts_with("u_"));
+        assert_eq!(a.len(), 14);
+    }
+
+    #[test]
+    fn derive_oauth_user_id_uses_provider_subject_not_email() {
+        let a = derive_oauth_user_id("google", "sub-123");
+        let b = derive_oauth_user_id("google", "sub-123");
+        let c = derive_oauth_user_id("google", "sub-456");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
         assert!(a.starts_with("u_"));
         assert_eq!(a.len(), 14);
     }
@@ -820,5 +1236,57 @@ mod tests {
     fn migrations_dir_falls_back_to_manifest_dir() {
         let p = migrations_dir(None);
         assert!(p.ends_with("migrations"));
+    }
+
+    #[tokio::test]
+    async fn migration_status_is_ready_for_current_schema() {
+        let url = match std::env::var("TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => return,
+        };
+        let pool = sqlx_postgres::PgPool::connect(&url).await.unwrap();
+        let db = PostgresGlobalDb::new(pool);
+        db.migrate().await.unwrap();
+
+        let status = db.migration_status().await.unwrap();
+        assert!(status.is_ready(), "status={status:?}");
+        assert_eq!(
+            status.expected_latest_version,
+            status.applied_latest_version
+        );
+    }
+
+    #[tokio::test]
+    async fn migration_status_detects_pending_binary_migration() {
+        let url = match std::env::var("TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => return,
+        };
+        let pool = sqlx_postgres::PgPool::connect(&url).await.unwrap();
+        let db = PostgresGlobalDb::new(pool);
+        db.migrate().await.unwrap();
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "scopeball-policy-db-migrations-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        for entry in std::fs::read_dir(postgres_migrations_path()).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("sql") {
+                std::fs::copy(&path, temp_dir.join(entry.file_name())).unwrap();
+            }
+        }
+        std::fs::write(temp_dir.join("9999_readiness_probe.sql"), "SELECT 1;\n").unwrap();
+
+        let status = db
+            .migration_status_from_dir(temp_dir.clone())
+            .await
+            .unwrap();
+        assert!(!status.is_ready(), "status={status:?}");
+        assert_eq!(status.pending_versions, vec![9999]);
+
+        std::fs::remove_dir_all(temp_dir).unwrap();
     }
 }

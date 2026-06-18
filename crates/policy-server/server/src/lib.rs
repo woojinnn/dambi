@@ -48,4 +48,5 @@ pub mod read_handlers;
 pub mod readiness;
 pub mod storage;
 pub mod store;
+pub mod sync_config;
 pub mod write_handlers;

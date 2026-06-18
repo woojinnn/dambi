@@ -31,6 +31,7 @@ use policy_state::primitives::{Address, ChainId, Decimal, Time};
 use policy_state::{ProtocolRef, WalletId, WalletState, WalletStore};
 use policy_sync::{Orchestrator, SyncConfig};
 use serde_json::json;
+use uuid::Uuid;
 
 const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
 
@@ -52,12 +53,11 @@ async fn spawn_server() -> (
 ) {
     let tmp = tempfile::tempdir().unwrap();
     let global_db = GlobalDb::open(tmp.path().join("global.db")).unwrap();
-    // Unique email per spawn → distinct derived user_id (tests share one DB and
-    // run on parallel threads; a shared email would race the `users` pkey).
-    static USER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = USER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // Globally unique email per spawn keeps repeated runs against the shared
+    // integration DB from inheriting wallet rows from an earlier process.
+    let suffix = Uuid::new_v4();
     let user_id = global_db
-        .upsert_user(&format!("perp-e2e-{n}@example.com"), "test")
+        .upsert_user(&format!("perp-e2e-{suffix}@example.com"), "test")
         .await
         .unwrap();
     let multi_user = MultiUserStore::new(tmp.path().join("users"));
@@ -211,7 +211,10 @@ async fn seed_flow_neutral(mu: &MultiUserStore, user_id: &str, now_secs: i64) {
 /// well-formed body and attach the two perp call_specs.
 fn evaluate_req(address: &str, now_secs: i64) -> serde_json::Value {
     json!({
-        "wallet_id": { "address": address, "chains": ["eip155:1"] },
+        // Mirrors the extension's HL venue `/evaluate` wire: the request chain is
+        // the off-chain HL venue id, while Postgres state lookup is keyed by
+        // user+address and returns the stored EVM wallet snapshot.
+        "wallet_id": { "address": address, "chains": ["hl-mainnet"] },
         "envelopes": [{
             "meta": {
                 "nature": {

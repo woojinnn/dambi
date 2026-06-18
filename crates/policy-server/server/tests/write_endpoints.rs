@@ -24,6 +24,7 @@ use policy_state::{
 use policy_sync::{HyperliquidConfig, Orchestrator, SyncConfig};
 use serde_json::{json, Value};
 use std::str::FromStr;
+use uuid::Uuid;
 
 const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
 
@@ -50,14 +51,11 @@ async fn spawn_server_with_orchestrator(
     let global_db = GlobalDb::open(path.join("global.db")).unwrap();
     // Seed the user so wallet writes (POST /wallets, direct store.save) satisfy
     // `wallets_user_id_fkey` (enforced by the Postgres backend). Each spawn gets
-    // a UNIQUE email so the derived id is distinct per test on the shared
-    // integration DB; reuse it for both the token and store lookups so they
-    // match. The `write-endpoints-` prefix keeps these ids disjoint from other
-    // test files sharing the same DB.
-    static USER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = USER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // a globally unique email so repeated runs against the shared integration DB
+    // cannot inherit wallet rows from an earlier process.
+    let suffix = Uuid::new_v4();
     let user_id = global_db
-        .upsert_user(&format!("write-endpoints-{n}@example.com"), "test")
+        .upsert_user(&format!("write-endpoints-{suffix}@example.com"), "test")
         .await
         .unwrap();
     let multi_user = MultiUserStore::new(path.join("users"));
@@ -197,6 +195,59 @@ async fn post_wallets_persists_and_returns_id() {
     let store = mu.for_user(&user_id).unwrap();
     let wallets = store.list_wallets().await.unwrap();
     assert_eq!(wallets.len(), 1);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn post_wallets_rejects_new_wallet_over_active_quota() {
+    let (addr, mu, token, user_id) = spawn_server().await;
+    let store = mu.for_user(&user_id).unwrap();
+    for i in 1..=128 {
+        let address = format!("0x{i:040x}");
+        let id = WalletId::new(
+            Address::from_str(&address).unwrap(),
+            vec![ChainId::ethereum_mainnet()],
+        );
+        store.save(&WalletState::new(id)).await.unwrap();
+    }
+
+    let existing = serde_json::json!({
+        "address": "0x0000000000000000000000000000000000000001",
+        "chains": ["eip155:1"],
+    });
+    let existing_resp = reqwest::Client::new()
+        .post(format!("http://{addr}/wallets"))
+        .bearer_auth(&token)
+        .json(&existing)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        existing_resp.status(),
+        200,
+        "re-adding an already active wallet should remain idempotent at quota"
+    );
+
+    let overflow = serde_json::json!({
+        "address": "0x0000000000000000000000000000000000000081",
+        "chains": ["eip155:1"],
+    });
+    let overflow_resp = reqwest::Client::new()
+        .post(format!("http://{addr}/wallets"))
+        .bearer_auth(&token)
+        .json(&overflow)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(overflow_resp.status(), 409);
+    let body = overflow_resp.text().await.unwrap();
+    assert!(body.contains("too many active wallets"), "got: {body}");
+
+    assert_eq!(
+        store.list_wallets().await.unwrap().len(),
+        128,
+        "quota rejection must not create the overflow wallet"
+    );
 }
 
 #[tokio::test]
@@ -408,6 +459,49 @@ async fn post_permit_unknown_wallet_returns_404() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 404);
+}
+
+/// `POST /wallets/:addr/permits` must not persist ownership-bearing signature
+/// state for a watch-only wallet.
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn post_permit_watch_only_wallet_returns_403() {
+    let (addr, mu, token, user_id) = spawn_server().await;
+    let store = mu.for_user(&user_id).unwrap();
+    let id = WalletId::new(
+        Address::from_str("0x000000000000000000000000000000000000a01c").unwrap(),
+        [ChainId::ethereum_mainnet()],
+    );
+    store.save(&WalletState::new(id.clone())).await.unwrap();
+    store
+        .update_wallet_metadata(&format!("{:#x}", id.address), None, Some(false))
+        .await
+        .unwrap();
+
+    let addr_lower = format!("{:#x}", id.address);
+    let body = json!({
+        "kind": "eip2612",
+        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "spender": "0x00000000000000000000000000000000deadbeef",
+        "amount": "1",
+        "deadline": 1_700_003_600u64,
+        "nonce": "1",
+        "chain_id": "eip155:1",
+    });
+    let resp = reqwest::Client::new()
+        .post(format!("http://{addr}/wallets/{addr_lower}/permits"))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 403);
+
+    let state = store.load(&id).await.unwrap();
+    assert!(
+        state.pending.is_empty(),
+        "watch-only wallet stayed unchanged"
+    );
 }
 
 /// E2E: the authenticated `POST /evaluate` serves an `oracle.usd_value` enrichment

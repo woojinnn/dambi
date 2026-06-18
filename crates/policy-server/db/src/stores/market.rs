@@ -218,7 +218,7 @@ pub async fn list_listings(
          LEFT JOIN users u ON u.user_id = l.publisher_id
          CROSS JOIN LATERAL (
            SELECT
-             (SELECT COUNT(*) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
+             (SELECT COUNT(DISTINCT i.user_id) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
              (SELECT AVG(rating)::float8 FROM market_reviews r WHERE r.listing_id = l.id) AS rating_avg,
              (SELECT COUNT(*) FROM market_reviews r WHERE r.listing_id = l.id) AS rating_count,
              ($9::text IS NOT NULL AND EXISTS (
@@ -272,7 +272,7 @@ pub async fn get_listing_by_slug(
          LEFT JOIN users u ON u.user_id = l.publisher_id
          CROSS JOIN LATERAL (
            SELECT
-             (SELECT COUNT(*) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
+             (SELECT COUNT(DISTINCT i.user_id) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
              (SELECT AVG(rating)::float8 FROM market_reviews r WHERE r.listing_id = l.id) AS rating_avg,
              (SELECT COUNT(*) FROM market_reviews r WHERE r.listing_id = l.id) AS rating_count,
              ($2::text IS NOT NULL AND EXISTS (
@@ -280,7 +280,7 @@ pub async fn get_listing_by_slug(
                 WHERE i.listing_id = l.id AND i.user_id = $2
              )) AS is_installed
          ) stats
-         WHERE l.slug = $1",
+         WHERE l.slug = $1 AND l.status = 'published'",
     )
     .bind(slug)
     .bind(viewer_id)
@@ -306,7 +306,7 @@ pub async fn get_listing_by_id(
          LEFT JOIN users u ON u.user_id = l.publisher_id
          CROSS JOIN LATERAL (
            SELECT
-             (SELECT COUNT(*) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
+             (SELECT COUNT(DISTINCT i.user_id) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
              (SELECT AVG(rating)::float8 FROM market_reviews r WHERE r.listing_id = l.id) AS rating_avg,
              (SELECT COUNT(*) FROM market_reviews r WHERE r.listing_id = l.id) AS rating_count,
              ($2::text IS NOT NULL AND EXISTS (
@@ -314,7 +314,7 @@ pub async fn get_listing_by_id(
                 WHERE i.listing_id = l.id AND i.user_id = $2
              )) AS is_installed
          ) stats
-         WHERE l.id = $1",
+         WHERE l.id = $1 AND l.status = 'published'",
     )
     .bind(id)
     .bind(viewer_id)
@@ -330,10 +330,11 @@ pub async fn get_version(
     version: &str,
 ) -> DbResult<Option<VersionRow>> {
     let row = query(
-        "SELECT listing_id, version, major, minor, patch,
-                cedar_text, manifest, policy_tree, members, changelog, published_at
-         FROM market_listing_versions
-         WHERE listing_id = $1 AND version = $2",
+        "SELECT v.listing_id, v.version, v.major, v.minor, v.patch,
+                v.cedar_text, v.manifest, v.policy_tree, v.members, v.changelog, v.published_at
+         FROM market_listing_versions v
+         JOIN market_listings l ON l.id = v.listing_id
+         WHERE v.listing_id = $1 AND v.version = $2 AND l.status = 'published'",
     )
     .bind(listing_id)
     .bind(version)
@@ -370,6 +371,24 @@ pub async fn create_listing(pool: &PgPool, n: NewListing, now: i64) -> DbResult<
         .begin()
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+    if let Some(parent_id) = n.forked_from {
+        let parent = query(
+            "SELECT id
+             FROM market_listings
+             WHERE id = $1 AND status = 'published'
+             FOR KEY SHARE",
+        )
+        .bind(parent_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+        if parent.is_none() {
+            return Err(DbError::Invariant(
+                "forked_from listing must reference a published listing".to_owned(),
+            ));
+        }
+    }
 
     query(
         "INSERT INTO market_listings (
@@ -493,19 +512,23 @@ async fn insert_version_row(
     Ok(())
 }
 
-/// Record one install event. The same user installing twice writes two rows
-/// (event log, not state).
+/// Record one install event for a currently published listing/version. The
+/// same user installing twice writes two rows (event log, not state). Returns
+/// `None` when the target listing/version is absent or no longer published.
 pub async fn record_install(
     pool: &PgPool,
     listing_id: Uuid,
     version: &str,
     user_id: &str,
     now: i64,
-) -> DbResult<Uuid> {
+) -> DbResult<Option<Uuid>> {
     let id = Uuid::new_v4();
-    query(
+    let res = query(
         "INSERT INTO market_installs (id, listing_id, version, user_id, installed_at)
-         VALUES ($1, $2, $3, $4, $5)",
+         SELECT $1, v.listing_id, v.version, $4, $5
+         FROM market_listing_versions v
+         JOIN market_listings l ON l.id = v.listing_id
+         WHERE v.listing_id = $2 AND v.version = $3 AND l.status = 'published'",
     )
     .bind(id)
     .bind(listing_id)
@@ -515,15 +538,15 @@ pub async fn record_install(
     .execute(pool)
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
-    Ok(id)
+    Ok((res.rows_affected() > 0).then_some(id))
 }
 
 /// One row of the install-activity rollup: a published listing plus how many
-/// install events it received since `since` (a unix-seconds cutoff).
+/// distinct users installed it since `since` (a unix-seconds cutoff).
 ///
-/// Note this counts install *events*, not distinct users — same semantics as
-/// the `install_count` LATERAL join above, so "popular this week" reflects
-/// demand. `slug` lets the dashboard bucket rows by its own category taxonomy
+/// The underlying table remains an event log, but public popularity metrics use
+/// unique installers so one account cannot boost ranking by replaying installs.
+/// `slug` lets the dashboard bucket rows by its own category taxonomy
 /// (`categoryOf(slug)`), which is finer-grained than the server's action-based
 /// `category` column.
 #[derive(Clone, Debug)]
@@ -535,9 +558,10 @@ pub struct InstallActivityRow {
     pub recent_installs: i64,
 }
 
-/// Aggregate install events newer than `since` (unix seconds) per published
-/// listing, most-installed first. Listings with zero recent installs are
-/// omitted (INNER JOIN), so the result is exactly "what got installed lately".
+/// Aggregate distinct installers newer than `since` (unix seconds) per
+/// published listing, most-installed first. Listings with zero recent installs
+/// are omitted (INNER JOIN), so the result is exactly "what got installed
+/// lately".
 pub async fn install_activity_since(
     pool: &PgPool,
     since: i64,
@@ -546,7 +570,7 @@ pub async fn install_activity_since(
     let limit = limit.clamp(1, LIST_LIMIT_MAX);
     let rows = query(
         "SELECT l.slug, l.kind, l.display_name, l.category,
-                COUNT(i.id) AS recent_installs
+                COUNT(DISTINCT i.user_id) AS recent_installs
          FROM market_listings l
          JOIN market_installs i ON i.listing_id = l.id
          WHERE l.status = 'published' AND i.installed_at >= $1
@@ -575,10 +599,12 @@ pub async fn install_activity_since(
 pub async fn list_reviews(pool: &PgPool, listing_id: Uuid, limit: i64) -> DbResult<Vec<ReviewRow>> {
     let limit = limit.clamp(1, 200);
     let rows = query(
-        "SELECT id, listing_id, user_id, version, rating, body, helpful_count, created_at
-         FROM market_reviews
-         WHERE listing_id = $1
-         ORDER BY helpful_count DESC, created_at DESC
+        "SELECT r.id, r.listing_id, r.user_id, r.version, r.rating, r.body,
+                r.helpful_count, r.created_at
+         FROM market_reviews r
+         JOIN market_listings l ON l.id = r.listing_id
+         WHERE r.listing_id = $1 AND l.status = 'published'
+         ORDER BY r.helpful_count DESC, r.created_at DESC
          LIMIT $2",
     )
     .bind(listing_id)
@@ -599,11 +625,14 @@ pub async fn upsert_review(
     rating: i16,
     body: &Value,
     now: i64,
-) -> DbResult<ReviewRow> {
+) -> DbResult<Option<ReviewRow>> {
     let id = Uuid::new_v4();
-    query(
+    let res = query(
         "INSERT INTO market_reviews (id, listing_id, user_id, version, rating, body, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         SELECT $1, v.listing_id, $3, v.version, $5, $6, $7
+         FROM market_listing_versions v
+         JOIN market_listings l ON l.id = v.listing_id
+         WHERE v.listing_id = $2 AND v.version = $4 AND l.status = 'published'
          ON CONFLICT (listing_id, user_id) DO UPDATE
          SET version = excluded.version,
              rating = excluded.rating,
@@ -620,6 +649,9 @@ pub async fn upsert_review(
     .execute(pool)
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
+    if res.rows_affected() == 0 {
+        return Ok(None);
+    }
 
     let row = query(
         "SELECT id, listing_id, user_id, version, rating, body, helpful_count, created_at
@@ -631,7 +663,7 @@ pub async fn upsert_review(
     .fetch_one(pool)
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
-    Ok(row_to_review(&row))
+    Ok(Some(row_to_review(&row)))
 }
 
 /// Vote "helpful" on a review. Returns `true` if the vote was newly inserted
@@ -641,11 +673,28 @@ pub async fn vote_helpful(
     review_id: Uuid,
     user_id: &str,
     now: i64,
-) -> DbResult<bool> {
+) -> DbResult<Option<bool>> {
     let mut tx = pool
         .begin()
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
+    let visible = query(
+        "SELECT r.id
+         FROM market_reviews r
+         JOIN market_listings l ON l.id = r.listing_id
+         WHERE r.id = $1 AND l.status = 'published'",
+    )
+    .bind(review_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    if visible.is_none() {
+        tx.rollback()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        return Ok(None);
+    }
+
     let res = query(
         "INSERT INTO market_review_helpful (review_id, user_id, voted_at)
          VALUES ($1, $2, $3)
@@ -674,7 +723,7 @@ pub async fn vote_helpful(
     tx.commit()
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
-    Ok(inserted)
+    Ok(Some(inserted))
 }
 
 pub async fn create_listing_report(
@@ -689,7 +738,7 @@ pub async fn create_listing_report(
         "INSERT INTO market_reports (id, listing_id, reporter_id, reason, details, status, created_at)
          SELECT $1, l.id, $3, $4, $5, 'open', $6
          FROM market_listings l
-         WHERE l.id = $2
+         WHERE l.id = $2 AND l.status = 'published'
          RETURNING id, listing_id, review_id, reporter_id, reason, details, status,
                    resolved_by, resolved_at, created_at",
     )
@@ -717,7 +766,8 @@ pub async fn create_review_report(
         "INSERT INTO market_reports (id, review_id, reporter_id, reason, details, status, created_at)
          SELECT $1, r.id, $3, $4, $5, 'open', $6
          FROM market_reviews r
-         WHERE r.id = $2
+         JOIN market_listings l ON l.id = r.listing_id
+         WHERE r.id = $2 AND l.status = 'published'
          RETURNING id, listing_id, review_id, reporter_id, reason, details, status,
                    resolved_by, resolved_at, created_at",
     )
@@ -810,10 +860,12 @@ pub async fn update_report_status(
     Ok(row.as_ref().map(row_to_report))
 }
 
-pub async fn watch(pool: &PgPool, user_id: &str, listing_id: Uuid, now: i64) -> DbResult<()> {
-    query(
+pub async fn watch(pool: &PgPool, user_id: &str, listing_id: Uuid, now: i64) -> DbResult<bool> {
+    let res = query(
         "INSERT INTO market_watches (user_id, listing_id, subscribed_at)
-         VALUES ($1, $2, $3)
+         SELECT $1, l.id, $3
+         FROM market_listings l
+         WHERE l.id = $2 AND l.status = 'published'
          ON CONFLICT DO NOTHING",
     )
     .bind(user_id)
@@ -822,7 +874,7 @@ pub async fn watch(pool: &PgPool, user_id: &str, listing_id: Uuid, now: i64) -> 
     .execute(pool)
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
-    Ok(())
+    Ok(res.rows_affected() > 0)
 }
 
 pub async fn unwatch(pool: &PgPool, user_id: &str, listing_id: Uuid) -> DbResult<()> {
@@ -840,15 +892,43 @@ pub async fn unwatch(pool: &PgPool, user_id: &str, listing_id: Uuid) -> DbResult
 /// has its `forked_from` cleared first (that FK has no cascade). Returns true
 /// when a row owned by the caller was actually removed.
 pub async fn delete_listing(pool: &PgPool, listing_id: Uuid, publisher_id: &str) -> DbResult<bool> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+    let owned = query(
+        "SELECT id
+         FROM market_listings
+         WHERE id = $1 AND publisher_id = $2
+         FOR UPDATE",
+    )
+    .bind(listing_id)
+    .bind(publisher_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+    if owned.is_none() {
+        tx.rollback()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        return Ok(false);
+    }
+
     query("UPDATE market_listings SET forked_from = NULL WHERE forked_from = $1")
         .bind(listing_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
     let res = query("DELETE FROM market_listings WHERE id = $1 AND publisher_id = $2")
         .bind(listing_id)
         .bind(publisher_id)
-        .execute(pool)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+
+    tx.commit()
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
     Ok(res.rows_affected() > 0)
@@ -867,7 +947,7 @@ pub async fn list_watches(pool: &PgPool, user_id: &str) -> DbResult<Vec<ListingR
          LEFT JOIN users u ON u.user_id = l.publisher_id
          CROSS JOIN LATERAL (
            SELECT
-             (SELECT COUNT(*) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
+             (SELECT COUNT(DISTINCT i.user_id) FROM market_installs i WHERE i.listing_id = l.id) AS install_count,
              (SELECT AVG(rating)::float8 FROM market_reviews r WHERE r.listing_id = l.id) AS rating_avg,
              (SELECT COUNT(*) FROM market_reviews r WHERE r.listing_id = l.id) AS rating_count,
              EXISTS (
@@ -875,7 +955,7 @@ pub async fn list_watches(pool: &PgPool, user_id: &str) -> DbResult<Vec<ListingR
                 WHERE i.listing_id = l.id AND i.user_id = $1
              ) AS is_installed
          ) stats
-         WHERE w.user_id = $1
+         WHERE w.user_id = $1 AND l.status = 'published'
          ORDER BY w.subscribed_at DESC",
     )
     .bind(user_id)

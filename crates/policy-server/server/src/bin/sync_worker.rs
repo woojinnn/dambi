@@ -6,6 +6,7 @@ use policy_server::config::ServerConfig;
 use policy_server::coordination::build_coordinator;
 use policy_server::events::{publish_tick_events, RedisEventPublisher};
 use policy_server::storage::StorageBackend;
+use policy_server::sync_config::sync_config_path_from_env;
 use policy_sync::{Orchestrator, Scheduler, SchedulerConfig, SyncConfig};
 
 #[tokio::main]
@@ -15,9 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     policy_server::logging::init_tracing(config.log_format);
     let storage = StorageBackend::open(&config).await?;
 
-    let sync_config_path =
-        std::env::var("DAMBI_SYNC_CONFIG").unwrap_or_else(|_| "./dambi-sync.toml".to_owned());
-    let sync_config = SyncConfig::load_file(sync_config_path)?;
+    let sync_config = SyncConfig::load_file(sync_config_path_from_env())?;
     let orchestrator = Arc::new(Orchestrator::from_sync_config(&sync_config)?);
     let coordinator = build_coordinator(&config).await?;
 
@@ -92,7 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get(&user_id)
                 .expect("scheduler inserted for active user");
             let report_result = scheduler.tick_once().await;
-            coordinator.release_lock(lock).await?;
+            if let Err(e) = coordinator.release_lock(lock).await {
+                tracing::warn!(user_id, error = %e, "sync worker: failed to release lock");
+            }
             let report = report_result?;
             tracing::info!(
                 user_id,

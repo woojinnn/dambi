@@ -16,7 +16,6 @@
 //! Periodic sync is handled by the standalone `sync_worker` binary. The API
 //! process also supports on-demand sync via `POST /wallets/:addr/sync`.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,11 +26,7 @@ use policy_server::events::{
     spawn_redis_event_forwarder, EventBus, EventPublisher, LocalEventPublisher, RedisEventPublisher,
 };
 use policy_server::storage::StorageBackend;
-use policy_sync::{CoinGeckoClient, EtherscanClient, Orchestrator, SyncConfig};
-
-/// Default sync config path. Lives next to the workspace root so the dev
-/// loop is one command (`cargo run -p policy-server`).
-const DEFAULT_SYNC_CONFIG: &str = "./dambi-sync.toml";
+use policy_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,30 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = StorageBackend::open(&config).await?;
     let coordinator = build_coordinator(&config).await?;
 
-    // Sync orchestrator. Load the TOML config; if the file is missing we
-    // boot with an empty config (no RPC providers) — endpoints that
-    // require sync will return 503-ish errors instead of crashing the
-    // whole server at startup, so a dev can run /auth/* alone.
-    let sync_config_path = std::env::var("DAMBI_SYNC_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_SYNC_CONFIG));
-    let sync_config = match SyncConfig::load_file(&sync_config_path) {
-        Ok(cfg) => {
-            tracing::info!(
-                path = %sync_config_path.display(),
-                "loaded sync config"
-            );
-            cfg
-        }
-        Err(e) => {
-            tracing::warn!(
-                path = %sync_config_path.display(),
-                error = %e,
-                "sync config not loaded — sync endpoints will fail until fixed"
-            );
-            SyncConfig::default()
-        }
-    };
+    let sync_config = policy_server::sync_config::load_sync_config(&config)?;
     let orchestrator = Arc::new(Orchestrator::from_sync_config(&sync_config)?);
 
     let etherscan = EtherscanClient::from_env();

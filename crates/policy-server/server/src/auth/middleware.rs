@@ -67,7 +67,7 @@ fn extract_user(req: &Request) -> Result<AuthUser, Box<Response>> {
     let claims = jwt::verify(&token).map_err(|e| Box::new(reject(&e.to_string())))?;
     if !claims.is_access() {
         return Err(Box::new(reject(
-            "refresh token cannot be used as an access token",
+            "non-access token cannot be used as an access token",
         )));
     }
     Ok(AuthUser::from(claims))
@@ -180,6 +180,25 @@ mod tests {
     }
 
     #[test]
+    fn oauth_state_token_rejected_as_access() {
+        set_secret();
+        let token = issue(
+            "oauth-state",
+            r#"{"nonce":"n","redirect_uri":"https://abc.chromiumapp.org/"}"#,
+            TokenType::OAuthState,
+            Some(300),
+        )
+        .unwrap();
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        let err = extract_user(&req_with(h, "/wallets")).unwrap_err();
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
     fn token_via_query_string_accepted_for_sse_only() {
         set_secret();
         let token = issue("u_eve", "eve@e.com", TokenType::Access, None).unwrap();
@@ -201,6 +220,21 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn token_via_query_string_requires_exact_sse_path() {
+        set_secret();
+        let token = issue("u_eve", "eve@e.com", TokenType::Access, None).unwrap();
+
+        for uri in [
+            format!("/events/stream/?token={token}"),
+            format!("/events/stream/extra?token={token}"),
+            format!("/events%2Fstream?token={token}"),
+        ] {
+            let err = extract_user(&req_with(HeaderMap::new(), &uri)).unwrap_err();
+            assert_eq!(err.status(), StatusCode::UNAUTHORIZED, "uri={uri}");
+        }
     }
 
     #[test]

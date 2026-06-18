@@ -15,6 +15,7 @@ use policy_state::approval::{AllowanceSpec, ApprovalSet};
 use policy_state::primitives::{Address, BlockHeight, ChainId, Time, U256};
 use policy_state::{WalletId, WalletState, WalletStore};
 use policy_sync::{Orchestrator, SyncConfig};
+use uuid::Uuid;
 
 const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
 
@@ -44,17 +45,12 @@ async fn spawn_server() -> (
     let tmp = tempfile::tempdir().unwrap();
     let global_db = GlobalDb::open(tmp.path().join("global.db")).unwrap();
     // Seed the user so wallet saves satisfy `wallets_user_id_fkey` (enforced by
-    // the Postgres integration backend). Each spawn gets a UNIQUE email so the
-    // derived user_id is distinct per test: these tests share one Postgres that
-    // is NOT reset between binaries, so a shared email would collide on the same
-    // `users` row and let leftover rows break the exact-state assertions. Reuse
-    // the returned user_id for the token + wallet seeding so they all reference
-    // one real, isolated user. The `read-endpoints-` prefix keeps these ids
-    // disjoint from other test files sharing the same DB.
-    static USER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = USER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // the Postgres integration backend). Each spawn gets a globally unique
+    // email so repeated runs against the shared integration DB cannot inherit
+    // wallet rows from an earlier process.
+    let suffix = Uuid::new_v4();
     let user_id = global_db
-        .upsert_user(&format!("read-endpoints-{n}@example.com"), "test")
+        .upsert_user(&format!("read-endpoints-{suffix}@example.com"), "test")
         .await
         .unwrap();
     let multi_user = MultiUserStore::new(tmp.path().join("users"));
@@ -178,6 +174,27 @@ async fn get_approvals_returns_approval_set() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn tracked_slice_routes_return_wallet_scoped_views() {
+    let (addr, mu, _tmp, token, user_id) = spawn_server().await;
+    seed_for(&mu, &user_id, seeded_state()).await;
+
+    let lower = format!("{:#x}", sample_id().address);
+    for suffix in ["holdings", "positions", "pending"] {
+        let got: serde_json::Value = reqwest::Client::new()
+            .get(format!("http://{addr}/wallets/{lower}/{suffix}"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(got, serde_json::json!([]), "{suffix} must be an array view");
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn get_block_heights_returns_array() {
     let (addr, mu, _tmp, token, user_id) = spawn_server().await;
     seed_for(&mu, &user_id, seeded_state()).await;
@@ -211,20 +228,40 @@ async fn invalid_address_returns_400() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
-async fn unseen_address_returns_empty_state() {
+async fn untracked_address_returns_404() {
     let (addr, _mu, _tmp, token, _user_id) = spawn_server().await;
     let other = "0x0000000000000000000000000000000000001111";
-    let got: WalletState = reqwest::Client::new()
+    let resp = reqwest::Client::new()
         .get(format!("http://{addr}/wallets/{other}/state"))
         .bearer_auth(&token)
         .send()
         .await
-        .unwrap()
-        .json()
-        .await
         .unwrap();
-    assert!(got.tokens.is_empty());
-    assert!(got.block_heights.is_empty());
+    assert_eq!(resp.status(), 404);
+    let body = resp.text().await.unwrap();
+    assert_eq!(body, "wallet not tracked for this user");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn untracked_slice_routes_return_404() {
+    let (addr, _mu, _tmp, token, _user_id) = spawn_server().await;
+    let other = "0x0000000000000000000000000000000000001111";
+    for suffix in ["holdings", "positions", "pending"] {
+        let resp = reqwest::Client::new()
+            .get(format!("http://{addr}/wallets/{other}/{suffix}"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            404,
+            "{suffix} should reject untracked wallet"
+        );
+        let body = resp.text().await.unwrap();
+        assert_eq!(body, "wallet not tracked for this user");
+    }
 }
 
 #[tokio::test]

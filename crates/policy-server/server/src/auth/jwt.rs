@@ -3,18 +3,20 @@
 //! from the `JWT_SECRET` env var on first use and cached for the process
 //! lifetime; rotating the secret requires a restart and invalidates every
 //! outstanding token (intentional — there is no revocation list).
-//! Defaults: access tokens live 1 hour, refresh tokens live 30 days. Both
-//! ride the same secret + algorithm; only the `typ` claim differs so an
-//! access token can't be replayed as a refresh.
+//! Defaults: access tokens live 1 hour, refresh tokens live 30 days, and OAuth
+//! state tokens live 5 minutes. All ride the same secret + algorithm; the
+//! `typ` claim keeps browser API auth, refresh rotation, and OAuth CSRF state
+//! separated.
 
 use std::sync::OnceLock;
 
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-/// User identifier baked into the `sub` claim. Always lowercase hex of a
-/// short hash of the user's email — deterministic so re-logging-in returns
-/// the same id.
+/// User identifier baked into the `sub` claim. For OAuth logins this is the
+/// stable server-side id returned by the identity store, which keys new users
+/// by provider subject rather than mutable email.
 pub type UserId = String;
 
 /// Access tokens last one hour. Short enough to limit damage if leaked,
@@ -25,11 +27,17 @@ pub const ACCESS_TTL_SECS: i64 = 60 * 60;
 /// Refresh tokens last 30 days. Used to mint new access tokens without
 /// re-running OAuth.
 pub const REFRESH_TTL_SECS: i64 = 60 * 60 * 24 * 30;
+/// OAuth state JWTs are single-flow CSRF carriers and should be brief.
+pub const OAUTH_STATE_TTL_SECS: i64 = 5 * 60;
+const MIN_JWT_SECRET_BYTES: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("JWT_SECRET env var not set")]
     MissingSecret,
+
+    #[error("JWT_SECRET must be at least {0} bytes")]
+    WeakSecret(usize),
 
     #[error("token expired")]
     Expired,
@@ -47,6 +55,7 @@ pub enum AuthError {
 pub enum TokenType {
     Access,
     Refresh,
+    OAuthState,
 }
 
 /// JWT payload. `sub` follows the standard claim name; everything else is
@@ -54,6 +63,8 @@ pub enum TokenType {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: UserId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jti: Option<String>,
     pub email: String,
     #[serde(rename = "typ")]
     pub token_type: TokenType,
@@ -71,6 +82,16 @@ impl Claims {
     pub fn is_refresh(&self) -> bool {
         matches!(self.token_type, TokenType::Refresh)
     }
+
+    #[must_use]
+    pub fn is_oauth_state(&self) -> bool {
+        matches!(self.token_type, TokenType::OAuthState)
+    }
+
+    #[must_use]
+    pub fn token_id(&self) -> Option<&str> {
+        self.jti.as_deref().filter(|jti| !jti.trim().is_empty())
+    }
 }
 
 /// Encode a fresh token. `ttl_secs` overrides the default for the given
@@ -81,21 +102,36 @@ pub fn issue(
     token_type: TokenType,
     ttl_secs: Option<i64>,
 ) -> Result<String, AuthError> {
+    issue_with_claims(user_id, email, token_type, ttl_secs).map(|(token, _claims)| token)
+}
+
+/// Encode a fresh token and return the exact claims that were signed. Callers
+/// that need session bookkeeping, such as refresh-token rotation, use this to
+/// persist the generated `jti` and expiry atomically with the response.
+pub fn issue_with_claims(
+    user_id: &str,
+    email: &str,
+    token_type: TokenType,
+    ttl_secs: Option<i64>,
+) -> Result<(String, Claims), AuthError> {
     let now = now_secs()?;
     let ttl = ttl_secs.unwrap_or(match token_type {
         TokenType::Access => ACCESS_TTL_SECS,
         TokenType::Refresh => REFRESH_TTL_SECS,
+        TokenType::OAuthState => OAUTH_STATE_TTL_SECS,
     });
     let claims = Claims {
         sub: user_id.to_string(),
+        jti: Some(Uuid::new_v4().to_string()),
         email: email.to_string(),
         token_type,
         iat: now,
         exp: now + ttl,
     };
     let key = encoding_key()?;
-    encode(&Header::new(Algorithm::HS256), &claims, &key)
-        .map_err(|e| AuthError::Invalid(e.to_string()))
+    let token = encode(&Header::new(Algorithm::HS256), &claims, &key)
+        .map_err(|e| AuthError::Invalid(e.to_string()))?;
+    Ok((token, claims))
 }
 
 /// Verify signature + expiry, return the decoded claims. Note: `jsonwebtoken`'s
@@ -114,6 +150,14 @@ pub fn verify(token: &str) -> Result<Claims, AuthError> {
     }
 }
 
+/// Validate the configured signing secret without touching the process-wide
+/// signing-key cache. Readiness uses this so a weak deployment secret fails
+/// before the service starts accepting traffic.
+pub fn validate_configured_secret() -> Result<(), AuthError> {
+    let raw = std::env::var("JWT_SECRET").map_err(|_| AuthError::MissingSecret)?;
+    validate_secret_value(&raw)
+}
+
 // ---------- internals ----------
 
 /// Cache the secret bytes for the process lifetime — env reads on every
@@ -125,11 +169,26 @@ fn secret_bytes() -> Result<&'static [u8], AuthError> {
         return Ok(s);
     }
     let raw = std::env::var("JWT_SECRET").map_err(|_| AuthError::MissingSecret)?;
+    validate_secret_value(&raw)?;
     let bytes = raw.into_bytes();
     let _ = SECRET_CACHE.set(bytes);
     Ok(SECRET_CACHE
         .get()
         .expect("SECRET_CACHE just set or already populated"))
+}
+
+fn validate_secret_value(raw: &str) -> Result<(), AuthError> {
+    let bytes = raw.as_bytes();
+    if bytes.len() < MIN_JWT_SECRET_BYTES {
+        return Err(AuthError::WeakSecret(MIN_JWT_SECRET_BYTES));
+    }
+    if bytes.iter().all(|b| b.is_ascii_whitespace()) {
+        return Err(AuthError::WeakSecret(MIN_JWT_SECRET_BYTES));
+    }
+    if bytes.windows(2).all(|pair| pair[0] == pair[1]) {
+        return Err(AuthError::WeakSecret(MIN_JWT_SECRET_BYTES));
+    }
+    Ok(())
 }
 
 fn encoding_key() -> Result<EncodingKey, AuthError> {
@@ -170,8 +229,27 @@ mod tests {
         let token = issue("u_abc123", "alice@example.com", TokenType::Access, None).unwrap();
         let claims = verify(&token).unwrap();
         assert_eq!(claims.sub, "u_abc123");
+        assert!(claims.token_id().is_some());
         assert_eq!(claims.email, "alice@example.com");
         assert!(claims.is_access());
+    }
+
+    #[test]
+    fn jwt_secret_validator_rejects_short_blank_and_repeated_values() {
+        for raw in [
+            "",
+            "short-secret",
+            "                                ",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ] {
+            let err = validate_secret_value(raw).unwrap_err();
+            assert!(matches!(err, AuthError::WeakSecret(_)), "got {err:?}");
+        }
+    }
+
+    #[test]
+    fn jwt_secret_validator_accepts_reasonable_test_secret() {
+        validate_secret_value("test-secret-only-do-not-use-in-production-2026-05-31").unwrap();
     }
 
     #[test]
@@ -179,7 +257,33 @@ mod tests {
         set_secret();
         let token = issue("u_x", "x@e.com", TokenType::Refresh, None).unwrap();
         let claims = verify(&token).unwrap();
+        assert!(claims.token_id().is_some());
         assert!(claims.is_refresh());
+    }
+
+    #[test]
+    fn oauth_state_token_kind_is_preserved() {
+        set_secret();
+        let token = issue(
+            "oauth-state",
+            r#"{"nonce":"n","redirect_uri":"https://abc.chromiumapp.org/"}"#,
+            TokenType::OAuthState,
+            None,
+        )
+        .unwrap();
+        let claims = verify(&token).unwrap();
+        assert!(claims.token_id().is_some());
+        assert!(claims.is_oauth_state());
+        assert!(!claims.is_access());
+        assert!(!claims.is_refresh());
+    }
+
+    #[test]
+    fn issued_tokens_get_distinct_ids() {
+        set_secret();
+        let a = verify(&issue("u_x", "x@e.com", TokenType::Refresh, None).unwrap()).unwrap();
+        let b = verify(&issue("u_x", "x@e.com", TokenType::Refresh, None).unwrap()).unwrap();
+        assert_ne!(a.token_id(), b.token_id());
     }
 
     #[test]

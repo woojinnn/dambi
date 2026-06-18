@@ -5,13 +5,14 @@
 //! State is shared as a single `AppState` carrying the per-user DB router
 //! (`MultiUserStore`) plus the cross-user identity DB (`GlobalDb`).
 
-use axum::extract::{FromRef, State};
-use axum::http::{header, HeaderValue, Method, StatusCode};
-use axum::middleware::from_fn;
+use axum::extract::{FromRef, Request, State};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
+use axum::middleware::{from_fn, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Extension, Json, Router};
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 
 use std::collections::HashMap;
@@ -41,7 +42,8 @@ use crate::write_handlers;
 
 /// Shared, cheaply-cloneable application state handed to every handler.
 /// `multi_user` resolves one `PostgreSQL`-backed wallet store per authenticated
-/// user. `global_db` is the cross-user identity DB (email ↔ `user_id`).
+/// user. `global_db` is the cross-user identity DB (OAuth provider subject,
+/// email, refresh sessions, and `user_id`).
 #[derive(Clone)]
 pub struct AppState {
     pub multi_user: MultiUserStore,
@@ -142,13 +144,13 @@ pub struct ShutdownRx(pub tokio::sync::watch::Receiver<bool>);
 /// - `GET  /wallets/:address/holdings`      — token holdings.
 /// - `GET  /wallets/:address/approvals`     — approval set.
 /// - `GET  /wallets/:address/block-heights` — per-chain sync block.
-/// - `GET  /transactions`                   — state-delta lifecycle log.
+/// - `GET  /transactions`                   — compatibility stub; currently empty.
 /// - `GET  /tokens`                         — token catalog + metadata.
 /// - `GET  /events/stream`                  — SSE live event feed.
 ///
-/// Policy installation, policy catalogs, verdict history, audit views, and
-/// finding feeds are intentionally extension-local. The cloud API only stores
-/// wallet state, token metadata, transactions, and sync lifecycle data.
+/// Policy installation, policy catalogs, verdict history, audit views, finding
+/// feeds, and transaction lifecycle rows are intentionally extension-local. The
+/// cloud API only stores wallet state, token metadata, and sync lifecycle data.
 ///
 /// CORS is allowlist-based in cloud mode. Local defaults still allow the
 /// dashboard development origins configured in [`ServerConfig`].
@@ -273,7 +275,9 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
     public
         .merge(protected)
         .layer(TraceLayer::new_for_http())
+        .layer(RequestBodyLimitLayer::new(config.http_body_limit_bytes))
         .layer(cors_layer(config))
+        .layer(from_fn(add_security_headers))
         .with_state(state)
 }
 
@@ -297,17 +301,74 @@ fn cors_layer(config: &ServerConfig) -> CorsLayer {
         .allow_private_network(config.allow_private_network)
 }
 
+async fn add_security_headers(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    insert_default_security_headers(response.headers_mut());
+    response
+}
+
+fn insert_default_security_headers(headers: &mut HeaderMap) {
+    insert_header_if_absent(
+        headers,
+        HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+    insert_header_if_absent(
+        headers,
+        HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static("DENY"),
+    );
+    insert_header_if_absent(
+        headers,
+        HeaderName::from_static("referrer-policy"),
+        HeaderValue::from_static("no-referrer"),
+    );
+    insert_header_if_absent(
+        headers,
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("geolocation=(), microphone=(), camera=()"),
+    );
+    insert_header_if_absent(
+        headers,
+        HeaderName::from_static("strict-transport-security"),
+        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
+}
+
+fn insert_header_if_absent(headers: &mut HeaderMap, name: HeaderName, value: HeaderValue) {
+    if !headers.contains_key(&name) {
+        headers.insert(name, value);
+    }
+}
+
 /// `GET /health` — liveness probe.
 async fn health_handler() -> &'static str {
     "ok"
 }
 
-/// `GET /auth/me` — echo the authenticated user. Used by the dashboard
-/// to validate a stored JWT on page load and render the profile chip.
-async fn auth_me_handler(Extension(user): Extension<AuthUser>) -> Response {
+/// `GET /auth/me` — return the current DB-backed user identity. Used by the
+/// dashboard to validate a stored JWT on page load and render the profile chip.
+async fn auth_me_handler(
+    State(global): State<GlobalDb>,
+    Extension(user): Extension<AuthUser>,
+) -> Response {
+    let current = match global.get_user_by_id(&user.user_id).await {
+        Ok(Some(current)) => current,
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "unauthorized",
+                    "reason": "invalid token user",
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => return internal_server_error(&format!("load auth user: {e}")),
+    };
     Json(serde_json::json!({
-        "user_id": user.user_id,
-        "email": user.email,
+        "user_id": current.user_id,
+        "email": current.email,
     }))
     .into_response()
 }
@@ -316,10 +377,10 @@ async fn auth_me_handler(Extension(user): Extension<AuthUser>) -> Response {
 /// invalid for the state) and [`HandlerError::Store`] to `500 Internal Server
 /// Error` (persistence failed).
 /// Adapts the global DB's market-wide price lookup to the handler's
-/// [`PriceBook`] so `oracle.usd_value` can value a swap from the synced price of
-/// ANY wallet holding that token — not just the requesting (possibly
-/// unregistered) wallet. A lookup error degrades to "unknown price" (the call
-/// then fail-closes upstream), never a 500.
+/// [`PriceBook`] so `oracle.usd_value` can value a token from market-wide DB
+/// facts, not just the requesting wallet's synced holdings. A lookup error
+/// degrades to "unknown price" (the call then fail-closes upstream), never a
+/// 500.
 struct DbPriceBook {
     global_db: GlobalDb,
 }
@@ -353,15 +414,14 @@ impl PriceBook for DbPriceBook {
 
 // ── F-ENRICH-1 fix: on-demand Chainlink price fallback ──────────────────────
 //
-// Root cause: `oracle.usd_value` resolves a price ONLY from a SYNCED wallet
-// holding's `price_usd` (own wallet, else the cross-wallet `latest_token_price`
-// DB scan — `DbPriceBook`). The Chainlink feed is exercised only as a side
-// effect of `POST /wallets` sync, so a canonical token held by NO synced wallet
-// (e.g. mainnet USDC) had no priced row and a USD-cap policy silently
-// fail-opened — even though the feed exists. This decouples price coverage from
-// holdings: on a DB miss `LayeredPriceBook` reads the canonical Chainlink USD
-// feed directly, bounded + fail-open, mirroring `ChainalysisSanctionsOracle` /
-// `AlchemyFloorOracle` (live eth_call at evaluate time for an OPTIONAL fact).
+// Root cause: the hot path resolved `oracle.usd_value` only from wallet/global
+// DB prices. The Chainlink feed was exercised as a side effect of wallet sync,
+// so a canonical token held by NO synced wallet (e.g. mainnet USDC) had no
+// priced row and a USD-cap policy silently fail-opened even though the feed
+// exists. This decouples price coverage from holdings: on a DB miss
+// `LayeredPriceBook` reads the canonical Chainlink USD feed directly, bounded +
+// fail-open, mirroring `ChainalysisSanctionsOracle` / `AlchemyFloorOracle`
+// (live eth_call at evaluate time for an OPTIONAL fact).
 
 /// Chainlink `AggregatorV3Interface::latestRoundData()` selector.
 const LATEST_ROUND_DATA_SELECTOR: &str = "0xfeaf968c";
@@ -786,6 +846,7 @@ impl NftFloorOracle for AlchemyFloorOracle {
         if chain != "eip155:1" {
             return None; // getFloorPrice is Ethereum-mainnet-only
         }
+        let collection = normalize_evm_address(collection)?;
         let base = self.base_url.as_deref()?;
         let url = format!("{base}/getFloorPrice?contractAddress={collection}");
         let resp = self
@@ -1040,6 +1101,14 @@ fn geckoterminal_network_slug(chain_id: i64) -> Option<&'static str> {
         .map(|&(_, slug)| slug)
 }
 
+fn normalize_evm_address(value: &str) -> Option<String> {
+    let addr = value.trim_start_matches("0x").to_ascii_lowercase();
+    if addr.len() != 40 || !addr.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("0x{addr}"))
+}
+
 /// Live external enrichment for the token policies: `GoPlus` malicious-address
 /// reputation (`address.reputation`) and the owner's transfer history
 /// (`stat_window.snapshot` / `address.similarity`, Phase 2 via Alchemy
@@ -1064,10 +1133,7 @@ struct LiveEnrichment {
 impl ExternalEnrichment for LiveEnrichment {
     async fn reputation_flagged(&self, chain_id: i64, address: &str) -> Option<bool> {
         // Validate 0x-hex (20 bytes) before building the URL.
-        let addr = address.trim_start_matches("0x").to_lowercase();
-        if addr.len() != 40 || !addr.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return None;
-        }
+        let addr = normalize_evm_address(address)?;
         let base = self
             .goplus_base
             .as_deref()
@@ -1075,7 +1141,7 @@ impl ExternalEnrichment for LiveEnrichment {
         if base.is_empty() {
             return None; // explicitly disabled
         }
-        let url = format!("{base}/address_security/0x{addr}?chain_id={chain_id}");
+        let url = format!("{base}/address_security/{addr}?chain_id={chain_id}");
         let resp = self
             .client
             .get(&url)
@@ -1115,10 +1181,7 @@ impl ExternalEnrichment for LiveEnrichment {
     ) -> Option<PoolLiquidityFacts> {
         // Resolve the pool key from the internally-tagged `AmmVenue`
         // (`.pool` / `.pool_id` / `.pair`); non-pool / unknown venue → dormant.
-        let pool_key = crate::handler::amm_venue_pool_key(venue)?.to_lowercase();
-        if !pool_key.starts_with("0x") || pool_key.len() < 4 {
-            return None;
-        }
+        let pool_key = normalize_evm_address(crate::handler::amm_venue_pool_key(venue)?)?;
         // `GeckoTerminal` keys pools by its own network SLUG, not eip155 chainId.
         let network = geckoterminal_network_slug(chain_id)?;
         let base = self
@@ -1172,10 +1235,7 @@ impl ExternalEnrichment for LiveEnrichment {
     /// (`/networks/{net}/tokens/{addr}`). A 404 (token not indexed) or parse miss →
     /// `None` (dormant), never a fabricated 0.
     async fn token_market_data(&self, chain_id: i64, token: &str) -> Option<TokenMarketData> {
-        let addr = token.trim_start_matches("0x").to_lowercase();
-        if addr.len() != 40 || !addr.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return None;
-        }
+        let addr = normalize_evm_address(token)?;
         let network = geckoterminal_network_slug(chain_id)?;
         let base = self
             .geckoterminal_base
@@ -1184,7 +1244,7 @@ impl ExternalEnrichment for LiveEnrichment {
         if base.is_empty() {
             return None; // explicitly disabled
         }
-        let url = format!("{base}/networks/{network}/tokens/0x{addr}");
+        let url = format!("{base}/networks/{network}/tokens/{addr}");
         let resp = self
             .client
             .get(&url)
@@ -1218,10 +1278,7 @@ impl ExternalEnrichment for LiveEnrichment {
     #[allow(clippy::cast_possible_truncation)] // tax clamped to [0, 1e7] before the cast
     async fn token_security_flags(&self, chain_id: i64, token: &str) -> Option<TokenSecurityFlags> {
         // Validate 0x-hex (20 bytes) before building the URL.
-        let addr = token.trim_start_matches("0x").to_lowercase();
-        if addr.len() != 40 || !addr.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return None;
-        }
+        let addr = normalize_evm_address(token)?;
         // `token_security`'s supported-chain set differs from `address_security`'s;
         // skip (dormant) outside it rather than mis-keying on an unsupported chain.
         if !TOKEN_SECURITY_CHAINS.contains(&chain_id) {
@@ -1234,7 +1291,7 @@ impl ExternalEnrichment for LiveEnrichment {
         if base.is_empty() {
             return None; // explicitly disabled
         }
-        let url = format!("{base}/token_security/{chain_id}?contract_addresses=0x{addr}");
+        let url = format!("{base}/token_security/{chain_id}?contract_addresses={addr}");
         let resp = self
             .client
             .get(&url)
@@ -1255,13 +1312,12 @@ impl ExternalEnrichment for LiveEnrichment {
         // up case-insensitively; an absent/empty entry = unanalyzed → UNKNOWN (None),
         // never a fabricated "clean".
         let result = body.get("result")?.as_object()?;
-        let key = format!("0x{addr}");
         let entry = result
-            .get(&key)
+            .get(&addr)
             .or_else(|| {
                 result
                     .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case(&key))
+                    .find(|(k, _)| k.eq_ignore_ascii_case(&addr))
                     .map(|(_, v)| v)
             })?
             .as_object()?;
@@ -1338,6 +1394,7 @@ impl LiveEnrichment {
         if base.is_empty() || chain_id != 1 {
             return None; // v1: Ethereum mainnet only
         }
+        let owner = normalize_evm_address(owner)?;
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -1398,11 +1455,18 @@ impl LiveEnrichment {
     }
 }
 
+const EVALUATE_MAX_ENVELOPES: usize = 128;
+const EVALUATE_MAX_CALL_SPECS: usize = 64;
+
 async fn evaluate_handler(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Json(req): Json<EvaluateRequest>,
 ) -> Response {
+    if let Some(reason) = evaluate_request_limit_violation(&req) {
+        return request_too_large(reason);
+    }
+
     tracing::debug!(
         user_id = %user.user_id,
         wallet_address = %format!("{:#x}", req.wallet_id.address),
@@ -1413,13 +1477,7 @@ async fn evaluate_handler(
     );
     let store = match state.multi_user.for_user(&user.user_id) {
         Ok(s) => s,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("open user store: {e}"),
-            )
-                .into_response();
-        }
+        Err(e) => return internal_server_error(&format!("open user store: {e}")),
     };
     // F-ENRICH-1 fix: DB-derived price (primary) + on-demand Chainlink fallback
     // (DB miss) so a USD-cap can value a canonical token NO synced wallet holds.
@@ -1467,10 +1525,36 @@ async fn evaluate_handler(
         Err(err @ HandlerError::Reducer(_)) => {
             (StatusCode::UNPROCESSABLE_ENTITY, err.to_string()).into_response()
         }
-        Err(err @ HandlerError::Store(_)) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-        }
+        Err(err @ HandlerError::Store(_)) => internal_server_error(&err.to_string()),
     }
+}
+
+fn evaluate_request_limit_violation(req: &EvaluateRequest) -> Option<&'static str> {
+    if req.envelopes.len() > EVALUATE_MAX_ENVELOPES {
+        Some("too many envelopes")
+    } else if req.call_specs.len() > EVALUATE_MAX_CALL_SPECS {
+        Some("too many call_specs")
+    } else {
+        None
+    }
+}
+
+fn request_too_large(reason: &str) -> Response {
+    (
+        StatusCode::PAYLOAD_TOO_LARGE,
+        Json(serde_json::json!({
+            "error": "request_too_large",
+            "reason": reason,
+            "max_envelopes": EVALUATE_MAX_ENVELOPES,
+            "max_call_specs": EVALUATE_MAX_CALL_SPECS,
+        })),
+    )
+        .into_response()
+}
+
+fn internal_server_error(reason: &str) -> Response {
+    tracing::error!(error = %reason, "app handler internal error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 #[cfg(test)]
@@ -1478,6 +1562,119 @@ mod tests {
     use serde_json::json;
     use time::format_description::well_known::Rfc3339;
     use time::OffsetDateTime;
+
+    #[tokio::test]
+    async fn internal_server_error_does_not_echo_reason() {
+        let response = super::internal_server_error("open user store password=secret");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "Internal server error");
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn default_security_headers_are_inserted_without_overwriting_existing_values() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::HeaderName::from_static("content-security-policy"),
+            axum::http::HeaderValue::from_static("default-src 'none'"),
+        );
+        headers.insert(
+            axum::http::HeaderName::from_static("x-frame-options"),
+            axum::http::HeaderValue::from_static("SAMEORIGIN"),
+        );
+
+        super::insert_default_security_headers(&mut headers);
+
+        assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
+        assert_eq!(headers.get("x-frame-options").unwrap(), "SAMEORIGIN");
+        assert_eq!(headers.get("referrer-policy").unwrap(), "no-referrer");
+        assert_eq!(
+            headers.get("permissions-policy").unwrap(),
+            "geolocation=(), microphone=(), camera=()"
+        );
+        assert_eq!(
+            headers.get("strict-transport-security").unwrap(),
+            "max-age=31536000; includeSubDomains"
+        );
+        assert_eq!(
+            headers.get("content-security-policy").unwrap(),
+            "default-src 'none'"
+        );
+    }
+
+    fn empty_evaluate_request() -> crate::dto::EvaluateRequest {
+        use std::str::FromStr;
+
+        crate::dto::EvaluateRequest {
+            wallet_id: policy_state::WalletId::new(
+                policy_state::primitives::Address::from_str(
+                    "0x000000000000000000000000000000000000a01c",
+                )
+                .unwrap(),
+                [policy_state::primitives::ChainId::ethereum_mainnet()],
+            ),
+            envelopes: Vec::new(),
+            eval_context: policy_state::EvalContext::new(
+                policy_state::primitives::ChainId::ethereum_mainnet(),
+                policy_state::primitives::Time::from_unix(1_700_000_000),
+                policy_state::RequestKind::Transaction,
+            ),
+            call_specs: Vec::new(),
+        }
+    }
+
+    fn sample_call_spec(i: usize) -> crate::dto::CallSpec {
+        crate::dto::CallSpec {
+            manifest_id: "limit-test".to_owned(),
+            call_id: format!("limit-test::{i}"),
+            method: "oracle.usd_value".to_owned(),
+            params: serde_json::json!({
+                "token": "USDC",
+                "amount": "0x1"
+            }),
+            outputs: Vec::new(),
+            optional: true,
+        }
+    }
+
+    #[test]
+    fn evaluate_request_limit_accepts_boundary_and_rejects_excess_call_specs() {
+        let mut req = empty_evaluate_request();
+        req.call_specs = (0..super::EVALUATE_MAX_CALL_SPECS)
+            .map(sample_call_spec)
+            .collect();
+        assert!(super::evaluate_request_limit_violation(&req).is_none());
+
+        req.call_specs
+            .push(sample_call_spec(super::EVALUATE_MAX_CALL_SPECS));
+        assert_eq!(
+            super::evaluate_request_limit_violation(&req),
+            Some("too many call_specs")
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_request_too_large_response_is_bounded_json() {
+        let response = super::request_too_large("too many call_specs");
+        assert_eq!(response.status(), axum::http::StatusCode::PAYLOAD_TOO_LARGE);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "request_too_large");
+        assert_eq!(json["reason"], "too many call_specs");
+        assert_eq!(
+            json["max_call_specs"],
+            serde_json::json!(super::EVALUATE_MAX_CALL_SPECS)
+        );
+    }
 
     fn at(ts: &str) -> OffsetDateTime {
         OffsetDateTime::parse(ts, &Rfc3339).unwrap()
@@ -1509,6 +1706,28 @@ mod tests {
             "expected the full GeckoTerminal EVM network table, got {}",
             super::GECKOTERMINAL_NETWORKS.len()
         );
+    }
+
+    #[test]
+    fn normalize_evm_address_rejects_url_injection_shapes() {
+        let upper = "0xA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48";
+        assert_eq!(
+            super::normalize_evm_address(upper),
+            Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_owned())
+        );
+        assert_eq!(
+            super::normalize_evm_address("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"),
+            Some("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_owned())
+        );
+        assert!(
+            super::normalize_evm_address("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48&x=1")
+                .is_none()
+        );
+        assert!(
+            super::normalize_evm_address("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48/path")
+                .is_none()
+        );
+        assert!(super::normalize_evm_address("0xabc").is_none());
     }
 
     // ── F-ENRICH-1: on-demand Chainlink price fallback ──────────────────────
@@ -1572,6 +1791,26 @@ mod tests {
         assert!(super::decode_chainlink_usd_answer(&neg, 8).is_none());
         // truncated payload ⇒ None.
         assert!(super::decode_chainlink_usd_answer("0x1234", 8).is_none());
+    }
+
+    #[tokio::test]
+    async fn onchain_chainlink_price_book_without_rpc_url_is_price_dormant() {
+        use crate::handler::PriceBook;
+
+        let pb = super::OnchainChainlinkPriceBook {
+            client: reqwest::Client::new(),
+            rpc_urls: std::collections::HashMap::new(),
+        };
+
+        let price = pb
+            .price("eip155:1", "0xA0b86991c6218b36c1D19D4a2e9Eb0cE3606eB48")
+            .await;
+        assert_eq!(price, None);
+
+        let decimals = pb
+            .decimals("eip155:1", "0xA0b86991c6218b36c1D19D4a2e9Eb0cE3606eB48")
+            .await;
+        assert_eq!(decimals, Some(6));
     }
 
     /// LIVE e2e (run with `--ignored`): the REAL on-demand fallback prices
