@@ -89,8 +89,8 @@ export function ProfilePage() {
     setServerSaved(true);
   };
 
-  // OpenAI API 키 — 서버에 유저별로 저장(LLM 정책 생성에 사용). 값은 서버가
-  // 절대 돌려주지 않고 "설정됨" 여부만 받는다.
+  // OpenAI API 키 — 이 브라우저(localStorage)에만 저장(LLM 정책 생성에 사용).
+  // 서버로 전송되지 않고, 여기선 "설정됨" 여부만 본다.
   const settingsQ = useQuery({
     queryKey: ["app-settings", user?.user_id],
     queryFn: getSettings,

@@ -21,6 +21,7 @@ const ALLOWLIST = new Set([
   "src/editor-v9/manifest-gen/registry.ts", // bilingual label data
   "src/pages/editor/v2/categories.ts", // bilingual CAT table
   "src/cedar/nl.ts", // Korean josa (particle) grammar mechanics
+  "src/server-api/llm-draft.ts", // LLM 프롬프트/스키마 설명(모델 지시문, UI 아님)
 ]);
 
 const SKIP_RE = /(__tests__\/|\.test\.tsx?$|\.generated\.ts$|^src\/i18n\/locales\/)/;
