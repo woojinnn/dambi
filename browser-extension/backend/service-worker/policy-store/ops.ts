@@ -140,6 +140,8 @@ export function removePackageFromWallet(
   opts: { address: string; packageId: string },
 ): Promise<void> {
   return mutate(uid, (d) => {
+    // 기본 안전팩은 모든 지갑에 상주해야 한다 — 지갑에서 빼기 금지.
+    assertNotBuiltinPackage(d, opts.packageId);
     const w = d.wallets.byAddress[opts.address.toLowerCase()];
     if (!w) return;
     for (const b of Object.values(w.bindings)) {

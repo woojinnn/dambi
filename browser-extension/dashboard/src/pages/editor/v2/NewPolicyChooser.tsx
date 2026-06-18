@@ -11,15 +11,19 @@ import { getOverview } from "../../../server-api/policy-store";
 
 import { CaretRightIcon, CheckIcon, ShieldIcon, XIcon } from "./icons";
 
+/** Chooser entry. "llm" isn't a stored PolicyMethod — it opens the editor's LLM
+ *  tab on a form-method draft. */
+type ChooserKey = "form" | "cedar" | "llm";
+
 interface CardDef {
-  key: PolicyMethod;
+  key: ChooserKey;
   accent: "cyan" | "sage" | "slate";
   title: string;
   summary: string;
   rec: string;
   pros: string[];
   cons: string[];
-  preview: "form" | "cedar";
+  preview: "form" | "cedar" | "llm";
   disabled?: boolean;
   disabledNote?: string;
 }
@@ -27,6 +31,16 @@ interface CardDef {
 /** 카드 문구는 호출 시점에 t()로 — 모듈 평가 시점엔 i18n이 없을 수 있다. */
 function buildCards(t: TFunction): CardDef[] {
   return [
+    {
+      key: "cedar",
+      accent: "slate",
+      title: t("editor:chooser.cedar.title"),
+      summary: t("editor:chooser.cedar.summary"),
+      rec: t("editor:chooser.cedar.rec"),
+      pros: [t("editor:chooser.cedar.pro1"), t("editor:chooser.cedar.pro2")],
+      cons: [t("editor:chooser.cedar.con1"), t("editor:chooser.cedar.con2")],
+      preview: "cedar",
+    },
     {
       key: "form",
       accent: "cyan",
@@ -42,14 +56,14 @@ function buildCards(t: TFunction): CardDef[] {
       preview: "form",
     },
     {
-      key: "cedar",
-      accent: "slate",
-      title: t("editor:chooser.cedar.title"),
-      summary: t("editor:chooser.cedar.summary"),
-      rec: t("editor:chooser.cedar.rec"),
-      pros: [t("editor:chooser.cedar.pro1"), t("editor:chooser.cedar.pro2")],
-      cons: [t("editor:chooser.cedar.con1"), t("editor:chooser.cedar.con2")],
-      preview: "cedar",
+      key: "llm",
+      accent: "sage",
+      title: t("editor:chooser.llm.title"),
+      summary: t("editor:chooser.llm.summary"),
+      rec: t("editor:chooser.llm.rec"),
+      pros: [t("editor:chooser.llm.pro1"), t("editor:chooser.llm.pro2")],
+      cons: [t("editor:chooser.llm.con1"), t("editor:chooser.llm.con2")],
+      preview: "llm",
     },
   ];
 }
@@ -92,16 +106,20 @@ export function NewPolicyChooser({ open, onClose }: ChooserProps) {
   // Do NOT persist here. We hand the editor an in-memory seed via navigation
   // state; nothing is written to storage until the user presses 저장. So a
   // policy the user abandons without saving simply never exists.
-  const pick = (method: PolicyMethod) => {
+  const pick = (key: ChooserKey) => {
+    // "llm" is not a stored method — it opens the editor's LLM tab on a
+    // form-method draft (the LLM produces a form policy).
+    const method: PolicyMethod = key === "cedar" ? "cedar" : "form";
+    const initialTab = key === "llm" ? "llm" : undefined;
     const stamp = Date.now().toString(36);
-    const slug = `new-${method}-${stamp}`;
+    const slug = `new-${key}-${stamp}`;
     const id = dashboardId(slug);
     const existing = Object.values(overviewQ.data?.library.defs ?? {}).map((d) => d.displayName);
     const displayName = uniqueName(t("chooser.newPolicyName"), existing);
     onClose();
     navigate(`/editor/${encodeURIComponent(id)}`, {
       state: {
-        newPolicy: { method, cedarText: seedCedar(slug), displayName },
+        newPolicy: { method, cedarText: seedCedar(slug), displayName, ...(initialTab ? { initialTab } : {}) },
       },
     });
   };
@@ -188,7 +206,25 @@ export function NewPolicyChooser({ open, onClose }: ChooserProps) {
   );
 }
 
-function ChooserPreview({ kind }: { kind: "form" | "cedar" }) {
+function ChooserPreview({ kind }: { kind: "form" | "cedar" | "llm" }) {
+  if (kind === "llm") {
+    return (
+      <div className="ev2-mpc-prev llm">
+        <div className="prompt">
+          <span className="spark">✦</span>
+          <span className="ln l1" />
+          <span className="ln l2" />
+        </div>
+        <div className="arrow">↓</div>
+        <div className="row">
+          <span className="cap" />
+          <span className="fld" />
+          <span className="op">&gt;</span>
+          <span className="val">150</span>
+        </div>
+      </div>
+    );
+  }
   if (kind === "form") {
     return (
       <div className="ev2-mpc-prev form">

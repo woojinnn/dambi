@@ -1660,7 +1660,7 @@
 .ev2-mpc {
   background: var(--surface);
   border-radius: var(--r-lg);
-  width: min(1040px, 100%);
+  width: min(1160px, 100%);
   max-height: calc(100vh - 40px);
   overflow: auto;
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
@@ -1707,11 +1707,16 @@
 
 .ev2-mpc-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   padding: 18px 24px 24px;
 }
-@media (max-width: 920px) {
+@media (max-width: 1080px) {
+  .ev2-mpc-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 720px) {
   .ev2-mpc-grid {
     grid-template-columns: 1fr;
   }
@@ -1915,6 +1920,26 @@
 .ev2-mpc-prev.cedar .t.s {
   width: 8%;
   flex: 0 0 8%;
+}
+
+/* LLM preview — a natural-language prompt box → a generated form row. */
+.ev2-mpc-prev.llm { align-items: stretch; }
+.ev2-mpc-prev.llm .prompt {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--sage-300); border-radius: var(--r-sm); padding: 6px 8px;
+}
+.ev2-mpc-prev.llm .spark { color: var(--sage-700); font-size: 11px; flex: none; }
+.ev2-mpc-prev.llm .ln { height: 8px; border-radius: var(--r-pill); background: var(--sage-200); }
+.ev2-mpc-prev.llm .ln.l1 { flex: 1; }
+.ev2-mpc-prev.llm .ln.l2 { width: 34%; flex: 0 0 34%; }
+.ev2-mpc-prev.llm .arrow { text-align: center; font-size: 11px; line-height: 1; color: var(--slate-400); }
+.ev2-mpc-prev.llm .row { display: flex; align-items: center; gap: 5px; height: 18px; }
+.ev2-mpc-prev.llm .cap { width: 16px; height: 16px; border-radius: 4px; background: var(--sage-200); }
+.ev2-mpc-prev.llm .fld { width: 80px; height: 10px; border-radius: var(--r-pill); background: var(--slate-200); }
+.ev2-mpc-prev.llm .op { font-family: var(--ff-mono); font-size: 11px; color: var(--slate-500); font-weight: 700; }
+.ev2-mpc-prev.llm .val {
+  background: var(--slate-50); border: 1px solid var(--slate-200); font-family: var(--ff-mono);
+  font-size: 10.5px; color: var(--slate-700); padding: 1px 6px; border-radius: var(--r-pill);
 }
 
 .ev2-mpc-summary {

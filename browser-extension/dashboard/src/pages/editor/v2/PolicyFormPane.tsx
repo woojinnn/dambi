@@ -888,7 +888,6 @@ function ValueSheet({
     // 값/필드 토글 + 편집을 그대로 제공한다(저장은 이미 field 참조도 지원).
     const rhsOptions = compatibleRhsFields(ctx.rhsFields, field);
     const canField = SCALAR_OPS.has(cond.op) && rhsOptions.length > 0;
-    const fieldMode = cond.value.kind === "field";
     const invalid = cond.value.kind === "decimal" && badDecimals.has(cond.value.value);
     // 주어: ko는 조사(이/가) 선택이 필요해 `subjectJosa`를, en은 `subject`를
     // 키 쪽에서 골라 쓴다 (sheet.subject = ko "{{subjectJosa}}" / en "{{subject}}").
@@ -903,35 +902,24 @@ function ValueSheet({
       <span className="pv-line">
         <span className="pv-subj">{subjectText}</span>
         {pre && <span className="pv-word">{pre}</span>}
-        {fieldMode ? (
-          <span className="pv-blank field">
-            <FieldCombobox
-              value={cond.value.kind === "field" ? cond.value.path : ""}
-              fields={rhsOptions}
-              onChange={(p) => onValue(cond, { kind: "field", path: p })}
+        {canField ? (
+          // 정책 만들기와 동일하게 — 값/필드 토글 없이 하나의 콤보박스로(상단 값
+          // 입력·추천 값, 아래 "다른 필드와 비교").
+          <span className={`pv-blank field${invalid ? " invalid" : ""}`}>
+            <RhsCombobox
+              value={cond.value}
+              field={field}
+              op={cond.op}
+              rhsOptions={rhsOptions}
+              ctx={ctx}
+              invalid={invalid}
+              onChange={(v) => onValue(cond, v)}
             />
           </span>
         ) : (
           <span className={`pv-blank${invalid ? " invalid" : ""}`}>
             <ValueInput value={cond.value} field={field} invalid={invalid} onChange={(v) => onValue(cond, v)} />
           </span>
-        )}
-        {canField && (
-          <button
-            type="button"
-            className="pv-mode"
-            onClick={() =>
-              onValue(
-                cond,
-                fieldMode
-                  ? defaultValueOfKind(valueKindFor(field, cond.op))
-                  : { kind: "field", path: rhsOptions[0]?.path ?? "principal.address" },
-              )
-            }
-            title={fieldMode ? t("sheet.toValueTitle") : t("form.toFieldTitle")}
-          >
-            {fieldMode ? t("sheet.toValue") : t("sheet.toField")}
-          </button>
         )}
         {post && <span className="pv-word">{post}</span>}
       </span>
@@ -1635,6 +1623,7 @@ function RhsCombobox({
   op,
   rhsOptions,
   ctx,
+  invalid,
   onChange,
 }: {
   value: FormValue;
@@ -1642,6 +1631,8 @@ function RhsCombobox({
   op: FormOp;
   rhsOptions: FieldOption[];
   ctx: EditorCtx;
+  /** 형식 오류(잘못된 decimal 등) — 버튼·입력칸을 빨갛게 표시. 값 시트에서 쓰임. */
+  invalid?: boolean;
   onChange: (v: FormValue) => void;
 }) {
   const { t } = useTranslation("editor");
@@ -1696,7 +1687,7 @@ function RhsCombobox({
     <div className="fc" ref={rootRef}>
       <button
         type="button"
-        className={`fc-btn${selected || btnText ? "" : " empty"}`}
+        className={`fc-btn${selected || btnText ? "" : " empty"}${invalid ? " invalid" : ""}`}
         onClick={() => setOpen((o) => !o)}
       >
         {selected ? (
@@ -1715,7 +1706,7 @@ function RhsCombobox({
         <div className="fc-pop">
           <div className="fc-valbox">
             <span className="fc-valbox-h">{t("combobox.literalHead")}</span>
-            <ValueInput value={literal} field={field} noDatalist onChange={onChange} />
+            <ValueInput value={literal} field={field} invalid={invalid} noDatalist onChange={onChange} />
           </div>
           {(suggestions.length > 0 || groups.length > 0) && (
             <div className="fc-list">

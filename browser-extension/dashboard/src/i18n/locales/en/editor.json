@@ -127,6 +127,15 @@
       "pro2": "Manage the manifest yourself",
       "con1": "Minimal guardrails",
       "con2": "Outside the form safety net"
+    },
+    "llm": {
+      "title": "Create with LLM",
+      "summary": "Describe the rule in plain language and the LLM drafts a form policy · review and tweak it in the form after.",
+      "rec": "Draft fast, refine later",
+      "pro1": "Just describe it",
+      "pro2": "Converted to a form & validated",
+      "con1": "Drafts need review",
+      "con2": "Requires an OpenAI key"
     }
   },
   "list": {

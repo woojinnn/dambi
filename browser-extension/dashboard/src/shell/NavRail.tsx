@@ -53,7 +53,7 @@ export function NavRail() {
   return (
     <nav className="nav-rail" tabIndex={0} aria-label="Dambi global nav">
       <div className="nav-logo">
-        <div className="mark">sb</div>
+        <img className="mark" src="logo.png" alt="dambi" />
         <div className="word">dambi</div>
       </div>
 

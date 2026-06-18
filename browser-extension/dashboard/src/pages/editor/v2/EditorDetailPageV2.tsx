@@ -89,6 +89,8 @@ interface NewPolicySeed {
   method: PolicyMethod;
   cedarText: string;
   displayName: string;
+  /** Force the initial editor tab (e.g. "llm" when started from the LLM card). */
+  initialTab?: Tab;
 }
 
 /** 에디터 본문이 다루는 뷰모델 — 저장된 def(IR→텍스트 변환) 또는 새 정책 시드. */
@@ -100,6 +102,8 @@ interface EditorPolicy {
    *  바인딩 파라미터가 적용된 구체 IR(이 지갑의 실제 값). */
   initialIr?: PolicyIR | undefined;
   method: PolicyMethod;
+  /** Forced initial tab for a new draft (e.g. "llm"); else derived from method. */
+  initialTab?: Tab;
   cat?: string | undefined;
   source: PolicyDef["source"];
   sourceVersion?: string | undefined;
@@ -176,6 +180,7 @@ export function EditorDetailPageV2() {
         displayName: seed.displayName,
         text: seed.cedarText,
         method: seed.method,
+        initialTab: seed.initialTab,
         source: "mine",
       };
     }
@@ -268,7 +273,7 @@ function EditorBody({
   // A hand-edited manifest from the form, wrapped so `null` = no override
   // (auto-generate) is distinct from an override whose value is `undefined`.
   const [manifestOverride, setManifestOverride] = useState<{ value: unknown } | null>(null);
-  const [tab, setTab] = useState<Tab>(() => defaultTab(policy.method));
+  const [tab, setTab] = useState<Tab>(() => policy.initialTab ?? defaultTab(policy.method));
   const [publishOpen, setPublishOpen] = useState(false);
   // Manifest computed at publish time so an UNSAVED policy still ships its
   // auto-generated manifest to the market (otherwise the listing carries
@@ -316,7 +321,7 @@ function EditorBody({
     setName(policy.displayName);
     setSeverity(bindingCtx?.binding.severity ?? severityFromCedar(policy.text));
     setCedarText(policy.text);
-    setTab(defaultTab(policy.method));
+    setTab(policy.initialTab ?? defaultTab(policy.method));
     setManifestOverride(null);
     setFormEntry(null);
     setFormValidity({ valid: true, error: null });
@@ -794,20 +799,6 @@ function EditorBody({
             placeholder={t("detail.namePlaceholder")}
           />
           <span className="ev2-detail-slug">{stripDashboardId(policy.id)}</span>
-          {/* 폼 탭은 ③ 심각도가 이 값을 소유(onChange로 동기화)하므로 헤더
-              셀렉트는 Cedar 탭에서만. 바인딩 모드에선 헤더 셀렉트를 숨기고
-              차단/경고를 값 시트의 결과(→ 차단/경고) 자리에서 인라인으로 바꾼다. */}
-          {tab !== "form" && !bindingCtx && (
-            <select
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value as PolicySeverity)}
-              className="ev2-detail-sev"
-            >
-              <option value="deny">{t("detail.sevDeny")}</option>
-              <option value="warn">{t("detail.sevWarn")}</option>
-              <option value="info">{t("detail.sevInfo")}</option>
-            </select>
-          )}
           {policy.cat && (
             <span className="ev2-cat-tag" style={cstyle.tag}>
               {catLabel(policy.cat)}

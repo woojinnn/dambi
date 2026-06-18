@@ -27,11 +27,9 @@
 .nav-logo { display: flex; align-items: center; gap: 12px; height: 40px; margin: 0 14px 18px; }
 .nav-logo .mark {
   width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px;
-  border: 1px dashed var(--slate-300);
-  background: repeating-linear-gradient(135deg, var(--fog-300) 0 5px, var(--fog-500) 5px 10px);
-  display: grid; place-items: center;
-  font-family: var(--ff-mono); font-size: 8px; color: var(--slate-500);
-  letter-spacing: 0.06em; text-transform: uppercase;
+  display: block; object-fit: cover;
+  /* 로고 배경(짙은 네이비/검정)과 맞춰 — 투명·검정 PNG 둘 다 자연스럽게 */
+  background: #0b1430;
 }
 .nav-logo .word {
   font-weight: 700; font-size: 16px; color: var(--slate-900); letter-spacing: -0.01em; white-space: nowrap;

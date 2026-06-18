@@ -85,6 +85,15 @@ describe("policy-store ops", () => {
     expect(s.library.packages["pkg::builtin.day1-safety"]?.displayName).toBe("기본 안전팩");
   });
 
+  it("기본 안전팩은 지갑에서 빼기(removePackageFromWallet)도 막힌다", async () => {
+    await putPackage("u", { id: "pkg::builtin.day1-safety", displayName: "기본 안전팩", source: "builtin", updatedAtMs: 1 });
+    await putDef("u", { ...def("def::b1"), source: "builtin" });
+    await bind("u", { defId: "def::b1", packageId: "pkg::builtin.day1-safety", addresses: ["0xa1"] });
+    await expect(removePackageFromWallet("u", { address: "0xa1", packageId: "pkg::builtin.day1-safety" })).rejects.toThrow();
+    const s = await readStore("u");
+    expect(Object.values(s.wallets.byAddress["0xa1"].bindings).length).toBe(1);
+  });
+
   it("builtin을 duplicateDef하면 source:'mine' 사본이 생겨 편집할 수 있다", async () => {
     await putDef("u", { ...def("def::builtin.y"), source: "builtin" });
     const newId = await duplicateDef("u", "def::builtin.y");

@@ -145,6 +145,18 @@
   font-weight: 600;
   padding: 0 2px 0 0;
 }
+/* 좁은 값 시트/모달에서 RHS 콤보박스 팝업이 오른쪽으로 넘쳐 잘리지 않게 —
+   버튼 오른쪽 끝에 맞춰 안쪽(왼쪽)으로 펼치고, 폭을 시트 안에 맞춘다. */
+.pv-blank .fc-pop {
+  left: auto;
+  right: 0;
+  width: 280px;
+  max-width: min(280px, 78vw);
+}
+.pv-blank .fc-list {
+  max-height: 240px;
+}
+
 /* 형식 오류 빈칸 — 빨갛게 */
 .pv-blank.invalid {
   background: var(--danger-50, #fef2f2);

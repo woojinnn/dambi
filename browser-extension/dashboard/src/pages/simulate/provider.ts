@@ -17,15 +17,26 @@ import type {
   WalletView,
 } from "./types";
 
+/** Stable key for a binding (one policy inside one package, per wallet). The
+ *  same def in two packages is two independent bindings → two distinct keys. */
+export const bindingKey = (packageId: string, defId: string): string => `${packageId}::${defId}`;
+
 /** Everything the wizard needs to seed its steps, sourced from a provider. */
 export interface SimData {
   wallets: WalletView[];
   /** s0 snapshot per wallet (lowercase address → state). */
   statesByAddr: Record<string, WalletStateView>;
   policies: PolicyView[];
-  packages: PackageView[];
-  /** Default enabled policy-ids per wallet (lowercase address → ids). */
-  enabledByWallet: Record<string, string[]>;
+  /** Packages PER WALLET (lowercase address → that wallet's packages). Each
+   *  wallet only shows the packages it actually has. */
+  packagesByWallet: Record<string, PackageView[]>;
+  /** Checkbox state — per wallet, the binding keys (`pkgId::defId`) whose policy
+   *  checkbox is ON (mirrors `binding.enabled`). Independent of the package gate. */
+  policyEnabledByWallet: Record<string, string[]>;
+  /** Package toggle (gate) state — per wallet, the package ids whose toggle is ON
+   *  (mirrors `w.packageEnabled`, default on). A policy is effective only when its
+   *  package gate is on AND its checkbox is on. */
+  packageEnabledByWallet: Record<string, string[]>;
   /** Seed tx-queue rows. */
   txRows: TxRow[];
 }
