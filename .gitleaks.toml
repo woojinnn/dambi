@@ -22,6 +22,9 @@ paths = [
   # test data / fixtures / golden corpora / ABI dumps / signature vectors
   '''(^|/)__tests__/''',
   '''(^|/)integration-tests/tests/''',
+  # Rust integration tests carry on-chain fixtures / signature vectors / bytes32
+  # words (same category as the JS __tests__/ allowlist) — never secrets.
+  '''(^|/)crates/.+/tests/.+\.rs$''',
   '''/fixtures/''',
   '''/golden/''',
   '''/data/golden/''',
@@ -33,6 +36,11 @@ paths = [
   '''/onboarding/''',
   # curated on-chain data blobs (addresses/pools — high-entropy hex, not secrets)
   '''(^|/)registry/.*\.json$''',
+  # registryV2 source-of-truth trees: decode manifests + token metadata are
+  # curated on-chain data (addresses, selectors, ABI notes) — never secrets.
+  # (the legacy registry/ tree above was renamed to registryV2/)
+  '''(^|/)registryV2/manifests/.*\.json$''',
+  '''(^|/)registryV2/tokens/.*\.json$''',
   '''example-transactions\.json$''',
   '''address-universe.*\.json$''',
   '''.*inventory-summary\.json$''',
