@@ -25,7 +25,11 @@ function parse(action: unknown) {
 
 describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
   it("routes an unmodeled, non-benign action to the hl_unknown catch-all (NOT null)", () => {
-    const payloads = parse({ type: "convertToMultiSigUser", signers: [], threshold: 2 });
+    const payloads = parse({
+      type: "convertToMultiSigUser",
+      signers: [],
+      threshold: 2,
+    });
     expect(payloads).not.toBeNull();
     expect(payloads).toHaveLength(1);
     expect(payloads![0].hlAction).toEqual({
@@ -62,7 +66,16 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
   it("still parses a modeled order action (regression)", () => {
     const payloads = parse({
       type: "order",
-      orders: [{ a: 0, b: true, p: "95000", s: "0.05", r: false, t: { limit: { tif: "Gtc" } } }],
+      orders: [
+        {
+          a: 0,
+          b: true,
+          p: "95000",
+          s: "0.05",
+          r: false,
+          t: { limit: { tif: "Gtc" } },
+        },
+      ],
       grouping: "na",
     });
     expect(payloads).toHaveLength(1);
@@ -71,29 +84,55 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
 
   it("returns null for a non-action body (not an /exchange action)", () => {
     expect(parse(undefined)).toBeNull();
-    expect(parseHyperliquidExchangeOrders("hyperliquid", URL, HOST, { foo: 1 })).toBeNull();
+    expect(
+      parseHyperliquidExchangeOrders("hyperliquid", URL, HOST, { foo: 1 }),
+    ).toBeNull();
   });
 
   it("captures the request nonce on every leg (for submitted_at threading)", () => {
     const payloads = parse({
       type: "order",
       orders: [
-        { a: 0, b: true, p: "95000", s: "0.05", r: false, t: { limit: { tif: "Gtc" } } },
-        { a: 1, b: false, p: "3500", s: "1", r: false, t: { limit: { tif: "Gtc" } } },
+        {
+          a: 0,
+          b: true,
+          p: "95000",
+          s: "0.05",
+          r: false,
+          t: { limit: { tif: "Gtc" } },
+        },
+        {
+          a: 1,
+          b: false,
+          p: "3500",
+          s: "1",
+          r: false,
+          t: { limit: { tif: "Gtc" } },
+        },
       ],
       grouping: "na",
     });
     expect(payloads).toHaveLength(2);
     expect(payloads!.every((p) => p.nonce === 1_700_000_000_000)).toBe(true);
+    expect(payloads![0].hlEnvelope).toMatchObject({
+      nonce: 1_700_000_000_000,
+      signature: { r: "0x1", s: "0x2", v: 27 },
+    });
   });
 
   it("captures a non-null vaultAddress (on-behalf-of attribution)", () => {
     const payloads = parseHyperliquidExchangeOrders("hyperliquid", URL, HOST, {
-      action: { type: "order", orders: [{ a: 0, b: true, p: "1", s: "1" }], grouping: "na" },
+      action: {
+        type: "order",
+        orders: [{ a: 0, b: true, p: "1", s: "1" }],
+        grouping: "na",
+      },
       nonce: 1_700_000_000_000,
       vaultAddress: "0x000000000000000000000000000000000000dEaD",
     });
-    expect(payloads![0].vaultAddress).toBe("0x000000000000000000000000000000000000dEaD");
+    expect(payloads![0].vaultAddress).toBe(
+      "0x000000000000000000000000000000000000dEaD",
+    );
   });
 
   it("omits vaultAddress when null/absent", () => {
@@ -112,12 +151,25 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
     const payloads = parse({
       type: "modify",
       oid: 123,
-      order: { a: 4, b: false, p: "62000", s: "2.5", r: false, t: { limit: { tif: "Gtc" } } },
+      order: {
+        a: 4,
+        b: false,
+        p: "62000",
+        s: "2.5",
+        r: false,
+        t: { limit: { tif: "Gtc" } },
+      },
     });
     expect(payloads).toHaveLength(1);
     expect(payloads![0].hlAction.kind).toBe("order");
     // The decoded order carries the opening-short fields a no-new-short policy needs.
-    expect((payloads![0].hlAction as { order: { a: number; b: boolean; r: boolean } }).order).toMatchObject({
+    expect(
+      (
+        payloads![0].hlAction as {
+          order: { a: number; b: boolean; r: boolean };
+        }
+      ).order,
+    ).toMatchObject({
       a: 4,
       b: false, // short (sell)
       r: false, // opening (not reduce-only)
@@ -128,8 +180,28 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
     const payloads = parse({
       type: "batchModify",
       modifies: [
-        { oid: 1, order: { a: 0, b: false, p: "62000", s: "1", r: false, t: { limit: { tif: "Gtc" } } } },
-        { oid: 2, order: { a: 1, b: true, p: "3500", s: "5", r: true, t: { limit: { tif: "Ioc" } } } },
+        {
+          oid: 1,
+          order: {
+            a: 0,
+            b: false,
+            p: "62000",
+            s: "1",
+            r: false,
+            t: { limit: { tif: "Gtc" } },
+          },
+        },
+        {
+          oid: 2,
+          order: {
+            a: 1,
+            b: true,
+            p: "3500",
+            s: "5",
+            r: true,
+            t: { limit: { tif: "Ioc" } },
+          },
+        },
       ],
     });
     expect(payloads).toHaveLength(2);
@@ -151,7 +223,17 @@ describe("parseHyperliquidExchangeOrders — catch-all routing", () => {
     const payloads = parse({
       type: "batchModify",
       modifies: [
-        { oid: 1, order: { a: 0, b: false, p: "62000", s: "1", r: false, t: { limit: { tif: "Gtc" } } } },
+        {
+          oid: 1,
+          order: {
+            a: 0,
+            b: false,
+            p: "62000",
+            s: "1",
+            r: false,
+            t: { limit: { tif: "Gtc" } },
+          },
+        },
         { oid: 2, order: { p: "3500", s: "5" } },
       ],
     });

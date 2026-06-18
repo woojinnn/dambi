@@ -107,6 +107,19 @@ export const bootReady: Promise<void> = bootSequence().catch((err) => {
   console.warn("[Dambi] boot sequence failed:", err);
 });
 
+async function listWalletsAndProvision(reason: string): Promise<WalletId[]> {
+  const wallets = await listWallets();
+  // 정책 스토리지 v2 프로비저닝 훅: 서버 지갑 목록과 동기화되는 이
+  // 경로에서 새 지갑에 defaults를 바인딩한다(멱등). 실패해도 지갑
+  // 목록 응답이나 로그인/current-user sync는 막지 않는다.
+  try {
+    await provisionFromWalletSync(wallets.map((w) => w.address));
+  } catch (err) {
+    console.warn(`[Dambi] ps2 wallet provisioning failed (${reason}):`, err);
+  }
+  return wallets;
+}
+
 async function bootSequence(): Promise<void> {
   // Storage-key migration from previous branded key prefixes to `dambi_*`.
   // Runs first so all subsequent reads see the correct keys.
@@ -497,7 +510,8 @@ async function pushDesktopNotification(
     case "summary":
       title = "이번 주 Dambi 요약";
       message = `이번 주 위험 ${fail}건을 차단하고 ${warn}건은 검토를 권했어요.`;
-      iconFile = fail > 0 ? "picture/state-fail-128.png" : "picture/state-warn-128.png";
+      iconFile =
+        fail > 0 ? "picture/state-fail-128.png" : "picture/state-warn-128.png";
       break;
     case "approval":
       title = "승인 권한이 위험해졌어요";
@@ -506,7 +520,8 @@ async function pushDesktopNotification(
       break;
     case "session-expired":
       title = "Dambi 로그인이 만료됐어요";
-      message = "보호를 계속 받으려면 다시 로그인하세요. 확인하기를 눌러 대시보드를 여세요.";
+      message =
+        "보호를 계속 받으려면 다시 로그인하세요. 확인하기를 눌러 대시보드를 여세요.";
       iconFile = "picture/state-warn-128.png";
       break;
     case "tx":
@@ -678,7 +693,10 @@ Browser.runtime.onMessage.addListener(
         .catch((err: unknown) =>
           sendResponse({
             ok: false,
-            error: { kind: "run_diagnosis_probes_failed", message: String(err) },
+            error: {
+              kind: "run_diagnosis_probes_failed",
+              message: String(err),
+            },
           }),
         );
       return true;
@@ -751,9 +769,23 @@ Browser.runtime.onMessage.addListener(
       return true;
     }
 
-    if (isDashboardRequest(req)) {
-      void handleDashboardRequest(req)
-        .then((response) => sendResponse(response))
+    const maybeDashboardReq: unknown = req;
+    if (isDashboardRequest(maybeDashboardReq)) {
+      const dashboardReq = maybeDashboardReq;
+      void handleDashboardRequest(dashboardReq)
+        .then((response) => {
+          sendResponse(response);
+          if (
+            dashboardReq.type === "dashboard:set-current-user" &&
+            response.ok
+          ) {
+            void bootReady
+              .then(() => listWalletsAndProvision("current-user"))
+              .catch((err: unknown) => {
+                console.warn("[Dambi] wallet pre-provisioning failed:", err);
+              });
+          }
+        })
         .catch((err: unknown) =>
           sendResponse({
             ok: false,
@@ -845,18 +877,10 @@ Browser.runtime.onMessage.addListener(
 
     if (req.type === "dambi-list-wallets") {
       void bootReady
-        .then(() => listWallets())
-        .then(async (wallets: WalletId[]) => {
-          // 정책 스토리지 v2 프로비저닝 훅: 서버 지갑 목록과 동기화되는 이
-          // 경로에서 새 지갑에 defaults를 바인딩한다(멱등). 실패해도 지갑
-          // 목록 응답은 막지 않는다.
-          try {
-            await provisionFromWalletSync(wallets.map((w) => w.address));
-          } catch (err) {
-            console.warn("[Dambi] ps2 wallet provisioning failed:", err);
-          }
-          sendResponse({ ok: true, data: wallets });
-        })
+        .then(() => listWalletsAndProvision("list-wallets"))
+        .then((wallets: WalletId[]) =>
+          sendResponse({ ok: true, data: wallets }),
+        )
         .catch((err: unknown) =>
           sendResponse({
             ok: false,
@@ -1066,7 +1090,9 @@ Browser.runtime.onMessage.addListener(
 
     if (req.type === "state-deltas:get") {
       void getStateDelta((req as StateDeltasGetRequest).id)
-        .then((row: StateDeltaRow | null) => sendResponse({ ok: true, data: row }))
+        .then((row: StateDeltaRow | null) =>
+          sendResponse({ ok: true, data: row }),
+        )
         .catch((err: unknown) =>
           sendResponse({
             ok: false,
@@ -1083,7 +1109,10 @@ Browser.runtime.onMessage.addListener(
         .catch((err: unknown) =>
           sendResponse({
             ok: false,
-            error: { kind: "diagnosis_context_get_failed", message: String(err) },
+            error: {
+              kind: "diagnosis_context_get_failed",
+              message: String(err),
+            },
           }),
         );
       return true;
