@@ -68,6 +68,32 @@ describe("policy-store ops", () => {
     expect(s.library.defs["def::a"]).toBeUndefined();
   });
 
+  it("기본 안전팩(builtin)은 삭제·수정·이름변경이 막힌다", async () => {
+    const builtin: PolicyDef = { ...def("def::builtin.x"), source: "builtin" };
+    await putDef("u", builtin); // 신규 생성(시드 경로)은 허용 — 기존 builtin만 보호
+    await putPackage("u", { id: "pkg::builtin.day1-safety", displayName: "기본 안전팩", source: "builtin", updatedAtMs: 1 });
+
+    await expect(deleteDef("u", "def::builtin.x")).rejects.toThrow();
+    await expect(putDef("u", { ...builtin, displayName: "변경 시도" })).rejects.toThrow();
+    await expect(deletePackage("u", "pkg::builtin.day1-safety")).rejects.toThrow();
+    await expect(
+      putPackage("u", { id: "pkg::builtin.day1-safety", displayName: "rename", source: "builtin", updatedAtMs: 2 }),
+    ).rejects.toThrow();
+
+    const s = await readStore("u");
+    expect(s.library.defs["def::builtin.x"]?.displayName).toBe("def::builtin.x");
+    expect(s.library.packages["pkg::builtin.day1-safety"]?.displayName).toBe("기본 안전팩");
+  });
+
+  it("builtin을 duplicateDef하면 source:'mine' 사본이 생겨 편집할 수 있다", async () => {
+    await putDef("u", { ...def("def::builtin.y"), source: "builtin" });
+    const newId = await duplicateDef("u", "def::builtin.y");
+    const s = await readStore("u");
+    expect(s.library.defs[newId]?.source).toBe("mine");
+    // 사본은 더 이상 잠겨 있지 않다 — 수정/삭제 가능.
+    await expect(putDef("u", { ...s.library.defs[newId], displayName: "내 사본" })).resolves.toBeUndefined();
+  });
+
   it("deletePackage(라이브러리 폴더 삭제)는 지갑 패키지/바인딩을 건드리지 않는다", async () => {
     await putDef("u", def("def::a"));
     await putPackage("u", { id: "pkg::x", displayName: "X", source: "mine", updatedAtMs: 1 });

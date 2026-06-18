@@ -144,9 +144,14 @@ export function ProfilePage() {
       const snap = overviewQ.data;
       if (!snap) return;
       // 정의 삭제가 바인딩을 cascade하고, 패키지 삭제는 미분류로 해체한다.
-      for (const id of Object.keys(snap.library.defs)) await deleteDef(id);
-      for (const id of Object.keys(snap.library.packages)) {
-        if (id !== UNCATEGORIZED_PKG) await deletePackage(id);
+      // 기본 안전팩(builtin)은 보호 대상 — 건너뛴다(ops.ts가 삭제를 막기도 한다).
+      for (const [id, def] of Object.entries(snap.library.defs)) {
+        if (def.source === "builtin") continue;
+        await deleteDef(id);
+      }
+      for (const [id, pkg] of Object.entries(snap.library.packages)) {
+        if (id === UNCATEGORIZED_PKG || pkg.source === "builtin") continue;
+        await deletePackage(id);
       }
     },
     onSuccess: () => {

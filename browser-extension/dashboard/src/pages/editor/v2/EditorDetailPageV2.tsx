@@ -8,6 +8,7 @@ import type { PolicySeverity } from "../../../server-api";
 import {
   bindDef,
   deleteDef,
+  duplicateDef,
   getOverview,
   putDef,
   putPackage,
@@ -225,6 +226,10 @@ export function EditorDetailPageV2() {
               void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
               navigate("/editor");
             }}
+            onDuplicated={(newId) => {
+              void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
+              navigate(`/editor/${encodeURIComponent(newId)}`);
+            }}
           />
         )}
       </div>
@@ -240,6 +245,7 @@ function EditorBody({
   isNew,
   onSaved,
   onDeleted,
+  onDuplicated,
 }: {
   policy: EditorPolicy;
   storedDef: PolicyDef | null;
@@ -248,6 +254,7 @@ function EditorBody({
   isNew: boolean;
   onSaved: (id: string) => void;
   onDeleted: () => void;
+  onDuplicated: (newId: string) => void;
 }) {
   const { t, i18n } = useTranslation("editor");
   const [name, setName] = useState(() => policy.displayName);
@@ -317,7 +324,16 @@ function EditorBody({
   }, [policy.id]);
 
   const fromMarket = policy.source === "market";
+  // 기본 안전팩(builtin)은 읽기 전용 — 삭제·수정 불가(ops.ts가 강제). 편집은
+  // "복제해서 내 정책으로"로 유도한다.
+  const isBuiltin = policy.source === "builtin";
+  const lockEdit = !!bindingCtx || isBuiltin;
   const cstyle = catStyle(policy.cat);
+
+  const duplicateMut = useMutation({
+    mutationFn: () => duplicateDef(policy.id),
+    onSuccess: (newId) => onDuplicated(newId),
+  });
 
   // 신규 def 첫 저장의 범위 모달 — prepare()가 만든 페이로드를 들고 띄운다.
   const [scopeAsk, setScopeAsk] = useState<{ ir: PolicyIR; manifest: unknown } | null>(null);
@@ -817,7 +833,7 @@ function EditorBody({
           )}
         </div>
 
-        {!bindingCtx && (
+        {!lockEdit && (
           <div className={`ev2-doc-sec${docOpen ? " open" : ""}`}>
             <button
               type="button"
@@ -863,7 +879,7 @@ function EditorBody({
           <TabBtn
             label="Cedar"
             active={tab === "cedar"}
-            badge={bindingCtx ? t("detail.readOnlyBadge") : undefined}
+            badge={lockEdit ? t("detail.readOnlyBadge") : undefined}
             onClick={() => handleTabChange("cedar")}
           />
           <TabBtn
@@ -871,7 +887,7 @@ function EditorBody({
             active={tab === "form"}
             onClick={() => handleTabChange("form")}
           />
-          {!bindingCtx && (
+          {!lockEdit && (
             <TabBtn
               label={t("detail.llmTab")}
               active={tab === "llm"}
@@ -879,7 +895,18 @@ function EditorBody({
             />
           )}
           <span className="ev2-spc" />
-          {!bindingCtx && (
+          {isBuiltin && (
+            <button
+              type="button"
+              className="ev2-pri"
+              onClick={() => duplicateMut.mutate()}
+              disabled={duplicateMut.isPending}
+              title={t("detail.builtinLockNote")}
+            >
+              {duplicateMut.isPending ? t("saving") : t("detail.duplicateToEdit")}
+            </button>
+          )}
+          {!bindingCtx && !isBuiltin && (
             <button
               type="button"
               className="ev2-pri ghost"
@@ -889,7 +916,7 @@ function EditorBody({
               <ShieldIcon /> {t("publish.title")}
             </button>
           )}
-          {!bindingCtx && (
+          {!bindingCtx && !isBuiltin && (
           <button
             type="button"
             className="ev2-pri danger"
@@ -906,6 +933,7 @@ function EditorBody({
             {t("common:delete")}
           </button>
           )}
+          {!isBuiltin && (
           <button
             type="button"
             className={`ev2-pri${bindingCtx && !formValidity.valid ? " invalid" : ""}`}
@@ -928,6 +956,7 @@ function EditorBody({
           >
             {saveMut.isPending ? t("saving") : t("common:save")}
           </button>
+          )}
         </div>
       </div>
 
@@ -943,6 +972,12 @@ function EditorBody({
           {revertNotice}
         </div>
       )}
+      {isBuiltin && (
+        <div className="ev2-err-banner info">
+          <ShieldIcon />
+          {t("detail.builtinLockNote")}
+        </div>
+      )}
       {llmWarn && (
         <div className="ev2-err-banner warn">
           <WarnIcon />
@@ -954,7 +989,7 @@ function EditorBody({
         {tab === "cedar" && (
           <CedarPane
             value={cedarText}
-            readOnly={!!bindingCtx}
+            readOnly={lockEdit}
             onChange={(next) => {
               setCedarText(next);
               // Drop the cached IR. Otherwise the form tab (openForm) and
@@ -970,7 +1005,7 @@ function EditorBody({
               key={formKey}
               initialModel={formEntry.model}
               initialManifest={policy.manifest}
-              valuesOnly={!!bindingCtx}
+              valuesOnly={lockEdit}
               onValidity={setFormValidity}
               resetToken={resetToken}
               {...(bindingCtx

@@ -1398,6 +1398,15 @@
 .ev2-err-banner.warn svg {
   color: var(--warn-600, #d97706);
 }
+/* 기본 안전팩 잠금 안내 (오류/경고 아님, 정보 톤) */
+.ev2-err-banner.info {
+  background: var(--cyan-50, #ecfeff);
+  border-color: var(--cyan-200, #a5f3fc);
+  color: var(--slate-700, #334155);
+}
+.ev2-err-banner.info svg {
+  color: var(--cyan-600, #0891b2);
+}
 
 .ev2-detail-tabbody {
   flex: 1;
