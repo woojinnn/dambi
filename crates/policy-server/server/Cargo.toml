@@ -59,7 +59,4 @@ sqlx-postgres = { version = "=0.8.6", default-features = false, features = ["chr
 
 [dev-dependencies]
 tempfile = "3"
-# Host (rlib) use of the v2 engine exports so the perp server-state e2e test can
-# drive plan/evaluate directly, mirroring the extension's WASM path.
-policy-engine-wasm = { path = "../../policy-engine-wasm" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }

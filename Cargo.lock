@@ -2516,7 +2516,6 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "policy-db",
- "policy-engine-wasm",
  "policy-state",
  "policy-sync",
  "policy-transition",
