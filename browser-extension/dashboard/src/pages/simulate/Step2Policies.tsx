@@ -1,23 +1,34 @@
 /**
- * Step 2 — pick policies. Three groups in order: 선택 지갑 관련 → 패키지 → 전체.
- * Selecting policies filters the right-hand state view down to the token/state
- * each enabled policy actually references (the rest dims out).
+ * Step 2 — pick policies, managed PER WALLET. Ported to the simulation-frontend
+ * layout: per-wallet switcher + the wallet's policy packages on the left, the
+ * active wallet's state (donut card) on the right. The standalone "library
+ * policy" list and the click-to-open policy detail are intentionally omitted.
+ *
+ * Each package is a collapsible group (closed by default) with a binary
+ * green/gray gate toggle; the per-policy checkbox selects which policies the
+ * gate activates (checkbox AND gate → effective).
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import { StateDashboard } from "./StateDashboard";
-import type { SimController, PkgState } from "./useSimController";
+import type { SimController } from "./useSimController";
 import type { PolicyView } from "./types";
 
 export function Step2Policies({ c }: { c: SimController }) {
   const { t } = useTranslation("simulation");
-  const related = c.walletRelatedPolicies;
-  const relatedIds = new Set(related.map((p) => p.id));
-  const pkgPolicyIds = new Set(c.packages.flatMap((p) => p.policyIds));
-  // 전체 = policies not already shown under 지갑관련/패키지.
-  const rest = c.policies.filter((p) => !relatedIds.has(p.id) && !pkgPolicyIds.has(p.id));
   const filtering = c.hasRelevanceFilter;
+  // Which packages are expanded — empty by default, so every package renders
+  // CLOSED (the policies inside are hidden until you open it). Keyed by id so it
+  // survives wallet switches (new wallet's packages start closed too).
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
 
   return (
     <div className="sw-step">
@@ -32,42 +43,68 @@ export function Step2Policies({ c }: { c: SimController }) {
 
       <div className="sw-cols">
         <section className="sw-policies">
-          {related.length > 0 && (
-            <Group title={t("wizard.step2.groupRelated")} hint={t("wizard.step2.groupRelatedHint")}>
-              {related.map((p) => (
-                <PolicyRow key={p.id} p={p} on={c.enabled.has(p.id)} toggle={() => c.togglePolicy(p.id)} />
-              ))}
-            </Group>
-          )}
-
           <Group title={t("wizard.step2.groupPackages")} hint={t("wizard.step2.groupPackagesHint")}>
-            {c.packages.map((pkg) => (
-              <div key={pkg.id} className="sw-pkg">
-                <PkgRow
-                  name={pkg.name}
-                  count={pkg.policyIds.length}
-                  state={c.packageState(pkg.id)}
-                  toggle={() => c.togglePackage(pkg.id)}
-                />
-                <div className="sw-pkg-kids">
-                  {pkg.policyIds
-                    .map((id) => c.policies.find((p) => p.id === id))
-                    .filter((p): p is PolicyView => Boolean(p))
-                    .map((p) => (
-                      <PolicyRow key={p.id} p={p} on={c.enabled.has(p.id)} toggle={() => c.togglePolicy(p.id)} small />
-                    ))}
+            {c.packages.map((pkg) => {
+              const open = expanded.has(pkg.id);
+              const state = c.packageState(pkg.id);
+              // Effective on-count = checked policies when the gate is on (0 otherwise).
+              const total = pkg.policyIds.length;
+              const onCount =
+                state === "on" ? pkg.policyIds.filter((id) => c.isPolicyOn(pkg.id, id)).length : 0;
+              const stateLabel =
+                onCount === 0
+                  ? t("wizard.step2.pkgStateOff")
+                  : onCount >= total
+                    ? t("wizard.step2.pkgStateOn")
+                    : t("wizard.step2.pkgStateSome", { count: onCount });
+              return (
+                <div key={pkg.id} className={`sw-pkg${open ? " open" : ""}`}>
+                  <div className="sw-pkg-head">
+                    <button
+                      type="button"
+                      className="sw-pkg-main"
+                      onClick={() => toggleExpand(pkg.id)}
+                      aria-expanded={open}
+                    >
+                      <span className={`sw-pkg-caret${open ? " open" : ""}`} aria-hidden>
+                        ›
+                      </span>
+                      <span className="sw-pkg-name">{pkg.name}</span>
+                      <span className="sw-mut">
+                        {t("wizard.step2.pkgCount", { count: total })} · {stateLabel}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`sw-pkgtog ${state}`}
+                      onClick={() => c.togglePackage(pkg.id)}
+                      role="switch"
+                      aria-checked={state === "on"}
+                      aria-label={pkg.name}
+                    >
+                      <span className="sw-pkgtog-dot" />
+                    </button>
+                  </div>
+                  {open && (
+                    <div className="sw-pkg-kids">
+                      {pkg.policyIds
+                        .map((id) => c.policies.find((p) => p.id === id))
+                        .filter((p): p is PolicyView => Boolean(p))
+                        .map((p) => (
+                          <PolicyRow
+                            key={p.id}
+                            p={p}
+                            on={c.isPolicyOn(pkg.id, p.id)}
+                            toggle={() => c.togglePolicy(pkg.id, p.id)}
+                            small
+                          />
+                        ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </Group>
-
-          {rest.length > 0 && (
-            <Group title={t("wizard.step2.groupAll")} hint={t("wizard.step2.groupAllHint")}>
-              {rest.map((p) => (
-                <PolicyRow key={p.id} p={p} on={c.enabled.has(p.id)} toggle={() => c.togglePolicy(p.id)} />
-              ))}
-            </Group>
-          )}
         </section>
 
         <aside className="sw-relstate">
@@ -96,21 +133,15 @@ export function Step2Policies({ c }: { c: SimController }) {
   );
 }
 
-/** Per-wallet tabs — pick which selected wallet's policy set you're editing. */
+/** Per-wallet tabs — pick which selected wallet's policy set you're editing.
+ *  Always the pill style, even for a single wallet (one "성준 5" pill). */
 function WalletSwitcher({ c }: { c: SimController }) {
   const { t } = useTranslation("simulation");
   const sel = c.wallets.filter((w) => c.selected.has(w.address));
-  if (sel.length <= 1) {
-    const w = sel[0];
+  if (sel.length === 0) {
     return (
-      <div className="sw-wsw single">
-        <span className="sw-mut">{t("wizard.step2.managingWallet")}</span>
-        <b className="sw-wsw-name">{w ? w.name : t("wizard.step2.noWalletSelected")}</b>
-        {w && (
-          <span className="sw-wsw-count">
-            {t("wizard.step2.enabledCount", { count: c.enabledCount(w.address) })}
-          </span>
-        )}
+      <div className="sw-wsw">
+        <span className="sw-mut">{t("wizard.step2.noWalletSelected")}</span>
       </div>
     );
   }
@@ -150,24 +181,5 @@ function PolicyRow({ p, on, toggle, small }: { p: PolicyView; on: boolean; toggl
       <span className="sw-policy-name">{p.name}</span>
       <span className="sw-policy-action">{p.action}</span>
     </label>
-  );
-}
-
-function PkgRow({ name, count, state, toggle }: { name: string; count: number; state: PkgState; toggle: () => void }) {
-  const { t } = useTranslation("simulation");
-  const stateLabel =
-    state === "on"
-      ? t("wizard.step2.pkgStateOn")
-      : state === "partial"
-        ? t("wizard.step2.pkgStatePartial")
-        : t("wizard.step2.pkgStateOff");
-  return (
-    <button type="button" className={`sw-pkgrow ${state}`} onClick={toggle}>
-      <span className={`sw-pkgtog ${state}`}>
-        <span className="sw-pkgtog-dot" />
-      </span>
-      <span className="sw-pkg-name">{name}</span>
-      <span className="sw-mut">{t("wizard.step2.pkgCount", { count })} · {stateLabel}</span>
-    </button>
   );
 }

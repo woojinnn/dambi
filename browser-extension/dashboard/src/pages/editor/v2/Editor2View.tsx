@@ -518,6 +518,7 @@ function Workspace(props: {
   const removePackage = (pkgId: string) => {
     const pkg = wallet.packages?.[pkgId];
     if (!pkg) return;
+    if (snap.library.packages[pkgId]?.source === "builtin") return void onToast(t("list.builtinLocked"));
     const n = Object.values(wallet.bindings).filter((b) => b.packageId === pkgId).length;
     if (!window.confirm(t("wallet.removePackageConfirm", { name: pkg.displayName, count: n }))) return;
     void run(t("actions.removePackage"), () => removeWalletPackage({ address, packageId: pkgId })).then(

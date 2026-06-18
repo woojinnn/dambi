@@ -14,11 +14,20 @@
       "3": "Transactions",
       "4": "Results"
     },
+    "stepSubs": {
+      "1": "What to simulate",
+      "2": "Rules to apply",
+      "3": "Actions to run",
+      "4": "Block · pass verdict"
+    },
     "step1": {
       "title": "① Select wallets",
-      "desc": "Pick the wallets to simulate — their current state is loaded.",
+      "desc": "Read each wallet's allocation from the donut, expand to check positions/approvals, then toggle to include it in the simulation.",
       "wallets": "Wallets",
-      "empty": "Select a wallet on the left."
+      "empty": "Select a wallet on the left.",
+      "includedCount": "wallet(s) included in the simulation",
+      "include": "Include in simulation",
+      "included": "Included in simulation"
     },
     "step2": {
       "title": "② Select policies",
@@ -30,6 +39,8 @@
       "groupAll": "All policies",
       "groupAllHint": "Every other policy",
       "relatedState": "Relevant state",
+      "relatedStateHint": "The managed wallet's assets, positions, and approvals",
+      "uncategorized": "Individual",
       "relatedStateFiltering": "Only assets the enabled policies touch remain; the rest drop out",
       "relatedStateIdle": "Enable a policy to narrow down to its relevant assets",
       "managingWallet": "Wallet whose policies you're managing:",
@@ -40,6 +51,7 @@
       "pkgCount_other": "{{count}} policies",
       "pkgStateOn": "All on",
       "pkgStatePartial": "Partially on",
+      "pkgStateSome": "{{count}} on",
       "pkgStateOff": "Off"
     },
     "step3": {

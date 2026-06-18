@@ -14,11 +14,20 @@
       "3": "트랜잭션",
       "4": "결과"
     },
+    "stepSubs": {
+      "1": "시뮬레이션 대상",
+      "2": "적용할 규칙",
+      "3": "실행할 작업",
+      "4": "차단 · 통과 판정"
+    },
     "step1": {
       "title": "① 지갑 선택",
-      "desc": "시뮬레이션할 지갑을 고르면, 해당 지갑들의 현재 상태(state)를 불러옵니다.",
+      "desc": "도넛 옆에서 토큰 구성을, 토글을 열어 포지션·승인을 확인하고, 하단 토글로 시뮬레이션에 포함하세요.",
       "wallets": "지갑",
-      "empty": "왼쪽에서 지갑을 선택하세요."
+      "empty": "왼쪽에서 지갑을 선택하세요.",
+      "includedCount": "개 지갑이 시뮬레이션에 포함됨",
+      "include": "시뮬레이션에 포함",
+      "included": "시뮬레이션에 포함됨"
     },
     "step2": {
       "title": "② 정책 선택",
@@ -30,6 +39,8 @@
       "groupAll": "전체 정책",
       "groupAllHint": "그 밖의 모든 정책",
       "relatedState": "관련 상태",
+      "relatedStateHint": "관리할 지갑의 자산·포지션·승인 현황",
+      "uncategorized": "개별",
       "relatedStateFiltering": "켠 정책이 다루는 자산만 남고 나머지는 빠집니다",
       "relatedStateIdle": "정책을 켜면 관련 자산만 남습니다",
       "managingWallet": "정책을 관리할 지갑:",
@@ -38,6 +49,7 @@
       "pkgCount_other": "정책 {{count}}개",
       "pkgStateOn": "전체 켜짐",
       "pkgStatePartial": "일부 켜짐",
+      "pkgStateSome": "{{count}}개 켜짐",
       "pkgStateOff": "꺼짐"
     },
     "step3": {

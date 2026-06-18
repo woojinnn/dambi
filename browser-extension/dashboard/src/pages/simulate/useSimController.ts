@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { SimData, SimProvider } from "./provider";
+import { bindingKey, type SimData, type SimProvider } from "./provider";
 import type {
   DenyView,
   PackageView,
@@ -59,6 +59,8 @@ export interface SimController {
   setChain: (c: string) => void;
   /** s0 state for each selected wallet, in selection order. */
   selectedStates: WalletStateView[];
+  /** s0 state for EVERY wallet (the step-1 card grid shows all wallets). */
+  statesByAddr: Record<string, WalletStateView>;
 
   // ── step 2: policies (managed PER WALLET) ──
   policies: PolicyView[];
@@ -69,11 +71,15 @@ export interface SimController {
   setActiveWallet: (addr: string) => void;
   /** The active wallet's s0 state (drives the step-2 relevance aside). */
   activeState: WalletStateView | null;
-  /** Enabled policy ids FOR THE ACTIVE WALLET. */
+  /** Effective policy ids (checkbox AND package gate) for the active wallet. */
   enabled: Set<string>;
-  /** How many policies are enabled for a given wallet (switcher chips). */
+  /** How many policies are effective for a given wallet (switcher chips). */
   enabledCount: (addr: string) => number;
-  togglePolicy: (id: string) => void;
+  /** Whether a policy's checkbox is on within its package (per-binding). */
+  isPolicyOn: (packageId: string, defId: string) => boolean;
+  /** Flip one policy's checkbox within a package. */
+  togglePolicy: (packageId: string, defId: string) => void;
+  /** Flip a package's gate (on/off). Does not touch the checkboxes. */
   togglePackage: (id: string) => void;
   packageState: (id: string) => PkgState;
   /** Policies scoped to the active wallet (`walletAddress` === active). */
@@ -129,9 +135,15 @@ export function useSimController(provider: SimProvider): SimController {
     () => new Set(init.wallets[0] ? [init.wallets[0].address] : []),
   );
   const [chain, setChain] = useState("eip155:1");
-  // Policies are managed per wallet: address → enabled policy-id set.
-  const [enabledByWallet, setEnabledByWallet] = useState<Record<string, Set<string>>>(
-    () => toSetMap(init.enabledByWallet),
+  // Per wallet, two INDEPENDENT axes (mirrors ps2): the policy checkbox set
+  // (binding keys `pkgId::defId` that are checked) and the package-gate set
+  // (package ids whose toggle is on). A policy is effective only when its
+  // checkbox is on AND its package gate is on.
+  const [checkedByWallet, setCheckedByWallet] = useState<Record<string, Set<string>>>(
+    () => toSetMap(init.policyEnabledByWallet),
+  );
+  const [pkgOnByWallet, setPkgOnByWallet] = useState<Record<string, Set<string>>>(
+    () => toSetMap(init.packageEnabledByWallet),
   );
   const [activeWalletRaw, setActiveWalletRaw] = useState<string>(init.wallets[0]?.address ?? "");
   const [txRows, setTxRowsState] = useState<TxRow[]>(init.txRows);
@@ -148,7 +160,8 @@ export function useSimController(provider: SimProvider): SimController {
     seededRef.current = true;
     setSelected(new Set([data.wallets[0].address]));
     setActiveWalletRaw(data.wallets[0].address);
-    setEnabledByWallet(toSetMap(data.enabledByWallet));
+    setCheckedByWallet(toSetMap(data.policyEnabledByWallet));
+    setPkgOnByWallet(toSetMap(data.packageEnabledByWallet));
     setTxRowsState(data.txRows);
   }, [data]);
 
@@ -189,56 +202,72 @@ export function useSimController(provider: SimProvider): SimController {
   );
   const setActiveWallet = useCallback((addr: string) => setActiveWalletRaw(addr), []);
 
-  const enabledFor = useCallback(
-    (addr: string): Set<string> => enabledByWallet[addr] ?? new Set<string>(),
-    [enabledByWallet],
+  // The active wallet's own packages (each wallet shows only its packages).
+  const activePackages = useMemo(
+    () => data.packagesByWallet[activeWallet] ?? [],
+    [data.packagesByWallet, activeWallet],
   );
-  const enabled = useMemo(() => enabledFor(activeWallet), [enabledFor, activeWallet]);
-  const enabledCount = useCallback((addr: string) => enabledFor(addr).size, [enabledFor]);
 
-  /** Apply `fn` to a fresh copy of the active wallet's enabled set. */
-  const mutateActive = useCallback(
-    (fn: (cur: Set<string>) => Set<string>) => {
-      setEnabledByWallet((prev) => {
+  // Enumerate a wallet's bindings = (package, policy) pairs from its packages.
+  const bindingsOf = useCallback(
+    (addr: string): { pkgId: string; defId: string }[] =>
+      (data.packagesByWallet[addr] ?? []).flatMap((pkg) =>
+        pkg.policyIds.map((defId) => ({ pkgId: pkg.id, defId })),
+      ),
+    [data.packagesByWallet],
+  );
+  // Effective = checkbox on AND package gate on (mirrors ps2 isEffectiveOn).
+  const effectiveDefIds = useCallback(
+    (addr: string): Set<string> => {
+      const ch = checkedByWallet[addr] ?? new Set<string>();
+      const pg = pkgOnByWallet[addr] ?? new Set<string>();
+      const ids = new Set<string>();
+      for (const { pkgId, defId } of bindingsOf(addr))
+        if (pg.has(pkgId) && ch.has(bindingKey(pkgId, defId))) ids.add(defId);
+      return ids;
+    },
+    [checkedByWallet, pkgOnByWallet, bindingsOf],
+  );
+  /** Effective policy DEFIDs of the active wallet (drives relevance + run). */
+  const enabled = useMemo(() => effectiveDefIds(activeWallet), [effectiveDefIds, activeWallet]);
+  const enabledCount = useCallback((addr: string) => effectiveDefIds(addr).size, [effectiveDefIds]);
+
+  const checked = useMemo(
+    () => checkedByWallet[activeWallet] ?? new Set<string>(),
+    [checkedByWallet, activeWallet],
+  );
+  const pkgOn = useMemo(() => pkgOnByWallet[activeWallet] ?? new Set<string>(), [pkgOnByWallet, activeWallet]);
+
+  /** Is this policy's checkbox on, within this package (per-binding)? */
+  const isPolicyOn = useCallback(
+    (packageId: string, defId: string): boolean => checked.has(bindingKey(packageId, defId)),
+    [checked],
+  );
+  const togglePolicy = useCallback(
+    (packageId: string, defId: string) => {
+      const key = bindingKey(packageId, defId);
+      setCheckedByWallet((prev) => {
         const cur = new Set(prev[activeWallet] ?? []);
-        return { ...prev, [activeWallet]: fn(cur) };
+        if (cur.has(key)) cur.delete(key);
+        else cur.add(key);
+        return { ...prev, [activeWallet]: cur };
       });
     },
     [activeWallet],
   );
-
-  const togglePolicy = useCallback(
-    (id: string) =>
-      mutateActive((n) => {
-        if (n.has(id)) n.delete(id);
-        else n.add(id);
-        return n;
-      }),
-    [mutateActive],
-  );
-  const packageState = useCallback(
-    (id: string): PkgState => {
-      const pkg = data.packages.find((p) => p.id === id);
-      if (!pkg || pkg.policyIds.length === 0) return "off";
-      const on = pkg.policyIds.filter((pid) => enabled.has(pid)).length;
-      return on === 0 ? "off" : on === pkg.policyIds.length ? "on" : "partial";
-    },
-    [enabled, data.packages],
-  );
+  // Package toggle = the gate only (binary). It does NOT touch the checkboxes;
+  // a policy turns on when its checkbox AND this gate are both on.
+  const packageState = useCallback((id: string): PkgState => (pkgOn.has(id) ? "on" : "off"), [pkgOn]);
   const togglePackage = useCallback(
     (id: string) => {
-      const pkg = data.packages.find((p) => p.id === id);
-      if (!pkg) return;
-      const turnOn = packageState(id) !== "on"; // off/partial → on, on → off
-      mutateActive((n) => {
-        for (const pid of pkg.policyIds) {
-          if (turnOn) n.add(pid);
-          else n.delete(pid);
-        }
-        return n;
+      setPkgOnByWallet((prev) => {
+        const cur = new Set(prev[activeWallet] ?? []);
+        if (cur.has(id)) cur.delete(id);
+        else cur.add(id);
+        return { ...prev, [activeWallet]: cur };
       });
     },
-    [packageState, mutateActive, data.packages],
+    [activeWallet],
   );
   const activeState = useMemo(() => data.statesByAddr[activeWallet] ?? null, [activeWallet, data.statesByAddr]);
   const walletRelatedPolicies = useMemo(
@@ -306,9 +335,8 @@ export function useSimController(provider: SimProvider): SimController {
       .run({
         selected: [...selected],
         chain,
-        enabledByWallet: Object.fromEntries(
-          Object.entries(enabledByWallet).map(([addr, ids]) => [addr, [...ids]]),
-        ),
+        // Active policies per wallet = effective (checkbox AND package gate).
+        enabledByWallet: Object.fromEntries([...selected].map((addr) => [addr, [...effectiveDefIds(addr)]])),
         txRows,
         statesByAddr: data.statesByAddr,
       })
@@ -319,7 +347,7 @@ export function useSimController(provider: SimProvider): SimController {
         setCursorIdx(firstBad >= 0 ? firstBad + 1 : res.steps.length);
       })
       .finally(() => setRunning(false));
-  }, [provider, selected, chain, enabledByWallet, txRows, data.statesByAddr]);
+  }, [provider, selected, chain, effectiveDefIds, txRows, data.statesByAddr]);
   const cumulativeDenies = useCallback(
     (cursor: number): DenyView[] => {
       if (!result) return [];
@@ -336,9 +364,10 @@ export function useSimController(provider: SimProvider): SimController {
   return {
     step, goTo, next, back, canAdvance,
     wallets: data.wallets, selected, toggleWallet, chain, setChain, selectedStates,
-    policies: data.policies, packages: data.packages,
+    statesByAddr: data.statesByAddr,
+    policies: data.policies, packages: activePackages,
     activeWallet, setActiveWallet, activeState, enabled, enabledCount,
-    togglePolicy, togglePackage, packageState,
+    isPolicyOn, togglePolicy, togglePackage, packageState,
     walletRelatedPolicies, relevantTokens, isTokenRelevant,
     relevantProtocols, isProtocolRelevant, relevantWidgets, isWidgetRelevant, hasRelevanceFilter,
     txRows, setTxRows, addRow, removeRow, updateRow,

@@ -107,7 +107,10 @@
 .e2 .ic.lg { width:19px; height:19px; }
 
 /* compact wallet bar */
-.e2 .wbar { display:flex; align-items:center; gap:10px; margin:0 0 20px; }
+/* position+z-index so the open wallet dropdown (.wmenu) stacks ABOVE the
+   workspace cards below it — otherwise the later-in-DOM cards paint over it and
+   the menu/toggles become unclickable. */
+.e2 .wbar { display:flex; align-items:center; gap:10px; margin:0 0 20px; position:relative; z-index:30; }
 .e2 .wsel-wrap { position:relative; }
 .e2 .wsel { display:inline-flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--line);
   border-radius:11px; padding:5px 11px 5px 6px; box-shadow:var(--shadow); cursor:pointer; font:inherit;

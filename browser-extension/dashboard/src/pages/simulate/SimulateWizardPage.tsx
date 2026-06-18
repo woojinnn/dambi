@@ -41,7 +41,6 @@ export function SimulateWizardPage() {
         <button type="button" className="sw-btn ghost" disabled={c.step === 1} onClick={c.back}>
           {t("wizard.back")}
         </button>
-        <div className="sw-foot-spacer" />
         {c.step < 3 && (
           <button type="button" className="sw-btn primary" disabled={!c.canAdvance} onClick={c.next}>
             {t("wizard.next")}
