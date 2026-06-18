@@ -24,6 +24,7 @@ import { naturalCondition, withJosa } from "../../../cedar/nl";
 import { useAddressBook, shortAddress, type AddressEntry } from "../../../hooks/useAddressBook";
 import { PolicyDiagram } from "../../../cedar/diagram/PolicyDiagram";
 import { AddressInput, AddressSetInput } from "./AddressPicker";
+import { SetInput } from "./SetInput";
 import {
   emptyFormModel,
   fieldsForTrigger,
@@ -1901,14 +1902,15 @@ function ValueInput({
           />
         );
       }
+      // Plain string set (e.g. market symbols). SetInput keeps a local draft
+      // buffer so a separator typed at the end survives the keystroke — without
+      // it, a trailing comma normalized itself away (see SetInput).
       return (
-        <input
-          className="pf-val wide"
-          value={value.values.join(", ")}
-          onChange={(e) =>
-            onChange({ kind: "set", values: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })
-          }
+        <SetInput
+          values={value.values}
+          invalid={invalid}
           placeholder={t("form.setPlaceholder")}
+          onChange={(values) => onChange({ kind: "set", values })}
         />
       );
     }
