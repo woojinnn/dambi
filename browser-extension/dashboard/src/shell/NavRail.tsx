@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
@@ -62,9 +62,9 @@ export function NavRail() {
 
       <div className="nav-group">
         <RailItem to="/" end label={t("nav.home")} icon={<HomeIcon />} />
-        <RailItem to="/editor" label={t("nav.editor")} icon={<EditorIcon />} />
-        {/* 정책 관리 2 — 새 에디터 프론트(이식 중). 백엔드 연동 후 기존 '정책 관리'를 대체. */}
-        <RailItem to="/editor2" label={t("nav.editor2")} icon={<EditorIcon />} />
+        {/* 기존 '정책 관리'(/editor)는 탭에서 숨김 — 라우트/코드는 유지(상세 편집 진입에 계속 사용). */}
+        {/* 새 에디터가 '정책 관리'를 대체. 탭 라벨은 nav.editor("정책 관리")를 그대로 사용. */}
+        <RailItem to="/editor2" label={t("nav.editor")} icon={<EditorIcon />} activePrefixes={["/editor"]} />
         <RailItem to="/simulation" label={t("nav.simulation")} icon={<SimIcon />} />
         <RailItem to="/assets" label={t("nav.assets")} icon={<MonIcon />} />
         <RailItem to="/market" label={t("nav.market")} icon={<MarketIcon />} />
@@ -122,10 +122,15 @@ interface RailItemProps {
   disabled?: boolean;
   badge?: string;
   showDot?: boolean;
+  /** Extra path prefixes that should also mark this item active (e.g. the new
+   *  '정책 관리' tab stays active while editing a policy on the legacy /editor route). */
+  activePrefixes?: string[];
 }
 
-function RailItem({ to, label, icon, end, disabled, badge, showDot }: RailItemProps) {
+function RailItem({ to, label, icon, end, disabled, badge, showDot, activePrefixes }: RailItemProps) {
   const { t } = useTranslation("shell");
+  const { pathname } = useLocation();
+  const prefixActive = (activePrefixes ?? []).some((p) => pathname === p || pathname.startsWith(p + "/"));
   if (disabled) {
     return (
       <span className="nav-item disabled" title={t("nav.comingSoon")}>
@@ -138,7 +143,7 @@ function RailItem({ to, label, icon, end, disabled, badge, showDot }: RailItemPr
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+      className={({ isActive }) => `nav-item${isActive || prefixActive ? " active" : ""}`}
       onPointerUp={(event) => {
         event.currentTarget.blur();
       }}
