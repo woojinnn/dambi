@@ -38,7 +38,7 @@ function WalletPoliciesView({ activeWallet, onWalletChange }) {
 function WalletWorkspace({ snap, address }) {
   const UNCAT = PS.UNCATEGORIZED_PKG;
   const wallet = snap.wallets.byAddress[address] || { bindings: {}, packages: {}, packageEnabled: {}, folders: {} };
-  const walletPkgName = (pid) => (pid === UNCAT ? "미분류" : wallet.packages?.[pid]?.displayName ?? pid);
+  const walletPkgName = (pid) => (pid === UNCAT ? "개별" : wallet.packages?.[pid]?.displayName ?? pid);
 
   const [scope, setScope] = React.useState("all");
   const [dropTarget, setDropTarget] = React.useState(null);
@@ -68,8 +68,8 @@ function WalletWorkspace({ snap, address }) {
     return m;
   }, [wallet]);
   const packages = React.useMemo(() => {
-    const hasUncat = Object.values(wallet.bindings).some((b) => b.packageId === UNCAT);
-    const list = [...(hasUncat ? [{ id: UNCAT, displayName: "미분류", updatedAtMs: 0 }] : []), ...Object.values(wallet.packages || {})];
+    // 개별(미분류)은 비어 있어도 항상 표시.
+    const list = [{ id: UNCAT, displayName: "개별", updatedAtMs: 0 }, ...Object.values(wallet.packages || {})];
     return list.sort((a, b) => (a.id === UNCAT ? -1 : b.id === UNCAT ? 1 : a.id.localeCompare(b.id)));
   }, [wallet]);
   const defsByFolder = React.useMemo(() => {
@@ -165,13 +165,13 @@ function WalletWorkspace({ snap, address }) {
     const d = snap.library.defs[defId];
     if (!d || d.hidden !== true || d.homeWallet !== address.toLowerCase()) return;
     if ((d.walletFolderId || null) === folderId) return;
-    const folderName = folderId ? wallet.folders?.[folderId]?.displayName ?? folderId : "미분류";
+    const folderName = folderId ? wallet.folders?.[folderId]?.displayName ?? folderId : "개별";
     run("폴더 이동", () => PS.putDef({ ...d, walletFolderId: folderId || undefined, updatedAtMs: Date.now() })).then((ok) => ok && pushToast(`${d.displayName} → ${folderName}`));
   };
   const deleteWalletFolderUi = (folderId) => {
     const name = wallet.folders?.[folderId]?.displayName ?? folderId;
-    if (!window.confirm(`"${name}" 폴더를 삭제할까요?\n안의 정책은 미분류로 이동해요(삭제되지 않아요).`)) return;
-    run("폴더 삭제", () => PS.removeWalletFolder({ address, folderId })).then((ok) => ok && pushToast("폴더를 삭제했어요 — 정책은 미분류로 옮겼어요"));
+    if (!window.confirm(`"${name}" 폴더를 삭제할까요?\n안의 정책은 개별로 이동해요(삭제되지 않아요).`)) return;
+    run("폴더 삭제", () => PS.removeWalletFolder({ address, folderId })).then((ok) => ok && pushToast("폴더를 삭제했어요 — 정책은 개별로 옮겼어요"));
   };
   const renderMember = (d) => ({
     slug: d.id.replace(/^def::/, ""),
@@ -336,7 +336,7 @@ function WalletWorkspace({ snap, address }) {
                   const defs = scope === "all" ? all : all.filter((d) => (bindingsByDef.get(d.id) || []).some((b) => b.packageId === scope));
                   const isUncat = fid === "__uncat__";
                   return renderFolder(
-                    { id: `own:${fid}`, displayName: isUncat ? "미분류" : wallet.folders?.[fid]?.displayName ?? fid },
+                    { id: `own:${fid}`, displayName: isUncat ? "개별" : wallet.folders?.[fid]?.displayName ?? fid },
                     defs,
                     null,
                     {
@@ -346,7 +346,7 @@ function WalletWorkspace({ snap, address }) {
                       actions: isUncat ? undefined : (
                         <>
                           <button type="button" className="ev2-iconbtn" title="폴더 이름 변경" onClick={() => renameWalletFolderUi(fid)}><PencilIcon /></button>
-                          <button type="button" className="ev2-iconbtn danger" title="폴더 삭제 (안의 정책은 미분류로)" onClick={() => deleteWalletFolderUi(fid)}><TrashIcon /></button>
+                          <button type="button" className="ev2-iconbtn danger" title="폴더 삭제 (안의 정책은 개별로)" onClick={() => deleteWalletFolderUi(fid)}><TrashIcon /></button>
                         </>
                       ),
                     },
@@ -358,7 +358,7 @@ function WalletWorkspace({ snap, address }) {
               <div className="wt-section-h">라이브러리 공유 정책</div>
               {Object.values(snap.library.packages)
                 .sort((a, b) => (a.id === UNCAT ? 1 : b.id === UNCAT ? -1 : a.id.localeCompare(b.id)))
-                .concat(defsByFolder.has(UNCAT) && !snap.library.packages[UNCAT] ? [{ id: UNCAT, displayName: "미분류" }] : [])
+                .concat(defsByFolder.has(UNCAT) && !snap.library.packages[UNCAT] ? [{ id: UNCAT, displayName: "개별" }] : [])
                 .map((folder) => {
                   let defs = defsByFolder.get(folder.id) || [];
                   if (scope !== "all") defs = defs.filter((d) => (bindingsByDef.get(d.id) || []).some((b) => b.packageId === scope));

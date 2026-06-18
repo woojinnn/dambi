@@ -361,7 +361,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const folders = React.useMemo(() => {
     const seen = /* @__PURE__ */ new Set();
     const list = Object.values(snap.library.packages).filter((p) => p.id !== UNCAT && !seen.has(p.id) && seen.add(p.id)).sort((a, b) => a.displayName.localeCompare(b.displayName, "ko") || a.id.localeCompare(b.id)).map((p) => ({ id: p.id, displayName: p.displayName }));
-    if (defsByFolder.has(UNCAT)) list.push({ id: UNCAT, displayName: "\uAC1C\uBCC4", locked: true });
+    list.push({ id: UNCAT, displayName: "\uAC1C\uBCC4", locked: true });
     return list;
   }, [snap, defsByFolder]);
   const matchQuery = (d) => !searching || d.displayName.toLowerCase().includes(query.trim().toLowerCase());
@@ -389,9 +389,9 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
     return m;
   }, [wallet]);
   const packages = React.useMemo(() => {
-    const hasUncat = Object.values(wallet.bindings).some((b) => b.packageId === UNCAT);
     const list = [
-      ...hasUncat ? [{ id: UNCAT, displayName: "\uAC1C\uBCC4" }] : [],
+      // 개별(미분류) 카드는 비어 있어도 항상 표시 — 고정 드롭 영역.
+      { id: UNCAT, displayName: "\uAC1C\uBCC4" },
       ...Object.values(wallet.packages || {}).slice().sort((a, b) => a.displayName.localeCompare(b.displayName, "ko")).map((p) => ({ id: p.id, displayName: p.displayName, desc: p.desc }))
     ];
     const pins = pinnedPkgs || /* @__PURE__ */ new Set();

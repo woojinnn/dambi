@@ -19,7 +19,7 @@ function WalletPoliciesView({ activeWallet, onWalletChange }) {
 function WalletWorkspace({ snap, address }) {
   const UNCAT = PS.UNCATEGORIZED_PKG;
   const wallet = snap.wallets.byAddress[address] || { bindings: {}, packages: {}, packageEnabled: {}, folders: {} };
-  const walletPkgName = (pid) => pid === UNCAT ? "\uBBF8\uBD84\uB958" : wallet.packages?.[pid]?.displayName ?? pid;
+  const walletPkgName = (pid) => pid === UNCAT ? "\uAC1C\uBCC4" : wallet.packages?.[pid]?.displayName ?? pid;
   const [scope, setScope] = React.useState("all");
   const [dropTarget, setDropTarget] = React.useState(null);
   const [renaming, setRenaming] = React.useState(null);
@@ -47,8 +47,7 @@ function WalletWorkspace({ snap, address }) {
     return m;
   }, [wallet]);
   const packages = React.useMemo(() => {
-    const hasUncat = Object.values(wallet.bindings).some((b) => b.packageId === UNCAT);
-    const list = [...hasUncat ? [{ id: UNCAT, displayName: "\uBBF8\uBD84\uB958", updatedAtMs: 0 }] : [], ...Object.values(wallet.packages || {})];
+    const list = [{ id: UNCAT, displayName: "\uAC1C\uBCC4", updatedAtMs: 0 }, ...Object.values(wallet.packages || {})];
     return list.sort((a, b) => a.id === UNCAT ? -1 : b.id === UNCAT ? 1 : a.id.localeCompare(b.id));
   }, [wallet]);
   const defsByFolder = React.useMemo(() => {
@@ -142,14 +141,14 @@ ${uses}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2
     const d = snap.library.defs[defId];
     if (!d || d.hidden !== true || d.homeWallet !== address.toLowerCase()) return;
     if ((d.walletFolderId || null) === folderId) return;
-    const folderName = folderId ? wallet.folders?.[folderId]?.displayName ?? folderId : "\uBBF8\uBD84\uB958";
+    const folderName = folderId ? wallet.folders?.[folderId]?.displayName ?? folderId : "\uAC1C\uBCC4";
     run("\uD3F4\uB354 \uC774\uB3D9", () => PS.putDef({ ...d, walletFolderId: folderId || void 0, updatedAtMs: Date.now() })).then((ok) => ok && pushToast(`${d.displayName} \u2192 ${folderName}`));
   };
   const deleteWalletFolderUi = (folderId) => {
     const name = wallet.folders?.[folderId]?.displayName ?? folderId;
     if (!window.confirm(`"${name}" \uD3F4\uB354\uB97C \uC0AD\uC81C\uD560\uAE4C\uC694?
-\uC548\uC758 \uC815\uCC45\uC740 \uBBF8\uBD84\uB958\uB85C \uC774\uB3D9\uD574\uC694(\uC0AD\uC81C\uB418\uC9C0 \uC54A\uC544\uC694).`)) return;
-    run("\uD3F4\uB354 \uC0AD\uC81C", () => PS.removeWalletFolder({ address, folderId })).then((ok) => ok && pushToast("\uD3F4\uB354\uB97C \uC0AD\uC81C\uD588\uC5B4\uC694 \u2014 \uC815\uCC45\uC740 \uBBF8\uBD84\uB958\uB85C \uC62E\uACBC\uC5B4\uC694"));
+\uC548\uC758 \uC815\uCC45\uC740 \uAC1C\uBCC4\uB85C \uC774\uB3D9\uD574\uC694(\uC0AD\uC81C\uB418\uC9C0 \uC54A\uC544\uC694).`)) return;
+    run("\uD3F4\uB354 \uC0AD\uC81C", () => PS.removeWalletFolder({ address, folderId })).then((ok) => ok && pushToast("\uD3F4\uB354\uB97C \uC0AD\uC81C\uD588\uC5B4\uC694 \u2014 \uC815\uCC45\uC740 \uAC1C\uBCC4\uB85C \uC62E\uACBC\uC5B4\uC694"));
   };
   const renderMember = (d) => ({
     slug: d.id.replace(/^def::/, ""),
@@ -286,17 +285,17 @@ ${uses}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2
     const defs = scope === "all" ? all : all.filter((d) => (bindingsByDef.get(d.id) || []).some((b) => b.packageId === scope));
     const isUncat = fid === "__uncat__";
     return renderFolder(
-      { id: `own:${fid}`, displayName: isUncat ? "\uBBF8\uBD84\uB958" : wallet.folders?.[fid]?.displayName ?? fid },
+      { id: `own:${fid}`, displayName: isUncat ? "\uAC1C\uBCC4" : wallet.folders?.[fid]?.displayName ?? fid },
       defs,
       null,
       {
         showEmpty: scope === "all",
         walletOnly: true,
         dropFolderId: isUncat ? null : fid,
-        actions: isUncat ? void 0 : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { type: "button", className: "ev2-iconbtn", title: "\uD3F4\uB354 \uC774\uB984 \uBCC0\uACBD", onClick: () => renameWalletFolderUi(fid) }, /* @__PURE__ */ React.createElement(PencilIcon, null)), /* @__PURE__ */ React.createElement("button", { type: "button", className: "ev2-iconbtn danger", title: "\uD3F4\uB354 \uC0AD\uC81C (\uC548\uC758 \uC815\uCC45\uC740 \uBBF8\uBD84\uB958\uB85C)", onClick: () => deleteWalletFolderUi(fid) }, /* @__PURE__ */ React.createElement(TrashIcon, null)))
+        actions: isUncat ? void 0 : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { type: "button", className: "ev2-iconbtn", title: "\uD3F4\uB354 \uC774\uB984 \uBCC0\uACBD", onClick: () => renameWalletFolderUi(fid) }, /* @__PURE__ */ React.createElement(PencilIcon, null)), /* @__PURE__ */ React.createElement("button", { type: "button", className: "ev2-iconbtn danger", title: "\uD3F4\uB354 \uC0AD\uC81C (\uC548\uC758 \uC815\uCC45\uC740 \uAC1C\uBCC4\uB85C)", onClick: () => deleteWalletFolderUi(fid) }, /* @__PURE__ */ React.createElement(TrashIcon, null)))
       }
     );
-  })), /* @__PURE__ */ React.createElement("div", { className: "wt-section" }, /* @__PURE__ */ React.createElement("div", { className: "wt-section-h" }, "\uB77C\uC774\uBE0C\uB7EC\uB9AC \uACF5\uC720 \uC815\uCC45"), Object.values(snap.library.packages).sort((a, b) => a.id === UNCAT ? 1 : b.id === UNCAT ? -1 : a.id.localeCompare(b.id)).concat(defsByFolder.has(UNCAT) && !snap.library.packages[UNCAT] ? [{ id: UNCAT, displayName: "\uBBF8\uBD84\uB958" }] : []).map((folder) => {
+  })), /* @__PURE__ */ React.createElement("div", { className: "wt-section" }, /* @__PURE__ */ React.createElement("div", { className: "wt-section-h" }, "\uB77C\uC774\uBE0C\uB7EC\uB9AC \uACF5\uC720 \uC815\uCC45"), Object.values(snap.library.packages).sort((a, b) => a.id === UNCAT ? 1 : b.id === UNCAT ? -1 : a.id.localeCompare(b.id)).concat(defsByFolder.has(UNCAT) && !snap.library.packages[UNCAT] ? [{ id: UNCAT, displayName: "\uAC1C\uBCC4" }] : []).map((folder) => {
     let defs = defsByFolder.get(folder.id) || [];
     if (scope !== "all") defs = defs.filter((d) => (bindingsByDef.get(d.id) || []).some((b) => b.packageId === scope));
     return renderFolder(folder, defs, null, { pkg: true });

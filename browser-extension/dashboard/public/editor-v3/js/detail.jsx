@@ -233,7 +233,7 @@ function EditorBody({ policy, storedDef, snap, bindingCtx, isNew, defaultScope, 
           const addr = address.toLowerCase();
           const defId = `def::${slugify(choice.name)}-${addr.slice(2, 6)}`;
           if (choice.applyNow) {
-            // ② 지금 켜기: 초안 def를 만들고(전용 폴더 = 미분류) 곧장 bindDef로 적용.
+            // ② 지금 켜기: 초안 def를 만들고(전용 폴더 = 개별) 곧장 bindDef로 적용.
             //    회수 동선(decision C)을 위해 def는 항상 전용 폴더에 남는다.
             await PS.putDef(mkDef({ id: defId, name: choice.name, cat: policy.cat, model: fm, manifest, doc: docPayload(), hidden: true, homeWallet: addr, walletFolderId: undefined, enabled: false, packageId: undefined }));
             const bindPkg = (choice.walletPackages || {})[address] || PS.UNCATEGORIZED_PKG;

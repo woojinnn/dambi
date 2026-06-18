@@ -439,7 +439,8 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
       .filter((p) => p.id !== UNCAT && !seen.has(p.id) && seen.add(p.id))
       .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko") || a.id.localeCompare(b.id))
       .map((p) => ({ id: p.id, displayName: p.displayName }));
-    if (defsByFolder.has(UNCAT)) list.push({ id: UNCAT, displayName: "개별", locked: true });
+    // 개별(미분류)은 비어 있어도 항상 표시 — 끌어다 놓을 고정 영역으로 둔다.
+    list.push({ id: UNCAT, displayName: "개별", locked: true });
     return list;
   }, [snap, defsByFolder]);
 
@@ -459,9 +460,9 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
     return m;
   }, [wallet]);
   const packages = React.useMemo(() => {
-    const hasUncat = Object.values(wallet.bindings).some((b) => b.packageId === UNCAT);
     const list = [
-      ...(hasUncat ? [{ id: UNCAT, displayName: "개별" }] : []),
+      // 개별(미분류) 카드는 비어 있어도 항상 표시 — 고정 드롭 영역.
+      { id: UNCAT, displayName: "개별" },
       ...Object.values(wallet.packages || {}).slice().sort((a, b) => a.displayName.localeCompare(b.displayName, "ko")).map((p) => ({ id: p.id, displayName: p.displayName, desc: p.desc })),
     ];
     // 위 지갑 카드에서 고른 패키지를 맨 위로 올려 “같은 것”임을 강조.

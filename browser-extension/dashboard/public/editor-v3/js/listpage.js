@@ -34,7 +34,7 @@ ${n}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2E4.
   };
   const removePackage = (pkg) => {
     if (!window.confirm(`\uD328\uD0A4\uC9C0 "${pkg.displayName}"\uB97C \uC0AD\uC81C\uD560\uAE4C\uC694?
-\uC548\uC758 \uC815\uCC45\uC740 '\uBBF8\uBD84\uB958'\uB85C \uC774\uB3D9\uD574\uC694.`)) return;
+\uC548\uC758 \uC815\uCC45\uC740 '\uAC1C\uBCC4'\uB85C \uC774\uB3D9\uD574\uC694.`)) return;
     run("\uD328\uD0A4\uC9C0 \uC0AD\uC81C", () => PS.deletePackage(pkg.id)).then((ok) => ok && pushToast("\uD328\uD0A4\uC9C0\uB97C \uC0AD\uC81C\uD588\uC5B4\uC694"));
   };
   const moveDef = (defId, packageId) => {
@@ -43,7 +43,7 @@ ${n}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2E4.
     const next = packageId === UNCAT ? void 0 : packageId;
     if ((d.defaults.packageId || void 0) === next) return;
     run("\uD3F4\uB354 \uC774\uB3D9", () => PS.putDef({ ...d, defaults: { ...d.defaults, packageId: next }, updatedAtMs: Date.now() })).then(
-      (ok) => ok && pushToast(`${d.displayName} \u2192 ${snap.library.packages[packageId]?.displayName ?? "\uBBF8\uBD84\uB958"}`)
+      (ok) => ok && pushToast(`${d.displayName} \u2192 ${snap.library.packages[packageId]?.displayName ?? "\uAC1C\uBCC4"}`)
     );
   };
   const publishPackage = (pkg) => {

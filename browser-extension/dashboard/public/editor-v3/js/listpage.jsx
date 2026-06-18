@@ -49,7 +49,7 @@ function LibraryTab({ snap }) {
     run("이름 변경", () => PS.putPackage({ ...pkg, displayName: t, updatedAtMs: Date.now() }));
   };
   const removePackage = (pkg) => {
-    if (!window.confirm(`패키지 "${pkg.displayName}"를 삭제할까요?\n안의 정책은 '미분류'로 이동해요.`)) return;
+    if (!window.confirm(`패키지 "${pkg.displayName}"를 삭제할까요?\n안의 정책은 '개별'로 이동해요.`)) return;
     run("패키지 삭제", () => PS.deletePackage(pkg.id)).then((ok) => ok && pushToast("패키지를 삭제했어요"));
   };
   const moveDef = (defId, packageId) => {
@@ -58,7 +58,7 @@ function LibraryTab({ snap }) {
     const next = packageId === UNCAT ? undefined : packageId;
     if ((d.defaults.packageId || undefined) === next) return;
     run("폴더 이동", () => PS.putDef({ ...d, defaults: { ...d.defaults, packageId: next }, updatedAtMs: Date.now() })).then(
-      (ok) => ok && pushToast(`${d.displayName} → ${snap.library.packages[packageId]?.displayName ?? "미분류"}`),
+      (ok) => ok && pushToast(`${d.displayName} → ${snap.library.packages[packageId]?.displayName ?? "개별"}`),
     );
   };
   const publishPackage = (pkg) => {
