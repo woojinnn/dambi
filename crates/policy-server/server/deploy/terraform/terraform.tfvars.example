@@ -1,2 +1,16 @@
 project_id = "policy-engine-498313"
 region     = "asia-northeast3"
+
+gke_deletion_protection = true
+
+# Production defaults keep the Cloud SQL instance protected, HA, backed up,
+# and PITR-enabled. Override these only for disposable environments.
+db_deletion_protection            = true
+db_availability_type              = "REGIONAL"
+db_backup_start_time              = "17:00"
+db_retained_backups               = 14
+db_transaction_log_retention_days = 7
+
+# Redis backs required cross-replica locks and SSE fanout in production.
+redis_tier         = "STANDARD_HA"
+redis_auth_enabled = true

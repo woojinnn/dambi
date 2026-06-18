@@ -35,7 +35,7 @@ ingress:
   gce:
     enabled: true
     staticIpName: dambi-ingress-ip
-    allowHttp: "true"       # keep :80 during cert provisioning; clients use HTTPS once ACTIVE
+    allowHttp: "false"
   annotations: {}
 
 managedCertificate:
@@ -44,6 +44,10 @@ managedCertificate:
 backendConfig:
   enabled: true
   timeoutSec: 3600
+  securityPolicyName: dambi-policy-server-edge
+
+networkPolicy:
+  enabled: true
 
 syncConfig: |-
   [rpc.failover]
@@ -133,8 +137,9 @@ syncConfig: |-
   chains = ["eip155:1"]
 
   # 1inch venues — all share the one Dev Portal Bearer key (ONEINCH_KEY, wired as
-  # an optional secretKeyRef on the worker). REQUIRES the ONEINCH_KEY secret value
-  # to be present: a keyless ${ONEINCH_KEY} expands to "" and 401s every tick.
+  # an optional secretKeyRef on both API and worker). REQUIRES the ONEINCH_KEY
+  # secret value to be present: a keyless ${ONEINCH_KEY} expands to "" and 401s
+  # every tick.
   [venues.one_inch_fusion]
   base_url = "https://api.1inch.dev/fusion"
   api_key = "${ONEINCH_KEY}"

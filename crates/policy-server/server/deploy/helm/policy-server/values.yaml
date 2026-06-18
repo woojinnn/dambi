@@ -50,6 +50,8 @@ worker:
 runtime:
   rustLog: info,policy_server=debug,policy_sync=info
   requireSyncConfig: true
+  requireRedis: true
+  requireOAuthConfig: true
   runMigrationsOnStartup: false
   redisEventsChannel: policy-server:events
 
@@ -78,11 +80,30 @@ ingress:
   gce:
     enabled: false
     staticIpName: ""
-    allowHttp: "true"
+    allowHttp: "false"
 
 serviceAccount:
   create: true
   name: ""
+  automountToken: false
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  capabilities:
+    drop:
+      - ALL
 
 migrationJob:
   enabled: true
@@ -102,7 +123,7 @@ pdb:
     maxUnavailable: 1
 
 networkPolicy:
-  enabled: false
+  enabled: true
 
 syncConfig: |-
   # Override this value with the production dambi-sync.toml.
@@ -131,9 +152,10 @@ syncConfig: |-
   chains = ["eip155:1"]
 
   # 1inch venues — all share the one Dev Portal Bearer key (ONEINCH_KEY, wired as
-  # an optional secretKeyRef on the worker). REQUIRES the ONEINCH_KEY secret value:
-  # a keyless ${ONEINCH_KEY} expands to "" and 401s every tick. NOTE: prod deploys
-  # the values-m3.yaml overlay, whose syncConfig OVERRIDES this one — enable there.
+  # an optional secretKeyRef on both API and worker). REQUIRES the ONEINCH_KEY
+  # secret value: a keyless ${ONEINCH_KEY} expands to "" and 401s every tick.
+  # NOTE: prod deploys the values-m3.yaml overlay, whose syncConfig OVERRIDES
+  # this one — enable there.
   [venues.one_inch_fusion]
   base_url = "https://api.1inch.dev/fusion"
   api_key = "${ONEINCH_KEY}"
@@ -154,3 +176,6 @@ managedCertificate:
 backendConfig:
   enabled: false
   timeoutSec: 3600
+  # Optional GKE BackendConfig Cloud Armor policy name. Use this for
+  # deployment-level rate limits / edge rules; empty preserves current behavior.
+  securityPolicyName: ""

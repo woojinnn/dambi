@@ -47,6 +47,8 @@ worker:
 runtime:
   rustLog: info,policy_server=debug,policy_sync=info
   requireSyncConfig: true
+  requireRedis: false
+  requireOAuthConfig: false
   runMigrationsOnStartup: false
   redisEventsChannel: policy-server:events
 

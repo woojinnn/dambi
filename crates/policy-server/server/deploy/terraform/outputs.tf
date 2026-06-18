@@ -32,10 +32,20 @@ output "database_url" {
 
 output "redis_url" {
   description = "REDIS_URL for the k8s secret."
-  value       = "redis://${google_redis_instance.dambi.host}:6379"
+  value = var.redis_auth_enabled ? (
+    "redis://:${urlencode(google_redis_instance.dambi.auth_string)}@${google_redis_instance.dambi.host}:${google_redis_instance.dambi.port}"
+  ) : (
+    "redis://${google_redis_instance.dambi.host}:${google_redis_instance.dambi.port}"
+  )
+  sensitive = true
 }
 
 output "ingress_ip" {
   description = "Global static IP for the GCE Ingress (point the DuckDNS A record here)."
   value       = google_compute_global_address.ingress.address
+}
+
+output "policy_server_security_policy_name" {
+  description = "Cloud Armor security policy name to attach through Helm BackendConfig."
+  value       = google_compute_security_policy.policy_server_edge.name
 }

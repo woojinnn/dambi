@@ -20,16 +20,23 @@ spec:
         checksum/sync-config: {{ .Values.syncConfig | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "policy-server.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: worker
           image: {{ include "policy-server.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["dambi-sync-worker"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - name: DAMBI_SYNC_CONFIG
               value: /app/dambi-sync.toml
             - name: REQUIRE_SYNC_CONFIG
               value: {{ .Values.runtime.requireSyncConfig | quote }}
+            - name: REQUIRE_REDIS
+              value: {{ .Values.runtime.requireRedis | quote }}
             - name: RUN_MIGRATIONS_ON_STARTUP
               value: {{ .Values.runtime.runMigrationsOnStartup | quote }}
             - name: SYNC_WORKER_TICK_SECS
@@ -48,7 +55,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: REDIS_URL
-                  optional: true
+                  optional: {{ not .Values.runtime.requireRedis }}
             - name: ETHERSCAN_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -61,9 +68,16 @@ spec:
                   name: {{ .Values.existingSecret }}
                   key: COINGECKO_API_KEY
                   optional: true
+            - name: UNISWAP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: UNISWAP_KEY
+                  optional: true
             # Dev Portal Bearer key shared by all 1inch venues (Fusion, Fusion+,
-            # LOP). Optional: ${ONEINCH_KEY} expands to "" when the secret key is
-            # absent, so the (commented) 1inch venues stay disabled until set.
+            # LOP). Optional at the secret-ref layer so charts that disable
+            # 1inch venues can still deploy; values that enable 1inch should
+            # provide the key or those venue fetches will fail.
             - name: ONEINCH_KEY
               valueFrom:
                 secretKeyRef:
