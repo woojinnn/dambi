@@ -31,11 +31,11 @@ else
 fi
 
 if [ -d browser-extension ]; then
-  mkdir -p browser-extension/backend/wasm browser-extension/public/wasm
+  mkdir -p browser-extension/backend/wasm
   cp crates/policy-engine-wasm/pkg/policy_engine_wasm.js browser-extension/backend/wasm/
   cp crates/policy-engine-wasm/pkg/policy_engine_wasm.d.ts browser-extension/backend/wasm/ 2>/dev/null || true
   cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm browser-extension/backend/wasm/
-  cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm browser-extension/public/wasm/
   cp crates/policy-engine-wasm/pkg/policy_engine_wasm_bg.wasm.d.ts browser-extension/backend/wasm/ 2>/dev/null || true
-  echo "==> wasm artifact copied to browser-extension/backend/wasm/ + public/wasm/"
+  rm -f browser-extension/public/wasm/policy_engine_wasm_bg.wasm
+  echo "==> wasm artifact copied to browser-extension/backend/wasm/"
 fi

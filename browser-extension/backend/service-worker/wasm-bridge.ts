@@ -1,4 +1,3 @@
-import Browser from "webextension-polyfill";
 import init, * as wasmExports from "../wasm/policy_engine_wasm";
 import type {
   Action as ActionDto,
@@ -154,13 +153,11 @@ export class EngineError extends Error {
 let cachedExports: WasmExports | null = null;
 let inflightLoad: Promise<WasmExports> | null = null;
 
-const WASM_BG_URL = Browser.runtime.getURL("wasm/policy_engine_wasm_bg.wasm");
-
 async function load(): Promise<WasmExports> {
   if (cachedExports) return cachedExports;
   if (inflightLoad) return inflightLoad;
   inflightLoad = (async () => {
-    await init({ module_or_path: WASM_BG_URL });
+    await init();
     cachedExports = wasmExports as unknown as WasmExports;
     return cachedExports;
   })();
