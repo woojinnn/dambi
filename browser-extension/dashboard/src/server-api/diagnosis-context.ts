@@ -3,9 +3,10 @@
  * (`diagnosis-context-storage.ts`). A history/confirm-popup deny row carries a
  * `delta_id` (UUID = `message.requestId` at decision time); calling
  * `getDiagnosisContextRow(delta_id)` returns the inputs the live verdict was
- * computed against — the decoded `action`/`meta`, the `tx`, and the materialized
- * enrichment `results` — so the dashboard can re-run "which clause blocked this"
- * against the REAL context (not a sample).
+ * computed against — the decoded `action`/`meta`, the `tx`, materialized
+ * enrichment `results`, and optional host-injected lowering inputs — so the
+ * dashboard can re-run "which clause blocked this" against the REAL context
+ * (not a sample).
  *
  * Returns `null` for non-deny rows, legacy rows, or when the extension isn't
  * installed (fails soft, like the other extension-sync helpers).
@@ -22,6 +23,9 @@ export interface DiagnosisContextRow {
   meta: unknown;
   tx: { chain_id: string; from: string; to: string };
   results: Record<string, unknown>;
+  token_decimals?: Record<string, number>;
+  account_leverage?: Record<string, number>;
+  order_enrichment?: unknown;
 }
 
 export async function getDiagnosisContextRow(

@@ -12,8 +12,12 @@
 use policy_transition::action::ActionView;
 use serde_json::{Map, Value};
 
-use super::manifest_v2::ManifestV2;
-use super::trigger::{evaluate as evaluate_trigger, TxView};
+use super::manifest_v2::{
+    ManifestV2, MAX_POLICY_RPC_V2_MANIFESTS, MAX_POLICY_RPC_V2_PLANNED_CALLS,
+};
+use super::trigger::{
+    evaluate as evaluate_trigger, scope_matches_position as trigger_scope_matches_position, TxView,
+};
 use super::{resolve_selector, ContextProjection, PolicyRpcError};
 
 /// One resolved v2 policy-rpc call, ready to dispatch.
@@ -62,25 +66,35 @@ pub(crate) fn policy_rpc_call_id_v2(manifest_id: &str, spec_id: &str) -> String 
 ///
 /// # Errors
 ///
-/// Returns [`PolicyRpcError::InvalidManifest`] if any manifest fails
-/// [`ManifestV2::validate`], or [`PolicyRpcError::Selector`] if a *required*
-/// (`optional == false`) param selector cannot be resolved. A failed selector on
-/// an `optional` call skips that call instead.
+/// Returns [`PolicyRpcError::InvalidManifest`] if any scope/trigger-matching
+/// manifest fails [`ManifestV2::validate`], or [`PolicyRpcError::Selector`] if a
+/// *required* (`optional == false`) param selector cannot be resolved. A failed
+/// selector on an `optional` call skips that call instead.
 pub fn plan_policy_rpc_v2(
     manifests: &[ManifestV2],
     action_view: &ActionView<'_>,
     lowered_context: &Value,
     tx: &TxView<'_>,
 ) -> Result<Vec<PlannedCallV2>, PolicyRpcError> {
+    if manifests.len() > MAX_POLICY_RPC_V2_MANIFESTS {
+        return Err(PolicyRpcError::InvalidManifest(format!(
+            "policy-rpc manifest count {} exceeds {MAX_POLICY_RPC_V2_MANIFESTS}",
+            manifests.len()
+        )));
+    }
+
     let root_json = root_selector_json(tx);
     let empty = Value::Object(Map::new());
     let mut calls = Vec::new();
 
     for manifest in manifests {
-        manifest.validate()?;
+        if !trigger_scope_matches_position(manifest.trigger.scope, action_view) {
+            continue;
+        }
         if !evaluate_trigger(&manifest.trigger, action_view, tx) {
             continue;
         }
+        manifest.validate()?;
         for spec in &manifest.policy_rpc {
             let mut params = Map::new();
             let mut skip = false;
@@ -111,6 +125,11 @@ pub fn plan_policy_rpc_v2(
             }
             if skip {
                 continue;
+            }
+            if calls.len() >= MAX_POLICY_RPC_V2_PLANNED_CALLS {
+                return Err(PolicyRpcError::InvalidManifest(format!(
+                    "planned policy-rpc call count exceeds {MAX_POLICY_RPC_V2_PLANNED_CALLS}"
+                )));
             }
             calls.push(PlannedCallV2 {
                 manifest_id: manifest.id.clone(),
@@ -148,6 +167,14 @@ mod tests {
             domain: "amm",
             action_tag: Some("swap"),
             venue_name: Some("uniswap_v3"),
+        }
+    }
+
+    fn multicall_view() -> ActionView<'static> {
+        ActionView {
+            domain: "multicall",
+            action_tag: None,
+            venue_name: None,
         }
     }
 
@@ -214,6 +241,50 @@ mod tests {
     }
 
     #[test]
+    fn invalid_non_matching_manifest_is_not_planned() {
+        let m = manifest(json!({
+            "id": "invalid-lending-only",
+            "schema_version": 999,
+            "trigger": { "where": { "action.domain": { "eq": "lending" } } },
+            "policy_rpc": [{ "id": "x", "method": "m", "outputs": [] }]
+        }));
+
+        let calls = plan_policy_rpc_v2(&[m], &swap_view(), &json!({}), &tx()).unwrap();
+
+        assert!(
+            calls.is_empty(),
+            "an invalid manifest must not poison unrelated non-matching actions"
+        );
+    }
+
+    #[test]
+    fn scope_skipped_positions_produce_no_calls() {
+        let inner = manifest(json!({
+            "id": "inner",
+            "schema_version": 2,
+            "policy_rpc": [{ "id": "x", "method": "m", "outputs": [] }]
+        }));
+        let outer = manifest(json!({
+            "id": "outer",
+            "schema_version": 2,
+            "trigger": { "scope": "outer" },
+            "policy_rpc": [{ "id": "x", "method": "m", "outputs": [] }]
+        }));
+
+        let calls = plan_policy_rpc_v2(&[inner], &multicall_view(), &json!({}), &tx()).unwrap();
+        assert!(
+            calls.is_empty(),
+            "inner-scoped RPC calls must not plan at the multicall batch position"
+        );
+
+        let calls = plan_policy_rpc_v2(&[outer], &swap_view(), &json!({}), &tx()).unwrap();
+        assert!(
+            calls.is_empty(),
+            "outer-scoped RPC calls must not plan at a leaf position"
+        );
+    }
+
+    #[test]
     fn required_missing_selector_errors_optional_skips() {
         let required = manifest(json!({
             "id": "req",
@@ -241,6 +312,44 @@ mod tests {
         assert!(
             calls.is_empty(),
             "optional call with missing selector is skipped"
+        );
+    }
+
+    #[test]
+    fn manifest_count_is_capped_before_trigger_scan() {
+        let manifests: Vec<ManifestV2> = (0..=MAX_POLICY_RPC_V2_MANIFESTS)
+            .map(|i| {
+                manifest(json!({
+                    "id": format!("m{i}"),
+                    "schema_version": 2,
+                    "trigger": { "where": { "action.domain": { "eq": "lending" } } }
+                }))
+            })
+            .collect();
+
+        let err = plan_policy_rpc_v2(&manifests, &swap_view(), &json!({}), &tx()).unwrap_err();
+
+        assert!(err.to_string().contains("manifest count"), "{err}");
+    }
+
+    #[test]
+    fn planned_call_count_is_capped_across_matching_manifests() {
+        let manifests: Vec<ManifestV2> = (0..=MAX_POLICY_RPC_V2_PLANNED_CALLS)
+            .map(|i| {
+                manifest(json!({
+                    "id": format!("m{i}"),
+                    "schema_version": 2,
+                    "trigger": { "where": { "action.tag": { "eq": "swap" } } },
+                    "policy_rpc": [{ "id": "c", "method": "m", "outputs": [] }]
+                }))
+            })
+            .collect();
+
+        let err = plan_policy_rpc_v2(&manifests, &swap_view(), &json!({}), &tx()).unwrap_err();
+
+        assert!(
+            err.to_string().contains("planned policy-rpc call count"),
+            "{err}"
         );
     }
 

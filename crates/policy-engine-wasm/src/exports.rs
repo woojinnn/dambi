@@ -398,6 +398,7 @@ mod tests {
 #[wasm_bindgen]
 pub fn preview_custom_schema_json(input_json: String) -> String {
     let result = (|| -> Result<PreviewCustomSchemaOutputDto, EngineErrorDto> {
+        check_input_size(&input_json, "preview_custom_schema_json")?;
         let input: PreviewCustomSchemaInputDto =
             serde_json::from_str(&input_json).map_err(|error| {
                 EngineErrorDto::new("invalid_input_json", format!("invalid input json: {error}"))
@@ -897,6 +898,23 @@ mod tests_policy_rpc {
         assert_eq!(diff["added"][0]["field"], "totalInputUsd", "{diff}");
         assert!(diff["removed"].as_array().unwrap().is_empty(), "{diff}");
         assert!(diff["changed"].as_array().unwrap().is_empty(), "{diff}");
+    }
+
+    #[test]
+    fn preview_custom_schema_rejects_oversized_input() {
+        let input = "x".repeat(MAX_WASM_INPUT_JSON_LEN + 1);
+        let out = preview_custom_schema_json(input);
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "input_too_large", "{parsed}");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("preview_custom_schema_json"),
+            "{parsed}"
+        );
     }
 
     #[test]

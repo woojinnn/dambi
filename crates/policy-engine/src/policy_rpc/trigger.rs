@@ -17,7 +17,7 @@
 
 use policy_transition::action::ActionView;
 
-use super::manifest_v2::{Trigger, TriggerConstraint, TriggerField};
+use super::manifest_v2::{Trigger, TriggerConstraint, TriggerField, TriggerScope};
 
 /// Transaction-level fields a trigger may match on. Borrow-only, built by the
 /// caller from the transaction envelope.
@@ -43,14 +43,40 @@ pub fn evaluate(trigger: &Trigger, action: &ActionView<'_>, tx: &TxView<'_>) -> 
         .all(|(field, constraint)| matches_field(*field, constraint, action, tx))
 }
 
+/// Return whether a manifest with `scope` applies to this action position.
+///
+/// The service worker evaluates a decoded multicall twice conceptually: once at
+/// the outer batch position and once per child. `TriggerScope::Inner` applies
+/// only to non-multicall leaf positions; `TriggerScope::Outer` applies only to
+/// the multicall batch position. Planning and evaluation must use this same
+/// gate so required policy-RPC calls are not materialized for skipped positions.
+#[must_use]
+pub fn scope_matches_position(scope: TriggerScope, action: &ActionView<'_>) -> bool {
+    let is_multicall = action.domain == "multicall";
+    match scope {
+        TriggerScope::Inner => !is_multicall,
+        TriggerScope::Outer => is_multicall,
+    }
+}
+
 fn matches_field(
     field: TriggerField,
     constraint: &TriggerConstraint,
     action: &ActionView<'_>,
     tx: &TxView<'_>,
 ) -> bool {
+    if matches!(field, TriggerField::ActionDomain) {
+        let alias =
+            if action.domain == "hyperliquid_core" && action.action_tag == Some("hl_unknown") {
+                Some("unknown")
+            } else {
+                None
+            };
+        return matches_present_values(action.domain, alias, constraint);
+    }
+
     let lhs: Option<&str> = match field {
-        TriggerField::ActionDomain => Some(action.domain),
+        TriggerField::ActionDomain => unreachable!("handled above"),
         TriggerField::ActionTag => action.action_tag,
         TriggerField::ActionVenue => action.venue_name,
         TriggerField::TxChainId => Some(tx.chain_id),
@@ -71,6 +97,20 @@ fn matches_field(
             TriggerConstraint::Nin(set) => !set.iter().any(|v| v == have),
         },
     )
+}
+
+fn matches_present_values(
+    primary: &str,
+    alias: Option<&str>,
+    constraint: &TriggerConstraint,
+) -> bool {
+    let any_eq = |want: &str| primary == want || alias == Some(want);
+    match constraint {
+        TriggerConstraint::Eq(want) => any_eq(want),
+        TriggerConstraint::Ne(want) => !any_eq(want),
+        TriggerConstraint::In(set) => set.iter().any(|v| any_eq(v)),
+        TriggerConstraint::Nin(set) => !set.iter().any(|v| any_eq(v)),
+    }
 }
 
 #[cfg(test)]
@@ -103,6 +143,22 @@ mod tests {
         }
     }
 
+    fn hl_unknown() -> ActionView<'static> {
+        ActionView {
+            domain: "hyperliquid_core",
+            action_tag: Some("hl_unknown"),
+            venue_name: Some("hyperliquid"),
+        }
+    }
+
+    fn multicall() -> ActionView<'static> {
+        ActionView {
+            domain: "multicall",
+            action_tag: None,
+            venue_name: None,
+        }
+    }
+
     fn trigger_of(pairs: &[(TriggerField, TriggerConstraint)]) -> Trigger {
         let mut where_ = BTreeMap::new();
         for (field, constraint) in pairs {
@@ -117,6 +173,42 @@ mod tests {
     #[test]
     fn empty_trigger_matches() {
         assert!(evaluate(&Trigger::default(), &swap_v3(), &tx()));
+    }
+
+    #[test]
+    fn scope_matches_the_current_evaluation_position() {
+        assert!(scope_matches_position(TriggerScope::Inner, &swap_v3()));
+        assert!(!scope_matches_position(TriggerScope::Outer, &swap_v3()));
+        assert!(scope_matches_position(TriggerScope::Outer, &multicall()));
+        assert!(!scope_matches_position(TriggerScope::Inner, &multicall()));
+    }
+
+    #[test]
+    fn hl_unknown_also_matches_core_unknown_domain() {
+        assert!(evaluate(
+            &trigger_of(&[(
+                TriggerField::ActionDomain,
+                TriggerConstraint::Eq("unknown".to_owned()),
+            )]),
+            &hl_unknown(),
+            &tx(),
+        ));
+        assert!(evaluate(
+            &trigger_of(&[(
+                TriggerField::ActionDomain,
+                TriggerConstraint::Eq("hyperliquid_core".to_owned()),
+            )]),
+            &hl_unknown(),
+            &tx(),
+        ));
+        assert!(!evaluate(
+            &trigger_of(&[(
+                TriggerField::ActionDomain,
+                TriggerConstraint::Ne("unknown".to_owned()),
+            )]),
+            &hl_unknown(),
+            &tx(),
+        ));
     }
 
     #[test]

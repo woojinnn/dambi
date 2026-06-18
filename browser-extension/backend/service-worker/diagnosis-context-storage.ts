@@ -7,8 +7,9 @@
  * a generic sample. The dashboard can't recompute that context (it never saw the
  * live enrichment), so at deny time we capture the inputs the diagnosis needs —
  * the decoded `action`/`meta`, the `tx`, and the materialized enrichment
- * `results` — and the dashboard re-runs the diagnosis on demand via the existing
- * `run-diagnosis-probes` oracle op (Option B: store context, dashboard re-runs).
+ * `results` plus host-injected lowering inputs — and the dashboard re-runs the
+ * diagnosis on demand via the existing `run-diagnosis-probes` oracle op
+ * (Option B: store context, dashboard re-runs).
  *
  * Only written for DENY decisions (the only case a culprit is meaningful), so
  * the ring buffer stays small. Cap mirrors `state-delta-storage` (500 rows).
@@ -34,6 +35,12 @@ export interface DiagnosisContextRow {
   /** Materialized enrichment map (`call_id` → value) the verdict used, so a
    *  `context.custom.*` policy's culprit reproduces. */
   results: Record<string, unknown>;
+  /** Host-resolved token decimals used by lowering to populate amountNano fields. */
+  token_decimals?: Record<string, number>;
+  /** Host-resolved venue leverage used by HyperLiquid order lowering. */
+  account_leverage?: Record<string, number>;
+  /** Host-resolved order-time enrichment used by HyperLiquid order lowering. */
+  order_enrichment?: unknown;
 }
 
 export async function listAllDiagnosisContexts(): Promise<DiagnosisContextRow[]> {

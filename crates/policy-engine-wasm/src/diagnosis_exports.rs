@@ -42,10 +42,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use policy_engine::lowering_v2::LoweredAction;
+use policy_engine::lowering_v2::{AccountLeverage, LoweredAction, OrderEnrichment, TokenDecimals};
 use policy_transition::action::{ActionBody, ActionMeta};
 
-use crate::action_eval_exports::{materialized_context, BundleInput, TxInput};
+use crate::action_eval_exports::{entities_for_tx, materialized_context, BundleInput, TxInput};
 use crate::dto::{EngineErrorDto, Envelope};
 use crate::exports::check_input_size;
 
@@ -70,6 +70,12 @@ struct DiagnosisInput {
     bundles: Vec<BundleInput>,
     #[serde(default)]
     results: BTreeMap<String, Value>,
+    #[serde(default)]
+    token_decimals: BTreeMap<String, u8>,
+    #[serde(default)]
+    account_leverage: BTreeMap<String, i64>,
+    #[serde(default)]
+    order_enrichment: OrderEnrichment,
     probes: Vec<ProbeInput>,
 }
 
@@ -94,6 +100,8 @@ pub fn run_diagnosis_probes_v2_json(input_json: String) -> String {
         check_input_size(&input_json, "run_diagnosis_probes_v2_json")?;
         let input: DiagnosisInput = serde_json::from_str(&input_json)
             .map_err(|e| EngineErrorDto::new("invalid_input_json", e.to_string()))?;
+        let decimals = TokenDecimals::new(input.token_decimals.clone());
+        let leverage = AccountLeverage::new(input.account_leverage.clone());
 
         let (lowered, context) = materialized_context(
             &input.action,
@@ -101,9 +109,12 @@ pub fn run_diagnosis_probes_v2_json(input_json: String) -> String {
             &input.tx,
             &input.bundles,
             &input.results,
+            &decimals,
+            &leverage,
+            &input.order_enrichment,
         )?;
 
-        run_probes(&lowered, context, &input.probes)
+        run_probes(&lowered, context, entities_for_tx(&input.tx), &input.probes)
     })();
 
     match result {
@@ -115,6 +126,7 @@ pub fn run_diagnosis_probes_v2_json(input_json: String) -> String {
 fn run_probes(
     lowered: &LoweredAction,
     context: Value,
+    entities_json: Value,
     probes: &[ProbeInput],
 ) -> Result<DiagnosisOutput, EngineErrorDto> {
     let principal: EntityUid = lowered
@@ -130,12 +142,14 @@ fn run_probes(
         .parse()
         .map_err(|e: cedar_policy::ParseErrors| EngineErrorDto::new("resource", e.to_string()))?;
 
-    // Schema-less, empty entities — mirrors the per-policy eval path (engine.rs:227-236, :318).
+    // Schema-less probe evaluation, but with the same Wallet/Protocol entity
+    // slice as the verdict path so probes involving `principal.address` agree
+    // with live Cedar evaluation.
     let cedar_ctx = Context::from_json_value(context.clone(), None)
         .map_err(|e| EngineErrorDto::new("context", e.to_string()))?;
     let request = Request::new(principal, action, resource, cedar_ctx, None)
         .map_err(|e| EngineErrorDto::new("request", e.to_string()))?;
-    let entities = Entities::from_json_value(Value::Array(Vec::new()), None)
+    let entities = Entities::from_json_value(entities_json, None)
         .map_err(|e| EngineErrorDto::new("entities", e.to_string()))?;
 
     let mut set = PolicySet::new();
@@ -380,6 +394,85 @@ mod tests {
             json!(["c0.body"]),
             "the when-body the forbid fired on must probe TRUE: {parsed}"
         );
+    }
+
+    #[test]
+    fn principal_address_probe_uses_verdict_entities() {
+        let probes = json!([
+            { "id": "recipient-not-self", "est": {
+                "effect": "permit",
+                "principal": { "op": "All" },
+                "action": { "op": "All" },
+                "resource": { "op": "All" },
+                "conditions": [{ "kind": "when", "body":
+                    { "!=": {
+                        "left": { ".": { "left": { "Var": "context" }, "attr": "recipient" } },
+                        "right": { ".": { "left": { "Var": "principal" }, "attr": "address" } }
+                    } } }] } }
+        ]);
+        let out = run_diagnosis_probes_v2_json(swap_input(150, probes));
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["true_ids"],
+            json!(["recipient-not-self"]),
+            "context.recipient != principal.address should probe true with the same Wallet entity attrs as verdict eval: {parsed}"
+        );
+        assert_eq!(parsed["data"]["error_ids"], json!([]), "{parsed}");
+    }
+
+    #[test]
+    fn token_decimals_enrichment_matches_verdict_context() {
+        let (body, meta) = crate::action_eval_exports::tests::swap_sample_with_slippage(50);
+        let usdc = "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
+        let mut decimals = serde_json::Map::new();
+        decimals.insert(usdc.to_owned(), json!(6));
+        let probes = json!([
+            { "id": "amount-in-nano-cap", "est": {
+                "effect": "permit",
+                "principal": { "op": "All" },
+                "action": { "op": "All" },
+                "resource": { "op": "All" },
+                "conditions": [{ "kind": "when", "body":
+                    { ">=": {
+                        "left": { ".": {
+                            "left": { ".": {
+                                "left": { "Var": "context" },
+                                "attr": "direction"
+                            } },
+                            "attr": "amountInNano"
+                        } },
+                        "right": { "Value": 1000000000000_i64 }
+                    } } }] } }
+        ]);
+        let out = run_diagnosis_probes_v2_json(
+            json!({
+                "action": body,
+                "meta": meta,
+                "tx": { "chain_id": "eip155:42161",
+                        "from": "0x1111111111111111111111111111111111111111",
+                        "to":   "0x2222222222222222222222222222222222222222" },
+                "bundles": [],
+                "results": {},
+                "token_decimals": Value::Object(decimals),
+                "probes": probes
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["true_ids"],
+            json!(["amount-in-nano-cap"]),
+            "{parsed}"
+        );
+        assert_eq!(
+            parsed["data"]["context"]["direction"]["amountInNano"],
+            json!(1000000000000_i64),
+            "{parsed}"
+        );
+        assert_eq!(parsed["data"]["error_ids"], json!([]), "{parsed}");
     }
 
     #[test]
