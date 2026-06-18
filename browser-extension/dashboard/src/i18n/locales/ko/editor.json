@@ -339,7 +339,11 @@
       "토큰을 소각 주소(0x0…0 / 0x…dead)로 전송하면 차단",
       "무제한 승인(uint256/uint160 max)은 차단, 단 spender가 Permit2면 예외",
       "정체불명 블라인드 서명 요청은 경고"
-    ]
+    ],
+    "errEmpty": "정책 의도를 입력해 주세요.",
+    "errNoKey": "OpenAI API 키가 설정되지 않았어요. 프로필 페이지에서 키를 입력하세요.",
+    "errCall": "OpenAI 호출 실패: {{detail}}",
+    "errParse": "LLM 응답을 정책으로 해석하지 못했어요. 다시 시도해 주세요."
   },
   "detail": {
     "backToList": "← 목록",

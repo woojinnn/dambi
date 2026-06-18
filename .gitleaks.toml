@@ -22,6 +22,9 @@ paths = [
   # test data / fixtures / golden corpora / ABI dumps / signature vectors
   '''(^|/)__tests__/''',
   '''(^|/)integration-tests/tests/''',
+  # Rust crate integration tests carry hex token/typed-data vectors (e.g. a
+  # 32-byte route token id) that trip the generic-api-key entropy rule — fixtures, not secrets.
+  '''(^|/)crates/.*/tests/.*\.rs$''',
   '''/fixtures/''',
   '''/golden/''',
   '''/data/golden/''',
@@ -33,6 +36,9 @@ paths = [
   '''/onboarding/''',
   # curated on-chain data blobs (addresses/pools — high-entropy hex, not secrets)
   '''(^|/)registry/.*\.json$''',
+  # registry v2 manifests = typed-data / route sample fixtures (token strings,
+  # not secrets); long literal blobs trip the generic-api-key entropy rule
+  '''(^|/)registryV2/.*\.json$''',
   '''example-transactions\.json$''',
   '''address-universe.*\.json$''',
   '''.*inventory-summary\.json$''',

@@ -45,13 +45,14 @@
     "languageKo": "한국어",
     "languageEn": "English",
     "openaiTitle": "OpenAI API key",
-    "openaiDesc": "Used server-side to draft policies from natural language in the editor's LLM tab. Stored on the server and never shown again — only that a key is set.",
+    "openaiDesc": "Used to draft policies from natural language in the editor's LLM tab. The key is stored only in this browser, never sent to our server — it's used solely for direct requests to OpenAI.",
     "openaiPlaceholder": "sk-…",
     "openaiPlaceholderSet": "A key is set — enter a new one to replace it",
     "openaiStatusSet": "Configured",
     "openaiClear": "Clear",
     "openaiSaved": "Saved",
-    "openaiSaveError": "Failed to save the API key: {{error}}"
+    "openaiSaveError": "Failed to save the API key: {{error}}",
+    "openaiBadPrefix": "An OpenAI API key usually starts with 'sk-'."
   },
   "profile": {
     "title": "Profile",

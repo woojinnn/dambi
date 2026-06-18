@@ -40,7 +40,6 @@ pub mod dto;
 pub mod events;
 pub mod handler;
 pub mod lending_hf;
-pub mod llm_handlers;
 pub mod logging;
 pub mod market_dto;
 pub mod market_handlers;
