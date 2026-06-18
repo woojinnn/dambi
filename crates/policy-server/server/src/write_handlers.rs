@@ -1117,10 +1117,19 @@ async fn run_sync(
         .await
         .map_err(|e| format!("orchestrator.sync_primitives: {e}"))?;
 
-    let hl = orchestrator
-        .sync_hyperliquid_account(&mut state, now)
+    // Split HL sync into core (rolls equity_baseline/equity_hwm drawdown anchors)
+    // + long-tail (ledger reconciliation → cumulative_net_flow / fill_window), so
+    // the /wallets + /wallets/:address/sync paths populate the fields the perp
+    // equity-drawdown circuit-breaker reads — verifiable locally, not only via the
+    // background sync worker.
+    let hl_core = orchestrator
+        .sync_hyperliquid_core(&mut state, now)
         .await
-        .map_err(|e| format!("orchestrator.sync_hyperliquid_account: {e}"))?;
+        .map_err(|e| format!("orchestrator.sync_hyperliquid_core: {e}"))?;
+    let hl_longtail = orchestrator
+        .sync_hyperliquid_longtail(&mut state, now)
+        .await
+        .map_err(|e| format!("orchestrator.sync_hyperliquid_longtail: {e}"))?;
 
     let intent = orchestrator
         .sync_intent_orders(&mut state, now)
@@ -1149,12 +1158,14 @@ async fn run_sync(
         + prim.approvals_updated;
     Ok(SyncCounts {
         fields_updated: prim_updated
-            + usize::from(hl.account_updated)
+            + usize::from(hl_core.account_updated)
+            + usize::from(hl_longtail.account_updated)
             + intent.orders_updated
             + permits.permits_retired
             + refresh.fields_updated,
         fields_failed: prim.errors.len()
-            + hl.errors.len()
+            + hl_core.errors.len()
+            + hl_longtail.errors.len()
             + intent.errors.len()
             + permits.errors.len()
             + refresh.fields_failed,
