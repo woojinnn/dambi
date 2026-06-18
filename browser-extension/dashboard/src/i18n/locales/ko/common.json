@@ -45,13 +45,14 @@
     "languageKo": "한국어",
     "languageEn": "English",
     "openaiTitle": "OpenAI API 키",
-    "openaiDesc": "에디터 LLM 탭에서 자연어로 정책을 만들 때 서버에서 사용합니다. 서버에 저장되며 다시 보여주지 않고, 설정 여부만 표시합니다.",
+    "openaiDesc": "에디터 LLM 탭에서 자연어로 정책을 만들 때 사용합니다. 키는 이 브라우저에만 저장되고 서버로 전송되지 않으며, OpenAI에 직접 요청할 때만 사용됩니다.",
     "openaiPlaceholder": "sk-…",
     "openaiPlaceholderSet": "키가 설정됨 — 새 키를 입력하면 교체됩니다",
     "openaiStatusSet": "설정됨",
     "openaiClear": "지우기",
     "openaiSaved": "저장됨",
-    "openaiSaveError": "API 키 저장 실패: {{error}}"
+    "openaiSaveError": "API 키 저장 실패: {{error}}",
+    "openaiBadPrefix": "OpenAI API 키는 보통 'sk-'로 시작합니다."
   },
   "profile": {
     "title": "프로필",

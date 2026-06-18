@@ -344,7 +344,11 @@
       "Block token transfers to a burn address (0x0…0 / 0x…dead)",
       "Block unlimited approvals (uint256/uint160 max), except when the spender is Permit2",
       "Warn on unidentified blind-signature requests"
-    ]
+    ],
+    "errEmpty": "Enter a policy intent.",
+    "errNoKey": "No OpenAI API key set. Add one on the Profile page.",
+    "errCall": "OpenAI call failed: {{detail}}",
+    "errParse": "Couldn't parse the LLM response into a policy. Please try again."
   },
   "detail": {
     "backToList": "← List",
