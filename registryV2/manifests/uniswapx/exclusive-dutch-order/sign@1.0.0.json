@@ -129,11 +129,11 @@
             "reactor": "$args.order.witness.info.reactor"
           },
           "sell": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.order.witness.inputToken" } },
-          "buy": { "key": { "standard": "erc20", "chain": "$chain", "address": "$args.order.witness.outputs[0].token" } },
+          "buy": { "key": { "standard": "erc20", "chain": "$chain", "address": { "$fn": "uniswapx_single_output_field", "$args": ["$args.order.witness.outputs", "token"] } } },
           "sell_amount": "$args.order.witness.inputStartAmount",
-          "buy_min": "$args.order.witness.outputs[0].endAmount",
+          "buy_min": { "$fn": "uniswapx_single_output_field", "$args": ["$args.order.witness.outputs", "endAmount"] },
           "order_kind": "dutch",
-          "recipient": "$args.order.witness.outputs[0].recipient",
+          "recipient": { "$fn": "uniswapx_single_output_field", "$args": ["$args.order.witness.outputs", "recipient"] },
           "valid_until": "$args.order.witness.info.deadline"
         }
       }

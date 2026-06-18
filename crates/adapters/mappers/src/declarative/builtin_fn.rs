@@ -37,19 +37,24 @@ use serde_json::Value as JsonValue;
 /// protocol-specific — they encode one venue's fixed calldata / bit layout:
 /// `curve_route_last_token`, `route_hash` (Curve), `maker_traits_expiry`
 /// (1inch LOP), `uniswap_v3_pool_swap_field` (Uniswap V3),
-/// `uniswapx_reactor_order_field` (UniswapX) — say so in their own doc comment
-/// below. The rest (`keccak256`, `address_from_uint256`, `coalesce_address`,
-/// `token_key_or_native`) are venue-agnostic byte/address utilities.
+/// `uniswapx_single_output_field`, `uniswapx_reactor_order_field` (UniswapX)
+/// — say so in their own doc comment below. The rest (`keccak256`,
+/// `address_from_uint256`, `address_from_left_padded_bytes32`,
+/// `left_padded_bytes32_shape`, `coalesce_address`, `token_key_or_native`) are
+/// venue-agnostic byte/address utilities.
 pub const WHITELIST: &[&str] = &[
     "curve_route_last_token",
     "route_hash",
     "unoswap_route_hash",
     "keccak256",
     "address_from_uint256",
+    "address_from_left_padded_bytes32",
+    "left_padded_bytes32_shape",
     "maker_traits_expiry",
     "coalesce_address",
     "token_key_or_native",
     "uniswap_v3_pool_swap_field",
+    "uniswapx_single_output_field",
     "uniswapx_reactor_order_field",
     "balancer_zip_token_amounts",
     "balancer_pool_id_to_address",
@@ -66,6 +71,8 @@ pub const WHITELIST: &[&str] = &[
     "bytes_nonempty",
     "token_key_or_native_zero",
     "bridge_recipient",
+    "bridge_recipient_from_bytes32",
+    "map_recipient",
 ];
 
 /// Dispatch a `$fn` call by name against its already-substituted JSON args.
@@ -80,10 +87,13 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "unoswap_route_hash" => unoswap_route_hash(args),
         "keccak256" => keccak256_hex(args),
         "address_from_uint256" => address_from_uint256(args),
+        "address_from_left_padded_bytes32" => address_from_left_padded_bytes32(args),
+        "left_padded_bytes32_shape" => left_padded_bytes32_shape(args),
         "maker_traits_expiry" => maker_traits_expiry(args),
         "coalesce_address" => coalesce_address(args),
         "token_key_or_native" => token_key_or_native(args),
         "uniswap_v3_pool_swap_field" => uniswap_v3_pool_swap_field(args),
+        "uniswapx_single_output_field" => uniswapx_single_output_field(args),
         "uniswapx_reactor_order_field" => uniswapx_reactor_order_field(args),
         "balancer_zip_token_amounts" => balancer_zip_token_amounts(args),
         "balancer_pool_id_to_address" => balancer_pool_id_to_address(args),
@@ -100,6 +110,8 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "bytes_nonempty" => bytes_nonempty(args),
         "token_key_or_native_zero" => token_key_or_native_zero(args),
         "bridge_recipient" => bridge_recipient(args),
+        "bridge_recipient_from_bytes32" => bridge_recipient_from_bytes32(args),
+        "map_recipient" => map_recipient(args),
         _ => Err(format!(
             "unknown $fn '{name}' (whitelist: {})",
             WHITELIST.join(", ")
@@ -230,6 +242,49 @@ fn address_from_uint256(args: &[JsonValue]) -> Result<JsonValue, String> {
     let bytes = packed.to_be_bytes::<32>();
     let addr = Address::from_slice(&bytes[12..]);
     Ok(JsonValue::String(format!("{addr:#x}")))
+}
+
+/// `address_from_left_padded_bytes32(word) -> address` — decode a bytes32 that
+/// is expected to be Solidity's `bytes32(uint256(uint160(address)))` form.
+///
+/// Unlike [`address_from_uint256`], this helper rejects non-zero high 96 bits.
+/// Use it for cross-VM `bytes32` ABI fields that are only EVM addresses when
+/// left-padded, not for packed uint256 route words where high bits are flags.
+fn address_from_left_padded_bytes32(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "address_from_left_padded_bytes32 expects 1 arg (bytes32), got {}",
+            args.len()
+        ));
+    }
+    let bytes = json_bytes32(&args[0], "address_from_left_padded_bytes32: word")?;
+    let addr = left_padded_bytes32_address(&bytes, "address_from_left_padded_bytes32: word")?;
+    Ok(JsonValue::String(format!("{addr:#x}")))
+}
+
+/// `left_padded_bytes32_shape(word[, ...]) -> "left_padded" | "unsupported"`.
+///
+/// Shape probe for manifests that should emit a precise action only when every
+/// relevant `bytes32` word is a left-padded EVM address. Malformed or
+/// non-left-padded words return `"unsupported"` so the manifest can choose an
+/// `Unknown` fallback instead of failing structural validation.
+fn left_padded_bytes32_shape(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.is_empty() {
+        return Err("left_padded_bytes32_shape expects at least 1 arg".to_owned());
+    }
+    let supported = args.iter().all(|arg| {
+        json_bytes32(arg, "left_padded_bytes32_shape: word")
+            .ok()
+            .is_some_and(|bytes| left_padded_bytes32_address(&bytes, "").is_ok())
+    });
+    Ok(JsonValue::String(
+        if supported {
+            "left_padded"
+        } else {
+            "unsupported"
+        }
+        .to_owned(),
+    ))
 }
 
 /// `bytes_nonempty(data: bytes) -> bool` — whether a `bytes` argument carries any
@@ -367,6 +422,33 @@ fn token_key_or_native_zero(args: &[JsonValue]) -> Result<JsonValue, String> {
     Ok(JsonValue::Object(key))
 }
 
+/// `map_recipient(recipient, from, to) -> Address` — resolve a Uniswap action
+/// recipient sentinel so a redirect check doesn't false-positive on the official
+/// SDK's self-send encoding. Uniswap `ActionConstants`: `0x..01` (`MSG_SENDER`) →
+/// `from` (the signer), `0x..02` (`ADDRESS_THIS`) → `to` (the router /
+/// PositionManager); any other address passes through unchanged. Used by the V4
+/// `modifyLiquidities` settlement opcode (TAKE_PAIR) so a genuine third-party
+/// payout warns while a self-take encoded as `MSG_SENDER` does not.
+fn map_recipient(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 3 {
+        return Err(format!(
+            "map_recipient expects 3 args (recipient, from, to), got {}",
+            args.len()
+        ));
+    }
+    let recipient = json_address(&args[0], "map_recipient: recipient")?;
+    let from = json_address(&args[1], "map_recipient: from")?;
+    let to = json_address(&args[2], "map_recipient: to")?;
+    const MSG_SENDER: &str = "0x0000000000000000000000000000000000000001";
+    const ADDRESS_THIS: &str = "0x0000000000000000000000000000000000000002";
+    let resolved = match format!("{recipient:#x}").as_str() {
+        MSG_SENDER => from,
+        ADDRESS_THIS => to,
+        _ => recipient,
+    };
+    Ok(JsonValue::String(format!("{resolved:#x}")))
+}
+
 /// `bridge_recipient(evm_receiver, raw_bytes32_receiver) -> BridgeRecipient`.
 ///
 /// Builds the discriminated `BridgeRecipient` for a Li.Fi bridge leg, handling
@@ -400,6 +482,37 @@ fn bridge_recipient(args: &[JsonValue]) -> Result<JsonValue, String> {
     } else {
         m.insert("kind".to_owned(), JsonValue::String("evm".to_owned()));
         m.insert("address".to_owned(), JsonValue::String(format!("{evm:#x}")));
+    }
+    Ok(JsonValue::Object(m))
+}
+
+/// `bridge_recipient_from_bytes32(word) -> BridgeRecipient`.
+///
+/// Cross-VM bridge APIs such as Across `deposit` carry recipient as `bytes32`.
+/// A left-padded 20-byte EVM address becomes `{kind:"evm", address}`; any
+/// non-left-padded word is preserved as `{kind:"raw", bytes32}` so policy sees
+/// the signed recipient bytes instead of a low-160-bit projection.
+fn bridge_recipient_from_bytes32(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "bridge_recipient_from_bytes32 expects 1 arg (bytes32), got {}",
+            args.len()
+        ));
+    }
+    let bytes = json_bytes32(&args[0], "bridge_recipient_from_bytes32: word")?;
+    let mut m = serde_json::Map::new();
+    if let Ok(addr) = left_padded_bytes32_address(&bytes, "bridge_recipient_from_bytes32: word") {
+        m.insert("kind".to_owned(), JsonValue::String("evm".to_owned()));
+        m.insert(
+            "address".to_owned(),
+            JsonValue::String(format!("{addr:#x}")),
+        );
+    } else {
+        m.insert("kind".to_owned(), JsonValue::String("raw".to_owned()));
+        m.insert(
+            "bytes32".to_owned(),
+            JsonValue::String(format!("0x{}", hex::encode(bytes))),
+        );
     }
     Ok(JsonValue::Object(m))
 }
@@ -472,6 +585,80 @@ fn uniswap_v3_pool_swap_field(args: &[JsonValue]) -> Result<JsonValue, String> {
     Ok(value)
 }
 
+/// `uniswapx_single_output_field(outputs, field) -> scalar`.
+///
+/// Current `SignIntentOrder`/`SettleIntentOrder` ActionBody shapes can express
+/// one buy token, one min-buy amount, and one recipient. Real UniswapX orders
+/// can carry multiple outputs, so typed-data manifests must reject multi-output
+/// orders instead of silently truncating to `outputs[0]`.
+fn uniswapx_single_output_field(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "uniswapx_single_output_field expects 2 args (outputs, field), got {}",
+            args.len()
+        ));
+    }
+
+    let outputs = args[0]
+        .as_array()
+        .ok_or("uniswapx_single_output_field: outputs arg is not an array")?;
+    if outputs.len() != 1 {
+        return Err(format!(
+            "uniswapx_single_output_field: expected exactly 1 output, got {}",
+            outputs.len()
+        ));
+    }
+    let field = args[1]
+        .as_str()
+        .ok_or("uniswapx_single_output_field: field arg is not a string")?;
+    uniswapx_json_output_field(&outputs[0], field, "uniswapx_single_output_field")
+}
+
+fn uniswapx_json_output_field(
+    output: &JsonValue,
+    field: &str,
+    label: &str,
+) -> Result<JsonValue, String> {
+    let value = match output {
+        JsonValue::Object(map) => map
+            .get(field)
+            .ok_or_else(|| format!("{label}: output missing field '{field}'"))?,
+        JsonValue::Array(items) => {
+            let idx = uniswapx_json_output_field_index(field)
+                .ok_or_else(|| format!("{label}: unsupported output field '{field}'"))?;
+            items
+                .get(idx)
+                .ok_or_else(|| format!("{label}: output missing field '{field}' at index {idx}"))?
+        }
+        other => {
+            return Err(format!("{label}: output is not object/array: {other}"));
+        }
+    };
+
+    match field {
+        "token" | "recipient" => {
+            let address = json_address(value, &format!("{label}: output.{field}"))?;
+            Ok(JsonValue::String(format!("{address:#x}")))
+        }
+        "startAmount" | "endAmount" | "minAmount" | "amount" => {
+            let amount = json_u256(value, &format!("{label}: output.{field}"))?;
+            Ok(JsonValue::String(amount.to_string()))
+        }
+        _ => Err(format!("{label}: unsupported output field '{field}'")),
+    }
+}
+
+fn uniswapx_json_output_field_index(field: &str) -> Option<usize> {
+    match field {
+        "token" => Some(0),
+        "startAmount" | "amount" => Some(1),
+        "endAmount" => Some(2),
+        "recipient" => Some(3),
+        "minAmount" => Some(4),
+        _ => None,
+    }
+}
+
 /// `uniswapx_reactor_order_field(order_bytes, reactor, field) -> scalar`.
 ///
 /// UniswapX reactors take a generic `SignedOrder { bytes order; bytes sig }`,
@@ -492,13 +679,7 @@ fn uniswapx_reactor_order_field(args: &[JsonValue]) -> Result<JsonValue, String>
         .as_str()
         .ok_or("uniswapx_reactor_order_field: field arg is not a string")?;
     let family = UniswapXOrderFamily::for_reactor(&reactor)?;
-    let order = decode_uniswapx_order(family, &order_bytes).or_else(|primary_error| {
-        decode_any_uniswapx_order(family, &order_bytes).map_err(|fallback_error| {
-            format!(
-                "target-family decode failed: {primary_error}; fallback family decode failed: {fallback_error}"
-            )
-        })
-    })?;
+    let order = decode_uniswapx_order(family, &order_bytes, &reactor)?;
 
     order.field(field).ok_or_else(|| {
         format!(
@@ -508,7 +689,7 @@ fn uniswapx_reactor_order_field(args: &[JsonValue]) -> Result<JsonValue, String>
     })
 }
 
-/// `balancer_zip_token_amounts(chain, assets: address[], amounts: uint256[]) -> [[TokenRef, U256]]`.
+/// `balancer_zip_token_amounts(chain, assets: address[], amounts: uint256[, field]) -> [[TokenRef, U256]] | shape`.
 ///
 /// Balancer V2 `joinPool`/`exitPool` carry the pooled token set as two parallel
 /// calldata arrays — `request.assets[]` (token addresses) and
@@ -517,12 +698,14 @@ fn uniswapx_reactor_order_field(args: &[JsonValue]) -> Result<JsonValue, String>
 /// field is `Vec<(TokenRef, U256)>`, which the flat `$args.*` placeholder grammar
 /// cannot build from two arrays. This zips them index-aligned into the
 /// `[[{"key":{"standard":"erc20","chain":c,"address":a}}, "<amount>"], …]` shape
-/// `lower_token_amount_set` consumes. Returns the array (the second `$fn` after
-/// `token_key_or_native` to return composite JSON).
+/// `lower_token_amount_set` consumes. The optional `field == "shape"` lets
+/// manifests surface mismatched/empty arrays as `Unknown` instead of silently
+/// truncating the token set to the common prefix. Returns the array (the second
+/// `$fn` after `token_key_or_native` to return composite JSON).
 fn balancer_zip_token_amounts(args: &[JsonValue]) -> Result<JsonValue, String> {
-    if args.len() != 3 {
+    if !matches!(args.len(), 3 | 4) {
         return Err(format!(
-            "balancer_zip_token_amounts expects 3 args (chain, assets, amounts), got {}",
+            "balancer_zip_token_amounts expects 3 or 4 args (chain, assets, amounts[, field]), got {}",
             args.len()
         ));
     }
@@ -535,11 +718,32 @@ fn balancer_zip_token_amounts(args: &[JsonValue]) -> Result<JsonValue, String> {
     let amounts = args[2]
         .as_array()
         .ok_or("balancer_zip_token_amounts: amounts arg is not an array")?;
-    // Real Balancer calldata guarantees assets.len() == amounts.len(); the
-    // validate's type-valid synthetic fuzz can emit unequal lengths (a
-    // would-revert tx), so zip the common prefix instead of erroring — real
-    // correctness is pinned by the corpus expect_body, not by this length.
-    let mut pairs = Vec::with_capacity(assets.len().min(amounts.len()));
+    if let Some(field) = args.get(3) {
+        let field = field
+            .as_str()
+            .ok_or("balancer_zip_token_amounts: field arg is not a string")?;
+        if field != "shape" {
+            return Err(format!(
+                "balancer_zip_token_amounts: unsupported field '{field}'"
+            ));
+        }
+        return Ok(JsonValue::String(
+            if !assets.is_empty() && assets.len() == amounts.len() {
+                "matched_nonempty"
+            } else {
+                "unsupported"
+            }
+            .to_owned(),
+        ));
+    }
+    if assets.is_empty() || assets.len() != amounts.len() {
+        return Err(format!(
+            "balancer_zip_token_amounts: assets/amounts length mismatch or empty (assets={}, amounts={})",
+            assets.len(),
+            amounts.len()
+        ));
+    }
+    let mut pairs = Vec::with_capacity(assets.len());
     for (i, (asset, amount)) in assets.iter().zip(amounts).enumerate() {
         let addr = json_address(asset, &format!("balancer_zip_token_amounts: assets[{i}]"))?;
         // Normalise the amount to a decimal string (U256 is serde-de'd from a
@@ -562,7 +766,7 @@ fn balancer_zip_token_amounts(args: &[JsonValue]) -> Result<JsonValue, String> {
     Ok(JsonValue::Array(pairs))
 }
 
-/// `balancer_v3_zip_pool_tokens(chain, pool: address, amounts: uint256[], pool_token_map: {pool->[token]}) -> [[TokenRef, U256]]`.
+/// `balancer_v3_zip_pool_tokens(chain, pool: address, amounts: uint256[], pool_token_map: {pool->[token]}[, field]) -> [[TokenRef, U256]] | shape`.
 ///
 /// Balancer V3 `addLiquidityProportional` / `addLiquidityUnbalanced` /
 /// `removeLiquidityProportional` carry the per-token `amounts[]` array but **not**
@@ -576,12 +780,14 @@ fn balancer_zip_token_amounts(args: &[JsonValue]) -> Result<JsonValue, String> {
 /// `RemoveLiquidity::PooledBurn.min_out` consume.
 ///
 /// Pool absent from the baked map (a deferred long-tail pool, or one created
-/// after the snapshot) → **error**, so the route misses and the user is
-/// warned — never a silent pass of an unresolved deposit/withdrawal.
+/// after the snapshot) → **error** for direct extraction, or `"unsupported"`
+/// for `field == "shape"` so manifests can emit `Unknown`. Length mismatch
+/// between baked pool tokens and calldata amounts is also unsupported; never
+/// silently truncate a liquidity leg to the common prefix.
 fn balancer_v3_zip_pool_tokens(args: &[JsonValue]) -> Result<JsonValue, String> {
-    if args.len() != 4 {
+    if !matches!(args.len(), 4 | 5) {
         return Err(format!(
-            "balancer_v3_zip_pool_tokens expects 4 args (chain, pool, amounts, pool_token_map), got {}",
+            "balancer_v3_zip_pool_tokens expects 4 or 5 args (chain, pool, amounts, pool_token_map[, field]), got {}",
             args.len()
         ));
     }
@@ -597,20 +803,40 @@ fn balancer_v3_zip_pool_tokens(args: &[JsonValue]) -> Result<JsonValue, String> 
     let map = args[3]
         .as_object()
         .ok_or("balancer_v3_zip_pool_tokens: pool_token_map arg is not an object")?;
-    let tokens = map
-        .get(&pool_key)
-        .and_then(JsonValue::as_array)
-        .ok_or_else(|| {
-            format!(
-                "balancer_v3_zip_pool_tokens: pool {pool_key} not in baked pool_token_map \
+    let tokens_opt = map.get(&pool_key).and_then(JsonValue::as_array);
+    if let Some(field) = args.get(4) {
+        let field = field
+            .as_str()
+            .ok_or("balancer_v3_zip_pool_tokens: field arg is not a string")?;
+        if field != "shape" {
+            return Err(format!(
+                "balancer_v3_zip_pool_tokens: unsupported field '{field}'"
+            ));
+        }
+        return Ok(JsonValue::String(
+            if tokens_opt.is_some_and(|tokens| !tokens.is_empty() && tokens.len() == amounts.len())
+            {
+                "matched_nonempty"
+            } else {
+                "unsupported"
+            }
+            .to_owned(),
+        ));
+    }
+    let tokens = tokens_opt.ok_or_else(|| {
+        format!(
+            "balancer_v3_zip_pool_tokens: pool {pool_key} not in baked pool_token_map \
              (deferred long-tail or post-snapshot pool → fail-closed)"
-            )
-        })?;
-    // Real calldata guarantees tokens.len() == amounts.len() (the pool's token
-    // count); type-valid synthetic fuzz can emit a mismatched `amounts` length,
-    // so zip the common prefix (min length) instead of erroring — real
-    // correctness is pinned by the corpus expect_body, not by this length.
-    let mut pairs = Vec::with_capacity(tokens.len().min(amounts.len()));
+        )
+    })?;
+    if tokens.is_empty() || tokens.len() != amounts.len() {
+        return Err(format!(
+            "balancer_v3_zip_pool_tokens: pool token/amount length mismatch or empty (tokens={}, amounts={})",
+            tokens.len(),
+            amounts.len()
+        ));
+    }
+    let mut pairs = Vec::with_capacity(tokens.len());
     for (i, (token, amount)) in tokens.iter().zip(amounts).enumerate() {
         let addr = json_address(
             token,
@@ -692,9 +918,12 @@ fn balancer_bpt_scalar(decoded: &DecodedEnum) -> U256 {
 /// BPT-amount scalar (`min_lp_out` for joins, `lp_amount` burned for exits). The
 /// per-token amounts and recipient live in calldata; only this LP bound is inside
 /// `userData`. `class ∈ {join, exit}` (selects the table; exits try Weighted then
-/// Stable to resolve the kind-reuse ambiguity). `field ∈ {min_bpt, bpt_in}` is
-/// validated but extraction is uniform ([`balancer_bpt_scalar`]). Undecodable /
-/// kindless payloads fall back to `"0"` (conservative: an unknown LP bound).
+/// Stable to resolve the kind-reuse ambiguity). `field ∈ {shape, min_bpt,
+/// bpt_in}`. The `"shape"` field lets manifests preserve concrete liquidity
+/// actions for decoded Balancer kinds while surfacing unknown future/invalid
+/// `userData` as `Unknown` instead of silently replacing the LP bound with zero.
+/// For a decoded kind that genuinely has no BPT scalar (for example INIT),
+/// extraction still returns `"0"`.
 fn balancer_v2_userdata_field(args: &[JsonValue]) -> Result<JsonValue, String> {
     if args.len() != 3 {
         return Err(format!(
@@ -709,9 +938,9 @@ fn balancer_v2_userdata_field(args: &[JsonValue]) -> Result<JsonValue, String> {
     let field = args[2]
         .as_str()
         .ok_or("balancer_v2_userdata_field: field arg is not a string")?;
-    if !matches!(field, "min_bpt" | "bpt_in") {
+    if !matches!(field, "shape" | "min_bpt" | "bpt_in") {
         return Err(format!(
-            "balancer_v2_userdata_field: unsupported field '{field}' (min_bpt | bpt_in)"
+            "balancer_v2_userdata_field: unsupported field '{field}' (shape | min_bpt | bpt_in)"
         ));
     }
     let decoded = match class {
@@ -729,7 +958,20 @@ fn balancer_v2_userdata_field(args: &[JsonValue]) -> Result<JsonValue, String> {
             ))
         }
     };
-    let value = decoded.map_or(U256::ZERO, |d| balancer_bpt_scalar(&d));
+    if field == "shape" {
+        return Ok(JsonValue::String(
+            if decoded.is_some() {
+                "supported"
+            } else {
+                "unsupported"
+            }
+            .to_owned(),
+        ));
+    }
+    let decoded = decoded.ok_or_else(|| {
+        "balancer_v2_userdata_field: unsupported or undecodable userData kind".to_owned()
+    })?;
+    let value = balancer_bpt_scalar(&decoded);
     Ok(JsonValue::String(value.to_string()))
 }
 
@@ -741,9 +983,10 @@ fn balancer_v2_userdata_field(args: &[JsonValue]) -> Result<JsonValue, String> {
 /// express. This resolves it into a single aggregate `Amm::Swap`:
 /// `token_in = assets[swaps[0].assetInIndex]`, `token_out = assets[swaps[last].assetOutIndex]`.
 /// `swaps[i]` arrives as a positional array `[poolId, assetInIndex, assetOutIndex, amount, userData]`.
-/// `field ∈ {token_in, token_out, pool_id, amount, direction_kind}`. Coarse for true
-/// multi-path batches (picks first-in/last-out + first step's amount/pool) — correct
-/// for the dominant single-route multi-hop; documented in the manifest `_note`.
+/// `field ∈ {shape, token_in, token_out, pool_id, amount, direction_kind}`. The
+/// `"shape"` field lets the manifest preserve exact single-step swaps while
+/// surfacing multi-step, multi-path, or malformed batches as Unknown instead of
+/// truncating them to `swaps[0]` / `swaps[last]`.
 /// `kind`: `0 = GIVEN_IN` (exact input), `1 = GIVEN_OUT` (exact output).
 fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String> {
     if args.len() != 4 {
@@ -752,9 +995,9 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
             args.len()
         ));
     }
-    // kind is uint8 (0=GIVEN_IN/1=GIVEN_OUT); default GIVEN_IN if a fuzz value
-    // does not fit u64. swaps/assets/field must be the right JSON kinds (structural).
-    let kind = json_to_u64(&args[0]).unwrap_or(0);
+    // kind is uint8 (0=GIVEN_IN/1=GIVEN_OUT). Other values are unsupported even
+    // if ABI-decodable: Balancer itself only defines those two enum variants.
+    let kind = json_to_u64(&args[0]);
     let swaps = args[1]
         .as_array()
         .ok_or("balancer_v2_batch_swap_field: swaps arg is not an array")?;
@@ -764,31 +1007,51 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
     let field = args[3]
         .as_str()
         .ok_or("balancer_v2_batch_swap_field: field arg is not a string")?;
-    const ZERO_ADDR: &str = "0x0000000000000000000000000000000000000000";
     let first = swaps.first().and_then(JsonValue::as_array);
     let last = swaps.last().and_then(JsonValue::as_array);
-    // Resolve assets[idx] for a (possibly huge / out-of-range) index by wrapping
-    // modulo assets.len() — identity on real in-bounds indices; on the validate's
-    // type-valid synthetic fuzz (huge uint / oob index = would-revert tx) it lands
-    // in-bounds so the decode stays shape-valid (real correctness pinned by corpus
-    // expect_body). Empty assets → zero-address sentinel.
-    let asset_at = |idx_val: Option<&JsonValue>| -> JsonValue {
-        if assets.is_empty() {
-            return JsonValue::String(ZERO_ADDR.to_owned());
-        }
+
+    let index_in_bounds = |idx_val: Option<&JsonValue>| -> bool {
+        let Some(idx) = idx_val
+            .and_then(|v| json_u256(v, "idx").ok())
+            .and_then(|u| usize::try_from(u).ok())
+        else {
+            return false;
+        };
+        idx < assets.len()
+    };
+    let single_step_supported = kind.is_some_and(|k| matches!(k, 0 | 1))
+        && swaps.len() == 1
+        && first
+            .map(|s| {
+                s.first().is_some()
+                    && s.get(3).is_some()
+                    && index_in_bounds(s.get(1))
+                    && index_in_bounds(s.get(2))
+            })
+            .unwrap_or(false);
+
+    let asset_at = |idx_val: Option<&JsonValue>, label: &str| -> Result<JsonValue, String> {
         let idx = idx_val
             .and_then(|v| json_u256(v, "idx").ok())
-            .map(|u| usize::try_from(u % U256::from(assets.len())).unwrap_or(0))
-            .unwrap_or(0);
+            .and_then(|u| usize::try_from(u).ok())
+            .ok_or_else(|| format!("balancer_v2_batch_swap_field: {label} index is invalid"))?;
         assets
             .get(idx)
             .cloned()
-            .unwrap_or_else(|| JsonValue::String(ZERO_ADDR.to_owned()))
+            .ok_or_else(|| format!("balancer_v2_batch_swap_field: {label} index out of range"))
     };
     match field {
+        "shape" => Ok(JsonValue::String(
+            if single_step_supported {
+                "single_step"
+            } else {
+                "unsupported"
+            }
+            .to_owned(),
+        )),
         // BatchSwapStep = [poolId(0), assetInIndex(1), assetOutIndex(2), amount(3), userData(4)].
-        "token_in" => Ok(asset_at(first.and_then(|s| s.get(1)))),
-        "token_out" => Ok(asset_at(last.and_then(|s| s.get(2)))),
+        "token_in" => asset_at(first.and_then(|s| s.get(1)), "assetInIndex"),
+        "token_out" => asset_at(last.and_then(|s| s.get(2)), "assetOutIndex"),
         "pool_id" => Ok(first
             .and_then(|s| s.first())
             .cloned()
@@ -797,14 +1060,13 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
             .and_then(|s| s.get(3))
             .cloned()
             .unwrap_or_else(|| JsonValue::String("0".to_owned()))),
-        "direction_kind" => Ok(JsonValue::String(
-            if kind == 0 {
-                "exact_input"
-            } else {
-                "exact_output"
-            }
-            .to_owned(),
-        )),
+        "direction_kind" => match kind {
+            Some(0) => Ok(JsonValue::String("exact_input".to_owned())),
+            Some(1) => Ok(JsonValue::String("exact_output".to_owned())),
+            other => Err(format!(
+                "balancer_v2_batch_swap_field: unsupported kind {other:?}"
+            )),
+        },
         other => Err(format!(
             "balancer_v2_batch_swap_field: unsupported field '{other}'"
         )),
@@ -819,11 +1081,9 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
 /// `steps[j] = [pool, tokenOut, isBuffer]` (positional, per `args_json`). The
 /// aggregate swap is `path[0]`: `token_in = tokenIn`, `token_out = the LAST step's
 /// tokenOut`, `pool = the first step's pool`, `amount_in = exactAmountIn`,
-/// `min_out = minAmountOut`. No baked map needed (tokens are in calldata). Coarse
-/// for true multi-path batches (picks the first path) — correct for the dominant
-/// single-route multi-hop; documented in the manifest `_note`. Fuzz-tolerant:
-/// empty paths/steps degrade to zero-address / "0" (real correctness pinned by the
-/// corpus expect_body), so no harness shape-artifact entry is needed.
+/// `min_out = minAmountOut`. No baked map needed (tokens are in calldata).
+/// The `"shape"` field lets manifests preserve exact single-path swaps while
+/// surfacing multi-path or empty-step batches as Unknown instead of truncating.
 fn balancer_v3_swap_path_field(args: &[JsonValue]) -> Result<JsonValue, String> {
     if args.len() != 2 {
         return Err(format!(
@@ -842,6 +1102,14 @@ fn balancer_v3_swap_path_field(args: &[JsonValue]) -> Result<JsonValue, String> 
     let p0 = paths.first().and_then(JsonValue::as_array);
     let steps = p0.and_then(|p| p.get(1)).and_then(JsonValue::as_array);
     match field {
+        "shape" => Ok(JsonValue::String(
+            if paths.len() == 1 && steps.is_some_and(|s| !s.is_empty()) {
+                "single_nonempty"
+            } else {
+                "unsupported"
+            }
+            .to_owned(),
+        )),
         // path[0] = [tokenIn(0), steps(1), exactAmountIn(2), minAmountOut(3)].
         "token_in" => Ok(p0
             .and_then(|p| p.first())
@@ -884,13 +1152,6 @@ enum UniswapXOrderFamily {
 }
 
 impl UniswapXOrderFamily {
-    const ALL: [Self; 4] = [
-        Self::ExclusiveDutch,
-        Self::V2Dutch,
-        Self::V3Dutch,
-        Self::Priority,
-    ];
-
     fn for_reactor(reactor: &Address) -> Result<Self, String> {
         let lower = reactor.to_string().to_ascii_lowercase();
         match lower.as_str() {
@@ -920,23 +1181,6 @@ impl UniswapXOrderFamily {
             Self::Priority => "decode(((address,address,uint256,uint256,address,bytes),address,uint256,uint256,(address,uint256,uint256),(address,uint256,uint256,address)[],(uint256),bytes))",
         }
     }
-}
-
-fn decode_any_uniswapx_order(
-    preferred: UniswapXOrderFamily,
-    order_bytes: &[u8],
-) -> Result<DecodedUniswapXOrder, String> {
-    let mut errors = Vec::new();
-    for family in UniswapXOrderFamily::ALL {
-        if family == preferred {
-            continue;
-        }
-        match decode_uniswapx_order(family, order_bytes) {
-            Ok(order) => return Ok(order),
-            Err(error) => errors.push(format!("{family:?}: {error}")),
-        }
-    }
-    Err(errors.join("; "))
 }
 
 #[derive(Debug)]
@@ -972,6 +1216,7 @@ impl DecodedUniswapXOrder {
 fn decode_uniswapx_order(
     family: UniswapXOrderFamily,
     order_bytes: &[u8],
+    expected_reactor: &Address,
 ) -> Result<DecodedUniswapXOrder, String> {
     let signature = family.synthetic_decode_signature();
     let mut calldata = Vec::with_capacity(4 + order_bytes.len());
@@ -985,6 +1230,12 @@ fn decode_uniswapx_order(
         .ok_or("uniswapx order ABI decode returned no args")?;
     let order = tuple_items(&order.value, "order")?;
     let info = tuple_at(order, 0, "order.info")?;
+    let embedded_reactor = address_value(tuple_get(info, 0, "order.info.reactor")?)?;
+    if embedded_reactor != *expected_reactor {
+        return Err(format!(
+            "uniswapx order decode: order.info.reactor {embedded_reactor:#x} does not match target reactor {expected_reactor:#x}"
+        ));
+    }
     let swapper = address_json(tuple_get(info, 1, "order.info.swapper")?)?;
     let nonce = uint_string_json(tuple_get(info, 2, "order.info.nonce")?)?;
     let deadline = uint_u64_json(tuple_get(info, 3, "order.info.deadline")?)?;
@@ -992,7 +1243,7 @@ fn decode_uniswapx_order(
     match family {
         UniswapXOrderFamily::ExclusiveDutch => {
             let input = tuple_at(order, 5, "order.input")?;
-            let output = first_tuple_array_item(order, 6, "order.outputs")?;
+            let output = single_tuple_array_item(order, 6, "order.outputs")?;
             Ok(DecodedUniswapXOrder {
                 swapper,
                 sell_token: address_json(tuple_get(input, 0, "order.input.token")?)?,
@@ -1007,7 +1258,7 @@ fn decode_uniswapx_order(
         }
         UniswapXOrderFamily::V2Dutch => {
             let input = tuple_at(order, 2, "order.baseInput")?;
-            let output = first_tuple_array_item(order, 3, "order.baseOutputs")?;
+            let output = single_tuple_array_item(order, 3, "order.baseOutputs")?;
             let cosigner_data = tuple_at(order, 4, "order.cosignerData")?;
             let cosigner_input_amount = uint_from_value(tuple_get(
                 cosigner_data,
@@ -1033,7 +1284,7 @@ fn decode_uniswapx_order(
         }
         UniswapXOrderFamily::V3Dutch => {
             let input = tuple_at(order, 3, "order.baseInput")?;
-            let output = first_tuple_array_item(order, 4, "order.baseOutputs")?;
+            let output = single_tuple_array_item(order, 4, "order.baseOutputs")?;
             let cosigner_data = tuple_at(order, 5, "order.cosignerData")?;
             let cosigner_input_amount = uint_from_value(tuple_get(
                 cosigner_data,
@@ -1059,7 +1310,7 @@ fn decode_uniswapx_order(
         }
         UniswapXOrderFamily::Priority => {
             let input = tuple_at(order, 4, "order.input")?;
-            let output = first_tuple_array_item(order, 5, "order.outputs")?;
+            let output = single_tuple_array_item(order, 5, "order.outputs")?;
             Ok(DecodedUniswapXOrder {
                 swapper,
                 sell_token: address_json(tuple_get(input, 0, "order.input.token")?)?,
@@ -1111,7 +1362,7 @@ fn tuple_get<'a>(
         .ok_or_else(|| format!("uniswapx order decode: missing {path} at tuple index {idx}"))
 }
 
-fn first_tuple_array_item<'a>(
+fn single_tuple_array_item<'a>(
     order: &'a [DynSolValue],
     idx: usize,
     path: &str,
@@ -1126,15 +1377,23 @@ fn first_tuple_array_item<'a>(
             ))
         }
     };
-    let first = items
-        .first()
-        .ok_or_else(|| format!("uniswapx order decode: {path} is empty"))?;
-    tuple_items(first, &format!("{path}[0]"))
+    if items.len() != 1 {
+        return Err(format!(
+            "uniswapx order decode: {path} expected exactly 1 output, got {}",
+            items.len()
+        ));
+    }
+    tuple_items(&items[0], &format!("{path}[0]"))
 }
 
 fn address_json(value: &DynSolValue) -> Result<JsonValue, String> {
+    let address = address_value(value)?;
+    Ok(JsonValue::String(address.to_string()))
+}
+
+fn address_value(value: &DynSolValue) -> Result<Address, String> {
     match value {
-        DynSolValue::Address(address) => Ok(JsonValue::String(address.to_string())),
+        DynSolValue::Address(address) => Ok(*address),
         other => Err(format!(
             "uniswapx order decode: expected address, got {}",
             dyn_value_kind(other)
@@ -1185,6 +1444,23 @@ fn json_hex_bytes(value: &JsonValue, label: &str) -> Result<Vec<u8>, String> {
         .ok_or_else(|| format!("{label} is not a hex string"))?;
     let body = s.strip_prefix("0x").unwrap_or(s);
     hex::decode(body).map_err(|e| format!("{label} is not valid hex: {e}"))
+}
+
+fn json_bytes32(value: &JsonValue, label: &str) -> Result<[u8; 32], String> {
+    let bytes = json_hex_bytes(value, label)?;
+    let len = bytes.len();
+    bytes
+        .try_into()
+        .map_err(|_| format!("{label} must be exactly 32 bytes, got {len}"))
+}
+
+fn left_padded_bytes32_address(bytes: &[u8; 32], label: &str) -> Result<Address, String> {
+    if bytes[..12].iter().any(|b| *b != 0) {
+        return Err(format!(
+            "{label} is not a left-padded EVM address (high 96 bits are non-zero)"
+        ));
+    }
+    Ok(Address::from_slice(&bytes[12..]))
 }
 
 /// Parse a JSON uint — decimal string (width > 64), `0x` hex string, or JSON
@@ -1334,8 +1610,15 @@ fn u64_saturating(args: &[JsonValue]) -> Result<JsonValue, String> {
         return Err(format!("u64_saturating expects 1 arg, got {}", args.len()));
     }
     let value = match &args[0] {
-        JsonValue::Number(n) => n.as_u64().unwrap_or(u64::MAX),
-        JsonValue::String(s) => s.parse::<u64>().unwrap_or(u64::MAX),
+        JsonValue::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| format!("u64_saturating: number is not a uint: {n}"))?,
+        JsonValue::String(s) => {
+            if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(format!("u64_saturating: string is not a uint: {s:?}"));
+            }
+            s.parse::<u64>().unwrap_or(u64::MAX)
+        }
         other => {
             return Err(format!(
                 "u64_saturating: argument is not a uint-like value: {other}"
@@ -1749,6 +2032,21 @@ mod tests {
     }
 
     #[test]
+    fn u64_saturating_keeps_overflow_but_rejects_malformed() {
+        assert_eq!(u64_saturating(&[json!(42u64)]).unwrap(), json!(42u64));
+        assert_eq!(u64_saturating(&[json!("42")]).unwrap(), json!(42u64));
+        assert_eq!(
+            u64_saturating(&[json!("18446744073709551616")]).unwrap(),
+            json!(u64::MAX)
+        );
+
+        assert!(u64_saturating(&[json!("")]).is_err());
+        assert!(u64_saturating(&[json!("not-a-number")]).is_err());
+        assert!(u64_saturating(&[json!("-1")]).is_err());
+        assert!(u64_saturating(&[json!(1.25)]).is_err());
+    }
+
+    #[test]
     fn whitelist_matches_shared_json() {
         // Single source of truth: registryV2/scripts/build-index.ts validates
         // manifest `$fn` names against this same JSON. Keep WHITELIST and
@@ -1881,6 +2179,44 @@ mod tests {
     }
 
     #[test]
+    fn address_from_left_padded_bytes32_rejects_high_bits() {
+        let left_padded =
+            json!("0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let out = address_from_left_padded_bytes32(&[left_padded]).unwrap();
+        assert_eq!(
+            out.as_str().unwrap(),
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+
+        let high_bits = json!("0xdeadbeef0000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert!(address_from_left_padded_bytes32(&[high_bits]).is_err());
+        assert!(address_from_left_padded_bytes32(&[json!("0x1234")]).is_err());
+    }
+
+    #[test]
+    fn left_padded_bytes32_shape_supports_only_all_left_padded_words() {
+        let left_padded_a =
+            json!("0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let left_padded_b =
+            json!("0x000000000000000000000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let high_bits = json!("0xdeadbeef0000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        assert_eq!(
+            left_padded_bytes32_shape(&[left_padded_a.clone(), left_padded_b]).unwrap(),
+            json!("left_padded")
+        );
+        assert_eq!(
+            left_padded_bytes32_shape(&[left_padded_a, high_bits]).unwrap(),
+            json!("unsupported")
+        );
+        assert_eq!(
+            left_padded_bytes32_shape(&[json!("0x1234")]).unwrap(),
+            json!("unsupported")
+        );
+        assert!(left_padded_bytes32_shape(&[]).is_err());
+    }
+
+    #[test]
     fn maker_traits_expiry_extracts_bits_80_to_120() {
         // expiry 101 at bits [80,120); a high flag bit (255) must be ignored.
         let traits = (U256::from(101u64) << 80usize) | (U256::from(1u64) << 255usize);
@@ -2000,6 +2336,58 @@ mod tests {
     }
 
     #[test]
+    fn bridge_recipient_from_bytes32_preserves_non_evm_words() {
+        let evm_word = "0x0000000000000000000000005529e0608cfc0cab5bb86b59cba7e88f0f66dfef";
+        let evm = bridge_recipient_from_bytes32(&[json!(evm_word)]).unwrap();
+        assert_eq!(evm["kind"], json!("evm"));
+        assert_eq!(
+            evm["address"],
+            json!("0x5529e0608cfc0cab5bb86b59cba7e88f0f66dfef")
+        );
+        assert!(evm.get("bytes32").is_none());
+
+        let raw_word = "0x0f64e4226322cd6908be7fe613f7f82ae2db8fc0ffaf0757e5e4839019170d7f";
+        let raw = bridge_recipient_from_bytes32(&[json!(raw_word)]).unwrap();
+        assert_eq!(raw["kind"], json!("raw"));
+        assert_eq!(raw["bytes32"], json!(raw_word));
+        assert!(raw.get("address").is_none());
+
+        assert!(bridge_recipient_from_bytes32(&[json!("0x1234")]).is_err());
+    }
+
+    #[test]
+    fn map_recipient_resolves_uniswap_recipient_sentinels() {
+        let from = "0x000000000000000000000000000000000000aaaa";
+        let to = "0x000000000000000000000000000000000000bbbb";
+        // MSG_SENDER (0x..01) -> from (the signer).
+        let s = map_recipient(&[
+            json!("0x0000000000000000000000000000000000000001"),
+            json!(from),
+            json!(to),
+        ])
+        .unwrap();
+        assert_eq!(s, json!(from));
+        // ADDRESS_THIS (0x..02) -> to (the router / PositionManager).
+        let t = map_recipient(&[
+            json!("0x0000000000000000000000000000000000000002"),
+            json!(from),
+            json!(to),
+        ])
+        .unwrap();
+        assert_eq!(t, json!(to));
+        // Any other address passes through unchanged (lowercased).
+        let lit = map_recipient(&[
+            json!("0x00000000000000000000000000000000CAFEF00D"),
+            json!(from),
+            json!(to),
+        ])
+        .unwrap();
+        assert_eq!(lit, json!("0x00000000000000000000000000000000cafef00d"));
+        // Wrong arity errors out.
+        assert!(map_recipient(&[json!("0x0")]).is_err());
+    }
+
+    #[test]
     fn uniswap_v3_pool_swap_field_positive_amount_is_exact_input() {
         let out = uniswap_v3_pool_swap_field(&[
             json!("1000"),
@@ -2083,6 +2471,50 @@ mod tests {
     }
 
     #[test]
+    fn uniswapx_single_output_field_extracts_normalized_fields() {
+        let outputs = json!([
+            {
+                "token": "0x3333333333333333333333333333333333333333",
+                "startAmount": "2000",
+                "endAmount": "1800",
+                "recipient": "0x4444444444444444444444444444444444444444"
+            }
+        ]);
+
+        assert_eq!(
+            uniswapx_single_output_field(&[outputs.clone(), json!("token")]).unwrap(),
+            json!("0x3333333333333333333333333333333333333333")
+        );
+        assert_eq!(
+            uniswapx_single_output_field(&[outputs.clone(), json!("endAmount")]).unwrap(),
+            json!("1800")
+        );
+        assert_eq!(
+            uniswapx_single_output_field(&[outputs, json!("recipient")]).unwrap(),
+            json!("0x4444444444444444444444444444444444444444")
+        );
+    }
+
+    #[test]
+    fn uniswapx_single_output_field_rejects_multi_output() {
+        let outputs = json!([
+            {
+                "token": "0x3333333333333333333333333333333333333333",
+                "endAmount": "1800",
+                "recipient": "0x4444444444444444444444444444444444444444"
+            },
+            {
+                "token": "0x5555555555555555555555555555555555555555",
+                "endAmount": "100",
+                "recipient": "0x6666666666666666666666666666666666666666"
+            }
+        ]);
+
+        let err = uniswapx_single_output_field(&[outputs, json!("token")]).unwrap_err();
+        assert!(err.contains("expected exactly 1 output, got 2"), "{err}");
+    }
+
+    #[test]
     fn uniswapx_v2_reactor_order_field_decodes_cosigned_order() {
         let order = v2_dutch_order_bytes();
         let order_hex = json!(format!("0x{}", hex::encode(order)));
@@ -2110,6 +2542,47 @@ mod tests {
     }
 
     #[test]
+    fn uniswapx_v2_reactor_order_field_rejects_multi_output() {
+        let order = v2_dutch_order_bytes_with_output_count(2);
+        let order_hex = json!(format!("0x{}", hex::encode(order)));
+        let reactor = json!("0x00000011f84b9aa48e5f8aa8b9897600006289be");
+
+        let err =
+            uniswapx_reactor_order_field(&[order_hex, reactor, json!("buy_min")]).unwrap_err();
+        assert!(err.contains("expected exactly 1 output, got 2"), "{err}");
+    }
+
+    #[test]
+    fn uniswapx_reactor_order_field_rejects_cross_family_target() {
+        let order = v2_dutch_order_bytes();
+        let order_hex = json!(format!("0x{}", hex::encode(order)));
+        let exclusive_dutch_reactor = json!("0x6000da47483062a0d734ba3dc7576ce6a0b645c4");
+
+        let err =
+            uniswapx_reactor_order_field(&[order_hex, exclusive_dutch_reactor, json!("buy_min")])
+                .unwrap_err();
+        assert!(
+            err.contains("ABI decode failed") || err.contains("does not match target reactor"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn uniswapx_reactor_order_field_rejects_embedded_reactor_mismatch() {
+        let order = v2_dutch_order_bytes_with_output_count_and_reactor(
+            1,
+            "0x1bd1aadc8a99fe9c48cffd9a5718b67f83cd4c08",
+        );
+        let order_hex = json!(format!("0x{}", hex::encode(order)));
+        let mainnet_v2_reactor = json!("0x00000011f84b9aa48e5f8aa8b9897600006289be");
+
+        let err = uniswapx_reactor_order_field(&[order_hex, mainnet_v2_reactor, json!("buy_min")])
+            .unwrap_err();
+        assert!(err.contains("order.info.reactor"), "{err}");
+        assert!(err.contains("does not match target reactor"), "{err}");
+    }
+
+    #[test]
     fn dispatch_unknown_fn_errors() {
         assert!(dispatch("nope", &[]).is_err());
     }
@@ -2129,11 +2602,29 @@ mod tests {
         assert_eq!(out[0][1], json!("100"));
         assert_eq!(out[1][0]["key"]["address"], json!(B));
         assert_eq!(out[1][1], json!("200"));
-        // length mismatch → zips the common prefix (min length), not an error
-        // (real Balancer calldata is always equal-length; this tolerates fuzz).
-        let trunc =
-            balancer_zip_token_amounts(&[json!(chain), json!([A]), json!(["1", "2"])]).unwrap();
-        assert_eq!(trunc.as_array().unwrap().len(), 1);
+        assert_eq!(
+            balancer_zip_token_amounts(&[
+                json!(chain),
+                json!([A, B]),
+                json!(["1", "2"]),
+                json!("shape")
+            ])
+            .unwrap(),
+            json!("matched_nonempty")
+        );
+        assert_eq!(
+            balancer_zip_token_amounts(&[
+                json!(chain),
+                json!([A]),
+                json!(["1", "2"]),
+                json!("shape")
+            ])
+            .unwrap(),
+            json!("unsupported")
+        );
+        assert!(
+            balancer_zip_token_amounts(&[json!(chain), json!([A]), json!(["1", "2"])]).is_err()
+        );
         // wrong arity still errors (structural).
         assert!(balancer_zip_token_amounts(&[json!(chain), json!([A])]).is_err());
     }
@@ -2165,10 +2656,42 @@ mod tests {
             map.clone(),
         ]);
         assert!(missing.is_err());
-        // amounts shorter than the pool token list → zips common prefix (fuzz-tolerant).
-        let trunc =
-            balancer_v3_zip_pool_tokens(&[json!(chain), json!(pool), json!(["1"]), map]).unwrap();
-        assert_eq!(trunc.as_array().unwrap().len(), 1);
+        assert_eq!(
+            balancer_v3_zip_pool_tokens(&[
+                json!(chain),
+                json!(pool),
+                json!(["1", "2"]),
+                map.clone(),
+                json!("shape")
+            ])
+            .unwrap(),
+            json!("matched_nonempty")
+        );
+        assert_eq!(
+            balancer_v3_zip_pool_tokens(&[
+                json!(chain),
+                json!(pool),
+                json!(["1"]),
+                map.clone(),
+                json!("shape")
+            ])
+            .unwrap(),
+            json!("unsupported")
+        );
+        assert_eq!(
+            balancer_v3_zip_pool_tokens(&[
+                json!(chain),
+                json!("0x9999999999999999999999999999999999999999"),
+                json!(["1", "2"]),
+                map.clone(),
+                json!("shape")
+            ])
+            .unwrap(),
+            json!("unsupported")
+        );
+        assert!(
+            balancer_v3_zip_pool_tokens(&[json!(chain), json!(pool), json!(["1"]), map]).is_err()
+        );
         // wrong arity errors (structural).
         assert!(balancer_v3_zip_pool_tokens(&[json!(chain), json!(pool)]).is_err());
     }
@@ -2183,11 +2706,27 @@ mod tests {
         assert_eq!(f("pool"), json!(C));
         assert_eq!(f("amount_in"), json!("1000"));
         assert_eq!(f("min_out"), json!("990"));
+        assert_eq!(f("shape"), json!("single_nonempty"));
         // multi-hop: token_out = the LAST step's tokenOut.
         let multi = json!([[A, [[C, B, false], [C, A, false]], "1", "1"]]);
         assert_eq!(
             balancer_v3_swap_path_field(&[multi, json!("token_out")]).unwrap(),
             json!(A)
+        );
+        // multi-path cannot be represented as one Amm::Swap; manifests use this
+        // shape signal to emit Unknown instead of truncating to paths[0].
+        let multi_path = json!([
+            [A, [[C, B, false]], "1000", "990"],
+            [B, [[C, A, false]], "500", "490"]
+        ]);
+        assert_eq!(
+            balancer_v3_swap_path_field(&[multi_path, json!("shape")]).unwrap(),
+            json!("unsupported")
+        );
+        let empty_steps = json!([[A, [], "1000", "990"]]);
+        assert_eq!(
+            balancer_v3_swap_path_field(&[empty_steps, json!("shape")]).unwrap(),
+            json!("unsupported")
         );
         // empty paths (fuzz) → zero/0, not an error.
         assert_eq!(
@@ -2255,12 +2794,14 @@ mod tests {
     }
 
     #[test]
-    fn balancer_v2_userdata_field_unknown_kind_is_zero() {
-        // kind 99 matches no entry → conservative "0".
+    fn balancer_v2_userdata_field_unknown_kind_is_unsupported() {
+        // kind 99 matches no entry → manifests must emit Unknown instead of
+        // fabricating a concrete liquidity action with a zero LP bound.
         let ud = encode_userdata(vec![uint(99)]);
-        let out =
-            balancer_v2_userdata_field(&[json!(ud), json!("join"), json!("min_bpt")]).unwrap();
-        assert_eq!(out, json!("0"));
+        let shape = balancer_v2_userdata_field(&[json!(ud.clone()), json!("join"), json!("shape")])
+            .unwrap();
+        assert_eq!(shape, json!("unsupported"));
+        assert!(balancer_v2_userdata_field(&[json!(ud), json!("join"), json!("min_bpt")]).is_err());
         // bad field / class / arity error out.
         let ud1 = encode_userdata(vec![uint(0), uint(1), uint(0)]);
         assert!(balancer_v2_userdata_field(&[json!(ud1), json!("exit"), json!("nope")]).is_err());
@@ -2271,13 +2812,16 @@ mod tests {
 
     #[test]
     fn balancer_v2_batch_swap_field_resolves_indirect_indices() {
-        // 2-hop A→B→C: swaps[0] in=assets[0]=A out=assets[1]=B; swaps[1] in=B out=assets[2]=C.
         // BatchSwapStep = [poolId, assetInIndex, assetOutIndex, amount, userData].
-        let swaps = json!([
-            [POOL1, "0", "1", "1000", "0x"],
-            [POOL2, "1", "2", "0", "0x"]
-        ]);
+        let swaps = json!([[POOL1, "0", "1", "1000", "0x"]]);
         let assets = json!([A, B, C]);
+        let shape = balancer_v2_batch_swap_field(&[
+            json!(0),
+            swaps.clone(),
+            assets.clone(),
+            json!("shape"),
+        ])
+        .unwrap();
         let tin = balancer_v2_batch_swap_field(&[
             json!(0),
             swaps.clone(),
@@ -2316,29 +2860,41 @@ mod tests {
         let pool =
             balancer_v2_batch_swap_field(&[json!(0), swaps.clone(), assets, json!("pool_id")])
                 .unwrap();
+        assert_eq!(shape, json!("single_step"));
         assert_eq!(tin, json!(A));
-        assert_eq!(tout, json!(C));
+        assert_eq!(tout, json!(B));
         assert_eq!(dir_in, json!("exact_input"));
         assert_eq!(dir_out, json!("exact_output"));
         assert_eq!(amount, json!("1000"));
         assert_eq!(pool, json!(POOL1));
-        // out-of-range index wraps modulo assets.len() (9 % 1 = 0 → A); fuzz-tolerant.
+        // Multi-step/multi-path batches are not a scalar Swap and must surface
+        // as Unknown at the manifest layer instead of truncating to first/last.
+        let multi = json!([
+            [POOL1, "0", "1", "1000", "0x"],
+            [POOL2, "1", "2", "0", "0x"]
+        ]);
+        assert_eq!(
+            balancer_v2_batch_swap_field(&[json!(0), multi, json!([A, B, C]), json!("shape")])
+                .unwrap(),
+            json!("unsupported")
+        );
+        // Out-of-range indices are unsupported; do not wrap modulo into a
+        // different token.
         let bad = json!([[POOL1, "0", "9", "1", "0x"]]);
         assert_eq!(
-            balancer_v2_batch_swap_field(&[json!(0), bad, json!([A]), json!("token_out")]).unwrap(),
-            json!(A)
+            balancer_v2_batch_swap_field(&[json!(0), bad.clone(), json!([A]), json!("shape")])
+                .unwrap(),
+            json!("unsupported")
         );
-        // empty assets → zero-address sentinel (shape-valid, fuzz would-revert case).
+        assert!(
+            balancer_v2_batch_swap_field(&[json!(0), bad, json!([A]), json!("token_out")]).is_err()
+        );
+        // Empty assets cannot identify tokens.
         let ok_swaps = json!([[POOL1, "0", "1", "1", "0x"]]);
         assert_eq!(
-            balancer_v2_batch_swap_field(&[
-                json!(0),
-                ok_swaps.clone(),
-                json!([]),
-                json!("token_in")
-            ])
-            .unwrap(),
-            json!("0x0000000000000000000000000000000000000000")
+            balancer_v2_batch_swap_field(&[json!(0), ok_swaps.clone(), json!([]), json!("shape")])
+                .unwrap(),
+            json!("unsupported")
         );
         // unsupported field still errors (structural manifest bug, not data).
         assert!(
@@ -2347,11 +2903,27 @@ mod tests {
     }
 
     fn v2_dutch_order_bytes() -> Vec<u8> {
-        let reactor = addr("0x00000011f84b9aa48e5f8aa8b9897600006289be");
+        v2_dutch_order_bytes_with_output_count(1)
+    }
+
+    fn v2_dutch_order_bytes_with_output_count(output_count: usize) -> Vec<u8> {
+        v2_dutch_order_bytes_with_output_count_and_reactor(
+            output_count,
+            "0x00000011f84b9aa48e5f8aa8b9897600006289be",
+        )
+    }
+
+    fn v2_dutch_order_bytes_with_output_count_and_reactor(
+        output_count: usize,
+        reactor: &str,
+    ) -> Vec<u8> {
+        let reactor = addr(reactor);
         let swapper = addr("0x1111111111111111111111111111111111111111");
         let sell = addr("0x2222222222222222222222222222222222222222");
         let buy = addr("0x3333333333333333333333333333333333333333");
         let recipient = addr("0x4444444444444444444444444444444444444444");
+        let second_buy = addr("0x5555555555555555555555555555555555555555");
+        let second_recipient = addr("0x6666666666666666666666666666666666666666");
         let zero = addr("0x0000000000000000000000000000000000000000");
 
         let info = DynSolValue::Tuple(vec![
@@ -2370,6 +2942,19 @@ mod tests {
             uint(1_800),
             DynSolValue::Address(recipient),
         ]);
+        let second_output = DynSolValue::Tuple(vec![
+            DynSolValue::Address(second_buy),
+            uint(300),
+            uint(100),
+            DynSolValue::Address(second_recipient),
+        ]);
+        let mut outputs = Vec::new();
+        if output_count >= 1 {
+            outputs.push(base_output);
+        }
+        if output_count >= 2 {
+            outputs.push(second_output);
+        }
         let cosigner_data = DynSolValue::Tuple(vec![
             uint(1_800_000_000),
             uint(1_900_000_000),
@@ -2382,7 +2967,7 @@ mod tests {
             info,
             DynSolValue::Address(zero),
             base_input,
-            DynSolValue::Array(vec![base_output]),
+            DynSolValue::Array(outputs),
             cosigner_data,
             DynSolValue::Bytes(vec![0xab; 65]),
         ]);
@@ -2396,6 +2981,33 @@ mod tests {
 
     fn uint(value: u64) -> DynSolValue {
         DynSolValue::Uint(U256::from(value), 256)
+    }
+
+    #[test]
+    fn tuple_array_field_extracts_positional_tuple_slot() {
+        let payloads = json!([
+            ["1", 1, "0x00000000000000000000000000000000c011ec7a", "10"],
+            ["137", 2, "0x00000000000000000000000000000000c011ec7b", "11"]
+        ]);
+
+        let out = tuple_array_field(&[payloads, json!(2)]).unwrap();
+
+        assert_eq!(
+            out,
+            json!([
+                "0x00000000000000000000000000000000c011ec7a",
+                "0x00000000000000000000000000000000c011ec7b"
+            ])
+        );
+    }
+
+    #[test]
+    fn tuple_array_field_rejects_out_of_bounds_slot() {
+        let payloads = json!([["1", 1, "0x00000000000000000000000000000000c011ec7a"]]);
+
+        let err = tuple_array_field(&[payloads, json!(3)]).unwrap_err();
+
+        assert!(err.contains("index 3 out of bounds"), "got: {err}");
     }
 
     // ── Seaport item decoders ────────────────────────────────────────────────

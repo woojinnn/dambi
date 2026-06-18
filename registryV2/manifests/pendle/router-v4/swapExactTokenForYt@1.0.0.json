@@ -347,9 +347,8 @@
           "direction": "token_for_yt",
           "external_token": {
             "key": {
-              "standard": "erc20",
-              "chain": "$chain",
-              "address": "$args.input[0]"
+              "$fn": "token_key_or_native_zero",
+              "$args": ["$args.input[0]", "$chain"]
             }
           },
           "exact_amount_in": "$args.input[1]",

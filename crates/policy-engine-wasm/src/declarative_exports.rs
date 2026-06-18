@@ -41,6 +41,9 @@ use policy_state::primitives::{
 };
 use policy_transition::action as v3_action;
 
+const DEFAULT_ARRAY_EMIT_MAX_ELEMENTS: usize = 64;
+const HARD_ARRAY_EMIT_MAX_ELEMENTS: usize = 64;
+
 /// Reserved selector key for **bare native transfers** (B.3). A tx with EMPTY
 /// calldata (`"0x"` / absent) and `value > 0` has NO 4-byte function selector,
 /// so it cannot be keyed by a real selector. Such a call is keyed under this
@@ -52,6 +55,42 @@ use policy_transition::action as v3_action;
 /// `match.selector = "0x00000000"` (e.g. the HyperLiquid HYPE system address's
 /// payable `receive()`).
 const NATIVE_TRANSFER_SELECTOR: &str = "0x00000000";
+
+fn parse_array_emit_max_elements(
+    emit: &serde_json::Value,
+    field_path: &str,
+) -> Result<Option<usize>, EngineErrorDto> {
+    let Some(value) = emit.get("max_elements") else {
+        return Ok(Some(DEFAULT_ARRAY_EMIT_MAX_ELEMENTS));
+    };
+    let raw = value.as_u64().ok_or_else(|| {
+        EngineErrorDto::new(
+            "invalid_bundle",
+            format!("{field_path}.max_elements must be a positive integer"),
+        )
+    })?;
+    if raw == 0 {
+        return Err(EngineErrorDto::new(
+            "invalid_bundle",
+            format!("{field_path}.max_elements must be >= 1"),
+        ));
+    }
+    let max = usize::try_from(raw).map_err(|_| {
+        EngineErrorDto::new(
+            "invalid_bundle",
+            format!("{field_path}.max_elements is too large: {raw}"),
+        )
+    })?;
+    if max > HARD_ARRAY_EMIT_MAX_ELEMENTS {
+        return Err(EngineErrorDto::new(
+            "invalid_bundle",
+            format!(
+                "{field_path}.max_elements must be <= {HARD_ARRAY_EMIT_MAX_ELEMENTS}, got {max}"
+            ),
+        ));
+    }
+    Ok(Some(max))
+}
 
 /// Bridge key: `(chain_id, to_lowercase, selector_lowercase)`.
 /// `to` is normalised to lowercase hex (no checksum) and `selector` to
@@ -294,7 +333,7 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                     to: to.to_ascii_lowercase(),
                     selector: selector.clone(),
                 };
-                state.bridge.entry(key).or_insert_with(|| bundle_id.clone());
+                state.bridge.insert(key, bundle_id.clone());
             }
             if let Some((ref vc, ref pt, ref wt)) = typed_data_route {
                 for (chain_id, _to) in bundle_match.entries() {
@@ -304,10 +343,7 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                         primary_type: pt.clone(),
                         witness_type: wt.clone(),
                     };
-                    state
-                        .typed_data_bridge
-                        .entry(key)
-                        .or_insert_with(|| bundle_id.clone());
+                    state.typed_data_bridge.insert(key, bundle_id.clone());
                 }
             }
             // Address-agnostic (selector-only) tier — standard NFT
@@ -323,10 +359,7 @@ pub fn declarative_install_v3_json(bundle_json: String) -> String {
                         chain_id,
                         selector: selector.clone(),
                     };
-                    state
-                        .selector_bridge
-                        .entry(key)
-                        .or_insert_with(|| bundle_id.clone());
+                    state.selector_bridge.insert(key, bundle_id.clone());
                 }
             }
             state.bundles.insert(bundle_id.clone(), bundle_value);
@@ -830,12 +863,14 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                 })?;
                 let parallel_sources = emit.get("parallel_sources");
                 let per_item_live_inputs = emit.get("live_inputs");
+                let max_elements = parse_array_emit_max_elements(emit, "emit")?;
                 build_array_emit(
                     &ctx,
                     array_source,
                     parallel_sources,
                     per_item_body,
                     per_item_live_inputs,
+                    max_elements,
                 )
                 .map_err(|error| {
                     EngineErrorDto::new("build_array_emit_failed", error.to_string())
@@ -948,12 +983,15 @@ pub fn declarative_route_request_v3_json(input_json: String) -> String {
                                     )
                                 })?;
                             let parallel_sources = part.get("parallel_sources");
+                            let max_elements =
+                                parse_array_emit_max_elements(part, "composite_emit part")?;
                             let m = build_array_emit(
                                 &ctx,
                                 array_source,
                                 parallel_sources,
                                 body_template,
                                 live_inputs_template,
+                                max_elements,
                             )
                             .map_err(|error| {
                                 EngineErrorDto::new("build_array_emit_failed", error.to_string())
@@ -1391,12 +1429,14 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
             })?;
             let parallel_sources = emit.get("parallel_sources");
             let per_item_live_inputs = emit.get("live_inputs");
+            let max_elements = parse_array_emit_max_elements(emit, "emit")?;
             build_array_emit(
                 &ctx,
                 array_source,
                 parallel_sources,
                 per_item_body,
                 per_item_live_inputs,
+                max_elements,
             )
             .map_err(|error| EngineErrorDto::new("build_array_emit_failed", error.to_string()))?
         } else {
@@ -1407,6 +1447,22 @@ pub fn declarative_route_typed_data_v3_json(input_json: String) -> String {
             build_action_body(&ctx, body_template, live_inputs_template).map_err(|error| {
                 EngineErrorDto::new("build_action_body_failed", error.to_string())
             })?
+        };
+
+        // Keep typed-data batch semantics aligned with calldata routing. A
+        // length-0 array_emit (Permit2 PermitBatch([]), batch transfer [], ...)
+        // builds an empty Multicall, which downstream aggregation treats as
+        // PASS because there are no children to evaluate. Typed signatures have
+        // no calldata, so the Unknown body carries an empty calldata string and
+        // still warn-closes the signature instead of silently passing it.
+        let body = match body {
+            v3_action::ActionBody::Multicall { ref actions } if actions.is_empty() => unknown_leg(
+                ctx.tx_to,
+                ctx.chain.clone(),
+                ctx.raw_calldata.to_string(),
+                ctx.value,
+            ),
+            other => other,
         };
 
         // ── ActionMeta (OffchainSig nature) ─────────────────────────────────
@@ -1857,6 +1913,25 @@ fn unknown_leg(
         calldata,
         value,
     }
+}
+
+fn unknown_child_leg(
+    chain_id: u64,
+    target: &str,
+    calldata: &str,
+    value: &str,
+    context: &str,
+) -> Result<v3_action::ActionBody, EngineErrorDto> {
+    let target = parse_v3_address(target, context)
+        .map_err(|error| EngineErrorDto::new("build_multicall_failed", error.message))?;
+    let value = parse_v3_u256(value, context)
+        .map_err(|error| EngineErrorDto::new("build_multicall_failed", error.message))?;
+    Ok(unknown_leg(
+        target,
+        V3ChainId::new(format!("eip155:{chain_id}")),
+        calldata.to_owned(),
+        value,
+    ))
 }
 
 /// B.1.c.2 — recursive opcode-stream → `ActionBody::Multicall` dispatch.
@@ -3289,7 +3364,6 @@ fn build_multicall_recurse_body(
     }
 
     let mut actions: Vec<v3_action::ActionBody> = Vec::new();
-    let mut resolved = 0usize;
     for (index, item) in inner_calls.iter().enumerate() {
         let inner_hex = item.as_str().ok_or_else(|| {
             EngineErrorDto::new(
@@ -3337,11 +3411,19 @@ fn build_multicall_recurse_body(
                 .pointer("/error/kind")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("");
-            // Unmapped helper leg (refundETH / sweepToken / unwrapWETH9 / a
-            // permit variant we don't model) — skip; the mapped legs carry the
-            // intent. Any OTHER error (a mapped leg that failed to decode) is
-            // surfaced so the batch fails loud rather than silently dropping it.
-            if kind == "no_declarative_v3_mapper" {
+            // Unmapped child legs must stay policy-visible. Earlier code skipped
+            // `no_declarative_v3_mapper` here for helper selectors, but that also
+            // erased any unsupported fund-moving selector inside an otherwise
+            // mapped multicall. Mirror opcode-stream warn semantics: preserve the
+            // child as Unknown so the parent warn-closes.
+            if kind == "no_declarative_v3_mapper" || kind == "route_failed" {
+                actions.push(unknown_child_leg(
+                    chain_id,
+                    to,
+                    inner_hex,
+                    "0",
+                    "multicall child target",
+                )?);
                 continue;
             }
             let message = parsed
@@ -3353,8 +3435,6 @@ fn build_multicall_recurse_body(
                 format!("multicall child #{index} ({inner_selector}): {kind}: {message}"),
             ));
         }
-        resolved += 1;
-
         let inner_actions = parsed
             .pointer("/data/actions")
             .and_then(serde_json::Value::as_array)
@@ -3382,10 +3462,10 @@ fn build_multicall_recurse_body(
         }
     }
 
-    if resolved == 0 {
+    if actions.is_empty() {
         return Err(EngineErrorDto::new(
             "build_multicall_failed",
-            "multicall_recurse: no inner leg resolved to an installed mapper".to_string(),
+            "multicall_recurse: no inner leg produced a policy-visible action".to_string(),
         ));
     }
 
@@ -3473,7 +3553,7 @@ fn build_multicall_call_array_body(
     if actions.is_empty() {
         return Err(EngineErrorDto::new(
             "build_multicall_failed",
-            "multicall_call_array: no inner leg resolved to an installed mapper".to_string(),
+            "multicall_call_array: no inner leg produced a policy-visible action".to_string(),
         ));
     }
 
@@ -3551,8 +3631,16 @@ fn process_call_legs(
             )
         })?;
         if data_bytes.len() < 4 {
-            // A bare value-transfer leg (empty / `<4B` data) has no selector to
-            // route — skip it; the mapped legs carry the intent.
+            // A bare value-transfer/fallback leg has no selector to route, but
+            // it is still a potentially value-moving call to `leg_to`. Preserve
+            // it as Unknown rather than erasing it from a partially decoded batch.
+            actions.push(unknown_child_leg(
+                chain_id,
+                leg_to,
+                leg_data,
+                leg_value,
+                "multicall_call_array leg target",
+            )?);
             continue;
         }
         let leg_selector = format!("0x{}", hex::encode(&data_bytes[0..4]));
@@ -3625,13 +3713,19 @@ fn process_call_legs(
                 .pointer("/error/kind")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("");
-            // Unmapped helper / deferred-adapter leg (no installed mapper, or no
-            // adapter registered for that `to`) — no primary body, but DON'T bail:
-            // a Morpho callback leg (notably the EXCLUDE `morphoFlashLoan`) still
-            // carries a `reenter(Call[])` we want to surface, so fall through to the
-            // callback extraction below. Any OTHER error (a mapped leg that failed
-            // to decode) is surfaced so the batch fails loud, not silently dropped.
-            if kind != "no_declarative_v3_mapper" && kind != "route_failed" {
+            // No installed mapper or a route-level non-applicable result is not
+            // safe to erase from a partially decoded Call[] batch. Preserve the
+            // primary leg as Unknown, then still fall through to callback
+            // extraction below if the child route surfaced one.
+            if kind == "no_declarative_v3_mapper" || kind == "route_failed" {
+                actions.push(unknown_child_leg(
+                    chain_id,
+                    leg_to,
+                    leg_data,
+                    leg_value,
+                    "multicall_call_array leg target",
+                )?);
+            } else {
                 let message = parsed
                     .pointer("/error/message")
                     .and_then(serde_json::Value::as_str)
@@ -3902,6 +3996,90 @@ mod tests {
         );
     }
 
+    #[test]
+    fn declarative_install_replaces_existing_bridge_for_same_callkey() {
+        // Registry entries can be updated or version-bumped while a WASM module
+        // is alive. Re-installing the same (chain,to,selector) must route to the
+        // latest bundle, not the first bundle that populated the bridge.
+        let contract = "0x000000000000000000000000000000000000f00d";
+        let submitter = "0x000000000000000000000000000000000000aaaa";
+        let f = Function::parse("replaceMe(uint256)").unwrap();
+        let calldata = f
+            .abi_encode_input(&[DynSolValue::Uint(U256::from(7_u64), 256)])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&calldata[0..4]));
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+        let make_bundle = |id: &str| {
+            json!({
+                "type": "adapter_action",
+                "id": id,
+                "publisher": "test",
+                "schema_version": "3",
+                "match": {
+                    "selector": selector,
+                    "chain_to_addresses": { "1": [contract] }
+                },
+                "abi_fragment": {
+                    "function_name": "replaceMe",
+                    "abi": {
+                        "name": "replaceMe",
+                        "type": "function",
+                        "stateMutability": "nonpayable",
+                        "inputs": [{ "name": "amount", "type": "uint256" }],
+                        "outputs": []
+                    }
+                },
+                "emit": {
+                    "strategy": "single_emit",
+                    "body": {
+                        "domain": "unknown",
+                        "unknown": {
+                            "target": "$to",
+                            "chain": "$chain",
+                            "calldata": "$calldata",
+                            "value": "$tx.value"
+                        }
+                    }
+                },
+                "requires": {
+                    "imperative": [],
+                    "adapter_capabilities": [],
+                    "host_capabilities": [],
+                    "extension": ">=0.1.0"
+                }
+            })
+        };
+
+        let first: Value = serde_json::from_str(&declarative_install_v3_json(
+            make_bundle("test/replace-a@1.0.0").to_string(),
+        ))
+        .unwrap();
+        assert_eq!(first["ok"], true, "{first}");
+        let second: Value = serde_json::from_str(&declarative_install_v3_json(
+            make_bundle("test/replace-b@2.0.0").to_string(),
+        ))
+        .unwrap();
+        assert_eq!(second["ok"], true, "{second}");
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1,
+                "to": contract,
+                "selector": selector,
+                "calldata": calldata_hex,
+                "submitter": submitter,
+                "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["decoder_id"], "test/replace-b@2.0.0",
+            "bridge must point at the latest install, not the first one: {parsed}"
+        );
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // N2/N3/K3 — a batch leg the decoder cannot map must surface as `Unknown`
     // (warn-closed downstream), NOT be silently dropped (which let a benign
@@ -4064,6 +4242,377 @@ mod tests {
         assert_eq!(
             parsed["data"]["actions"][0]["body"]["domain"], "unknown",
             "empty array_emit must route to Unknown, not an empty Multicall (PASS): {parsed}"
+        );
+    }
+
+    #[test]
+    fn array_emit_max_elements_routes_to_error() {
+        let contract = "0x000000000000000000000000000000000000c0df";
+        let batch_fn = Function::parse("batchLimit(uint256[] xs)").unwrap();
+        let calldata = batch_fn
+            .abi_encode_input(&[DynSolValue::Array(vec![
+                DynSolValue::Uint(U256::from(1_u64), 256),
+                DynSolValue::Uint(U256::from(2_u64), 256),
+            ])])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&calldata[0..4]));
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+
+        let bundle = json!({
+            "type": "adapter_action", "id": "test/array-emit-max@1.0.0",
+            "publisher": "test", "schema_version": "3",
+            "match": { "selector": selector, "chain_to_addresses": { "1": [contract] } },
+            "abi_fragment": { "function_name": "batchLimit", "abi": {
+                "name": "batchLimit", "type": "function", "stateMutability": "nonpayable",
+                "inputs": [{ "name": "xs", "type": "uint256[]" }], "outputs": [] } },
+            "emit": {
+                "strategy": "array_emit",
+                "array_source": "$args.xs",
+                "max_elements": 1,
+                "body": {
+                    "domain": "token", "token": { "action": "erc20_transfer", "erc20_transfer": {
+                        "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$to" } },
+                        "recipient": "$submitter", "amount": "$inputs" } } }
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1, "to": contract, "selector": selector, "calldata": calldata_hex,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(
+            parsed["error"]["kind"], "build_array_emit_failed",
+            "{parsed}"
+        );
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("exceeding max_elements=1"),
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn array_emit_missing_max_elements_uses_default_cap() {
+        let contract = "0x000000000000000000000000000000000000c0e1";
+        let batch_fn = Function::parse("batchDefaultLimit(uint256[] xs)").unwrap();
+        let values: Vec<DynSolValue> = (0..=DEFAULT_ARRAY_EMIT_MAX_ELEMENTS)
+            .map(|i| DynSolValue::Uint(U256::from(i as u64), 256))
+            .collect();
+        let calldata = batch_fn
+            .abi_encode_input(&[DynSolValue::Array(values)])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&calldata[0..4]));
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+
+        let bundle = json!({
+            "type": "adapter_action", "id": "test/array-emit-default-max@1.0.0",
+            "publisher": "test", "schema_version": "3",
+            "match": { "selector": selector, "chain_to_addresses": { "1": [contract] } },
+            "abi_fragment": { "function_name": "batchDefaultLimit", "abi": {
+                "name": "batchDefaultLimit", "type": "function", "stateMutability": "nonpayable",
+                "inputs": [{ "name": "xs", "type": "uint256[]" }], "outputs": [] } },
+            "emit": {
+                "strategy": "array_emit",
+                "array_source": "$args.xs",
+                "body": {
+                    "domain": "token", "token": { "action": "erc20_transfer", "erc20_transfer": {
+                        "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$to" } },
+                        "recipient": "$submitter", "amount": "$inputs" } } }
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1, "to": contract, "selector": selector, "calldata": calldata_hex,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(
+            parsed["error"]["kind"], "build_array_emit_failed",
+            "{parsed}"
+        );
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("exceeding max_elements=64"),
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn array_emit_explicit_max_elements_over_hard_cap_is_invalid_bundle() {
+        let contract = "0x000000000000000000000000000000000000c0e2";
+        let batch_fn = Function::parse("batchHardLimit(uint256[] xs)").unwrap();
+        let calldata = batch_fn
+            .abi_encode_input(&[DynSolValue::Array(vec![DynSolValue::Uint(
+                U256::from(1_u64),
+                256,
+            )])])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&calldata[0..4]));
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+
+        let bundle = json!({
+            "type": "adapter_action", "id": "test/array-emit-hard-max@1.0.0",
+            "publisher": "test", "schema_version": "3",
+            "match": { "selector": selector, "chain_to_addresses": { "1": [contract] } },
+            "abi_fragment": { "function_name": "batchHardLimit", "abi": {
+                "name": "batchHardLimit", "type": "function", "stateMutability": "nonpayable",
+                "inputs": [{ "name": "xs", "type": "uint256[]" }], "outputs": [] } },
+            "emit": {
+                "strategy": "array_emit",
+                "array_source": "$args.xs",
+                "max_elements": HARD_ARRAY_EMIT_MAX_ELEMENTS + 1,
+                "body": {
+                    "domain": "token", "token": { "action": "erc20_transfer", "erc20_transfer": {
+                        "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$to" } },
+                        "recipient": "$submitter", "amount": "$inputs" } } }
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1, "to": contract, "selector": selector, "calldata": calldata_hex,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "invalid_bundle", "{parsed}");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("max_elements must be <= 64"),
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn composite_array_emit_max_elements_routes_to_error() {
+        let contract = "0x000000000000000000000000000000000000c0e0";
+        let combo_fn = Function::parse("comboLimit(uint256[] xs,uint256 y)").unwrap();
+        let calldata = combo_fn
+            .abi_encode_input(&[
+                DynSolValue::Array(vec![
+                    DynSolValue::Uint(U256::from(1_u64), 256),
+                    DynSolValue::Uint(U256::from(2_u64), 256),
+                ]),
+                DynSolValue::Uint(U256::from(3_u64), 256),
+            ])
+            .unwrap();
+        let selector = format!("0x{}", hex::encode(&calldata[0..4]));
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+
+        let bundle = json!({
+            "type": "adapter_action", "id": "test/composite-array-emit-max@1.0.0",
+            "publisher": "test", "schema_version": "3",
+            "match": { "selector": selector, "chain_to_addresses": { "1": [contract] } },
+            "abi_fragment": { "function_name": "comboLimit", "abi": {
+                "name": "comboLimit", "type": "function", "stateMutability": "nonpayable",
+                "inputs": [
+                    { "name": "xs", "type": "uint256[]" },
+                    { "name": "y", "type": "uint256" }
+                ],
+                "outputs": [] } },
+            "emit": {
+                "strategy": "composite_emit",
+                "parts": [
+                    {
+                        "strategy": "array_emit",
+                        "array_source": "$args.xs",
+                        "max_elements": 1,
+                        "body": {
+                            "domain": "token", "token": { "action": "erc20_transfer", "erc20_transfer": {
+                                "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$to" } },
+                                "recipient": "$submitter", "amount": "$inputs" } } }
+                    },
+                    {
+                        "strategy": "single_emit",
+                        "body": {
+                            "domain": "unknown",
+                            "unknown": {
+                                "target": "$to",
+                                "chain": "$chain",
+                                "calldata": "$calldata",
+                                "value": "$tx.value"
+                            }
+                        }
+                    }
+                ]
+            },
+            "requires": { "imperative": [], "adapter_capabilities": [], "host_capabilities": [], "extension": ">=0.1.0" }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let out = declarative_route_request_v3_json(
+            json!({
+                "chain_id": 1, "to": contract, "selector": selector, "calldata": calldata_hex,
+                "submitter": "0x000000000000000000000000000000000000aaaa", "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(
+            parsed["error"]["kind"], "build_array_emit_failed",
+            "{parsed}"
+        );
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("exceeding max_elements=1"),
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn typed_data_array_emit_empty_array_routes_to_unknown_not_empty_multicall() {
+        // Same N2 guard as calldata, but through the EIP-712 route. Permit2
+        // PermitBatch-style typed-data manifests use array_emit; an empty batch
+        // must not become a PASS-valued empty Multicall.
+        let permit2 = "0x000000000022d473030f116ddee9f6b43ac78ba3";
+        let submitter = "0x000000000000000000000000000000000000aaaa";
+
+        let bundle = json!({
+            "type": "adapter_action",
+            "id": "test/typed-array-emit-empty@1.0.0",
+            "publisher": "test",
+            "schema_version": "3",
+            "match": {
+                "selector": "0x000000aa",
+                "chain_to_addresses": { "1": [permit2] },
+                "typed_data": {
+                    "domain_name": "Permit2",
+                    "verifying_contract": permit2,
+                    "primary_type": "PermitBatchEmptyAudit",
+                    "types": {
+                        "PermitBatchEmptyAudit": [
+                            { "name": "details", "type": "PermitDetails[]" },
+                            { "name": "spender", "type": "address" },
+                            { "name": "sigDeadline", "type": "uint256" }
+                        ],
+                        "PermitDetails": [
+                            { "name": "token", "type": "address" },
+                            { "name": "amount", "type": "uint160" },
+                            { "name": "expiration", "type": "uint48" },
+                            { "name": "nonce", "type": "uint48" }
+                        ]
+                    }
+                }
+            },
+            "abi_fragment": {
+                "function_name": "permit",
+                "abi": {
+                    "name": "permit",
+                    "type": "function",
+                    "inputs": [
+                        { "name": "owner", "type": "address" },
+                        {
+                            "name": "permitBatch",
+                            "type": "tuple",
+                            "components": [
+                                {
+                                    "name": "details",
+                                    "type": "tuple[]",
+                                    "components": [
+                                        { "name": "token", "type": "address" },
+                                        { "name": "amount", "type": "uint160" },
+                                        { "name": "expiration", "type": "uint48" },
+                                        { "name": "nonce", "type": "uint48" }
+                                    ]
+                                },
+                                { "name": "spender", "type": "address" },
+                                { "name": "sigDeadline", "type": "uint256" }
+                            ]
+                        },
+                        { "name": "signature", "type": "bytes" }
+                    ]
+                }
+            },
+            "emit": {
+                "strategy": "array_emit",
+                "array_source": "$args.permitBatch[0]",
+                "body": {
+                    "domain": "token",
+                    "token": {
+                        "action": "permit2_sign_allowance",
+                        "permit2_sign_allowance": {
+                            "token": {
+                                "key": {
+                                    "standard": "erc20",
+                                    "chain": "$chain",
+                                    "address": "$inputs[0]"
+                                }
+                            },
+                            "spender": "$args.permitBatch[1]",
+                            "amount": "$inputs[1]",
+                            "expires_at": "$inputs[2]",
+                            "sig_deadline": "$args.permitBatch[2]",
+                            "nonce": "$inputs[3]"
+                        }
+                    }
+                }
+            },
+            "requires": {
+                "imperative": [],
+                "adapter_capabilities": [],
+                "host_capabilities": [],
+                "extension": ">=0.1.0"
+            }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let out = declarative_route_typed_data_v3_json(
+            json!({
+                "chain_id": 1,
+                "verifying_contract": permit2,
+                "primary_type": "PermitBatchEmptyAudit",
+                "domain_name": "Permit2",
+                "message": {
+                    "details": [],
+                    "spender": "0x000000000000000000000000000000000000b0b0",
+                    "sigDeadline": "1700000300"
+                },
+                "submitter": submitter,
+                "submitted_at": 1_700_000_000_u64
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["actions"][0]["body"]["domain"], "unknown",
+            "typed-data empty array_emit must route to Unknown, not an empty Multicall (PASS): {parsed}"
         );
     }
 
@@ -4298,6 +4847,92 @@ mod tests {
         assert_eq!(body_json["domain"], "multicall", "{body_json}");
         assert_eq!(body_json["actions"].as_array().unwrap().len(), 1);
         assert_eq!(body_json["actions"][0]["domain"], "unknown", "{body_json}");
+    }
+
+    #[test]
+    fn multicall_recurse_unmapped_child_surfaces_unknown_instead_of_dropping() {
+        let router = "0x000000000000000000000000000000000000ba01";
+        let submitter = "0x000000000000000000000000000000000000aaaa";
+        let child_fn = Function::parse("mappedChild(uint256)").unwrap();
+        let child_calldata = child_fn
+            .abi_encode_input(&[DynSolValue::Uint(U256::from(123_u64), 256)])
+            .unwrap();
+        let child_selector = format!("0x{}", hex::encode(&child_calldata[0..4]));
+        let child_hex = format!("0x{}", hex::encode(&child_calldata));
+        let unmapped_hex =
+            "0xdeadbeef0000000000000000000000000000000000000000000000000000000000000001";
+
+        let child_bundle = json!({
+            "type": "adapter_action",
+            "id": "test/multicall-recurse-mapped-child@1.0.0",
+            "publisher": "test",
+            "schema_version": "3",
+            "match": {
+                "selector": child_selector,
+                "chain_to_addresses": { "1": [router] }
+            },
+            "abi_fragment": {
+                "function_name": "mappedChild",
+                "abi": {
+                    "name": "mappedChild",
+                    "type": "function",
+                    "stateMutability": "nonpayable",
+                    "inputs": [{ "name": "amount", "type": "uint256" }],
+                    "outputs": []
+                }
+            },
+            "emit": {
+                "strategy": "single_emit",
+                "body": {
+                    "domain": "unknown",
+                    "unknown": {
+                        "target": "$to",
+                        "chain": "$chain",
+                        "calldata": "$calldata",
+                        "value": "$tx.value"
+                    }
+                }
+            },
+            "requires": {
+                "imperative": [],
+                "adapter_capabilities": [],
+                "host_capabilities": [],
+                "extension": ">=0.1.0"
+            }
+        });
+        let installed: Value =
+            serde_json::from_str(&declarative_install_v3_json(child_bundle.to_string())).unwrap();
+        assert_eq!(installed["ok"], true, "{installed}");
+
+        let args = json!({ "multicallData": [child_hex, unmapped_hex] });
+        let body = build_multicall_recurse_body(
+            1,
+            router,
+            submitter,
+            1_700_000_000,
+            &args,
+            &json!({
+                "strategy": "multicall_recurse",
+                "recurse_rule_id": "self_array_bytes_last_arg",
+                "recurse_arg": "multicallData",
+                "max_depth": 3
+            }),
+        )
+        .unwrap();
+        let body_json = serde_json::to_value(body).unwrap();
+        let actions = body_json["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 2, "{body_json}");
+        assert_eq!(actions[0]["domain"], "unknown", "{body_json}");
+        assert_eq!(
+            actions[0]["calldata"], args["multicallData"][0],
+            "{body_json}"
+        );
+        assert_eq!(actions[1]["domain"], "unknown", "{body_json}");
+        assert_eq!(
+            actions[1]["calldata"],
+            json!(unmapped_hex),
+            "unmapped child must remain policy-visible as Unknown, not vanish: {body_json}"
+        );
     }
 
     /// `parallel_tagged_dispatch` end-to-end: a Compound v3
@@ -4589,23 +5224,52 @@ mod tests {
         // (Per-leg-to is proven structurally: the child mapper is installed ONLY at
         // `adapter`, so a successful decode REQUIRES routing the leg at its own `to`.)
 
-        // A bundle whose ONLY leg targets an uninstalled `to` resolves nothing →
-        // reject (never an empty no-op). The all-empty rejection becomes the
-        // caller's warn-closed fault — the registry's `warn`=skip intent for a
-        // PARTIAL batch is preserved; only an empty result is escalated.
+        // A bundle whose ONLY selector-bearing leg targets an uninstalled `to`
+        // must still produce an Unknown leg. Dropping it would turn partial
+        // decode into a misleading no-op.
         let unmapped = "0x000000000000000000000000000000000000dead";
         let only_unmapped = json!({ "bundle": [[unmapped, child_hex, "0", false, zero32]] });
-        let err = build_multicall_call_array_body(
+        let body = build_multicall_call_array_body(
             1,
             submitter,
             1_700_000_000,
             &only_unmapped,
             &json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle" }),
         )
-        .unwrap_err();
-        assert!(
-            err.message.contains("no inner leg resolved"),
-            "expected resolved==0 rejection, got {err:?}"
+        .unwrap();
+        let body_json = serde_json::to_value(body).unwrap();
+        assert_eq!(body_json["domain"], "multicall", "{body_json}");
+        assert_eq!(body_json["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(body_json["actions"][0]["domain"], "unknown", "{body_json}");
+        assert_eq!(
+            body_json["actions"][0]["calldata"], child_hex,
+            "unmapped selector-bearing Call[] leg must remain visible: {body_json}"
+        );
+
+        // Selector-less value/fallback legs have no route key but can still move
+        // native value to `Call.to`; preserve them as Unknown too.
+        let bare_value = json!({ "bundle": [[unmapped, "0x", "42", false, zero32]] });
+        let body = build_multicall_call_array_body(
+            1,
+            submitter,
+            1_700_000_000,
+            &bare_value,
+            &json!({ "strategy": "multicall_call_array", "recurse_arg": "bundle" }),
+        )
+        .unwrap();
+        let body_json = serde_json::to_value(body).unwrap();
+        assert_eq!(body_json["domain"], "multicall", "{body_json}");
+        assert_eq!(body_json["actions"].as_array().unwrap().len(), 1);
+        assert_eq!(body_json["actions"][0]["domain"], "unknown", "{body_json}");
+        assert_eq!(
+            body_json["actions"][0]["target"],
+            json!(unmapped),
+            "{body_json}"
+        );
+        assert_eq!(
+            body_json["actions"][0]["value"],
+            json!("0x2a"),
+            "bare value leg must retain its native value: {body_json}"
         );
     }
 

@@ -228,38 +228,52 @@
         "name": "PERMIT2_PERMIT_BATCH",
         "inputs_abi": "(((address,uint160,uint48,uint48)[],address,uint256) permitBatch, bytes signature)",
         "body": {
-          "domain": "token",
-          "token": {
-            "action": "permit2_sign_allowance",
-            "permit2_sign_allowance": {
+          "$match": { "$fn": "array_len", "$args": ["$inputs.permitBatch[0]"] },
+          "$cases": {
+            "1": {
+              "domain": "token",
               "token": {
-                "key": {
-                  "standard": "erc20",
-                  "chain": "$chain",
-                  "address": "$inputs.permitBatch[0][0][0]"
-                }
-              },
-              "spender": "$inputs.permitBatch[1]",
-              "amount": "$inputs.permitBatch[0][0][1]",
-              "expires_at": "$inputs.permitBatch[0][0][2]",
-              "sig_deadline": "$inputs.permitBatch[2]",
-              "nonce": "$inputs.permitBatch[0][0][3]",
-              "live_inputs": {
-                "nonce": {
-                  "source": {
-                    "kind": "onchain_view",
-                    "chain": "$chain",
-                    "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
-                    "function": "nonceBitmap(address,uint256)",
-                    "decoder_id": "permit2_nonce_bitmap"
+                "action": "permit2_sign_allowance",
+                "permit2_sign_allowance": {
+                  "token": {
+                    "key": {
+                      "standard": "erc20",
+                      "chain": "$chain",
+                      "address": "$inputs.permitBatch[0][0][0]"
+                    }
                   },
-                  "ttl_s": 12
+                  "spender": "$inputs.permitBatch[1]",
+                  "amount": "$inputs.permitBatch[0][0][1]",
+                  "expires_at": "$inputs.permitBatch[0][0][2]",
+                  "sig_deadline": "$inputs.permitBatch[2]",
+                  "nonce": "$inputs.permitBatch[0][0][3]",
+                  "live_inputs": {
+                    "nonce": {
+                      "source": {
+                        "kind": "onchain_view",
+                        "chain": "$chain",
+                        "contract": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+                        "function": "nonceBitmap(address,uint256)",
+                        "decoder_id": "permit2_nonce_bitmap"
+                      },
+                      "ttl_s": 12
+                    }
+                  }
                 }
               }
             }
+          },
+          "$default": {
+            "domain": "unknown",
+            "unknown": {
+              "target": "$tx.to",
+              "chain": "$chain",
+              "calldata": "$calldata",
+              "value": "0"
+            }
           }
         },
-        "_note": "Batch entries beyond index [0] require array_emit expansion — Phase 3F first batch emits only the lead entry; multi-entry expansion is a follow-up."
+        "_note": "Single-entry Permit2 batch preserves the exact allowance body. Multi-entry batches emit Unknown until opcode-stream can expand each permit entry without truncation."
       },
       "0x04": {
         "name": "SWEEP",
@@ -585,25 +599,39 @@
       },
       "0x0d": {
         "name": "PERMIT2_TRANSFER_FROM_BATCH",
-        "inputs_abi": "((address from, address to, uint160 amount, address token)[] transferDetails)",
+        "inputs_abi": "((address,address,uint160,address)[] transferDetails)",
         "body": {
-          "domain": "token",
-          "token": {
-            "action": "erc20_transfer",
-            "erc20_transfer": {
+          "$match": { "$fn": "array_len", "$args": ["$inputs.transferDetails"] },
+          "$cases": {
+            "1": {
+              "domain": "token",
               "token": {
-                "key": {
-                  "standard": "erc20",
-                  "chain": "$chain",
-                  "address": "$inputs.transferDetails[0].token"
+                "action": "erc20_transfer",
+                "erc20_transfer": {
+                  "token": {
+                    "key": {
+                      "standard": "erc20",
+                      "chain": "$chain",
+                      "address": "$inputs.transferDetails[0][3]"
+                    }
+                  },
+                  "recipient": "$inputs.transferDetails[0][1]",
+                  "amount": "$inputs.transferDetails[0][2]"
                 }
-              },
-              "recipient": "$inputs.transferDetails[0].to",
-              "amount": "$inputs.transferDetails[0].amount"
+              }
+            }
+          },
+          "$default": {
+            "domain": "unknown",
+            "unknown": {
+              "target": "$tx.to",
+              "chain": "$chain",
+              "calldata": "$calldata",
+              "value": "0"
             }
           }
         },
-        "_note": "Batch transfer — Phase 3F first batch emits only the lead entry [0]. Multi-entry array_emit expansion is a follow-up (same as PERMIT2_PERMIT_BATCH 0x03)."
+        "_note": "Single-entry Permit2 transfer batch preserves the exact transfer body. Multi-entry batches emit Unknown until opcode-stream can expand each transfer entry without truncation."
       },
       "0x0e": {
         "name": "BALANCE_CHECK_ERC20",
@@ -613,7 +641,7 @@
           "unknown": {
             "target": "$tx.to",
             "chain": "$chain",
-            "calldata": "$inputs._raw",
+            "calldata": "$calldata",
             "value": "0"
           }
         },

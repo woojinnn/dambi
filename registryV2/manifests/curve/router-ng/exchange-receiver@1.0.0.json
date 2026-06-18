@@ -44,14 +44,10 @@
           },
           "params": {
             "token_in": {
-              "key": { "standard": "erc20", "chain": "$chain", "address": "$args._route[0]" }
+              "key": { "$fn": "token_key_or_native", "$args": ["$args._route[0]", "$chain"] }
             },
             "token_out": {
-              "key": {
-                "standard": "erc20",
-                "chain": "$chain",
-                "address": { "$fn": "curve_route_last_token", "$args": ["$args._route", "$args._swap_params"] }
-              }
+              "key": { "$fn": "token_key_or_native", "$args": [{ "$fn": "curve_route_last_token", "$args": ["$args._route", "$args._swap_params"] }, "$chain"] }
             },
             "direction": {
               "kind": "exact_input",

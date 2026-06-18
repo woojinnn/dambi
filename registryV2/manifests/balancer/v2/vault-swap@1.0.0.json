@@ -80,14 +80,17 @@
           },
           "live_inputs": {
             "route": {
-              "_note": "host:registry Fjord-LBP identification. The convergent registry sync track derives pool_addr = poolId[0:20], resolves whether this pool_id is a Fjord Foundry LBP, and supplies the real pool tokens/weights (+ precise pool_type) for the route. pool_addr is the zero-address placeholder here because the declarative DSL cannot slice the 32-byte poolId down to the 20-byte pool address.",
+              "_note": "host:registry Fjord-LBP identification. The registry sync track derives pool_addr = poolId[0:20], resolves whether this pool_id is a Fjord Foundry LBP, and supplies the real pool tokens/weights (+ precise pool_type) for the route.",
               "source": {
                 "kind":     "registry_api",
                 "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app",
                 "resource": {
                   "kind":      "pool_meta",
                   "chain":     "$chain",
-                  "pool_addr": "0x0000000000000000000000000000000000000000"
+                  "pool_addr": {
+                    "$fn": "balancer_pool_id_to_address",
+                    "$args": ["$args.singleSwap[0]"]
+                  }
                 },
                 "version": "2"
               },

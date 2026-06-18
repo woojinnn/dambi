@@ -47,10 +47,26 @@
           },
           "params": {
             "token_in": {
-              "key": { "standard": "erc20", "chain": "$chain", "address": { "$fn": "address_from_uint256", "$args": ["$args.srcToken"] } }
+              "key": {
+                "$match": { "$fn": "address_from_uint256", "$args": ["$args.srcToken"] },
+                "$cases": {
+                  "0x0000000000000000000000000000000000000000": { "standard": "native", "chain": "$chain" }
+                },
+                "$default": {
+                  "standard": "erc20",
+                  "chain": "$chain",
+                  "address": { "$fn": "address_from_uint256", "$args": ["$args.srcToken"] }
+                }
+              }
             },
             "token_out": {
-              "key": { "standard": "erc20", "chain": "$chain", "address": "$args.dstToken" }
+              "key": {
+                "$match": "$args.dstToken",
+                "$cases": {
+                  "0x0000000000000000000000000000000000000000": { "standard": "native", "chain": "$chain" }
+                },
+                "$default": { "standard": "erc20", "chain": "$chain", "address": "$args.dstToken" }
+              }
             },
             "direction": {
               "kind": "exact_input",

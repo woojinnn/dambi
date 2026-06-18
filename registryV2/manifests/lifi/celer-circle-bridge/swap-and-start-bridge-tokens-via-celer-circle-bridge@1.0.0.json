@@ -146,7 +146,7 @@
     "host_capabilities": [],
     "extension": ">=0.1.0"
   },
-  "note": "Li.Fi swapAndStartBridgeTokensViaCelerCircleBridge (LiFiDiamond) \u2014 swapAndStartBridge -> composite_emit Multicall[ amm::Swap per source SwapData[] leg, bridge::send from BridgeData ]. Swap legs = user's real pre-bridge input; bridge leg = bridged asset + destination.",
+  "note": "Li.Fi swapAndStartBridgeTokensViaCelerCircleBridge (LiFiDiamond) — swapAndStartBridge -> composite_emit Multicall[ amm::Swap per source SwapData[] leg, bridge::send from BridgeData ]. Swap legs = user's real pre-bridge input; bridge leg = bridged asset + destination; source-swap precise modeling is limited to a single SwapData leg so BridgeData.minAmount is not misapplied across multi-leg routes.",
   "emit": {
     "strategy": "composite_emit",
     "parts": [
@@ -155,71 +155,90 @@
         "array_source": "$args._swapData",
         "max_elements": 16,
         "body": {
-          "domain": "amm",
-          "amm": {
-            "action": "swap",
-            "swap": {
-              "venue": {
-                "name": "aggregator_route",
-                "chain": "$chain",
-                "router": "$to",
-                "executor": "$inputs[0]",
-                "route_hash": {
-                  "$fn": "keccak256",
-                  "$args": [
-                    "$inputs[5]"
-                  ]
-                }
-              },
-              "params": {
-                "token_in": {
-                  "key": {
-                    "$fn": "token_key_or_native_zero",
-                    "$args": [
-                      "$inputs[2]",
-                      "$chain"
-                    ]
-                  }
-                },
-                "token_out": {
-                  "key": {
-                    "$fn": "token_key_or_native_zero",
-                    "$args": [
-                      "$inputs[3]",
-                      "$chain"
-                    ]
-                  }
-                },
-                "direction": {
-                  "kind": "exact_input",
-                  "amount_in": "$inputs[4]",
-                  "min_amount_out": "0x0"
-                },
-                "recipient": "$to",
-                "slippage_bp": 0
-              },
-              "live_inputs": {
-                "route": {
-                  "source": {
-                    "kind": "user_supplied"
-                  }
-                },
-                "expected_amount_out": {
-                  "source": {
-                    "kind": "user_supplied"
-                  }
-                },
-                "price_impact_bp": {
-                  "source": {
-                    "kind": "user_supplied"
-                  }
-                },
-                "gas_estimate": {
-                  "source": {
-                    "kind": "user_supplied"
+          "$match": {
+            "$fn": "array_len",
+            "$args": [
+              "$args._swapData"
+            ]
+          },
+          "$cases": {
+            "1": {
+              "domain": "amm",
+              "amm": {
+                "action": "swap",
+                "swap": {
+                  "venue": {
+                    "name": "aggregator_route",
+                    "chain": "$chain",
+                    "router": "$to",
+                    "executor": "$inputs[0]",
+                    "route_hash": {
+                      "$fn": "keccak256",
+                      "$args": [
+                        "$inputs[5]"
+                      ]
+                    }
+                  },
+                  "params": {
+                    "token_in": {
+                      "key": {
+                        "$fn": "token_key_or_native_zero",
+                        "$args": [
+                          "$inputs[2]",
+                          "$chain"
+                        ]
+                      }
+                    },
+                    "token_out": {
+                      "key": {
+                        "$fn": "token_key_or_native_zero",
+                        "$args": [
+                          "$inputs[3]",
+                          "$chain"
+                        ]
+                      }
+                    },
+                    "direction": {
+                      "kind": "exact_input",
+                      "amount_in": "$inputs[4]",
+                      "min_amount_out": "$args._bridgeData[6]"
+                    },
+                    "recipient": "$to",
+                    "slippage_bp": 0
+                  },
+                  "live_inputs": {
+                    "route": {
+                      "source": {
+                        "kind": "user_supplied"
+                      }
+                    },
+                    "expected_amount_out": {
+                      "source": {
+                        "kind": "user_supplied"
+                      }
+                    },
+                    "price_impact_bp": {
+                      "source": {
+                        "kind": "user_supplied"
+                      }
+                    },
+                    "gas_estimate": {
+                      "source": {
+                        "kind": "user_supplied"
+                      }
+                    }
                   }
                 }
               }
+            }
+          },
+          "$default": {
+            "domain": "unknown",
+            "unknown": {
+              "target": "$to",
+              "chain": "$chain",
+              "calldata": "$calldata",
+              "value": "$tx.value"
             }
           }
         }
@@ -249,10 +268,13 @@
                 "$cases": {
                   "1": "eip155:1",
                   "10": "eip155:10",
+                  "25": "eip155:25",
+                  "30": "eip155:30",
                   "56": "eip155:56",
                   "100": "eip155:100",
                   "130": "eip155:130",
                   "137": "eip155:137",
+                  "143": "eip155:143",
                   "146": "eip155:146",
                   "169": "eip155:169",
                   "232": "eip155:232",
@@ -261,12 +283,16 @@
                   "288": "eip155:288",
                   "324": "eip155:324",
                   "480": "eip155:480",
+                  "999": "eip155:999",
                   "1101": "eip155:1101",
                   "1135": "eip155:1135",
+                  "1329": "eip155:1329",
                   "1868": "eip155:1868",
+                  "2020": "eip155:2020",
                   "2741": "eip155:2741",
                   "5000": "eip155:5000",
                   "8453": "eip155:8453",
+                  "13371": "eip155:13371",
                   "34443": "eip155:34443",
                   "42161": "eip155:42161",
                   "42170": "eip155:42170",
@@ -276,17 +302,10 @@
                   "60808": "eip155:60808",
                   "80094": "eip155:80094",
                   "81457": "eip155:81457",
+                  "98866": "eip155:98866",
                   "167000": "eip155:167000",
                   "534352": "eip155:534352",
-                  "7777777": "eip155:7777777",
-                  "999": "eip155:999",
-                  "1329": "eip155:1329",
-                  "13371": "eip155:13371",
-                  "25": "eip155:25",
-                  "30": "eip155:30",
-                  "143": "eip155:143",
-                  "2020": "eip155:2020",
-                  "98866": "eip155:98866"
+                  "7777777": "eip155:7777777"
                 }
               },
               "dst_recipient": {

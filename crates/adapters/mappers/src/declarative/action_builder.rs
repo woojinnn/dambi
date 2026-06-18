@@ -97,6 +97,19 @@ pub enum V3BuildError {
         /// Parallel array length.
         parallel_len: usize,
     },
+    /// An `array_emit` source resolved to more elements than the manifest's
+    /// declared `max_elements` cap.
+    #[error(
+        "array_emit array_source {array_source} has {actual} element(s), exceeding max_elements={max}"
+    )]
+    ArraySourceTooLarge {
+        /// Placeholder used as the array source.
+        array_source: String,
+        /// Manifest-declared cap.
+        max: usize,
+        /// Actual resolved array length.
+        actual: usize,
+    },
     /// A discriminant value-map (`{ $match, $cases, $default? }`) resolved its
     /// `$match` to a key that is absent from `$cases` and the map declares no
     /// `$default`. Fail-loud — the manifest author missed an on-chain enum
@@ -1281,6 +1294,8 @@ pub fn build_multicall_from_opcode_stream(
 /// An empty array yields `ActionBody::Multicall { actions: [] }` (valid, no
 /// error). `array_source` resolving to a non-array surfaces
 /// [`V3BuildError::ArraySourceNotArray`].
+/// If `max_elements` is present, arrays longer than that cap fail loud before
+/// any per-item bodies are built.
 ///
 /// # Errors
 ///
@@ -1294,6 +1309,7 @@ pub fn build_array_emit(
     parallel_sources: Option<&JsonValue>,
     per_item_body: &JsonValue,
     per_item_live_inputs: Option<&JsonValue>,
+    max_elements: Option<usize>,
 ) -> Result<ActionBody, V3BuildError> {
     // `resolve_placeholder` returns an OWNED value; bind it locally so the
     // `&element` borrows below live through the whole loop.
@@ -1301,6 +1317,15 @@ pub fn build_array_emit(
     let arr = array_val
         .as_array()
         .ok_or_else(|| V3BuildError::ArraySourceNotArray(array_source.to_owned()))?;
+    if let Some(max) = max_elements {
+        if arr.len() > max {
+            return Err(V3BuildError::ArraySourceTooLarge {
+                array_source: array_source.to_owned(),
+                max,
+                actual: arr.len(),
+            });
+        }
+    }
 
     let mut parallels: Vec<(String, Vec<JsonValue>)> = Vec::new();
     if let Some(parallel_sources) = parallel_sources {
@@ -2085,7 +2110,8 @@ mod tests {
             }
         });
 
-        let action = build_array_emit(&ctx, "$args.transfers", None, &per_item_body, None).unwrap();
+        let action =
+            build_array_emit(&ctx, "$args.transfers", None, &per_item_body, None, None).unwrap();
         match action {
             ActionBody::Multicall { actions } => {
                 assert_eq!(actions.len(), 2);
@@ -2169,6 +2195,7 @@ mod tests {
             Some(&parallel_sources),
             &per_item_body,
             Some(&live_inputs),
+            None,
         )
         .unwrap();
 
@@ -2215,10 +2242,56 @@ mod tests {
                 }
             }
         });
-        let action = build_array_emit(&ctx, "$args.transfers", None, &per_item_body, None).unwrap();
+        let action =
+            build_array_emit(&ctx, "$args.transfers", None, &per_item_body, None, None).unwrap();
         match action {
             ActionBody::Multicall { actions } => assert!(actions.is_empty()),
             other => panic!("expected empty Multicall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_emit_respects_max_elements() {
+        let args = json!({
+            "transfers": [
+                {
+                    "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                    "recipient": "0x00000000000000000000000000000000deadbeef",
+                    "amount": "1000"
+                },
+                {
+                    "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                    "recipient": "0x00000000000000000000000000000000cafef00d",
+                    "amount": "2000"
+                }
+            ]
+        });
+        let ctx = mk_ctx(&args);
+        let per_item_body = json!({
+            "domain": "token",
+            "token": {
+                "action": "erc20_transfer",
+                "erc20_transfer": {
+                    "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.token" } },
+                    "recipient": "$inputs.recipient",
+                    "amount": "$inputs.amount"
+                }
+            }
+        });
+
+        let err = build_array_emit(&ctx, "$args.transfers", None, &per_item_body, None, Some(1))
+            .unwrap_err();
+        match err {
+            V3BuildError::ArraySourceTooLarge {
+                array_source,
+                max,
+                actual,
+            } => {
+                assert_eq!(array_source, "$args.transfers");
+                assert_eq!(max, 1);
+                assert_eq!(actual, 2);
+            }
+            other => panic!("expected ArraySourceTooLarge, got {other:?}"),
         }
     }
 
@@ -2231,8 +2304,8 @@ mod tests {
             "domain": "token",
             "token": { "action": "erc20_transfer", "erc20_transfer": {} }
         });
-        let err =
-            build_array_emit(&ctx, "$args.transfers", None, &per_item_body, None).unwrap_err();
+        let err = build_array_emit(&ctx, "$args.transfers", None, &per_item_body, None, None)
+            .unwrap_err();
         match err {
             V3BuildError::ArraySourceNotArray(s) => assert_eq!(s, "$args.transfers"),
             other => panic!("expected ArraySourceNotArray, got {other:?}"),

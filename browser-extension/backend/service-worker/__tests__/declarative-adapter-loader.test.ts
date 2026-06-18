@@ -481,6 +481,43 @@ describe("installDeclarativeBundleV3BySelector", () => {
     expect(result).toBeNull();
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
+
+  it("throws on a by-selector registry status fault", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("boom", { status: 503 }));
+
+    await expect(
+      installDeclarativeBundleV3BySelector({
+        chainId: 1,
+        selector: "0xa22cb465",
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
+    ).rejects.toMatchObject({ stage: "fetch_status" });
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
+
+  it("throws on a malformed by-selector bundle", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          matched: true,
+          bundle_id: "standard/nft/set-approval-for-all@1.0.0",
+          bundle: { ...agnosticBundle, type: "adapter_function" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      installDeclarativeBundleV3BySelector({
+        chainId: 1,
+        selector: "0xa22cb465",
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
+    ).rejects.toMatchObject({ stage: "parse" });
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
 });
 
 describe("bundle signature gate — per-site fail shape", () => {
@@ -571,19 +608,20 @@ describe("bundle signature gate — per-site fail shape", () => {
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 
-  it("by-selector: verify fail → null, no install", async () => {
+  it("by-selector: verify fail → throws InstallDeclarativeV3Error(stage=verify), no install", async () => {
     fetchMock.mockResolvedValueOnce(resp(okBundle));
     mocks.verifyBundleSignature.mockResolvedValueOnce({
       ok: false,
       reason: "sig_invalid",
     });
-    const r = await installDeclarativeBundleV3BySelector({
-      chainId: 1,
-      selector: "0x18cbafe5",
-      baseUrl: "https://example.invalid",
-      fetchImpl: fetchMock as unknown as typeof fetch,
-    });
-    expect(r).toBeNull();
+    await expect(
+      installDeclarativeBundleV3BySelector({
+        chainId: 1,
+        selector: "0x18cbafe5",
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
+    ).rejects.toMatchObject({ stage: "verify" });
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 

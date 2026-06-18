@@ -32,7 +32,7 @@
     "mask": "0xff",
     "allow_revert_bit": "0x00",
     "unknown_opcode_policy": "skip",
-    "_note": "unlockData = abi.encode(bytes actions, bytes[] params). The dispatcher pre-decodes it into (commands, inputs[]) — structurally identical to the Universal Router envelope — then runs the shared per-opcode dispatch. V4 actions are NOT masked (full byte 0x00-0x1b), so mask=0xff / allow_revert_bit=0x00. Settlement actions (0x0b-0x16: SETTLE/SETTLE_PAIR/TAKE/TAKE_PAIR/CLOSE_CURRENCY/CLEAR_OR_TAKE/SWEEP/WRAP/UNWRAP) are absent from per_opcode_body + policy=skip → silently dropped: the liquidity action IS the intent, and they would otherwise add Unknown noise that trips the policy engine's warn-on-Unknown default. Swap codes (0x06-0x09) are UnsupportedAction inside modifyLiquidities (PositionManager table only) and are likewise skipped. Native-ETH V4 pools (currency0 == address(0)) currently surface the native leg as erc20{0x0...0}; a value-map native-token mapping is a follow-up. pool_manager is injected per-chain by the route handler as $resolved.pool_manager (mainnet/Base/OP/ARB V4 PoolManager singletons).",
+    "_note": "unlockData = abi.encode(bytes actions, bytes[] params). The dispatcher pre-decodes it into (commands, inputs[]) — structurally identical to the Universal Router envelope — then runs the shared per-opcode dispatch. V4 actions are NOT masked (full byte 0x00-0x1b), so mask=0xff / allow_revert_bit=0x00. Settlement-only actions that pay PoolManager deltas (for example SETTLE/SETTLE_PAIR) remain skipped to avoid noisy Unknown legs on normal mint/increase flows. Recipient-bearing egress actions are explicit below: exact TAKE is modeled as token egress, while amountless or balance-dependent recipient actions such as TAKE_PAIR/SWEEP are surfaced as Unknown so payout redirection cannot vanish from policy evaluation. Swap codes (0x06-0x09) are UnsupportedAction inside modifyLiquidities (PositionManager table only) and are likewise skipped. V4 native currency address(0) is mapped to Core::TokenKey::Native via token_key_or_native_zero. pool_manager is injected per-chain by the route handler as $resolved.pool_manager (mainnet/Base/OP/ARB V4 PoolManager singletons).",
     "per_opcode_body": {
       "0x00": {
         "name": "INCREASE_LIQUIDITY",
@@ -156,8 +156,8 @@
               "params": {
                 "kind": "concentrated_mint",
                 "pool_pair": [
-                  { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.currency0" } },
-                  { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.currency1" } }
+                  { "key": { "$fn": "token_key_or_native_zero", "$args": ["$inputs.currency0", "$chain"] } },
+                  { "key": { "$fn": "token_key_or_native_zero", "$args": ["$inputs.currency1", "$chain"] } }
                 ],
                 "amount_desired": ["$inputs.amount0Max", "$inputs.amount1Max"],
                 "amount_min":     ["0", "0"],
@@ -270,6 +270,120 @@
           }
         },
         "_note": "DEPRECATED (Actions.sol @notice: 'Vulnerable to sandwich attacks - do not use'). Emitted as Unknown (same rationale as 0x04)."
+      },
+      "0x0e": {
+        "name": "TAKE",
+        "inputs_abi": "(address currency, address recipient, uint256 amount)",
+        "body": {
+          "domain": "token",
+          "token": {
+            "action": "erc20_transfer",
+            "erc20_transfer": {
+              "token": {
+                "key": {
+                  "$fn": "token_key_or_native_zero",
+                  "$args": ["$inputs.currency", "$chain"]
+                }
+              },
+              "recipient": "$inputs.recipient",
+              "amount": "$inputs.amount",
+              "is_router_egress": true
+            }
+          }
+        },
+        "_note": "TAKE withdraws an exact owed currency amount to an explicit recipient. This is policy-visible because it can redirect liquidity proceeds away from the submitter."
+      },
+      "0x0f": {
+        "name": "TAKE_ALL",
+        "inputs_abi": "(address currency, uint256 minAmount)",
+        "body": {
+          "domain": "token",
+          "token": {
+            "action": "erc20_transfer",
+            "erc20_transfer": {
+              "token": {
+                "key": {
+                  "$fn": "token_key_or_native_zero",
+                  "$args": ["$inputs.currency", "$chain"]
+                }
+              },
+              "recipient": "$tx.from",
+              "amount": "$inputs.minAmount",
+              "is_router_egress": true
+            }
+          }
+        },
+        "_note": "TAKE_ALL withdraws owed currency subject to minAmount. It has no explicit recipient parameter, so it is modeled as router egress to the submitter."
+      },
+      "0x10": {
+        "name": "TAKE_PORTION",
+        "inputs_abi": "(address currency, address recipient, uint256 bips)",
+        "body": {
+          "domain": "unknown",
+          "unknown": {
+            "target": "$to",
+            "chain": "$chain",
+            "calldata": "$calldata",
+            "value": "0"
+          }
+        },
+        "_note": "TAKE_PORTION has an explicit recipient but a balance-dependent amount. Surface as Unknown rather than silently dropping a possible fee/redirect recipient."
+      },
+      "0x11": {
+        "name": "TAKE_PAIR",
+        "inputs_abi": "(address currency0, address currency1, address recipient)",
+        "body": {
+          "domain": "amm",
+          "amm": {
+            "action": "collect_fees",
+            "collect_fees": {
+              "venue": {
+                "name": "uniswap_v4",
+                "chain": "$chain",
+                "pool_id": "unknown",
+                "pool_manager": "$resolved.pool_manager",
+                "hooks": "0x0000000000000000000000000000000000000000"
+              },
+              "nft_key": {
+                "standard": "erc721",
+                "chain": "$chain",
+                "contract": "$to",
+                "token_id": "0x0"
+              },
+              "recipient": {
+                "$fn": "map_recipient",
+                "$args": ["$inputs.recipient", "$tx.from", "$to"]
+              },
+              "live_inputs": {
+                "fees_owed": {
+                  "source": {
+                    "kind": "onchain_view",
+                    "chain": "$chain",
+                    "contract": "$to",
+                    "function": "getPositionLiquidity(uint256)",
+                    "decoder_id": "uniswap_v4_position_fees_owed"
+                  },
+                  "ttl_s": 12
+                }
+              }
+            }
+          }
+        },
+        "_note": "TAKE_PAIR withdraws both owed pool currencies to an explicit recipient. Modeled as CollectFees (the pair-level settlement of a position's owed tokens) so a third-party payout fires AMM-004 (collect-recipient-not-self) — mirroring how V3 collect() is covered. recipient is sentinel-resolved via map_recipient (0x..01 MSG_SENDER -> signer, 0x..02 ADDRESS_THIS -> PositionManager) so a self-take does not false-positive. nft_key is synthetic (token_id 0x0): V4 positions are not held as ERC721 here and the policy reads only recipient. Exact amounts are not in calldata (fees_owed defaults; AMM-004 does not read it)."
+      },
+      "0x14": {
+        "name": "SWEEP",
+        "inputs_abi": "(address currency, address recipient)",
+        "body": {
+          "domain": "unknown",
+          "unknown": {
+            "target": "$to",
+            "chain": "$chain",
+            "calldata": "$calldata",
+            "value": "0"
+          }
+        },
+        "_note": "SWEEP is recipient-bearing but amountless in the action stream. Surface as Unknown until an amount-aware model exists."
       }
     }
   },

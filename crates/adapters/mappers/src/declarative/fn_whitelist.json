@@ -4,10 +4,13 @@
   "unoswap_route_hash",
   "keccak256",
   "address_from_uint256",
+  "address_from_left_padded_bytes32",
+  "left_padded_bytes32_shape",
   "maker_traits_expiry",
   "coalesce_address",
   "token_key_or_native",
   "uniswap_v3_pool_swap_field",
+  "uniswapx_single_output_field",
   "uniswapx_reactor_order_field",
   "balancer_zip_token_amounts",
   "balancer_pool_id_to_address",
@@ -23,5 +26,7 @@
   "u64_saturating",
   "bytes_nonempty",
   "token_key_or_native_zero",
-  "bridge_recipient"
+  "bridge_recipient",
+  "bridge_recipient_from_bytes32",
+  "map_recipient"
 ]
