@@ -60,12 +60,24 @@ function e2Override(base, edited, severity) {
 /* ─────────────── 진입점: 지갑 선택 + 워크스페이스 ─────────────── */
 // 라이브러리 뼈대에서 끌고 있는 항목 — 레스(말풍선)와 패키지 카드가 공유하는 드래그 페이로드.
 let e2Drag = null;
+// 지갑 별명(label) — 부모 대시보드가 localStorage("dambi_wallet_labels")에 기록한다
+// (ps2 스냅샷엔 라벨이 없음). 같은 origin이라 공유된다.
+function readWalletLabels() {
+  try { return JSON.parse(localStorage.getItem("dambi_wallet_labels") || "{}"); } catch (e) { return {}; }
+}
 function Editor2View({ onNewPolicy }) {
   const snap = useOverview();
+  // 부모가 라벨을 늦게 써도 반영되도록 storage 이벤트로 갱신.
+  const [labelRev, setLabelRev] = React.useState(0);
+  React.useEffect(() => {
+    const on = (e) => { if (!e || e.key === "dambi_wallet_labels") setLabelRev((r) => r + 1); };
+    window.addEventListener("storage", on);
+    return () => window.removeEventListener("storage", on);
+  }, []);
   const rows = React.useMemo(() => {
-    // 실제 ps2 지갑만 사용(목업 채우기 제거). 라벨은 ps2에 없어 주소로 표시.
-    return Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: undefined }));
-  }, [snap]);
+    const labels = readWalletLabels();
+    return Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: labels[address.toLowerCase()] || undefined }));
+  }, [snap, labelRev]);
   const [addr, setAddr] = React.useState(null);
   const rowAddrs = React.useMemo(() => new Set(rows.map((r) => r.address)), [rows]);
   const activeAddr = (addr && rowAddrs.has(addr) ? addr : null) || rows[0]?.address || null;

@@ -8,8 +8,26 @@
  */
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "../../../hooks/useAuth";
+import { getDashboardSummary } from "../../../server-api/dashboard";
+
+/** 지갑 라벨(별명)을 localStorage에 기록 — iframe(같은 origin)이 읽어 주소 대신
+ *  별명을 보여준다. ps2 스냅샷엔 라벨이 없어 대시보드 요약에서 가져온다. */
+function useWalletLabelBridge() {
+  const q = useQuery({ queryKey: ["dashboard-summary"], queryFn: getDashboardSummary });
+  useEffect(() => {
+    if (!q.data) return;
+    const map: Record<string, string> = {};
+    for (const w of q.data.wallets ?? []) if (w.label) map[w.address.toLowerCase()] = w.label;
+    try {
+      localStorage.setItem("dambi_wallet_labels", JSON.stringify(map));
+    } catch {
+      /* ignore */
+    }
+  }, [q.data]);
+}
 
 // 빌드 base("./")에 맞춘 정적 자산 경로 — 확장/dev 둘 다에서 동작.
 const SRC = `${import.meta.env.BASE_URL}editor-v3/Editor.html`;
@@ -45,11 +63,13 @@ function useOpenPolicyBridge() {
 
 export function EditorV3ListPage() {
   useOpenPolicyBridge();
+  useWalletLabelBridge();
   return <EmbeddedEditor />;
 }
 
 export function EditorV3DetailPage() {
   // 프로토타입이 내부 해시 라우팅으로 목록/상세를 처리하므로 동일 임베드를 띄운다.
   useOpenPolicyBridge();
+  useWalletLabelBridge();
   return <EmbeddedEditor />;
 }

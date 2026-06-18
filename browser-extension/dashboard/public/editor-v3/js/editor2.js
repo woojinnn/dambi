@@ -45,11 +45,27 @@ function e2Override(base, edited, severity) {
   return editedJson !== baseJson ? { ...finalModel, id: base.id } : void 0;
 }
 let e2Drag = null;
+function readWalletLabels() {
+  try {
+    return JSON.parse(localStorage.getItem("dambi_wallet_labels") || "{}");
+  } catch (e) {
+    return {};
+  }
+}
 function Editor2View({ onNewPolicy }) {
   const snap = useOverview();
+  const [labelRev, setLabelRev] = React.useState(0);
+  React.useEffect(() => {
+    const on = (e) => {
+      if (!e || e.key === "dambi_wallet_labels") setLabelRev((r) => r + 1);
+    };
+    window.addEventListener("storage", on);
+    return () => window.removeEventListener("storage", on);
+  }, []);
   const rows = React.useMemo(() => {
-    return Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: void 0 }));
-  }, [snap]);
+    const labels = readWalletLabels();
+    return Object.keys(snap.wallets.byAddress).sort().map((address) => ({ address, label: labels[address.toLowerCase()] || void 0 }));
+  }, [snap, labelRev]);
   const [addr, setAddr] = React.useState(null);
   const rowAddrs = React.useMemo(() => new Set(rows.map((r) => r.address)), [rows]);
   const activeAddr = (addr && rowAddrs.has(addr) ? addr : null) || rows[0]?.address || null;
