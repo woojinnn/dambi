@@ -24,7 +24,9 @@ function Ic({ id, cls }) {
   return /* @__PURE__ */ React.createElement("svg", { className: `ic ${cls || ""}`.trim(), viewBox: "0 0 24 24", "aria-hidden": "true" }, E2_ICONS[id]);
 }
 function e2BaseModel(def) {
-  return def.skeleton.model;
+  if (def.skeleton && def.skeleton.model) return def.skeleton.model;
+  if (typeof Cedar !== "undefined" && Cedar.emptyFormModel) return Cedar.emptyFormModel(def.id);
+  return { trigger: { kind: "any" }, when: [], unless: [], id: def.id, severity: "warn", reason: "" };
 }
 function e2CountLeaves(nodes) {
   let n = 0;
@@ -36,6 +38,7 @@ function e2NeedsValues(def) {
   return e2CountLeaves(m.when) + e2CountLeaves(m.unless) > 0;
 }
 function e2Override(base, edited, severity) {
+  if (!base) return void 0;
   const finalModel = { ...edited || base, severity };
   const baseJson = JSON.stringify({ ...base, severity: base.severity });
   const editedJson = JSON.stringify({ ...finalModel, id: base.id });
@@ -776,10 +779,9 @@ function E2ApplyModal({ def, pkgId, pkgName, address, onClose }) {
   const submit = async () => {
     const aliasTrim = alias.trim();
     const finalAlias = aliasTrim && aliasTrim !== def.displayName ? aliasTrim : void 0;
-    const modelOverride = e2Override(base, edited, severity);
     const ok = await run(
       "\uC815\uCC45 \uC801\uC6A9",
-      () => PS.bindDef({ defId: def.id, packageId: pkgId, addresses: [address], ...finalAlias ? { alias: finalAlias } : {}, ...modelOverride ? { modelOverride } : {} })
+      () => PS.bindDef({ defId: def.id, packageId: pkgId, addresses: [address], ...finalAlias ? { alias: finalAlias } : {} })
     );
     if (ok) {
       pushToast(`${finalAlias ?? def.displayName} \u2192 ${pkgName}`);
@@ -829,8 +831,7 @@ function E2FolderApplyModal({ folderName, pkgId, pkgName, address, defs, isInPac
     const ok = await run("\uC815\uCC45 \uC801\uC6A9", async () => {
       for (const d of checkedDefs) {
         if (isInPackage(d.id)) continue;
-        const modelOverride = e2Override(baseModels[d.id], edited[d.id] ?? baseModels[d.id], sevMap[d.id] ?? "warn");
-        await PS.bindDef({ defId: d.id, packageId: pkgId, addresses: [address], ...modelOverride ? { modelOverride } : {} });
+        await PS.bindDef({ defId: d.id, packageId: pkgId, addresses: [address] });
       }
     });
     if (ok) {

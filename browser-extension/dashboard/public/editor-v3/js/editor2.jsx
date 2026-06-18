@@ -34,8 +34,11 @@ function Ic({ id, cls }) {
 
 /* ── 데이터 helpers (포팅 모델: binding.modelOverride 사용) ── */
 function e2BaseModel(def) {
-  // 포팅 시드는 params 가 없으므로 skeleton.model 직접 사용.
-  return def.skeleton.model;
+  // 실제 백엔드 def 는 skeleton.ir 만 있고 model 이 없을 수 있다. 없으면 안전한
+  // 빈 모델을 돌려 모달이 깨지지 않게 한다(조건은 못 보여줘도 적용은 가능).
+  if (def.skeleton && def.skeleton.model) return def.skeleton.model;
+  if (typeof Cedar !== "undefined" && Cedar.emptyFormModel) return Cedar.emptyFormModel(def.id);
+  return { trigger: { kind: "any" }, when: [], unless: [], id: def.id, severity: "warn", reason: "" };
 }
 function e2CountLeaves(nodes) {
   let n = 0;
@@ -47,6 +50,7 @@ function e2NeedsValues(def) {
   return e2CountLeaves(m.when) + e2CountLeaves(m.unless) > 0;
 }
 function e2Override(base, edited, severity) {
+  if (!base) return undefined; // 안전망 — base 가 없으면 override 없음
   const finalModel = { ...(edited || base), severity };
   const baseJson = JSON.stringify({ ...base, severity: base.severity });
   const editedJson = JSON.stringify({ ...finalModel, id: base.id });
@@ -958,9 +962,10 @@ function E2ApplyModal({ def, pkgId, pkgName, address, onClose }) {
   const submit = async () => {
     const aliasTrim = alias.trim();
     const finalAlias = aliasTrim && aliasTrim !== def.displayName ? aliasTrim : undefined;
-    const modelOverride = e2Override(base, edited, severity);
+    // 실제 ps2 bind 는 modelOverride 를 받지 않는다. 정책의 심각도/구조는 def 를
+    // 그대로 상속하고, 여기선 적용(별칭만 옵션)만 한다. (값 채우기=params 는 추후)
     const ok = await run("정책 적용", () =>
-      PS.bindDef({ defId: def.id, packageId: pkgId, addresses: [address], ...(finalAlias ? { alias: finalAlias } : {}), ...(modelOverride ? { modelOverride } : {}) }),
+      PS.bindDef({ defId: def.id, packageId: pkgId, addresses: [address], ...(finalAlias ? { alias: finalAlias } : {}) }),
     );
     if (ok) { pushToast(`${finalAlias ?? def.displayName} → ${pkgName}`); onClose(); }
   };
@@ -1027,8 +1032,8 @@ function E2FolderApplyModal({ folderName, pkgId, pkgName, address, defs, isInPac
     const ok = await run("정책 적용", async () => {
       for (const d of checkedDefs) {
         if (isInPackage(d.id)) continue;
-        const modelOverride = e2Override(baseModels[d.id], edited[d.id] ?? baseModels[d.id], sevMap[d.id] ?? "warn");
-        await PS.bindDef({ defId: d.id, packageId: pkgId, addresses: [address], ...(modelOverride ? { modelOverride } : {}) });
+        // 실제 ps2 bind 는 modelOverride 미지원 — def 상속으로 적용.
+        await PS.bindDef({ defId: d.id, packageId: pkgId, addresses: [address] });
       }
     });
     if (ok) { pushToast(`${folderName} → ${pkgName}`); onClose(); }
