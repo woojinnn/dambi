@@ -72,6 +72,9 @@ export function collectActionMetas(body: unknown): ActionMeta[] {
           : null,
   };
   const metas = [self];
+  if (self.domain === "hyperliquid_core" && self.tag === "hl_unknown") {
+    metas.push({ domain: "unknown", tag: self.tag, venue: self.venue });
+  }
   if (b.domain === "multicall" && Array.isArray(b.actions)) {
     for (const child of b.actions) metas.push(...collectActionMetas(child));
   }

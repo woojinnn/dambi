@@ -158,6 +158,25 @@ describe("trigger pre-filter", () => {
     ]);
   });
 
+  it("aliases hyperliquid hl_unknown as unknown for trigger pre-filtering", () => {
+    const metas = collectActionMetas({
+      domain: "hyperliquid_core",
+      action: "hl_unknown",
+      venue: { name: "hyperliquid" },
+    });
+    expect(metas).toEqual([
+      { domain: "hyperliquid_core", tag: "hl_unknown", venue: "hyperliquid" },
+      { domain: "unknown", tag: "hl_unknown", venue: "hyperliquid" },
+    ]);
+
+    const bundles: ResolvedBundle[] = [
+      { id: "unknown-domain", policy: "p", manifest: undefined, trigger: { domains: ["unknown"] } },
+      { id: "hl-tag", policy: "p", manifest: undefined, trigger: { tags: ["hl_unknown"] } },
+      { id: "swap", policy: "p", manifest: undefined, trigger: { tags: ["swap"] } },
+    ];
+    expect(filterForAction(bundles, metas).map((b) => b.id)).toEqual(["unknown-domain", "hl-tag"]);
+  });
+
   it("filterForAction drops only definite misses; unknown dims pass", () => {
     const bundles: ResolvedBundle[] = [
       { id: "approve-only", policy: "p", manifest: undefined, trigger: { tags: ["erc20_approve"] } },
