@@ -437,8 +437,9 @@ export async function tryDeclarativeRouteV3(args: {
       // Per-address callkey miss. For an address-agnostic standard selector
       // (NFT setApprovalForAll) the decoder is keyed by (chain, selector) ONLY,
       // so fall back to the by-selector index — an UNREGISTERED collection then
-      // still decodes via the WASM selector_bridge. A by-selector miss/fault is
-      // null too → the orchestrator fail-closes to a warn, same as before.
+      // still decodes via the WASM selector_bridge. A real by-selector miss is
+      // null; a registry/install fault throws and is preserved as
+      // fault/install_failed below.
       if (AGNOSTIC_SELECTORS.has(selector.toLowerCase())) {
         installed = await installDeclarativeBundleV3BySelector({
           chainId: args.chainId,

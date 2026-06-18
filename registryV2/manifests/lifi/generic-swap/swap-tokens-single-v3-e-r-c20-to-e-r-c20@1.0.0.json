@@ -97,7 +97,7 @@
     "host_capabilities": [],
     "extension": ">=0.1.0"
   },
-  "note": "Li.Fi swapTokensSingleV3ERC20ToERC20 (GenericSwapFacetV3) \u2014 single swap -> amm::Swap{aggregator_route}.",
+  "note": "Li.Fi swapTokensSingleV3ERC20ToERC20 (GenericSwapFacetV3) — single swap -> amm::Swap{aggregator_route}; min_amount_out is the top-level _minAmountOut, not zero.",
   "emit": {
     "strategy": "single_emit",
     "body": {
@@ -139,7 +139,7 @@
             "direction": {
               "kind": "exact_input",
               "amount_in": "$args._swapData[4]",
-              "min_amount_out": "0x0"
+              "min_amount_out": "$args._minAmountOut"
             },
             "recipient": "$args._receiver",
             "slippage_bp": 0

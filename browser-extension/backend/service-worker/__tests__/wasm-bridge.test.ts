@@ -14,14 +14,6 @@ const wasmMocks = vi.hoisted(() => ({
   evaluateActionV2Json: vi.fn(),
 }));
 
-vi.mock("webextension-polyfill", () => ({
-  default: {
-    runtime: {
-      getURL: vi.fn((path: string) => `chrome-extension://dambi/${path}`),
-    },
-  },
-}));
-
 vi.mock("../../wasm/policy_engine_wasm", () => ({
   default: wasmMocks.init,
   install_policies_json: wasmMocks.installPoliciesJson,
@@ -68,6 +60,7 @@ describe("wasm bridge parsers", () => {
     await expect(
       installPolicies({ schema_text: "schema", policy_set: [] }),
     ).resolves.toBeNull();
+    expect(wasmMocks.init).toHaveBeenCalledWith();
     expect(wasmMocks.installPoliciesJson).toHaveBeenCalledOnce();
   });
 

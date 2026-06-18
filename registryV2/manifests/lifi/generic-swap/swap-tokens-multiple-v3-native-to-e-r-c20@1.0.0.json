@@ -97,77 +97,96 @@
     "host_capabilities": [],
     "extension": ">=0.1.0"
   },
-  "note": "Li.Fi swapTokensMultipleV3NativeToERC20 (GenericSwapFacet) \u2014 swap-only -> array_emit Multicall[ amm::Swap per SwapData[] leg ]; venue=aggregator_route, recipient=_receiver.",
+  "note": "Li.Fi swapTokensMultipleV3NativeToERC20 (GenericSwapFacet) — swap-only -> array_emit Multicall[ amm::Swap per SwapData[] leg ]; venue=aggregator_route, recipient=_receiver; precise swap modeling is limited to a single SwapData leg so the top-level minimum is not misapplied across multi-leg routes.",
   "emit": {
     "strategy": "array_emit",
     "array_source": "$args._swapData",
     "max_elements": 16,
     "body": {
-      "domain": "amm",
-      "amm": {
-        "action": "swap",
-        "swap": {
-          "venue": {
-            "name": "aggregator_route",
-            "chain": "$chain",
-            "router": "$to",
-            "executor": "$inputs[0]",
-            "route_hash": {
-              "$fn": "keccak256",
-              "$args": [
-                "$inputs[5]"
-              ]
-            }
-          },
-          "params": {
-            "token_in": {
-              "key": {
-                "$fn": "token_key_or_native_zero",
-                "$args": [
-                  "$inputs[2]",
-                  "$chain"
-                ]
-              }
-            },
-            "token_out": {
-              "key": {
-                "$fn": "token_key_or_native_zero",
-                "$args": [
-                  "$inputs[3]",
-                  "$chain"
-                ]
-              }
-            },
-            "direction": {
-              "kind": "exact_input",
-              "amount_in": "$inputs[4]",
-              "min_amount_out": "0x0"
-            },
-            "recipient": "$args._receiver",
-            "slippage_bp": 0
-          },
-          "live_inputs": {
-            "route": {
-              "source": {
-                "kind": "user_supplied"
-              }
-            },
-            "expected_amount_out": {
-              "source": {
-                "kind": "user_supplied"
-              }
-            },
-            "price_impact_bp": {
-              "source": {
-                "kind": "user_supplied"
-              }
-            },
-            "gas_estimate": {
-              "source": {
-                "kind": "user_supplied"
+      "$match": {
+        "$fn": "array_len",
+        "$args": [
+          "$args._swapData"
+        ]
+      },
+      "$cases": {
+        "1": {
+          "domain": "amm",
+          "amm": {
+            "action": "swap",
+            "swap": {
+              "venue": {
+                "name": "aggregator_route",
+                "chain": "$chain",
+                "router": "$to",
+                "executor": "$inputs[0]",
+                "route_hash": {
+                  "$fn": "keccak256",
+                  "$args": [
+                    "$inputs[5]"
+                  ]
+                }
+              },
+              "params": {
+                "token_in": {
+                  "key": {
+                    "$fn": "token_key_or_native_zero",
+                    "$args": [
+                      "$inputs[2]",
+                      "$chain"
+                    ]
+                  }
+                },
+                "token_out": {
+                  "key": {
+                    "$fn": "token_key_or_native_zero",
+                    "$args": [
+                      "$inputs[3]",
+                      "$chain"
+                    ]
+                  }
+                },
+                "direction": {
+                  "kind": "exact_input",
+                  "amount_in": "$inputs[4]",
+                  "min_amount_out": "$args._minAmountOut"
+                },
+                "recipient": "$args._receiver",
+                "slippage_bp": 0
+              },
+              "live_inputs": {
+                "route": {
+                  "source": {
+                    "kind": "user_supplied"
+                  }
+                },
+                "expected_amount_out": {
+                  "source": {
+                    "kind": "user_supplied"
+                  }
+                },
+                "price_impact_bp": {
+                  "source": {
+                    "kind": "user_supplied"
+                  }
+                },
+                "gas_estimate": {
+                  "source": {
+                    "kind": "user_supplied"
+                  }
+                }
               }
             }
           }
+        }
+      },
+      "$default": {
+        "domain": "unknown",
+        "unknown": {
+          "target": "$to",
+          "chain": "$chain",
+          "calldata": "$calldata",
+          "value": "$tx.value"
         }
       }
     }

@@ -3,7 +3,7 @@
   "id": "balancer/v2/vault-batch-swap@1.0.0",
   "publisher": "balancer.eth",
   "schema_version": "3",
-  "_note": "Balancer V2 Vault.batchSwap(uint8 kind, (bytes32 poolId,uint256 assetInIndex,uint256 assetOutIndex,uint256 amount,bytes userData)[] swaps, address[] assets, (address,bool,address,bool) funds, int256[] limits, uint256 deadline) — selector 0x945bcec9. Source: balancer/balancer-v2-monorepo IVault.sol. Maps to ONE aggregate Amm::Swap. batchSwap references tokens INDIRECTLY (step i's token = assets[swaps[i].assetInIndex/assetOutIndex]); $fn balancer_v2_batch_swap_field resolves that indirection: token_in = assets[swaps[0].assetInIndex], token_out = assets[swaps[last].assetOutIndex], amount = swaps[0].amount, direction from kind (0=GIVEN_IN exact_input, 1=GIVEN_OUT exact_output). COARSE for true multi-PATH batches (picks first-in/last-out + first step amount) — accurate for the dominant single-route multi-hop; min_amount_out/max_amount_in left 0 (per-asset limits[] not aggregated). recipient = funds.recipient (funds[2]). Mainnet only.",
+  "_note": "Balancer V2 Vault.batchSwap(uint8 kind, (bytes32 poolId,uint256 assetInIndex,uint256 assetOutIndex,uint256 amount,bytes userData)[] swaps, address[] assets, (address,bool,address,bool) funds, int256[] limits, uint256 deadline) — selector 0x945bcec9. Source: balancer/balancer-v2-monorepo IVault.sol. batchSwap references tokens INDIRECTLY (step i's token = assets[swaps[i].assetInIndex/assetOutIndex]); $fn balancer_v2_batch_swap_field resolves that indirection. Exactly one in-bounds swap step is modeled as one Amm::Swap. Multi-step/multi-path batches, unsupported kind values, and malformed asset indexes emit Unknown instead of truncating to swaps[0]/swaps[last] or wrapping indexes. min_amount_out/max_amount_in left 0 (per-asset limits[] not aggregated). recipient = funds.recipient (funds[2]). Mainnet only.",
   "match": {
     "selector": "0x945bcec9",
     "chain_to_addresses": {
@@ -49,10 +49,13 @@
   "emit": {
     "strategy": "single_emit",
     "body": {
-      "domain": "amm",
-      "amm": {
-        "action": "swap",
-        "swap": {
+      "$match": { "$fn": "balancer_v2_batch_swap_field", "$args": ["$args.kind", "$args.swaps", "$args.assets", "shape"] },
+      "$cases": {
+        "single_step": {
+          "domain": "amm",
+          "amm": {
+            "action": "swap",
+            "swap": {
           "venue": {
             "name":      "balancer_v2",
             "chain":     "$chain",
@@ -107,50 +110,70 @@
             },
             "recipient": "$args.funds[2]",
             "slippage_bp": 50
-          },
-          "live_inputs": {
-            "route": {
-              "source": {
-                "kind":     "registry_api",
-                "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app",
-                "resource": {
-                  "kind":      "pool_meta",
-                  "chain":     "$chain",
-                  "pool_addr": "0x0000000000000000000000000000000000000000"
-                },
-                "version": "2"
-              },
-              "ttl_s": 86400
-            },
-            "expected_amount_out": {
-              "source": {
-                "kind":       "onchain_view",
-                "chain":      "$chain",
-                "contract":   "$to",
-                "function":   "queryBatchSwap(uint8,(bytes32,uint256,uint256,uint256,bytes)[],address[],(address,bool,address,bool))",
-                "decoder_id": "balancer_v2_query_swap"
-              },
-              "ttl_s": 12
-            },
-            "price_impact_bp": {
-              "source": {
-                "kind":    "derived_from",
-                "inputs":  [],
-                "calc_id": "balancer_v2_price_impact_bp"
-              },
-              "ttl_s": 12
-            },
-            "gas_estimate": {
-              "source": {
-                "kind":     "oracle_feed",
-                "provider": "pyth",
-                "feed_id":  "gas/ethereum"
-              },
-              "ttl_s": 6
+              }
             }
           }
         }
+      },
+    "$default": {
+      "domain": "unknown",
+      "unknown": {
+        "target": "$to",
+        "chain": "$chain",
+        "calldata": "$calldata",
+        "value": "$tx.value"
       }
+    }
+  },
+  "live_inputs": {
+    "route": {
+      "_note": "PoolMeta lookup derives pool_addr from the selected single swap step poolId; Balancer V2 poolId packs the pool address in the leading 20 bytes.",
+      "source": {
+        "kind":     "registry_api",
+        "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app",
+        "resource": {
+          "kind":      "pool_meta",
+          "chain":     "$chain",
+          "pool_addr": {
+            "$fn": "balancer_pool_id_to_address",
+            "$args": [
+              {
+                "$fn": "balancer_v2_batch_swap_field",
+                "$args": ["$args.kind", "$args.swaps", "$args.assets", "pool_id"]
+              }
+            ]
+          }
+        },
+        "version": "2"
+      },
+      "ttl_s": 86400
+    },
+    "expected_amount_out": {
+      "source": {
+        "kind":       "onchain_view",
+        "chain":      "$chain",
+        "contract":   "$to",
+        "function":   "queryBatchSwap(uint8,(bytes32,uint256,uint256,uint256,bytes)[],address[],(address,bool,address,bool))",
+        "decoder_id": "balancer_v2_query_swap"
+      },
+      "ttl_s": 12
+    },
+    "price_impact_bp": {
+      "source": {
+        "kind":    "derived_from",
+        "inputs":  [],
+        "calc_id": "balancer_v2_price_impact_bp"
+      },
+      "ttl_s": 12
+    },
+    "gas_estimate": {
+      "source": {
+        "kind":     "oracle_feed",
+        "provider": "pyth",
+        "feed_id":  "gas/ethereum"
+      },
+      "ttl_s": 6
+    }
     }
   },
   "requires": {

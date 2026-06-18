@@ -24,6 +24,8 @@
 import {
   RequestType,
   type HyperliquidOrderWire,
+  type HyperliquidExchangeEnvelopeWire,
+  type HyperliquidExchangeSignatureWire,
   type VenueActionWire,
   type VenueOrderPayload,
 } from "@lib/types";
@@ -69,14 +71,15 @@ export function normalizeVenueUrl(raw: string, base?: string): URL | null {
  * Venue endpoints we police. Each entry tests the NORMALIZED `URL`
  * (host allowlist + exact `/exchange` path) → venue id.
  */
-export const VENUE_MATCHERS: { test: (url: URL) => boolean; venue: string }[] = [
-  {
-    test: (url) =>
-      HL_EXCHANGE_HOSTS.has(normalizeHost(url.hostname)) &&
-      url.pathname === "/exchange",
-    venue: "hyperliquid",
-  },
-];
+export const VENUE_MATCHERS: { test: (url: URL) => boolean; venue: string }[] =
+  [
+    {
+      test: (url) =>
+        HL_EXCHANGE_HOSTS.has(normalizeHost(url.hostname)) &&
+        url.pathname === "/exchange",
+      venue: "hyperliquid",
+    },
+  ];
 
 /**
  * Resolve `url` (absolute or, with `base`, relative) and return the matched
@@ -129,6 +132,8 @@ interface HlAttribution {
   nonce?: number;
   /** `vaultAddress` when the order is placed on behalf of a vault. */
   vaultAddress?: string;
+  /** Raw signed `/exchange` fields for SW-side signer recovery. */
+  exchange?: HyperliquidExchangeEnvelopeWire;
 }
 
 /** Wrap one parsed CORE action in a `VenueOrderPayload` envelope. */
@@ -150,8 +155,20 @@ function envelope(
     // the numeric index); omitted here.
   };
   if (attribution.nonce !== undefined) p.nonce = attribution.nonce;
-  if (attribution.vaultAddress !== undefined) p.vaultAddress = attribution.vaultAddress;
+  if (attribution.vaultAddress !== undefined)
+    p.vaultAddress = attribution.vaultAddress;
+  if (attribution.exchange !== undefined) p.hlEnvelope = attribution.exchange;
   return p;
+}
+
+function signatureWireFrom(
+  value: unknown,
+): HyperliquidExchangeSignatureWire | undefined {
+  const sig = asObject(value);
+  if (!sig || typeof sig.r !== "string" || typeof sig.s !== "string")
+    return undefined;
+  if (typeof sig.v !== "number" && typeof sig.v !== "string") return undefined;
+  return { r: sig.r, s: sig.s, v: sig.v };
 }
 
 function unknownPayload(
@@ -215,11 +232,19 @@ function parseOrders(
       continue;
     }
     payloads.push(
-      envelope(venue, endpoint, hostname, { kind: "order", order: wire }, attribution),
+      envelope(
+        venue,
+        endpoint,
+        hostname,
+        { kind: "order", order: wire },
+        attribution,
+      ),
     );
   }
   if (sawInvalidLeg) {
-    payloads.push(unknownPayload(venue, endpoint, hostname, "order", attribution));
+    payloads.push(
+      unknownPayload(venue, endpoint, hostname, "order", attribution),
+    );
   }
   return payloads.length > 0
     ? payloads
@@ -255,18 +280,40 @@ function parseModify(
     const wire = orderWireFrom(o);
     if (wire) {
       payloads.push(
-        envelope(venue, endpoint, hostname, { kind: "order", order: wire }, attribution),
+        envelope(
+          venue,
+          endpoint,
+          hostname,
+          { kind: "order", order: wire },
+          attribution,
+        ),
       );
     } else {
       sawInvalidLeg = true;
     }
   }
   if (sawInvalidLeg) {
-    payloads.push(unknownPayload(venue, endpoint, hostname, String(action.type), attribution));
+    payloads.push(
+      unknownPayload(
+        venue,
+        endpoint,
+        hostname,
+        String(action.type),
+        attribution,
+      ),
+    );
   }
   return payloads.length > 0
     ? payloads
-    : [unknownPayload(venue, endpoint, hostname, String(action.type), attribution)];
+    : [
+        unknownPayload(
+          venue,
+          endpoint,
+          hostname,
+          String(action.type),
+          attribution,
+        ),
+      ];
 }
 
 /**
@@ -305,6 +352,16 @@ export function parseHyperliquidExchangeOrders(
   if (typeof root.vaultAddress === "string" && root.vaultAddress.length > 0) {
     attribution.vaultAddress = root.vaultAddress;
   }
+  const exchange: HyperliquidExchangeEnvelopeWire = { action };
+  if (typeof root.nonce === "number") exchange.nonce = root.nonce;
+  if (typeof root.vaultAddress === "string" && root.vaultAddress.length > 0) {
+    exchange.vaultAddress = root.vaultAddress;
+  }
+  if (typeof root.expiresAfter === "number")
+    exchange.expiresAfter = root.expiresAfter;
+  const signature = signatureWireFrom(root.signature);
+  if (signature) exchange.signature = signature;
+  attribution.exchange = exchange;
 
   const one = (a: VenueActionWire): VenueOrderPayload[] => [
     envelope(venue, endpoint, hostname, a, attribution),
@@ -340,7 +397,10 @@ export function parseHyperliquidExchangeOrders(
     }
 
     case "withdraw3": {
-      if (typeof action.destination !== "string" || action.amount === undefined) {
+      if (
+        typeof action.destination !== "string" ||
+        action.amount === undefined
+      ) {
         return unknown();
       }
       return one({
@@ -351,7 +411,10 @@ export function parseHyperliquidExchangeOrders(
     }
 
     case "usdSend": {
-      if (typeof action.destination !== "string" || action.amount === undefined) {
+      if (
+        typeof action.destination !== "string" ||
+        action.amount === undefined
+      ) {
         return unknown();
       }
       return one({
@@ -387,7 +450,10 @@ export function parseHyperliquidExchangeOrders(
     }
 
     case "sendAsset": {
-      if (typeof action.destination !== "string" || action.amount === undefined) {
+      if (
+        typeof action.destination !== "string" ||
+        action.amount === undefined
+      ) {
         return unknown();
       }
       return one({
@@ -395,7 +461,9 @@ export function parseHyperliquidExchangeOrders(
         destination: action.destination,
         sourceDex: typeof action.sourceDex === "string" ? action.sourceDex : "",
         destinationDex:
-          typeof action.destinationDex === "string" ? action.destinationDex : "",
+          typeof action.destinationDex === "string"
+            ? action.destinationDex
+            : "",
         token: typeof action.token === "string" ? action.token : "",
         amount: String(action.amount),
       });
@@ -441,7 +509,10 @@ export function parseHyperliquidExchangeOrders(
     }
 
     case "subAccountTransfer": {
-      if (typeof action.subAccountUser !== "string" || action.usd === undefined) {
+      if (
+        typeof action.subAccountUser !== "string" ||
+        action.usd === undefined
+      ) {
         return unknown();
       }
       return one({
@@ -514,18 +585,24 @@ export function parseHyperliquidExchangeOrders(
  * by short-circuiting straight to the native `send()`. Lives here (the pure,
  * stream-free module) so it is unit-testable and shared by both hook branches.
  */
-export async function coerceBodyToString(body: unknown): Promise<string | null> {
+export async function coerceBodyToString(
+  body: unknown,
+): Promise<string | null> {
   if (body == null) return null;
   if (typeof body === "string") return body;
   try {
-    if (typeof Blob !== "undefined" && body instanceof Blob) return await body.text();
+    if (typeof Blob !== "undefined" && body instanceof Blob)
+      return await body.text();
     if (body instanceof ArrayBuffer) {
       return new TextDecoder().decode(new Uint8Array(body));
     }
     if (ArrayBuffer.isView(body)) {
       return new TextDecoder().decode(body as ArrayBufferView);
     }
-    if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+    if (
+      typeof URLSearchParams !== "undefined" &&
+      body instanceof URLSearchParams
+    ) {
       return body.toString();
     }
   } catch {
@@ -569,11 +646,17 @@ export async function decideVenueBody(
   if (bodyStr === null) {
     return { kind: "deny", reason: "unreadable_body", payloads: null };
   }
+  let bodyJson: unknown;
+  try {
+    bodyJson = JSON.parse(bodyStr);
+  } catch {
+    return { kind: "deny", reason: "unreadable_body", payloads: null };
+  }
   const payloads = parseHyperliquidExchangeOrders(
     venue,
     endpoint,
     hostname,
-    bodyStr,
+    bodyJson,
   );
   if (!payloads) return { kind: "passthrough" };
   const allowed = await evaluate(payloads);

@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 
-import { matchVenue, parseHyperliquidExchangeOrders } from "../hl-exchange-parse";
+import {
+  decideVenueBody,
+  matchVenue,
+  parseHyperliquidExchangeOrders,
+} from "../hl-exchange-parse";
 import { RequestType } from "@lib/types";
 
 const ENDPOINT = "https://api.hyperliquid.xyz/exchange";
@@ -102,6 +106,36 @@ describe("parseHyperliquidExchangeOrders", () => {
     const out = parse({ action: { type: "order", orders: [{ x: 1 }, { y: 2 }] } });
     expect(out).toHaveLength(1);
     expect(out![0].hlAction).toEqual({ kind: "unknown", actionType: "order" });
+  });
+});
+
+describe("decideVenueBody", () => {
+  it("deny-closes malformed JSON venue bodies instead of treating them as passthrough", async () => {
+    const evaluate = async () => true;
+
+    await expect(
+      decideVenueBody("hyperliquid", ENDPOINT, HOST, "not json", evaluate),
+    ).resolves.toEqual({
+      kind: "deny",
+      reason: "unreadable_body",
+      payloads: null,
+    });
+  });
+
+  it("still passes through valid JSON that is not a guarded venue action", async () => {
+    const evaluate = async () => {
+      throw new Error("should not evaluate out-of-scope body");
+    };
+
+    await expect(
+      decideVenueBody(
+        "hyperliquid",
+        ENDPOINT,
+        HOST,
+        JSON.stringify({ type: "meta" }),
+        evaluate,
+      ),
+    ).resolves.toEqual({ kind: "passthrough" });
   });
 });
 

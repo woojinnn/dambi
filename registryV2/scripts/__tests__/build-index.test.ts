@@ -34,6 +34,7 @@ const TSX_BIN = join(REGISTRY_V2_ROOT, "node_modules", ".bin", "tsx");
 
 const PERMIT2 = "0x000000000022d473030f116ddee9f6b43ac78ba3";
 const ERC20_TOKEN = "0x1111111111111111111111111111111111111111";
+const ERC20_TOKEN_2 = "0x3333333333333333333333333333333333333333";
 const ERC721_TOKEN = "0x2222222222222222222222222222222222222222";
 
 interface RunResult {
@@ -443,6 +444,48 @@ describe("build-index token source expansion", () => {
     expect("chain_ids" in bundle.match).toBe(false);
   });
 
+  it("prunes concrete-owned callkeys out of sourced bundle fan-out", () => {
+    const concreteTransfer = erc20TransferManifest({
+      id: "compound-v3/comet/transfer@1.0.0",
+      match: {
+        selector: "0xa9059cbb",
+        chain_to_addresses: { "1": [ERC20_TOKEN] },
+      },
+    });
+    const root = track(
+      scaffold({
+        "standard-transfer.json": erc20TransferManifest(),
+        "compound-transfer.json": concreteTransfer,
+      }),
+    );
+    writeToken(root, 1, ERC20_TOKEN, "erc20", { symbol: "C20" });
+    writeToken(root, 1, ERC20_TOKEN_2, "erc20", { symbol: "T20" });
+
+    const res = runBuild(root);
+    expect(res.status, `stderr:\n${res.stderr}`).toBe(0);
+
+    expect([...listCallkeys(root)].sort()).toEqual(
+      [
+        `1__${ERC20_TOKEN}__0xa9059cbb.json`,
+        `1__${ERC20_TOKEN_2}__0xa9059cbb.json`,
+      ].sort(),
+    );
+
+    const concreteEntry = JSON.parse(
+      readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN}__0xa9059cbb.json`), "utf8"),
+    );
+    expect(concreteEntry.bundle_id).toBe("compound-v3/comet/transfer@1.0.0");
+
+    const sourcedEntry = JSON.parse(
+      readFileSync(join(callkeyDir(root), `1__${ERC20_TOKEN_2}__0xa9059cbb.json`), "utf8"),
+    );
+    expect(sourcedEntry.schema_version).toBe("3-ref");
+    const sourcedBundle = JSON.parse(readFileSync(join(root, sourcedEntry.bundle_ref), "utf8"));
+    expect(sourcedBundle.match.chain_to_addresses).toEqual({
+      "1": [ERC20_TOKEN_2],
+    });
+  });
+
   it("rejects tokens:erc20 when the requested chain has no token directory", () => {
     const root = track(scaffold({ "transfer.json": erc20TransferManifest() }));
     const res = runBuild(root);
@@ -572,5 +615,69 @@ describe("build-index protocol source materialization", () => {
     expect(context.address).toBe(pool);
     expect(context.context.coins).toEqual([coin0, coin1]);
     expect(context.context.id_suffix).toBe("1-factory-stable-ng-0-33333333");
+  });
+});
+
+describe("manifest live-input regressions", () => {
+  function manifestJsonFiles(dir: string): string[] {
+    const files: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...manifestJsonFiles(full));
+      } else if (entry.isFile() && entry.name.endsWith(".json")) {
+        files.push(full);
+      }
+    }
+    return files;
+  }
+
+  function collectPoolMetaResources(
+    value: unknown,
+    out: { file: string; path: string; resource: Record<string, unknown> }[],
+    file: string,
+    pathParts: string[] = [],
+  ): void {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const record = value as Record<string, unknown>;
+    const source = record.source as Record<string, unknown> | undefined;
+    const resource = source?.resource as Record<string, unknown> | undefined;
+    if (source?.kind === "registry_api" && resource?.kind === "pool_meta") {
+      out.push({ file, path: pathParts.join("."), resource });
+    }
+    for (const [key, child] of Object.entries(record)) {
+      collectPoolMetaResources(child, out, file, [...pathParts, key]);
+    }
+  }
+
+  it("does not send any registry_api pool_meta lookup to the zero address", () => {
+    const poolMeta: { file: string; path: string; resource: Record<string, unknown> }[] = [];
+    for (const file of manifestJsonFiles(join(REGISTRY_V2_ROOT, "manifests"))) {
+      const manifest = JSON.parse(readFileSync(file, "utf8"));
+      collectPoolMetaResources(manifest, poolMeta, file);
+    }
+
+    expect(poolMeta.length).toBeGreaterThanOrEqual(5);
+    for (const entry of poolMeta) {
+      expect(entry.resource.pool_addr, `${entry.file}:${entry.path}`).not.toBe(
+        "0x0000000000000000000000000000000000000000",
+      );
+    }
+  });
+
+  it("does not send Balancer V2 pool_meta lookups to the zero address", () => {
+    const manifestPaths = [
+      "manifests/balancer/v2/vault-swap@1.0.0.json",
+      "manifests/balancer/v2/vault-batch-swap@1.0.0.json",
+    ];
+
+    for (const rel of manifestPaths) {
+      const manifest = JSON.parse(readFileSync(join(REGISTRY_V2_ROOT, rel), "utf8"));
+      const poolAddr =
+        manifest.emit.body.amm.swap.live_inputs.route.source.resource.pool_addr;
+
+      expect(poolAddr, rel).not.toBe("0x0000000000000000000000000000000000000000");
+      expect(poolAddr?.$fn, rel).toBe("balancer_pool_id_to_address");
+    }
   });
 });

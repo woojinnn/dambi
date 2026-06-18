@@ -23,7 +23,26 @@ const mocks = vi.hoisted(() => {
       runtime: { getURL: (p: string) => `chrome-extension://x/${p}` },
       storage: {
         local: {
-          get: vi.fn(async (key: string) => ({ [key]: localStore.get(key) })),
+          get: vi.fn(
+            async (key?: string | string[] | Record<string, unknown>) => {
+              if (Array.isArray(key)) {
+                return Object.fromEntries(
+                  key.map((k) => [k, localStore.get(k)]),
+                );
+              }
+              if (typeof key === "string")
+                return { [key]: localStore.get(key) };
+              if (key && typeof key === "object") {
+                return Object.fromEntries(
+                  Object.entries(key).map(([k, defaultValue]) => [
+                    k,
+                    localStore.has(k) ? localStore.get(k) : defaultValue,
+                  ]),
+                );
+              }
+              return Object.fromEntries(localStore);
+            },
+          ),
           set: vi.fn(async (entries: Record<string, unknown>) => {
             for (const [k, v] of Object.entries(entries)) localStore.set(k, v);
           }),
@@ -43,6 +62,8 @@ import type { VenueOrderPayload } from "@lib/types";
 const HOST = "app.hyperliquid.xyz";
 const MASTER = "0x000000000000000000000000000000000000a01c";
 const VAULT = "0x1111111111111111111111111111111111111111";
+const SYNCED = "0x3333333333333333333333333333333333333333";
+const UID = "u-hl-test";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -52,20 +73,22 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /** Mock `/info` answering meta + activeAssetData + clearinghouseState by type. */
-function infoFetch(opts: {
-  fail?: boolean;
-  /** Override the clearinghouseState response (e.g. no positions). */
-  positions?: Array<Record<string, unknown>>;
-  noClearinghouse?: boolean;
-  /** Override `marginSummary` (e.g. an isolated account with ~$0 perp equity). */
-  marginSummary?: Record<string, unknown>;
-  /**
-   * activeAssetData `availableToTrade` collateral (USD). Default "34000" makes
-   * `totalMarginUsed + availableToTrade == accountValue` for the cross fixture.
-   * `null` omits the field entirely (the SW then can't compute a spot-aware ratio).
-   */
-  availableToTrade?: string | null;
-} = {}): ReturnType<typeof vi.fn<typeof fetch>> {
+function infoFetch(
+  opts: {
+    fail?: boolean;
+    /** Override the clearinghouseState response (e.g. no positions). */
+    positions?: Array<Record<string, unknown>>;
+    noClearinghouse?: boolean;
+    /** Override `marginSummary` (e.g. an isolated account with ~$0 perp equity). */
+    marginSummary?: Record<string, unknown>;
+    /**
+     * activeAssetData `availableToTrade` collateral (USD). Default "34000" makes
+     * `totalMarginUsed + availableToTrade == accountValue` for the cross fixture.
+     * `null` omits the field entirely (the SW then can't compute a spot-aware ratio).
+     */
+    availableToTrade?: string | null;
+  } = {},
+): ReturnType<typeof vi.fn<typeof fetch>> {
   const markPx: Record<string, string> = { BTC: "60000", ETH: "3000" };
   return vi.fn(async (_url: unknown, init?: unknown) => {
     if (opts.fail) throw new Error("network down");
@@ -143,10 +166,30 @@ const orderPayload = (
     hostname: HOST,
     hlAction: {
       kind: "order",
-      order: { a: assetIndex, b: true, p: "60000", s: "0.1", r: false, t: { limit: { tif: "Gtc" } } },
+      order: {
+        a: assetIndex,
+        b: true,
+        p: "60000",
+        s: "0.1",
+        r: false,
+        t: { limit: { tif: "Gtc" } },
+      },
     },
     ...over,
   }) as VenueOrderPayload;
+
+function seedSyncedWallets(...addresses: string[]): void {
+  mocks.localStore.set("dashboard:current-user-id", UID);
+  mocks.localStore.set(`ps2:${UID}:wallets`, {
+    schemaVersion: 1,
+    byAddress: Object.fromEntries(
+      addresses.map((address) => [
+        address.toLowerCase(),
+        { bindings: {}, packages: {}, packageEnabled: {} },
+      ]),
+    ),
+  });
+}
 
 beforeEach(() => {
   mocks.localStore.clear();
@@ -201,12 +244,18 @@ describe("HlInfoClient new reads", () => {
     expect(s?.accountValue).toBe(50000);
     expect(s?.totalMarginUsed).toBe(16000);
     const btc = s?.positions.get("BTC");
-    expect(btc).toEqual({ returnOnEquity: -0.15, liquidationPx: 55000, szi: 0.5 });
+    expect(btc).toEqual({
+      returnOnEquity: -0.15,
+      liquidationPx: 55000,
+      szi: 0.5,
+    });
     expect(s?.positions.has("ETH")).toBe(false);
   });
 
   it("clearinghouseStateFor returns nulls/empty on a bare shape", async () => {
-    const client = new HlInfoClient({ fetchImpl: infoFetch({ noClearinghouse: true }) });
+    const client = new HlInfoClient({
+      fetchImpl: infoFetch({ noClearinghouse: true }),
+    });
     const s = await client.clearinghouseStateFor(MASTER);
     expect(s?.accountValue).toBeNull();
     expect(s?.positions.size).toBe(0);
@@ -217,7 +266,11 @@ describe("collectOrderEnrichment", () => {
   it("computes every field for a BTC order with an open position", async () => {
     await setConnectedAccount(HOST, MASTER);
     const client = new HlInfoClient({ fetchImpl: infoFetch() });
-    const out = await collectOrderEnrichment(order("BTC"), orderPayload(0), client);
+    const out = await collectOrderEnrichment(
+      order("BTC"),
+      orderPayload(0),
+      client,
+    );
     expect(out).toEqual({
       markets: {
         BTC: {
@@ -236,10 +289,26 @@ describe("collectOrderEnrichment", () => {
     });
   });
 
+  it("uses the only synced wallet fallback when wallet_id and origin store are absent", async () => {
+    seedSyncedWallets(SYNCED);
+    const client = new HlInfoClient({ fetchImpl: infoFetch() });
+    const out = await collectOrderEnrichment(
+      order("BTC"),
+      orderPayload(0),
+      client,
+    );
+    expect(out.markets?.BTC?.max_leverage).toBe(50);
+    expect(out.account?.account_value_usd).toBe(50000);
+  });
+
   it("omits position fields and sets has_open_position=false with no position in this market", async () => {
     await setConnectedAccount(HOST, MASTER);
     const client = new HlInfoClient({ fetchImpl: infoFetch() }); // positions only has BTC
-    const out = await collectOrderEnrichment(order("ETH"), orderPayload(1), client);
+    const out = await collectOrderEnrichment(
+      order("ETH"),
+      orderPayload(1),
+      client,
+    );
     expect(out.markets?.ETH).toEqual({
       max_leverage: 25,
       leverage_type: "cross",
@@ -248,7 +317,10 @@ describe("collectOrderEnrichment", () => {
     });
     expect(out.markets?.ETH).not.toHaveProperty("position_roe_bps");
     expect(out.markets?.ETH).not.toHaveProperty("liquidation_distance_bps");
-    expect(out.account).toEqual({ account_value_usd: 50000, margin_used_ratio_bps: 3200 });
+    expect(out.account).toEqual({
+      account_value_usd: 50000,
+      margin_used_ratio_bps: 3200,
+    });
   });
 
   it("counts spot collateral via availableToTrade, not perp-only accountValue", async () => {
@@ -259,12 +331,19 @@ describe("collectOrderEnrichment", () => {
     await setConnectedAccount(HOST, MASTER);
     const client = new HlInfoClient({
       fetchImpl: infoFetch({
-        marginSummary: { accountValue: "0.958269", totalMarginUsed: "0.958269" },
+        marginSummary: {
+          accountValue: "0.958269",
+          totalMarginUsed: "0.958269",
+        },
         availableToTrade: "116.453994",
         positions: [],
       }),
     });
-    const out = await collectOrderEnrichment(order("ETH"), orderPayload(1), client);
+    const out = await collectOrderEnrichment(
+      order("ETH"),
+      orderPayload(1),
+      client,
+    );
     // 0.958269 / (0.958269 + 116.453994) × 10000 = 81.6 → 82  (was 10000)
     expect(out.account?.margin_used_ratio_bps).toBe(82);
   });
@@ -276,12 +355,19 @@ describe("collectOrderEnrichment", () => {
     await setConnectedAccount(HOST, MASTER);
     const client = new HlInfoClient({
       fetchImpl: infoFetch({
-        marginSummary: { accountValue: "0.958269", totalMarginUsed: "0.958269" },
+        marginSummary: {
+          accountValue: "0.958269",
+          totalMarginUsed: "0.958269",
+        },
         availableToTrade: null,
         positions: [],
       }),
     });
-    const out = await collectOrderEnrichment(order("ETH"), orderPayload(1), client);
+    const out = await collectOrderEnrichment(
+      order("ETH"),
+      orderPayload(1),
+      client,
+    );
     expect(out.account ?? {}).not.toHaveProperty("margin_used_ratio_bps");
   });
 
@@ -299,18 +385,26 @@ describe("collectOrderEnrichment", () => {
     await setConnectedAccount(HOST, MASTER);
     const client = new HlInfoClient({ fetchImpl: infoFetch() });
     const withdraw = { action: "hl_withdraw", destination: VAULT, amount: "1" };
-    expect(await collectOrderEnrichment(withdraw, orderPayload(0), client)).toEqual({});
+    expect(
+      await collectOrderEnrichment(withdraw, orderPayload(0), client),
+    ).toEqual({});
   });
 
   it("returns {} when the master is unknown (best-effort dormancy)", async () => {
     const client = new HlInfoClient({ fetchImpl: infoFetch() });
-    expect(await collectOrderEnrichment(order("BTC"), orderPayload(0), client)).toEqual({});
+    expect(
+      await collectOrderEnrichment(order("BTC"), orderPayload(0), client),
+    ).toEqual({});
   });
 
   it("never throws on a network failure (best-effort)", async () => {
     await setConnectedAccount(HOST, MASTER);
     const client = new HlInfoClient({ fetchImpl: infoFetch({ fail: true }) });
-    const out = await collectOrderEnrichment(order("BTC"), orderPayload(0), client);
+    const out = await collectOrderEnrichment(
+      order("BTC"),
+      orderPayload(0),
+      client,
+    );
     // No coin / markPx / clearinghouse resolved → fully empty, but never throws.
     expect(out).toEqual({});
   });
@@ -322,26 +416,32 @@ describe("collectOrderEnrichment", () => {
 // account that holds open positions, and asserts the full `order_enrichment`
 // parses + computes. Proves real order info → e2e parse.
 const LIVE = process.env.HL_LIVE === "1";
-(LIVE ? describe : describe.skip)("LIVE: real HL /info → order_enrichment", () => {
-  it("fetches + parses a populated order_enrichment from the real endpoint", async () => {
-    // A real Hyperliquid account with many open positions (incl. BTC).
-    const REAL = "0x010461c14e146ac35fe42271bdc1134ee31c703a";
-    const client = new HlInfoClient({ fetchImpl: globalThis.fetch, timeoutMs: 8000 });
-    const out = await collectOrderEnrichment(
-      order("BTC", "0.1"),
-      orderPayload(0, { wallet_id: { address: REAL, chains: [] } }),
-      client,
-    );
-    // eslint-disable-next-line no-console
-    console.log("LIVE order_enrichment:", JSON.stringify(out));
-    const btc = out.markets?.BTC;
-    expect(btc?.max_leverage).toBeGreaterThan(0); // meta
-    expect(typeof btc?.leverage_type).toBe("string"); // activeAssetData
-    expect(btc?.notional_usd).toBeGreaterThan(0); // 0.1 × real markPx
-    expect(btc?.has_open_position).toBe(true); // clearinghouseState (this account holds BTC)
-    expect(typeof btc?.position_roe_bps).toBe("number"); // returnOnEquity × 10000
-    expect(typeof btc?.liquidation_distance_bps).toBe("number"); // |markPx-liqPx|/markPx × 10000
-    expect(out.account?.account_value_usd).toBeGreaterThan(0); // marginSummary.accountValue
-    expect(out.account?.margin_used_ratio_bps).toBeGreaterThanOrEqual(0); // totalMarginUsed/accountValue
-  }, 30000);
-});
+(LIVE ? describe : describe.skip)(
+  "LIVE: real HL /info → order_enrichment",
+  () => {
+    it("fetches + parses a populated order_enrichment from the real endpoint", async () => {
+      // A real Hyperliquid account with many open positions (incl. BTC).
+      const REAL = "0x010461c14e146ac35fe42271bdc1134ee31c703a";
+      const client = new HlInfoClient({
+        fetchImpl: globalThis.fetch,
+        timeoutMs: 8000,
+      });
+      const out = await collectOrderEnrichment(
+        order("BTC", "0.1"),
+        orderPayload(0, { wallet_id: { address: REAL, chains: [] } }),
+        client,
+      );
+      // eslint-disable-next-line no-console
+      console.log("LIVE order_enrichment:", JSON.stringify(out));
+      const btc = out.markets?.BTC;
+      expect(btc?.max_leverage).toBeGreaterThan(0); // meta
+      expect(typeof btc?.leverage_type).toBe("string"); // activeAssetData
+      expect(btc?.notional_usd).toBeGreaterThan(0); // 0.1 × real markPx
+      expect(btc?.has_open_position).toBe(true); // clearinghouseState (this account holds BTC)
+      expect(typeof btc?.position_roe_bps).toBe("number"); // returnOnEquity × 10000
+      expect(typeof btc?.liquidation_distance_bps).toBe("number"); // |markPx-liqPx|/markPx × 10000
+      expect(out.account?.account_value_usd).toBeGreaterThan(0); // marginSummary.accountValue
+      expect(out.account?.margin_used_ratio_bps).toBeGreaterThanOrEqual(0); // totalMarginUsed/accountValue
+    }, 30000);
+  },
+);

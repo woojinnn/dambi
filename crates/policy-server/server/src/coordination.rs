@@ -163,6 +163,9 @@ pub type DynCoordinator = Arc<dyn Coordinator>;
 pub async fn build_coordinator(config: &ServerConfig) -> Result<DynCoordinator, CoordinationError> {
     match config.redis_url.as_deref() {
         Some(url) if !url.trim().is_empty() => Ok(Arc::new(RedisCoordinator::connect(url).await?)),
+        _ if config.require_redis => Err(CoordinationError::Redis(
+            "REDIS_URL is required when REQUIRE_REDIS=true".to_owned(),
+        )),
         _ => Ok(Arc::new(NoopCoordinator)),
     }
 }

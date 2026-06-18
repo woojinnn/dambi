@@ -87,14 +87,22 @@ impl OnchainView for NoOnchain {
 // Params
 // ---------------------------------------------------------------------------
 
-/// Direction of the pending action — borrow grows debt, withdraw shrinks
-/// collateral. Parsed from the `action_kind` param (`$.action.tag`).
+/// Direction of the pending action. Borrow grows debt; withdraw shrinks
+/// collateral; disable-collateral removes one reserve from the collateral side;
+/// set-e-mode changes the liquidation thresholds (LEND-014 only needs "is there
+/// open debt"). Parsed from the `action_kind` param (`$.action.tag` / a literal).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionKind {
     /// Borrowing `amount` of `asset` (debt increases).
     Borrow,
     /// Withdrawing `amount` of `asset` collateral (collateral decreases).
     Withdraw,
+    /// `setUserUseReserveAsCollateral(asset,false)` — drop `asset`'s collateral
+    /// contribution (LEND-013). No `amount` (the whole reserve is un-collateralized).
+    DisableCollateral,
+    /// `setUserEMode(category)` — LEND-014 checks only for open debt; no HF
+    /// projection (the new category's LT is not modelled). No `asset`/`amount`.
+    SetEMode,
 }
 
 /// The parsed `lending.health_factor` params (manifest-wired, see
@@ -123,16 +131,29 @@ impl HfParams {
         let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
         let owner = params.get("owner").and_then(asset_address)?;
         let venue = params.get("venue")?.clone();
-        // `$.action.asset` lowers to a TokenRef `{ key: { standard, chain, address } }`
-        // (lower_token_ref), so dig into `key.address` — NOT the flat `{ address }`
-        // that `asset_address` expects.
-        let asset_addr = token_ref_address(params.get("asset")?)?;
-        let amount_raw = params.get("amount").and_then(Value::as_str)?;
-        let amount = U256::from_str_radix(amount_raw.trim_start_matches("0x"), 16).ok()?;
         let kind = match params.get("action_kind").and_then(Value::as_str)? {
             "borrow" => ActionKind::Borrow,
             "withdraw" => ActionKind::Withdraw,
+            "disable_collateral" => ActionKind::DisableCollateral,
+            "set_e_mode" => ActionKind::SetEMode,
             _ => return None,
+        };
+        // `asset` identifies the reserve for borrow/withdraw/disable-collateral;
+        // `set_e_mode` is position-wide (no asset). `$.action.asset` lowers to a
+        // TokenRef `{ key: { standard, chain, address } }` (lower_token_ref), so dig
+        // into `key.address` — NOT the flat `{ address }` that `asset_address` expects.
+        let asset_addr = if matches!(kind, ActionKind::SetEMode) {
+            String::new()
+        } else {
+            token_ref_address(params.get("asset")?)?
+        };
+        // `amount` is the borrow/withdraw delta only — disable removes the whole
+        // reserve and e-mode changes no balance.
+        let amount = if matches!(kind, ActionKind::Borrow | ActionKind::Withdraw) {
+            let amount_raw = params.get("amount").and_then(Value::as_str)?;
+            U256::from_str_radix(amount_raw.trim_start_matches("0x"), 16).ok()?
+        } else {
+            U256::ZERO
         };
         Some(Self {
             chain_id,
@@ -236,29 +257,88 @@ impl LendingHealthAdapter for AaveV3Adapter {
             return None; // v1: Ethereum mainnet only.
         }
         let pool = venue_pool(&p.venue)?;
-        // All three reads are independent ⇒ one batched round.
-        let batch = onchain
-            .eth_call_batch(
-                p.chain_id,
-                &[
-                    (
-                        pool,
-                        calldata("getUserAccountData(address)", &[address_word(&p.owner)?]),
-                    ),
-                    (
-                        AAVE_ORACLE_MAINNET.to_owned(),
-                        calldata("getAssetPrice(address)", &[address_word(&p.asset_addr)?]),
-                    ),
-                    (p.asset_addr.clone(), selector("decimals()").to_vec()),
-                ],
-            )
-            .await?;
-        aave_project(
-            batch_at(&batch, 0)?,
-            batch_at(&batch, 1)?,
-            batch_at(&batch, 2)?,
-            p,
-        )
+        match p.kind {
+            ActionKind::Borrow | ActionKind::Withdraw => {
+                // All three reads are independent ⇒ one batched round.
+                let batch = onchain
+                    .eth_call_batch(
+                        p.chain_id,
+                        &[
+                            (
+                                pool,
+                                calldata("getUserAccountData(address)", &[address_word(&p.owner)?]),
+                            ),
+                            (
+                                AAVE_ORACLE_MAINNET.to_owned(),
+                                calldata("getAssetPrice(address)", &[address_word(&p.asset_addr)?]),
+                            ),
+                            (p.asset_addr.clone(), selector("decimals()").to_vec()),
+                        ],
+                    )
+                    .await?;
+                aave_project(
+                    batch_at(&batch, 0)?,
+                    batch_at(&batch, 1)?,
+                    batch_at(&batch, 2)?,
+                    p,
+                )
+            }
+            // LEND-014: only "is there open debt" — one read, no projection.
+            ActionKind::SetEMode => {
+                let acct_b = onchain
+                    .eth_call(
+                        p.chain_id,
+                        &pool,
+                        &calldata("getUserAccountData(address)", &[address_word(&p.owner)?]),
+                    )
+                    .await?;
+                aave_current_position(&acct_b)
+            }
+            // LEND-013: HF after dropping `asset`'s collateral. Round 1 reads the
+            // aggregate + the reserve (config bitmask carries LT_j + decimals_j, word
+            // 8 the aToken) + the asset price; round 2 reads the user's aToken balance
+            // (dependent on the aToken address).
+            ActionKind::DisableCollateral => {
+                let r1 = onchain
+                    .eth_call_batch(
+                        p.chain_id,
+                        &[
+                            (
+                                pool.clone(),
+                                calldata("getUserAccountData(address)", &[address_word(&p.owner)?]),
+                            ),
+                            (
+                                pool,
+                                calldata(
+                                    "getReserveData(address)",
+                                    &[address_word(&p.asset_addr)?],
+                                ),
+                            ),
+                            (
+                                AAVE_ORACLE_MAINNET.to_owned(),
+                                calldata("getAssetPrice(address)", &[address_word(&p.asset_addr)?]),
+                            ),
+                        ],
+                    )
+                    .await?;
+                let reserve_b = batch_at(&r1, 1)?;
+                let atoken = word_addr(reserve_b, 8)?;
+                let bal = onchain
+                    .eth_call(
+                        p.chain_id,
+                        &atoken,
+                        &calldata("balanceOf(address)", &[address_word(&p.owner)?]),
+                    )
+                    .await?;
+                aave_project_disable(
+                    batch_at(&r1, 0)?,
+                    batch_at(&r1, 1)?,
+                    &bal,
+                    batch_at(&r1, 2)?,
+                    p,
+                )
+            }
+        }
     }
 }
 
@@ -291,6 +371,8 @@ fn aave_project(
             (acct.total_collateral_base - delta_base).max(0.0),
             acct.total_debt_base,
         ),
+        // Routed to dedicated projections in `evaluate`; unreachable here.
+        ActionKind::DisableCollateral | ActionKind::SetEMode => return None,
     };
 
     let current_hf = {
@@ -305,6 +387,78 @@ fn aave_project(
         current_hf,
         ltv_bps: Some(acct.ltv_bps),
     })
+}
+
+/// Current (pre-action) Aave position from `getUserAccountData` — `set_e_mode`
+/// (LEND-014) needs only "is there open debt", so no projection: post == current.
+fn aave_current_position(acct_b: &[u8]) -> Option<NormalizedPosition> {
+    let acct = decode_user_account_data(acct_b)?;
+    let current_hf = {
+        let h = acct.health_factor_wad / 1e18;
+        (h < 1e6).then_some(h)
+    };
+    Some(NormalizedPosition {
+        collateral_base: acct.total_collateral_base,
+        debt_base: acct.total_debt_base,
+        liq_threshold_bps: acct.liq_threshold_bps,
+        current_hf,
+        ltv_bps: Some(acct.ltv_bps),
+    })
+}
+
+/// Aave disable-collateral projection (LEND-013): HF after
+/// `setUserUseReserveAsCollateral(asset, false)`. The aggregate weighted threshold
+/// gives `Σ(collateral_i × LT_i) = totalCollateral × avgLT`; dropping reserve `j`
+/// removes `collateral_j_usd × LT_j` from that numerator (debt unchanged):
+/// `HF_after = (totalCollateral×avgLT − collateral_j×LT_j) / debt`. Re-expressed for
+/// the shared [`post_action_hf`] (single `collateral × LT`): keep `liq_threshold_bps
+/// = avgLT` and scale collateral by `LT_j/avgLT` so `collateral_base × avgLT` equals
+/// that numerator.
+fn aave_project_disable(
+    acct_b: &[u8],
+    reserve_b: &[u8],
+    atoken_bal_b: &[u8],
+    price_b: &[u8],
+    _p: &HfParams,
+) -> Option<NormalizedPosition> {
+    let acct = decode_user_account_data(acct_b)?;
+    let (lt_j_bps, dec_j) = decode_reserve_config_lt_decimals(reserve_b)?;
+    let atoken_bal = u256_to_f64(word_u256(atoken_bal_b, 0)?)?;
+    let price = decode_u256_word(price_b)?; // base (USD 8dp) per whole token
+    let scale = 10f64.powi(i32::try_from(dec_j).ok()?);
+    let collateral_j_usd = (atoken_bal / scale) * price; // base (USD 8dp)
+
+    let avg_lt = acct.liq_threshold_bps;
+    let collateral_base = if avg_lt == 0 {
+        // No effective collateral weight ⇒ removing one reserve can't raise HF.
+        (acct.total_collateral_base - collateral_j_usd).max(0.0)
+    } else {
+        (acct.total_collateral_base - collateral_j_usd * (f64::from(lt_j_bps) / f64::from(avg_lt)))
+            .max(0.0)
+    };
+
+    let current_hf = {
+        let h = acct.health_factor_wad / 1e18;
+        (h < 1e6).then_some(h)
+    };
+    Some(NormalizedPosition {
+        collateral_base,
+        debt_base: acct.total_debt_base,
+        liq_threshold_bps: avg_lt,
+        current_hf,
+        ltv_bps: Some(acct.ltv_bps),
+    })
+}
+
+/// From Aave V3 `getReserveData(asset)` returndata, decode the reserve's liquidation
+/// threshold (bps) and token decimals out of the packed `ReserveConfigurationMap`
+/// (returndata word 0): LT = bits 16–31, decimals = bits 48–55. (Word 8 is the
+/// `aTokenAddress`, read separately for the balance call.)
+fn decode_reserve_config_lt_decimals(data: &[u8]) -> Option<(u32, u32)> {
+    let config = word_u256(data, 0)?;
+    let lt = u256_to_u32((config >> 16) & U256::from(0xFFFFu64))?;
+    let decimals = u256_to_u32((config >> 48) & U256::from(0xFFu64))?;
+    Some((lt, decimals))
 }
 
 /// Morpho Blue — isolated single-collateral / single-debt markets. The market's
@@ -420,6 +574,9 @@ fn morpho_project(
             };
             ((collateral - amt).max(0.0) * oracle_price / 1e36, debt)
         }
+        // Morpho Blue markets are single-collateral isolated — no Aave-style
+        // collateral toggle / e-mode. Both are dormant here.
+        ActionKind::DisableCollateral | ActionKind::SetEMode => return None,
     };
 
     let current_hf = (debt > 0.0)
@@ -442,6 +599,11 @@ fn morpho_project(
 /// Note: a Comet *base-asset* withdraw is economically a **borrow** (debt up);
 /// a *collateral* withdraw reduces that leg.
 struct CompoundV3Adapter;
+
+/// Production Comet markets have a small collateral set. Cap the on-chain
+/// fanout anyway: `numAssets()` is read from an external contract and otherwise
+/// controls allocations plus Multicall leg count inside one `/evaluate`.
+const COMET_MAX_COLLATERALS: u32 = 32;
 
 #[async_trait]
 impl LendingHealthAdapter for CompoundV3Adapter {
@@ -478,6 +640,9 @@ impl LendingHealthAdapter for CompoundV3Adapter {
             )
             .await?;
         let num = u256_to_u32(word_u256(batch_at(&round_a, 0)?, 0)?)?;
+        if num > COMET_MAX_COLLATERALS {
+            return None;
+        }
         // Comet.decimals() == the base token's decimals.
         let base_decimals = u256_to_u32(word_u256(batch_at(&round_a, 1)?, 0)?)?;
         let base_scale = 10f64.powi(i32::try_from(base_decimals).ok()?);
@@ -566,6 +731,8 @@ impl LendingHealthAdapter for CompoundV3Adapter {
             ActionKind::Withdraw => {
                 risk_collateral_usd = (risk_collateral_usd - wd_collateral_delta).max(0.0);
             }
+            // Compound III has no per-reserve collateral toggle / e-mode ⇒ dormant.
+            ActionKind::DisableCollateral | ActionKind::SetEMode => return None,
         }
 
         let current_hf = (debt_usd > 0.0)
@@ -629,6 +796,12 @@ pub async fn lending_health_factor(params: &Value, onchain: &dyn OnchainView) ->
         "postActionHf": post_action_hf(&pos),
         "currentHf": pos.current_hf.map(|h| format!("{h:.4}")),
         "ltv": pos.ltv_bps,
+        // Current total debt in USD (the protocol base currency, lowered from the
+        // 8dp base unit), as a 4dp Decimal string — `set_e_mode` (LEND-014) checks
+        // `> decimal("0")` for open debt (post == current for that kind). "0.0000"
+        // when debtless. (Only meaningful for set_e_mode; borrow's projected debt
+        // can be unbounded and is not consumed.)
+        "totalDebtUsd": format!("{:.4}", (pos.debt_base / 1e8).max(0.0)),
     }))
 }
 
@@ -914,6 +1087,107 @@ mod tests {
         assert_eq!(post_action_hf(&pos), "0.0000");
     }
 
+    /// 15-word `getReserveData` returndata: word 0 = packed config, word 8 = aToken.
+    fn reserve_bytes(config: u128, atoken: &str) -> Vec<u8> {
+        let mut words: Vec<[u8; 32]> = vec![[0u8; 32]; 15];
+        words[0] = word(config);
+        let bytes = hex::decode(atoken.trim_start_matches("0x")).unwrap();
+        words[8][12..].copy_from_slice(&bytes);
+        words.into_iter().flatten().collect()
+    }
+
+    #[test]
+    fn decode_reserve_config_extracts_lt_and_decimals() {
+        // LT in bits 16–31, decimals in bits 48–55 of the ReserveConfigurationMap.
+        let config = (8500u128 << 16) | (18u128 << 48);
+        let reserve = reserve_bytes(config, "0x0000000000000000000000000000000000000abc");
+        assert_eq!(
+            decode_reserve_config_lt_decimals(&reserve),
+            Some((8500, 18))
+        );
+    }
+
+    #[test]
+    fn project_disable_collateral_drops_asset_contribution() {
+        // LEND-013: total collat 300e8, debt 100e8, avgLT 80% → current HF 2.4.
+        // Disable USDC (LT 80%, 6dp), user holds 100 USDC ($100 = 100e8):
+        // numerator_after = 300e8×0.8 − 100e8×0.8 = 160e8 → HF 1.6.
+        let acct = acct_bytes(300 * E8, 100 * E8, 8000, 7500, 2_400_000_000_000_000_000);
+        let config = (8000u128 << 16) | (6u128 << 48); // LT 8000bps, 6dp
+        let reserve = reserve_bytes(config, "0x0000000000000000000000000000000000000abc");
+        let bal = word(100_000_000).to_vec(); // 100 USDC (6dp)
+        let price = word(E8).to_vec(); // $1 @ 8dp
+        let p = HfParams::parse(&params("disable_collateral", "0x0")).unwrap();
+        let pos = aave_project_disable(&acct, &reserve, &bal, &price, &p).unwrap();
+        assert_eq!(post_action_hf(&pos), "1.6000");
+    }
+
+    #[test]
+    fn set_emode_parses_without_asset_or_amount() {
+        // set_e_mode carries no asset/amount; parse must still succeed.
+        let p = json!({
+            "chain_id": "eip155:1",
+            "owner": OWNER,
+            "venue": { "name": "aave_v3", "chain": "eip155:1", "pool": POOL },
+            "action_kind": "set_e_mode",
+        });
+        let parsed = HfParams::parse(&p).unwrap();
+        assert_eq!(parsed.kind, ActionKind::SetEMode);
+        assert_eq!(parsed.amount, U256::ZERO);
+        assert!(parsed.asset_addr.is_empty());
+    }
+
+    #[tokio::test]
+    async fn disable_collateral_full_path_drops_hf() {
+        const ATOKEN: &str = "0xbcca60bb61934080951369a648fb03df4f96263c";
+        let config = (8000u128 << 16) | (6u128 << 48);
+        let onchain = FakeOnchain::new()
+            .with(
+                POOL,
+                "getUserAccountData(address)",
+                acct_bytes(300 * E8, 100 * E8, 8000, 7500, 2_400_000_000_000_000_000),
+            )
+            .with(
+                POOL,
+                "getReserveData(address)",
+                reserve_bytes(config, ATOKEN),
+            )
+            .with(
+                AAVE_ORACLE_MAINNET,
+                "getAssetPrice(address)",
+                word(E8).to_vec(),
+            )
+            .with(ATOKEN, "balanceOf(address)", word(100_000_000).to_vec());
+        let out = lending_health_factor(&params("disable_collateral", "0x0"), &onchain)
+            .await
+            .unwrap();
+        assert_eq!(out["postActionHf"], json!("1.6000"));
+    }
+
+    #[tokio::test]
+    async fn set_emode_reports_open_debt_via_health_factor() {
+        // Open debt ($200) ⇒ totalDebtUsd "200.0000" > 0 (LEND-014 fires).
+        let onchain = FakeOnchain::new().with(
+            POOL,
+            "getUserAccountData(address)",
+            acct_bytes(300 * E8, 200 * E8, 8000, 7500, 1_500_000_000_000_000_000),
+        );
+        let out = lending_health_factor(&params("set_e_mode", "0x0"), &onchain)
+            .await
+            .unwrap();
+        assert_eq!(out["totalDebtUsd"], json!("200.0000"));
+        // Debtless ⇒ "0.0000" (LEND-014 stays dormant).
+        let onchain0 = FakeOnchain::new().with(
+            POOL,
+            "getUserAccountData(address)",
+            acct_bytes(300 * E8, 0, 8000, 7500, u128::from(u64::MAX)),
+        );
+        let out0 = lending_health_factor(&params("set_e_mode", "0x0"), &onchain0)
+            .await
+            .unwrap();
+        assert_eq!(out0["totalDebtUsd"], json!("0.0000"));
+    }
+
     #[test]
     fn adapter_matches_aave_and_spark_not_compound() {
         assert!(AaveV3Adapter.matches(&json!({ "name": "aave_v3", "pool": POOL })));
@@ -1142,6 +1416,39 @@ mod tests {
             }
             Some(out)
         }
+    }
+
+    #[tokio::test]
+    async fn comet_num_assets_is_capped_before_fanout() {
+        const COMET: &str = "0xc3d688b66703497daa19211eedff47f25384cdc3";
+
+        let fake = FakeOnchain::new().with(
+            COMET,
+            "numAssets()",
+            word(u128::from(COMET_MAX_COLLATERALS) + 1).to_vec(),
+        );
+        let rec = RecordingFake {
+            inner: fake,
+            batch_rounds: std::sync::Mutex::new(Vec::new()),
+            singles: std::sync::Mutex::new(0),
+        };
+        let params = json!({
+            "chain_id": "eip155:1",
+            "owner": OWNER,
+            "venue": {
+                "name": "compound_v3",
+                "chain": "eip155:1",
+                "comet": COMET,
+                "baseAsset": { "key": { "standard": "erc20", "chain": "eip155:1", "address": USDC } }
+            },
+            "asset": { "key": { "standard": "erc20", "chain": "eip155:1", "address": USDC } },
+            "amount": "0x1",
+            "action_kind": "borrow",
+        });
+
+        assert!(lending_health_factor(&params, &rec).await.is_none());
+        assert_eq!(*rec.batch_rounds.lock().unwrap(), vec![4]);
+        assert_eq!(*rec.singles.lock().unwrap(), 0);
     }
 
     /// The whole point of the Multicall3 work: a Comet position with N collaterals is

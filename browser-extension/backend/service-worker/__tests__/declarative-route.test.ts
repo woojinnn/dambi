@@ -1,17 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeAbiParameters, encodeFunctionData, type Hex } from "viem";
 
-const mocks = vi.hoisted(() => ({
-  installDeclarativeBundleV3: vi.fn(),
-  installDeclarativeBundleV3BySelector: vi.fn(),
-  declarativeRouteRequestV3: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  class InstallDeclarativeV3Error extends Error {}
+  return {
+    installDeclarativeBundleV3: vi.fn(),
+    installDeclarativeBundleV3BySelector: vi.fn(),
+    declarativeRouteRequestV3: vi.fn(),
+    InstallDeclarativeV3Error,
+  };
+});
 
 vi.mock("../adapter-loader/declarative-adapter-loader", () => ({
   installDeclarativeBundleV3: mocks.installDeclarativeBundleV3,
   installDeclarativeBundleV3BySelector:
     mocks.installDeclarativeBundleV3BySelector,
-  InstallDeclarativeV3Error: class InstallDeclarativeV3Error extends Error {},
+  InstallDeclarativeV3Error: mocks.InstallDeclarativeV3Error,
 }));
 
 vi.mock("../wasm-bridge", () => ({
@@ -235,6 +239,26 @@ describe("tryDeclarativeRouteV3", () => {
     });
 
     expect(outcome.kind).toBe("miss");
+    expect(mocks.declarativeRouteRequestV3).not.toHaveBeenCalled();
+  });
+
+  it("preserves a by-selector registry fault instead of flattening it to miss", async () => {
+    const fault = new mocks.InstallDeclarativeV3Error("selector 503");
+    mocks.installDeclarativeBundleV3.mockResolvedValue(null);
+    mocks.installDeclarativeBundleV3BySelector.mockRejectedValue(fault);
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0xf7c57e015b57e2b58949353599e1a7a1e5e7fc01",
+      to: BAYC,
+      calldataHex: setApprovalCalldata,
+    });
+
+    expect(outcome).toEqual({
+      kind: "fault",
+      reason: "install_failed",
+      cause: fault,
+    });
     expect(mocks.declarativeRouteRequestV3).not.toHaveBeenCalled();
   });
 

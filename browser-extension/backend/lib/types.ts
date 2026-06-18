@@ -99,14 +99,24 @@ export type VenueActionWire =
     }
   | { kind: "c_deposit"; wei: string }
   | { kind: "c_withdraw"; wei: string }
-  | { kind: "vault_transfer"; vaultAddress: string; isDeposit: boolean; usd: string }
+  | {
+      kind: "vault_transfer";
+      vaultAddress: string;
+      isDeposit: boolean;
+      usd: string;
+    }
   | {
       kind: "sub_account_transfer";
       subAccountUser: string;
       isDeposit: boolean;
       usd: string;
     }
-  | { kind: "token_delegate"; validator: string; isUndelegate: boolean; wei: string }
+  | {
+      kind: "token_delegate";
+      validator: string;
+      isUndelegate: boolean;
+      wei: string;
+    }
   | {
       kind: "twap_order";
       assetIndex: number;
@@ -116,7 +126,12 @@ export type VenueActionWire =
       minutes: number;
       randomize: boolean;
     }
-  | { kind: "update_isolated_margin"; assetIndex: number; isBuy: boolean; ntli: string }
+  | {
+      kind: "update_isolated_margin";
+      assetIndex: number;
+      isBuy: boolean;
+      ntli: string;
+    }
   | {
       /**
        * Catch-all for an `/exchange` action with no explicit model. Carries only
@@ -166,11 +181,31 @@ export interface VenueOrderPayload {
    * may report without this field and let a later venue sync reconcile state.
    */
   wallet_id?: WalletIdWire;
+  /**
+   * Raw `/exchange` envelope fields needed to recover the actual L1 signer
+   * (master or API/agent wallet). Used only in-memory by the service worker for
+   * deterministic master resolution; audit/storage paths use redacted envelopes.
+   */
+  hlEnvelope?: HyperliquidExchangeEnvelopeWire;
 }
 
 export interface WalletIdWire {
   address: string;
   chains: string[];
+}
+
+export interface HyperliquidExchangeSignatureWire {
+  r: string;
+  s: string;
+  v: number | string;
+}
+
+export interface HyperliquidExchangeEnvelopeWire {
+  action: unknown;
+  nonce?: number;
+  vaultAddress?: string;
+  expiresAfter?: number;
+  signature?: HyperliquidExchangeSignatureWire;
 }
 
 export type ExecutionReportOutcome =

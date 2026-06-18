@@ -3,9 +3,10 @@
  *
  * The HL `/exchange` body carries no master account address and orders are
  * signed by an agent key, so the SW cannot recover the master from the request
- * alone. The provider proxy captures the EVM account from `eth_requestAccounts`
- * and writes it here keyed by origin. `resolve-hl-master.ts` reads it to key
- * the `activeAssetData` leverage lookup.
+ * alone. This store is a trusted per-origin override for extension-owned seeds
+ * or a future explicit binding flow. Do NOT populate it from page-observable
+ * postMessage payloads: a page-forged account would poison the principal used
+ * for per-wallet policy selection and HL enrichment.
  *
  * Can be seeded manually from the SW console for testing:
  *   chrome.storage.local.set({ "venue:hl-connected-accounts":

@@ -688,11 +688,12 @@ export async function installDeclarativeBundleV3ByTypedData(
  *
  * Mirrors {@link installDeclarativeBundleV3} but fetches the `by-selector/`
  * index (URL via {@link v3SelectorUrl}). Returns the install result, or `null`
- * on ANY miss/fault (404 / parse / install). It NEVER throws: the on-chain tx
- * flow is warn-closed, so a fault here degrades to the same fail-closed warn as
- * a plain miss. Memory cache only (re-fetch on SW cold start is cheap; the WASM
- * install is idempotent) under the `sel:`-prefixed key so it cannot collide
- * with the `v3:` callkey or `td:` typed-data entries.
+ * on a real miss only (404 / `matched:false`). Hard faults throw
+ * {@link InstallDeclarativeV3Error} so the route audit can distinguish a
+ * registry/operator fault from an unpublished selector. Memory cache only
+ * (re-fetch on SW cold start is cheap; the WASM install is idempotent) under
+ * the `sel:`-prefixed key so it cannot collide with the `v3:` callkey or `td:`
+ * typed-data entries.
  */
 export async function installDeclarativeBundleV3BySelector(args: {
   chainId: number;
@@ -717,33 +718,33 @@ export async function installDeclarativeBundleV3BySelector(args: {
 
   let response: Response;
   try {
-    response = await doFetch(url);
+    response = await timedRegistryFetch(doFetch, url, "by-selector");
   } catch (err) {
-    console.warn("[Dambi] installDeclarativeBundleV3BySelector fetch failed", {
-      selectorKey: cacheKey,
-      message: err instanceof Error ? err.message : err,
-    });
-    return null;
+    throw new InstallDeclarativeV3Error(
+      "fetch",
+      url,
+      err instanceof Error ? err : new Error(String(err)),
+    );
   }
 
   if (response.status === 404) return null;
   if (!response.ok) {
-    console.warn("[Dambi] installDeclarativeBundleV3BySelector fetch_status", {
-      selectorKey: cacheKey,
-      status: response.status,
-    });
-    return null;
+    throw new InstallDeclarativeV3Error(
+      "fetch_status",
+      url,
+      new Error(`HTTP ${response.status}`),
+    );
   }
 
   let parsedResponse: DeclarativeRegistryV3Response;
   try {
     parsedResponse = (await response.json()) as DeclarativeRegistryV3Response;
   } catch (err) {
-    console.warn("[Dambi] installDeclarativeBundleV3BySelector json parse failed", {
-      selectorKey: cacheKey,
-      message: err instanceof Error ? err.message : err,
-    });
-    return null;
+    throw new InstallDeclarativeV3Error(
+      "fetch_json",
+      url,
+      err instanceof Error ? err : new Error(String(err)),
+    );
   }
 
   if (!parsedResponse || parsedResponse.matched !== true) return null;
@@ -753,18 +754,21 @@ export async function installDeclarativeBundleV3BySelector(args: {
     parsedBundle = parseBundleV3(parsedResponse.bundle);
   } catch (err) {
     if (err instanceof BundleParseError) {
-      console.warn("[Dambi] installDeclarativeBundleV3BySelector parse failed", {
-        selectorKey: cacheKey,
-        message: err.message,
-      });
-      return null;
+      throw new InstallDeclarativeV3Error("parse", url, err);
     }
     throw err;
   }
-  if (parsedBundle === null) return null;
+  if (parsedBundle === null) {
+    throw new InstallDeclarativeV3Error(
+      "parse",
+      url,
+      new BundleParseError("by-selector matched a non-v3 bundle"),
+    );
+  }
 
-  // Supply-chain gate — verify before install. by-selector NEVER throws; a
-  // verify failure returns null like every other miss/fault (warn-closed).
+  // Supply-chain gate — verify before install. by-selector preserves verify
+  // faults as InstallDeclarativeV3Error so route telemetry can distinguish a
+  // registry/signature failure from a real unpublished selector.
   const verifyResult = await verifyBundleSignature({
     bundle: parsedResponse.bundle,
     claimedSha256: parsedResponse.bundle_sha256,
@@ -773,14 +777,12 @@ export async function installDeclarativeBundleV3BySelector(args: {
     ...bundleSigDefines,
   });
   if (!verifyResult.ok) {
-    console.warn("[Dambi] installDeclarativeBundleV3BySelector verify failed", {
-      selectorKey: cacheKey,
-      reason: verifyResult.reason,
-      localSha: verifyResult.localSha,
-      sigUrl: verifyResult.sigUrl,
-      detail: verifyResult.detail,
-    });
-    return null;
+    const detail = verifyResult.detail ? ` (${verifyResult.detail})` : "";
+    throw new InstallDeclarativeV3Error(
+      "verify",
+      url,
+      new Error(`bundle signature: ${verifyResult.reason}${detail}`),
+    );
   }
 
   const bundleJson = JSON.stringify(parsedResponse.bundle);
@@ -788,11 +790,11 @@ export async function installDeclarativeBundleV3BySelector(args: {
   try {
     installed = await declarativeInstallV3(bundleJson);
   } catch (err) {
-    console.warn("[Dambi] installDeclarativeBundleV3BySelector install failed", {
-      selectorKey: cacheKey,
-      message: err instanceof Error ? err.message : err,
-    });
-    return null;
+    throw new InstallDeclarativeV3Error(
+      "install",
+      url,
+      err instanceof Error ? err : new Error(String(err)),
+    );
   }
 
   v3InstallCache.set(cacheKey, installed);

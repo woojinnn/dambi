@@ -51,6 +51,7 @@ export async function syncTokensFromExtensionStorage(): Promise<void> {
     for (const k of TOKEN_KEYS) {
       const v = got[k];
       if (typeof v === "string" && v) localStorage.setItem(k, v);
+      else localStorage.removeItem(k);
     }
   } catch {
     // Degrade to "no token synced → /login"; never block the render.

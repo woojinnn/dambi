@@ -135,9 +135,8 @@
           "kind": "single_token_keep_yt",
           "external_token": {
             "key": {
-              "standard": "erc20",
-              "chain": "$chain",
-              "address": "$args.input[0]"
+              "$fn": "token_key_or_native_zero",
+              "$args": ["$args.input[0]", "$chain"]
             }
           },
           "net_token_in": "$args.input[1]",

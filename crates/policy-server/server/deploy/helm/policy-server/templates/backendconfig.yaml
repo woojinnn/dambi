@@ -7,6 +7,10 @@ metadata:
     {{- include "policy-server.labels" . | nindent 4 }}
 spec:
   timeoutSec: {{ .Values.backendConfig.timeoutSec }}
+  {{- if .Values.backendConfig.securityPolicyName }}
+  securityPolicy:
+    name: {{ .Values.backendConfig.securityPolicyName | quote }}
+  {{- end }}
   healthCheck:
     type: HTTP
     requestPath: /readyz

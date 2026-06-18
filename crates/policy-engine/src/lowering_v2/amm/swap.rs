@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 
 use policy_state::primitives::U256;
 use policy_state::token::TokenRef;
-use policy_transition::action::amm::{SwapAction, SwapDirection};
+use policy_transition::action::amm::{SwapAction, SwapDirection, SwapParams};
 
 use super::super::common::cedar::{addr, u256_hex};
 use super::super::common::token::lower_token_ref;
@@ -58,7 +58,7 @@ pub(crate) fn lower(swap: &SwapAction, ctx: &LowerCtx<'_>) -> Result<LoweredActi
     );
     m.insert(
         "slippageBp".into(),
-        Value::from(i64::from(swap.params.slippage_bp)),
+        Value::from(effective_slippage_bp(&swap.params)),
     );
     m.insert(
         "routeEstimatedOut".into(),
@@ -132,6 +132,24 @@ fn lower_swap_direction(
         }
     }
     Value::Object(m)
+}
+
+/// Effective slippage tolerance (basis points) for the policy layer.
+///
+/// True slippage *tolerance vs a fair quote* needs a live price and is **not**
+/// statically decodable (left to enrichment, like `priceImpactBp`). But the
+/// **unbounded** case IS statically decodable: an exact-input swap whose
+/// `minAmountOut == 0` accepts *any* output — a guaranteed-sandwichable order
+/// with effectively 100% tolerance. Surface that as the max (`10000` bp) so
+/// `swap-high-slippage` (AMM-010, `context.slippageBp > 100`) fires on it.
+/// Otherwise pass through whatever `slippage_bp` the decoder carried (`0`
+/// today); the `max` preserves a real `slippage_bp` if one is ever computed.
+fn effective_slippage_bp(params: &SwapParams) -> i64 {
+    let unbounded = matches!(
+        &params.direction,
+        SwapDirection::ExactInput { min_amount_out, .. } if *min_amount_out == U256::ZERO
+    );
+    i64::from(params.slippage_bp).max(if unbounded { 10_000 } else { 0 })
 }
 
 #[cfg(test)]
@@ -477,6 +495,56 @@ mod tests {
         assert!(
             matches!(verdict, crate::policy::Verdict::Warn(_)),
             "slippage 150 must warn, got {verdict:?}"
+        );
+    }
+
+    /// Unbounded slippage (AMM-010): an exact-input swap with `minAmountOut == 0`
+    /// accepts *any* output. We cannot grade tolerance statically (no live
+    /// price), but the unbounded case is decodable → `slippageBp` is surfaced as
+    /// `10000`, so `context.slippageBp > 100` fires. A swap with a real
+    /// `minAmountOut` and `slippage_bp == 0` stays at `0` (graded tolerance is
+    /// enrichment's job, left dormant).
+    #[test]
+    fn swap_min_amount_out_zero_surfaces_max_slippage() {
+        // Control: bounded minAmountOut + slippage_bp 0 → slippageBp 0.
+        let (body, meta) = sample_swap_action(0);
+        let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        assert_eq!(lowered.context["slippageBp"], serde_json::json!(0));
+
+        // Unbounded: same swap with minAmountOut == 0 → slippageBp 10000.
+        let (mut body, meta) = sample_swap_action(0);
+        if let ActionBody::Amm(AmmAction::Swap(s)) = &mut body {
+            s.params.direction = SwapDirection::ExactInput {
+                amount_in: U256::from(1_000_000_000u64),
+                min_amount_out: U256::ZERO,
+            };
+        } else {
+            panic!("sample_swap_action builds a Swap");
+        }
+        let lowered = lower_action(&body, &meta, &TxMeta { from: FROM, to: TO }).unwrap();
+        assert_eq!(lowered.context["slippageBp"], serde_json::json!(10000));
+
+        // And it must drive an AMM-010-shaped policy to warn.
+        let policy = "@id(\"swap-high-slippage\")\n@severity(\"warn\")\n\
+            forbid(principal, action == Amm::Action::\"Swap\", resource)\n\
+            when { context.slippageBp > 100 };\n";
+        let engine = crate::policy::PolicyEngine::build_from_per_policy(&[(
+            policy.to_owned(),
+            swap_schema_text(),
+        )])
+        .unwrap();
+        let verdict = engine
+            .evaluate(
+                &lowered.principal,
+                &lowered.action_uid,
+                &lowered.resource,
+                &serde_json::json!([]),
+                &lowered.context,
+            )
+            .unwrap();
+        assert!(
+            matches!(verdict, crate::policy::Verdict::Warn(_)),
+            "minAmountOut==0 must warn via AMM-010, got {verdict:?}"
         );
     }
 

@@ -13,6 +13,8 @@ GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
 GOOGLE_REDIRECT_URI="${GOOGLE_REDIRECT_URI:-http://127.0.0.1:8788/auth/google/callback}"
 ETHERSCAN_API_KEY="${ETHERSCAN_API_KEY:-}"
 COINGECKO_API_KEY="${COINGECKO_API_KEY:-}"
+UNISWAP_KEY="${UNISWAP_KEY:-}"
+ONEINCH_KEY="${ONEINCH_KEY:-}"
 
 generate_jwt_secret() {
   if command -v openssl >/dev/null 2>&1; then
@@ -51,6 +53,8 @@ kubectl -n "${NS}" create secret generic "${SECRET_NAME}" \
   --from-literal=JWT_SECRET="${JWT_SECRET}" \
   --from-literal=ETHERSCAN_API_KEY="${ETHERSCAN_API_KEY}" \
   --from-literal=COINGECKO_API_KEY="${COINGECKO_API_KEY}" \
+  --from-literal=UNISWAP_KEY="${UNISWAP_KEY}" \
+  --from-literal=ONEINCH_KEY="${ONEINCH_KEY}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "Secret '${SECRET_NAME}' applied in namespace '${NS}'."

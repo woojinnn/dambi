@@ -4,9 +4,12 @@
  * The server hosts both endpoints we need (`GET /auth/google` and the
  * `/auth/google/callback` redirect target). The dashboard's job is to
  * (1) kick off the login by sending the browser to the server, and
- * (2) on return, pull the JWT(s) out of the URL fragment.
+ * (2) on return, pull the JWT out of the URL fragment.
  *
- * The server redirects back to `${DASHBOARD_URL}/auth/callback#access_token=…&refresh_token=…`.
+ * The default web-dashboard callback is access-token only:
+ * `${DASHBOARD_URL}/auth/callback#access_token=…`. Extension OAuth redirects
+ * can additionally include `refresh_token=…`; this parser keeps that optional
+ * path so the extension-backed dashboard stays compatible.
  * We expose `consumeTokensFromHash()` which the `/auth/callback` route
  * calls on mount: it parses the fragment, persists the tokens, and
  * clears the hash so reloads don't re-trigger.
@@ -18,6 +21,7 @@ import {
   getStoredToken,
   getStoredRefreshToken,
   request,
+  setTokenRefreshObserver,
   setStoredRefreshToken,
   setStoredToken,
 } from "./client";
@@ -51,6 +55,8 @@ async function syncTokensToSw(access: string, refresh: string | null): Promise<v
   }
 }
 
+setTokenRefreshObserver((access, refresh) => syncTokensToSw(access, refresh));
+
 /** Server's `/auth/me` view of the current user. Mirror of `AuthUser`. */
 export interface Me {
   user_id: string;
@@ -64,9 +70,9 @@ export function startGoogleLogin(): void {
   window.location.href = `${SERVER_BASE_URL}/auth/google`;
 }
 
-/** Pull `access_token` (and optional `refresh_token`) out of the current
- * URL fragment. Persists them and clears the hash. Returns the access
- * token, or `null` when there was nothing to consume. */
+/** Pull `access_token` (and optional extension `refresh_token`) out of the
+ * current URL fragment. Persists present tokens and clears the hash. Returns
+ * the access token, or `null` when there was nothing to consume. */
 export function consumeTokensFromHash(): string | null {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash.startsWith("#")
@@ -80,7 +86,7 @@ export function consumeTokensFromHash(): string | null {
   if (!access) return null;
 
   setStoredToken(access);
-  if (refresh) setStoredRefreshToken(refresh);
+  setStoredRefreshToken(refresh);
 
   // Mirror the tokens to the SW so its `chrome.storage.local` matches.
   // Fire-and-forget — extension-less dev contexts no-op cleanly inside.

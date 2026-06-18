@@ -303,38 +303,41 @@ async fn load_state(
         .for_user(user_id)
         .map_err(|e| open_store_error(&e.to_string()))?;
 
-    let known = store.list_wallets().await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("list_wallets: {e}"),
-        )
-            .into_response()
-    })?;
-    let id = known
-        .into_iter()
-        .find(|w| w.address == addr)
-        .unwrap_or_else(|| WalletId::new(addr, std::iter::empty::<ChainId>()));
+    let known = store
+        .list_wallets()
+        .await
+        .map_err(|e| internal_server_error(&format!("list_wallets: {e}")))?;
+    let id = tracked_wallet_id(known, addr)?;
 
     store
         .load(&id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("load: {e}")).into_response())
+        .map_err(|e| internal_server_error(&format!("load: {e}")))
+}
+
+fn not_found(reason: &str) -> Response {
+    (StatusCode::NOT_FOUND, reason.to_owned()).into_response()
+}
+
+#[allow(clippy::result_large_err)]
+fn tracked_wallet_id(known: Vec<WalletId>, addr: Address) -> Result<WalletId, Response> {
+    known
+        .into_iter()
+        .find(|w| w.address == addr)
+        .ok_or_else(|| not_found("wallet not tracked for this user"))
 }
 
 fn store_error(e: &policy_state::store::StoreError) -> Response {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("store error: {e}"),
-    )
-        .into_response()
+    internal_server_error(&format!("store error: {e}"))
 }
 
 fn open_store_error(reason: &str) -> Response {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("open user store: {reason}"),
-    )
-        .into_response()
+    internal_server_error(&format!("open user store: {reason}"))
+}
+
+fn internal_server_error(reason: &str) -> Response {
+    tracing::error!(error = %reason, "read handler internal error");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 // ---------- /transactions ----------
@@ -445,4 +448,36 @@ pub async fn list_tokens(
     }
 
     Json(rows).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn internal_errors_do_not_echo_reason() {
+        let response = internal_server_error("postgres://user:secret@example/db");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "Internal server error");
+        assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn tracked_wallet_id_rejects_untracked_address() {
+        let addr = Address::from([0x11; 20]);
+        let err = tracked_wallet_id(Vec::new(), addr).unwrap_err();
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn tracked_wallet_id_preserves_stored_chain_set() {
+        let addr = Address::from([0x22; 20]);
+        let id = WalletId::new(addr, [ChainId::ethereum_mainnet(), ChainId::arbitrum()]);
+        let found = tracked_wallet_id(vec![id.clone()], addr).unwrap();
+        assert_eq!(found, id);
+    }
 }

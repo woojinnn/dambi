@@ -2,25 +2,25 @@
  * In-process handlers for policy-rpc methods that are pure functions of the
  * ActionBody itself — no oracles, no chain RPC, no portfolio lookup.
  *
- * The remote policy-rpc server (localhost:8787) exists for enrichment that
- * needs external data (`oracle.usd_value`, `chain.is_contract`, etc.). For
- * methods whose inputs are already present in calldata, routing through
- * HTTP is pure overhead and an unnecessary runtime dependency: a user's
- * policy stops working if the policy-rpc daemon happens to be down, even
- * though no external information was actually needed.
+ * Stateful enrichment that needs external data (`oracle.usd_value`,
+ * `lending.health_factor`, etc.) is served by the authenticated policy-server
+ * `/evaluate` path. For methods whose inputs are already present in calldata,
+ * routing through HTTP is pure overhead and an unnecessary runtime dependency:
+ * a user's policy stops working if the server happens to be down, even though
+ * no external information was actually needed.
  *
  * This module shortcuts that path. `tryHandleLocally` is consulted before
  * `postPolicyRpc`; any method it recognises is computed here and the
  * caller never forwards that call across the network. The result shape
- * mirrors what the remote server would have returned so the WASM
- * materializer is oblivious to the split.
+ * mirrors what remote enrichment would have returned so the WASM materializer
+ * is oblivious to the split.
  */
 import type { PolicyRpcCallDto } from "./wasm-bridge.types";
 
 /**
  * Shape of a single entry in `PolicyRpcResponseDto.results`, matching the
- * `/v1/rpc` batch response shape so the WASM bridge can consume locally
- * produced results interchangeably with remote ones.
+ * remote-result shape so the WASM bridge can consume locally produced results
+ * interchangeably with server-produced ones.
  */
 export type LocalRpcResult =
   | { readonly id: string; readonly ok: true; readonly result: Record<string, unknown> }

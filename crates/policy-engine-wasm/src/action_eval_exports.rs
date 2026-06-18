@@ -48,7 +48,8 @@ use policy_engine::lowering_v2::{
 };
 use policy_engine::policy::{MatchedPolicy, PolicyEngine, Severity, Verdict};
 use policy_engine::policy_rpc::{
-    plan_policy_rpc_v2, system_fail_verdict, ManifestV2, PlannedCallV2, TriggerScope, TxView,
+    plan_policy_rpc_v2, scope_matches_position as trigger_scope_matches_position,
+    system_fail_verdict, ManifestV2, PlannedCallV2, TxView, MAX_POLICY_RPC_V2_MANIFESTS,
 };
 use policy_engine::schema::compose_per_policy;
 use policy_transition::action::{ActionBody, ActionMeta};
@@ -88,6 +89,18 @@ where
 {
     let s = String::deserialize(deserializer)?;
     Ok(s.to_ascii_lowercase())
+}
+
+fn check_manifest_count(count: usize, entry: &str) -> Result<(), EngineErrorDto> {
+    if count > MAX_POLICY_RPC_V2_MANIFESTS {
+        return Err(EngineErrorDto::new(
+            "input_too_large",
+            format!(
+                "{entry} manifest/bundle count {count} exceeds {MAX_POLICY_RPC_V2_MANIFESTS} item limit"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Input to [`plan_action_rpc_v2_json`].
@@ -213,6 +226,7 @@ pub fn plan_action_rpc_v2_json(input_json: String) -> String {
         check_input_size(&input_json, "plan_action_rpc_v2_json")?;
         let input: PlanActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
+        check_manifest_count(input.manifests.len(), "plan_action_rpc_v2_json")?;
         let decimals = TokenDecimals::new(input.token_decimals.clone());
         let leverage = AccountLeverage::new(input.account_leverage.clone());
         let lowered = lower(
@@ -259,6 +273,7 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
         check_input_size(&input_json, "evaluate_action_v2_json")?;
         let input: EvaluateActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
+        check_manifest_count(input.bundles.len(), "evaluate_action_v2_json")?;
 
         let decimals = TokenDecimals::new(input.token_decimals.clone());
         let leverage = AccountLeverage::new(input.account_leverage.clone());
@@ -272,10 +287,11 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
         )?;
 
         // Boundary invariant: PLAN over the bundles' own manifests, never a
-        // host-supplied side list. This ties the `SystemFail` gate (driven by
-        // the planned set below) to the exact manifests whose schemas/policies
-        // are evaluated, so a bundle requiring an un-planned RPC call cannot
-        // silently fail-open (v2 analogue of v1's manifest_set_hash tie).
+        // host-supplied side list, and apply the same scope-position gate that
+        // evaluation uses. This ties the `SystemFail` gate (driven by the
+        // planned set below) to the exact manifests whose schemas/policies are
+        // evaluated, so a bundle requiring an un-planned RPC call cannot silently
+        // fail-open and a skipped Inner/Outer position cannot false-deny.
         let manifests: Vec<ManifestV2> = input.bundles.iter().map(|b| b.manifest.clone()).collect();
         let planned = plan(&manifests, &input.action, &lowered, &input.tx)?;
 
@@ -321,6 +337,7 @@ pub fn debug_lowered_context_v2_json(input_json: String) -> String {
         check_input_size(&input_json, "debug_lowered_context_v2_json")?;
         let input: EvaluateActionInput =
             serde_json::from_str(&input_json).map_err(|error| invalid_input(&error.to_string()))?;
+        check_manifest_count(input.bundles.len(), "debug_lowered_context_v2_json")?;
         let decimals = TokenDecimals::new(input.token_decimals.clone());
         let leverage = AccountLeverage::new(input.account_leverage.clone());
         let lowered = lower(
@@ -394,29 +411,18 @@ fn plan(
 /// lower→plan→materialize sequence (which inlines its own copy — the two are NOT
 /// shared and must be kept in sync) so a diagnosis probe sees the identical
 /// environment as the verdict.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn materialized_context(
     action: &ActionBody,
     meta: &ActionMeta,
     tx: &TxInput,
     bundles: &[BundleInput],
     results: &BTreeMap<String, Value>,
+    decimals: &TokenDecimals,
+    leverage: &AccountLeverage,
+    enrichment: &OrderEnrichment,
 ) -> Result<(LoweredAction, Value), EngineErrorDto> {
-    // The diagnosis input (`DiagnosisInput`) does not carry the host-injected
-    // enrichment maps (`token_decimals` / `account_leverage` / `order_enrichment`),
-    // so the probe lowers with empty maps: the `amountNano` siblings, the HL
-    // order `leverage` field, and the order-enrichment siblings are omitted from
-    // the probe context. A clause that denied purely on those enrichment-only
-    // fields is therefore diagnosed best-effort — the verdict itself is unaffected
-    // (this rebuilds context only for the dashboard's post-hoc "which clause
-    // blocked this" explainer).
-    let lowered = lower(
-        action,
-        meta,
-        tx,
-        &TokenDecimals::default(),
-        &AccountLeverage::default(),
-        &OrderEnrichment::default(),
-    )?;
+    let lowered = lower(action, meta, tx, decimals, leverage, enrichment)?;
     let manifests: Vec<ManifestV2> = bundles.iter().map(|b| b.manifest.clone()).collect();
     let planned = plan(&manifests, action, &lowered, tx)?;
     let mut context = lowered.context.clone();
@@ -427,6 +433,32 @@ pub(crate) fn materialized_context(
         return Err(EngineErrorDto::new("projection_failed", error.to_string()));
     }
     Ok((lowered, context))
+}
+
+/// Entity slice for Cedar's `Entities::from_json_value` (engine.rs:227).
+///
+/// Cedar evaluates `principal.<attr>` accesses by looking the principal up in
+/// this slice and reading its attrs object. We synthesize the same two entities
+/// everywhere the ActionBody v2 path runs Cedar:
+/// - `Wallet::"<tx.from>"` with `attrs.address = tx.from`
+/// - `Protocol::"<tx.to>"` attribute-less (`Core::Protocol` declares none)
+///
+/// The lowering layer formats `lowered.principal` as `Wallet::"<from>"` and
+/// `lowered.resource` as `Protocol::"<to>"`, so the request uids resolve cleanly
+/// against this slice in both verdict evaluation and denial diagnosis.
+pub(crate) fn entities_for_tx(tx: &TxInput) -> Value {
+    serde_json::json!([
+        {
+            "uid": { "type": "Wallet", "id": tx.from.as_str() },
+            "attrs": { "address": tx.from.as_str() },
+            "parents": [],
+        },
+        {
+            "uid": { "type": "Protocol", "id": tx.to.as_str() },
+            "attrs": {},
+            "parents": [],
+        }
+    ])
 }
 
 /// Evaluate every bundle whose trigger matches the action and aggregate the
@@ -446,38 +478,7 @@ fn evaluate_matching_bundles(
     let view = action.view();
     let tx_view = tx_view(tx);
 
-    // Entity slice for Cedar's `Entities::from_json_value` (engine.rs:227).
-    //
-    // Cedar evaluates `principal.<attr>` accesses by looking the principal
-    // up in this slice and reading its attrs object. Pre-fix this was an
-    // empty array, so ANY policy that touched `principal.address` (or any
-    // other entity attribute) crashed with `entity does not exist` — the
-    // engine wrapped that as a `__schemaless_eval_error__` SystemFail. The
-    // `bridge-recipient-not-self-deny` policy is the canonical victim
-    // (`when { context.recipient != principal.address }`).
-    //
-    // We synthesize two entities:
-    //   - `Wallet::"<tx.from>"`   with `attrs.address = tx.from`
-    //   - `Protocol::"<tx.to>"`   attribute-less (Core::Protocol declares none)
-    //
-    // The wallet attrs mirror `core.cedarschema::entity Wallet { address: String }`.
-    // The lowering layer (`lowering_v2/dispatch.rs`) already formats
-    // `lowered.principal` as `Wallet::"<from>"` (matching the uid we build
-    // here) and `lowered.resource` as `Protocol::"<to>"`, so the principal /
-    // resource uids the evaluator passes downstream resolve cleanly against
-    // this slice without any further glue.
-    let entities = serde_json::json!([
-        {
-            "uid": { "type": "Wallet", "id": tx.from.as_str() },
-            "attrs": { "address": tx.from.as_str() },
-            "parents": [],
-        },
-        {
-            "uid": { "type": "Protocol", "id": tx.to.as_str() },
-            "attrs": {},
-            "parents": [],
-        }
-    ]);
+    let entities = entities_for_tx(tx);
 
     // Scope×position gate (mirrors `trigger_exports::manifest_matches`). The SW
     // dispatches the outer multicall AND each inner child as its own evaluate
@@ -489,8 +490,6 @@ fn evaluate_matching_bundles(
     // This closes the per-child-detail gap (an Inner slippage/recipient policy
     // never seeing a UR-wrapped swap) without double-firing the same policy on
     // both the batch and its children.
-    let is_multicall = matches!(action, ActionBody::Multicall { .. });
-
     let mut verdicts: Vec<Verdict> = Vec::new();
     for bundle in bundles {
         // Per-bundle install-quarantine. A single broken bundle — invalid
@@ -507,14 +506,8 @@ fn evaluate_matching_bundles(
         // the action. (Genuine WHOLE-engine faults — lower / plan / materialize,
         // handled ABOVE this loop — remain fail-closed via `?`.)
         let outcome: Result<Option<Verdict>, EngineErrorDto> = (|| {
-            bundle
-                .manifest
-                .validate()
-                .map_err(|error| EngineErrorDto::new("invalid_manifest", error.to_string()))?;
-            match bundle.manifest.trigger.scope {
-                TriggerScope::Outer if !is_multicall => return Ok(None),
-                TriggerScope::Inner if is_multicall => return Ok(None),
-                _ => {}
+            if !trigger_scope_matches_position(bundle.manifest.trigger.scope, &view) {
+                return Ok(None);
             }
             if !policy_engine::policy_rpc::evaluate_trigger(
                 &bundle.manifest.trigger,
@@ -523,6 +516,10 @@ fn evaluate_matching_bundles(
             ) {
                 return Ok(None);
             }
+            bundle
+                .manifest
+                .validate()
+                .map_err(|error| EngineErrorDto::new("invalid_manifest", error.to_string()))?;
 
             let schema = compose_per_policy(&bundle.manifest)
                 .map_err(|error| EngineErrorDto::new("schema_failed", error.to_string()))?;
@@ -676,6 +673,7 @@ pub(crate) mod tests {
         AmmAction, AmmVenue, PoolState, RouteHop, RoutePath, SwapAction, SwapDirection,
         SwapLiveInputs, SwapParams, SwapRoute,
     };
+    use policy_transition::action::hyperliquid_core::{HlUnknownAction, HyperliquidCoreAction};
     use policy_transition::action::{ActionMeta, ActionNature};
 
     const FROM: &str = "0x1111111111111111111111111111111111111111";
@@ -1064,6 +1062,34 @@ pub(crate) mod tests {
         );
     }
 
+    /// A malformed bundle whose trigger does not match this action must not
+    /// poison the position during planning. Broken matching bundles quarantine,
+    /// but non-matching ones should be invisible to the verdict.
+    #[test]
+    fn evaluate_action_v2_invalid_non_matching_bundle_is_skipped() {
+        let (body, meta) = swap_sample();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{
+                    "policy": broken_schema_policy(),
+                    "manifest": {
+                        "id": "invalid-lending-only",
+                        "schema_version": 999,
+                        "trigger": { "where": { "action.domain": { "eq": "lending" } } }
+                    }
+                }],
+                "results": {}
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            verdict_kind(&out),
+            "pass",
+            "invalid non-matching bundle must not fail or warn an unrelated swap: {out}"
+        );
+    }
+
     /// A broken bundle must NOT poison a sibling HEALTHY policy that passes. The
     /// `only-usdt` forbid does not fire on the WETH sample (Pass), so with the
     /// broken bundle quarantined the aggregate is `warn` — pre-fix the broken
@@ -1143,6 +1169,67 @@ pub(crate) mod tests {
         assert_eq!(parsed["error"]["kind"], "invalid_input_json", "{parsed}");
     }
 
+    #[test]
+    fn plan_action_rpc_v2_rejects_too_many_manifests() {
+        let (body, meta) = swap_sample();
+        let manifests: Vec<Value> = (0..=MAX_POLICY_RPC_V2_MANIFESTS)
+            .map(|i| dashboard_manifest(&format!("m{i}")))
+            .collect();
+
+        let out = plan_action_rpc_v2_json(
+            json!({
+                "manifests": manifests,
+                "action": body,
+                "meta": meta,
+                "tx": tx(),
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "input_too_large", "{parsed}");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("manifest/bundle count"),
+            "{parsed}"
+        );
+    }
+
+    #[test]
+    fn evaluate_action_v2_too_many_bundles_fails_closed() {
+        let (body, meta) = swap_sample();
+        let bundles: Vec<Value> = (0..=MAX_POLICY_RPC_V2_MANIFESTS)
+            .map(|i| {
+                json!({
+                    "policy": "permit(principal, action, resource);",
+                    "manifest": dashboard_manifest(&format!("m{i}"))
+                })
+            })
+            .collect();
+
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body,
+                "meta": meta,
+                "tx": tx(),
+                "bundles": bundles,
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["verdict"]["kind"], "fail", "{parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["matched"][0]["policy_id"], "__engine::input_too_large",
+            "{parsed}"
+        );
+    }
+
     // ── Dashboard policy (Option B) — synthesized minimal manifest ──────────
     //
     // `policies-loader-v2.ts` projects each user-authored dashboard policy to a
@@ -1175,6 +1262,61 @@ pub(crate) mod tests {
             .to_string(),
         );
         serde_json::from_str(&out).unwrap()
+    }
+
+    #[test]
+    fn evaluate_action_v2_unknown_domain_trigger_matches_hl_unknown_alias() {
+        let now = Time::from_unix(1_738_000_000);
+        let user = Address::from_str(FROM).unwrap();
+        let body = ActionBody::HyperliquidCore(HyperliquidCoreAction::Unknown(HlUnknownAction {
+            action_type: "unrecognizedCoreWriterAction".to_owned(),
+        }));
+        let meta = ActionMeta {
+            submitted_at: now,
+            submitter: user,
+            nature: ActionNature::OnchainTx {
+                chain: ChainId::new("eip155:999"),
+                nonce: 1,
+                gas_limit: U256::from(100_000u64),
+                gas_price: LiveField::new(
+                    U256::from(1u64),
+                    DataSource::OracleFeed {
+                        provider: OracleProvider::Pyth,
+                        feed_id: "gas/hyperevm".into(),
+                    },
+                    now,
+                ),
+                value: U256::ZERO,
+            },
+        };
+        let policy = "@id(\"unknown-blind-sign-warning\")\n@severity(\"warn\")\n\
+             @reason(\"Unrecognized action\")\n\
+             forbid(principal, action == Core::Action::\"Unknown\", resource)\n\
+             when { context has actionType && context.actionType == \"unrecognizedCoreWriterAction\" };\n";
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body,
+                "meta": meta,
+                "tx": { "chain_id": "eip155:999", "from": FROM, "to": TO },
+                "bundles": [{
+                    "policy": policy,
+                    "manifest": {
+                        "id": "unknown-blind-sign-warning",
+                        "schema_version": 2,
+                        "trigger": { "where": { "action.domain": { "eq": "unknown" } } }
+                    }
+                }],
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["verdict"]["kind"], "warn", "{parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["matched"][0]["policy_id"], "unknown-blind-sign-warning",
+            "{parsed}"
+        );
     }
 
     /// HOLYMOLY shape: block a swap whose output token is NOT USDT. The sample
@@ -1244,6 +1386,22 @@ pub(crate) mod tests {
         json!({ "id": "always-inner", "schema_version": 2 })
     }
 
+    /// Empty-trigger manifest, default (`Inner`) scope, with one required RPC.
+    /// On a multicall outer/batch position this bundle is skipped by scope, so
+    /// the required RPC must not be materialized there.
+    fn always_inner_required_rpc_manifest() -> Value {
+        json!({
+            "id": "always-inner-required-rpc",
+            "schema_version": 2,
+            "policy_rpc": [{
+                "id": "must-not-run-on-batch",
+                "method": "oracle.usd_value",
+                "params": { "chain_id": "$.root.chain_id" },
+                "outputs": []
+            }]
+        })
+    }
+
     /// Empty-trigger manifest, `Outer` scope — matches every position.
     fn always_outer_manifest() -> Value {
         json!({ "id": "always-outer", "schema_version": 2, "trigger": { "scope": "outer" } })
@@ -1307,6 +1465,31 @@ pub(crate) mod tests {
             verdict_kind(&out),
             "pass",
             "inner policy must be skipped on the multicall batch: {out}"
+        );
+    }
+
+    /// Inner-scope also has to gate policy-RPC planning/materialization. A broad
+    /// Inner policy may require host facts for every child action, but the
+    /// multicall batch position itself is skipped; missing results for that
+    /// skipped position must not become a synthetic `__system__` Fail.
+    #[test]
+    fn scope_inner_required_rpc_skipped_on_multicall_batch_position() {
+        let (body, meta) = multicall_of_swap();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{
+                    "policy": multicall_forbid_policy(),
+                    "manifest": always_inner_required_rpc_manifest()
+                }],
+                "results": {}
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            verdict_kind(&out),
+            "pass",
+            "inner required RPC must be skipped on the multicall batch before materialization: {out}"
         );
     }
 

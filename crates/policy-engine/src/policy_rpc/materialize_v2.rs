@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use super::planning_v2::PlannedCallV2;
-use super::{PolicyRpcError, ProjectionType};
+use super::{PolicyRpcError, ProjectionType, MAX_POLICY_RPC_V2_SET_STRING_ENTRIES};
 
 /// Apply raw policy-rpc results into the lowered action `context`'s `custom`.
 ///
@@ -156,6 +156,11 @@ fn materialize_value(value: &Value, type_name: &ProjectionType) -> Result<Value,
             let array = value.as_array().ok_or_else(|| {
                 PolicyRpcError::RpcResult("expected Set<String> array".to_owned())
             })?;
+            if array.len() > MAX_POLICY_RPC_V2_SET_STRING_ENTRIES {
+                return Err(PolicyRpcError::RpcResult(format!(
+                    "expected Set<String> array length <= {MAX_POLICY_RPC_V2_SET_STRING_ENTRIES}"
+                )));
+            }
             let mut out = Vec::with_capacity(array.len());
             for entry in array {
                 let entry = entry.as_str().ok_or_else(|| {
@@ -271,6 +276,30 @@ mod tests {
 
         let err = materialize_v2(&mut context, &calls, &results).unwrap_err();
         assert!(matches!(err, PolicyRpcError::SystemFail { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn required_set_string_projection_entry_count_is_capped() {
+        let mut context = json!({});
+        let calls = vec![planned(
+            "m::c",
+            vec![projection("blocked", "Set<String>", "$.result.blocked")],
+            false,
+        )];
+        let blocked: Vec<String> = (0..=MAX_POLICY_RPC_V2_SET_STRING_ENTRIES)
+            .map(|i| format!("entry-{i}"))
+            .collect();
+        let mut results = BTreeMap::new();
+        results.insert("m::c".to_owned(), json!({ "blocked": blocked }));
+
+        let err = materialize_v2(&mut context, &calls, &results).unwrap_err();
+
+        match &err {
+            PolicyRpcError::SystemFail { reason, .. } => {
+                assert!(reason.contains("Set<String> array length"), "{reason}");
+            }
+            other => panic!("expected SystemFail, got {other:?}"),
+        }
     }
 
     #[test]

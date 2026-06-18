@@ -119,13 +119,25 @@ export interface TypedDataRouteResult {
   decoderId: string;
 }
 
+export class TypedDataRouteError extends Error {
+  constructor(
+    readonly reason: string,
+    detail?: string,
+  ) {
+    super(`typed-data route ${reason}${detail ? `: ${detail}` : ""}`);
+    this.name = "TypedDataRouteError";
+  }
+}
+
 /**
  * Typed-data router entry (async, manifest-driven).
  *
  * Returns the decoded `Action` list when the request matches a manifest in the
- * `by-typed-data/` index AND the WASM decode succeeds, or `null` on a miss.
- * Match is strict — the triple must match a published manifest exactly; we never
- * fuzzy-match a benign signature onto a high-trust body.
+ * `by-typed-data/` index AND the WASM decode succeeds, `null` on a real
+ * manifest miss, and throws {@link TypedDataRouteError} on registry/install or
+ * WASM route faults. Match is strict — the triple must match a published
+ * manifest exactly; we never fuzzy-match a benign signature onto a high-trust
+ * body.
  */
 export async function routeTypedData(args: {
   typedData: EIP712TypedData;
@@ -157,7 +169,12 @@ export async function routeTypedData(args: {
     ...(witnessType !== undefined ? { witnessType } : {}),
   });
   if (!installed.ok) {
-    return null;
+    if (installed.reason === "manifest_not_found") {
+      return null;
+    }
+    throw new TypedDataRouteError(
+      `typed_sig_install_${installed.reason ?? "failed"}`,
+    );
   }
 
   const result = await declarativeRouteTypedDataV3({
@@ -171,7 +188,9 @@ export async function routeTypedData(args: {
     submittedAt: args.submittedAt ?? Math.floor(Date.now() / 1000),
   });
   if (!result.ok || !result.data) {
-    return null;
+    const kind = result.error?.kind ?? "route_failed";
+    const message = result.error?.message;
+    throw new TypedDataRouteError(`typed_sig_wasm_${kind}`, message);
   }
 
   return { actions: result.data.actions, decoderId: result.data.decoder_id };
@@ -206,20 +225,20 @@ function extractWitnessType(
  * plain `number`; return `null` for shapes we can't safely interpret (caller
  * misses).
  */
-function parseDomainChainId(raw: number | string | undefined): number | null {
+export function parseDomainChainId(raw: number | string | undefined): number | null {
   if (raw === undefined) return null;
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === "number") {
+    return Number.isSafeInteger(raw) && raw > 0 ? raw : null;
+  }
   if (typeof raw === "string") {
     if (raw.startsWith("0x") || raw.startsWith("0X")) {
-      try {
-        const n = Number.parseInt(raw, 16);
-        return Number.isFinite(n) ? n : null;
-      } catch {
-        return null;
-      }
+      if (!/^0x[0-9a-fA-F]+$/.test(raw)) return null;
+      const n = Number.parseInt(raw, 16);
+      return Number.isSafeInteger(n) && n > 0 ? n : null;
     }
+    if (!/^[0-9]+$/.test(raw)) return null;
     const n = Number.parseInt(raw, 10);
-    return Number.isFinite(n) ? n : null;
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
   }
   return null;
 }
@@ -262,4 +281,9 @@ export function normalizeTypedDataPayload(raw: unknown): EIP712TypedData | null 
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   return raw as EIP712TypedData;
+}
+
+export function typedDataDomainChainId(raw: unknown): number | null {
+  const td = normalizeTypedDataPayload(raw);
+  return td ? parseDomainChainId(td.domain?.chainId) : null;
 }

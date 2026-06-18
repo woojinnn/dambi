@@ -15,6 +15,7 @@ use policy_server::events::{EventBus, LocalEventPublisher};
 use policy_state::primitives::{Address, BlockHeight, ChainId, Time};
 use policy_state::{EvalContext, RequestKind, WalletId, WalletState, WalletStore};
 use policy_sync::{Orchestrator, SyncConfig};
+use uuid::Uuid;
 
 const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
 
@@ -133,6 +134,66 @@ async fn postgres_backed_evaluate_persists_state_across_requests() {
     // 4. Same user, fresh store handle, should see the data persisted.
     let reloaded = user_store.load(&id).await.unwrap();
     assert_eq!(reloaded, seeded);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn evaluate_does_not_reactivate_archived_wallet_metadata() {
+    let (state, _tmp) = spawn_state();
+    state.global_db.migrate().await.unwrap();
+    let user_id = state
+        .global_db
+        .upsert_user(
+            &format!("server-pg-evaluate-archived-{}@example.com", Uuid::new_v4()),
+            "test",
+        )
+        .await
+        .unwrap();
+    let user_store = state.multi_user.for_user(&user_id).unwrap();
+
+    let id = sample_wallet_id();
+    let mut seeded = WalletState::new(id.clone());
+    seeded.block_heights.insert(
+        ChainId::ethereum_mainnet(),
+        BlockHeight {
+            number: 19_000_001,
+            time: 1_700_000_001,
+        },
+    );
+    user_store.save(&seeded).await.unwrap();
+    assert!(
+        user_store
+            .archive_wallet(&format!("{:#x}", id.address), 1_700_000_002)
+            .await
+            .unwrap(),
+        "seeded wallet should be archived before /evaluate"
+    );
+    assert!(
+        user_store.list_wallets().await.unwrap().is_empty(),
+        "archived wallet must be absent from active wallet views before /evaluate"
+    );
+
+    let token = mint_token(&user_id);
+    let addr = spawn_server(state).await;
+    let resp: EvaluateResponse = reqwest::Client::new()
+        .post(format!("http://{addr}/evaluate"))
+        .bearer_auth(&token)
+        .json(&empty_envelope_request(id.clone()))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.policy_request.state_before, seeded);
+    assert_eq!(resp.policy_request.state_after, seeded);
+    assert!(
+        user_store.list_wallets().await.unwrap().is_empty(),
+        "/evaluate must not save predicted state or reactivate archived wallet metadata"
+    );
 }
 
 #[tokio::test]

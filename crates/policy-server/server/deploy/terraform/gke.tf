@@ -11,6 +11,5 @@ resource "google_container_cluster" "autopilot" {
     services_secondary_range_name = "services"
   }
 
-  # Allow `terraform destroy` to remove the cluster (default is true in v6).
-  deletion_protection = false
+  deletion_protection = var.gke_deletion_protection
 }

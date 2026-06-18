@@ -111,6 +111,8 @@ pub struct ListingSummary {
     pub current_version: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Unique authenticated installers. The underlying install table is an
+    /// event log, but public popularity metrics are distinct-user counts.
     pub install_count: i64,
     pub rating_avg: Option<f64>,
     pub rating_count: i64,
@@ -181,7 +183,7 @@ pub struct ActivitySummaryQuery {
 
 /// One listing's recent-install rollup. The dashboard buckets these by its own
 /// `categoryOf(slug)` taxonomy to drive the "최근 인기" recommendation hero.
-/// This is real install demand (install events in the window), never mocked.
+/// This is real install demand (unique installers in the window), never mocked.
 #[derive(Clone, Debug, Serialize)]
 pub struct InstallActivityEntry {
     pub slug: String,
@@ -190,7 +192,8 @@ pub struct InstallActivityEntry {
     /// Server action-based category (may differ from the dashboard taxonomy).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
-    /// Install events for this listing within the look-back window.
+    /// Unique authenticated installers for this listing within the look-back
+    /// window.
     pub recent_installs: i64,
 }
 

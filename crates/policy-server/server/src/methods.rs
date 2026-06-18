@@ -5,7 +5,7 @@
 //! Returning `None` means "cannot serve" — the caller leaves the result absent
 //! (fail-open for `optional` calls), never fabricating a value.
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use policy_state::pending::{AssetCommitment, PendingKind, PendingStatus};
 use policy_state::primitives::U256;
@@ -193,11 +193,13 @@ pub(crate) fn validity_horizon_sec(_state: &WalletState, params: &Value) -> Opti
 ///
 /// Pure read over the loaded `WalletState`; the anchors are rolled by the sync
 /// layer (`HlAccount::roll_equity_anchors`), never here. Returns `None`
-/// (fail-open) when there is no synced HL account, no current equity, no
-/// baseline yet, or a stored decimal doesn't parse. NOTE: the loaded state
-/// must be the HL MASTER's wallet — the extension passes the resolved master
-/// as the venue `wallet_id`; an unregistered/sentinel wallet loads empty and
-/// lands here as `None` (the policy stays dormant).
+/// (fail-open) when there is no synced HL account, no current equity, and no
+/// usable drawdown axis. The day axis requires a positive day baseline; the
+/// peak axis only requires a positive high-water mark, so a zero day baseline
+/// must not accidentally disable max-drawdown protection. NOTE: the loaded
+/// state must be the HL MASTER's wallet — the extension passes the resolved
+/// master as the venue `wallet_id`; an unregistered/sentinel wallet loads empty
+/// and lands here as `None` (the policy stays dormant).
 pub(crate) fn equity_drawdown_bps(state: &WalletState, params: &Value) -> Option<Value> {
     let _chain = params.get("chain_id").and_then(Value::as_str)?;
     let hl = find_hl_account(state)?;
@@ -213,27 +215,43 @@ pub(crate) fn equity_drawdown_bps(state: &WalletState, params: &Value) -> Option
         .filter(|f| f.is_finite())
         .unwrap_or(0.0);
     let current = raw - flow;
-    let baseline = hl.equity_baseline.as_ref()?;
-    let baseline_f: f64 = baseline.value.as_str().parse().ok()?;
-    if !(current.is_finite() && baseline_f.is_finite()) || baseline_f <= 0.0 {
+    if !current.is_finite() {
         return None;
     }
 
-    let day = drawdown_bps(baseline_f, current);
-    // HWM is rolled together with the baseline, so it is present whenever the
-    // baseline is; the day-value fallback only covers a hand-edited blob.
-    let peak = hl
+    let baseline = hl.equity_baseline.as_ref();
+    let day = baseline.and_then(|anchor| {
+        anchor
+            .value
+            .as_str()
+            .parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(|value| (drawdown_bps(value, current), anchor.trusted))
+    });
+    let hwm = hl
         .equity_hwm
         .as_ref()
         .and_then(|h| h.as_str().parse::<f64>().ok())
-        .filter(|h| h.is_finite() && *h > 0.0)
-        .map_or(day, |h| drawdown_bps(h, current));
+        .filter(|h| h.is_finite() && *h > 0.0);
 
-    Some(json!({
-        "dayDrawdownBps": day,
-        "peakDrawdownBps": peak,
-        "baselineTrusted": baseline.trusted,
-    }))
+    let mut out = Map::new();
+    if let Some((day_bps, trusted)) = day {
+        out.insert("dayDrawdownBps".to_owned(), json!(day_bps));
+        out.insert("baselineTrusted".to_owned(), json!(trusted));
+    }
+    if let Some(hwm) = hwm {
+        out.insert(
+            "peakDrawdownBps".to_owned(),
+            json!(drawdown_bps(hwm, current)),
+        );
+    } else if let Some((day_bps, _)) = day {
+        // Corrupt/missing HWM must not kill the method when the day baseline is
+        // valid; keep the previous fallback behavior for the peak axis.
+        out.insert("peakDrawdownBps".to_owned(), json!(day_bps));
+    }
+
+    (!out.is_empty()).then_some(Value::Object(out))
 }
 
 /// Drawdown of `current` below `anchor` in basis points, clamped to ≥ 0 — an
@@ -842,10 +860,30 @@ mod tests {
     }
 
     #[test]
-    fn no_baseline_is_none() {
+    fn no_drawdown_axis_is_none() {
         // Watch started this request — no anchor yet → fail-open, not 0.
-        let st = hl_state(Some("950"), None, Some("1000"));
+        let st = hl_state(Some("950"), None, None);
         assert!(drawdown(&st).is_none());
+    }
+
+    #[test]
+    fn hwm_without_day_baseline_still_serves_peak_drawdown() {
+        let st = hl_state(Some("920"), None, Some("1000"));
+        let v = drawdown(&st).expect("served peak axis");
+        assert!(v.get("dayDrawdownBps").is_none());
+        assert!(v.get("baselineTrusted").is_none());
+        assert_eq!(v["peakDrawdownBps"], 800);
+    }
+
+    #[test]
+    fn zero_day_baseline_does_not_disable_hwm_drawdown() {
+        // Mirrors observed prod state: accountValue=0, day baseline=0, positive
+        // HWM. Daily drawdown is unset, but max drawdown must still fire.
+        let st = hl_state(Some("0"), Some(("0", true)), Some("189.448501"));
+        let v = drawdown(&st).expect("served peak axis");
+        assert!(v.get("dayDrawdownBps").is_none());
+        assert!(v.get("baselineTrusted").is_none());
+        assert_eq!(v["peakDrawdownBps"], 10_000);
     }
 
     #[test]

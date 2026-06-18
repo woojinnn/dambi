@@ -11,6 +11,7 @@ use policy_state::primitives::{Address, ChainId, Decimal, Time, U256};
 use policy_state::token::{Balance, TokenHolding, TokenKey, TokenKind};
 use policy_state::{ProtocolRef, WalletId, WalletState, WalletStore};
 use policy_sync::{Orchestrator, SyncConfig};
+use uuid::Uuid;
 
 const TEST_SECRET: &str = "test-secret-only-do-not-use-in-production-2026-05-31";
 
@@ -33,15 +34,12 @@ async fn spawn_server() -> (
     let tmp = tempfile::tempdir().unwrap();
     let global_db = GlobalDb::open(tmp.path().join("global.db")).unwrap();
     // Seed the user so wallet saves satisfy `wallets_user_id_fkey` (enforced by
-    // the Postgres integration backend). Each spawn gets a UNIQUE email so the
-    // derived user_id is distinct per test: these tests run on parallel threads
-    // and a shared email would race to insert the same `users` row (duplicate
-    // pkey). Reuse the returned user_id for the token + wallet seeding so they
-    // all reference one real, isolated user.
-    static USER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = USER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // the Postgres integration backend). Each spawn gets a globally unique
+    // email so repeated runs against the shared integration DB cannot inherit
+    // wallet rows from an earlier process.
+    let suffix = Uuid::new_v4();
     let user_id = global_db
-        .upsert_user(&format!("dashboard-test-{n}@example.com"), "test")
+        .upsert_user(&format!("dashboard-test-{suffix}@example.com"), "test")
         .await
         .unwrap();
     let multi_user = MultiUserStore::new(tmp.path().join("users"));

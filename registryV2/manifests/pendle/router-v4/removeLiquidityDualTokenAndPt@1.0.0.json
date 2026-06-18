@@ -130,9 +130,8 @@
           "kind": "dual_token_and_pt",
           "external_token": {
             "key": {
-              "standard": "erc20",
-              "chain": "$chain",
-              "address": "$args.output[0]"
+              "$fn": "token_key_or_native_zero",
+              "$args": ["$args.output[0]", "$chain"]
             }
           },
           "net_lp_in": "$args.netLpToRemove",

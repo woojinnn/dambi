@@ -25,11 +25,16 @@ spec:
         checksum/sync-config: {{ .Values.syncConfig | sha256sum | quote }}
     spec:
       serviceAccountName: {{ include "policy-server.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: api
           image: {{ include "policy-server.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["policy-server"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.api.port }}
@@ -52,6 +57,10 @@ spec:
               value: /app/dambi-sync.toml
             - name: REQUIRE_SYNC_CONFIG
               value: {{ .Values.runtime.requireSyncConfig | quote }}
+            - name: REQUIRE_REDIS
+              value: {{ .Values.runtime.requireRedis | quote }}
+            - name: REQUIRE_OAUTH_CONFIG
+              value: {{ .Values.runtime.requireOAuthConfig | quote }}
             - name: RUN_MIGRATIONS_ON_STARTUP
               value: {{ .Values.runtime.runMigrationsOnStartup | quote }}
             - name: REDIS_EVENTS_CHANNEL
@@ -72,22 +81,25 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: REDIS_URL
-                  optional: true
+                  optional: {{ not .Values.runtime.requireRedis }}
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: GOOGLE_CLIENT_ID
+                  optional: {{ not .Values.runtime.requireOAuthConfig }}
             - name: GOOGLE_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: GOOGLE_CLIENT_SECRET
+                  optional: {{ not .Values.runtime.requireOAuthConfig }}
             - name: GOOGLE_REDIRECT_URI
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: GOOGLE_REDIRECT_URI
+                  optional: {{ not .Values.runtime.requireOAuthConfig }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -104,6 +116,22 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: COINGECKO_API_KEY
+                  optional: true
+            - name: UNISWAP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: UNISWAP_KEY
+                  optional: true
+            # Dev Portal Bearer key shared by all 1inch venues (Fusion, Fusion+,
+            # LOP). API uses the same sync config for on-demand wallet sync as
+            # the worker uses for background sync, so both processes need the
+            # same env expansion view.
+            - name: ONEINCH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: ONEINCH_KEY
                   optional: true
             {{- if .Values.oracleRpc.sanctionsUrl }}
             - name: POLICY_SANCTIONS_RPC_URL

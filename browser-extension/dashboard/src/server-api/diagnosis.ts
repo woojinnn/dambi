@@ -7,7 +7,9 @@
  * (this function), then pass the policy, the probe ids, and the returned result into
  * `diagnoseFromResult`. The `action`/`meta`/`tx`/`bundles`/`results` describe the
  * transaction context the policy is evaluated against (use `SAMPLE_ACTIONS` for the
- * editor; the live verdict's own context for the popup).
+ * editor; the live verdict's own context for the popup). Optional host-injected
+ * lowering inputs must be forwarded when present so diagnosis sees the same
+ * materialized context as the verdict.
  */
 
 import { sendToExtension } from "./extension-bridge";
@@ -26,6 +28,9 @@ export interface DiagnosisRequestDto {
   tx: { chain_id: string; from: string; to: string };
   bundles: { policy: string; manifest: unknown }[];
   results: Record<string, unknown>;
+  token_decimals?: Record<string, number>;
+  account_leverage?: Record<string, number>;
+  order_enrichment?: unknown;
   probes: ProbeDto[];
 }
 

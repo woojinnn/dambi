@@ -24,6 +24,7 @@ async fn noop_coordinator_allows_lock_and_idempotency() {
 async fn coordinator_builder_uses_noop_without_redis_url() {
     let mut config = ServerConfig::for_tests();
     config.redis_url = None;
+    config.require_redis = false;
 
     let c = build_coordinator(&config).await.unwrap();
     let token = c
@@ -33,6 +34,18 @@ async fn coordinator_builder_uses_noop_without_redis_url() {
         .unwrap();
 
     assert_eq!(token.value, "noop");
+}
+
+#[tokio::test]
+async fn coordinator_builder_rejects_missing_required_redis_url() {
+    let mut config = ServerConfig::for_tests();
+    config.redis_url = None;
+    config.require_redis = true;
+
+    let Err(err) = build_coordinator(&config).await else {
+        panic!("missing required Redis URL should fail");
+    };
+    assert!(err.to_string().contains("REDIS_URL is required"));
 }
 
 #[tokio::test]

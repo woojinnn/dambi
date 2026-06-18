@@ -716,6 +716,7 @@ const FN_WHITELIST: ReadonlySet<string> = new Set(
     ),
   ) as string[],
 );
+const HARD_ARRAY_EMIT_MAX_ELEMENTS = 64;
 
 /** Recursively collect every `$fn` name referenced anywhere in an emit subtree. */
 function collectFnNames(node: unknown, out: Set<string>): void {
@@ -725,6 +726,36 @@ function collectFnNames(node: unknown, out: Set<string>): void {
     const o = node as Record<string, unknown>;
     if (typeof o.$fn === "string") out.add(o.$fn);
     for (const v of Object.values(o)) collectFnNames(v, out);
+  }
+}
+
+function validateArrayEmitCaps(path: string, node: unknown, jsonPath: string): void {
+  if (Array.isArray(node)) {
+    node.forEach((item, index) =>
+      validateArrayEmitCaps(path, item, `${jsonPath}[${index}]`),
+    );
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const o = node as Record<string, unknown>;
+  if (o.strategy === "array_emit" && o.max_elements !== undefined) {
+    if (
+      typeof o.max_elements !== "number" ||
+      !Number.isInteger(o.max_elements) ||
+      o.max_elements < 1
+    ) {
+      throw new Error(
+        `manifests/: ${path} ${jsonPath}.max_elements must be a positive integer`,
+      );
+    }
+    if (o.max_elements > HARD_ARRAY_EMIT_MAX_ELEMENTS) {
+      throw new Error(
+        `manifests/: ${path} ${jsonPath}.max_elements must be <= ${HARD_ARRAY_EMIT_MAX_ELEMENTS}, got ${o.max_elements}`,
+      );
+    }
+  }
+  for (const [key, value] of Object.entries(o)) {
+    validateArrayEmitCaps(path, value, `${jsonPath}.${key}`);
   }
 }
 
@@ -754,6 +785,7 @@ function validateEmitShape(path: string, emit: unknown): void {
       );
     }
   }
+  validateArrayEmitCaps(path, e, "emit");
 }
 
 // ---------------------------------------------------------------------------
@@ -1143,6 +1175,64 @@ function typedDataFilename(
   return `${base}.json`;
 }
 
+function collectConcreteCallkeys(manifestFiles: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const file of manifestFiles) {
+    try {
+      const bundle = loadBundle(file);
+      if (
+        "chain_to_addresses" in bundle.match &&
+        !("chain_to_addresses_source" in bundle.match) &&
+        !("address_agnostic" in bundle.match)
+      ) {
+        const match = bundle.match as BundleMatchSpecific;
+        for (const [chainKey, addresses] of Object.entries(match.chain_to_addresses)) {
+          const chainId = Number(chainKey);
+          for (const to of addresses) {
+            out.add(callkeyFilename(chainId, to, match.selector));
+          }
+        }
+      }
+    } catch {
+      // The main build loop reports invalid manifests with their normal error
+      // accounting. This prepass is only for source-bundle pruning.
+    }
+  }
+  return out;
+}
+
+function pruneConcreteOwnedCallkeys(
+  bundle: ResolvedBundle,
+  concreteCallkeys: ReadonlySet<string>,
+): { bundle: ResolvedBundle; pruned: number } {
+  const next: Record<string, Hex[]> = {};
+  let pruned = 0;
+  for (const [chainKey, addresses] of Object.entries(bundle.match.chain_to_addresses)) {
+    const chainId = Number(chainKey);
+    const kept: Hex[] = [];
+    for (const to of addresses) {
+      const fname = callkeyFilename(chainId, to, bundle.match.selector);
+      if (concreteCallkeys.has(fname)) {
+        pruned++;
+      } else {
+        kept.push(to);
+      }
+    }
+    if (kept.length > 0) next[chainKey] = kept;
+  }
+  if (pruned === 0) return { bundle, pruned };
+  return {
+    bundle: {
+      ...bundle,
+      match: {
+        ...bundle.match,
+        chain_to_addresses: next,
+      },
+    },
+    pruned,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -1187,6 +1277,7 @@ async function main(): Promise<void> {
     for (const set of perKind.values()) tokenTotal += set.size;
   }
   console.error(`[build-index] tokens:       ${tokenTotal} across ${tokenChainCount} chain(s)`);
+  const concreteCallkeys = collectConcreteCallkeys(manifestFiles);
 
   // orphan 방지
   wipeDir(INDEX_BY_CALLKEY_DIR);
@@ -1217,8 +1308,13 @@ async function main(): Promise<void> {
       const resolvedOutputs = await resolveBundle(bundle, tokens, manifestPath, forceRefresh);
 
       for (const output of resolvedOutputs) {
-        const resolved = output.kind === "bundle" ? output.bundle : output.materialized;
-        const bundleSha256 = computeBundleSha256(resolved);
+        const isSourcedManifest = "chain_to_addresses_source" in bundle.match;
+        let resolved = output.kind === "bundle" ? output.bundle : output.materialized;
+        if (isSourcedManifest && output.kind === "bundle") {
+          const pruned = pruneConcreteOwnedCallkeys(resolved, concreteCallkeys);
+          resolved = pruned.bundle;
+          duplicateSourcedCallkeys += pruned.pruned;
+        }
 
         // Address-agnostic (selector-only) manifests — standard NFT
         // setApprovalForAll. No per-address callkeys; emit ONE by-selector entry
@@ -1229,6 +1325,7 @@ async function main(): Promise<void> {
           chain_ids?: ChainId[];
         };
         if (agnosticMatch.address_agnostic === true) {
+          const bundleSha256 = computeBundleSha256(resolved);
           const selector = agnosticMatch.selector.toLowerCase() as Hex;
           const chainIds = agnosticMatch.chain_ids ?? [];
           if (!summaryOnly) {
@@ -1260,13 +1357,21 @@ async function main(): Promise<void> {
           continue;
         }
 
-        const isSourcedManifest = "chain_to_addresses_source" in bundle.match;
         const representativeSourcedKey = isSourcedManifest
           ? `${(bundle.match as BundleMatchSourced).chain_to_addresses_source}|${manifestPath}`
           : undefined;
 
         const pairs = Object.entries(resolved.match.chain_to_addresses);
         const pairCount = pairs.reduce((acc, [, addrs]) => acc + addrs.length, 0);
+        if (pairCount === 0) {
+          if (!summaryOnly && isSourcedManifest) {
+            console.error(
+              `[build-index] WARN ${manifestPath}: sourced manifest has no callkeys after concrete-owner pruning`,
+            );
+          }
+          continue;
+        }
+        const bundleSha256 = computeBundleSha256(resolved);
 
         if (!summaryOnly) {
           console.error(
@@ -1282,7 +1387,10 @@ async function main(): Promise<void> {
           for (const to of addresses) {
             const fname = callkeyFilename(chainId, to, resolved.match.selector);
             const outPath = join(INDEX_BY_CALLKEY_DIR, fname);
-            if (isSourcedManifest && safeExists(outPath)) {
+            if (
+              isSourcedManifest &&
+              (safeExists(outPath) || concreteCallkeys.has(fname))
+            ) {
               duplicateSourcedCallkeys++;
               if (!summaryOnly) {
                 console.error(

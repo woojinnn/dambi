@@ -3,7 +3,7 @@
   "id": "across/spoke-pool/deposit@1.0.0",
   "publisher": "across",
   "schema_version": "3",
-  "note": "Across SpokePool deposit (bytes32-typed, cross-VM unified) — outbound cross-chain bridge → bridge::send. depositor/recipient/inputToken/outputToken/exclusiveRelayer are bytes32; for EVM destinations (the mainnet-dominant case) they are left-padded 20-byte addresses, decoded via address_from_uint256 (low 160 bits). A genuinely non-EVM (e.g. Solana) recipient would be mis-projected as an EVM address — acceptable for V1 (rare on mainnet), tracked for a Raw-recipient follow-up. has_message flags an attached destination-execution `message` (compose risk).",
+  "note": "Across SpokePool deposit (bytes32-typed, cross-VM unified) — outbound cross-chain bridge → bridge::send. depositor/recipient/inputToken/outputToken/exclusiveRelayer are bytes32. Token and relayer fields must be left-padded EVM addresses; recipient is modeled as EVM only when left-padded, otherwise preserved as a raw bytes32 recipient so cross-VM or malformed words are not projected to low-160-bit EVM addresses. has_message flags an attached destination-execution `message` (compose risk).",
   "match": {
     "selector": "0xad5425c6",
     "chain_to_addresses": {
@@ -74,103 +74,121 @@
   "emit": {
     "strategy": "single_emit",
     "body": {
-      "domain": "bridge",
-      "bridge": {
-        "action": "send",
-        "send": {
-          "venue": {
-            "name": "across_spoke_pool"
-          },
-          "src_token": {
-            "key": {
-              "standard": "erc20",
-              "chain": "$chain",
-              "address": {
-                "$fn": "address_from_uint256",
-                "$args": [
-                  "$args.inputToken"
-                ]
-              }
-            }
-          },
-          "input_amount": "$args.inputAmount",
-          "dst_chain_id": {
-            "$match": "$args.destinationChainId",
-            "$cases": {
-              "1": "eip155:1",
-              "10": "eip155:10",
-              "137": "eip155:137",
-              "8453": "eip155:8453",
-              "42161": "eip155:42161",
-              "59144": "eip155:59144",
-              "534352": "eip155:534352",
-              "81457": "eip155:81457",
-              "324": "eip155:324",
-              "56": "eip155:56",
-              "130": "eip155:130",
-              "480": "eip155:480",
-              "999": "eip155:999",
-              "1135": "eip155:1135",
-              "34443": "eip155:34443",
-              "57073": "eip155:57073",
-              "7777777": "eip155:7777777"
-            }
-          },
-          "dst_recipient": {
-            "kind": "evm",
-            "address": {
-              "$fn": "address_from_uint256",
-              "$args": [
-                "$args.recipient"
-              ]
-            }
-          },
-          "dst_token": {
-            "key": {
-              "standard": "erc20",
-              "chain": {
+      "$match": {
+        "$fn": "left_padded_bytes32_shape",
+        "$args": [
+          "$args.inputToken",
+          "$args.outputToken",
+          "$args.exclusiveRelayer"
+        ]
+      },
+      "$cases": {
+        "left_padded": {
+          "domain": "bridge",
+          "bridge": {
+            "action": "send",
+            "send": {
+              "venue": {
+                "name": "across_spoke_pool"
+              },
+              "src_token": {
+                "key": {
+                  "standard": "erc20",
+                  "chain": "$chain",
+                  "address": {
+                    "$fn": "address_from_left_padded_bytes32",
+                    "$args": [
+                      "$args.inputToken"
+                    ]
+                  }
+                }
+              },
+              "input_amount": "$args.inputAmount",
+              "dst_chain_id": {
                 "$match": "$args.destinationChainId",
                 "$cases": {
                   "1": "eip155:1",
                   "10": "eip155:10",
-                  "137": "eip155:137",
-                  "8453": "eip155:8453",
-                  "42161": "eip155:42161",
-                  "59144": "eip155:59144",
-                  "534352": "eip155:534352",
-                  "81457": "eip155:81457",
-                  "324": "eip155:324",
                   "56": "eip155:56",
                   "130": "eip155:130",
+                  "137": "eip155:137",
+                  "324": "eip155:324",
                   "480": "eip155:480",
                   "999": "eip155:999",
                   "1135": "eip155:1135",
+                  "8453": "eip155:8453",
                   "34443": "eip155:34443",
+                  "42161": "eip155:42161",
                   "57073": "eip155:57073",
+                  "59144": "eip155:59144",
+                  "81457": "eip155:81457",
+                  "534352": "eip155:534352",
                   "7777777": "eip155:7777777"
                 }
               },
-              "address": {
-                "$fn": "address_from_uint256",
+              "dst_recipient": {
+                "$fn": "bridge_recipient_from_bytes32",
                 "$args": [
-                  "$args.outputToken"
+                  "$args.recipient"
+                ]
+              },
+              "dst_token": {
+                "key": {
+                  "standard": "erc20",
+                  "chain": {
+                    "$match": "$args.destinationChainId",
+                    "$cases": {
+                      "1": "eip155:1",
+                      "10": "eip155:10",
+                      "56": "eip155:56",
+                      "130": "eip155:130",
+                      "137": "eip155:137",
+                      "324": "eip155:324",
+                      "480": "eip155:480",
+                      "999": "eip155:999",
+                      "1135": "eip155:1135",
+                      "8453": "eip155:8453",
+                      "34443": "eip155:34443",
+                      "42161": "eip155:42161",
+                      "57073": "eip155:57073",
+                      "59144": "eip155:59144",
+                      "81457": "eip155:81457",
+                      "534352": "eip155:534352",
+                      "7777777": "eip155:7777777"
+                    }
+                  },
+                  "address": {
+                    "$fn": "address_from_left_padded_bytes32",
+                    "$args": [
+                      "$args.outputToken"
+                    ]
+                  }
+                }
+              },
+              "output_amount": "$args.outputAmount",
+              "exclusive_relayer": {
+                "$fn": "address_from_left_padded_bytes32",
+                "$args": [
+                  "$args.exclusiveRelayer"
+                ]
+              },
+              "has_message": {
+                "$fn": "bytes_nonempty",
+                "$args": [
+                  "$args.message"
                 ]
               }
             }
-          },
-          "output_amount": "$args.outputAmount",
-          "exclusive_relayer": {
-            "$fn": "address_from_uint256",
-            "$args": [
-              "$args.exclusiveRelayer"
-            ]
-          },
-          "has_message": {
-            "$fn": "bytes_nonempty",
-            "$args": [
-              "$args.message"
-            ]
           }
+        }
+      },
+      "$default": {
+        "domain": "unknown",
+        "unknown": {
+          "target": "$to",
+          "chain": "$chain",
+          "calldata": "$calldata",
+          "value": "$tx.value"
         }
       }
     },

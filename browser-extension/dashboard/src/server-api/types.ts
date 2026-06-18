@@ -100,7 +100,7 @@ export interface TokenCatalogRow {
   metadata_synced_at?: UnixSeconds;
 }
 
-// ---------- transactions / state_deltas ----------
+// ---------- legacy /transactions compatibility ----------
 
 export interface TxRow {
   id: number;

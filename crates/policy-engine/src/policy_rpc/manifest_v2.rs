@@ -25,6 +25,30 @@ use super::{ContextProjection, PolicyRpcError};
 /// `schema_version` differs is rejected by [`ManifestV2::validate`].
 pub const MANIFEST_V2_SCHEMA_VERSION: u64 = 2;
 
+/// Maximum v2 manifests accepted for one ActionBody policy evaluation.
+///
+/// Keep this aligned with the WASM action-evaluation boundary and high enough
+/// for normal user/default bundles while bounding per-action planning work.
+pub const MAX_POLICY_RPC_V2_MANIFESTS: usize = 128;
+
+/// Maximum policy-RPC call specs one v2 manifest may declare.
+///
+/// The authenticated policy-server `/evaluate` path caps a request at 64 call
+/// specs, so the client-side planner must not synthesize a larger batch.
+pub const MAX_POLICY_RPC_V2_CALL_SPECS: usize = 64;
+
+/// Maximum total planned policy-RPC calls emitted for one ActionBody.
+pub const MAX_POLICY_RPC_V2_PLANNED_CALLS: usize = 64;
+
+/// Maximum outputs one v2 policy-RPC call may project.
+pub const MAX_POLICY_RPC_V2_OUTPUTS_PER_CALL: usize = 64;
+
+/// Maximum custom-context fields one v2 manifest may declare.
+pub const MAX_POLICY_RPC_V2_CUSTOM_CONTEXT_FIELDS: usize = 64;
+
+/// Maximum string entries accepted for one materialized `Set<String>` output.
+pub const MAX_POLICY_RPC_V2_SET_STRING_ENTRIES: usize = 256;
+
 /// A per-policy v2 manifest (`manifest.json`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManifestV2 {
@@ -163,6 +187,20 @@ impl ManifestV2 {
                 self.id, self.schema_version
             )));
         }
+        if self.policy_rpc.len() > MAX_POLICY_RPC_V2_CALL_SPECS {
+            return Err(PolicyRpcError::InvalidManifest(format!(
+                "manifest `{}` declares {} policy_rpc call specs (max {MAX_POLICY_RPC_V2_CALL_SPECS})",
+                self.id,
+                self.policy_rpc.len()
+            )));
+        }
+        if self.custom_context.fields.len() > MAX_POLICY_RPC_V2_CUSTOM_CONTEXT_FIELDS {
+            return Err(PolicyRpcError::InvalidManifest(format!(
+                "manifest `{}` declares {} custom_context fields (max {MAX_POLICY_RPC_V2_CUSTOM_CONTEXT_FIELDS})",
+                self.id,
+                self.custom_context.fields.len()
+            )));
+        }
 
         let mut call_ids = HashSet::new();
         let mut produced_fields = HashSet::new();
@@ -173,8 +211,21 @@ impl ManifestV2 {
                     self.id, call.id
                 )));
             }
+            if call.outputs.len() > MAX_POLICY_RPC_V2_OUTPUTS_PER_CALL {
+                return Err(PolicyRpcError::InvalidManifest(format!(
+                    "manifest `{}` call `{}` declares {} outputs (max {MAX_POLICY_RPC_V2_OUTPUTS_PER_CALL})",
+                    self.id,
+                    call.id,
+                    call.outputs.len()
+                )));
+            }
             for output in &call.outputs {
-                produced_fields.insert(output.field.as_str());
+                if !produced_fields.insert(output.field.as_str()) {
+                    return Err(PolicyRpcError::InvalidManifest(format!(
+                        "manifest `{}` produces custom_context field `{}` more than once",
+                        self.id, output.field
+                    )));
+                }
             }
         }
 
@@ -183,6 +234,14 @@ impl ManifestV2 {
                 return Err(PolicyRpcError::InvalidManifest(format!(
                     "manifest `{}` declares custom_context field `{field}` with no \
                      producing policy_rpc output",
+                    self.id
+                )));
+            }
+        }
+        for field in &produced_fields {
+            if !self.custom_context.fields.contains_key(*field) {
+                return Err(PolicyRpcError::InvalidManifest(format!(
+                    "manifest `{}` policy_rpc output field `{field}` is not declared in custom_context",
                     self.id
                 )));
             }
@@ -263,6 +322,67 @@ mod tests {
         assert_eq!(manifest.trigger.scope, TriggerScope::Inner);
         assert!(manifest.policy_rpc.is_empty());
         manifest.validate().expect("empty manifest is valid");
+    }
+
+    #[test]
+    fn policy_rpc_call_specs_are_capped_per_manifest() {
+        let calls: Vec<Value> = (0..=MAX_POLICY_RPC_V2_CALL_SPECS)
+            .map(|i| json!({ "id": format!("c{i}"), "method": "m", "outputs": [] }))
+            .collect();
+        let manifest: ManifestV2 = serde_json::from_value(json!({
+            "id": "too-many-calls",
+            "schema_version": 2,
+            "policy_rpc": calls
+        }))
+        .unwrap();
+
+        let err = manifest.validate().unwrap_err();
+
+        assert!(err.to_string().contains("policy_rpc call specs"), "{err}");
+    }
+
+    #[test]
+    fn rejects_policy_rpc_output_without_custom_context_declaration() {
+        let manifest: ManifestV2 = serde_json::from_value(json!({
+            "id": "undeclared-output",
+            "schema_version": 2,
+            "policy_rpc": [{
+                "id": "c",
+                "method": "m",
+                "outputs": [{ "kind": "context", "field": "x", "type": "String", "from": "$.result.x" }]
+            }]
+        }))
+        .unwrap();
+
+        let err = manifest.validate().unwrap_err();
+
+        assert!(err.to_string().contains("not declared"), "{err}");
+    }
+
+    #[test]
+    fn rejects_duplicate_policy_rpc_output_field() {
+        let manifest: ManifestV2 = serde_json::from_value(json!({
+            "id": "duplicate-output",
+            "schema_version": 2,
+            "policy_rpc": [
+                {
+                    "id": "a",
+                    "method": "m",
+                    "outputs": [{ "kind": "context", "field": "x", "type": "String", "from": "$.result.x" }]
+                },
+                {
+                    "id": "b",
+                    "method": "m",
+                    "outputs": [{ "kind": "context", "field": "x", "type": "String", "from": "$.result.y" }]
+                }
+            ],
+            "custom_context": { "fields": { "x": "String" } }
+        }))
+        .unwrap();
+
+        let err = manifest.validate().unwrap_err();
+
+        assert!(err.to_string().contains("more than once"), "{err}");
     }
 
     #[test]

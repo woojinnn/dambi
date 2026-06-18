@@ -13,6 +13,7 @@
 //!
 //! Run (Postgres on :5433):
 //!   TEST_DATABASE_URL=postgres://dambi:dambi@127.0.0.1:5433/dambi \
+//!   BROWSER_E2E_PORT=8799 \
 //!     cargo test -p policy-server --test serve_seeded_browser_e2e \
 //!     serve_seeded_for_browser -- --ignored --nocapture
 
@@ -37,6 +38,13 @@ fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64
+}
+
+fn listen_port() -> u16 {
+    std::env::var("BROWSER_E2E_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(8788)
 }
 
 fn hl_position(account: HlAccount, synced_at: u64) -> Position {
@@ -156,16 +164,18 @@ fn scenarios(now: i64) -> Vec<(&'static str, &'static str, HlAccount)> {
             "0xe2e0000000000000000000000000000000000002",
             acct_equity("9501", "10000", "10000", now),
         ),
-        // max-drawdown: peakDrawdownBps >= 800 (baseline low so day stays 0 → isolates peak).
+        // max-drawdown: peakDrawdownBps >= 800. Baseline is deliberately zero
+        // (observed prod shape after a full account drawdown) so this proves the
+        // HWM axis does not depend on a positive day baseline.
         (
             "MDD_FIRE",
             "0xe2e0000000000000000000000000000000000003",
-            acct_equity("9200", "9200", "10000", now),
+            acct_equity("9200", "0", "10000", now),
         ),
         (
             "MDD_PASS",
             "0xe2e0000000000000000000000000000000000004",
-            acct_equity("9201", "9201", "10000", now),
+            acct_equity("9201", "0", "10000", now),
         ),
         // loss-streak: lossStreak >= 3.
         (
@@ -255,7 +265,8 @@ async fn serve_seeded_for_browser() {
         sync_lock_ttl: std::time::Duration::from_secs(120),
     };
     let router = build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8788")
+    let port = listen_port();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
         .unwrap();
     let token = issue(&user_id, EMAIL, TokenType::Access, None).unwrap();
@@ -265,9 +276,9 @@ async fn serve_seeded_for_browser() {
         addr_lines.push_str(&format!("{label}={addr}\n"));
     }
     let summary =
-        format!("READY\nuser_id={user_id}\nemail={EMAIL}\nnow={now}\n{addr_lines}JWT={token}\n");
+        format!("READY\nurl=http://127.0.0.1:{port}\nuser_id={user_id}\nemail={EMAIL}\nnow={now}\n{addr_lines}JWT={token}\n");
     std::fs::write("/tmp/perp-browser-e2e.txt", &summary).unwrap();
-    eprintln!("==== SEED+SERVE READY (127.0.0.1:8788) ====\n{summary}");
+    eprintln!("==== SEED+SERVE READY (127.0.0.1:{port}) ====\n{summary}");
 
     axum::serve(listener, router).await.unwrap();
 }

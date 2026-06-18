@@ -20,12 +20,17 @@ spec:
       # No serviceAccountName: this is a pre-install hook that runs before the
       # chart's ServiceAccount (a main-phase resource) exists. The migrate Job
       # needs only DATABASE_URL, so the namespace default SA is sufficient.
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       restartPolicy: Never
       containers:
         - name: migrate
           image: {{ include "policy-server.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["policy-server-migrate"]
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - name: DATABASE_URL
               valueFrom:

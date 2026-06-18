@@ -85,6 +85,31 @@ interface RefreshResponse {
   refresh_token?: string;
 }
 
+type TokenRefreshObserver = (
+  access: string,
+  refresh: string | null,
+) => void | Promise<void>;
+
+let tokenRefreshObserver: TokenRefreshObserver | null = null;
+
+export function setTokenRefreshObserver(
+  observer: TokenRefreshObserver | null,
+): void {
+  tokenRefreshObserver = observer;
+}
+
+function notifyTokenRefresh(access: string, refresh: string | null): void {
+  const observer = tokenRefreshObserver;
+  if (!observer) return;
+  try {
+    void Promise.resolve(observer(access, refresh)).catch((err: unknown) => {
+      console.warn("[Dambi] token refresh observer failed:", err);
+    });
+  } catch (err) {
+    console.warn("[Dambi] token refresh observer failed:", err);
+  }
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   const refresh = getStoredRefreshToken();
   if (!refresh) return null;
@@ -99,8 +124,10 @@ async function refreshAccessToken(): Promise<string | null> {
     return null;
   }
   const body = (await res.json()) as RefreshResponse;
+  const nextRefresh = body.refresh_token ?? refresh;
   setStoredToken(body.access_token);
-  setStoredRefreshToken(body.refresh_token ?? refresh);
+  setStoredRefreshToken(nextRefresh);
+  notifyTokenRefresh(body.access_token, nextRefresh);
   return body.access_token;
 }
 
@@ -156,8 +183,15 @@ async function parseResponse<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Build a URL with `?token=…` for `EventSource` (which can't set headers). */
+const SSE_STREAM_PATH = "/events/stream";
+
+/** Build a URL with `?token=...` for the SSE `EventSource` endpoint only. */
 export function urlWithTokenQuery(path: string, token: string): string {
+  const queryStart = path.indexOf("?");
+  const pathname = queryStart === -1 ? path : path.slice(0, queryStart);
+  if (pathname !== SSE_STREAM_PATH) {
+    throw new Error("token query URLs are only supported for /events/stream");
+  }
   const sep = path.includes("?") ? "&" : "?";
   return `${SERVER_BASE_URL}${path}${sep}token=${encodeURIComponent(token)}`;
 }

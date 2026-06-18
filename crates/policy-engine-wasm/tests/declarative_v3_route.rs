@@ -199,6 +199,1169 @@ fn t1_erc20_approve() {
 }
 
 // ---------------------------------------------------------------------------
+// t1c — Across bytes32 `deposit` recipient/token words must not be projected
+// blindly to low-160-bit EVM addresses.
+// ---------------------------------------------------------------------------
+
+const T1C_ACROSS_DEPOSIT_V3: &str =
+    include_str!("../../../registryV2/manifests/across/spoke-pool/deposit@1.0.0.json");
+const ACROSS_SPOKE_POOL_MAINNET: &str = "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5";
+const ACROSS_SUBMITTER: &str = "0x000000000000000000000000000000000000aaaa";
+const ACROSS_RECIPIENT: &str = "0x5529e0608cfc0cab5bb86b59cba7e88f0f66dfef";
+const ACROSS_USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+
+fn fixed_bytes32(bytes: [u8; 32]) -> DynSolValue {
+    DynSolValue::FixedBytes(alloy_primitives::B256::from(bytes), 32)
+}
+
+fn left_padded_address_word(address: &str) -> DynSolValue {
+    let mut bytes = [0u8; 32];
+    bytes[12..].copy_from_slice(addr(address).as_slice());
+    fixed_bytes32(bytes)
+}
+
+fn raw_bytes32_word(word: &str) -> DynSolValue {
+    let bytes: [u8; 32] = hex::decode(word.trim_start_matches("0x"))
+        .unwrap()
+        .try_into()
+        .unwrap();
+    fixed_bytes32(bytes)
+}
+
+fn across_deposit_calldata_with_words(
+    recipient: DynSolValue,
+    input_token: DynSolValue,
+    output_token: DynSolValue,
+    exclusive_relayer: DynSolValue,
+) -> String {
+    encode_calldata(
+        "0xad5425c6",
+        &[
+            left_padded_address_word(ACROSS_SUBMITTER), // depositor
+            recipient,
+            input_token,
+            output_token,
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(990_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(10u64), 256), // Optimism
+            exclusive_relayer,
+            DynSolValue::Uint(AlloyU256::from(1_700_000_000u64), 32),
+            DynSolValue::Uint(AlloyU256::from(1_700_003_600u64), 32),
+            DynSolValue::Uint(AlloyU256::from(0u64), 32),
+            DynSolValue::Bytes(vec![]),
+        ],
+    )
+}
+
+fn across_deposit_calldata(recipient: DynSolValue) -> String {
+    across_deposit_calldata_with_words(
+        recipient,
+        left_padded_address_word(ACROSS_USDC),
+        left_padded_address_word(ACROSS_USDC),
+        left_padded_address_word("0x0000000000000000000000000000000000000000"),
+    )
+}
+
+#[test]
+fn t1c_across_deposit_left_padded_recipient_routes_evm() {
+    install_ok(T1C_ACROSS_DEPOSIT_V3);
+
+    let calldata = across_deposit_calldata(left_padded_address_word(ACROSS_RECIPIENT));
+    let parsed = route_ok(route_input(
+        1,
+        ACROSS_SPOKE_POOL_MAINNET,
+        "0xad5425c6",
+        calldata,
+        ACROSS_SUBMITTER,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"],
+        "across/spoke-pool/deposit@1.0.0"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "bridge", "{parsed}");
+    assert_eq!(body["action"], "send", "{parsed}");
+    assert_eq!(body["dst_chain_id"], "eip155:10", "{parsed}");
+    assert_eq!(body["dst_recipient"]["kind"], "evm", "{parsed}");
+    assert_eq!(
+        body["dst_recipient"]["address"], ACROSS_RECIPIENT,
+        "{parsed}"
+    );
+    assert_eq!(body["src_token"]["key"]["address"], ACROSS_USDC, "{parsed}");
+}
+
+#[test]
+fn t1c_across_deposit_non_left_padded_recipient_routes_raw() {
+    install_ok(T1C_ACROSS_DEPOSIT_V3);
+
+    let raw_recipient = "0x0f64e4226322cd6908be7fe613f7f82ae2db8fc0ffaf0757e5e4839019170d7f";
+    let calldata = across_deposit_calldata(raw_bytes32_word(raw_recipient));
+    let parsed = route_ok(route_input(
+        1,
+        ACROSS_SPOKE_POOL_MAINNET,
+        "0xad5425c6",
+        calldata,
+        ACROSS_SUBMITTER,
+    ));
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "bridge", "{parsed}");
+    assert_eq!(body["dst_recipient"]["kind"], "raw", "{parsed}");
+    assert_eq!(body["dst_recipient"]["bytes32"], raw_recipient, "{parsed}");
+    assert!(body["dst_recipient"].get("address").is_none(), "{parsed}");
+}
+
+#[test]
+fn t1c_across_deposit_non_left_padded_token_routes_unknown() {
+    install_ok(T1C_ACROSS_DEPOSIT_V3);
+
+    let raw_token = "0x0f64e4226322cd6908be7fe613f7f82ae2db8fc0ffaf0757e5e4839019170d7f";
+    let calldata = across_deposit_calldata_with_words(
+        left_padded_address_word(ACROSS_RECIPIENT),
+        raw_bytes32_word(raw_token),
+        left_padded_address_word(ACROSS_USDC),
+        left_padded_address_word("0x0000000000000000000000000000000000000000"),
+    );
+    let parsed = route_ok(route_input(
+        1,
+        ACROSS_SPOKE_POOL_MAINNET,
+        "0xad5425c6",
+        calldata.clone(),
+        ACROSS_SUBMITTER,
+    ));
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "unknown", "{parsed}");
+    assert_eq!(body["target"], ACROSS_SPOKE_POOL_MAINNET, "{parsed}");
+    assert_eq!(body["calldata"], calldata, "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// t1d — Li.Fi generic/source swaps must preserve caller-supplied minimum
+// output floors, and must not project an aggregate minimum onto each leg of a
+// multi-leg `SwapData[]` route.
+// ---------------------------------------------------------------------------
+
+const T1D_LIFI_SINGLE_NATIVE_TO_ERC20: &str = include_str!(
+    "../../../registryV2/manifests/lifi/generic-swap/swap-tokens-single-v3-native-to-e-r-c20@1.0.0.json"
+);
+const T1D_LIFI_MULTI_NATIVE_TO_ERC20: &str = include_str!(
+    "../../../registryV2/manifests/lifi/generic-swap/swap-tokens-multiple-v3-native-to-e-r-c20@1.0.0.json"
+);
+const T1D_LIFI_GASZIP_START_BRIDGE: &str = include_str!(
+    "../../../registryV2/manifests/lifi/gas-zip/start-bridge-tokens-via-gas-zip@1.0.0.json"
+);
+const LIFI_DIAMOND_MAINNET: &str = "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae";
+const LIFI_RECEIVER: &str = "0x5529e0608cfc0cab5bb86b59cba7e88f0f66dfef";
+const LIFI_EXECUTOR: &str = "0x00000000000000000000000000000000000000e1";
+const LIFI_APPROVE_TO: &str = "0x00000000000000000000000000000000000000e2";
+const LIFI_NATIVE_SENTINEL: &str = "0x0000000000000000000000000000000000000000";
+const LIFI_NON_EVM_SENTINEL: &str = "0x11f111f111f111f111f111f111f111f111f111f1";
+const LIFI_USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const LIFI_USDT: &str = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+
+fn lifi_transaction_id() -> DynSolValue {
+    fixed_bytes32([0x11; 32])
+}
+
+fn lifi_swap_data(
+    sending_asset: &str,
+    receiving_asset: &str,
+    amount: u64,
+    payload: &[u8],
+) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(LIFI_EXECUTOR)),
+        DynSolValue::Address(addr(LIFI_APPROVE_TO)),
+        DynSolValue::Address(addr(sending_asset)),
+        DynSolValue::Address(addr(receiving_asset)),
+        DynSolValue::Uint(AlloyU256::from(amount), 256),
+        DynSolValue::Bytes(payload.to_vec()),
+        DynSolValue::Bool(true),
+    ])
+}
+
+fn lifi_bridge_data(
+    receiver: &str,
+    sending_asset: &str,
+    destination_chain_id: AlloyU256,
+) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        lifi_transaction_id(),
+        DynSolValue::String("gaszip".to_owned()),
+        DynSolValue::String("codex".to_owned()),
+        DynSolValue::Address(addr("0x0000000000000000000000000000000000000000")),
+        DynSolValue::Address(addr(sending_asset)),
+        DynSolValue::Address(addr(receiver)),
+        DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+        DynSolValue::Uint(destination_chain_id, 256),
+        DynSolValue::Bool(false),
+        DynSolValue::Bool(false),
+    ])
+}
+
+fn lifi_gaszip_data(receiver_address: [u8; 32]) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        fixed_bytes32(receiver_address),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+    ])
+}
+
+#[test]
+fn t1d_lifi_single_swap_preserves_min_amount_out() {
+    install_ok(T1D_LIFI_SINGLE_NATIVE_TO_ERC20);
+
+    let min_amount_out = 990_000u64;
+    let calldata = encode_calldata(
+        "0xaf7060fd",
+        &[
+            lifi_transaction_id(),
+            DynSolValue::String("codex".to_owned()),
+            DynSolValue::String("audit".to_owned()),
+            DynSolValue::Address(addr(LIFI_RECEIVER)),
+            DynSolValue::Uint(AlloyU256::from(min_amount_out), 256),
+            lifi_swap_data(LIFI_NATIVE_SENTINEL, LIFI_USDC, 1_000_000, &[0x12, 0x34]),
+        ],
+    );
+    let parsed = route_ok(route_input_with_value(
+        1,
+        LIFI_DIAMOND_MAINNET,
+        "0xaf7060fd",
+        calldata,
+        LIFI_RECEIVER,
+        "1000000",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"],
+        "lifi/generic-swap/swap-tokens-single-v3-native-to-e-r-c20@1.0.0"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "swap", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aggregator_route", "{parsed}");
+    assert_eq!(
+        body["params"]["direction"]["kind"], "exact_input",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0xf1b30",
+        "{parsed}"
+    );
+    assert_eq!(body["params"]["recipient"], LIFI_RECEIVER, "{parsed}");
+}
+
+#[test]
+fn t1d_lifi_multi_swapdata_falls_back_unknown_for_aggregate_minimum() {
+    install_ok(T1D_LIFI_MULTI_NATIVE_TO_ERC20);
+
+    let calldata = encode_calldata(
+        "0x736eac0b",
+        &[
+            lifi_transaction_id(),
+            DynSolValue::String("codex".to_owned()),
+            DynSolValue::String("audit".to_owned()),
+            DynSolValue::Address(addr(LIFI_RECEIVER)),
+            DynSolValue::Uint(AlloyU256::from(1_950_000u64), 256),
+            DynSolValue::Array(vec![
+                lifi_swap_data(LIFI_NATIVE_SENTINEL, LIFI_USDC, 1_000_000, &[0xaa]),
+                lifi_swap_data(LIFI_USDC, LIFI_USDT, 950_000, &[0xbb]),
+            ]),
+        ],
+    );
+    let parsed = route_ok(route_input_with_value(
+        1,
+        LIFI_DIAMOND_MAINNET,
+        "0x736eac0b",
+        calldata.clone(),
+        LIFI_RECEIVER,
+        "1000000",
+    ));
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let actions = body["actions"].as_array().expect("multicall actions");
+    assert_eq!(actions.len(), 2, "{parsed}");
+    for action in actions {
+        assert_eq!(action["domain"], "unknown", "{parsed}");
+        assert_eq!(action["target"], LIFI_DIAMOND_MAINNET, "{parsed}");
+        assert_eq!(action["calldata"], calldata, "{parsed}");
+        assert_eq!(action["value"], "0xf4240", "{parsed}");
+    }
+}
+
+#[test]
+fn t1d_lifi_gaszip_non_evm_receiver_preserves_raw_bytes32() {
+    install_ok(T1D_LIFI_GASZIP_START_BRIDGE);
+
+    let raw_receiver = [0xab; 32];
+    let solana_chain = AlloyU256::from_str_radix("1151111081099710", 10).unwrap();
+    let calldata = encode_calldata(
+        "0xfc5f1003",
+        &[
+            lifi_bridge_data(LIFI_NON_EVM_SENTINEL, LIFI_USDC, solana_chain),
+            lifi_gaszip_data(raw_receiver),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        LIFI_DIAMOND_MAINNET,
+        "0xfc5f1003",
+        calldata,
+        LIFI_RECEIVER,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"],
+        "lifi/gas-zip/start-bridge-tokens-via-gas-zip@1.0.0"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "bridge", "{parsed}");
+    assert_eq!(body["action"], "send", "{parsed}");
+    assert_eq!(body["src_token"]["key"]["address"], LIFI_USDC, "{parsed}");
+    assert_eq!(body["input_amount"], "0xf4240", "{parsed}");
+    assert_eq!(
+        body["dst_chain_id"], "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpZ9grvp9",
+        "{parsed}"
+    );
+    assert_eq!(body["dst_recipient"]["kind"], "raw", "{parsed}");
+    assert_eq!(
+        body["dst_recipient"]["bytes32"],
+        format!("0x{}", hex::encode(raw_receiver)),
+        "{parsed}"
+    );
+    assert!(body["dst_recipient"].get("address").is_none(), "{parsed}");
+}
+
+#[test]
+fn t1d_lifi_gaszip_evm_receiver_ignores_raw_bytes32() {
+    install_ok(T1D_LIFI_GASZIP_START_BRIDGE);
+
+    let calldata = encode_calldata(
+        "0xfc5f1003",
+        &[
+            lifi_bridge_data(LIFI_RECEIVER, LIFI_USDC, AlloyU256::from(10u64)),
+            lifi_gaszip_data([0xcd; 32]),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        LIFI_DIAMOND_MAINNET,
+        "0xfc5f1003",
+        calldata,
+        LIFI_RECEIVER,
+    ));
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "bridge", "{parsed}");
+    assert_eq!(body["dst_chain_id"], "eip155:10", "{parsed}");
+    assert_eq!(body["dst_recipient"]["kind"], "evm", "{parsed}");
+    assert_eq!(body["dst_recipient"]["address"], LIFI_RECEIVER, "{parsed}");
+    assert!(body["dst_recipient"].get("bytes32").is_none(), "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// t1e — Curve Router NG uses the 0xeeee... native sentinel in route tokens.
+// ---------------------------------------------------------------------------
+
+const T1E_CURVE_ROUTER_EXCHANGE: &str =
+    include_str!("../../../registryV2/manifests/curve/router-ng/exchange@1.0.0.json");
+const CURVE_ROUTER_NG_MAINNET: &str = "0x45312ea0eff7e09c83cbe249fa1d7598c4c8cd4e";
+const CURVE_NATIVE_SENTINEL: &str = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+const CURVE_TEST_POOL: &str = "0x2222222222222222222222222222222222222222";
+const CURVE_USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const CURVE_SUBMITTER: &str = "0x000000000000000000000000000000000000aaaa";
+
+fn curve_fixed_address_array(addrs: &[&str], len: usize) -> DynSolValue {
+    let mut values = addrs
+        .iter()
+        .map(|address| DynSolValue::Address(addr(address)))
+        .collect::<Vec<_>>();
+    while values.len() < len {
+        values.push(DynSolValue::Address(AlloyAddress::ZERO));
+    }
+    DynSolValue::FixedArray(values)
+}
+
+fn curve_swap_params(swap_type: u64) -> DynSolValue {
+    let row = |values: [u64; 5]| {
+        DynSolValue::FixedArray(
+            values
+                .into_iter()
+                .map(|value| DynSolValue::Uint(AlloyU256::from(value), 256))
+                .collect(),
+        )
+    };
+    DynSolValue::FixedArray(vec![
+        row([0, 1, swap_type, 1, 2]),
+        row([0, 0, 0, 0, 0]),
+        row([0, 0, 0, 0, 0]),
+        row([0, 0, 0, 0, 0]),
+        row([0, 0, 0, 0, 0]),
+    ])
+}
+
+fn curve_router_exchange_body(route: DynSolValue, value: &str) -> Value {
+    install_ok(T1E_CURVE_ROUTER_EXCHANGE);
+    let calldata = encode_calldata(
+        "0x371dc447",
+        &[
+            route,
+            curve_swap_params(1),
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(990_000u64), 256),
+        ],
+    );
+    let parsed = route_ok(route_input_with_value(
+        1,
+        CURVE_ROUTER_NG_MAINNET,
+        "0x371dc447",
+        calldata,
+        CURVE_SUBMITTER,
+        value,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "curve/router-ng/exchange@1.0.0",
+        "{parsed}"
+    );
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t1e_curve_router_native_sentinel_routes_to_native_token_keys() {
+    let body = curve_router_exchange_body(
+        curve_fixed_address_array(&[CURVE_NATIVE_SENTINEL, CURVE_TEST_POOL, CURVE_USDC], 11),
+        "1000000",
+    );
+    assert_eq!(body["domain"], "amm", "{body}");
+    assert_eq!(body["action"], "swap", "{body}");
+    assert_eq!(
+        body["params"]["token_in"]["key"]["standard"], "native",
+        "{body}"
+    );
+    assert_eq!(
+        body["params"]["token_in"]["key"]["chain"], "eip155:1",
+        "{body}"
+    );
+    assert!(
+        body["params"]["token_in"]["key"].get("address").is_none(),
+        "{body}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["address"], CURVE_USDC,
+        "{body}"
+    );
+
+    let body = curve_router_exchange_body(
+        curve_fixed_address_array(&[CURVE_USDC, CURVE_TEST_POOL, CURVE_NATIVE_SENTINEL], 11),
+        "0",
+    );
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], CURVE_USDC,
+        "{body}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["standard"], "native",
+        "{body}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["chain"], "eip155:1",
+        "{body}"
+    );
+    assert!(
+        body["params"]["token_out"]["key"].get("address").is_none(),
+        "{body}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// t1f — Pendle Router V4 TokenInput/TokenOutput use address(0) for native ETH.
+// The manifest must not model that sentinel as an ERC20 zero-address.
+// ---------------------------------------------------------------------------
+
+const T1F_PENDLE_MINT_SY_FROM_TOKEN: &str =
+    include_str!("../../../registryV2/manifests/pendle/router-v4/mintSyFromToken@1.0.0.json");
+const T1F_PENDLE_REDEEM_SY_TO_TOKEN: &str =
+    include_str!("../../../registryV2/manifests/pendle/router-v4/redeemSyToToken@1.0.0.json");
+const PENDLE_ROUTER_V4_MAINNET: &str = "0x888888888889758f76e7103c6cbf23abbf58f946";
+const PENDLE_RECEIVER: &str = "0x0000000000000000000000000000000000000a11";
+const PENDLE_SY: &str = "0x0000000000000000000000000000000000000b22";
+const PENDLE_NATIVE: &str = "0x0000000000000000000000000000000000000000";
+
+fn pendle_swap_data_none() -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(0u64), 8),
+        DynSolValue::Address(AlloyAddress::ZERO),
+        DynSolValue::Bytes(vec![]),
+        DynSolValue::Bool(false),
+    ])
+}
+
+fn pendle_token_input(token_in: &str, net_token_in: u64) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(token_in)),
+        DynSolValue::Uint(AlloyU256::from(net_token_in), 256),
+        DynSolValue::Address(addr(token_in)),
+        DynSolValue::Address(AlloyAddress::ZERO),
+        pendle_swap_data_none(),
+    ])
+}
+
+fn pendle_token_output(token_out: &str, min_token_out: u64) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(token_out)),
+        DynSolValue::Uint(AlloyU256::from(min_token_out), 256),
+        DynSolValue::Address(addr(token_out)),
+        DynSolValue::Address(AlloyAddress::ZERO),
+        pendle_swap_data_none(),
+    ])
+}
+
+fn assert_native_token_key(key: &Value, parsed: &Value) {
+    assert_eq!(key["standard"], "native", "{parsed}");
+    assert_eq!(key["chain"], "eip155:1", "{parsed}");
+    assert!(key.get("address").is_none(), "{parsed}");
+}
+
+#[test]
+fn t1f_pendle_native_token_input_routes_to_native_key() {
+    install_ok(T1F_PENDLE_MINT_SY_FROM_TOKEN);
+
+    let calldata = encode_calldata(
+        "0x2e071dc6",
+        &[
+            DynSolValue::Address(addr(PENDLE_RECEIVER)),
+            DynSolValue::Address(addr(PENDLE_SY)),
+            DynSolValue::Uint(AlloyU256::from(990_000u64), 256),
+            pendle_token_input(PENDLE_NATIVE, 1_000_000),
+        ],
+    );
+    let parsed = route_ok(route_input_with_value(
+        1,
+        PENDLE_ROUTER_V4_MAINNET,
+        "0x2e071dc6",
+        calldata,
+        PENDLE_RECEIVER,
+        "1000000",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "pendle/router-v4/mintSyFromToken@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "yield", "{parsed}");
+    assert_eq!(body["action"], "mint_sy", "{parsed}");
+    assert_native_token_key(&body["external_token"]["key"], &parsed);
+    assert_eq!(body["net_token_in"], "0xf4240", "{parsed}");
+    assert_eq!(body["min_sy_out"], "0xf1b30", "{parsed}");
+}
+
+#[test]
+fn t1f_pendle_native_token_output_routes_to_native_key() {
+    install_ok(T1F_PENDLE_REDEEM_SY_TO_TOKEN);
+
+    let calldata = encode_calldata(
+        "0x339a5572",
+        &[
+            DynSolValue::Address(addr(PENDLE_RECEIVER)),
+            DynSolValue::Address(addr(PENDLE_SY)),
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            pendle_token_output(PENDLE_NATIVE, 990_000),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        PENDLE_ROUTER_V4_MAINNET,
+        "0x339a5572",
+        calldata,
+        PENDLE_RECEIVER,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "pendle/router-v4/redeemSyToToken@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "yield", "{parsed}");
+    assert_eq!(body["action"], "redeem_sy", "{parsed}");
+    assert_native_token_key(&body["external_token"]["key"], &parsed);
+    assert_eq!(body["net_sy_in"], "0xf4240", "{parsed}");
+    assert_eq!(body["min_token_out"], "0xf1b30", "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// t1g — 1inch AggregationRouterV6 swaps use packed uint256 address fields:
+// Clipper maps address(0) to native ETH, and UnoswapTo masks recipient/token
+// words down to their low-160-bit address payload.
+// ---------------------------------------------------------------------------
+
+const T1G_ONEINCH_CLIPPER_SWAP: &str = include_str!(
+    "../../../registryV2/manifests/1inch/aggregation-router-v6/clipper-swap@1.0.0.json"
+);
+const T1G_ONEINCH_CLIPPER_SWAP_TO: &str = include_str!(
+    "../../../registryV2/manifests/1inch/aggregation-router-v6/clipper-swap-to@1.0.0.json"
+);
+const T1G_ONEINCH_UNOSWAP_TO: &str =
+    include_str!("../../../registryV2/manifests/1inch/aggregation-router-v6/unoswapTo@1.0.0.json");
+const T1G_ONEINCH_ETH_UNOSWAP_TO: &str = include_str!(
+    "../../../registryV2/manifests/1inch/aggregation-router-v6/ethUnoswapTo@1.0.0.json"
+);
+const T1G_ONEINCH_LOP_ORDER_SIGN: &str =
+    include_str!("../../../registryV2/manifests/1inch/limit-order-protocol/order-sign@1.0.0.json");
+const ONEINCH_ROUTER_V6_MAINNET: &str = "0x111111125421ca6dc452d289314280a0f8842a65";
+const ONEINCH_CLIPPER_EXCHANGE: &str = "0x000000000000000000000000000000000000c111";
+const ONEINCH_RECIPIENT: &str = "0x0000000000000000000000000000000000000b0b";
+const ONEINCH_SUBMITTER: &str = "0x000000000000000000000000000000000000aaaa";
+const ONEINCH_USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const ONEINCH_WETH: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+const ONEINCH_NATIVE_ZERO: &str = "0x0000000000000000000000000000000000000000";
+const ONEINCH_POOL: &str = "0x000000000000000000000000000000000000c0de";
+
+fn oneinch_packed_address(address: &str) -> DynSolValue {
+    DynSolValue::Uint(
+        AlloyU256::from_str_radix(address.trim_start_matches("0x"), 16).unwrap(),
+        256,
+    )
+}
+
+fn oneinch_packed_address_with_flags(address: &str) -> DynSolValue {
+    let packed = format!(
+        "00000000000000000000beef{}",
+        address.trim_start_matches("0x")
+    );
+    DynSolValue::Uint(AlloyU256::from_str_radix(&packed, 16).unwrap(), 256)
+}
+
+#[test]
+fn t1g_oneinch_clipper_native_src_routes_to_native_key() {
+    install_ok(T1G_ONEINCH_CLIPPER_SWAP);
+
+    let calldata = encode_calldata(
+        "0xd2d374e5",
+        &[
+            DynSolValue::Address(addr(ONEINCH_CLIPPER_EXCHANGE)),
+            oneinch_packed_address(ONEINCH_NATIVE_ZERO),
+            DynSolValue::Address(addr(ONEINCH_USDC)),
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(990_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+            fixed_bytes32([0x11; 32]),
+            fixed_bytes32([0x22; 32]),
+        ],
+    );
+    let parsed = route_ok(route_input_with_value(
+        1,
+        ONEINCH_ROUTER_V6_MAINNET,
+        "0xd2d374e5",
+        calldata,
+        ONEINCH_SUBMITTER,
+        "1000000",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "1inch/aggregation-router-v6/clipper-swap@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "swap", "{parsed}");
+    assert_native_token_key(&body["params"]["token_in"]["key"], &parsed);
+    assert_eq!(
+        body["params"]["token_out"]["key"]["address"], ONEINCH_USDC,
+        "{parsed}"
+    );
+    assert_eq!(body["params"]["recipient"], ONEINCH_SUBMITTER, "{parsed}");
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0xf1b30",
+        "{parsed}"
+    );
+}
+
+#[test]
+fn t1g_oneinch_clipper_native_dst_routes_to_native_key() {
+    install_ok(T1G_ONEINCH_CLIPPER_SWAP_TO);
+
+    let calldata = encode_calldata(
+        "0xc4d652af",
+        &[
+            DynSolValue::Address(addr(ONEINCH_CLIPPER_EXCHANGE)),
+            DynSolValue::Address(addr(ONEINCH_RECIPIENT)),
+            oneinch_packed_address(ONEINCH_USDC),
+            DynSolValue::Address(addr(ONEINCH_NATIVE_ZERO)),
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(990_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+            fixed_bytes32([0x33; 32]),
+            fixed_bytes32([0x44; 32]),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        ONEINCH_ROUTER_V6_MAINNET,
+        "0xc4d652af",
+        calldata,
+        ONEINCH_SUBMITTER,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "1inch/aggregation-router-v6/clipper-swap-to@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], ONEINCH_USDC,
+        "{parsed}"
+    );
+    assert_native_token_key(&body["params"]["token_out"]["key"], &parsed);
+    assert_eq!(body["params"]["recipient"], ONEINCH_RECIPIENT, "{parsed}");
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0xf1b30",
+        "{parsed}"
+    );
+}
+
+#[test]
+fn t1g_oneinch_unoswap_to_unmasks_packed_token_and_recipient() {
+    install_ok(T1G_ONEINCH_UNOSWAP_TO);
+
+    let calldata = encode_calldata(
+        "0xe2c95c82",
+        &[
+            oneinch_packed_address_with_flags(ONEINCH_RECIPIENT),
+            oneinch_packed_address_with_flags(ONEINCH_USDC),
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(990_000u64), 256),
+            oneinch_packed_address_with_flags(ONEINCH_POOL),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        ONEINCH_ROUTER_V6_MAINNET,
+        "0xe2c95c82",
+        calldata,
+        ONEINCH_SUBMITTER,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "1inch/aggregation-router-v6/unoswapTo@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "swap", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aggregator_route", "{parsed}");
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], ONEINCH_USDC,
+        "{parsed}"
+    );
+    assert_eq!(body["params"]["recipient"], ONEINCH_RECIPIENT, "{parsed}");
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0xf1b30",
+        "{parsed}"
+    );
+    let route_hash = body["venue"]["route_hash"].as_str().unwrap();
+    assert!(route_hash.starts_with("0x"), "{parsed}");
+    assert_eq!(route_hash.len(), 66, "{parsed}");
+}
+
+#[test]
+fn t1g_oneinch_eth_unoswap_to_uses_tx_value_and_unmasks_recipient() {
+    install_ok(T1G_ONEINCH_ETH_UNOSWAP_TO);
+
+    let calldata = encode_calldata(
+        "0x175accdc",
+        &[
+            oneinch_packed_address_with_flags(ONEINCH_RECIPIENT),
+            DynSolValue::Uint(AlloyU256::from(990_000u64), 256),
+            oneinch_packed_address_with_flags(ONEINCH_POOL),
+        ],
+    );
+    let parsed = route_ok(route_input_with_value(
+        1,
+        ONEINCH_ROUTER_V6_MAINNET,
+        "0x175accdc",
+        calldata,
+        ONEINCH_SUBMITTER,
+        "1000000",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "1inch/aggregation-router-v6/ethUnoswapTo@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "swap", "{parsed}");
+    assert_native_token_key(&body["params"]["token_in"]["key"], &parsed);
+    assert_eq!(body["params"]["recipient"], ONEINCH_RECIPIENT, "{parsed}");
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0xf1b30",
+        "{parsed}"
+    );
+}
+
+fn oneinch_lop_typed_order_input(message: Value) -> String {
+    json!({
+        "chain_id": 1_u64,
+        "verifying_contract": ONEINCH_ROUTER_V6_MAINNET,
+        "primary_type": "Order",
+        "domain_name": "1inch Aggregation Router",
+        "message": message,
+        "submitter": ONEINCH_SUBMITTER,
+        "submitted_at": 1_700_000_000_u64
+    })
+    .to_string()
+}
+
+#[test]
+fn t1g_oneinch_lop_zero_receiver_routes_to_maker_and_preserves_expiry() {
+    install_ok(T1G_ONEINCH_LOP_ORDER_SIGN);
+
+    let valid_until = 1_800_000_000_u64;
+    let maker_traits = format!("0x{valid_until:x}00000000000000000000");
+    let out = declarative_route_typed_data_v3_json(oneinch_lop_typed_order_input(json!({
+        "salt": "1",
+        "maker": ONEINCH_SUBMITTER,
+        "receiver": ONEINCH_NATIVE_ZERO,
+        "makerAsset": ONEINCH_WETH,
+        "takerAsset": ONEINCH_USDC,
+        "makingAmount": "1000000000000000000",
+        "takingAmount": "3400000000",
+        "makerTraits": maker_traits
+    })));
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "typed route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "1inch/limit-order-protocol/order-sign@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "sign_intent_order", "{parsed}");
+    assert_eq!(body["venue"]["name"], "one_inch_limit_order", "{parsed}");
+    assert_eq!(body["sell"]["key"]["address"], ONEINCH_WETH, "{parsed}");
+    assert_eq!(body["buy"]["key"]["address"], ONEINCH_USDC, "{parsed}");
+    assert_eq!(body["recipient"], ONEINCH_SUBMITTER, "{parsed}");
+    assert_ne!(body["recipient"], ONEINCH_NATIVE_ZERO, "{parsed}");
+    assert_eq!(body["valid_until"], valid_until, "{parsed}");
+    assert_eq!(body["sell_amount"], "0xde0b6b3a7640000", "{parsed}");
+    assert_eq!(body["buy_min"], "0xcaa7e200", "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// t1h — CoW Protocol uses BUY_ETH_ADDRESS (0xEeee...) as the native ETH payout
+// marker for buy tokens. Sell-side native ETH goes through EthFlow/WETH, but
+// buyToken may legitimately be the native marker.
+// ---------------------------------------------------------------------------
+
+const T1H_COWSWAP_ORDER_SIGN: &str =
+    include_str!("../../../registryV2/manifests/cowswap/order/sign@1.0.0.json");
+const T1H_COWSWAP_ETHFLOW_CREATE_ORDER: &str =
+    include_str!("../../../registryV2/manifests/cowswap/ethflow/create-order@1.0.0.json");
+const COWSWAP_SETTLEMENT_MAINNET: &str = "0x9008d19f58aabd9ed0d60971565aa8510560ab41";
+const COWSWAP_ETHFLOW_MAINNET: &str = "0xba3cb449bd2b4adddbc894d8697f5170800eadec";
+const COWSWAP_NATIVE_BUY_SENTINEL: &str = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+const COWSWAP_USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const COWSWAP_WETH: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+const COWSWAP_RECEIVER: &str = "0x2222222222222222222222222222222222222222";
+const COWSWAP_ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
+
+fn cowswap_typed_order_input(message: Value) -> String {
+    json!({
+        "chain_id": 1_u64,
+        "verifying_contract": COWSWAP_SETTLEMENT_MAINNET,
+        "primary_type": "Order",
+        "domain_name": "Gnosis Protocol",
+        "message": message,
+        "submitter": ONEINCH_SUBMITTER,
+        "submitted_at": 1_700_000_000_u64
+    })
+    .to_string()
+}
+
+fn cowswap_typed_order_ok(message: Value) -> Value {
+    let out = declarative_route_typed_data_v3_json(cowswap_typed_order_input(message));
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "typed route failed: {parsed}");
+    parsed
+}
+
+fn cowswap_ethflow_order(buy_token: &str) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(buy_token)),
+        DynSolValue::Address(addr(COWSWAP_RECEIVER)),
+        DynSolValue::Uint(AlloyU256::from(1_000_000_000_000_000_000u128), 256),
+        DynSolValue::Uint(AlloyU256::from(990_000_000_000_000_000u128), 256),
+        fixed_bytes32([0x00; 32]),
+        DynSolValue::Uint(AlloyU256::from(0u64), 256),
+        DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 32),
+        DynSolValue::Bool(false),
+        DynSolValue::Int(alloy_primitives::I256::try_from(0i64).unwrap(), 64),
+    ])
+}
+
+#[test]
+fn t1h_cowswap_order_native_buy_token_routes_to_native_key() {
+    install_ok(T1H_COWSWAP_ORDER_SIGN);
+
+    let parsed = cowswap_typed_order_ok(json!({
+        "sellToken": COWSWAP_USDC,
+        "buyToken": COWSWAP_NATIVE_BUY_SENTINEL,
+        "receiver": COWSWAP_RECEIVER,
+        "sellAmount": "3000000000",
+        "buyAmount": "1000000000000000000",
+        "validTo": 1_600_000_000_u64,
+        "appData": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "feeAmount": "0",
+        "kind": "sell",
+        "partiallyFillable": false,
+        "sellTokenBalance": "erc20",
+        "buyTokenBalance": "erc20"
+    }));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "cowswap/order/sign@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "sign_intent_order", "{parsed}");
+    assert_eq!(body["sell"]["key"]["address"], COWSWAP_USDC, "{parsed}");
+    assert_native_token_key(&body["buy"]["key"], &parsed);
+    assert_eq!(body["buy_min"], "0xde0b6b3a7640000", "{parsed}");
+    assert_eq!(body["recipient"], COWSWAP_RECEIVER, "{parsed}");
+}
+
+#[test]
+fn t1h_cowswap_order_zero_receiver_routes_to_submitter() {
+    install_ok(T1H_COWSWAP_ORDER_SIGN);
+
+    let parsed = cowswap_typed_order_ok(json!({
+        "sellToken": COWSWAP_USDC,
+        "buyToken": COWSWAP_WETH,
+        "receiver": COWSWAP_ZERO_ADDRESS,
+        "sellAmount": "3000000000",
+        "buyAmount": "1000000000000000000",
+        "validTo": 1_600_000_000_u64,
+        "appData": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "feeAmount": "0",
+        "kind": "sell",
+        "partiallyFillable": false,
+        "sellTokenBalance": "erc20",
+        "buyTokenBalance": "erc20"
+    }));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "cowswap/order/sign@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["recipient"], ONEINCH_SUBMITTER, "{parsed}");
+    assert_ne!(body["recipient"], COWSWAP_ZERO_ADDRESS, "{parsed}");
+}
+
+#[test]
+fn t1h_cowswap_ethflow_native_buy_token_routes_to_native_key() {
+    install_ok(T1H_COWSWAP_ETHFLOW_CREATE_ORDER);
+
+    let calldata = encode_calldata(
+        "0x322bba21",
+        &[cowswap_ethflow_order(COWSWAP_NATIVE_BUY_SENTINEL)],
+    );
+    let parsed = route_ok(route_input_with_value(
+        1,
+        COWSWAP_ETHFLOW_MAINNET,
+        "0x322bba21",
+        calldata,
+        ONEINCH_SUBMITTER,
+        "1000000000000000000",
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "cowswap/ethflow/create-order@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["sell"]["key"]["address"], COWSWAP_WETH, "{parsed}");
+    assert_native_token_key(&body["buy"]["key"], &parsed);
+    assert_eq!(body["sell_amount"], "0xde0b6b3a7640000", "{parsed}");
+    assert_eq!(body["buy_min"], "0xdbd2fc137a30000", "{parsed}");
+    assert_eq!(body["recipient"], COWSWAP_RECEIVER, "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// t1i — Direct Uniswap V3 pool swap signed amount semantics.
+// ---------------------------------------------------------------------------
+
+const T1I_UNISWAP_V3_POOL_SWAP: &str =
+    include_str!("../../../registryV2/manifests/uniswap/v3-pool/swap@1.0.0.json");
+const T1I_UNISWAP_V3_POOL: &str = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640";
+const T1I_UNISWAP_V3_TOKEN0_USDC: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const T1I_UNISWAP_V3_TOKEN1_WETH: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+const T1I_UNISWAP_V3_RECIPIENT: &str = "0x0000000000000000000000000000000000000a11";
+
+fn replace_exact_json_string(value: &mut Value, needle: &str, replacement: Value) {
+    match value {
+        Value::String(s) if s == needle => {
+            *value = replacement;
+        }
+        Value::Array(items) => {
+            for item in items {
+                replace_exact_json_string(item, needle, replacement.clone());
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                replace_exact_json_string(item, needle, replacement.clone());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn materialized_uniswap_v3_pool_swap_manifest() -> String {
+    let mut manifest: Value =
+        serde_json::from_str(T1I_UNISWAP_V3_POOL_SWAP).expect("parse V3 pool swap manifest");
+    manifest["match"]["chain_to_addresses"] = json!({ "1": [T1I_UNISWAP_V3_POOL] });
+    manifest["match"]
+        .as_object_mut()
+        .expect("match object")
+        .remove("chain_to_addresses_source");
+
+    replace_exact_json_string(&mut manifest, "$source.address", json!(T1I_UNISWAP_V3_POOL));
+    replace_exact_json_string(
+        &mut manifest,
+        "$source.token0",
+        json!(T1I_UNISWAP_V3_TOKEN0_USDC),
+    );
+    replace_exact_json_string(
+        &mut manifest,
+        "$source.token1",
+        json!(T1I_UNISWAP_V3_TOKEN1_WETH),
+    );
+    replace_exact_json_string(&mut manifest, "$source.fee_tier_bp", json!(500));
+    replace_exact_json_string(&mut manifest, "$derived.slippage_bp", json!(0));
+
+    serde_json::to_string(&manifest).expect("serialize materialized V3 pool swap manifest")
+}
+
+fn uniswap_v3_pool_swap_calldata(zero_for_one: bool, amount_specified: i64) -> String {
+    encode_calldata(
+        "0x128acb08",
+        &[
+            DynSolValue::Address(addr(T1I_UNISWAP_V3_RECIPIENT)),
+            DynSolValue::Bool(zero_for_one),
+            DynSolValue::Int(
+                alloy_primitives::I256::try_from(amount_specified).unwrap(),
+                256,
+            ),
+            DynSolValue::Uint(AlloyU256::ZERO, 160),
+            DynSolValue::Bytes(vec![]),
+        ],
+    )
+}
+
+fn route_uniswap_v3_pool_swap(zero_for_one: bool, amount_specified: i64) -> Value {
+    let manifest = materialized_uniswap_v3_pool_swap_manifest();
+    install_ok(&manifest);
+
+    route_ok(route_input(
+        1,
+        T1I_UNISWAP_V3_POOL,
+        "0x128acb08",
+        uniswap_v3_pool_swap_calldata(zero_for_one, amount_specified),
+        ONEINCH_SUBMITTER,
+    ))
+}
+
+#[test]
+fn t1i_uniswap_v3_pool_positive_amount_is_exact_input() {
+    let parsed = route_uniswap_v3_pool_swap(true, 1_000_000);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "uniswap/v3-pool/swap@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "swap", "{parsed}");
+    assert_eq!(body["venue"]["pool"], T1I_UNISWAP_V3_POOL, "{parsed}");
+    assert_eq!(body["venue"]["fee_tier_bp"], 500, "{parsed}");
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], T1I_UNISWAP_V3_TOKEN0_USDC,
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["address"], T1I_UNISWAP_V3_TOKEN1_WETH,
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["kind"], "exact_input",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0x0",
+        "{parsed}"
+    );
+    assert_eq!(body["params"]["recipient"], T1I_UNISWAP_V3_RECIPIENT);
+}
+
+#[test]
+fn t1i_uniswap_v3_pool_negative_amount_is_exact_output() {
+    let parsed = route_uniswap_v3_pool_swap(false, -2_000_000);
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], T1I_UNISWAP_V3_TOKEN1_WETH,
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["address"], T1I_UNISWAP_V3_TOKEN0_USDC,
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["kind"], "exact_output",
+        "{parsed}"
+    );
+    assert_eq!(
+        body["params"]["direction"]["amount_out"], "0x1e8480",
+        "{parsed}"
+    );
+    let max_amount_in = body["params"]["direction"]["max_amount_in"]
+        .as_str()
+        .expect("max_amount_in string");
+    assert!(max_amount_in.starts_with("0xffff"), "{parsed}");
+    assert_eq!(max_amount_in.len(), 66, "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
 // H2 — SwapRouter02 `sweepToken` (fund egress WITH an explicit recipient) is no
 // longer a dropped/excluded helper: it decodes to an `erc20_transfer` carrying
 // `is_router_egress: true`, so a redirected sweep (recipient != signer) hidden
@@ -284,13 +1447,17 @@ fn h2_sweep_token_decodes_to_router_egress_transfer() {
 /// router funds to a non-signer (`execute([V3_SWAP→router, SWEEP(token,attacker)])`
 /// — the dominant Uniswap drain pattern). Loads the REAL manifest from disk so a
 /// future edit that drops the flag from SWEEP/TRANSFER/UNWRAP_WETH fails HERE.
-#[test]
-fn h2_ur_execute_sweep_decodes_to_router_egress_transfer() {
-    let manifest = std::fs::read_to_string(concat!(
+fn shipped_ur_execute_v2_manifest() -> String {
+    std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../registryV2/manifests/uniswap/universal-router/execute-v2@1.0.0.json"
     ))
-    .expect("read shipped execute-v2 manifest");
+    .expect("read shipped execute-v2 manifest")
+}
+
+#[test]
+fn h2_ur_execute_sweep_decodes_to_router_egress_transfer() {
+    let manifest = shipped_ur_execute_v2_manifest();
     install_ok(&manifest);
 
     let token = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
@@ -330,6 +1497,161 @@ fn h2_ur_execute_sweep_decodes_to_router_egress_transfer() {
     assert_eq!(
         leg["is_router_egress"], true,
         "UR SWEEP must carry is_router_egress so sweep-recipient-not-self-warn fires: {parsed}"
+    );
+}
+
+#[test]
+fn h2_ur_execute_transfer_batch_single_entry_preserves_transfer() {
+    let manifest = shipped_ur_execute_v2_manifest();
+    install_ok(&manifest);
+
+    let from = "0x000000000000000000000000000000000000aaaa";
+    let recipient = "0x000000000000000000000000000000000000b0b0";
+    let token = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    let detail = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(from)),
+        DynSolValue::Address(addr(recipient)),
+        DynSolValue::Uint(AlloyU256::from(123u64), 160),
+        DynSolValue::Address(addr(token)),
+    ]);
+    let transfer_batch_blob = DynSolValue::Array(vec![detail]).abi_encode_params();
+
+    let calldata = encode_calldata(
+        "0x3593564c",
+        &[
+            DynSolValue::Bytes(vec![0x0d]),
+            DynSolValue::Array(vec![DynSolValue::Bytes(transfer_batch_blob)]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "0x3593564c",
+        calldata,
+        from,
+    );
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let leg = &body["actions"][0];
+    assert_eq!(leg["domain"], "token", "{parsed}");
+    assert_eq!(leg["action"], "erc20_transfer", "{parsed}");
+    assert_eq!(leg["token"]["key"]["address"], token, "{parsed}");
+    assert_eq!(leg["recipient"], recipient, "{parsed}");
+    assert_eq!(leg["amount"], "0x7b", "{parsed}");
+}
+
+#[test]
+fn h2_ur_execute_transfer_batch_multi_entry_surfaces_unknown() {
+    let manifest = shipped_ur_execute_v2_manifest();
+    install_ok(&manifest);
+
+    let from = "0x000000000000000000000000000000000000aaaa";
+    let recipient_a = "0x000000000000000000000000000000000000b0b0";
+    let recipient_b = "0x000000000000000000000000000000000000b0b1";
+    let token_a = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    let token_b = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+    let details = vec![
+        DynSolValue::Tuple(vec![
+            DynSolValue::Address(addr(from)),
+            DynSolValue::Address(addr(recipient_a)),
+            DynSolValue::Uint(AlloyU256::from(123u64), 160),
+            DynSolValue::Address(addr(token_a)),
+        ]),
+        DynSolValue::Tuple(vec![
+            DynSolValue::Address(addr(from)),
+            DynSolValue::Address(addr(recipient_b)),
+            DynSolValue::Uint(AlloyU256::from(456u64), 160),
+            DynSolValue::Address(addr(token_b)),
+        ]),
+    ];
+    let transfer_batch_blob = DynSolValue::Array(details).abi_encode_params();
+
+    let calldata = encode_calldata(
+        "0x3593564c",
+        &[
+            DynSolValue::Bytes(vec![0x0d]),
+            DynSolValue::Array(vec![DynSolValue::Bytes(transfer_batch_blob)]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "0x3593564c",
+        calldata,
+        from,
+    );
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let leg = &body["actions"][0];
+    assert_eq!(leg["domain"], "unknown", "{parsed}");
+    assert_eq!(
+        leg["target"], "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "{parsed}"
+    );
+}
+
+#[test]
+fn h2_ur_execute_permit_batch_multi_entry_surfaces_unknown() {
+    let manifest = shipped_ur_execute_v2_manifest();
+    install_ok(&manifest);
+
+    let signer = "0x000000000000000000000000000000000000aaaa";
+    let spender = "0x00000000000000000000000000000000deadbeef";
+    let token_a = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+    let token_b = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+    let details = vec![
+        DynSolValue::Tuple(vec![
+            DynSolValue::Address(addr(token_a)),
+            DynSolValue::Uint(AlloyU256::from(123u64), 160),
+            DynSolValue::Uint(AlloyU256::from(1_738_001_800u64), 48),
+            DynSolValue::Uint(AlloyU256::from(1u64), 48),
+        ]),
+        DynSolValue::Tuple(vec![
+            DynSolValue::Address(addr(token_b)),
+            DynSolValue::Uint(AlloyU256::from(456u64), 160),
+            DynSolValue::Uint(AlloyU256::from(1_738_001_800u64), 48),
+            DynSolValue::Uint(AlloyU256::from(2u64), 48),
+        ]),
+    ];
+    let permit_batch = DynSolValue::Tuple(vec![
+        DynSolValue::Array(details),
+        DynSolValue::Address(addr(spender)),
+        DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+    ]);
+    let permit_batch_blob =
+        DynSolValue::Tuple(vec![permit_batch, DynSolValue::Bytes(vec![0xab; 65])])
+            .abi_encode_params();
+
+    let calldata = encode_calldata(
+        "0x3593564c",
+        &[
+            DynSolValue::Bytes(vec![0x03]),
+            DynSolValue::Array(vec![DynSolValue::Bytes(permit_batch_blob)]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "0x3593564c",
+        calldata,
+        signer,
+    );
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let leg = &body["actions"][0];
+    assert_eq!(leg["domain"], "unknown", "{parsed}");
+    assert_eq!(
+        leg["target"], "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "{parsed}"
     );
 }
 
@@ -1324,6 +2646,112 @@ fn t6_aave_variable_debt_usdc_delegation_with_sig_typed_data() {
     );
     assert_eq!(body["amount"], "0x2625a0", "{parsed}");
     assert_eq!(body["rate_mode"], "variable", "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// t1j — Aave Governance V3 createProposal -> GovernanceAction::Propose
+// ---------------------------------------------------------------------------
+
+const T1J_AAVE_GOVERNANCE_CREATE_PROPOSAL: &str =
+    include_str!("../../../registryV2/manifests/aave/governance/core-createProposal@1.0.0.json");
+const AAVE_GOVERNANCE_CORE_MAINNET: &str = "0x9aee0b04504cef83a65ac3f0e838d0593bcb2bc7";
+const AAVE_GOVERNANCE_PAYLOAD_CONTROLLER_A: &str = "0x00000000000000000000000000000000c011ec7a";
+const AAVE_GOVERNANCE_PAYLOAD_CONTROLLER_B: &str = "0x00000000000000000000000000000000c011ec7b";
+const AAVE_GOVERNANCE_VOTING_PORTAL: &str = "0x00000000000000000000000000000000a0e0a0e0";
+const AAVE_GOVERNANCE_SUBMITTER: &str = "0x000000000000000000000000000000000000aaaa";
+
+fn aave_governance_payload(
+    chain: u64,
+    access_level: u64,
+    payload_controller: &str,
+    payload_id: u64,
+) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(chain), 256),
+        DynSolValue::Uint(AlloyU256::from(access_level), 8),
+        DynSolValue::Address(addr(payload_controller)),
+        DynSolValue::Uint(AlloyU256::from(payload_id), 40),
+    ])
+}
+
+fn aave_create_proposal_calldata(payloads: Vec<DynSolValue>) -> String {
+    encode_calldata(
+        "0x3bec1bfc",
+        &[
+            DynSolValue::Array(payloads),
+            DynSolValue::Address(addr(AAVE_GOVERNANCE_VOTING_PORTAL)),
+            DynSolValue::FixedBytes(alloy_primitives::B256::repeat_byte(0xab), 32),
+        ],
+    )
+}
+
+fn route_aave_create_proposal(payloads: Vec<DynSolValue>) -> Value {
+    install_ok(T1J_AAVE_GOVERNANCE_CREATE_PROPOSAL);
+    let input = route_input(
+        1,
+        AAVE_GOVERNANCE_CORE_MAINNET,
+        "0x3bec1bfc",
+        aave_create_proposal_calldata(payloads),
+        AAVE_GOVERNANCE_SUBMITTER,
+    );
+    route_ok(input)
+}
+
+#[test]
+fn t1j_aave_governance_create_proposal_extracts_payload_targets_and_count() {
+    let install = install_ok(T1J_AAVE_GOVERNANCE_CREATE_PROPOSAL);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "aave/governance/core/createProposal@1.0.0"
+    );
+
+    let parsed = route_aave_create_proposal(vec![
+        aave_governance_payload(1, 1, AAVE_GOVERNANCE_PAYLOAD_CONTROLLER_A, 10),
+        aave_governance_payload(137, 2, AAVE_GOVERNANCE_PAYLOAD_CONTROLLER_B, 11),
+    ]);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "aave/governance/core/createProposal@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "governance", "{parsed}");
+    assert_eq!(body["action"], "propose", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aave_governance_v3", "{parsed}");
+    assert_eq!(
+        body["venue"]["governance"], AAVE_GOVERNANCE_CORE_MAINNET,
+        "{parsed}"
+    );
+    assert_eq!(
+        body["payload_targets"],
+        json!([
+            AAVE_GOVERNANCE_PAYLOAD_CONTROLLER_A,
+            AAVE_GOVERNANCE_PAYLOAD_CONTROLLER_B
+        ]),
+        "{parsed}"
+    );
+    assert_eq!(body["payload_count"], "0x2", "{parsed}");
+    assert_eq!(
+        body["metadata"],
+        format!("0x{}", "ab".repeat(32)),
+        "{parsed}"
+    );
+}
+
+#[test]
+fn t1j_aave_governance_create_proposal_empty_payloads_keeps_zero_count() {
+    let parsed = route_aave_create_proposal(Vec::new());
+    let body = &parsed["data"]["actions"][0]["body"];
+
+    assert_eq!(body["domain"], "governance", "{parsed}");
+    assert_eq!(body["action"], "propose", "{parsed}");
+    assert_eq!(body["payload_targets"], json!([]), "{parsed}");
+    assert_eq!(body["payload_count"], "0x0", "{parsed}");
+    assert_eq!(
+        body["metadata"],
+        format!("0x{}", "ab".repeat(32)),
+        "{parsed}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3673,8 +5101,10 @@ fn b1_nfpm_burn_concentrated_burn() {
 //     tokenId in calldata → pool_id NOT statically recoverable → "unknown".
 //   * 0x01 DECREASE        → amm.remove_liquidity / concentrated_decrease.
 //   * 0x03 BURN            → amm.remove_liquidity / concentrated_burn.
-//   * settlement 0x0b-0x16 → skipped (unknown_opcode_policy=skip; absent from
-//     per_opcode_body). The liquidity action is the intent.
+//   * settlement-only opcodes like SETTLE_PAIR → skipped; they pay PoolManager
+//     deltas and would otherwise add noisy Unknown legs on ordinary mint/increase.
+//   * recipient-bearing egress opcodes are policy-visible: exact TAKE becomes a
+//     token transfer, amountless TAKE_PAIR/SWEEP-style legs become Unknown.
 //   * 0x04/0x05 DEPRECATED → emitted as Unknown (preserve the sandwich-risk
 //     signal without crashing).
 
@@ -3687,6 +5117,8 @@ const V4_PM_MAINNET: &str = "0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e";
 const V4_POOL_MANAGER_MAINNET: &str = "0x000000000004444c5dc75cb358380d2e3de08a90";
 const V4_HOOKS: &str = "0x0000000000000000000000000000000000000000"; // no-hook pool
 const V4_SUBMITTER: &str = "0x000000000000000000000000000000000000aaaa";
+const V4_REDIRECT_RECIPIENT: &str = "0x00000000000000000000000000000000cafef00d";
+const V4_NATIVE: &str = "0x0000000000000000000000000000000000000000";
 const V4_CURRENCY0: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
 const V4_CURRENCY1: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"; // WETH
 const V4_SELECTOR: &str = "0xdd46508f";
@@ -3731,9 +5163,27 @@ fn v4_pool_id(
 /// MINT_POSITION (0x02) params tuple — PoolKey INLINE (head-flattened 5 fields)
 /// then tickLower/tickUpper/liquidity/amount0Max/amount1Max/owner/hookData.
 fn v4_mint_params(fee: u32, tick_spacing: i32, tick_lower: i32, tick_upper: i32) -> Vec<u8> {
+    v4_mint_params_for(
+        V4_CURRENCY0,
+        V4_CURRENCY1,
+        fee,
+        tick_spacing,
+        tick_lower,
+        tick_upper,
+    )
+}
+
+fn v4_mint_params_for(
+    currency0: &str,
+    currency1: &str,
+    fee: u32,
+    tick_spacing: i32,
+    tick_lower: i32,
+    tick_upper: i32,
+) -> Vec<u8> {
     DynSolValue::Tuple(vec![
-        DynSolValue::Address(addr(V4_CURRENCY0)),    // currency0
-        DynSolValue::Address(addr(V4_CURRENCY1)),    // currency1
+        DynSolValue::Address(addr(currency0)),       // currency0
+        DynSolValue::Address(addr(currency1)),       // currency1
         DynSolValue::Uint(AlloyU256::from(fee), 24), // fee
         DynSolValue::Int(alloy_primitives::I256::try_from(tick_spacing).unwrap(), 24), // tickSpacing
         DynSolValue::Address(addr(V4_HOOKS)),                                          // hooks
@@ -3753,6 +5203,26 @@ fn v4_settle_pair_params() -> Vec<u8> {
     DynSolValue::Tuple(vec![
         DynSolValue::Address(addr(V4_CURRENCY0)),
         DynSolValue::Address(addr(V4_CURRENCY1)),
+    ])
+    .abi_encode_params()
+}
+
+/// TAKE (0x0e) params tuple — (Currency currency, address recipient, uint256 amount).
+fn v4_take_params(currency: &str, recipient: &str, amount: u64) -> Vec<u8> {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(currency)),
+        DynSolValue::Address(addr(recipient)),
+        DynSolValue::Uint(AlloyU256::from(amount), 256),
+    ])
+    .abi_encode_params()
+}
+
+/// TAKE_PAIR (0x11) params tuple — (Currency currency0, Currency currency1, address recipient).
+fn v4_take_pair_params(recipient: &str) -> Vec<u8> {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(V4_CURRENCY0)),
+        DynSolValue::Address(addr(V4_CURRENCY1)),
+        DynSolValue::Address(addr(recipient)),
     ])
     .abi_encode_params()
 }
@@ -3826,6 +5296,40 @@ fn b1_v4_modify_liquidities_mint_settle_pair() {
     assert_eq!(mint["params"]["recipient"], V4_SUBMITTER, "{parsed}");
 }
 
+#[test]
+fn b1_v4_modify_liquidities_mint_native_currency_maps_to_native_key() {
+    install_ok(V4_PM_MODIFY_LIQ_V3);
+
+    let calldata = v4_modify_liquidities_calldata(
+        &[0x02],
+        vec![v4_mint_params_for(
+            V4_NATIVE,
+            V4_CURRENCY1,
+            3000,
+            60,
+            -887_220,
+            887_220,
+        )],
+    );
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let mint = &body["actions"][0];
+    let native_key = &mint["params"]["pool_pair"][0]["key"];
+    assert_eq!(native_key["standard"], "native", "{parsed}");
+    assert_eq!(native_key["chain"], "eip155:1", "{parsed}");
+    assert!(
+        native_key.get("address").is_none(),
+        "native token key must not carry ERC20 zero-address: {parsed}"
+    );
+    assert_eq!(
+        mint["params"]["pool_pair"][1]["key"]["address"], V4_CURRENCY1,
+        "{parsed}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // b1.c.increase — INCREASE_LIQUIDITY + SETTLE_PAIR → concentrated_increase
 // ---------------------------------------------------------------------------
@@ -3876,7 +5380,7 @@ fn b1_v4_modify_liquidities_increase_settle_pair() {
 }
 
 // ---------------------------------------------------------------------------
-// b1.c.decrease — DECREASE_LIQUIDITY + TAKE_PAIR → concentrated_decrease
+// b1.c.decrease — DECREASE_LIQUIDITY + TAKE_PAIR keeps recipient-bearing egress visible
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -3892,23 +5396,20 @@ fn b1_v4_modify_liquidities_decrease_take_pair() {
         DynSolValue::Bytes(vec![]),                          // hookData
     ])
     .abi_encode_params();
-    // TAKE_PAIR (0x11): (Currency currency0, Currency currency1, address recipient)
-    let take_pair = DynSolValue::Tuple(vec![
-        DynSolValue::Address(addr(V4_CURRENCY0)),
-        DynSolValue::Address(addr(V4_CURRENCY1)),
-        DynSolValue::Address(addr(V4_SUBMITTER)),
-    ])
-    .abi_encode_params();
+    // TAKE_PAIR (0x11) can redirect both withdrawn currencies to a non-submitter.
+    let take_pair = v4_take_pair_params(V4_REDIRECT_RECIPIENT);
     let calldata = v4_modify_liquidities_calldata(&[0x01, 0x11], vec![decrease, take_pair]);
     let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
 
     let parsed = route_ok(input);
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "multicall", "{parsed}");
-    // TAKE_PAIR skipped — one child (the decrease).
-    assert_eq!(body["actions"].as_array().unwrap().len(), 1, "{parsed}");
+    let legs = body["actions"].as_array().unwrap();
+    // TAKE_PAIR carries the payout recipient: it surfaces as a CollectFees leg so a
+    // third-party redirect fires AMM-004 (mirrors how V3 collect() is covered).
+    assert_eq!(legs.len(), 2, "{parsed}");
 
-    let dec = &body["actions"][0];
+    let dec = &legs[0];
     assert_eq!(dec["domain"], "amm", "{parsed}");
     assert_eq!(dec["action"], "remove_liquidity", "{parsed}");
     assert_eq!(dec["venue"]["name"], "uniswap_v4", "{parsed}");
@@ -3923,10 +5424,81 @@ fn b1_v4_modify_liquidities_decrease_take_pair() {
     assert_eq!(dec["params"]["liquidity_burn"], "0x75bcd15", "{parsed}");
     assert_eq!(dec["params"]["amount_min"][0], "0x32", "{parsed}"); // 50
     assert_eq!(dec["params"]["amount_min"][1], "0x3c", "{parsed}"); // 60
+
+    let take_pair = &legs[1];
+    assert_eq!(take_pair["domain"], "amm", "{parsed}");
+    assert_eq!(take_pair["action"], "collect_fees", "{parsed}");
+    assert_eq!(take_pair["venue"]["name"], "uniswap_v4", "{parsed}");
+    // A literal recipient passes through map_recipient unchanged ⇒ AMM-004 fires.
+    assert_eq!(take_pair["recipient"], V4_REDIRECT_RECIPIENT, "{parsed}");
 }
 
 // ---------------------------------------------------------------------------
-// b1.c.burn — BURN_POSITION + TAKE_PAIR → concentrated_burn
+// b1.c.decrease-sentinel — TAKE_PAIR recipient MSG_SENDER (0x..01) resolves to the
+// signer, so a self-take does NOT false-positive AMM-004.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b1_v4_modify_liquidities_take_pair_msg_sender_resolves_to_signer() {
+    install_ok(V4_PM_MODIFY_LIQ_V3);
+
+    let decrease = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(424_242u64), 256),
+        DynSolValue::Uint(AlloyU256::from(123_456_789u64), 256),
+        DynSolValue::Uint(AlloyU256::from(50u64), 128),
+        DynSolValue::Uint(AlloyU256::from(60u64), 128),
+        DynSolValue::Bytes(vec![]),
+    ])
+    .abi_encode_params();
+    // MSG_SENDER sentinel — the official SDK's "send the proceeds to me" encoding.
+    let take_pair = v4_take_pair_params("0x0000000000000000000000000000000000000001");
+    let calldata = v4_modify_liquidities_calldata(&[0x01, 0x11], vec![decrease, take_pair]);
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let take_pair = &parsed["data"]["actions"][0]["body"]["actions"][1];
+    assert_eq!(take_pair["action"], "collect_fees", "{parsed}");
+    // 0x..01 → ctx.from (the submitter) ⇒ recipient == signer ⇒ AMM-004 dormant.
+    assert_eq!(take_pair["recipient"], V4_SUBMITTER, "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// b1.c.decrease-take — exact TAKE exposes token, amount, and explicit recipient
+// ---------------------------------------------------------------------------
+
+#[test]
+fn b1_v4_modify_liquidities_decrease_take_exact_recipient_visible() {
+    install_ok(V4_PM_MODIFY_LIQ_V3);
+
+    let decrease = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(424_242u64), 256),
+        DynSolValue::Uint(AlloyU256::from(123_456_789u64), 256),
+        DynSolValue::Uint(AlloyU256::from(50u64), 128),
+        DynSolValue::Uint(AlloyU256::from(60u64), 128),
+        DynSolValue::Bytes(vec![]),
+    ])
+    .abi_encode_params();
+    let take = v4_take_params(V4_CURRENCY0, V4_REDIRECT_RECIPIENT, 70);
+    let calldata = v4_modify_liquidities_calldata(&[0x01, 0x0e], vec![decrease, take]);
+    let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let legs = body["actions"].as_array().unwrap();
+    assert_eq!(legs.len(), 2, "{parsed}");
+
+    let take = &legs[1];
+    assert_eq!(take["domain"], "token", "{parsed}");
+    assert_eq!(take["action"], "erc20_transfer", "{parsed}");
+    assert_eq!(take["token"]["key"]["address"], V4_CURRENCY0, "{parsed}");
+    assert_eq!(take["recipient"], V4_REDIRECT_RECIPIENT, "{parsed}");
+    assert_eq!(take["amount"], "0x46", "{parsed}");
+    assert_eq!(take["is_router_egress"], true, "{parsed}");
+}
+
+// ---------------------------------------------------------------------------
+// b1.c.burn — BURN_POSITION + TAKE_PAIR keeps recipient-bearing egress visible
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -3941,21 +5513,17 @@ fn b1_v4_modify_liquidities_burn() {
         DynSolValue::Bytes(vec![]),                          // hookData
     ])
     .abi_encode_params();
-    let take_pair = DynSolValue::Tuple(vec![
-        DynSolValue::Address(addr(V4_CURRENCY0)),
-        DynSolValue::Address(addr(V4_CURRENCY1)),
-        DynSolValue::Address(addr(V4_SUBMITTER)),
-    ])
-    .abi_encode_params();
+    let take_pair = v4_take_pair_params(V4_REDIRECT_RECIPIENT);
     let calldata = v4_modify_liquidities_calldata(&[0x03, 0x11], vec![burn, take_pair]);
     let input = route_input(1, V4_PM_MAINNET, V4_SELECTOR, calldata, V4_SUBMITTER);
 
     let parsed = route_ok(input);
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "multicall", "{parsed}");
-    assert_eq!(body["actions"].as_array().unwrap().len(), 1, "{parsed}");
+    let legs = body["actions"].as_array().unwrap();
+    assert_eq!(legs.len(), 2, "{parsed}");
 
-    let b = &body["actions"][0];
+    let b = &legs[0];
     assert_eq!(b["action"], "remove_liquidity", "{parsed}");
     assert_eq!(b["params"]["kind"], "concentrated_burn", "{parsed}");
     assert_eq!(
@@ -3963,6 +5531,11 @@ fn b1_v4_modify_liquidities_burn() {
         "{parsed}"
     );
     assert_eq!(b["params"]["nft_key"]["token_id"], "0x67932", "{parsed}"); // 424242
+
+    let take_pair = &legs[1];
+    assert_eq!(take_pair["domain"], "amm", "{parsed}");
+    assert_eq!(take_pair["action"], "collect_fees", "{parsed}");
+    assert_eq!(take_pair["recipient"], V4_REDIRECT_RECIPIENT, "{parsed}");
 }
 
 // ---------------------------------------------------------------------------
@@ -4029,6 +5602,382 @@ fn t1_typed_data_input(
         obj["witness_type"] = json!(wt);
     }
     obj.to_string()
+}
+
+const SEAPORT_V16: &str = "0x0000000000000068f116a894984e2db1123eb395";
+const SEAPORT_OFFERER: &str = "0x0000000000000000000000000000000000000a11";
+const SEAPORT_NFT: &str = "0x0000000000000000000000000000000000000b11";
+const SEAPORT_BUYER: &str = "0x0000000000000000000000000000000000000c11";
+const SEAPORT_FEE_RECIPIENT: &str = "0x0000000000000000000000000000000000000f11";
+const SEAPORT_ZERO: &str = "0x0000000000000000000000000000000000000000";
+const SEAPORT_ZERO32: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const SEAPORT_NONZERO_CONDUIT: &str =
+    "0x1111111111111111111111111111111111111111111111111111111111111111";
+
+fn seaport_sign_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/seaport/order/sign@1.0.0.json"
+    ))
+    .expect("read shipped Seaport sign manifest")
+}
+
+fn seaport_fulfill_basic_order_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/seaport/order/fulfillBasicOrder@1.0.0.json"
+    ))
+    .expect("read shipped Seaport fulfillBasicOrder manifest")
+}
+
+fn seaport_fulfill_order_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/seaport/order/fulfillOrder@1.0.0.json"
+    ))
+    .expect("read shipped Seaport fulfillOrder manifest")
+}
+
+fn seaport_match_orders_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/seaport/order/matchOrders@1.0.0.json"
+    ))
+    .expect("read shipped Seaport matchOrders manifest")
+}
+
+fn seaport_order_components(end_time: Value) -> Value {
+    json!({
+        "offerer": SEAPORT_OFFERER,
+        "zone": SEAPORT_ZERO,
+        "offer": [{
+            "itemType": 2,
+            "token": SEAPORT_NFT,
+            "identifierOrCriteria": "1234",
+            "startAmount": "1",
+            "endAmount": "1"
+        }],
+        "consideration": [{
+            "itemType": 0,
+            "token": SEAPORT_ZERO,
+            "identifierOrCriteria": "0",
+            "startAmount": "1000000000000000000",
+            "endAmount": "1000000000000000000",
+            "recipient": SEAPORT_BUYER
+        }],
+        "orderType": 0,
+        "startTime": "1700000000",
+        "endTime": end_time,
+        "zoneHash": SEAPORT_ZERO32,
+        "salt": "1",
+        "conduitKey": SEAPORT_ZERO32,
+        "counter": "0"
+    })
+}
+
+fn seaport_typed_data_input(message: Value) -> String {
+    json!({
+        "chain_id": 1,
+        "verifying_contract": SEAPORT_V16,
+        "primary_type": "OrderComponents",
+        "domain_name": "Seaport",
+        "message": message,
+        "submitter": SEAPORT_OFFERER,
+        "submitted_at": 1_700_000_000_u64
+    })
+    .to_string()
+}
+
+#[test]
+fn t1b_seaport_sign_order_valid_time_routes() {
+    install_ok(&seaport_sign_manifest());
+
+    let out = declarative_route_typed_data_v3_json(seaport_typed_data_input(
+        seaport_order_components(json!("1900000000")),
+    ));
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(parsed["ok"], true, "seaport route failed: {parsed}");
+    let body = &parsed["data"]["actions"][0]["body"];
+
+    assert_eq!(body["domain"], "marketplace", "{body}");
+    assert_eq!(body["action"], "sign_order", "{body}");
+    assert_eq!(body["venue"]["name"], "seaport", "{body}");
+    assert_eq!(body["end_time"], 1_900_000_000_u64, "{body}");
+}
+
+#[test]
+fn t1b_seaport_sign_order_malformed_time_fails_visible() {
+    install_ok(&seaport_sign_manifest());
+
+    let out = declarative_route_typed_data_v3_json(seaport_typed_data_input(
+        seaport_order_components(json!("not-a-number")),
+    ));
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+
+    assert_eq!(parsed["ok"], false, "{parsed}");
+    let message = parsed["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("u64_saturating"),
+        "unexpected error message: {parsed}"
+    );
+}
+
+fn seaport_u256_hex(value: u128) -> String {
+    format!("{:#x}", AlloyU256::from(value))
+}
+
+fn seaport_bytes32(word: &str) -> DynSolValue {
+    raw_bytes32_word(word)
+}
+
+fn seaport_offer_item(
+    item_type: u64,
+    token: &str,
+    identifier: u64,
+    start_amount: u128,
+    end_amount: u128,
+) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(item_type), 8),
+        DynSolValue::Address(addr(token)),
+        DynSolValue::Uint(AlloyU256::from(identifier), 256),
+        DynSolValue::Uint(AlloyU256::from(start_amount), 256),
+        DynSolValue::Uint(AlloyU256::from(end_amount), 256),
+    ])
+}
+
+fn seaport_consideration_item(
+    item_type: u64,
+    token: &str,
+    identifier: u64,
+    start_amount: u128,
+    end_amount: u128,
+    recipient: &str,
+) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(item_type), 8),
+        DynSolValue::Address(addr(token)),
+        DynSolValue::Uint(AlloyU256::from(identifier), 256),
+        DynSolValue::Uint(AlloyU256::from(start_amount), 256),
+        DynSolValue::Uint(AlloyU256::from(end_amount), 256),
+        DynSolValue::Address(addr(recipient)),
+    ])
+}
+
+fn seaport_order_parameters(token_id: u64, price: u128, recipient: &str) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(SEAPORT_OFFERER)),
+        DynSolValue::Address(addr(SEAPORT_ZERO)),
+        DynSolValue::Array(vec![seaport_offer_item(2, SEAPORT_NFT, token_id, 1, 1)]),
+        DynSolValue::Array(vec![seaport_consideration_item(
+            0,
+            SEAPORT_ZERO,
+            0,
+            price,
+            price,
+            recipient,
+        )]),
+        DynSolValue::Uint(AlloyU256::ZERO, 8),
+        DynSolValue::Uint(AlloyU256::from(1_700_000_000u64), 256),
+        DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        seaport_bytes32(SEAPORT_ZERO32),
+        DynSolValue::Uint(AlloyU256::from(token_id), 256),
+        seaport_bytes32(SEAPORT_ZERO32),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+    ])
+}
+
+fn seaport_order(token_id: u64, price: u128, recipient: &str) -> DynSolValue {
+    DynSolValue::Tuple(vec![
+        seaport_order_parameters(token_id, price, recipient),
+        DynSolValue::Bytes(vec![0xab; 65]),
+    ])
+}
+
+fn route_seaport_body(manifest: &str, selector: &str, calldata: String, decoder_id: &str) -> Value {
+    install_ok(manifest);
+    let input = route_input_with_value(
+        1,
+        SEAPORT_V16,
+        selector,
+        calldata,
+        SEAPORT_BUYER,
+        "1050000000000000000",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(parsed["data"]["decoder_id"], decoder_id, "{parsed}");
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t1k_seaport_fulfill_basic_order_preserves_flattened_basic_order_legs() {
+    let additional_recipient = DynSolValue::Tuple(vec![
+        DynSolValue::Uint(AlloyU256::from(50_000_000_000_000_000u128), 256),
+        DynSolValue::Address(addr(SEAPORT_FEE_RECIPIENT)),
+    ]);
+    let params = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(SEAPORT_ZERO)),
+        DynSolValue::Uint(AlloyU256::ZERO, 256),
+        DynSolValue::Uint(AlloyU256::from(1_000_000_000_000_000_000u128), 256),
+        DynSolValue::Address(addr(SEAPORT_OFFERER)),
+        DynSolValue::Address(addr(SEAPORT_ZERO)),
+        DynSolValue::Address(addr(SEAPORT_NFT)),
+        DynSolValue::Uint(AlloyU256::from(1234u64), 256),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        DynSolValue::Uint(AlloyU256::ZERO, 8),
+        DynSolValue::Uint(AlloyU256::from(1_700_000_000u64), 256),
+        DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        seaport_bytes32(SEAPORT_ZERO32),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        seaport_bytes32(SEAPORT_ZERO32),
+        seaport_bytes32(SEAPORT_ZERO32),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        DynSolValue::Array(vec![additional_recipient]),
+        DynSolValue::Bytes(vec![0xab; 65]),
+    ]);
+    let calldata = encode_calldata("0xfb0f3ee1", &[params]);
+    let body = route_seaport_body(
+        &seaport_fulfill_basic_order_manifest(),
+        "0xfb0f3ee1",
+        calldata,
+        "seaport/order/fulfillBasicOrder@1.0.0",
+    );
+
+    assert_eq!(body["domain"], "marketplace", "{body}");
+    assert_eq!(body["action"], "fulfill_order", "{body}");
+    assert_eq!(body["venue"]["name"], "seaport", "{body}");
+    assert_eq!(body["recipient"], SEAPORT_BUYER, "{body}");
+    assert_eq!(body["order_count"], 1, "{body}");
+    assert_eq!(body["is_batch"], false, "{body}");
+    assert_eq!(body["fulfiller_conduit_key"], SEAPORT_ZERO32, "{body}");
+
+    assert_eq!(body["offer"][0]["kind"], "erc721", "{body}");
+    assert_eq!(body["offer"][0]["token"], SEAPORT_NFT, "{body}");
+    assert_eq!(
+        body["offer"][0]["token_id"],
+        seaport_u256_hex(1234),
+        "{body}"
+    );
+    assert_eq!(
+        body["offer"][0]["start_amount"],
+        seaport_u256_hex(1),
+        "{body}"
+    );
+
+    assert_eq!(body["consideration"][0]["kind"], "native", "{body}");
+    assert!(body["consideration"][0].get("token").is_none(), "{body}");
+    assert_eq!(
+        body["consideration"][0]["recipient"], SEAPORT_OFFERER,
+        "{body}"
+    );
+    assert_eq!(
+        body["consideration"][0]["start_amount"],
+        seaport_u256_hex(1_000_000_000_000_000_000u128),
+        "{body}"
+    );
+    assert_eq!(body["consideration"][1]["kind"], "native", "{body}");
+    assert_eq!(
+        body["consideration"][1]["recipient"], SEAPORT_FEE_RECIPIENT,
+        "{body}"
+    );
+    assert_eq!(
+        body["consideration"][1]["start_amount"],
+        seaport_u256_hex(50_000_000_000_000_000u128),
+        "{body}"
+    );
+}
+
+#[test]
+fn t1k_seaport_fulfill_order_preserves_order_tuple_items_and_conduit() {
+    let calldata = encode_calldata(
+        "0xb3a34c4c",
+        &[
+            seaport_order(777, 1_250_000_000_000_000_000u128, SEAPORT_OFFERER),
+            seaport_bytes32(SEAPORT_NONZERO_CONDUIT),
+        ],
+    );
+    let body = route_seaport_body(
+        &seaport_fulfill_order_manifest(),
+        "0xb3a34c4c",
+        calldata,
+        "seaport/order/fulfillOrder@1.0.0",
+    );
+
+    assert_eq!(body["domain"], "marketplace", "{body}");
+    assert_eq!(body["action"], "fulfill_order", "{body}");
+    assert_eq!(body["venue"]["name"], "seaport", "{body}");
+    assert_eq!(body["recipient"], SEAPORT_BUYER, "{body}");
+    assert_eq!(body["order_count"], 1, "{body}");
+    assert_eq!(body["is_batch"], false, "{body}");
+    assert_eq!(
+        body["fulfiller_conduit_key"], SEAPORT_NONZERO_CONDUIT,
+        "{body}"
+    );
+    assert_eq!(body["offer"][0]["idx"], 0, "{body}");
+    assert_eq!(body["offer"][0]["kind"], "erc721", "{body}");
+    assert_eq!(
+        body["offer"][0]["token_id"],
+        seaport_u256_hex(777),
+        "{body}"
+    );
+    assert_eq!(
+        body["consideration"][0]["recipient"], SEAPORT_OFFERER,
+        "{body}"
+    );
+    assert_eq!(
+        body["consideration"][0]["start_amount"],
+        seaport_u256_hex(1_250_000_000_000_000_000u128),
+        "{body}"
+    );
+}
+
+#[test]
+fn t1k_seaport_match_orders_aggregates_order_array_items() {
+    let calldata = encode_calldata(
+        "0xa8174404",
+        &[
+            DynSolValue::Array(vec![
+                seaport_order(101, 1_000_000_000_000_000_000u128, SEAPORT_OFFERER),
+                seaport_order(202, 2_000_000_000_000_000_000u128, SEAPORT_FEE_RECIPIENT),
+            ]),
+            DynSolValue::Array(vec![]),
+        ],
+    );
+    let body = route_seaport_body(
+        &seaport_match_orders_manifest(),
+        "0xa8174404",
+        calldata,
+        "seaport/order/matchOrders@1.0.0",
+    );
+
+    assert_eq!(body["domain"], "marketplace", "{body}");
+    assert_eq!(body["action"], "fulfill_order", "{body}");
+    assert_eq!(body["venue"]["name"], "seaport", "{body}");
+    assert_eq!(body["recipient"], SEAPORT_BUYER, "{body}");
+    assert_eq!(body["order_count"], 2, "{body}");
+    assert_eq!(body["is_batch"], true, "{body}");
+    assert!(body.get("fulfiller_conduit_key").is_none(), "{body}");
+
+    assert_eq!(body["offer"][0]["idx"], 0, "{body}");
+    assert_eq!(
+        body["offer"][0]["token_id"],
+        seaport_u256_hex(101),
+        "{body}"
+    );
+    assert_eq!(body["offer"][1]["idx"], 1, "{body}");
+    assert_eq!(
+        body["offer"][1]["token_id"],
+        seaport_u256_hex(202),
+        "{body}"
+    );
+    assert_eq!(
+        body["consideration"][0]["recipient"], SEAPORT_OFFERER,
+        "{body}"
+    );
+    assert_eq!(
+        body["consideration"][1]["recipient"], SEAPORT_FEE_RECIPIENT,
+        "{body}"
+    );
 }
 
 /// A synthetic Permit2-witness manifest. `witness_type` (optional) + a
@@ -4338,6 +6287,51 @@ fn t2_order_info(reactor: &str) -> Value {
     })
 }
 
+fn t2_u256(value: u128) -> DynSolValue {
+    DynSolValue::Uint(AlloyU256::from(value), 256)
+}
+
+fn t2_v2_reactor_order_bytes(reactor: &str) -> Vec<u8> {
+    let info = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(reactor)),
+        DynSolValue::Address(addr(T1_SIGNER)),
+        t2_u256(0),
+        t2_u256(1_738_002_000),
+        DynSolValue::Address(addr(T2_ZERO)),
+        DynSolValue::Bytes(Vec::new()),
+    ]);
+    let base_input = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(T2_WETH)),
+        t2_u256(1_000_000_000_000_000_000),
+        t2_u256(1_000_000_000_000_000_000),
+    ]);
+    let base_output = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(T2_USDC)),
+        t2_u256(3_500_000_000),
+        t2_u256(3_400_000_000),
+        DynSolValue::Address(addr(T2_RECIPIENT)),
+    ]);
+    let cosigner_data = DynSolValue::Tuple(vec![
+        t2_u256(0),
+        t2_u256(0),
+        DynSolValue::Address(addr(T2_ZERO)),
+        t2_u256(0),
+        t2_u256(0),
+        DynSolValue::Array(Vec::new()),
+    ]);
+
+    let order = DynSolValue::Tuple(vec![
+        info,
+        DynSolValue::Address(addr(T2_ZERO)),
+        base_input,
+        DynSolValue::Array(vec![base_output]),
+        cosigner_data,
+        DynSolValue::Bytes(Vec::new()),
+    ]);
+
+    DynSolValue::Tuple(vec![order]).abi_encode_params()
+}
+
 // ---------------------------------------------------------------------------
 // T2.1 — ExclusiveDutchOrder (V1), mainnet only. FLATTEN input.
 // ---------------------------------------------------------------------------
@@ -4402,6 +6396,57 @@ fn t2_uniswapx_exclusive_dutch_sign_intent_order() {
     assert_eq!(body["buy_min"], "0xcaa7e200", "{parsed}");
 }
 
+#[test]
+fn t2_uniswapx_exclusive_dutch_multi_output_fails_visible() {
+    install_ok(T2_EXCLUSIVE_DUTCH_V3);
+
+    let reactor = "0x6000da47483062a0d734ba3dc7576ce6a0b645c4";
+    let witness = json!({
+        "info": t2_order_info(reactor),
+        "decayStartTime": 1_738_001_800_u64,
+        "decayEndTime": 1_738_002_000_u64,
+        "exclusiveFiller": T2_ZERO,
+        "exclusivityOverrideBps": "0",
+        "inputToken": T2_WETH,
+        "inputStartAmount": "1000000000000000000",
+        "inputEndAmount": "1000000000000000000",
+        "outputs": [
+            {
+                "token": T2_USDC,
+                "startAmount": "3500000000",
+                "endAmount": "3400000000",
+                "recipient": T2_RECIPIENT
+            },
+            {
+                "token": "0x000000000000000000000000000000000000b0b0",
+                "startAmount": "10",
+                "endAmount": "5",
+                "recipient": "0x000000000000000000000000000000000000b0b1"
+            }
+        ]
+    });
+    let input = t1_typed_data_input(
+        1,
+        PERMIT2_VC,
+        "PermitWitnessTransferFrom",
+        Some("ExclusiveDutchOrder"),
+        t2_permit_witness_message(witness),
+    );
+
+    let out = declarative_route_typed_data_v3_json(input);
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        parsed["ok"], false,
+        "multi-output order must fail: {parsed}"
+    );
+    let rendered = parsed.to_string();
+    assert!(
+        rendered.contains("uniswapx_single_output_field")
+            && rendered.contains("expected exactly 1 output, got 2"),
+        "{parsed}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // T2.2 — V2DutchOrder, mainnet + arbitrum. FLATTEN baseInput.
 // ---------------------------------------------------------------------------
@@ -4454,6 +6499,67 @@ fn t2_uniswapx_v2_dutch_sign_intent_order() {
     assert_eq!(body["recipient"], T2_RECIPIENT, "{parsed}");
     assert_eq!(body["sell_amount"], "0xde0b6b3a7640000", "{parsed}");
     assert_eq!(body["buy_min"], "0xcaa7e200", "{parsed}");
+}
+
+const T2_REACTOR_EXECUTE_V3: &str =
+    include_str!("../../../registryV2/manifests/uniswapx/reactor/execute@1.0.0.json");
+const T2_V2_REACTOR_MAINNET: &str = "0x00000011f84b9aa48e5f8aa8b9897600006289be";
+const T2_V2_REACTOR_ARBITRUM: &str = "0x1bd1aadc8a99fe9c48cffd9a5718b67f83cd4c08";
+
+fn route_t2_reactor_execute(target_reactor: &str, embedded_reactor: &str) -> Value {
+    install_ok(T2_REACTOR_EXECUTE_V3);
+
+    let signed_order = DynSolValue::Tuple(vec![
+        DynSolValue::Bytes(t2_v2_reactor_order_bytes(embedded_reactor)),
+        DynSolValue::Bytes(vec![0x12, 0x34]),
+    ]);
+    let calldata = encode_calldata("0x3f62192e", &[signed_order]);
+    let input = route_input(
+        1,
+        target_reactor,
+        "0x3f62192e",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let out = declarative_route_request_v3_json(input);
+    serde_json::from_str(&out).unwrap()
+}
+
+#[test]
+fn t2_uniswapx_v2_reactor_execute_settles_intent_order() {
+    let parsed = route_t2_reactor_execute(T2_V2_REACTOR_MAINNET, T2_V2_REACTOR_MAINNET);
+    assert_eq!(parsed["ok"], true, "route failed: {parsed}");
+    assert_eq!(
+        parsed["data"]["decoder_id"], "uniswapx/reactor/execute@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "amm", "{parsed}");
+    assert_eq!(body["action"], "settle_intent_order", "{parsed}");
+    assert_eq!(body["venue"]["reactor"], T2_V2_REACTOR_MAINNET, "{parsed}");
+    assert_eq!(body["swapper"], T1_SIGNER, "{parsed}");
+    assert_eq!(body["sell"]["key"]["address"], T2_WETH, "{parsed}");
+    assert_eq!(body["buy"]["key"]["address"], T2_USDC, "{parsed}");
+    assert_eq!(body["recipient"], T2_RECIPIENT, "{parsed}");
+    assert_eq!(body["sell_amount"], "0xde0b6b3a7640000", "{parsed}");
+    assert_eq!(body["buy_min"], "0xcaa7e200", "{parsed}");
+    assert_eq!(body["signature"], "0x1234", "{parsed}");
+}
+
+#[test]
+fn t2_uniswapx_reactor_execute_rejects_embedded_reactor_mismatch() {
+    let parsed = route_t2_reactor_execute(T2_V2_REACTOR_MAINNET, T2_V2_REACTOR_ARBITRUM);
+    assert_eq!(
+        parsed["ok"], false,
+        "embedded reactor mismatch must fail: {parsed}"
+    );
+    let rendered = parsed.to_string();
+    assert!(rendered.contains("order.info.reactor"), "{parsed}");
+    assert!(
+        rendered.contains("does not match target reactor"),
+        "{parsed}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -4680,8 +6786,8 @@ const T21_UR_V4_SWAP_NESTED: &str = r#"{
                 "amm": { "action": "swap", "swap": {
                   "venue": { "name": "uniswap_v4", "chain": "$chain", "pool_id": "$inputs.pool_id", "pool_manager": "$resolved.pool_manager", "hooks": "$inputs.poolKey[4]" },
                   "params": {
-                    "token_in":  { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.poolKey[0]" } },
-                    "token_out": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.poolKey[1]" } },
+                    "token_in":  { "key": { "$fn": "token_key_or_native_zero", "$args": ["$inputs.poolKey[0]", "$chain"] } },
+                    "token_out": { "key": { "$fn": "token_key_or_native_zero", "$args": ["$inputs.poolKey[1]", "$chain"] } },
                     "direction": { "kind": "exact_input", "amount_in": "$inputs.amountIn", "min_amount_out": "$inputs.amountOutMinimum" },
                     "recipient": "$tx.from",
                     "slippage_bp": 50
@@ -4701,7 +6807,7 @@ const T21_UR_V4_SWAP_NESTED: &str = r#"{
               "body": {
                 "domain": "token",
                 "token": { "action": "erc20_transfer", "erc20_transfer": {
-                  "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.currency" } },
+                  "token": { "key": { "$fn": "token_key_or_native_zero", "$args": ["$inputs.currency", "$chain"] } },
                   "recipient": "0x000000000000000000000000000000000000dEaD",
                   "amount": "$inputs.maxAmount"
                 } }
@@ -4713,7 +6819,7 @@ const T21_UR_V4_SWAP_NESTED: &str = r#"{
               "body": {
                 "domain": "token",
                 "token": { "action": "erc20_transfer", "erc20_transfer": {
-                  "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$inputs.currency" } },
+                  "token": { "key": { "$fn": "token_key_or_native_zero", "$args": ["$inputs.currency", "$chain"] } },
                   "recipient": "$tx.from",
                   "amount": "$inputs.minAmount"
                 } }
@@ -4887,6 +6993,65 @@ fn t21_ur_execute_v4_swap_nested_expands_to_inner_multicall() {
     );
 }
 
+#[test]
+fn t21_ur_execute_v4_swap_nested_native_currency_maps_to_native_key() {
+    install_ok(T21_UR_V4_SWAP_NESTED);
+
+    let currency0 = V4_NATIVE;
+    let currency1 = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+    let amount_in: u128 = 1_000_000_000_000_000_000;
+    let amount_out_min: u128 = 1_000_000_000;
+
+    let inner_actions = vec![0x06u8, 0x0c, 0x0f];
+    let inner_params = vec![
+        DynSolValue::Bytes(v4_swap_exact_in_single_param(
+            currency0,
+            currency1,
+            amount_in,
+            amount_out_min,
+        )),
+        DynSolValue::Bytes(v4_currency_amount_param(currency0, amount_in)),
+        DynSolValue::Bytes(v4_currency_amount_param(currency1, amount_out_min)),
+    ];
+    let v4_swap_input = DynSolValue::Tuple(vec![
+        DynSolValue::Bytes(inner_actions),
+        DynSolValue::Array(inner_params),
+    ])
+    .abi_encode_params();
+    let calldata = encode_calldata(
+        "0x3593564c",
+        &[
+            DynSolValue::Bytes(vec![0x10]),
+            DynSolValue::Array(vec![DynSolValue::Bytes(v4_swap_input)]),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+        "0x3593564c",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    let legs = body["actions"][0]["actions"].as_array().unwrap();
+    let swap_native_key = &legs[0]["params"]["token_in"]["key"];
+    assert_eq!(swap_native_key["standard"], "native", "{parsed}");
+    assert_eq!(swap_native_key["chain"], "eip155:1", "{parsed}");
+    assert!(
+        swap_native_key.get("address").is_none(),
+        "V4 zero currency must not become erc20 zero-address: {parsed}"
+    );
+
+    let settle_native_key = &legs[1]["token"]["key"];
+    assert_eq!(settle_native_key["standard"], "native", "{parsed}");
+    assert_eq!(settle_native_key["chain"], "eip155:1", "{parsed}");
+    assert!(settle_native_key.get("address").is_none(), "{parsed}");
+    assert_eq!(legs[2]["token"]["key"]["address"], currency1, "{parsed}");
+}
+
 // ---------------------------------------------------------------------------
 // t22 — B.1.c.2 max_depth guard: a manifest with max_depth=0 whose opcode
 // carries a `nested` block fails LOUD with `max_depth_exceeded` when the
@@ -5023,6 +7188,7 @@ const VAULT_MAINNET: &str = "0xba12222222228d8ba445958a75a0704d566bf2c8";
 // A realistic Balancer V2 weighted-pool id shape: 20-byte pool address ++
 // 2-byte specifier ++ 10-byte nonce. (Any bytes32 decodes; this is plausible.)
 const LBP_POOL_ID: &str = "0xc45d42f801105e861e86658648e3678ad7aa70f900020000000000000000011e";
+const LBP_POOL_ADDR: &str = "0xc45d42f801105e861e86658648e3678ad7aa70f9";
 
 const B5_BALANCER_VAULT_SWAP_V3: &str = r#"{
   "type": "adapter_action",
@@ -5100,7 +7266,14 @@ const B5_BALANCER_VAULT_SWAP_V3: &str = r#"{
               "source": {
                 "kind":     "registry_api",
                 "endpoint": "https://registry-api-v2-891268973493.asia-northeast3.run.app",
-                "resource": { "kind": "pool_meta", "chain": "$chain", "pool_addr": "0x0000000000000000000000000000000000000000" },
+                "resource": {
+                  "kind": "pool_meta",
+                  "chain": "$chain",
+                  "pool_addr": {
+                    "$fn": "balancer_pool_id_to_address",
+                    "$args": ["$args.singleSwap[0]"]
+                  }
+                },
                 "version": "2"
               },
               "ttl_s": 86400
@@ -5257,6 +7430,10 @@ fn t21_balancer_vault_swap_given_in_exact_input() {
         "{body}"
     );
     assert_eq!(
+        body["live_inputs"]["route"]["source"]["resource"]["pool_addr"], LBP_POOL_ADDR,
+        "{body}"
+    );
+    assert_eq!(
         body["live_inputs"]["expected_amount_out"]["source"]["kind"], "onchain_view",
         "{body}"
     );
@@ -5302,6 +7479,589 @@ fn t22_balancer_vault_swap_given_out_exact_output() {
         body["params"]["direction"].get("min_amount_out").is_none(),
         "{body}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// t22b — Balancer V2 Vault.batchSwap only models exact single-step batches
+// ---------------------------------------------------------------------------
+
+fn balancer_v2_batch_swap_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/balancer/v2/vault-batch-swap@1.0.0.json"
+    ))
+    .expect("read shipped Balancer V2 Vault.batchSwap manifest")
+}
+
+fn balancer_v2_batch_step(
+    pool_id: &str,
+    asset_in_index: u64,
+    asset_out_index: u64,
+    amount: u64,
+) -> DynSolValue {
+    let pool_id_bytes = hex::decode(pool_id.trim_start_matches("0x")).expect("32-byte poolId");
+    DynSolValue::Tuple(vec![
+        DynSolValue::FixedBytes(alloy_primitives::B256::from_slice(&pool_id_bytes), 32),
+        DynSolValue::Uint(AlloyU256::from(asset_in_index), 256),
+        DynSolValue::Uint(AlloyU256::from(asset_out_index), 256),
+        DynSolValue::Uint(AlloyU256::from(amount), 256),
+        DynSolValue::Bytes(vec![]),
+    ])
+}
+
+fn route_balancer_v2_batch_swap(swaps: Vec<DynSolValue>, assets: Vec<&str>) -> Value {
+    let manifest = balancer_v2_batch_swap_manifest();
+    install_ok(&manifest);
+
+    let funds = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr("0x000000000000000000000000000000000000a01c")),
+        DynSolValue::Bool(false),
+        DynSolValue::Address(addr("0x000000000000000000000000000000000000bbbb")),
+        DynSolValue::Bool(false),
+    ]);
+    let limits = DynSolValue::Array(
+        assets
+            .iter()
+            .map(|_| DynSolValue::Int(alloy_primitives::I256::try_from(0i64).unwrap(), 256))
+            .collect(),
+    );
+    let calldata = encode_calldata(
+        "0x945bcec9",
+        &[
+            DynSolValue::Uint(AlloyU256::ZERO, 8),
+            DynSolValue::Array(swaps),
+            DynSolValue::Array(
+                assets
+                    .into_iter()
+                    .map(|asset| DynSolValue::Address(addr(asset)))
+                    .collect(),
+            ),
+            funds,
+            limits,
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+        ],
+    );
+    let input = route_input(
+        1,
+        VAULT_MAINNET,
+        "0x945bcec9",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v2/vault-batch-swap@1.0.0",
+        "{parsed}"
+    );
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t22b_balancer_v2_batchswap_single_step_stays_swap() {
+    let body = route_balancer_v2_batch_swap(
+        vec![balancer_v2_batch_step(LBP_POOL_ID, 0, 1, 1_000_000)],
+        vec![
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        ],
+    );
+
+    assert_eq!(body["domain"], "amm", "{body}");
+    assert_eq!(body["action"], "swap", "{body}");
+    assert_eq!(body["venue"]["name"], "balancer_v2", "{body}");
+    assert_eq!(body["venue"]["pool_id"], LBP_POOL_ID, "{body}");
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "{body}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["address"], "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "{body}"
+    );
+    assert_eq!(body["params"]["direction"]["kind"], "exact_input", "{body}");
+    assert_eq!(
+        body["params"]["direction"]["amount_in"], "0xf4240",
+        "{body}"
+    );
+    assert_eq!(
+        body["live_inputs"]["route"]["source"]["resource"]["pool_addr"], LBP_POOL_ADDR,
+        "{body}"
+    );
+}
+
+#[test]
+fn t22b_balancer_v2_batchswap_multi_step_surfaces_unknown() {
+    let body = route_balancer_v2_batch_swap(
+        vec![
+            balancer_v2_batch_step(LBP_POOL_ID, 0, 1, 1_000_000),
+            balancer_v2_batch_step(
+                "0x222222222222222222222222222222222222222200020000000000000000011e",
+                1,
+                2,
+                0,
+            ),
+        ],
+        vec![
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            "0x0000000000000000000000000000000000000c03",
+        ],
+    );
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], VAULT_MAINNET, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+#[test]
+fn t22b_balancer_v2_batchswap_empty_steps_surface_unknown() {
+    let body = route_balancer_v2_batch_swap(
+        vec![],
+        vec![
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        ],
+    );
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], VAULT_MAINNET, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// t22c — Balancer V2 join/exit unknown userData must not fake zero LP bounds
+// ---------------------------------------------------------------------------
+
+fn balancer_v2_join_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/balancer/v2/vault-join-pool@1.0.0.json"
+    ))
+    .expect("read shipped Balancer V2 Vault.joinPool manifest")
+}
+
+fn balancer_v2_exit_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/balancer/v2/vault-exit-pool@1.0.0.json"
+    ))
+    .expect("read shipped Balancer V2 Vault.exitPool manifest")
+}
+
+fn balancer_v2_userdata(values: Vec<DynSolValue>) -> Vec<u8> {
+    DynSolValue::Tuple(values).abi_encode_params()
+}
+
+fn route_balancer_v2_join(user_data: Vec<u8>) -> Value {
+    route_balancer_v2_join_with_amounts(user_data, vec![1_000_000, 2_000_000])
+}
+
+fn route_balancer_v2_join_with_amounts(user_data: Vec<u8>, amounts: Vec<u64>) -> Value {
+    let manifest = balancer_v2_join_manifest();
+    install_ok(&manifest);
+
+    let pool_id_bytes = hex::decode(LBP_POOL_ID.trim_start_matches("0x")).expect("32-byte poolId");
+    let amounts = amounts
+        .into_iter()
+        .map(|amount| DynSolValue::Uint(AlloyU256::from(amount), 256))
+        .collect();
+    let request = DynSolValue::Tuple(vec![
+        DynSolValue::Array(vec![
+            DynSolValue::Address(addr("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")),
+            DynSolValue::Address(addr("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")),
+        ]),
+        DynSolValue::Array(amounts),
+        DynSolValue::Bytes(user_data),
+        DynSolValue::Bool(false),
+    ]);
+    let calldata = encode_calldata(
+        "0xb95cac28",
+        &[
+            DynSolValue::FixedBytes(alloy_primitives::B256::from_slice(&pool_id_bytes), 32),
+            DynSolValue::Address(addr("0x000000000000000000000000000000000000a01c")),
+            DynSolValue::Address(addr("0x000000000000000000000000000000000000bbbb")),
+            request,
+        ],
+    );
+    let input = route_input(
+        1,
+        VAULT_MAINNET,
+        "0xb95cac28",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v2/vault-join-pool@1.0.0",
+        "{parsed}"
+    );
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+fn route_balancer_v2_exit(user_data: Vec<u8>) -> Value {
+    route_balancer_v2_exit_with_amounts(user_data, vec![900_000, 1_900_000])
+}
+
+fn route_balancer_v2_exit_with_amounts(user_data: Vec<u8>, amounts: Vec<u64>) -> Value {
+    let manifest = balancer_v2_exit_manifest();
+    install_ok(&manifest);
+
+    let pool_id_bytes = hex::decode(LBP_POOL_ID.trim_start_matches("0x")).expect("32-byte poolId");
+    let amounts = amounts
+        .into_iter()
+        .map(|amount| DynSolValue::Uint(AlloyU256::from(amount), 256))
+        .collect();
+    let request = DynSolValue::Tuple(vec![
+        DynSolValue::Array(vec![
+            DynSolValue::Address(addr("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")),
+            DynSolValue::Address(addr("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")),
+        ]),
+        DynSolValue::Array(amounts),
+        DynSolValue::Bytes(user_data),
+        DynSolValue::Bool(false),
+    ]);
+    let calldata = encode_calldata(
+        "0x8bdb3913",
+        &[
+            DynSolValue::FixedBytes(alloy_primitives::B256::from_slice(&pool_id_bytes), 32),
+            DynSolValue::Address(addr("0x000000000000000000000000000000000000a01c")),
+            DynSolValue::Address(addr("0x000000000000000000000000000000000000bbbb")),
+            request,
+        ],
+    );
+    let input = route_input(
+        1,
+        VAULT_MAINNET,
+        "0x8bdb3913",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v2/vault-exit-pool@1.0.0",
+        "{parsed}"
+    );
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t22c_balancer_v2_join_supported_userdata_stays_add_liquidity() {
+    let user_data = balancer_v2_userdata(vec![
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        DynSolValue::Array(vec![
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            DynSolValue::Uint(AlloyU256::from(2_000_000u64), 256),
+        ]),
+        DynSolValue::Uint(AlloyU256::from(777u64), 256),
+    ]);
+    let body = route_balancer_v2_join(user_data);
+
+    assert_eq!(body["domain"], "amm", "{body}");
+    assert_eq!(body["action"], "add_liquidity", "{body}");
+    assert_eq!(body["venue"]["name"], "balancer_v2", "{body}");
+    assert_eq!(body["params"]["min_lp_out"], "0x309", "{body}");
+}
+
+#[test]
+fn t22c_balancer_v2_join_unknown_userdata_surfaces_unknown() {
+    let body = route_balancer_v2_join(balancer_v2_userdata(vec![DynSolValue::Uint(
+        AlloyU256::from(99u64),
+        256,
+    )]));
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], VAULT_MAINNET, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+#[test]
+fn t22c_balancer_v2_join_mismatched_amounts_surface_unknown() {
+    let user_data = balancer_v2_userdata(vec![
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+        DynSolValue::Array(vec![DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256)]),
+        DynSolValue::Uint(AlloyU256::from(777u64), 256),
+    ]);
+    let body = route_balancer_v2_join_with_amounts(user_data, vec![1_000_000]);
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], VAULT_MAINNET, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+#[test]
+fn t22c_balancer_v2_exit_supported_userdata_stays_remove_liquidity() {
+    let user_data = balancer_v2_userdata(vec![
+        DynSolValue::Uint(AlloyU256::ZERO, 256),
+        DynSolValue::Uint(AlloyU256::from(1_234u64), 256),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+    ]);
+    let body = route_balancer_v2_exit(user_data);
+
+    assert_eq!(body["domain"], "amm", "{body}");
+    assert_eq!(body["action"], "remove_liquidity", "{body}");
+    assert_eq!(body["venue"]["name"], "balancer_v2", "{body}");
+    assert_eq!(body["params"]["lp_amount"], "0x4d2", "{body}");
+}
+
+#[test]
+fn t22c_balancer_v2_exit_unknown_userdata_surfaces_unknown() {
+    let body = route_balancer_v2_exit(balancer_v2_userdata(vec![DynSolValue::Uint(
+        AlloyU256::from(99u64),
+        256,
+    )]));
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], VAULT_MAINNET, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+#[test]
+fn t22c_balancer_v2_exit_mismatched_amounts_surface_unknown() {
+    let user_data = balancer_v2_userdata(vec![
+        DynSolValue::Uint(AlloyU256::ZERO, 256),
+        DynSolValue::Uint(AlloyU256::from(1_234u64), 256),
+        DynSolValue::Uint(AlloyU256::from(1u64), 256),
+    ]);
+    let body = route_balancer_v2_exit_with_amounts(user_data, vec![900_000]);
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], VAULT_MAINNET, "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// t22d — Balancer V3 liquidity amount arrays must match baked pool tokens
+// ---------------------------------------------------------------------------
+
+const B24_BALANCER_V3_ROUTER: &str = "0x0000000000000000000000000000000000000b24";
+const B24_POOL: &str = "0x0000000000000000000000000000000000000c24";
+const B24_TOKEN_A: &str = "0x0000000000000000000000000000000000000a24";
+const B24_TOKEN_B: &str = "0x0000000000000000000000000000000000000b25";
+
+fn replace_source_pool_tokens(value: &mut Value, pool_tokens: &Value) {
+    match value {
+        Value::String(s) if s == "$source.pool_tokens" => {
+            *value = pool_tokens.clone();
+        }
+        Value::Array(items) => {
+            for item in items {
+                replace_source_pool_tokens(item, pool_tokens);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                replace_source_pool_tokens(item, pool_tokens);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn balancer_v3_add_liquidity_proportional_manifest() -> String {
+    let raw = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/balancer/v3/router-add-liquidity-proportional@1.0.0.json"
+    ))
+    .expect("read shipped Balancer V3 Router.addLiquidityProportional manifest");
+    let mut manifest: Value = serde_json::from_str(&raw).expect("parse Balancer V3 manifest");
+    manifest["match"]["chain_to_addresses"] = json!({ "1": [B24_BALANCER_V3_ROUTER] });
+
+    let mut map = serde_json::Map::new();
+    map.insert(B24_POOL.to_owned(), json!([B24_TOKEN_A, B24_TOKEN_B]));
+    replace_source_pool_tokens(&mut manifest, &Value::Object(map));
+
+    serde_json::to_string(&manifest).expect("serialize materialized Balancer V3 manifest")
+}
+
+fn route_balancer_v3_add_liquidity_proportional(max_amounts: Vec<u64>) -> Value {
+    let manifest = balancer_v3_add_liquidity_proportional_manifest();
+    install_ok(&manifest);
+
+    let amounts = max_amounts
+        .into_iter()
+        .map(|amount| DynSolValue::Uint(AlloyU256::from(amount), 256))
+        .collect();
+    let calldata = encode_calldata(
+        "0x724dba33",
+        &[
+            DynSolValue::Address(addr(B24_POOL)),
+            DynSolValue::Array(amounts),
+            DynSolValue::Uint(AlloyU256::from(777u64), 256),
+            DynSolValue::Bool(false),
+            DynSolValue::Bytes(vec![]),
+        ],
+    );
+    let input = route_input(
+        1,
+        B24_BALANCER_V3_ROUTER,
+        "0x724dba33",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v3/router-add-liquidity-proportional@1.0.0",
+        "{parsed}"
+    );
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t22d_balancer_v3_liquidity_matching_amounts_stays_add_liquidity() {
+    let body = route_balancer_v3_add_liquidity_proportional(vec![1_000, 2_000]);
+
+    assert_eq!(body["domain"], "amm", "{body}");
+    assert_eq!(body["action"], "add_liquidity", "{body}");
+    assert_eq!(body["venue"]["name"], "balancer_v3", "{body}");
+    assert_eq!(
+        body["params"]["tokens"][0][0]["key"]["address"], B24_TOKEN_A,
+        "{body}"
+    );
+    assert_eq!(
+        body["params"]["tokens"][1][0]["key"]["address"], B24_TOKEN_B,
+        "{body}"
+    );
+}
+
+#[test]
+fn t22d_balancer_v3_liquidity_mismatched_amounts_surfaces_unknown() {
+    let body = route_balancer_v3_add_liquidity_proportional(vec![1_000]);
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], B24_BALANCER_V3_ROUTER, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// t23 — Balancer V3 BatchRouter.swapExactIn keeps multi-path batches visible
+// ---------------------------------------------------------------------------
+
+const B23_BALANCER_V3_BATCH_ROUTER: &str = "0x136f1efcc3f8f88516b9e94110d56fdbfb1778d1";
+const B23_POOL_A: &str = "0x0000000000000000000000000000000000000ba1";
+const B23_POOL_B: &str = "0x0000000000000000000000000000000000000ba2";
+const B23_TOKEN_A: &str = "0x0000000000000000000000000000000000000a01";
+const B23_TOKEN_B: &str = "0x0000000000000000000000000000000000000b02";
+const B23_TOKEN_C: &str = "0x0000000000000000000000000000000000000c03";
+
+fn balancer_v3_batch_router_manifest() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../registryV2/manifests/balancer/v3/batchrouter-swap-exact-in@1.0.0.json"
+    ))
+    .expect("read shipped Balancer V3 BatchRouter manifest")
+}
+
+fn balancer_v3_swap_path(
+    token_in: &str,
+    pool: &str,
+    token_out: &str,
+    exact_amount_in: u64,
+    min_amount_out: u64,
+) -> DynSolValue {
+    let step = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(pool)),
+        DynSolValue::Address(addr(token_out)),
+        DynSolValue::Bool(false),
+    ]);
+    DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(token_in)),
+        DynSolValue::Array(vec![step]),
+        DynSolValue::Uint(AlloyU256::from(exact_amount_in), 256),
+        DynSolValue::Uint(AlloyU256::from(min_amount_out), 256),
+    ])
+}
+
+fn route_balancer_v3_batch_swap(paths: Vec<DynSolValue>) -> Value {
+    let manifest = balancer_v3_batch_router_manifest();
+    install_ok(&manifest);
+
+    let calldata = encode_calldata(
+        "0x286f580d",
+        &[
+            DynSolValue::Array(paths),
+            DynSolValue::Uint(AlloyU256::from(1_900_000_000u64), 256),
+            DynSolValue::Bool(false),
+            DynSolValue::Bytes(vec![]),
+        ],
+    );
+    let input = route_input(
+        1,
+        B23_BALANCER_V3_BATCH_ROUTER,
+        "0x286f580d",
+        calldata,
+        "0x000000000000000000000000000000000000aaaa",
+    );
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"], "balancer/v3/batchrouter-swap-exact-in@1.0.0",
+        "{parsed}"
+    );
+    parsed["data"]["actions"][0]["body"].clone()
+}
+
+#[test]
+fn t23_balancer_v3_batchrouter_single_path_stays_swap() {
+    let body = route_balancer_v3_batch_swap(vec![balancer_v3_swap_path(
+        B23_TOKEN_A,
+        B23_POOL_A,
+        B23_TOKEN_B,
+        1_000,
+        990,
+    )]);
+
+    assert_eq!(body["domain"], "amm", "{body}");
+    assert_eq!(body["action"], "swap", "{body}");
+    assert_eq!(body["venue"]["name"], "balancer_v3", "{body}");
+    assert_eq!(body["venue"]["pool_id"], B23_POOL_A, "{body}");
+    assert_eq!(
+        body["params"]["token_in"]["key"]["address"], B23_TOKEN_A,
+        "{body}"
+    );
+    assert_eq!(
+        body["params"]["token_out"]["key"]["address"], B23_TOKEN_B,
+        "{body}"
+    );
+    assert_eq!(body["params"]["direction"]["kind"], "exact_input", "{body}");
+    assert_eq!(body["params"]["direction"]["amount_in"], "0x3e8", "{body}");
+    assert_eq!(
+        body["params"]["direction"]["min_amount_out"], "0x3de",
+        "{body}"
+    );
+}
+
+#[test]
+fn t23_balancer_v3_batchrouter_multi_path_surfaces_unknown() {
+    let body = route_balancer_v3_batch_swap(vec![
+        balancer_v3_swap_path(B23_TOKEN_A, B23_POOL_A, B23_TOKEN_B, 1_000, 990),
+        balancer_v3_swap_path(B23_TOKEN_B, B23_POOL_B, B23_TOKEN_C, 500, 490),
+    ]);
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], B23_BALANCER_V3_BATCH_ROUTER, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+#[test]
+fn t23_balancer_v3_batchrouter_empty_paths_surface_unknown() {
+    let body = route_balancer_v3_batch_swap(vec![]);
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], B23_BALANCER_V3_BATCH_ROUTER, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
+}
+
+#[test]
+fn t23_balancer_v3_batchrouter_empty_steps_surface_unknown() {
+    let path = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(B23_TOKEN_A)),
+        DynSolValue::Array(vec![]),
+        DynSolValue::Uint(AlloyU256::from(1_000u64), 256),
+        DynSolValue::Uint(AlloyU256::from(990u64), 256),
+    ]);
+    let body = route_balancer_v3_batch_swap(vec![path]);
+
+    assert_eq!(body["domain"], "unknown", "{body}");
+    assert_eq!(body["target"], B23_BALANCER_V3_BATCH_ROUTER, "{body}");
+    assert!(body.get("live_inputs").is_none(), "{body}");
 }
 
 // ===========================================================================

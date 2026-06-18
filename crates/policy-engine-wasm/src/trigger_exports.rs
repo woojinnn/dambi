@@ -8,8 +8,12 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use policy_engine::policy_rpc::{evaluate_trigger, ManifestV2, TriggerScope, TxView};
+use policy_engine::policy_rpc::{
+    evaluate_trigger, scope_matches_position, ManifestV2, TxView, MAX_POLICY_RPC_V2_MANIFESTS,
+};
 use policy_transition::action::ActionBody;
+
+use crate::exports::check_input_size;
 
 /// Input: the installed manifests (v2), the decoded action, and tx metadata.
 #[derive(Deserialize)]
@@ -45,9 +49,10 @@ struct EvaluateTriggersOutput {
 /// Return the ids of the manifests whose [`Trigger`](policy_engine::policy_rpc::Trigger)
 /// matches the decoded action.
 ///
-/// Scope handling: `outer` matches against the outer action's view; `inner`
-/// (default) matches a `Multicall` if ANY inner child matches, otherwise the
-/// action's own view. Returns `{"matched_ids":[...]}` or `{"error":"..."}`.
+/// Scope handling mirrors the v2 evaluation tree: every multicall batch position
+/// is tested for `outer`, while every non-multicall leaf position is tested for
+/// `inner` (default). A manifest matches if any eligible position in the tree
+/// matches its trigger. Returns `{"matched_ids":[...]}` or `{"error":"..."}`.
 #[wasm_bindgen]
 #[must_use]
 pub fn evaluate_triggers_json(input_json: String) -> String {
@@ -59,8 +64,15 @@ pub fn evaluate_triggers_json(input_json: String) -> String {
 }
 
 fn run(input_json: &str) -> Result<EvaluateTriggersOutput, String> {
+    check_input_size(input_json, "evaluate_triggers_json").map_err(|e| e.message)?;
     let mut input: EvaluateTriggersInput =
         serde_json::from_str(input_json).map_err(|e| format!("invalid input json: {e}"))?;
+    if input.manifests.len() > MAX_POLICY_RPC_V2_MANIFESTS {
+        return Err(format!(
+            "evaluate_triggers_json manifest count {} exceeds {MAX_POLICY_RPC_V2_MANIFESTS} item limit",
+            input.manifests.len()
+        ));
+    }
     input.normalize();
     let tx = TxView {
         chain_id: &input.tx.chain_id,
@@ -77,16 +89,18 @@ fn run(input_json: &str) -> Result<EvaluateTriggersOutput, String> {
 }
 
 fn manifest_matches(manifest: &ManifestV2, action: &ActionBody, tx: &TxView<'_>) -> bool {
-    match manifest.trigger.scope {
-        TriggerScope::Outer => evaluate_trigger(&manifest.trigger, &action.view(), tx),
-        TriggerScope::Inner => match action {
-            // Per-inner-child: a Multicall matches if ANY child matches.
-            ActionBody::Multicall { actions } => actions
-                .iter()
-                .any(|child| evaluate_trigger(&manifest.trigger, &child.view(), tx)),
-            other => evaluate_trigger(&manifest.trigger, &other.view(), tx),
-        },
+    let view = action.view();
+    if scope_matches_position(manifest.trigger.scope, &view)
+        && evaluate_trigger(&manifest.trigger, &view, tx)
+    {
+        return true;
     }
+    if let ActionBody::Multicall { actions } = action {
+        return actions
+            .iter()
+            .any(|child| manifest_matches(manifest, child, tx));
+    }
+    false
 }
 
 fn error_json(message: &str) -> String {
@@ -178,6 +192,26 @@ mod tests {
     }
 
     #[test]
+    fn inner_scope_multicall_matches_nested_leaf() {
+        let action = ActionBody::Multicall {
+            actions: vec![ActionBody::Multicall {
+                actions: vec![approve()],
+            }],
+        };
+        let ids = matched(json!({
+            "manifests": [
+                { "id": "approve-policy", "schema_version": 2,
+                  "trigger": { "where": { "action.tag": { "eq": "erc20_approve" } } } },
+                { "id": "inner-multicall", "schema_version": 2,
+                  "trigger": { "where": { "action.domain": { "eq": "multicall" } } } }
+            ],
+            "action": action,
+            "tx": tx(),
+        }));
+        assert_eq!(ids, vec!["approve-policy".to_owned()]);
+    }
+
+    #[test]
     fn outer_scope_matches_multicall_domain() {
         let action = ActionBody::Multicall {
             actions: vec![approve()],
@@ -202,5 +236,38 @@ mod tests {
         let out = evaluate_triggers_json("not json".to_owned());
         let v: Value = serde_json::from_str(&out).unwrap();
         assert!(v["error"].as_str().unwrap().contains("invalid input json"));
+    }
+
+    #[test]
+    fn oversized_input_returns_error_json_before_parse() {
+        let out = evaluate_triggers_json("x".repeat(crate::exports::MAX_WASM_INPUT_JSON_LEN + 1));
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("input json length"));
+        assert!(v["error"]
+            .as_str()
+            .unwrap()
+            .contains("evaluate_triggers_json"));
+    }
+
+    #[test]
+    fn too_many_manifests_returns_error_json() {
+        let manifests: Vec<Value> = (0..=MAX_POLICY_RPC_V2_MANIFESTS)
+            .map(|i| json!({ "id": format!("m{i}"), "schema_version": 2 }))
+            .collect();
+        let out = evaluate_triggers_json(
+            json!({
+                "manifests": manifests,
+                "action": approve(),
+                "tx": tx(),
+            })
+            .to_string(),
+        );
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert!(v["error"].as_str().unwrap().contains("manifest count"));
+        assert!(v["error"]
+            .as_str()
+            .unwrap()
+            .contains("evaluate_triggers_json"));
     }
 }

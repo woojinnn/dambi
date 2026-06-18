@@ -27,8 +27,9 @@ use crate::dto::{CallSpec, Diagnostic, EvaluateRequest, EvaluateResponse, Policy
 /// pair is identical across wallets, so this lets `oracle.usd_value` value a
 /// swap even when the *requesting* wallet has never been synced — fixing the
 /// surprise that an address-independent USD-cap policy needed the wallet
-/// registered. Production backs this with the global DB
-/// (`PostgresGlobalDb::latest_token_price`); unit tests use a stub.
+/// registered. Production uses the global DB first
+/// (`PostgresGlobalDb::latest_token_price`) and may layer a bounded host-side
+/// fallback; unit tests use a stub.
 #[async_trait]
 pub trait PriceBook: Send + Sync {
     /// Global USD price (decimal string) + token decimals for `(chain, address)`,
@@ -367,13 +368,12 @@ pub async fn evaluate(
         }
     }
 
-    // Execute the manifest-planned enrichment calls server-side, sourcing facts
-    // from the wallet state we LOADED (`state_before`), independent of whether the
-    // action could be simulated. `oracle.usd_value` reads the synced `price_usd`
-    // on the held token, falling back to the market-global `price_book` when the
-    // requesting wallet doesn't hold it — no live network call either way — so a
-    // USD-cap policy's `context.custom.*Usd` field is populated even for a wallet
-    // that was never registered/synced.
+    // Execute the manifest-planned enrichment calls server-side, sourcing wallet
+    // facts from the loaded state (`state_before`), independent of whether the
+    // action could be simulated. `oracle.usd_value` reads this wallet's synced
+    // `price_usd` first, then asks the host `price_book`; production backs that
+    // price book with global DB prices plus an optional bounded Chainlink RPC
+    // fallback for canonical tokens.
     let (results, mut diagnostics) = execute_call_specs(
         &state_before,
         &req.call_specs,
@@ -410,8 +410,8 @@ pub async fn evaluate(
 }
 
 /// Execute the request's enrichment call-specs against the (already-loaded)
-/// wallet state. Currently serves `oracle.usd_value` from the synced `price_usd`
-/// on the held token; unknown methods are surfaced as diagnostics and skipped.
+/// wallet state. `oracle.usd_value` prefers synced wallet `price_usd` and then
+/// the host price book. Unknown methods are surfaced as diagnostics and skipped.
 /// Returns the results map keyed by `call_id` plus non-fatal diagnostics. A call
 /// that cannot be served leaves its `call_id` absent from the map — the
 /// extension's materialize step fail-closes a *required* missing result and
@@ -448,7 +448,7 @@ async fn execute_call_specs(
                 None => diagnostics.push(Diagnostic {
                     level: "warn".to_owned(),
                     message: format!(
-                        "oracle.usd_value: no synced price for the requested asset \
+                        "oracle.usd_value: no price for the requested asset \
                          (call {}) — field left unset",
                         spec.call_id
                     ),
@@ -803,10 +803,10 @@ async fn execute_call_specs(
 /// it parses as a Cedar `decimal`.
 ///
 /// Price + decimals come from the requesting wallet's own synced holding when it
-/// holds the asset (freshest for that user); otherwise from the market-global
-/// [`PriceBook`] — the price of a `(chain, contract)` pair is wallet-independent,
-/// so a USD-cap policy works even for a wallet that was never registered. Returns
-/// `None` when neither source knows the price, or the amount cannot be parsed.
+/// holds the asset (freshest for that user); otherwise from the host
+/// [`PriceBook`] — production uses global DB prices and may fall back to a
+/// bounded on-chain Chainlink read for canonical tokens. Returns `None` when no
+/// source knows the price, or the amount cannot be parsed.
 async fn oracle_usd_value(
     state: &WalletState,
     params: &Value,
@@ -2919,9 +2919,9 @@ mod tests {
         );
     }
 
-    /// Enrichment is served from synced state even when the action itself can't
-    /// be simulated (the reducer rejects it). This is what lets a USD-cap policy
-    /// evaluate a Uniswap v4 multicall, whose `/evaluate` simulation 422s.
+    /// Enrichment is served from wallet/global state even when the action itself
+    /// can't be simulated (the reducer rejects it). This is what lets a USD-cap
+    /// policy evaluate a Uniswap v4 multicall, whose `/evaluate` simulation 422s.
     #[tokio::test]
     async fn enrichment_served_even_when_action_is_not_reducible() {
         let store = InMemoryWalletStore::new();
@@ -2947,7 +2947,7 @@ mod tests {
         .await
         .expect("a non-reducible action must NOT fail the request");
 
-        // The USD value was still computed from the synced price.
+        // The USD value was still computed from the available wallet price.
         assert_eq!(
             resp.policy_request.results["swap-usdc-usd-cap-deny::usd"],
             serde_json::json!({ "usd": "100.0100" })
@@ -2963,8 +2963,8 @@ mod tests {
         assert!(resp.policy_request.deltas.is_empty());
     }
 
-    /// A token the wallet does not hold (no synced price) yields no result — the
-    /// executor never fabricates a value; a diagnostic records the miss.
+    /// A token with no wallet or host price yields no result — the executor never
+    /// fabricates a value; a diagnostic records the miss.
     #[tokio::test]
     async fn oracle_usd_value_skips_unpriced_asset() {
         let store = InMemoryWalletStore::new();
@@ -2995,7 +2995,7 @@ mod tests {
         assert!(
             resp.diagnostics
                 .iter()
-                .any(|d| d.level == "warn" && d.message.contains("no synced price")),
+                .any(|d| d.level == "warn" && d.message.contains("no price")),
             "miss should surface a diagnostic"
         );
     }

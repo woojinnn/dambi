@@ -18,7 +18,7 @@ pub(super) const HL_ZERO_ADDR: &str = "0x000000000000000000000000000000000000000
 
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn lower(
-    _action: &HlUnknownAction,
+    action: &HlUnknownAction,
     ctx: &LowerCtx<'_>,
 ) -> Result<LoweredAction, LowerError> {
     let mut m = Map::new();
@@ -27,6 +27,10 @@ pub(crate) fn lower(
     m.insert("chain".into(), Value::String(HL_SENTINEL_CHAIN.into()));
     m.insert("calldata".into(), Value::String("0x".into()));
     m.insert("value".into(), Value::String("0x0".into()));
+    m.insert(
+        "actionType".into(),
+        Value::String(action.action_type.clone()),
+    );
 
     Ok(ctx.lowered(r#"Core::Action::"Unknown""#, Value::Object(m)))
 }
@@ -38,6 +42,7 @@ mod tests {
     use policy_transition::action::ActionBody;
 
     use crate::lowering_v2::perp::test_support::{assert_conforms, offchain_meta};
+    use crate::lowering_v2::{lower_action, TxMeta};
 
     #[test]
     fn unknown_lowering_conforms_to_core_unknown_schema() {
@@ -48,5 +53,16 @@ mod tests {
         // ("hyperliquid_core","hl_unknown") → CORE_UNKNOWN_SCHEMA, this composes
         // the Core::Unknown schema and the lowered uid validates.
         assert_conforms("hl_unknown", &body, &offchain_meta());
+
+        let lowered = lower_action(
+            &body,
+            &offchain_meta(),
+            &TxMeta {
+                from: "0x1111111111111111111111111111111111111111",
+                to: "0x0000000000000000000000000000000000000000",
+            },
+        )
+        .unwrap();
+        assert_eq!(lowered.context["actionType"], "convertToMultiSigUser");
     }
 }

@@ -551,7 +551,7 @@
     },
     "addrCount_one": "{{count}} address",
     "addrCount_other": "{{count}} addresses",
-    "badSlug": "Invalid slug format (letters/digits/_.-()/ only, 1-128 chars)",
+    "badSlug": "Invalid slug format (letters/digits/_.-() only, 1-120 chars)",
     "noMembersError": "No member policies to publish.",
     "title": "Publish to Policy Hub",
     "subtitle": "Make your curated package public so other users can install it.",

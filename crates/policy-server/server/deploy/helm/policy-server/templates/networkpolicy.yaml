@@ -2,13 +2,15 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "policy-server.fullname" . }}
+  name: {{ include "policy-server.fullname" . }}-api
   labels:
     {{- include "policy-server.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
 spec:
   podSelector:
     matchLabels:
       {{- include "policy-server.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
   policyTypes:
     - Ingress
     - Egress
@@ -18,4 +20,44 @@ spec:
           port: {{ .Values.api.port }}
   egress:
     - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "policy-server.fullname" . }}-worker
+  labels:
+    {{- include "policy-server.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "policy-server.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - {}
+{{- if .Values.migrationJob.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "policy-server.fullname" . }}-migrate
+  labels:
+    {{- include "policy-server.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "policy-server.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: migrate
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - {}
+{{- end }}
 {{- end }}

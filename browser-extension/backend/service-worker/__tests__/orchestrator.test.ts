@@ -18,6 +18,11 @@ const mocks = vi.hoisted(() => {
       super(message);
     }
   }
+  class MockTypedDataRouteError extends Error {
+    constructor(readonly reason: string) {
+      super(reason);
+    }
+  }
 
   const sessionStore = new Map<string, unknown>();
   const localStore = new Map<string, unknown>();
@@ -47,6 +52,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     MockEngineError,
+    MockTypedDataRouteError,
     sessionStore,
     localStore,
     runtimeMessageListeners,
@@ -68,29 +74,34 @@ const mocks = vi.hoisted(() => {
     dispatchCallsV2: vi.fn<(...args: unknown[]) => Promise<unknown>>(
       async () => ({}),
     ),
-    resolveBundlesForWallet: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => [
-      {
-        id: "high-slippage-warning",
-        policy: "forbid(...);",
-        manifest: { id: "high-slippage-warning", schema_version: 2 },
-      },
-    ]),
+    resolveBundlesForWallet: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(
+      async () => [
+        {
+          id: "high-slippage-warning",
+          policy: "forbid(...);",
+          manifest: { id: "high-slippage-warning", schema_version: 2 },
+        },
+      ],
+    ),
     // WP7: controllable render-fault list for the venue deny-closed path; the
     // resolve mock factory threads it into resolveBundlesForWalletWithFaults.
     // Reset in beforeEach. A {severity:"deny"} entry must make a venue order
     // deny-close (a DENY policy that could not be rendered fail-opens if dropped).
-    venueRenderFaults: [] as Array<{ defId: string; severity: string | undefined }>,
-    tryDeclarativeRouteV3: vi.fn<
-      (...args: unknown[]) => Promise<unknown>
-    >(async () => ({
-      kind: "miss",
-      reason: "bundle_not_installed",
-    })),
+    venueRenderFaults: [] as Array<{
+      defId: string;
+      severity: string | undefined;
+    }>,
+    tryDeclarativeRouteV3: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => ({
+        kind: "miss",
+        reason: "bundle_not_installed",
+      }),
+    ),
     // Typed-data signature router. Default `null` (no published manifest) so
     // existing typed-sig cases fail closed; the routed-hit case overrides it.
-    routeTypedSignaturePayload: vi.fn<
-      (...args: unknown[]) => Promise<unknown>
-    >(async () => null),
+    routeTypedSignaturePayload: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => null,
+    ),
     browser: {
       storage: {
         session: {
@@ -179,7 +190,9 @@ vi.mock("../policy-rpc", () => ({
   dispatchCallsV2: mocks.dispatchCallsV2,
   // Pass-through so the orchestrator's audit-log builder behaves like
   // the real `formatAuditMatched` for synthetic diagnostics.
-  formatAuditMatched: (verdict: { matched?: { policy_id: string; severity: string; reason?: string }[] }) =>
+  formatAuditMatched: (verdict: {
+    matched?: { policy_id: string; severity: string; reason?: string }[];
+  }) =>
     (verdict.matched ?? []).map((m) => {
       const base: { id: string; severity: string; reason?: string } = {
         id: m.policy_id,
@@ -207,6 +220,7 @@ vi.mock("../adapter-loader/declarative-route", () => ({
 // registry `by-typed-data/` fetch.
 vi.mock("../sig-routing", () => ({
   routeTypedSignaturePayload: mocks.routeTypedSignaturePayload,
+  TypedDataRouteError: mocks.MockTypedDataRouteError,
   normalizeTypedDataPayload: (raw: unknown) => {
     if (typeof raw === "string") {
       try {
@@ -216,6 +230,39 @@ vi.mock("../sig-routing", () => ({
       }
     }
     return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+  },
+  typedDataDomainChainId: (raw: unknown) => {
+    let typedData = raw;
+    if (typeof typedData === "string") {
+      try {
+        typedData = JSON.parse(typedData) as unknown;
+      } catch {
+        return null;
+      }
+    }
+    if (
+      !typedData ||
+      typeof typedData !== "object" ||
+      Array.isArray(typedData)
+    ) {
+      return null;
+    }
+    const chainId = (typedData as { domain?: { chainId?: unknown } }).domain
+      ?.chainId;
+    if (typeof chainId === "number") {
+      return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : null;
+    }
+    if (typeof chainId === "string") {
+      if (/^0x[0-9a-fA-F]+$/.test(chainId)) {
+        const parsed = Number.parseInt(chainId, 16);
+        return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+      }
+      if (/^[0-9]+$/.test(chainId)) {
+        const parsed = Number.parseInt(chainId, 10);
+        return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+      }
+    }
+    return null;
   },
 }));
 // Venue (HL) order enrichment collectors hit the HL info API; stub them inert so
@@ -294,11 +341,30 @@ function venueMessage(requestId: string, walletAddress?: string): Message {
     endpoint: "https://api-ui.hyperliquid.xyz/exchange",
     hlAction: {
       kind: "order",
-      order: { a: 0, b: false, p: "60000", s: "0.1", r: false, t: { limit: { tif: "Gtc" } } },
+      order: {
+        a: 0,
+        b: false,
+        p: "60000",
+        s: "0.1",
+        r: false,
+        t: { limit: { tif: "Gtc" } },
+      },
     },
   };
   if (walletAddress) data.wallet_id = { address: walletAddress, chains: [] };
   return { requestId, data };
+}
+
+function seedSyncedWallets(...addresses: string[]): void {
+  mocks.localStore.set("ps2:u-test:wallets", {
+    schemaVersion: 1,
+    byAddress: Object.fromEntries(
+      addresses.map((address) => [
+        address.toLowerCase(),
+        { bindings: {}, packages: {}, packageEnabled: {} },
+      ]),
+    ),
+  });
 }
 
 function approve(requestId: string, ok: boolean): void {
@@ -310,6 +376,14 @@ function approve(requestId: string, ok: boolean): void {
 describe("inferActor — per-actor lock key (venue coverage)", () => {
   it("returns the tx `from` for a transaction", () => {
     expect(inferActor(txMessage())).toBe(OWNER);
+  });
+
+  it("returns the typed-signature signer for a typed signature", () => {
+    expect(inferActor(typedSigMessage())).toBe(OWNER);
+  });
+
+  it("does not actor-lock untyped signatures", () => {
+    expect(inferActor(untypedMessage())).toBeUndefined();
   });
 
   it("returns the trusted wallet_id for a venue order (shares the lock with that wallet's tx/sig)", () => {
@@ -540,7 +614,10 @@ describe("orchestrator", () => {
   // (Inner-scoped) policies see the wrapped swap/transfer. Aggregation is
   // deny-overrides across all positions.
 
-  const swapChild = { domain: "amm", swap: { recipient: OWNER, slippageBp: 50 } };
+  const swapChild = {
+    domain: "amm",
+    swap: { recipient: OWNER, slippageBp: 50 },
+  };
   const transferChild = {
     domain: "token",
     token: { action: "erc20_transfer", erc20_transfer: { recipient: ROUTER } },
@@ -674,7 +751,10 @@ describe("orchestrator", () => {
     };
     mocks.tryDeclarativeRouteV3.mockResolvedValueOnce({
       kind: "hit",
-      value: { actions: [mixed], decoderId: "registry-v2.test/deny-plus-unknown" },
+      value: {
+        actions: [mixed],
+        decoderId: "registry-v2.test/deny-plus-unknown",
+      },
     });
     mocks.evaluateActionV2.mockImplementation(async (input: unknown) => {
       const body = (input as { action: { domain?: string } }).action;
@@ -773,6 +853,33 @@ describe("orchestrator", () => {
     );
   });
 
+  it("p3: a transaction hard timeout warn-closes and requires user approval", async () => {
+    vi.useFakeTimers();
+    mocks.tryDeclarativeRouteV3.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+
+    const pending = decideMessage(txMessage("p3-tx-timeout-1"), {
+      onAwaitingUser: vi.fn(),
+    });
+    await vi.advanceTimersByTimeAsync(8_000);
+    await Promise.resolve();
+
+    expect(mocks.browser.windows.create).toHaveBeenCalledTimes(1);
+    approve("p3-tx-timeout-1", true);
+    const result = await pending;
+
+    expect(result.ok).toBe(true);
+    expect(result.verdict.kind).toBe("warn");
+    expect(result.verdict.matched?.[0]).toMatchObject({
+      policy_id: "__engine::timeout",
+      severity: "warn",
+    });
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({ verdictSource: "fail_closed" }),
+    );
+  });
+
   it("p3: a planActionRpcV2 throw fails closed", async () => {
     mocks.tryDeclarativeRouteV3.mockResolvedValueOnce(v3HitOutcome);
     mocks.planActionRpcV2.mockRejectedValueOnce(
@@ -801,7 +908,10 @@ describe("orchestrator", () => {
       ),
     );
 
-    const result = await decideAndApprove(txMessage("p3-eval-engineerr-1"), true);
+    const result = await decideAndApprove(
+      txMessage("p3-eval-engineerr-1"),
+      true,
+    );
 
     expect(result.ok).toBe(true); // 여전히 승인 가능한 warn (fail-closed)
     expect(result.verdict.kind).toBe("warn");
@@ -850,25 +960,166 @@ describe("orchestrator", () => {
     );
   });
 
+  it("branch confusion: typed-signature messages never fall through to the transaction route, even with tx-shaped extras", async () => {
+    const message = typedSigMessage("typed-with-tx-extra");
+    (message.data as unknown as { transaction: unknown }).transaction = {
+      from: OWNER,
+      to: ROUTER,
+      data: "0x",
+    };
+
+    const result = await decideAndApprove(message, true);
+
+    expect(result.ok).toBe(true);
+    expect(result.verdict.kind).toBe("warn");
+    expect(mocks.routeTypedSignaturePayload).toHaveBeenCalledOnce();
+    expect(mocks.tryDeclarativeRouteV3).not.toHaveBeenCalled();
+  });
+
+  it("p3: a typed signature route throw fails closed (route fault)", async () => {
+    mocks.routeTypedSignaturePayload.mockRejectedValueOnce(
+      new Error("typed route exploded"),
+    );
+
+    const result = await decideAndApprove(
+      typedSigMessage("p3-typed-fault-1"),
+      true,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.verdict.kind).toBe("warn");
+    expect(mocks.tryDeclarativeRouteV3).not.toHaveBeenCalled();
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "fail_closed",
+        declarativeV3: expect.objectContaining({
+          outcome: "fault",
+          reason: "typed_sig_route_threw",
+        }),
+      }),
+    );
+  });
+
+  it("preserves typed-data route fault reasons in declarativeV3 audit metadata", async () => {
+    mocks.routeTypedSignaturePayload.mockRejectedValueOnce(
+      new mocks.MockTypedDataRouteError("typed_sig_install_verify_failed"),
+    );
+
+    const result = await decideAndApprove(
+      typedSigMessage("p3-typed-install-fault-1"),
+      true,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.verdict.kind).toBe("warn");
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "fail_closed",
+        declarativeV3: expect.objectContaining({
+          outcome: "fault",
+          reason: "typed_sig_install_verify_failed",
+        }),
+      }),
+    );
+  });
+
   // ── Venue (HL) order — per-wallet policy resolution ──────────────────────
-  // HL orders are submitted by a sentinel (`meta.submitter`), so historically
-  // the policy set resolved against an UNREGISTERED address → the global
-  // `defaults.enabled` fallback, and per-wallet toggles never applied. The
-  // fetch-hook stamps the connected account onto `payload.wallet_id`; the venue
-  // lifecycle now resolves that master and keys the policy set by it, so the
-  // user's per-wallet binding toggles govern HL orders too.
+  // HL `/exchange` bodies are agent-key submissions and do not carry the master
+  // wallet directly. The fetch-hook stamps the trusted connected account onto
+  // `payload.wallet_id`; the venue lifecycle uses that master for policy-set
+  // selection and for the v2 eval actor (`tx.from` / `meta.submitter`), so
+  // per-wallet policy bindings and principal-scoped Cedar checks evaluate
+  // against the same user identity.
   describe("venue order resolves the policy set against the connected master", () => {
     const MASTER = "0x676fa5b94067c2be14bc025df6c5c80dedf49a54";
+    const SYNCED = "0x3333333333333333333333333333333333333333";
     const SUBMITTER_SENTINEL = "0x000000000000000000000000000000000000a01c";
 
     it("keys the policy set by the wallet_id master (not the sentinel)", async () => {
-      await decideMessage(venueMessage("venue-master-1", MASTER), { onAwaitingUser: vi.fn() });
-      expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith("u-test", MASTER);
+      await decideMessage(venueMessage("venue-master-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith(
+        "u-test",
+        MASTER,
+      );
+    });
+
+    it("keys the policy set by the only synced wallet when wallet_id is absent", async () => {
+      seedSyncedWallets(SYNCED);
+      await decideMessage(venueMessage("venue-synced-master-1"), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith(
+        "u-test",
+        SYNCED,
+      );
     });
 
     it("falls back to the submitter sentinel when no master is resolvable", async () => {
-      await decideMessage(venueMessage("venue-nomaster-1"), { onAwaitingUser: vi.fn() });
-      expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith("u-test", SUBMITTER_SENTINEL);
+      await decideMessage(venueMessage("venue-nomaster-1"), {
+        onAwaitingUser: vi.fn(),
+      });
+      expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith(
+        "u-test",
+        SUBMITTER_SENTINEL,
+      );
+    });
+
+    it("uses the wallet_id master as the v2 eval principal and meta submitter", async () => {
+      await decideMessage(venueMessage("venue-master-principal-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+
+      const planInput = mocks.planActionRpcV2.mock.calls[0][0] as {
+        tx: { from: string };
+        meta: { submitter: string };
+      };
+      expect(planInput.tx.from).toBe(MASTER);
+      expect(planInput.meta.submitter).toBe(MASTER);
+
+      const evalInput = mocks.evaluateActionV2.mock.calls[0][0] as {
+        tx: { from: string };
+        meta: { submitter: string };
+      };
+      expect(evalInput.tx.from).toBe(MASTER);
+      expect(evalInput.meta.submitter).toBe(MASTER);
+    });
+
+    it("uses the only synced wallet as the v2 eval principal and meta submitter", async () => {
+      seedSyncedWallets(SYNCED);
+      await decideMessage(venueMessage("venue-synced-principal-1"), {
+        onAwaitingUser: vi.fn(),
+      });
+
+      const planInput = mocks.planActionRpcV2.mock.calls[0][0] as {
+        tx: { from: string };
+        meta: { submitter: string };
+      };
+      expect(planInput.tx.from).toBe(SYNCED);
+      expect(planInput.meta.submitter).toBe(SYNCED);
+
+      const evalInput = mocks.evaluateActionV2.mock.calls[0][0] as {
+        tx: { from: string };
+        meta: { submitter: string };
+      };
+      expect(evalInput.tx.from).toBe(SYNCED);
+      expect(evalInput.meta.submitter).toBe(SYNCED);
+    });
+
+    it("keeps the sentinel eval actor when no master is resolvable", async () => {
+      await decideMessage(venueMessage("venue-nomaster-principal-1"), {
+        onAwaitingUser: vi.fn(),
+      });
+
+      const evalInput = mocks.evaluateActionV2.mock.calls[0][0] as {
+        tx: { from: string };
+        meta: { submitter: string };
+      };
+      expect(evalInput.tx.from).toBe(SUBMITTER_SENTINEL);
+      expect(evalInput.meta.submitter).toBe(SUBMITTER_SENTINEL);
     });
 
     it("DENY-CLOSES hl_unknown before policy resolution, even with no bundle installed", async () => {
@@ -894,14 +1145,36 @@ describe("orchestrator", () => {
       expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
     });
 
+    it("branch confusion: venue messages never route as typed signatures, even with typed-signature-shaped extras", async () => {
+      const message = venueMessage("venue-with-typed-extra", MASTER);
+      (
+        message.data as unknown as { typedData: unknown; address: string }
+      ).typedData = {
+        primaryType: "Permit",
+        domain: { verifyingContract: ROUTER, chainId: 1 },
+      };
+      (message.data as unknown as { address: string }).address = OWNER;
+
+      await decideMessage(message, { onAwaitingUser: vi.fn() });
+
+      expect(mocks.routeTypedSignaturePayload).not.toHaveBeenCalled();
+      expect(mocks.tryDeclarativeRouteV3).not.toHaveBeenCalled();
+      expect(mocks.planActionRpcV2).toHaveBeenCalled();
+    });
+
     it("DENY-CLOSES when a DENY policy fails to render (must not silently drop → fail-open)", async () => {
       // A deny-closed venue order whose DENY policy threw during render must be
       // BLOCKED — dropping it would let an order that should have been denied ride
       // through (the WP7 fail-open).
-      mocks.venueRenderFaults = [{ defId: "no-new-short-deny", severity: "deny" }];
-      const result = await decideMessage(venueMessage("venue-deny-fault-1", MASTER), {
-        onAwaitingUser: vi.fn(),
-      });
+      mocks.venueRenderFaults = [
+        { defId: "no-new-short-deny", severity: "deny" },
+      ];
+      const result = await decideMessage(
+        venueMessage("venue-deny-fault-1", MASTER),
+        {
+          onAwaitingUser: vi.fn(),
+        },
+      );
       expect(result.verdict.kind).toBe("fail");
       expect(result.ok).toBe(false);
       // The order must be blocked BEFORE the engine evaluates (deny-close).
@@ -912,17 +1185,19 @@ describe("orchestrator", () => {
       // A warn fault must not hard-block the order (only a faulted DENY does);
       // the remaining bundles evaluate normally (mock → pass).
       mocks.venueRenderFaults = [{ defId: "some-warn", severity: "warn" }];
-      const result = await decideMessage(venueMessage("venue-warn-fault-1", MASTER), {
-        onAwaitingUser: vi.fn(),
-      });
+      const result = await decideMessage(
+        venueMessage("venue-warn-fault-1", MASTER),
+        {
+          onAwaitingUser: vi.fn(),
+        },
+      );
       expect(result.verdict.kind).not.toBe("fail");
     });
 
     // SW prereq for HL server-state methods (`perp.*`): the server loads
-    // wallet state by the dispatch ctx identity. The venue `tx.from` is the
-    // SENTINEL, so the resolved master must ride along as `walletAddress` —
-    // otherwise the server reads an empty wallet and every stateful policy
-    // stays dormant. The eval `tx` context itself stays sentinel-keyed.
+    // wallet state by the dispatch ctx identity. With a trusted `wallet_id`, the
+    // venue eval `tx.from` is the master and the explicit `walletAddress`
+    // override carries the same identity for the authenticated /evaluate path.
     const plannedServerCall = {
       manifest_id: "order-daily-loss-limit-warn",
       call_id: "order-daily-loss-limit-warn::equity-drawdown",
@@ -943,8 +1218,7 @@ describe("orchestrator", () => {
         walletAddress?: string;
       };
       expect(ctx.walletAddress).toBe(MASTER);
-      // Only the server state-load identity changes; eval tx stays sentinel.
-      expect(ctx.tx.from).toBe(SUBMITTER_SENTINEL);
+      expect(ctx.tx.from).toBe(MASTER);
     });
 
     it("omits walletAddress from the dispatch ctx when no master is resolvable", async () => {
@@ -953,11 +1227,99 @@ describe("orchestrator", () => {
         onAwaitingUser: vi.fn(),
       });
       expect(mocks.dispatchCallsV2).toHaveBeenCalledTimes(1);
-      const ctx = mocks.dispatchCallsV2.mock.calls[0][2] as Record<string, unknown>;
+      const ctx = mocks.dispatchCallsV2.mock.calls[0][2] as Record<
+        string,
+        unknown
+      >;
       // Absent key (not `undefined`) — the fallback to tx.from happens inside
       // serveEnrichmentViaEvaluate, and an explicit-undefined would violate
       // exactOptionalPropertyTypes.
       expect("walletAddress" in ctx).toBe(false);
+    });
+
+    it("DENY-CLOSES when venue planning throws", async () => {
+      mocks.planActionRpcV2.mockRejectedValueOnce(
+        new mocks.MockEngineError("plan_failed", "venue plan failed"),
+      );
+
+      const result = await decideMessage(
+        venueMessage("venue-plan-fault-1", MASTER),
+        {
+          onAwaitingUser: vi.fn(),
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.verdict.matched?.[0]).toMatchObject({
+        policy_id: "__venue::deny_closed",
+        severity: "deny",
+      });
+      expect(result.verdict.matched?.[0]?.reason).toContain(
+        "policy evaluation failed",
+      );
+      expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
+    });
+
+    it("DENY-CLOSES when venue policy RPC dispatch throws", async () => {
+      mocks.planActionRpcV2.mockResolvedValueOnce([plannedServerCall]);
+      mocks.dispatchCallsV2.mockRejectedValueOnce(new Error("venue rpc down"));
+
+      const result = await decideMessage(
+        venueMessage("venue-dispatch-fault-1", MASTER),
+        { onAwaitingUser: vi.fn() },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.verdict.matched?.[0]?.reason).toContain(
+        "policy evaluation failed",
+      );
+      expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
+    });
+
+    it("DENY-CLOSES when venue evaluation throws", async () => {
+      mocks.evaluateActionV2.mockRejectedValueOnce(
+        new mocks.MockEngineError("install_failed", "venue eval failed"),
+      );
+
+      const result = await decideMessage(
+        venueMessage("venue-eval-fault-1", MASTER),
+        {
+          onAwaitingUser: vi.fn(),
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.verdict.matched?.[0]?.reason).toContain(
+        "policy evaluation failed",
+      );
+    });
+
+    it("DENY-CLOSES when a venue order hits the hard timeout", async () => {
+      vi.useFakeTimers();
+      mocks.resolveBundlesForWallet.mockImplementationOnce(
+        () => new Promise(() => undefined),
+      );
+
+      const pending = decideMessage(venueMessage("venue-timeout-1", MASTER), {
+        onAwaitingUser: vi.fn(),
+      });
+      await vi.advanceTimersByTimeAsync(8_000);
+      await Promise.resolve();
+      const result = await pending;
+
+      expect(result.ok).toBe(false);
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.verdict.matched?.[0]).toMatchObject({
+        policy_id: "__venue::deny_closed",
+        severity: "deny",
+      });
+      expect(result.verdict.matched?.[0]?.reason).toContain("engine timeout");
+      expect(mocks.auditAppend).toHaveBeenCalledWith(
+        expect.objectContaining({ verdictSource: "fail_closed" }),
+      );
     });
   });
 
@@ -988,9 +1350,12 @@ describe("orchestrator", () => {
     });
     // evaluate → pass (beforeEach default) → decideMessage resolves w/o a window.
 
-    const { ok, verdict } = await decideMessage(typedSigMessage("typed-hit-1"), {
-      onAwaitingUser: vi.fn(),
-    });
+    const { ok, verdict } = await decideMessage(
+      typedSigMessage("typed-hit-1"),
+      {
+        onAwaitingUser: vi.fn(),
+      },
+    );
 
     expect(ok).toBe(true);
     expect(verdict.kind).toBe("pass");
@@ -1040,6 +1405,69 @@ describe("orchestrator", () => {
     expect(tx.to).toBe(ROUTER.toLowerCase());
   });
 
+  it("typed sig: routed all-Unknown bodies warn-close even when no policies are installed", async () => {
+    mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
+      actions: [
+        {
+          meta: sigPermitAction.meta,
+          body: { domain: "unknown", action: "unknown" },
+        },
+      ],
+      decoderId: "unknown/typed@1.0.0",
+    });
+
+    const decided = await decideAndApprove(
+      typedSigMessage("typed-all-unknown-no-policies"),
+      true,
+    );
+
+    expect(decided.ok).toBe(true);
+    expect(decided.verdict.kind).toBe("warn");
+    expect(mocks.resolveBundlesForWallet).not.toHaveBeenCalled();
+    expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({ verdictSource: "fail_closed" }),
+    );
+  });
+
+  it("typed sig: v2 evaluation uses the signed EIP-712 domain chainId, not the provider chain", async () => {
+    mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
+      actions: [sigPermitAction],
+      decoderId: "uniswap/permit2/permitSingle@1.0.0",
+    });
+
+    const typedData = {
+      primaryType: "Permit",
+      domain: {
+        chainId: "0x89",
+        verifyingContract: ROUTER.toUpperCase(),
+      },
+    };
+    const message = typedSigMessage("typed-domain-chain-1", typedData);
+    if (message.data.type !== RequestType.TYPED_SIGNATURE) {
+      throw new Error("expected typed signature");
+    }
+    message.data.chainId = 1;
+
+    const { ok, verdict } = await decideMessage(message, {
+      onAwaitingUser: vi.fn(),
+    });
+
+    expect(ok).toBe(true);
+    expect(verdict.kind).toBe("pass");
+    const planArgs = mocks.planActionRpcV2.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    const evalArgs = mocks.evaluateActionV2.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect((planArgs.tx as { chain_id: string }).chain_id).toBe("eip155:137");
+    expect((evalArgs.tx as { chain_id: string }).chain_id).toBe("eip155:137");
+  });
+
   it("typed sig: a routed hit logs a readable off-chain signature summary to DevTools", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
@@ -1082,13 +1510,48 @@ describe("orchestrator", () => {
       ],
     });
 
-    const decided = await decideAndApprove(typedSigMessage("typed-warn-1"), true);
+    const decided = await decideAndApprove(
+      typedSigMessage("typed-warn-1"),
+      true,
+    );
 
     expect(decided.ok).toBe(true);
     expect(decided.verdict.kind).toBe("warn");
     expect(mocks.evaluateActionV2).toHaveBeenCalledOnce();
     expect(mocks.auditAppend).toHaveBeenCalledWith(
       expect.objectContaining({ verdictSource: "declarative-v2" }),
+    );
+  });
+
+  it("typed sig: a v2 plan fault warn-closes and surfaces the engine error", async () => {
+    mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
+      actions: [sigPermitAction],
+      decoderId: "uniswap/permit2/permitSingle@1.0.0",
+    });
+    mocks.planActionRpcV2.mockRejectedValueOnce(
+      new mocks.MockEngineError("plan_failed", "typed plan failed"),
+    );
+
+    const result = await decideAndApprove(
+      typedSigMessage("typed-plan-fault-1"),
+      true,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.verdict.kind).toBe("warn");
+    expect(result.verdict.matched?.[0]).toMatchObject({
+      policy_id: "__engine::plan_failed",
+      reason: "typed plan failed",
+    });
+    expect(mocks.evaluateActionV2).not.toHaveBeenCalled();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdictSource: "fail_closed",
+        declarativeV3: expect.objectContaining({
+          outcome: "fault",
+          reason: "evaluate_failed",
+        }),
+      }),
     );
   });
 

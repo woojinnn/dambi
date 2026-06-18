@@ -318,6 +318,7 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA,
     GOVERNANCE_VOTE_SCHEMA,
     LENDING_BORROW_SCHEMA,
+    LENDING_BUY_COLLATERAL_SCHEMA,
     LENDING_DELEGATE_BORROW_SCHEMA,
     LENDING_DISABLE_COLLATERAL_SCHEMA,
     LENDING_ENABLE_COLLATERAL_SCHEMA,
@@ -853,6 +854,7 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     ("swap", "SwapContext"),
     // lending (alphabetical)
     ("borrow", "BorrowContext"),
+    ("buy_collateral", "BuyCollateralContext"),
     ("delegate_borrow", "DelegateBorrowContext"),
     ("disable_collateral", "DisableCollateralContext"),
     ("enable_collateral", "EnableCollateralContext"),
@@ -914,6 +916,9 @@ mod base_schema_tests {
     //! These tests fire on every `cargo test -p policy-engine` and catch
     //! schema-file regressions before they reach downstream consumers.
 
+    use std::fs;
+    use std::path::Path;
+
     use super::base_schema_text;
 
     #[test]
@@ -965,5 +970,87 @@ mod base_schema_tests {
                 "expected action `{id}` declared in base schema; got: {declared:?}"
             );
         }
+    }
+
+    #[test]
+    fn base_schema_includes_every_action_schema_file() {
+        let text = base_schema_text();
+        let (schema, _warnings) =
+            cedar_policy::Schema::from_cedarschema_str(&text).expect("base schema parses");
+        let declared: Vec<String> = schema
+            .actions()
+            .map(std::string::ToString::to_string)
+            .collect();
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/policy-schema/actions");
+        let expected = expected_action_ids_from_schema_files(&root);
+        assert!(
+            !expected.is_empty(),
+            "expected at least one action schema under {}",
+            root.display()
+        );
+        for id in expected {
+            assert!(
+                declared.iter().any(|d| d.contains(&id)),
+                "expected action `{id}` declared in base schema; got: {declared:?}"
+            );
+        }
+    }
+
+    fn expected_action_ids_from_schema_files(root: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        collect_expected_action_ids(root, &mut out);
+        out.sort();
+        out
+    }
+
+    fn collect_expected_action_ids(path: &Path, out: &mut Vec<String>) {
+        let entries =
+            fs::read_dir(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|err| panic!("read_dir entry: {err}"));
+            let path = entry.path();
+            if path.is_dir() {
+                collect_expected_action_ids(&path, out);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("cedarschema") {
+                continue;
+            }
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+            let Some(namespace) = first_namespace(&text) else {
+                panic!("{} has no namespace declaration", path.display());
+            };
+            for action in declared_actions(&text) {
+                out.push(format!("{namespace}::Action::\"{action}\""));
+            }
+        }
+    }
+
+    fn first_namespace(text: &str) -> Option<&str> {
+        for line in text.lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("namespace ") else {
+                continue;
+            };
+            return rest.split_whitespace().next();
+        }
+        None
+    }
+
+    fn declared_actions(text: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        for line in text.lines() {
+            let line = line.trim();
+            let Some(rest) = line.strip_prefix("action \"") else {
+                continue;
+            };
+            let Some((action, _)) = rest.split_once('"') else {
+                continue;
+            };
+            out.push(action);
+        }
+        out
     }
 }

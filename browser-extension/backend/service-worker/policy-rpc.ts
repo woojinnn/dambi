@@ -1,5 +1,6 @@
 import { tryHandleLocally } from "./local-method-handlers";
 import { fetchStarted, fetchEnded } from "./diagnostics";
+import { legacyV1RpcFallbackEnabled } from "./legacy-v1-rpc";
 // `./dambi-auth/*` is imported LAZILY inside the authenticated dispatch path
 // only — it pulls `webextension-polyfill` (browser-only), which would otherwise
 // break every (test) importer of this module at load time.
@@ -20,22 +21,20 @@ export interface ServerEvalContext {
   readonly meta: unknown;
   readonly tx: { readonly chain_id: string; readonly from: string; readonly to: string };
   /**
-   * Wallet identity the server loads state for, when it differs from
-   * `tx.from`. The venue-order path sets this to the resolved HL master:
-   * its `tx.from` is the submitter SENTINEL, and a server-state method
-   * (`perp.*`) run against the sentinel reads an empty wallet and stays
-   * dormant. Absent → `tx.from` (tx / typed-sig paths, where `from` is the
-   * real signer).
+   * Wallet identity the server loads state for. Absent → `tx.from`; venue
+   * orders pass the resolved HL master explicitly so authenticated enrichment
+   * uses the same wallet as the Cedar principal.
    */
   readonly walletAddress?: string;
 }
 
 /**
  * Serve remote enrichment from the authenticated policy-server `/evaluate`
- * (which executes e.g. `oracle.usd_value` from the signed-in user's synced
- * holding price) instead of the legacy per-method rpc server. Returns the
- * `{ call_id: result }` map from `policyRequest.results`. Throws on transport /
- * auth failure so the caller can fail CLOSED (omit → required `SystemFail` deny).
+ * (which executes e.g. `oracle.usd_value` from server-side wallet/global facts
+ * plus bounded host-configured fallbacks) instead of the legacy per-method rpc
+ * server. Returns the `{ call_id: result }` map from `policyRequest.results`.
+ * Throws on transport / auth failure so the caller can fail CLOSED (omit →
+ * required `SystemFail` deny).
  */
 /** True when a signed-in server session token is present (lazy polyfill load). */
 async function hasServerSession(): Promise<boolean> {
@@ -309,8 +308,13 @@ export interface PolicyRpcAuditMeta {
  * v2 (ActionBody-model) policy-RPC dispatch.
  *
  * For each planned call: handles pure-math methods in-process via
- * {@link tryHandleLocally}, POSTs the remainder to the policy-rpc server, and
- * folds the results into a `{ call_id: <value> }` map.
+ * {@link tryHandleLocally}, serves stateful remote enrichment through the
+ * authenticated policy-server `/evaluate` path when the user has a server
+ * session, and folds results into a `{ call_id: <value> }` map.
+ *
+ * The old unauthenticated `/v1/rpc` sidecar is disabled by default because the
+ * Rust policy-server no longer registers that route. It can be re-enabled only
+ * for local experiments with `POLICY_RPC_ENABLE_LEGACY_V1_RPC=true`.
  *
  * Fail-closed: `ok: false` / unreachable / dropped calls are OMITTED. An
  * omitted REQUIRED call causes `materialize_v2` to raise `SystemFail`, which
@@ -353,7 +357,7 @@ export async function dispatchCallsV2(
   }
 
   // When the user is signed in, serve remote enrichment from the authenticated
-  // policy-server `/evaluate` (executes oracle.usd_value from the synced state).
+  // policy-server `/evaluate` using server-side wallet/global facts.
   // Failures fail closed — omit, so a required call trips `SystemFail` → deny.
   if (ctx && (await hasServerSession())) {
     try {
@@ -372,8 +376,33 @@ export async function dispatchCallsV2(
     return results;
   }
 
-  // Fallback (signed-out / no context): post to the per-method rpc server.
+  const remoteCallIds = new Set(remoteCalls.map((c) => c.id));
+
   const requestId = `action-v2:${remoteCalls[0]?.id ?? "calls"}`;
+  if (!legacyV1RpcFallbackEnabled()) {
+    const requiredCount = planned.filter(
+      (call) => remoteCallIds.has(call.call_id) && !call.optional,
+    ).length;
+    const detail = {
+      requestId,
+      callCount: remoteCalls.length,
+      requiredCount,
+    };
+    if (requiredCount > 0) {
+      console.warn(
+        "[Dambi] no authenticated policy-server session; omitting remote policy-rpc calls (fail-closed)",
+        detail,
+      );
+    } else {
+      console.debug(
+        "[Dambi] no authenticated policy-server session; optional remote policy-rpc calls stay dormant",
+        detail,
+      );
+    }
+    return results;
+  }
+
+  // Legacy dev-only fallback: post to the retired per-method rpc sidecar.
   const remotePlan: PolicyRpcBatchRequestDto = {
     request_id: requestId,
     calls: remoteCalls,
