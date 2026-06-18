@@ -614,6 +614,9 @@
 .e2 .e2pop-ro { display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:600; color:var(--mut); }
 .e2 .e2pop-ro .ic { width:12px; height:12px; }
 .e2 .e2pop-empty { padding:14px; color:var(--mut); font-size:12px; text-align:center; }
+.e2 .e2pop-sentence { margin-top:2px; font-size:12px; line-height:1.55; color:var(--ink); font-weight:560;
+  text-wrap:pretty; overflow-wrap:anywhere; word-break:break-word;
+  background:var(--surface-2); border:1px solid var(--line-2); border-radius:8px; padding:8px 10px; }
 
 /* 기본 안전팩(builtin) — 옅은 파랑 (개별/회색 점선과 구분). 폴더(좌)·패키지 카드(우) 둘 다 */
 .e2 .sgroup.builtin .sghead { background:#f2f6fd; }

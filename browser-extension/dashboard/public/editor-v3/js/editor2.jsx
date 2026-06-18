@@ -376,7 +376,7 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
                         >
                           <Ic id={b.enabled ? "check" : "x"} />
                         </button>
-                        <button type="button" className="ib danger" title="이 패키지에서 제거" onClick={() => run("제거", () => PS.removeBinding({ address: activeAddr, bindingId: b.id }))}><Ic id="trash" cls="sm" /></button>
+                        <button type="button" className="ib danger" title="이 패키지에서 제거" onClick={async () => { if (await e2Confirm({ title: `"${nm}" 정책을 이 패키지에서 뺄까요?`, body: "이 지갑에서 더는 적용되지 않아요. (정책 자체는 라이브러리에 남아요)", danger: true, confirmLabel: "제거" })) run("제거", () => PS.removeBinding({ address: activeAddr, bindingId: b.id })); }}><Ic id="trash" cls="sm" /></button>
                       </div>
                     );
                   })
@@ -948,7 +948,7 @@ function E2BindingItem({ binding: b, def, address, selected, readOnly, onPreview
         {b.enabled && <Ic id="check" cls="sm" />}
       </button>
       {!readOnly && <button type="button" className="ib" title="구조 편집 — 액션·조건을 바꾸면 새 정책으로 저장돼요" onClick={(e) => { e.stopPropagation(); onFork(); }}><Ic id="edit" cls="sm" /></button>}
-      {!readOnly && <button type="button" className="ib danger" title="이 패키지에서 제거" onClick={(e) => { e.stopPropagation(); run("제거", () => PS.removeBinding({ address, bindingId: b.id })); }}><Ic id="trash" cls="sm" /></button>}
+      {!readOnly && <button type="button" className="ib danger" title="이 패키지에서 제거" onClick={async (e) => { e.stopPropagation(); if (await e2Confirm({ title: `"${name}" 정책을 이 패키지에서 뺄까요?`, body: "이 지갑에서 더는 적용되지 않아요. (정책 자체는 라이브러리에 남아요)", danger: true, confirmLabel: "제거" })) run("제거", () => PS.removeBinding({ address, bindingId: b.id })); }}><Ic id="trash" cls="sm" /></button>}
       <E2PolicyPreview hover binding={b} def={def} displayName={name} />
     </div>
   );

@@ -3,7 +3,7 @@ function EditorListPageV2() {
   const [chooserOpen, setChooserOpen] = React.useState(false);
   const defCount = Object.values(snap.library.defs).filter((d) => !d.hidden).length;
   const pkgCount = Object.keys(snap.library.packages).length;
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Topbar, { here: "Policy Editor", subtitle: `\uC815\uCC45 ${defCount}\uAC1C \xB7 \uD328\uD0A4\uC9C0 ${pkgCount}\uAC1C` }), /* @__PURE__ */ React.createElement("div", { className: "ev2-body" }, /* @__PURE__ */ React.createElement(Editor2View, { onNewPolicy: () => setChooserOpen(true) })), /* @__PURE__ */ React.createElement(ToastStack, null), /* @__PURE__ */ React.createElement(NewPolicyChooser, { open: chooserOpen, onClose: () => setChooserOpen(false) }));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Topbar, { here: "Policy Editor", subtitle: `\uC815\uCC45 ${defCount}\uAC1C \xB7 \uD328\uD0A4\uC9C0 ${pkgCount}\uAC1C` }), /* @__PURE__ */ React.createElement("div", { className: "ev2-body" }, /* @__PURE__ */ React.createElement(Editor2View, { onNewPolicy: () => setChooserOpen(true) })), /* @__PURE__ */ React.createElement(ToastStack, null), /* @__PURE__ */ React.createElement(ConfirmHost, null), /* @__PURE__ */ React.createElement(NewPolicyChooser, { open: chooserOpen, onClose: () => setChooserOpen(false) }));
 }
 function LibraryTab({ snap }) {
   const UNCAT = PS.UNCATEGORIZED_PKG;

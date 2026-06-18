@@ -326,7 +326,9 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
           },
           /* @__PURE__ */ React.createElement(Ic, { id: b.enabled ? "check" : "x" })
         ),
-        /* @__PURE__ */ React.createElement("button", { type: "button", className: "ib danger", title: "\uC774 \uD328\uD0A4\uC9C0\uC5D0\uC11C \uC81C\uAC70", onClick: () => run("\uC81C\uAC70", () => PS.removeBinding({ address: activeAddr, bindingId: b.id })) }, /* @__PURE__ */ React.createElement(Ic, { id: "trash", cls: "sm" }))
+        /* @__PURE__ */ React.createElement("button", { type: "button", className: "ib danger", title: "\uC774 \uD328\uD0A4\uC9C0\uC5D0\uC11C \uC81C\uAC70", onClick: async () => {
+          if (await e2Confirm({ title: `"${nm}" \uC815\uCC45\uC744 \uC774 \uD328\uD0A4\uC9C0\uC5D0\uC11C \uBE84\uAE4C\uC694?`, body: "\uC774 \uC9C0\uAC11\uC5D0\uC11C \uB354\uB294 \uC801\uC6A9\uB418\uC9C0 \uC54A\uC544\uC694. (\uC815\uCC45 \uC790\uCCB4\uB294 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uC5D0 \uB0A8\uC544\uC694)", danger: true, confirmLabel: "\uC81C\uAC70" })) run("\uC81C\uAC70", () => PS.removeBinding({ address: activeAddr, bindingId: b.id }));
+        } }, /* @__PURE__ */ React.createElement(Ic, { id: "trash", cls: "sm" }))
       );
     }))))
   )));
@@ -771,9 +773,9 @@ function E2BindingItem({ binding: b, def, address, selected, readOnly, onPreview
       e.stopPropagation();
       onFork();
     } }, /* @__PURE__ */ React.createElement(Ic, { id: "edit", cls: "sm" })),
-    !readOnly && /* @__PURE__ */ React.createElement("button", { type: "button", className: "ib danger", title: "\uC774 \uD328\uD0A4\uC9C0\uC5D0\uC11C \uC81C\uAC70", onClick: (e) => {
+    !readOnly && /* @__PURE__ */ React.createElement("button", { type: "button", className: "ib danger", title: "\uC774 \uD328\uD0A4\uC9C0\uC5D0\uC11C \uC81C\uAC70", onClick: async (e) => {
       e.stopPropagation();
-      run("\uC81C\uAC70", () => PS.removeBinding({ address, bindingId: b.id }));
+      if (await e2Confirm({ title: `"${name}" \uC815\uCC45\uC744 \uC774 \uD328\uD0A4\uC9C0\uC5D0\uC11C \uBE84\uAE4C\uC694?`, body: "\uC774 \uC9C0\uAC11\uC5D0\uC11C \uB354\uB294 \uC801\uC6A9\uB418\uC9C0 \uC54A\uC544\uC694. (\uC815\uCC45 \uC790\uCCB4\uB294 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uC5D0 \uB0A8\uC544\uC694)", danger: true, confirmLabel: "\uC81C\uAC70" })) run("\uC81C\uAC70", () => PS.removeBinding({ address, bindingId: b.id }));
     } }, /* @__PURE__ */ React.createElement(Ic, { id: "trash", cls: "sm" })),
     /* @__PURE__ */ React.createElement(E2PolicyPreview, { hover: true, binding: b, def, displayName: name })
   );

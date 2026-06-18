@@ -86,6 +86,46 @@ function ToastStack() {
   );
 }
 
+/* Confirm dialog (module-level promise bus) — leaf 컴포넌트도 setState 없이
+ * `await e2Confirm({title, body, danger, confirmLabel})` 한 줄로 확인 모달을 띄운다.
+ * 호스트(ConfirmHost)는 리스트 페이지에 한 번 마운트된다. */
+const ConfirmBus = (() => {
+  const subs = new Set();
+  return { request: (opts) => subs.forEach((cb) => cb(opts)), subscribe: (cb) => (subs.add(cb), () => subs.delete(cb)) };
+})();
+function e2Confirm(opts) {
+  return new Promise((resolve) => ConfirmBus.request({ ...opts, _resolve: resolve }));
+}
+function ConfirmHost() {
+  const [ask, setAsk] = React.useState(null);
+  React.useEffect(() => ConfirmBus.subscribe((opts) => setAsk(opts)), []);
+  React.useEffect(() => {
+    if (!ask) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") { ask._resolve(false); setAsk(null); }
+      if (e.key === "Enter") { ask._resolve(true); setAsk(null); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [ask]);
+  if (!ask) return null;
+  const close = (ok) => { ask._resolve(ok); setAsk(null); };
+  return (
+    <div className="e2-ov" onMouseDown={() => close(false)}>
+      <div className="modal e2cf" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="e2cf-body">
+          <div className="e2cf-title">{ask.title}</div>
+          {ask.body && <div className="e2cf-text">{ask.body}</div>}
+        </div>
+        <div className="e2cf-foot">
+          <button type="button" className="e2cf-btn cancel" onClick={() => close(false)}>취소</button>
+          <button type="button" className={`e2cf-btn ok${ask.danger ? " danger" : ""}`} autoFocus onClick={() => close(true)}>{ask.confirmLabel || "확인"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── NavRail ── */
 const navStroke = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
 function NavRail() {
@@ -183,4 +223,4 @@ function Topbar({ here, subtitle, right }) {
   );
 }
 
-Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, NavRail, Topbar });
+Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, e2Confirm, ConfirmHost, NavRail, Topbar });

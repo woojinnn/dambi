@@ -13,6 +13,7 @@ function EditorListPageV2() {
         <Editor2View onNewPolicy={() => setChooserOpen(true)} />
       </div>
       <ToastStack />
+      <ConfirmHost />
       <NewPolicyChooser open={chooserOpen} onClose={() => setChooserOpen(false)} />
     </>
   );

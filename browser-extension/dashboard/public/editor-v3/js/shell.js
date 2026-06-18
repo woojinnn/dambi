@@ -66,6 +66,38 @@ function ToastStack() {
   if (toasts.length === 0) return null;
   return /* @__PURE__ */ React.createElement("div", { className: "ev2-toaststack" }, toasts.map((t) => /* @__PURE__ */ React.createElement("div", { key: t.id, className: "ev2-toast" }, t.text)));
 }
+const ConfirmBus = /* @__PURE__ */ (() => {
+  const subs = /* @__PURE__ */ new Set();
+  return { request: (opts) => subs.forEach((cb) => cb(opts)), subscribe: (cb) => (subs.add(cb), () => subs.delete(cb)) };
+})();
+function e2Confirm(opts) {
+  return new Promise((resolve) => ConfirmBus.request({ ...opts, _resolve: resolve }));
+}
+function ConfirmHost() {
+  const [ask, setAsk] = React.useState(null);
+  React.useEffect(() => ConfirmBus.subscribe((opts) => setAsk(opts)), []);
+  React.useEffect(() => {
+    if (!ask) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        ask._resolve(false);
+        setAsk(null);
+      }
+      if (e.key === "Enter") {
+        ask._resolve(true);
+        setAsk(null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [ask]);
+  if (!ask) return null;
+  const close = (ok) => {
+    ask._resolve(ok);
+    setAsk(null);
+  };
+  return /* @__PURE__ */ React.createElement("div", { className: "e2-ov", onMouseDown: () => close(false) }, /* @__PURE__ */ React.createElement("div", { className: "modal e2cf", onMouseDown: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-body" }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-title" }, ask.title), ask.body && /* @__PURE__ */ React.createElement("div", { className: "e2cf-text" }, ask.body)), /* @__PURE__ */ React.createElement("div", { className: "e2cf-foot" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "e2cf-btn cancel", onClick: () => close(false) }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { type: "button", className: `e2cf-btn ok${ask.danger ? " danger" : ""}`, autoFocus: true, onClick: () => close(true) }, ask.confirmLabel || "\uD655\uC778"))));
+}
 const navStroke = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
 function NavRail() {
   const route = useRoute();
@@ -118,4 +150,4 @@ function Topbar({ here, subtitle, right }) {
   const hits = needle ? Object.values(snap.library.defs).filter((d) => !d.hidden && (d.displayName.toLowerCase().includes(needle) || d.id.toLowerCase().includes(needle))) : [];
   return /* @__PURE__ */ React.createElement("div", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "crumb" }, /* @__PURE__ */ React.createElement("span", { className: "here" }, here), subtitle != null && /* @__PURE__ */ React.createElement("span", { className: "sep" }, "/"), subtitle != null && /* @__PURE__ */ React.createElement("span", { className: "addr" }, subtitle)), /* @__PURE__ */ React.createElement("div", { className: "search-wrap", ref: wrapRef, style: { display: "none" } }), /* @__PURE__ */ React.createElement("div", { className: "dots" }, right));
 }
-Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, NavRail, Topbar });
+Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, e2Confirm, ConfirmHost, NavRail, Topbar });
