@@ -6,7 +6,7 @@
         <span class="here">Assets</span>
       </div>
       <div class="dots">
-        <button class="icon-btn" title="3건 미해결 finding" aria-label="notifications">
+        <button class="icon-btn" data-i18n-title="assets.notif" data-i18n-count="3" title="3건 미해결 finding" aria-label="notifications">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
           <span class="unread-dot"></span>
         </button>
@@ -15,7 +15,7 @@
 
     <!-- Wallet switcher (좌우 스크롤) -->
     <div class="ws-wrap">
-      <button class="ws-nav prev" type="button" aria-label="이전 지갑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></button>
+      <button class="ws-nav prev" type="button" data-i18n-aria="assets.prevWallet" aria-label="이전 지갑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></button>
       <div class="wallet-switch" id="wallet-switch" role="group" aria-label="wallet switcher">
         <button class="ws-chip on" data-wallet="all">전체 합산 <span class="ws-amt">5</span></button>
         <button class="ws-chip" data-wallet="main"><span class="ws-dot warn"></span>메인 지갑 <span class="ws-amt">0x7a3F···c2D4</span></button>
@@ -24,18 +24,18 @@
         <button class="ws-chip" data-wallet="savings"><span class="ws-dot calm"></span>적립 지갑 <span class="ws-amt">0x3dF2···91Ac</span></button>
         <button class="ws-chip" data-wallet="airdrop"><span class="ws-dot warn"></span>에어드랍 <span class="ws-amt">0xBe07···5C13</span></button>
       </div>
-      <button class="ws-nav next" type="button" aria-label="다음 지갑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></button>
+      <button class="ws-nav next" type="button" data-i18n-aria="assets.nextWallet" aria-label="다음 지갑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></button>
     </div>
 
     <div class="donut-grid" id="l1-extra">
     <!-- Wallet asset ratio (donut) — 좌측 -->
     <div class="chain-card donut-card" id="donut-wallets">
       <div class="cc-head">
-        <span class="cc-ttl">지갑별 자산 비율</span>
+        <span class="cc-ttl" data-i18n="assets.donut.walletTitle">지갑별 자산 비율</span>
       </div>
       <div class="donut-wrap">
         <div class="donut-figure">
-          <svg class="donut" viewBox="0 0 120 120" aria-label="지갑별 자산 비율 도넛 차트"></svg>
+          <svg class="donut" viewBox="0 0 120 120" data-i18n-aria="assets.donut.walletChart" aria-label="지갑별 자산 비율 도넛 차트"></svg>
           <div class="donut-center"></div>
         </div>
         <div class="donut-legend"></div>
@@ -45,11 +45,11 @@
     <!-- Chain breakdown (donut) — 우측 -->
     <div class="chain-card donut-card" id="donut-assets">
       <div class="cc-head">
-        <span class="cc-ttl">자산 분포</span>
+        <span class="cc-ttl" data-i18n="assets.donut.assetTitle">자산 분포</span>
       </div>
       <div class="donut-wrap">
         <div class="donut-figure">
-          <svg class="donut" viewBox="0 0 120 120" aria-label="체인별 자산 분포 도넛 차트"></svg>
+          <svg class="donut" viewBox="0 0 120 120" data-i18n-aria="assets.donut.assetChart" aria-label="체인별 자산 분포 도넛 차트"></svg>
           <div class="donut-center"></div>
         </div>
         <div class="donut-legend"></div>
@@ -66,11 +66,11 @@
     <!-- Holdings -->
     <div class="mod-sec" data-sec="holdings">
     <div class="sec-head">
-      <h3>보유자산</h3>
+      <h3 data-i18n="assets.sections.holdings">보유자산</h3>
       <div class="sec-tools">
         <div class="hold-search">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-          <input type="text" id="holdings-filter" placeholder="토큰 검색" autocomplete="off" />
+          <input type="text" id="holdings-filter" data-i18n-ph="assets.holdings.search" placeholder="토큰 검색" autocomplete="off" />
         </div>
         <span class="meta" id="holdings-meta">3 지갑 · 9 토큰</span>
       </div>
@@ -81,7 +81,7 @@
     <!-- Approvals -->
     <div class="mod-sec" data-sec="approvals">
     <div class="sec-head">
-      <h3>승인 <span class="h3-sub">(risk overlay)</span></h3>
+      <h3><span data-i18n="assets.sections.approvals">승인</span> <span class="h3-sub">(risk overlay)</span></h3>
       <span class="meta" id="approvals-meta">UNLIMITED · KNOWN_VENUE · BLOCKED · OLD</span>
     </div>
     <div id="approvals-host"></div>
@@ -91,7 +91,7 @@
     <div id="hl-section" class="mod-sec" data-sec="hl">
     <div class="sec-head">
       <h3>Hyperliquid</h3>
-      <span class="meta">포지션 · 레버리지 · 오픈 오더 · 마진</span>
+      <span class="meta" data-i18n="assets.hl.meta">포지션 · 레버리지 · 오픈 오더 · 마진</span>
     </div>
     <div class="hl-card">
       <div class="hl-card-head">
@@ -157,7 +157,7 @@
     <!-- Pending -->
     <div id="pending-section" class="mod-sec" data-sec="pending">
     <div class="sec-head">
-      <h3>대기 주문 <span class="h3-sub">(오프체인 인텐트 · 서명)</span></h3>
+      <h3><span data-i18n="assets.sections.pending">대기 주문</span> <span class="h3-sub" data-i18n="assets.pending.subhead">(오프체인 인텐트 · 서명)</span></h3>
       <span class="meta">UniswapX · CoW · 1inch · Permit2</span>
     </div>
     <div id="pending-host" style="margin-bottom: 32px;"></div>
