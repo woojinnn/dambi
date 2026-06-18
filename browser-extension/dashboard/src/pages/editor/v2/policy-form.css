@@ -498,6 +498,64 @@
   font-size: 13px;
   outline: none;
 }
+/* 값 직접 입력 영역 — 드롭다운 상단(필드 목록 위). 예전 "값" 모드 위젯을 그대로
+   품어, 문자/숫자/주소 등 필드 타입에 맞는 입력기를 보여준다. */
+.fc-valbox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border, #eee);
+}
+.fc-valbox-h {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #6b7280);
+}
+.fc-valbox .pf-val,
+.fc-valbox .pf-val-wrap,
+.fc-valbox .fc {
+  width: 100%;
+}
+.fc-valbox .pf-val {
+  height: 32px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 0 9px;
+}
+/* "추천 값" 구분 머리글 */
+.fc-cmp-h {
+  padding: 9px 12px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted, #6b7280);
+}
+/* "다른 필드와 비교" — 보조(접이식). 추천 값이 있으면 접혀 있다. */
+.fc-cmp-more {
+  border-top: 1px solid var(--border, #eee);
+  margin-top: 4px;
+}
+.fc-cmp-more > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #6b7280);
+}
+.fc-cmp-more > summary::-webkit-details-marker {
+  display: none;
+}
+.fc-cmp-more > summary::before {
+  content: "▸ ";
+  font-size: 10px;
+}
+.fc-cmp-more[open] > summary::before {
+  content: "▾ ";
+}
+.fc-cmp-more > summary:hover {
+  color: #374151;
+}
 .fc-list {
   max-height: 320px;
   overflow-y: auto;
@@ -541,6 +599,14 @@
 .fc-opt-label {
   font-size: 13px;
   color: #111827;
+}
+/* 추천 행의 보조 텍스트(주소록: "내 지갑 · 0x7ee0…822c") — 오른쪽 끝, 흐리게 */
+.fc-opt-sub {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted, #9ca3af);
+  font-family: var(--ff-mono, ui-monospace, monospace);
+  white-space: nowrap;
 }
 .fc-opt-desc {
   font-size: 11.5px;

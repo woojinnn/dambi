@@ -43,6 +43,9 @@ interface PasuDonut {
 export function initDonuts(root: HTMLElement): () => void {
   const C = 2 * Math.PI * 45; // circumference, r=45
   const GAP = 3; // dash gap between segments
+  // i18n bridge (read at render time; falls back to key in standalone prototype).
+  const T = (k: string, vars?: Record<string, unknown>): string =>
+    window.PASU_T ? window.PASU_T(k, vars) : k;
 
   // 실제 체인 로고 (브랜드 마크) — 자산 분포 도넛 범례 + Holdings 체인 칩 공용
   const LOGOS: Record<string, string> = {
@@ -108,7 +111,7 @@ export function initDonuts(root: HTMLElement): () => void {
   }
 
   // Standalone fallback (PASU_DATA absent) — empty donuts, no demo data.
-  const FALLBACK: DonutCfg = { centerK: "총 자산", total: 0, items: [] };
+  const FALLBACK: DonutCfg = { centerK: T("assets.donut.assetCenter"), total: 0, items: [] };
 
   function readDonut(): PasuDonut | null {
     return (window.PASU_DATA as { donut?: PasuDonut } | undefined)?.donut ?? null;
@@ -293,9 +296,9 @@ export function initDonuts(root: HTMLElement): () => void {
       legEls.forEach(function (l, j) {
         l.classList.toggle("linked", indices.indexOf(j) >= 0);
       });
-      const heading = id === "donut-assets" ? "포함 자산군" : "보유 지갑";
+      const heading = id === "donut-assets" ? T("assets.donut.includedAssets") : T("assets.donut.holdingWallets");
       center!.innerHTML =
-        '<span class="dc-k">' + heading + "</span>" + '<span class="dc-sub">' + ctxLabel + " 기준</span>";
+        '<span class="dc-k">' + heading + "</span>" + '<span class="dc-sub">' + T("assets.donut.ctxBasis", { label: ctxLabel }) + "</span>";
       center!.animate(
         [
           { transform: "scale(0.94)", opacity: 0.45 },

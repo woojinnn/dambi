@@ -60,11 +60,11 @@ export function NavRail() {
       <div className="nav-divider" />
 
       <div className="nav-group">
-        <RailItem to="/" end label="Home" icon={<HomeIcon />} />
-        <RailItem to="/editor" label="Editor" icon={<EditorIcon />} />
-        <RailItem to="/simulation" label="Simulation" icon={<SimIcon />} />
-        <RailItem to="/assets" label="Assets" icon={<MonIcon />} />
-        <RailItem to="/market" label="Policy Hub" icon={<MarketIcon />} />
+        <RailItem to="/" end label={t("nav.home")} icon={<HomeIcon />} />
+        <RailItem to="/editor" label={t("nav.editor")} icon={<EditorIcon />} />
+        <RailItem to="/simulation" label={t("nav.simulation")} icon={<SimIcon />} />
+        <RailItem to="/assets" label={t("nav.assets")} icon={<MonIcon />} />
+        <RailItem to="/market" label={t("nav.market")} icon={<MarketIcon />} />
       </div>
 
       <div className="nav-divider" />
@@ -72,7 +72,7 @@ export function NavRail() {
       <div className="nav-group">
         <RailItem
           to="/history"
-          label="History"
+          label={t("nav.history")}
           icon={<HistoryIcon />}
           badge={pendingCount > 0 ? String(pendingCount) : undefined}
           showDot={pendingCount > 0}

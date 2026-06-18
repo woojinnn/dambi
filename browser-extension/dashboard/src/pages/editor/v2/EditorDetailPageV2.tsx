@@ -8,6 +8,7 @@ import type { PolicySeverity } from "../../../server-api";
 import {
   bindDef,
   deleteDef,
+  duplicateDef,
   getOverview,
   putDef,
   putPackage,
@@ -53,7 +54,8 @@ import "../../market.css";
 import { catLabel, catStyle } from "./categories";
 import { CatIcon, ShieldIcon, WarnIcon } from "./icons";
 import { blocksToText, textToBlocks } from "../../../cedar";
-import { concretizeIr } from "../../../cedar/blocks";
+import { blocksToEst, concretizeIr } from "../../../cedar/blocks";
+import { llmDraftPolicy } from "../../../server-api/llm-draft";
 import { PolicyFormPane } from "./PolicyFormPane";
 import {
   emptyFormModel,
@@ -64,7 +66,7 @@ import {
   type FormModel,
 } from "../../../cedar/form";
 
-type Tab = "cedar" | "form";
+type Tab = "cedar" | "form" | "llm";
 
 function defaultTab(method: PolicyMethod | undefined): Tab {
   // Legacy `block`-method policies fall through to Cedar — they keep their full
@@ -213,27 +215,20 @@ export function EditorDetailPageV2() {
             snap={overviewQ.data ?? null}
             bindingCtx={bindingCtx}
             isNew={isNew}
-            onSaved={(savedId) => {
+            onSaved={() => {
               void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
-              if (bindingCtx) {
-                navigate("/editor"); // 지갑별 정책(기본 탭)으로 복귀
-                return;
-              }
-              if (isNew) {
-                // 새 정책 저장 완료 → "+ 새 정책"을 눌렀던 목록으로 복귀.
-                // (상세에 머무르지 않는다 — 저장이 끝났다는 감각 + 다음 작업 동선)
-                navigate("/editor", { replace: true });
-                return;
-              }
-              if (savedId !== id) {
-                navigate(`/editor/${encodeURIComponent(savedId)}`, {
-                  replace: true,
-                });
-              }
+              // 저장 완료 → 항상 목록(/editor)으로 복귀해 "저장됐다"는 화면 전환을
+              // 준다(기존 def 수정도 포함 — 예전엔 같은 페이지에 머물러 변화가 없었음).
+              // 새 정책/바인딩 저장은 뒤로가기로 미저장 상태에 돌아가지 않게 replace.
+              navigate("/editor", { replace: isNew || !!bindingCtx });
             }}
             onDeleted={() => {
               void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
               navigate("/editor");
+            }}
+            onDuplicated={(newId) => {
+              void qc.invalidateQueries({ queryKey: ["ps2-overview"] });
+              navigate(`/editor/${encodeURIComponent(newId)}`);
             }}
           />
         )}
@@ -250,6 +245,7 @@ function EditorBody({
   isNew,
   onSaved,
   onDeleted,
+  onDuplicated,
 }: {
   policy: EditorPolicy;
   storedDef: PolicyDef | null;
@@ -258,6 +254,7 @@ function EditorBody({
   isNew: boolean;
   onSaved: (id: string) => void;
   onDeleted: () => void;
+  onDuplicated: (newId: string) => void;
 }) {
   const { t, i18n } = useTranslation("editor");
   const [name, setName] = useState(() => policy.displayName);
@@ -291,6 +288,8 @@ function EditorBody({
   });
   const [resetToken, setResetToken] = useState(0);
   const [revertNotice, setRevertNotice] = useState<string | null>(null);
+  // LLM 이 남긴 경고(예: mock 메서드라 표현 못 한 부분) — 폼 탭으로 넘어가도 보이게.
+  const [llmWarn, setLlmWarn] = useState<string | null>(null);
   // 정책 문서(정의/범위/대상/데이터). 발행 시 함께 올라간다. 빈 칸은 저장 안 함.
   // EditorBody는 policy.id로 remount되므로 초기값을 storedDef.doc에서 읽으면 충분.
   const [docDefinition, setDocDefinition] = useState(() => storedDef?.doc?.definition ?? "");
@@ -325,7 +324,16 @@ function EditorBody({
   }, [policy.id]);
 
   const fromMarket = policy.source === "market";
+  // 기본 안전팩(builtin)은 읽기 전용 — 삭제·수정 불가(ops.ts가 강제). 편집은
+  // "복제해서 내 정책으로"로 유도한다.
+  const isBuiltin = policy.source === "builtin";
+  const lockEdit = !!bindingCtx || isBuiltin;
   const cstyle = catStyle(policy.cat);
+
+  const duplicateMut = useMutation({
+    mutationFn: () => duplicateDef(policy.id),
+    onSuccess: (newId) => onDuplicated(newId),
+  });
 
   // 신규 def 첫 저장의 범위 모달 — prepare()가 만든 페이로드를 들고 띄운다.
   const [scopeAsk, setScopeAsk] = useState<{ ir: PolicyIR; manifest: unknown } | null>(null);
@@ -736,6 +744,36 @@ function EditorBody({
     setTab(next);
   };
 
+  /** LLM 탭에서 생성한 FormModel 을 폼 탭에 적용한다. 헤더가 소유한 slug/severity 를
+   *  주입하고, 변환 가능 여부를 로컬에서 한번 검증(WASM 불필요)한 뒤 폼 탭으로 전환한다.
+   *  부분집합 밖이면 throw → LlmPane 이 에러를 보여준다. */
+  const applyLlmModel = async (model: FormModel, warnings: string[] = []) => {
+    // LLM 산출물은 신뢰하지 않고 최소 형태를 보정한다(누락 필드로 변환기가 죽는 것 방지).
+    const m = (model ?? {}) as Partial<FormModel>;
+    const normalized: FormModel = {
+      trigger: m.trigger ?? { kind: "any" },
+      when: Array.isArray(m.when) ? m.when : [],
+      unless: Array.isArray(m.unless) ? m.unless : [],
+      id: stripDashboardId(policy.id),
+      severity: (m.severity ?? severity) as FormModel["severity"],
+      reason: m.reason ?? "",
+    };
+    // 변환 가능성 사전 검증(폼 부분집합 안인지). 깨지면 원본을 콘솔에 남기고 깔끔한
+    // 메시지로 throw → LlmPane 이 표시.
+    try {
+      blocksToEst(concretizeIr(formToIr(normalized)));
+    } catch (err) {
+      console.error("[llm] FormModel 변환 실패:", model, err); // i18n-ok
+      throw new Error(t("detail.llmBadModel"));
+    }
+    setFormEntry({ kind: "ok", model: normalized });
+    setFormKey((k) => k + 1);
+    setLastModel(normalized);
+    setSeverity(normalized.severity as PolicySeverity);
+    setLlmWarn(warnings.length > 0 ? warnings.join(" · ") : null);
+    setTab("form");
+  };
+
   // Open the form on first mount when it is the default tab (method === "form").
   useEffect(() => {
     if (tab === "form" && formEntry === null) void openForm();
@@ -795,7 +833,7 @@ function EditorBody({
           )}
         </div>
 
-        {!bindingCtx && (
+        {!lockEdit && (
           <div className={`ev2-doc-sec${docOpen ? " open" : ""}`}>
             <button
               type="button"
@@ -841,7 +879,7 @@ function EditorBody({
           <TabBtn
             label="Cedar"
             active={tab === "cedar"}
-            badge={bindingCtx ? t("detail.readOnlyBadge") : undefined}
+            badge={lockEdit ? t("detail.readOnlyBadge") : undefined}
             onClick={() => handleTabChange("cedar")}
           />
           <TabBtn
@@ -849,8 +887,26 @@ function EditorBody({
             active={tab === "form"}
             onClick={() => handleTabChange("form")}
           />
+          {!lockEdit && (
+            <TabBtn
+              label={t("detail.llmTab")}
+              active={tab === "llm"}
+              onClick={() => handleTabChange("llm")}
+            />
+          )}
           <span className="ev2-spc" />
-          {!bindingCtx && (
+          {isBuiltin && (
+            <button
+              type="button"
+              className="ev2-pri"
+              onClick={() => duplicateMut.mutate()}
+              disabled={duplicateMut.isPending}
+              title={t("detail.builtinLockNote")}
+            >
+              {duplicateMut.isPending ? t("saving") : t("detail.duplicateToEdit")}
+            </button>
+          )}
+          {!bindingCtx && !isBuiltin && (
             <button
               type="button"
               className="ev2-pri ghost"
@@ -860,7 +916,7 @@ function EditorBody({
               <ShieldIcon /> {t("publish.title")}
             </button>
           )}
-          {!bindingCtx && (
+          {!bindingCtx && !isBuiltin && (
           <button
             type="button"
             className="ev2-pri danger"
@@ -877,6 +933,7 @@ function EditorBody({
             {t("common:delete")}
           </button>
           )}
+          {!isBuiltin && (
           <button
             type="button"
             className={`ev2-pri${bindingCtx && !formValidity.valid ? " invalid" : ""}`}
@@ -899,6 +956,7 @@ function EditorBody({
           >
             {saveMut.isPending ? t("saving") : t("common:save")}
           </button>
+          )}
         </div>
       </div>
 
@@ -914,12 +972,24 @@ function EditorBody({
           {revertNotice}
         </div>
       )}
+      {isBuiltin && (
+        <div className="ev2-err-banner info">
+          <ShieldIcon />
+          {t("detail.builtinLockNote")}
+        </div>
+      )}
+      {llmWarn && (
+        <div className="ev2-err-banner warn">
+          <WarnIcon />
+          {t("detail.llmWarnPrefix")} {llmWarn}
+        </div>
+      )}
 
       <div className="ev2-detail-tabbody">
         {tab === "cedar" && (
           <CedarPane
             value={cedarText}
-            readOnly={!!bindingCtx}
+            readOnly={lockEdit}
             onChange={(next) => {
               setCedarText(next);
               // Drop the cached IR. Otherwise the form tab (openForm) and
@@ -935,7 +1005,7 @@ function EditorBody({
               key={formKey}
               initialModel={formEntry.model}
               initialManifest={policy.manifest}
-              valuesOnly={!!bindingCtx}
+              valuesOnly={lockEdit}
               onValidity={setFormValidity}
               resetToken={resetToken}
               {...(bindingCtx
@@ -974,6 +1044,7 @@ function EditorBody({
               <div className="sm">{t("detail.formLoading")}</div>
             </div>
           ))}
+        {tab === "llm" && !bindingCtx && <LlmPane onModel={applyLlmModel} />}
       </div>
 
       <PublishModal
@@ -1108,6 +1179,91 @@ function CedarPane({
         autoCorrect="off"
         autoCapitalize="off"
       />
+    </div>
+  );
+}
+
+/** LLM 탭 — 자연어 의도를 적으면 LLM 이 FormModel 을 만들어 폼 탭으로 넘긴다.
+ *  생성 성공 시 onModel 이 폼 탭으로 전환하므로 여기선 입력/진행/에러만 다룬다. */
+/** LLM 탭 아이콘 — 작은 sparkle/wand. */
+function SparkleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" />
+      <path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
+    </svg>
+  );
+}
+
+function LlmPane({ onModel }: { onModel: (m: FormModel, warnings: string[]) => Promise<void> }) {
+  const { t } = useTranslation("editor");
+  const [intent, setIntent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const text = intent.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { model, warnings } = await llmDraftPolicy({ intent: text });
+      await onModel(model, warnings);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="ev2-llm-pane">
+      <div className="ev2-llm-card">
+        <div className="ev2-llm-head">
+          <span className="ev2-llm-badge">
+            <SparkleIcon />
+          </span>
+          <div>
+            <div className="ev2-llm-title">{t("llm.title")}</div>
+            <div className="ev2-llm-sub">{t("llm.hint")}</div>
+          </div>
+        </div>
+
+        <div className="ev2-llm-field">
+          <textarea
+            className="ev2-llm-textarea"
+            value={intent}
+            onChange={(e) => setIntent(e.target.value)}
+            placeholder={t("llm.placeholder")}
+            disabled={busy}
+            autoFocus
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+          />
+          <div className="ev2-llm-bar">
+            <button
+              type="button"
+              className="ev2-pri ev2-llm-gen"
+              onClick={() => void submit()}
+              disabled={busy || !intent.trim()}
+            >
+              {busy ? <span className="ev2-llm-spin" /> : <SparkleIcon />}
+              {busy ? t("llm.generating") : t("llm.generate")}
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="ev2-llm-error">
+            <WarnIcon />
+            {error}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

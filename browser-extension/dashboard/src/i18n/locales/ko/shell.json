@@ -1,5 +1,11 @@
 {
   "nav": {
+    "home": "홈",
+    "editor": "정책 관리",
+    "simulation": "시뮬레이션",
+    "assets": "자산",
+    "market": "정책허브",
+    "history": "설정",
     "profile": "프로필",
     "signOut": "로그아웃",
     "account": "계정",

@@ -8,6 +8,8 @@
  * from one source of truth (no duplicated join/parse logic).
  */
 
+import i18n from "i18next";
+
 import {
   hlAccountOf,
   type ClassifiedApprovals,
@@ -283,15 +285,27 @@ export function buildDonutData(
       .sort((a, b) => b.usd - a.usd);
 
     walletAssets[w.address] = {
-      centerLabel: `${w.label ?? shortAddr(w.address)} 자산`,
+      centerLabel: i18n.t("monitoring:assets.donut.walletAssets", { label: w.label ?? shortAddr(w.address) }),
       total,
       items,
     };
   });
 
   return {
-    wallets: { id: "wallets", title: "지갑별 자산 비율", centerLabel: "합산 자산", total: walletTotal, items: walletItems },
-    assets: { id: "assets", title: "자산 분포", centerLabel: "총 자산", total: assetTotal, items: assetItems },
+    wallets: {
+      id: "wallets",
+      title: i18n.t("monitoring:assets.donut.walletTitle"),
+      centerLabel: i18n.t("monitoring:assets.donut.walletCenter"),
+      total: walletTotal,
+      items: walletItems,
+    },
+    assets: {
+      id: "assets",
+      title: i18n.t("monitoring:assets.donut.assetTitle"),
+      centerLabel: i18n.t("monitoring:assets.donut.assetCenter"),
+      total: assetTotal,
+      items: assetItems,
+    },
     walletAssets,
     adjacency: { walletToAsset, assetToWallet },
   };

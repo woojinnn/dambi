@@ -267,10 +267,14 @@
 .pkc { height: 192px; perspective: 1400px; }
 .pkc-in { position: relative; width: 100%; height: 100%; transition: transform 520ms cubic-bezier(.34,.9,.28,1); transform-style: preserve-3d; }
 .pkc.flip .pkc-in { transform: rotateY(180deg); }
-/* 뒷면이 보일 때 앞면(패키지 토글 포함)이 클릭을 가로채지 못하게 — 화살표 눌렀을
-   때 뒤집히지 않고 패키지가 꺼지던 버그 방지. 안 보이는 면은 항상 클릭 비활성. */
-.pkc:not(.flip) .pkc-back { pointer-events: none; }
-.pkc.flip .pkc-front { pointer-events: none; }
+/* 보이는 면만 상호작용 가능하게 한다. pointer-events:none 만으로는 두 면이 3D
+   동일 평면(preserve-3d)에 겹쳐 있어, 보이는 뒷면을 눌러도 클릭이 안 보이는
+   앞면(pointer-events:none)으로 해석돼 빈 부모로 흘러버리는 경우가 있었다 — 그래서
+   화살표를 눌러도 안 돌아가던 버그. visibility 로 안 보이는 면을 hit-test 에서
+   완전히 제거하되, 회전(520ms)이 끝난 뒤에 적용되도록 지연해 애니메이션은 그대로
+   보이게 한다(시각적 가림은 backface-visibility 가 이미 처리). */
+.pkc:not(.flip) .pkc-back { pointer-events: none; visibility: hidden; transition: visibility 0s linear 520ms; }
+.pkc.flip .pkc-front { pointer-events: none; visibility: hidden; transition: visibility 0s linear 520ms; }
 .pkc-face {
   position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   border: 1px solid var(--hairline); border-radius: var(--r-md); background: var(--surface);
@@ -280,7 +284,7 @@
 .pkc.off { opacity: 0.62; }
 
 /* front */
-.pkc-front { padding: 15px 15px 13px; cursor: pointer; transition: transform 150ms ease, box-shadow 170ms ease, border-color 150ms ease; }
+.pkc-front { padding: 15px 15px 13px; cursor: pointer; transition: transform 150ms ease, box-shadow 170ms ease, border-color 150ms ease, visibility 0s; }
 .pkc:not(.flip) .pkc-front:hover { transform: translateY(-2px); border-color: var(--cyan-300, #a9c8cf); box-shadow: 0 1px 2px rgba(72,90,94,0.05), 0 16px 30px -20px rgba(72,90,94,0.5); }
 .pkc-ftop { display: flex; align-items: center; gap: 9px; }
 .pkc-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--fog-200); color: var(--slate-500); flex-shrink: 0; }
@@ -306,7 +310,7 @@
 .pkc-fliphint:hover { color: var(--cyan-600, var(--slate-700)); }
 
 /* back */
-.pkc-back { transform: rotateY(180deg); }
+.pkc-back { transform: rotateY(180deg); transition: visibility 0s; }
 .pkc-bhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--hairline-soft); }
 .pkc-bback { display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; cursor: pointer; padding: 0; color: var(--slate-400); flex-shrink: 0; }
 .pkc-bback:hover { color: var(--slate-700); }
@@ -344,7 +348,12 @@ button.pkc-edit { border: 0; background: none; padding: 0; }
 .pkc-pol:hover .pkc-edit { opacity: 1; }
 .pkc-edit:hover { background: var(--fog-300); color: var(--slate-700); }
 .pkc-edit svg { width: 13px; height: 13px; }
-@media (prefers-reduced-motion: reduce) { .pkc-in { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .pkc-in { transition: none; }
+  /* 회전이 즉시면 visibility 지연도 없앤다(안 보이는 면이 잠깐 클릭 먹는 것 방지). */
+  .pkc:not(.flip) .pkc-back,
+  .pkc.flip .pkc-front { transition-delay: 0s; }
+}
 
 .pk-folder {
   border: 1px solid var(--hairline-soft);

@@ -65,8 +65,12 @@
   },
   "combobox": {
     "enrichBadge": "enriched",
-    "pickField": "Pick a field…",
+    "pickField": "Enter a value or pick a field…",
     "searchPlaceholder": "Search fields…",
+    "valuePlaceholder": "Enter a value…",
+    "literalHead": "Enter a value",
+    "suggestHead": "Suggested values",
+    "fieldsHead": "Compare to a field",
     "noMatch": "No matching fields",
     "hideAdvanced": "▾ Hide advanced fields",
     "showAdvanced": "▸ Show advanced fields ({{count}})"
@@ -136,6 +140,7 @@
     "deleteConfirm": "Delete the policy \"{{name}}\"?\nThis can't be undone.",
     "deleteConfirmUsed": "Delete the policy \"{{name}}\"?\nIt will also be removed from {{count}} wallet(s). This can't be undone.",
     "deletedToast": "Policy deleted",
+    "builtinLocked": "The default safety pack can't be deleted or edited",
     "newFolderName": "New folder",
     "folderCreatedToast": "Folder created — try giving it a name",
     "deleteFolderConfirm": "Delete the folder \"{{name}}\"?\nPolicies inside move to 'Uncategorized'.",
@@ -257,7 +262,7 @@
     "walletOptDesc": "Apply customized settings per wallet package — the template is still saved to the Library.",
     "noWalletsSuffix": " (no registered wallets)",
     "libOptTitle": "Save to Library (shared)",
-    "libOptDesc": "A shared policy reusable across wallets. Kept in the Library; apply it to any wallet/package when needed. Usually the right choice.",
+    "libOptDesc": "A shared policy reusable across wallets. Kept in the Library; apply it to any wallet/package when needed.",
     "title2Wallet": "Which wallets / packages?",
     "title2Library": "Library settings",
     "sub2Wallet": "The template is saved to the Library and applied to the packages you pick. Wallets with no package go to the Library only.",
@@ -318,6 +323,20 @@
     "folderDeletedToast": "Folder deleted — its policies moved to Uncategorized",
     "defRowTitle": "Click to edit the template · drag to apply to a package / move to a dedicated folder"
   },
+  "llm": {
+    "title": "Describe the policy in plain language",
+    "hint": "An LLM turns your intent into a policy, then drops it into the Form tab for review.",
+    "placeholder": "e.g. Block swaps whose output goes to an address other than my own wallet",
+    "generate": "Generate",
+    "generating": "Generating…",
+    "examplesLabel": "Examples",
+    "examples": [
+      "Block swaps whose output goes to an address other than my own wallet",
+      "Block token transfers to a burn address (0x0…0 / 0x…dead)",
+      "Block unlimited approvals (uint256/uint160 max), except when the spender is Permit2",
+      "Warn on unidentified blind-signature requests"
+    ]
+  },
   "detail": {
     "backToList": "← List",
     "notFoundTitle": "Policy not found",
@@ -353,7 +372,12 @@
     "bindingBadge": "Editing the instance for wallet {{addr}} — value changes apply only to this wallet",
     "fromMarket": "From Policy Hub",
     "readOnlyBadge": "Read-only",
+    "builtinLockNote": "This is a default safety-pack policy — it can't be deleted or edited. Duplicate it to edit your own copy.",
+    "duplicateToEdit": "Duplicate to edit",
     "formTab": "Form",
+    "llmTab": "LLM",
+    "llmBadModel": "The policy the LLM produced isn't in a valid shape. Please try again.",
+    "llmWarnPrefix": "Heads up:",
     "deleteConfirm": "Delete the policy \"{{name}}\"?",
     "deleteConfirmUsed": "Delete the policy \"{{name}}\"?\nIt will also be removed from {{count}} wallet(s).",
     "invalidSaveTitle": "Invalid format — pressing this reverts to the state before your changes",

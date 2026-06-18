@@ -34,14 +34,19 @@ interface ModeSummary {
 export function initLayoutModes(root: HTMLElement): () => void {
   "use strict";
 
-  const T: ModeTweaks = (window.PASU_TWEAKS as ModeTweaks) || { layoutMode: "segment", alertStrip: true, segmentDefault: "holdings" };
+  const TW: ModeTweaks = (window.PASU_TWEAKS as ModeTweaks) || { layoutMode: "segment", alertStrip: true, segmentDefault: "holdings" };
 
-  const SECTIONS = [
-    { key: "holdings", label: "보유자산" },
-    { key: "approvals", label: "승인" },
-    { key: "hl", label: "Hyperliquid" },
-    { key: "pending", label: "대기 주문" },
+  // i18n bridge (read at render time; falls back to key in standalone prototype).
+  const Tr = (k: string, vars?: Record<string, unknown>): string =>
+    window.PASU_T ? window.PASU_T(k, vars) : k;
+
+  const SECTIONS: Array<{ key: string; labelKey?: string; label?: string }> = [
+    { key: "holdings", labelKey: "assets.sections.holdings" },
+    { key: "approvals", labelKey: "assets.sections.approvals" },
+    { key: "hl", label: "Hyperliquid" }, // proper noun — never translated
+    { key: "pending", labelKey: "assets.sections.pending" },
   ];
+  const secLabel = (s: { labelKey?: string; label?: string }): string => (s.labelKey ? Tr(s.labelKey) : s.label || "");
   const MODES = [
     { key: "stack", title: "전체 스택", desc: "지금처럼 네 섹션을 모두 펼쳐 둠" },
     { key: "segment", title: "세그먼트", desc: "한 번에 한 섹션 · 위험은 상시 노출" },
@@ -51,8 +56,8 @@ export function initLayoutModes(root: HTMLElement): () => void {
     { key: "stickyacc", title: "스티키 아코디언", desc: "상단 점프 내비 고정 + 섹션별 접기·펼치기" },
   ];
 
-  let activeSeg = T.segmentDefault || "holdings";
-  let currentMode = T.layoutMode || "stack";
+  let activeSeg = TW.segmentDefault || "holdings";
+  let currentMode = TW.layoutMode || "stack";
   let lastSummary: ModeSummary | null = typeof window.PASU_getSummary === "function" ? (window.PASU_getSummary() as ModeSummary) : null;
   let scrollSpy: (() => void) | null = null;
 
@@ -102,34 +107,34 @@ export function initLayoutModes(root: HTMLElement): () => void {
       let items = "";
       let cnt = 0;
       if ((s.blocked || 0) > 0) {
-        items += item("fail", "approvals", "차단 대상", s.blocked!);
+        items += item("fail", "approvals", Tr("assets.alert.blocked"), s.blocked!);
         cnt++;
       }
       if ((s.unlimited || 0) > 0) {
-        items += item("warn", "approvals", "무제한 승인", s.unlimited!);
+        items += item("warn", "approvals", Tr("assets.alert.unlimited"), s.unlimited!);
         cnt++;
       }
       if ((s.exposureUsd || 0) > 0) {
-        items += item("warn", "holdings", "현재 노출", s.exposureTxt || "$0");
+        items += item("warn", "holdings", Tr("assets.alert.exposure"), s.exposureTxt || "$0");
         cnt++;
       }
       if ((s.pending || 0) > 0) {
-        items += item("slate", "pending", "대기 주문", s.pending!);
+        items += item("slate", "pending", Tr("assets.alert.pending"), s.pending!);
         cnt++;
       }
       return (
         '<div class="alert-strip has-risk">' +
         '<span class="as-ic">' + warnIco + "</span>" +
-        '<span class="as-lead">조치 필요 <span class="as-n">' + cnt + "</span></span>" +
+        '<span class="as-lead">' + Tr("assets.alert.actionNeeded") + ' <span class="as-n">' + cnt + "</span></span>" +
         '<div class="as-items">' + items + "</div>" +
         "</div>"
       );
     }
-    const extra = (s.pending || 0) > 0 ? " · 대기 주문 " + s.pending + "건" : "";
+    const extra = (s.pending || 0) > 0 ? Tr("assets.alert.calmExtra", { count: s.pending }) : "";
     return (
       '<div class="alert-strip is-calm">' +
       '<span class="as-ic">' + okIco + "</span>" +
-      '<div class="as-items"><span class="as-calm-txt">정상 — 처리할 긴급 항목이 없어요' + extra + "</span></div>" +
+      '<div class="as-items"><span class="as-calm-txt">' + Tr("assets.alert.calm") + extra + "</span></div>" +
       "</div>"
     );
   }
@@ -147,7 +152,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
         return (
           '<button class="seg-tab' + (s.key === activeSeg ? " on" : "") + '" data-seg="' + s.key + '">' +
           dot +
-          s.label +
+          secLabel(s) +
           cntHtml +
           "</button>"
         );
@@ -191,25 +196,33 @@ export function initLayoutModes(root: HTMLElement): () => void {
     const s = lastSummary || ({} as ModeSummary);
     const apprRisk = (s.blocked || 0) > 0 || (s.unlimited || 0) > 0;
     const items: OvItem[] = [
-      { key: "holdings", k: "보유 자산", v: s.holdingsUsdTxt || "—", sub: (s.holdingsCount || 0) + " 토큰", risk: false },
+      { key: "holdings", k: Tr("assets.overview.holdings"), v: s.holdingsUsdTxt || "—", sub: Tr("assets.overview.tokens", { count: s.holdingsCount || 0 }), risk: false },
       {
         key: "approvals",
-        k: "승인 위험",
-        v: apprRisk ? s.exposureTxt || "$0" : (s.apprCount || 0) + "건",
-        sub: apprRisk ? "무제한 " + (s.unlimited || 0) + (s.blocked ? " · 차단 " + s.blocked : "") : "노출 없음",
+        k: Tr("assets.overview.apprRisk"),
+        v: apprRisk ? s.exposureTxt || "$0" : Tr("assets.overview.cases", { count: s.apprCount || 0 }),
+        sub: apprRisk
+          ? Tr("assets.overview.unlimitedN", { count: s.unlimited || 0 }) + (s.blocked ? Tr("assets.overview.blockedN", { count: s.blocked }) : "")
+          : Tr("assets.overview.noExposure"),
         risk: apprRisk,
       },
     ];
     if (isAvailable("hl")) {
       const h = hlSummary();
-      items.push({ key: "hl", k: "Hyperliquid", v: h.value, sub: h.positions + " 포지션", risk: false });
+      items.push({ key: "hl", k: "Hyperliquid", v: h.value, sub: Tr("assets.overview.positions", { count: h.positions }), risk: false });
     }
-    items.push({ key: "pending", k: "대기 주문", v: (s.pending || 0) + "건", sub: (s.pending || 0) > 0 ? "서명 대기" : "없음", risk: false });
+    items.push({
+      key: "pending",
+      k: Tr("assets.overview.pending"),
+      v: Tr("assets.overview.cases", { count: s.pending || 0 }),
+      sub: (s.pending || 0) > 0 ? Tr("assets.overview.signWaiting") : Tr("assets.overview.none"),
+      risk: false,
+    });
     return items;
   }
 
   function ovCardsHtml(): string {
-    const style = T.overviewStyle || "editorial";
+    const style = TW.overviewStyle || "editorial";
     const items = ovItems();
     if (style === "ribbon") return ovRibbonHtml(items);
     if (style === "editorial") return ovEditorialHtml(items);
@@ -282,11 +295,11 @@ export function initLayoutModes(root: HTMLElement): () => void {
         const cnt = sectionCount(s.key);
         const cntHtml = cnt != null ? '<span class="jl-count">' + cnt + "</span>" : "";
         return (
-          '<button class="jump-link" data-jump="' + s.key + '">' + dot + '<span class="jl-name">' + s.label + "</span>" + cntHtml + "</button>"
+          '<button class="jump-link" data-jump="' + s.key + '">' + dot + '<span class="jl-name">' + secLabel(s) + "</span>" + cntHtml + "</button>"
         );
       })
       .join("");
-    const tail = withAcc ? '<button class="jump-allbtn" data-allacc="toggle">모두 펼치기</button>' : "";
+    const tail = withAcc ? '<button class="jump-allbtn" data-allacc="toggle">' + Tr("assets.acc.expandAll") + "</button>" : "";
     return '<div class="jump-nav' + (withAcc ? " jump-nav-acc" : "") + '">' + links + tail + "</div>";
   }
 
@@ -303,20 +316,20 @@ export function initLayoutModes(root: HTMLElement): () => void {
     };
     let inner = "";
     if (key === "holdings") {
-      inner = stat((s.holdingsCount || 0) + " 토큰") + val(s.holdingsUsdTxt || "—");
-      if ((s.exposureUsd || 0) > 0) inner += flag("warn", "노출 " + s.exposureTxt);
+      inner = stat(Tr("assets.acc.tokens", { count: s.holdingsCount || 0 })) + val(s.holdingsUsdTxt || "—");
+      if ((s.exposureUsd || 0) > 0) inner += flag("warn", Tr("assets.acc.exposureN", { amount: s.exposureTxt }));
     } else if (key === "approvals") {
-      inner = stat((s.apprCount || 0) + "건");
-      if ((s.blocked || 0) > 0) inner += flag("fail", "차단 " + s.blocked);
-      if ((s.unlimited || 0) > 0) inner += flag("warn", "무제한 " + s.unlimited);
-      if (!s.blocked && !s.unlimited && (s.old || 0) > 0) inner += flag("slate", "정리 대상 " + s.old);
-      if (!s.blocked && !s.unlimited && !s.old) inner += flag("calm", "위험 없음");
+      inner = stat(Tr("assets.acc.cases", { count: s.apprCount || 0 }));
+      if ((s.blocked || 0) > 0) inner += flag("fail", Tr("assets.acc.blockedN", { count: s.blocked }));
+      if ((s.unlimited || 0) > 0) inner += flag("warn", Tr("assets.acc.unlimitedN", { count: s.unlimited }));
+      if (!s.blocked && !s.unlimited && (s.old || 0) > 0) inner += flag("slate", Tr("assets.acc.cleanupN", { count: s.old }));
+      if (!s.blocked && !s.unlimited && !s.old) inner += flag("calm", Tr("assets.acc.noRisk"));
     } else if (key === "hl") {
       const h = hlSummary();
-      inner = stat(h.positions + " 포지션") + val(h.value);
+      inner = stat(Tr("assets.acc.positions", { count: h.positions })) + val(h.value);
     } else if (key === "pending") {
       const p = s.pending || 0;
-      inner = p > 0 ? stat(p + "건") + flag("slate", "서명 대기") : stat("없음");
+      inner = p > 0 ? stat(Tr("assets.acc.cases", { count: p })) + flag("slate", Tr("assets.acc.signWaiting")) : stat(Tr("assets.acc.none"));
     }
     return '<span class="acc-sum">' + inner + "</span>";
   }
@@ -332,7 +345,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
         const e = secEl(s.key);
         return isAvailable(s.key) && e && e.classList.contains("collapsed");
       });
-      allBtn.textContent = anyCollapsed ? "모두 펼치기" : "모두 접기";
+      allBtn.textContent = anyCollapsed ? Tr("assets.acc.expandAll") : Tr("assets.acc.collapseAll");
     }
   }
 
@@ -412,9 +425,9 @@ export function initLayoutModes(root: HTMLElement): () => void {
 
   // ── apply current mode ────────────────────────────────────────────────────
   function applyMode(): void {
-    currentMode = T.layoutMode || "stack";
-    document.body.classList.toggle("compact", !!T.compact);
-    document.body.classList.toggle("stable-h", !!T.stableHeight);
+    currentMode = TW.layoutMode || "stack";
+    document.body.classList.toggle("compact", !!TW.compact);
+    document.body.classList.toggle("stable-h", !!TW.stableHeight);
     document.body.classList.remove("mode-stack", "mode-segment", "mode-overview", "mode-sticky", "mode-accordion", "mode-stickyacc");
     document.body.classList.add("mode-" + currentMode);
 
@@ -437,7 +450,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
       ensureSegAvailable();
       html += ovCardsHtml();
     } else {
-      if (T.alertStrip) html += alertStripHtml();
+      if (TW.alertStrip) html += alertStripHtml();
       if (currentMode === "segment") html += segBarHtml();
       if (currentMode === "sticky") html += jumpNavHtml(false);
       if (currentMode === "stickyacc") html += jumpNavHtml(true);
@@ -572,8 +585,8 @@ export function initLayoutModes(root: HTMLElement): () => void {
       const mode = target.closest(".tw-mode");
       if (mode) {
         const mk = mode.getAttribute("data-mode");
-        if (mk && mk !== T.layoutMode) {
-          T.layoutMode = mk;
+        if (mk && mk !== TW.layoutMode) {
+          TW.layoutMode = mk;
           persist({ layoutMode: mk });
           applyMode();
           renderPanel();
@@ -584,8 +597,8 @@ export function initLayoutModes(root: HTMLElement): () => void {
       const ovs = target.closest("[data-ovstyle]");
       if (ovs) {
         const sv = ovs.getAttribute("data-ovstyle") || undefined;
-        if (sv !== T.overviewStyle) {
-          T.overviewStyle = sv;
+        if (sv !== TW.overviewStyle) {
+          TW.overviewStyle = sv;
           persist({ overviewStyle: sv });
           applyMode();
           renderPanel();
@@ -597,14 +610,14 @@ export function initLayoutModes(root: HTMLElement): () => void {
       if (tog) {
         const tk = tog.getAttribute("data-tw");
         if (tk === "compact") {
-          T.compact = !T.compact;
-          persist({ compact: T.compact });
+          TW.compact = !TW.compact;
+          persist({ compact: TW.compact });
         } else if (tk === "stableHeight") {
-          T.stableHeight = !T.stableHeight;
-          persist({ stableHeight: T.stableHeight });
+          TW.stableHeight = !TW.stableHeight;
+          persist({ stableHeight: TW.stableHeight });
         } else {
-          T.alertStrip = !T.alertStrip;
-          persist({ alertStrip: T.alertStrip });
+          TW.alertStrip = !TW.alertStrip;
+          persist({ alertStrip: TW.alertStrip });
         }
         applyMode();
         renderPanel();
@@ -615,10 +628,10 @@ export function initLayoutModes(root: HTMLElement): () => void {
     panel.addEventListener("change", function (e) {
       const sel = (e.target as HTMLElement).closest("#tw-segdef") as HTMLSelectElement | null;
       if (sel) {
-        T.segmentDefault = sel.value;
+        TW.segmentDefault = sel.value;
         activeSeg = sel.value;
         persist({ segmentDefault: sel.value });
-        if (T.layoutMode === "segment") applyMode();
+        if (TW.layoutMode === "segment") applyMode();
       }
     });
   }
@@ -627,7 +640,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
     if (!panel) return;
     const modeHtml = MODES.map(function (m) {
       return (
-        '<button class="tw-mode' + (m.key === T.layoutMode ? " on" : "") + '" data-mode="' + m.key + '">' +
+        '<button class="tw-mode' + (m.key === TW.layoutMode ? " on" : "") + '" data-mode="' + m.key + '">' +
         '<span class="tw-radio"></span>' +
         '<span class="tw-mode-txt"><span class="tw-mode-t">' + m.title + "</span>" +
         '<span class="tw-mode-d">' + m.desc + "</span></span></button>"
@@ -635,11 +648,11 @@ export function initLayoutModes(root: HTMLElement): () => void {
     }).join("");
 
     const segOpts = SECTIONS.map(function (s) {
-      return '<option value="' + s.key + '"' + (s.key === T.segmentDefault ? " selected" : "") + ">" + s.label + "</option>";
+      return '<option value="' + s.key + '"' + (s.key === TW.segmentDefault ? " selected" : "") + ">" + secLabel(s) + "</option>";
     }).join("");
 
     const segDefSec =
-      T.layoutMode === "segment" || T.layoutMode === "overview"
+      TW.layoutMode === "segment" || TW.layoutMode === "overview"
         ? '<div class="tw-sec"><div class="tw-label">기본 열릴 섹션</div>' +
           '<select class="tw-select" id="tw-segdef">' +
           segOpts +
@@ -651,9 +664,9 @@ export function initLayoutModes(root: HTMLElement): () => void {
       { k: "ribbon", t: "리본" },
       { k: "editorial", t: "에디토리얼" },
     ];
-    const curOv = T.overviewStyle || "editorial";
+    const curOv = TW.overviewStyle || "editorial";
     const ovStyleSec =
-      T.layoutMode === "overview"
+      TW.layoutMode === "overview"
         ? '<div class="tw-sec"><div class="tw-label">요약 스타일</div>' +
           '<div class="tw-seg">' +
           OVSTYLES.map(function (o) {
@@ -663,12 +676,12 @@ export function initLayoutModes(root: HTMLElement): () => void {
         : "";
 
     const alertToggleSec =
-      T.layoutMode === "overview"
+      TW.layoutMode === "overview"
         ? ""
         : '<div class="tw-sec"><div class="tw-row">' +
           '<div class="tw-row-txt"><div class="tw-label">위험 알럿 스트립</div>' +
           '<div class="tw-hint">위험 요약을 항상 상단에 고정</div></div>' +
-          '<button class="tw-toggle' + (T.alertStrip ? " on" : "") + '" data-tw="alertStrip" role="switch" aria-checked="' + T.alertStrip + '"></button>' +
+          '<button class="tw-toggle' + (TW.alertStrip ? " on" : "") + '" data-tw="alertStrip" role="switch" aria-checked="' + TW.alertStrip + '"></button>' +
           "</div></div>";
 
     panel.innerHTML =
@@ -683,12 +696,12 @@ export function initLayoutModes(root: HTMLElement): () => void {
       '<div class="tw-sec"><div class="tw-row">' +
       '<div class="tw-row-txt"><div class="tw-label">컴팩트 밀도</div>' +
       '<div class="tw-hint">행·여백을 압축 — 어떤 모드에서도 적용</div></div>' +
-      '<button class="tw-toggle' + (T.compact ? " on" : "") + '" data-tw="compact" role="switch" aria-checked="' + T.compact + '"></button>' +
+      '<button class="tw-toggle' + (TW.compact ? " on" : "") + '" data-tw="compact" role="switch" aria-checked="' + TW.compact + '"></button>' +
       "</div></div>" +
       '<div class="tw-sec"><div class="tw-row">' +
       '<div class="tw-row-txt"><div class="tw-label">높이 안정화</div>' +
       '<div class="tw-hint">보유·승인·HL·대기 네 항목의 높이를 동일하게 고정 (요약·세그먼트)</div></div>' +
-      '<button class="tw-toggle' + (T.stableHeight ? " on" : "") + '" data-tw="stableHeight" role="switch" aria-checked="' + T.stableHeight + '"></button>' +
+      '<button class="tw-toggle' + (TW.stableHeight ? " on" : "") + '" data-tw="stableHeight" role="switch" aria-checked="' + TW.stableHeight + '"></button>' +
       "</div></div>" +
       segDefSec +
       ovStyleSec +

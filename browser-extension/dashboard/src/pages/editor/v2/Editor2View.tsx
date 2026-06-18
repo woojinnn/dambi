@@ -545,6 +545,7 @@ function Workspace(props: {
   const moveDefToLibFolder = (defId: string, folderId: string) => {
     const d = snap.library.defs[defId];
     if (!d) return;
+    if (d.source === "builtin") return void onToast(t("list.builtinLocked"));
     const next = folderId === UNCATEGORIZED_PKG ? undefined : folderId;
     if ((d.defaults.packageId ?? undefined) === next) return;
     const folderName =
@@ -559,6 +560,7 @@ function Workspace(props: {
   const renameLibFolder = (id: string) => {
     const pkg = snap.library.packages[id];
     if (!pkg) return;
+    if (pkg.source === "builtin") return void onToast(t("list.builtinLocked"));
     const name = window.prompt(t("library.rename"), pkg.displayName)?.trim();
     if (!name || name === pkg.displayName) return;
     void run(t("actions.rename"), () =>
@@ -569,6 +571,7 @@ function Workspace(props: {
   const deleteLibFolder = (id: string) => {
     const pkg = snap.library.packages[id];
     if (!pkg) return;
+    if (pkg.source === "builtin") return void onToast(t("list.builtinLocked"));
     if (!window.confirm(t("list.deleteFolderConfirm", { name: pkg.displayName }))) return;
     void run(t("actions.deleteFolder"), () => deletePackage(id)).then(
       (ok) => ok && onToast(t("list.folderDeletedToast")),
@@ -576,6 +579,7 @@ function Workspace(props: {
   };
 
   const onDeleteDef = (d: PolicyDef) => {
+    if (d.source === "builtin") return void onToast(t("list.builtinLocked"));
     const uses = Object.values(snap.wallets.byAddress).reduce(
       (n, w) => n + Object.values(w.bindings).filter((b) => b.defId === d.id).length,
       0,

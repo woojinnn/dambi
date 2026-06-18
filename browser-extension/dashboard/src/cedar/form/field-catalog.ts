@@ -169,6 +169,23 @@ export function labelForPath(path: string): string {
   return raw.replace(/\s*\(\s*nano\s*\)/i, "").trim();
 }
 
+/** Leaf names that denote a numeric MAGNITUDE (amount/gas/price/leverage/…). */
+const NUMERIC_MAGNITUDE_LEAF =
+  /amount|amt|qty|quantity|count|counter|gas|fee|price|value|usd|wei|gwei|balance|liquidity|cap|limit|threshold|leverage|slippage|ratio|pct|percent|score|deadline|expiry|horizon|duration|exposure|streak|notional|collateral|reserve|weight|bp$|min$|max$|^min|^max|out$|^net|estimate/i;
+/** Identifier/enum/address leaves — String here is legitimate, never demote. */
+const NON_NUMERIC_LEAF =
+  /address|contract|recipient|spender|owner|account|operator|delegatee|validator|builder|swapper|offerer|representative|sig|signature|proof|hash|nonce|salt|id$|kind|mode|side|^type|standard|support|tif|name|chain|venue|pool|factory|router|reactor|settlement|domain/i;
+
+/** A `String`-typed field whose name is a numeric magnitude — exact uint256/hex
+ *  with no ordering, so the form can only ==/≠ it (misleading for "amount > X").
+ *  These are demoted from the default picker AND dropped from the LLM's field
+ *  candidates; the numeric Usd/Nano/Bp siblings are the comparable versions.
+ *  Single source of truth — the dashboard sends the LLM a catalog cleaned with
+ *  this (see server-api/llm-draft.ts). */
+export function isRawNumericStringLeaf(leaf: string): boolean {
+  return NUMERIC_MAGNITUDE_LEAF.test(leaf) && !NON_NUMERIC_LEAF.test(leaf);
+}
+
 /** True for engine-internal fields the form hides by default (Rule 3): nano
  *  mirrors, raw-hex amount strings, deep `.key`/state sub-fields, chain ids.
  *  A field stays prominent if it is glossed, a depth-1 primitive scalar, or a
@@ -176,10 +193,10 @@ export function labelForPath(path: string): string {
 function isAdvancedField(path: string, fieldKind: FieldKind, glossed: boolean): boolean {
   const segs = path.split(".").slice(1); // drop "context"
   const leaf = segs[segs.length - 1] ?? "";
-  // Raw amount strings ("…(원본)") demote EVEN when glossed — they're exact
-  // uint256 strings with no ordering, so the form can only ==/≠ them; the
-  // nano/USD siblings are the comparable versions users actually want.
-  if (fieldKind === "primitive.String" && /amount|^buyMin|^sellAmount|^netInput|^minOut/i.test(leaf)) return true;
+  // Raw numeric-magnitude strings demote EVEN when glossed — they're exact
+  // uint256/hex with no ordering, so the form can only ==/≠ them; the
+  // nano/USD/bp siblings are the comparable versions users actually want.
+  if (fieldKind === "primitive.String" && isRawNumericStringLeaf(leaf)) return true;
   if (glossed) return false;
   // The token-identity address (what most token gates compare) stays prominent.
   if (/\.key\.address$/.test(path)) return false;
