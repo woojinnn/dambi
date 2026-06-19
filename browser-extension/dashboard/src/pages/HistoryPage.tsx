@@ -13,7 +13,8 @@ import {
   type VerdictRangeAlias,
 } from "../server-api";
 import { PolicyDiagnosisByText } from "../cedar/diagram/PolicyDiagnosisByText";
-import { getLibrary } from "../server-api/policy-store";
+import { getLibrary, getOverview } from "../server-api/policy-store";
+import { concretizeDefIr } from "../cedar/binding-ir";
 import { annotationIdOf } from "./history-policy-match";
 import { blocksToText } from "../cedar";
 import type { PolicyIR } from "../cedar/blocks";
@@ -799,6 +800,7 @@ function HistoryDetail({
         <PolicyStructureSection
           cedarId={v.policy.name}
           defId={v.policy.def_id ?? null}
+          wallet={v.wallet}
           deltaId={v.delta_id}
           managedPolicies={managedPolicies}
         />
@@ -831,12 +833,15 @@ function manifestIdsOf(results: Record<string, unknown>): Set<string> {
 function PolicyStructureSection({
   cedarId,
   defId,
+  wallet,
   deltaId,
   managedPolicies,
 }: {
   cedarId: string;
   /** verdict에 박제된 def id — 이름이 바뀌어도 1순위로 안정 매칭. */
   defId: string | null;
+  /** 이 deny가 난 지갑(소문자) — 그 지갑의 바인딩 override를 다이어그램에 반영. */
+  wallet: string | null;
   deltaId: string | null;
   managedPolicies: ManagedPolicyEntry[];
 }) {
@@ -861,13 +866,38 @@ function PolicyStructureSection({
     byCedarId[0] ||
     null;
 
+  // managedPolicies.text 는 def 기본값(holes=defaults)으로 렌더된 것이라, 이 deny가
+  // 난 지갑의 바인딩 override(편집값)가 빠져 있다. 그 지갑의 바인딩을 찾아 에디터와
+  // 같은 concretizeDefIr 로 다시 그린다(override 없으면 기본값 텍스트 유지).
+  const overviewQ = useQuery({
+    queryKey: ["ps2-overview"],
+    queryFn: getOverview,
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const walletTextQ = useQuery({
+    queryKey: ["history-binding-text", resolved?.dashId ?? null, wallet],
+    enabled: open && !!resolved && !!wallet && !!overviewQ.data,
+    retry: false,
+    queryFn: async () => {
+      const ov = overviewQ.data;
+      const def = ov && resolved ? ov.library.defs[resolved.dashId] : undefined;
+      if (!ov || !def || !wallet) return null;
+      const bindings = ov.wallets.byAddress[wallet.toLowerCase()]?.bindings ?? {};
+      const binding = Object.values(bindings).find((b) => b.defId === def.id) ?? null;
+      if (!binding) return null; // 이 지갑에 override 없음 → 기본값 텍스트 유지
+      return blocksToText(concretizeDefIr(def, binding)).catch(() => null);
+    },
+  });
+  const effectiveText = walletTextQ.data ?? resolved?.text ?? "";
+
   const request =
     ctx && resolved
       ? {
           action: ctx.action,
           meta: ctx.meta,
           tx: ctx.tx,
-          bundles: [{ policy: resolved.text, manifest: resolved.manifest }],
+          bundles: [{ policy: effectiveText, manifest: resolved.manifest }],
           results: ctx.results,
         }
       : undefined;
@@ -898,14 +928,14 @@ function PolicyStructureSection({
               <div className="pdiagram-empty">{t("common:loading")}</div>
             ) : ctx ? (
               <PolicyDiagnosisByText
-                cedarText={resolved.text}
+                cedarText={effectiveText}
                 compact
                 request={request}
                 autoRun
               />
             ) : (
               <PolicyDiagnosisByText
-                cedarText={resolved.text}
+                cedarText={effectiveText}
                 compact
                 structureOnly
               />

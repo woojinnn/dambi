@@ -56,6 +56,7 @@ import { catLabel, catStyle } from "./categories";
 import { CatIcon, ShieldIcon, WarnIcon } from "./icons";
 import { blocksToText, textToBlocks } from "../../../cedar";
 import { blocksToEst, concretizeIr } from "../../../cedar/blocks";
+import { concretizeDefIr } from "../../../cedar/binding-ir";
 import { llmDraftPolicy } from "../../../server-api/llm-draft";
 import { PolicyFormPane } from "./PolicyFormPane";
 import {
@@ -133,17 +134,12 @@ export function EditorDetailPageV2() {
   const bindingCtx = storedDef && walletAddr && binding ? { address: walletAddr, binding } : null;
 
   // 폼/텍스트의 기준 IR: 바인딩 모드면 그 지갑의 파라미터를 적용한 구체 IR.
+  // 병합은 concretizeDefIr 하나로 통일 — history 다이어그램과 같은 경로를 써야
+  // 둘이 어긋나지 않는다(어긋나서 history가 stale 기본값을 그렸던 버그).
   const baseIr = useMemo(() => {
     if (!storedDef) return null;
-    const ir = storedDef.skeleton.ir as PolicyIR;
-    if (!bindingCtx) return ir;
-    const live = new Set(storedDef.holes.map((h) => h.name));
-    const merged = Object.fromEntries(
-      Object.entries({ ...storedDef.defaults.params, ...bindingCtx.binding.params }).filter(
-        ([k]) => live.has(k),
-      ),
-    );
-    return concretizeIr(ir, merged as never);
+    if (!bindingCtx) return storedDef.skeleton.ir as PolicyIR;
+    return concretizeDefIr(storedDef, bindingCtx.binding);
   }, [storedDef, bindingCtx]);
 
   // def 뼈대(BlockIR)는 텍스트가 아니므로 Cedar 탭용 텍스트는 비동기로 렌더한다.
