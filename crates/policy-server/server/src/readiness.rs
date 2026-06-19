@@ -85,12 +85,59 @@ fn oauth_config_status(config: &ServerConfig) -> String {
     if !config.require_oauth_config {
         return "skipped".to_owned();
     }
-    required_env_status(&[
+    let required = required_env_status(&[
         "GOOGLE_CLIENT_ID",
         "GOOGLE_CLIENT_SECRET",
         "GOOGLE_REDIRECT_URI",
         "DASHBOARD_URL",
-    ])
+    ]);
+    if required != "ok" {
+        return required;
+    }
+    let https = required_https_env_status(&["GOOGLE_REDIRECT_URI", "DASHBOARD_URL"]);
+    if https != "ok" {
+        return https;
+    }
+    optional_https_csv_env_status("OAUTH_ALLOWED_REDIRECT_URIS")
+}
+
+fn required_https_env_status(names: &[&str]) -> String {
+    let invalid: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|name| std::env::var(name).map_or(true, |value| !is_https_url(value.trim())))
+        .collect();
+    if invalid.is_empty() {
+        "ok".to_owned()
+    } else {
+        tracing::warn!(invalid = %invalid.join(","), "readiness HTTPS URL check failed");
+        "error".to_owned()
+    }
+}
+
+fn optional_https_csv_env_status(name: &str) -> String {
+    let Ok(value) = std::env::var(name) else {
+        return "ok".to_owned();
+    };
+    let invalid = value
+        .split(',')
+        .map(str::trim)
+        .any(|url| !url.is_empty() && !is_https_url(url));
+    if invalid {
+        tracing::warn!(
+            name,
+            "readiness OAuth redirect allowlist HTTPS check failed"
+        );
+        "error".to_owned()
+    } else {
+        "ok".to_owned()
+    }
+}
+
+fn is_https_url(value: &str) -> bool {
+    value
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
 }
 
 async fn postgres_status(state: &AppState) -> String {
@@ -152,7 +199,8 @@ async fn redis_status(redis_url: Option<&str>, required: bool) -> String {
 }
 
 fn readiness_error(component: &'static str, error: impl fmt::Display) -> String {
-    tracing::warn!(component, error = %error, "readiness check failed");
+    let safe_error = crate::logging::redact_sensitive_log_text(error);
+    tracing::warn!(component, error = %safe_error, "readiness check failed");
     "error".to_owned()
 }
 
@@ -217,6 +265,7 @@ mod tests {
             "GOOGLE_CLIENT_SECRET",
             "GOOGLE_REDIRECT_URI",
             "DASHBOARD_URL",
+            "OAUTH_ALLOWED_REDIRECT_URIS",
         ];
         let previous: Vec<_> = vars
             .iter()
@@ -232,6 +281,59 @@ mod tests {
 
         config.require_oauth_config = false;
         assert_eq!(oauth_config_status(&config), "skipped");
+
+        for (name, value) in previous {
+            restore_env(name, value);
+        }
+    }
+
+    #[test]
+    fn oauth_config_required_rejects_non_https_redirect_targets() {
+        let _guard = env_lock();
+        let vars = [
+            "GOOGLE_CLIENT_ID",
+            "GOOGLE_CLIENT_SECRET",
+            "GOOGLE_REDIRECT_URI",
+            "DASHBOARD_URL",
+            "OAUTH_ALLOWED_REDIRECT_URIS",
+        ];
+        let previous: Vec<_> = vars
+            .iter()
+            .map(|name| (*name, std::env::var_os(name)))
+            .collect();
+
+        std::env::set_var("GOOGLE_CLIENT_ID", "client-id");
+        std::env::set_var("GOOGLE_CLIENT_SECRET", "client-secret");
+        std::env::set_var(
+            "GOOGLE_REDIRECT_URI",
+            "http://api.example/auth/google/callback",
+        );
+        std::env::set_var("DASHBOARD_URL", "https://dashboard.example");
+        std::env::remove_var("OAUTH_ALLOWED_REDIRECT_URIS");
+
+        let mut config = ServerConfig::for_tests();
+        config.require_oauth_config = true;
+        assert_eq!(oauth_config_status(&config), "error");
+
+        std::env::set_var(
+            "GOOGLE_REDIRECT_URI",
+            "https://api.example/auth/google/callback",
+        );
+        std::env::set_var("DASHBOARD_URL", "http://dashboard.example");
+        assert_eq!(oauth_config_status(&config), "error");
+
+        std::env::set_var("DASHBOARD_URL", "https://dashboard.example");
+        std::env::set_var(
+            "OAUTH_ALLOWED_REDIRECT_URIS",
+            "https://abc.chromiumapp.org/,http://127.0.0.1:5173/auth/callback",
+        );
+        assert_eq!(oauth_config_status(&config), "error");
+
+        std::env::set_var(
+            "OAUTH_ALLOWED_REDIRECT_URIS",
+            "https://abc.chromiumapp.org/",
+        );
+        assert_eq!(oauth_config_status(&config), "ok");
 
         for (name, value) in previous {
             restore_env(name, value);

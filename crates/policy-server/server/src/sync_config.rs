@@ -37,9 +37,10 @@ pub fn load_sync_config(config: &ServerConfig) -> Result<SyncConfig, IoError> {
             ),
         )),
         Err(e) => {
+            let safe_error = crate::logging::redact_sensitive_log_text(&e);
             tracing::warn!(
                 path = %path.display(),
-                error = %e,
+                error = %safe_error,
                 "sync config not loaded; sync endpoints will stay dormant"
             );
             Ok(SyncConfig::default())

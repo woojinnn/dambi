@@ -36,8 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(p)
                 }
                 Err(e) => {
+                    let safe_error = policy_server::logging::redact_sensitive_log_text(&e);
                     tracing::warn!(
-                        error = %e,
+                        error = %safe_error,
                         "sync worker: Redis connect failed — live wallet_synced events disabled"
                     );
                     None
@@ -92,7 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("scheduler inserted for active user");
             let report_result = scheduler.tick_once().await;
             if let Err(e) = coordinator.release_lock(lock).await {
-                tracing::warn!(user_id, error = %e, "sync worker: failed to release lock");
+                let safe_error = policy_server::logging::redact_sensitive_log_text(&e);
+                tracing::warn!(user_id, error = %safe_error, "sync worker: failed to release lock");
             }
             let report = report_result?;
             tracing::info!(
@@ -105,7 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // (e.g. which venue/source failed and why). These are non-fatal
             // best-effort failures (one dead venue never aborts a tick), so warn.
             for err in &report.errors {
-                tracing::warn!(user_id, error = %err, "sync worker: non-fatal sync error");
+                let safe_error = policy_server::logging::redact_sensitive_log_text(err);
+                tracing::warn!(user_id, error = %safe_error, "sync worker: non-fatal sync error");
             }
 
             // Push one live `wallet_synced` per refreshed wallet so dashboards

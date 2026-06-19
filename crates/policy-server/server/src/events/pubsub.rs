@@ -79,7 +79,8 @@ impl EventPublisher for RedisEventPublisher {
             .query_async::<i64>(&mut conn)
             .await
         {
-            tracing::warn!(error = %e, channel = %self.channel, "failed to publish Redis event");
+            let safe_error = crate::logging::redact_sensitive_log_text(&e);
+            tracing::warn!(error = %safe_error, channel = %self.channel, "failed to publish Redis event");
         }
     }
 }
