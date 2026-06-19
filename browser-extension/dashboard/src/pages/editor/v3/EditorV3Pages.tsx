@@ -51,9 +51,11 @@ function useOpenPolicyBridge() {
   const navigate = useNavigate();
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      const d = e.data as { source?: string; type?: string; to?: string } | null;
+      const d = e.data as { source?: string; type?: string; to?: string; state?: unknown } | null;
       if (d && d.source === "dambi-editor-v3" && d.type === "open-policy" && typeof d.to === "string") {
-        navigate(d.to); // 예: "/editor/<id>?wallet=..&binding=.." → 실제 EditorDetailPageV2
+        // state(newPolicy seed)가 있으면 라우터 state 로 함께 넘긴다 — 새 정책 생성 시
+        // EditorDetailPageV2 가 location.state.newPolicy 로 시드하기 때문.
+        navigate(d.to, d.state ? { state: d.state } : undefined);
       }
     };
     window.addEventListener("message", onMsg);
