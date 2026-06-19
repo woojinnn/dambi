@@ -413,9 +413,11 @@ body.onb-mode .pc-onb { position: relative; min-height: 480px; }
 .pc-onb .onb-check:hover { background: rgba(255,255,255,0.1); }
 .pc-onb .onb-check .box { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 auto; border: 1.5px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.04); display: grid; place-items: center; color: transparent; transition: background .12s, border-color .12s, color .12s; }
 .pc-onb .onb-check.on .box { background: var(--pass-500); border-color: var(--pass-500); color: #fff; }
-.pc-onb .onb-check .cmain { flex: 1; min-width: 0; }
-.pc-onb .onb-check .cn { font-size: 13px; font-weight: 700; color: #fff; }
-.pc-onb .onb-check .cd { font-family: var(--ff-mono); font-size: 10.5px; color: var(--brand-300); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* cmain 을 flex 컬럼으로 둬야 자식 span(.cn/.cd)이 block 화되어 text-overflow:ellipsis 가
+ * 실제로 동작한다(inline span 에는 ellipsis 가 먹지 않아 긴 def id 가 박스를 뚫고 나갔다). */
+.pc-onb .onb-check .cmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pc-onb .onb-check .cn { display: block; max-width: 100%; font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-onb .onb-check .cd { display: block; max-width: 100%; font-family: var(--ff-mono); font-size: 10.5px; color: var(--brand-300); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-onb .onb-check .sev { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .pc-onb .onb-check .sev.deny { background: var(--fail-500); } .pc-onb .onb-check .sev.warn { background: var(--warn-500); } .pc-onb .onb-check .sev.unknown { background: var(--slate-300); }
 
