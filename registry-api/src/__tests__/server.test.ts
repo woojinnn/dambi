@@ -1,6 +1,12 @@
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
-import { createRegistryApiServer } from "../server";
+import canonicalize from "canonicalize";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  createRegistryApiServer,
+  materializeSourceBundle,
+  type SourceContextDocument,
+} from "../server";
 import type { ObjectReader, ObjectResult } from "../gcs-client";
 
 const CALLKEY_PATH =
@@ -26,6 +32,14 @@ function fakeReader(
       };
     },
   };
+}
+
+function bundleSha256(bundle: unknown): string {
+  const canonical = canonicalize(bundle);
+  if (typeof canonical !== "string") {
+    throw new Error("bundle canonicalization failed");
+  }
+  return "0x" + createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 const baseConfig = {
@@ -107,6 +121,38 @@ describe("registry-api HTTP server", () => {
       "bundles/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json";
     const contextRef =
       "contexts/curve/factory_stable_ng_2coin_mainnet/1/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2.json";
+    const templateBundle = {
+      type: "adapter_action",
+      id: "curve/stableswap-ng/source/exchange@1.0.0",
+      schema_version: "3",
+      match: {
+        selector: "0x38ed1739",
+        chain_to_addresses_source: "curve:factory_stable_ng_2coin_mainnet",
+        chain_ids: [1],
+      },
+      source_materialize: { kind: "per_address_context" },
+      abi_fragment: {
+        function_name: "exchange",
+        abi: { type: "function", name: "exchange", inputs: [] },
+      },
+      emit: {
+        strategy: "single_emit",
+        body: {
+          token_in: "$source.coins.0",
+        },
+      },
+    };
+    const contextDoc: SourceContextDocument = {
+      schema_version: "3-source-context",
+      source: "curve:factory_stable_ng_2coin_mainnet",
+      chain_id: 1,
+      address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      context: {
+        id_suffix: "1-test-33333333",
+        coins: ["0x1111111111111111111111111111111111111111"],
+      },
+    };
+    const materializedBundle = materializeSourceBundle(templateBundle, contextDoc);
     const url = await start(
       fakeReader({
         "index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json":
@@ -116,41 +162,12 @@ describe("registry-api HTTP server", () => {
             bundle_id:
               "curve/stableswap-ng/source/exchange/1-test-33333333@1.0.0",
             manifest_path: "manifests/curve/exchange.json",
-            bundle_sha256: "0x" + "b".repeat(64),
+            bundle_sha256: bundleSha256(materializedBundle),
             bundle_ref: bundleRef,
             context_ref: contextRef,
           }),
-        [bundleRef]: JSON.stringify({
-          type: "adapter_action",
-          id: "curve/stableswap-ng/source/exchange@1.0.0",
-          schema_version: "3",
-          match: {
-            selector: "0x38ed1739",
-            chain_to_addresses_source: "curve:factory_stable_ng_2coin_mainnet",
-            chain_ids: [1],
-          },
-          source_materialize: { kind: "per_address_context" },
-          abi_fragment: {
-            function_name: "exchange",
-            abi: { type: "function", name: "exchange", inputs: [] },
-          },
-          emit: {
-            strategy: "single_emit",
-            body: {
-              token_in: "$source.coins.0",
-            },
-          },
-        }),
-        [contextRef]: JSON.stringify({
-          schema_version: "3-source-context",
-          source: "curve:factory_stable_ng_2coin_mainnet",
-          chain_id: 1,
-          address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-          context: {
-            id_suffix: "1-test-33333333",
-            coins: ["0x1111111111111111111111111111111111111111"],
-          },
-        }),
+        [bundleRef]: JSON.stringify(templateBundle),
+        [contextRef]: JSON.stringify(contextDoc),
       }),
     );
 
@@ -251,13 +268,15 @@ describe("registry-api HTTP server", () => {
   it("fetches a shared bundle template only once across sibling callkeys (sub-read cache)", async () => {
     const bundleRef =
       "bundles/0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.json";
+    const sharedBundle = { id: "shared", emit: { strategy: "single_emit" } };
+    const sharedBundleSha256 = bundleSha256(sharedBundle);
     const refEntry = (addr: string) =>
       JSON.stringify({
         matched: true,
         schema_version: "3-ref",
         bundle_id: `curve/pool/exchange/${addr}@1.0.0`,
         manifest_path: "manifests/curve/exchange.json",
-        bundle_sha256: "0x" + "c".repeat(64),
+        bundle_sha256: sharedBundleSha256,
         bundle_ref: bundleRef,
       });
     const KEY1 =
@@ -269,13 +288,46 @@ describe("registry-api HTTP server", () => {
         refEntry("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
       "index/by-callkey/1__0x1111111111111111111111111111111111111111__0x38ed1739.json":
         refEntry("0x1111111111111111111111111111111111111111"),
-      [bundleRef]: JSON.stringify({ id: "shared", emit: { strategy: "single_emit" } }),
+      [bundleRef]: JSON.stringify(sharedBundle),
     });
     const url = await start(reader);
     expect((await fetch(`${url}${KEY1}`)).status).toBe(200);
     expect((await fetch(`${url}${KEY2}`)).status).toBe(200);
     // Both callkeys resolve the same bundle template, but it is fetched once.
     expect(reader.reads.filter((r) => r === bundleRef)).toHaveLength(1);
+  });
+
+  it("rejects a ref callkey whose served bundle does not match bundle_sha256", async () => {
+    const bundleRef =
+      "bundles/0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.json";
+    const reader = fakeReader({
+      "index/by-callkey/1__0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2__0x38ed1739.json":
+        JSON.stringify({
+          matched: true,
+          schema_version: "3-ref",
+          bundle_id: "curve/pool/exchange@1.0.0",
+          manifest_path: "manifests/curve/exchange.json",
+          bundle_sha256: "0x" + "0".repeat(64),
+          bundle_ref: bundleRef,
+        }),
+      [bundleRef]: JSON.stringify({
+        id: "shared",
+        emit: { strategy: "single_emit" },
+      }),
+    });
+    const url = await start(reader);
+
+    const res = await fetch(`${url}${CALLKEY_PATH}`);
+    expect(res.status).toBe(502);
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain(bundleRef);
+    expect(JSON.parse(bodyText)).toMatchObject({
+      error: {
+        code: "ref_materialization_failed",
+        message: "Registry reference materialization failed",
+      },
+    });
+    expect(reader.reads).toContain(bundleRef);
   });
 
   it("passes a GCS miss through as a real HTTP 404", async () => {
@@ -370,42 +422,60 @@ describe("registry-api HTTP server", () => {
   });
 
   it("returns 502 on a GCS upstream error", async () => {
-    const url = await start({
-      async read() {
-        return {
-          kind: "upstream_error",
-          message: "boom secret-token=do-not-echo",
-        };
-      },
-    });
-    const res = await fetch(`${url}${CALLKEY_PATH}`);
-    expect(res.status).toBe(502);
-    const bodyText = await res.text();
-    expect(bodyText).not.toContain("secret-token");
-    expect(JSON.parse(bodyText)).toMatchObject({
-      error: {
-        code: "upstream_error",
-        message: "Registry upstream read failed",
-      },
-    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const url = await start({
+        async read() {
+          return {
+            kind: "upstream_error",
+            message: "boom secret-token=do-not-echo",
+          };
+        },
+      });
+      const res = await fetch(`${url}${CALLKEY_PATH}`);
+      expect(res.status).toBe(502);
+      const bodyText = await res.text();
+      expect(bodyText).not.toContain("secret-token");
+      expect(JSON.parse(bodyText)).toMatchObject({
+        error: {
+          code: "upstream_error",
+          message: "Registry upstream read failed",
+        },
+      });
+      const logged = errorSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(logged).not.toContain("secret-token");
+      expect(logged).not.toContain("do-not-echo");
+      expect(logged).toContain("[REDACTED]");
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("does not echo unexpected internal error details", async () => {
-    const url = await start({
-      async read() {
-        throw new Error("internal-secret=do-not-echo");
-      },
-    });
-    const res = await fetch(`${url}${CALLKEY_PATH}`);
-    expect(res.status).toBe(500);
-    const bodyText = await res.text();
-    expect(bodyText).not.toContain("internal-secret");
-    expect(JSON.parse(bodyText)).toMatchObject({
-      error: {
-        code: "internal_error",
-        message: "Internal server error",
-      },
-    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const url = await start({
+        async read() {
+          throw new Error("internal-secret=do-not-echo");
+        },
+      });
+      const res = await fetch(`${url}${CALLKEY_PATH}`);
+      expect(res.status).toBe(500);
+      const bodyText = await res.text();
+      expect(bodyText).not.toContain("internal-secret");
+      expect(JSON.parse(bodyText)).toMatchObject({
+        error: {
+          code: "internal_error",
+          message: "Internal server error",
+        },
+      });
+      const logged = errorSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(logged).not.toContain("internal-secret");
+      expect(logged).not.toContain("do-not-echo");
+      expect(logged).toContain("[REDACTED]");
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("returns 429 when the per-IP rate limit is exceeded", async () => {
