@@ -25,6 +25,13 @@ pub enum DbError {
         id: String,
     },
 
+    /// A caller is authenticated but not allowed to perform this mutation.
+    #[error("forbidden: {reason}")]
+    Forbidden {
+        /// Stable, non-secret public-safe reason.
+        reason: &'static str,
+    },
+
     /// A database invariant was violated.
     #[error("invariant violation: {0}")]
     Invariant(String),
