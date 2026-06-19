@@ -52,6 +52,17 @@ pub enum V3BuildError {
     /// Final `from_value::<ActionBody>` did not match the target enum shape.
     #[error("serde from_value: {0}")]
     SerdeFromValue(#[from] serde_json::Error),
+    /// The flattened manifest body carried keys that the typed `ActionBody`
+    /// model did not consume. Serde would otherwise ignore those fields.
+    #[error("unknown ActionBody field(s) for domain={domain:?} action={action:?}: {fields}")]
+    UnknownActionBodyFields {
+        /// Flattened domain tag.
+        domain: Option<String>,
+        /// Flattened action tag, when present.
+        action: Option<String>,
+        /// Comma-separated unknown field names.
+        fields: String,
+    },
     /// `emit.strategy` is something other than `single_emit` /
     /// `opcode_stream_dispatch`. Future strategies can plug in here.
     #[error("unsupported emit.strategy: {0}")]
@@ -626,9 +637,19 @@ pub fn build_action_body(
     let substituted = substitute_placeholders(ctx, &stripped_body)?;
     let mut flat = flatten_body(&substituted)?;
 
+    let (domain, action) = extract_tags(&flat);
+
     // Stage 2 — pick the live_inputs source. The explicit argument wins, then
-    // the inline block from the body, then nothing.
-    let live_source = live_inputs_template.cloned().or(inline_live);
+    // the inline block from the body, then nothing. Variants without typed
+    // LiveField slots must not evaluate dormant helper placeholders or inject
+    // ignored fields into the typed ActionBody decode.
+    let layout = live_input_layout(domain.as_deref(), action.as_deref());
+    let live_source = match layout {
+        LiveInputLayout::Unsupported => None,
+        LiveInputLayout::Nested | LiveInputLayout::Inline => {
+            live_inputs_template.cloned().or(inline_live)
+        }
+    };
 
     // Stage 3 — inject live_inputs. The injection shape depends on the
     // destination action's serde schema: some variants nest the fields under
@@ -637,10 +658,8 @@ pub fn build_action_body(
     // Permit2SignAllowance nonce). The catalog [`live_input_layout`] picks
     // the right shape per (domain, action).
     if let Some(live_template) = live_source {
-        let (domain, action) = extract_tags(&flat);
         let live_substituted = substitute_placeholders(ctx, &live_template)?;
         if let Some(map) = live_substituted.as_object() {
-            let layout = live_input_layout(domain.as_deref(), action.as_deref());
             match layout {
                 LiveInputLayout::Nested => {
                     let mut live_obj = JsonMap::with_capacity(map.len());
@@ -671,16 +690,43 @@ pub fn build_action_body(
                         flat.insert(field_name.clone(), wrapped);
                     }
                 }
+                LiveInputLayout::Unsupported => {}
             }
         }
     }
 
     coerce_time_like_fields(&mut flat);
 
-    // Stage 4 — typed decode.
-    Ok(serde_json::from_value::<ActionBody>(JsonValue::Object(
-        flat,
-    ))?)
+    // Stage 4 — typed decode. Reject keys the typed model does not consume so
+    // manifest typos cannot silently drop policy-relevant fields.
+    let action = serde_json::from_value::<ActionBody>(JsonValue::Object(flat.clone()))?;
+    reject_unknown_action_body_fields(&flat, &action)?;
+    Ok(action)
+}
+
+fn reject_unknown_action_body_fields(
+    flat: &JsonMap<String, JsonValue>,
+    action: &ActionBody,
+) -> Result<(), V3BuildError> {
+    let serialized = serde_json::to_value(action)?;
+    let Some(serialized_obj) = serialized.as_object() else {
+        return Ok(());
+    };
+    let mut unknown: Vec<String> = flat
+        .iter()
+        .filter(|(key, value)| !value.is_null() && !serialized_obj.contains_key(*key))
+        .map(|(key, _)| key.clone())
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    unknown.sort();
+    let (domain, action) = extract_tags(flat);
+    Err(V3BuildError::UnknownActionBodyFields {
+        domain,
+        action,
+        fields: unknown.join(", "),
+    })
 }
 
 fn coerce_time_like_fields(flat: &mut JsonMap<String, JsonValue>) {
@@ -738,19 +784,17 @@ fn strip_inline_live_inputs(body: &JsonValue) -> (JsonValue, Option<JsonValue>) 
 /// * [`LiveInputLayout::Inline`] — each live field lives next to the
 ///   deterministic fields directly on the action struct (the token-permit
 ///   family).
+/// * [`LiveInputLayout::Unsupported`] — the destination action has no typed
+///   `LiveField` slots, so manifest-side `live_inputs` are dormant metadata
+///   and must not be evaluated or injected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LiveInputLayout {
     Nested,
     Inline,
+    Unsupported,
 }
 
 /// Pick the live-input layout for a given (domain, action) pair.
-///
-/// Unknown / cross-cutting variants default to [`LiveInputLayout::Nested`] —
-/// this is the safer choice because a missing `live_inputs` field on an
-/// action that expects one yields a clear serde error, whereas an extra
-/// `live_inputs` key on an action that doesn't is silently ignored by the
-/// `deny_unknown_fields`-free variants.
 fn live_input_layout(domain: Option<&str>, action: Option<&str>) -> LiveInputLayout {
     match (domain, action) {
         (Some("token"), Some("erc20_permit"))
@@ -758,7 +802,40 @@ fn live_input_layout(domain: Option<&str>, action: Option<&str>) -> LiveInputLay
             Some("token"),
             Some("permit2_sign_allowance" | "permit2_sign_transfer" | "permit2_transfer_from"),
         ) => LiveInputLayout::Inline,
-        _ => LiveInputLayout::Nested,
+        (
+            Some("amm"),
+            Some(
+                "swap" | "add_liquidity" | "remove_liquidity" | "collect_fees"
+                | "sign_intent_order",
+            ),
+        )
+        | (Some("airdrop"), Some("claim" | "delegate"))
+        | (
+            Some("lending"),
+            Some(
+                "supply" | "withdraw" | "borrow" | "repay" | "swap_rate_mode" | "set_e_mode"
+                | "enable_collateral" | "disable_collateral" | "liquidate",
+            ),
+        )
+        | (
+            Some("launchpad"),
+            Some("commit" | "claim_allocation" | "claim_vested" | "refund" | "withdraw_commit"),
+        )
+        | (
+            Some("perp"),
+            Some(
+                "open_position" | "close_position" | "increase_position" | "decrease_position"
+                | "adjust_margin" | "change_leverage" | "change_margin_mode" | "place_order"
+                | "claim_funding",
+            ),
+        )
+        | (Some("liquid_staking"), Some("wrap" | "unwrap" | "transfer_shares"))
+        | (
+            Some("yield"),
+            Some("pt_swap" | "yt_swap" | "add_market_liquidity" | "remove_market_liquidity"),
+        )
+        | (Some("governance"), Some("delegate")) => LiveInputLayout::Nested,
+        _ => LiveInputLayout::Unsupported,
     }
 }
 
@@ -1457,6 +1534,76 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unknown_body_skips_dormant_live_inputs() {
+        let args = json!({});
+        let ctx = mk_ctx(&args);
+        let body = json!({
+            "domain": "unknown",
+            "unknown": {
+                "target": "$to",
+                "chain": "$chain",
+                "calldata": "$calldata",
+                "value": "$tx.value"
+            }
+        });
+        let live_inputs = json!({
+            "route": {
+                "source": {
+                    "kind": "registry_api",
+                    "resource": {
+                        "pool_addr": {
+                            "$fn": "array_len",
+                            "$args": []
+                        }
+                    }
+                }
+            }
+        });
+
+        let action = build_action_body(&ctx, &body, Some(&live_inputs)).unwrap();
+        assert!(matches!(action, ActionBody::Unknown { .. }));
+    }
+
+    #[test]
+    fn unsupported_action_skips_dormant_live_inputs() {
+        let args = json!({
+            "to": "0x00000000000000000000000000000000deadbeef",
+            "amount": "12345",
+        });
+        let ctx = mk_ctx(&args);
+        let body = json!({
+            "domain": "token",
+            "token": {
+                "action": "erc20_transfer",
+                "erc20_transfer": {
+                    "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$to" } },
+                    "recipient": "$args.to",
+                    "amount": "$args.amount"
+                }
+            }
+        });
+        let live_inputs = json!({
+            "route": {
+                "source": {
+                    "kind": "registry_api",
+                    "resource": {
+                        "pool_addr": {
+                            "$fn": "array_len",
+                            "$args": []
+                        }
+                    }
+                }
+            }
+        });
+
+        let action = build_action_body(&ctx, &body, Some(&live_inputs)).unwrap();
+        assert!(matches!(
+            action,
+            ActionBody::Token(TokenAction::Erc20Transfer(_))
+        ));
+    }
+
     // 2. ERC20 transfer → ActionBody::Token(Erc20Transfer)
     #[test]
     fn t2_erc20_transfer() {
@@ -1481,6 +1628,33 @@ mod tests {
             action,
             ActionBody::Token(TokenAction::Erc20Transfer(_))
         ));
+    }
+
+    #[test]
+    fn action_body_rejects_unknown_manifest_fields() {
+        let args = json!({
+            "to": "0x00000000000000000000000000000000deadbeef",
+            "amount": "12345",
+        });
+        let ctx = mk_ctx(&args);
+        let body = json!({
+            "domain": "token",
+            "token": {
+                "action": "erc20_transfer",
+                "erc20_transfer": {
+                    "token": { "key": { "standard": "erc20", "chain": "$chain", "address": "$to" } },
+                    "recipient": "$args.to",
+                    "amount": "$args.amount",
+                    "reciepient": "$args.to"
+                }
+            }
+        });
+
+        let err = build_action_body(&ctx, &body, None).unwrap_err();
+        assert!(
+            err.to_string().contains("reciepient"),
+            "unexpected error: {err}"
+        );
     }
 
     // 3. ERC721 approve → ActionBody::Token(NftApprove)
