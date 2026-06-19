@@ -38,6 +38,53 @@
       "returns": { "kind": "record", "type": "TokenMarketData" },
       "origin": "bundled"
     },
+    "token.security_flags": {
+      "name": "token.security_flags",
+      "description": "External token-security feed for a decoded ERC-20 token. Reports honeypot/malicious flags and optional buy/sell tax bps when the feed can answer.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": false,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "token": {
+          "type": "String",
+          "required": true,
+          "description": "Token contract under review, 0x-hex.",
+          "defaultSelector": "$.action.token.key.address"
+        }
+      },
+      "returns": { "kind": "record", "type": "TokenSecurityFlags" },
+      "origin": "bundled"
+    },
+    "token.normalize_to_nano": {
+      "name": "token.normalize_to_nano",
+      "description": "Normalize a token-native raw amount to 1e9 nano units using either literal decimals in the extension or server/global decimals when decimals are omitted.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": false,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "asset": {
+          "type": "AssetRef",
+          "required": true,
+          "defaultSelector": "$.action.inputToken.asset"
+        },
+        "amount": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.inputToken.amount.value"
+        },
+        "decimals": {
+          "type": "Long",
+          "required": false,
+          "description": "Optional literal token decimals for local pure handling."
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Long", "from": "$.result.nano" },
+      "origin": "bundled"
+    },
     "address.sanctions": {
       "name": "address.sanctions",
       "description": "Is an address on an on-chain sanctions oracle (Chainalysis isSanctioned — OFAC/EU/UN)? Legal-list membership, distinct from a scam/drainer heuristic. v1 screens Ethereum mainnet (the EigenLayer chain).",
@@ -56,6 +103,47 @@
       "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.sanctioned" },
       "origin": "bundled"
     },
+    "address.reputation": {
+      "name": "address.reputation",
+      "description": "External reputation feed for an address such as a recipient, spender, operator, or counterparty. Returns a fail-open scam/drainer heuristic, distinct from sanctions-list membership.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": false,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "address": {
+          "type": "String",
+          "required": true,
+          "description": "Address under review, 0x-hex."
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.flagged" },
+      "origin": "bundled"
+    },
+    "address.similarity": {
+      "name": "address.similarity",
+      "description": "Compare a candidate recipient/counterparty against the wallet's recent outbound transfer set and report address-poisoning style similarity collisions.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": false,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "owner": {
+          "type": "String",
+          "required": false,
+          "defaultSelector": "$.root.from"
+        },
+        "candidate": {
+          "type": "String",
+          "required": true,
+          "description": "Candidate address being sent to or approved, 0x-hex."
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.poisonCollision" },
+      "origin": "bundled"
+    },
     "lending.health_factor": {
       "name": "lending.health_factor",
       "description": "Projected post-action health factor of a lending position (Aave V3; Spark fork shares the ABI). Reads the borrower's on-chain account state and applies the pending borrow/withdraw delta — a CONSERVATIVE pre-sign estimate (HF < 1 ⇒ liquidatable), NOT a transaction simulation. v1 reads Ethereum mainnet only; any uncertainty omits the field so the policy stays dormant (never a fabricated HF).",
@@ -70,26 +158,72 @@
       "returns": { "kind": "scalar", "type": "Decimal", "from": "$.result.postActionHf" },
       "origin": "bundled"
     },
+    "bridge.value_loss_pct": {
+      "name": "bridge.value_loss_pct",
+      "description": "Implied bridge value loss: (inputUsd - outputUsd) / inputUsd * 100, using synced/global token prices for both legs. Omitted when either leg cannot be valued.",
+      "params": {
+        "src_chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "src_asset": {
+          "type": "AssetRef",
+          "required": true,
+          "defaultSelector": "$.action.srcToken.key.address"
+        },
+        "input_amount": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.inputAmount"
+        },
+        "dst_chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.action.dstChainId"
+        },
+        "dst_asset": {
+          "type": "AssetRef",
+          "required": true,
+          "defaultSelector": "$.action.dstToken.key.address"
+        },
+        "output_amount": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.outputAmount"
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Decimal", "from": "$.result.loss_pct" },
+      "origin": "bundled"
+    },
     "approval.allowance": {
       "name": "approval.allowance",
-      "description": "Inspect a token allowance: surfaces raw value, unlimited-allowance flag, and coverage of a requested amount.",
+      "description": "Inspect a synced ERC-20 allowance for (chain, asset, spender): surfaces raw value, unlimited-allowance flag, and optional coverage of a requested amount.",
       "params": {
-        "allowance": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "asset": {
+          "type": "AssetRef",
+          "required": true,
+          "defaultSelector": "$.action.token"
+        },
+        "spender": {
           "type": "String",
-          "required": false,
-          "description": "Current allowance (uint256 string). Defaults to 0 when omitted."
+          "required": true,
+          "defaultSelector": "$.action.spender",
+          "description": "Approved spender, 0x-hex."
         },
         "requested_amount": {
           "type": "String",
           "required": false,
-          "description": "Amount being requested by the transaction (uint256 string)."
+          "defaultSelector": "$.action.amount",
+          "description": "Optional amount to compare against the synced allowance (uint256 string)."
         }
       },
-      "returns": {
-        "kind": "scalar",
-        "type": "Bool",
-        "from": "$.result.coversRequestedAmount"
-      },
+      "returns": { "kind": "record", "type": "AllowanceFact" },
       "origin": "bundled"
     },
     "approval.cover_inputs": {
@@ -124,6 +258,72 @@
       "description": "Current Unix timestamp (seconds) from the daemon's clock.",
       "params": {},
       "returns": { "kind": "scalar", "type": "Long", "from": "$.result.nowTs" },
+      "origin": "bundled"
+    },
+    "intent.pending_cap_over_balance": {
+      "name": "intent.pending_cap_over_balance",
+      "description": "Check whether already-open signed limit orders plus the new order commit more of the sell token than the wallet's synced balance.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "owner": {
+          "type": "String",
+          "required": false,
+          "defaultSelector": "$.root.from"
+        },
+        "action": {
+          "type": "String",
+          "required": true,
+          "description": "Lowered SignIntentOrder context.",
+          "defaultSelector": "$.action"
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.capSumOverBalance" },
+      "origin": "bundled"
+    },
+    "intent.near_duplicate_pending": {
+      "name": "intent.near_duplicate_pending",
+      "description": "Detect whether a new signed intent order is a near duplicate of an already-open order by venue, sell token, and buy token.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "owner": {
+          "type": "String",
+          "required": false,
+          "defaultSelector": "$.root.from"
+        },
+        "action": {
+          "type": "String",
+          "required": true,
+          "description": "Lowered SignIntentOrder context.",
+          "defaultSelector": "$.action"
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Bool", "from": "$.result.duplicate" },
+      "origin": "bundled"
+    },
+    "intent.validity_horizon_sec": {
+      "name": "intent.validity_horizon_sec",
+      "description": "Seconds remaining until an intent order's validity deadline. Values below zero clamp to zero.",
+      "params": {
+        "valid_until": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.action.validUntil"
+        },
+        "now": {
+          "type": "Long",
+          "required": false,
+          "description": "Unix timestamp override used by tests; omitted in production."
+        }
+      },
+      "returns": { "kind": "scalar", "type": "Long", "from": "$.result.horizonSec" },
       "origin": "bundled"
     },
     "oracle.effective_rate_bps": {
@@ -192,6 +392,19 @@
       "returns": { "kind": "record", "type": "UsdValuation" },
       "origin": "bundled"
     },
+    "oracle.steth_peg_status_bps": {
+      "name": "oracle.steth_peg_status_bps",
+      "description": "Directional stETH/ETH peg status in basis points from market-global stETH and WETH prices. Returns discount, premium, absolute deviation, and peg ratio.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        }
+      },
+      "returns": { "kind": "record", "type": "StethPegStatus" },
+      "origin": "bundled"
+    },
     "portfolio.balance": {
       "name": "portfolio.balance",
       "description": "Wallet balance of a specific token.",
@@ -243,56 +456,106 @@
       "returns": { "kind": "scalar", "type": "Long", "from": "$.result.bps" },
       "origin": "bundled"
     },
-    "dambi.evaluate_v3": {
-      "name": "dambi.evaluate_v3",
-      "description": "Phase 5D mock — echo (actions, eval_context, wallet_id) back as policyRequest.actions with empty state_before / deltas / state_after. Real implementation arrives in Phase 6 (reducer + state sync).",
+    "marketplace.sign_order_proceeds_floor": {
+      "name": "marketplace.sign_order_proceeds_floor",
+      "description": "Compare a signed Seaport order's proceeds paid to the offerer against the floor value of the NFT collection(s) offered.",
       "params": {
-        "wallet_id": {
-          "type": "String",
+        "chain_id": {
+          "type": "Long",
           "required": true,
-          "description": "WalletId (address + chains). Carried verbatim by the mock; Phase 6 will key state persistence off this."
+          "defaultSelector": "$.root.chain_id"
         },
-        "actions": {
+        "offerer": {
           "type": "String",
           "required": true,
-          "description": "List of caller-built Actions (typed PDF FSM ActionBody plus ActionMeta). The mock echoes these into policyRequest.actions."
+          "defaultSelector": "$.action.offerer"
         },
-        "eval_context": {
+        "offer": {
           "type": "String",
           "required": true,
-          "description": "EvalContext (chain + clock + RequestKind + SimulationMode + action_index)."
+          "defaultSelector": "$.action.offer"
+        },
+        "consideration": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.consideration"
         }
       },
-      "returns": { "kind": "record", "type": "UsdValuation" },
+      "returns": { "kind": "record", "type": "MarketplaceProceedsFloor" },
+      "origin": "bundled"
+    },
+    "marketplace.fulfill_overpay_vs_floor": {
+      "name": "marketplace.fulfill_overpay_vs_floor",
+      "description": "Compare the taker's total paid consideration against the floor value of the NFT collection(s) received when fulfilling a Seaport order.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "offer": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.offer"
+        },
+        "consideration": {
+          "type": "String",
+          "required": true,
+          "defaultSelector": "$.action.consideration"
+        }
+      },
+      "returns": { "kind": "record", "type": "MarketplaceOverpayFloor" },
+      "origin": "bundled"
+    },
+    "perp.equity_drawdown_bps": {
+      "name": "perp.equity_drawdown_bps",
+      "description": "HyperLiquid account equity drawdown from day-start and high-water-mark anchors, measured in basis points over synced master-wallet state.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        }
+      },
+      "returns": { "kind": "record", "type": "PerpEquityDrawdown" },
+      "origin": "bundled"
+    },
+    "perp.session_fill_stats": {
+      "name": "perp.session_fill_stats",
+      "description": "HyperLiquid UTC-day fill-window aggregates: loss streak, losses today, trades today, and realized PnL today.",
+      "params": {
+        "chain_id": {
+          "type": "Long",
+          "required": true,
+          "defaultSelector": "$.root.chain_id"
+        },
+        "min_loss_usd": {
+          "type": "Decimal",
+          "required": false,
+          "description": "Minimum absolute closed PnL, in USD, for a losing close to count toward loss streak/count."
+        },
+        "now": {
+          "type": "Long",
+          "required": false,
+          "description": "Unix timestamp override used by tests; omitted in production."
+        }
+      },
+      "returns": { "kind": "record", "type": "PerpSessionFillStats" },
       "origin": "bundled"
     },
     "stat_window.snapshot": {
       "name": "stat_window.snapshot",
-      "description": "Rolling-window snapshot of recent on-chain activity for the wallet.",
+      "description": "Rolling-window snapshot of recent outbound on-chain transfer activity for the wallet.",
       "params": {
-        "owner": {
-          "type": "String",
-          "required": true,
-          "defaultSelector": "$.root.from"
-        }
-      },
-      "returns": { "kind": "record", "type": "WindowStats" },
-      "origin": "bundled"
-    },
-    "stat_window.swap_stats": {
-      "name": "stat_window.swap_stats",
-      "description": "Per-action stats over a sliding 24h window (volume + count).",
-      "params": {
-        "owner": {
-          "type": "String",
-          "required": true,
-          "defaultSelector": "$.root.from"
+        "chain_id": {
+          "type": "Long",
+          "required": false,
+          "defaultSelector": "$.root.chain_id"
         },
-        "action": {
+        "owner": {
           "type": "String",
           "required": true,
-          "description": "Action keyword (e.g. \"swap\").",
-          "defaultSelector": "swap"
+          "defaultSelector": "$.root.from"
         }
       },
       "returns": { "kind": "record", "type": "WindowStats" },

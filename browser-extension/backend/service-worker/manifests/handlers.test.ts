@@ -471,6 +471,19 @@ describe("handleManifestRequest", () => {
     }
   });
 
+  it("manifest:set-endpoint-url canonicalizes origin-only endpoints", async () => {
+    const r = await handleManifestRequest({
+      type: "manifest:set-endpoint-url",
+      url: "  HTTPS://Policy-Rpc.Example.Com:443  ",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((r.data as { url: string | null }).url).toBe(
+        "https://policy-rpc.example.com",
+      );
+    }
+  });
+
   it("manifest:set-endpoint-url rejects URLs with non-http(s) schemes", async () => {
     for (const bad of [
       "javascript:alert(1)",
@@ -490,6 +503,27 @@ describe("handleManifestRequest", () => {
       }
     }
     // Storage was never written.
+    expect(await store.getEndpointUrl()).toBeNull();
+  });
+
+  it("manifest:set-endpoint-url rejects credentials, path, query, hash, and non-loopback http", async () => {
+    for (const bad of [
+      "https://user:pass@policy-rpc.example.com",
+      "https://policy-rpc.example.com/v1",
+      "https://policy-rpc.example.com?x=1",
+      "https://policy-rpc.example.com#frag",
+      "http://policy-rpc.example.com",
+      "http://169.254.169.254",
+    ]) {
+      const r = await handleManifestRequest({
+        type: "manifest:set-endpoint-url",
+        url: bad,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error.kind).toBe("invalid_endpoint_url");
+      }
+    }
     expect(await store.getEndpointUrl()).toBeNull();
   });
 
