@@ -12,6 +12,12 @@
      · render/buildSummary are exposed on window for the React wrapper + layout-modes,
      · wallet-chip clicks bridge to window.PASU_SET_SEL (URL-driven reselection). */
 
+import {
+  escapeAttr,
+  escapeHtml,
+  safeClassToken,
+} from "./html-safe";
+
 // ── PASU_DATA shapes (the adapter fills these; demo literals share the shape) ──
 type RiskTagArr = string[];
 interface AggRow {
@@ -180,10 +186,10 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (sev === "none") return '<span class="r-safe">—</span>';
     const amt = r.varNum > 0 ? r.varTxt : T("assets.exposure.pendingEval");
     return (
-      '<div class="exp-cell ' + sev + '" title="' + expLabel(r) + " · " + T("assets.exposure.prefix") + " " + amt + '">' +
-      '<span class="exp-dot ' + sev + '"></span>' +
-      '<span class="exp-amt">' + amt + "</span>" +
-      '<span class="exp-lbl">' + expLabel(r) + "</span>" +
+      '<div class="exp-cell ' + safeClassToken(sev) + '" title="' + escapeAttr(expLabel(r) + " · " + T("assets.exposure.prefix") + " " + amt) + '">' +
+      '<span class="exp-dot ' + safeClassToken(sev) + '"></span>' +
+      '<span class="exp-amt">' + escapeHtml(amt) + "</span>" +
+      '<span class="exp-lbl">' + escapeHtml(expLabel(r)) + "</span>" +
       "</div>"
     );
   }
@@ -265,9 +271,6 @@ export function initAssetsApp(root: HTMLElement): () => void {
   function el(id: string): HTMLElement | null {
     return root.querySelector<HTMLElement>("#" + id);
   }
-  function esc(s: string): string {
-    return String(s);
-  }
   function riskClass(risk: string[]): string {
     if (REPUTATION_CONNECTED && risk.indexOf("BLOCKED") >= 0) return "risk-fail";
     if (risk.indexOf("UNLIMITED") >= 0) return "risk-warn";
@@ -284,30 +287,12 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (kind === "nft") return ' <span class="kind-tag nft">NFT</span>';
     return "";
   }
-  // Pymmdrza/CoinGecko 로고 해석 (백엔드 연동 대비).
-  const CG_BASE = "https://cdn.jsdelivr.net/gh/simplr-sh/coin-logos/images/";
-  const CG_ID: Record<string, string> = {
-    ETH: "ethereum", WETH: "weth", CBETH: "coinbase-wrapped-staked-eth",
-    USDC: "usd-coin", USDT: "tether", DAI: "dai",
-    WBTC: "wrapped-bitcoin", BTC: "bitcoin", MATIC: "matic-network",
-    ARB: "arbitrum", OP: "optimism", LINK: "chainlink", UNI: "uniswap",
-    AAVE: "aave", CRV: "curve-dao-token", LDO: "lido-dao", GMX: "gmx",
-    SUSHI: "sushi", PEPE: "pepe", DUST: "dust-protocol",
-    SNX: "havven", COMP: "compound-governance-token", MKR: "maker",
-    GRT: "the-graph", FRAX: "frax", CVX: "convex-finance", BAL: "balancer",
-    "1INCH": "1inch", YFI: "yearn-finance", SHIB: "shiba-inu",
-  };
-  const PYMM_BASE = "https://cdn.jsdelivr.net/gh/Pymmdrza/Cryptocurrency_Logos@PNG_v1.0.0.1/PNG/";
-  const PYMM_FILE: Record<string, string> = {
-    SNX: "snx", COMP: "comp", MKR: "mkr", GRT: "grt",
-    FRAX: "frax", CVX: "cvx", BAL: "bal", "1INCH": "1inch", YFI: "yfi", SHIB: "shib",
-  };
   function imgFail(img: HTMLImageElement): void {
     const span = img.parentNode as HTMLElement | null;
     if (!span) return;
     const s = img.getAttribute("data-sym") || "?";
     const k = img.getAttribute("data-kind") || "";
-    span.outerHTML = '<span class="asset-ic ' + k + '">' + s.slice(0, 1).toUpperCase() + "</span>";
+    span.outerHTML = '<span class="asset-ic ' + safeClassToken(k) + '">' + escapeHtml(s.slice(0, 1).toUpperCase()) + "</span>";
   }
   function badgeFail(img: HTMLImageElement): void {
     const span = img.parentNode as HTMLElement | null;
@@ -317,30 +302,11 @@ export function initAssetsApp(root: HTMLElement): () => void {
   window.PASU_imgFail = imgFail;
   window.PASU_badgeFail = badgeFail;
 
-  function isUrl(s: unknown): boolean {
-    return typeof s === "string" && /^(https?:)?\/\//.test(s);
-  }
-  function tokenLogoUrl(r: AggRow): string | null {
-    if (isUrl(r.logoUrl)) return r.logoUrl as string;
-    if (isUrl(r.logoURI)) return r.logoURI as string;
-    if (isUrl(r.logo)) return r.logo as string;
-    const sym = (r.sym || "").toUpperCase();
-    if (CG_ID[sym]) return CG_BASE + CG_ID[sym] + "/large.png";
-    if (PYMM_FILE[sym]) return PYMM_BASE + PYMM_FILE[sym] + ".png";
-    return null;
-  }
   function tokenBase(r: AggRow): string {
-    const url = tokenLogoUrl(r);
-    if (url) {
-      return (
-        '<span class="asset-logo img"><img src="' + url + '" alt="' + r.sym +
-        '" data-sym="' + r.sym + '" data-kind="' + r.kind + '" data-onerr="img"></span>'
-      );
-    }
     const T = window.PASU_TOKEN_LOGOS || {};
-    return T[r.sym]
+    return Object.prototype.hasOwnProperty.call(T, r.sym)
       ? '<span class="asset-logo">' + T[r.sym] + "</span>"
-      : '<span class="asset-ic ' + r.kind + '">' + r.sym.slice(0, 1).toUpperCase() + "</span>";
+      : '<span class="asset-ic ' + safeClassToken(r.kind) + '">' + escapeHtml(r.sym.slice(0, 1).toUpperCase()) + "</span>";
   }
 
   // ── holdings table ───────────────────────────────────────────────────────
@@ -351,43 +317,31 @@ export function initAssetsApp(root: HTMLElement): () => void {
     const rc = riskClass(r.risk);
     const dim = lens === "risk" && !rc ? " row-dim" : "";
     const tail = opts.tail ? " row-tail" : "";
-    const walletCell = isAll ? walletChips(r.wallets || []) : '<span class="w-single">' + WLABEL[sel] + "</span>";
-    const balUnit = r.unit ? ' <span class="bal-unit">' + r.unit + "</span>" : "";
+    const walletCell = isAll ? walletChips(r.wallets || []) : '<span class="w-single">' + escapeHtml(WLABEL[sel]) + "</span>";
+    const balUnit = r.unit ? ' <span class="bal-unit">' + escapeHtml(r.unit) + "</span>" : "";
     return (
-      '<tr class="' + (rc + dim + tail).trim() + '">' +
+      '<tr class="' + escapeAttr((rc + dim + tail).trim()) + '">' +
       '<td><div class="asset-cell">' + assetAvatar(r) +
       '<span class="asset-txt">' +
-      '<span class="asset-sym">' + r.sym + kindTag(r.kind) + "</span>" +
-      '<span class="asset-chain">' + r.chain + "</span>" +
+      '<span class="asset-sym">' + escapeHtml(r.sym) + kindTag(r.kind) + "</span>" +
+      '<span class="asset-chain">' + escapeHtml(r.chain) + "</span>" +
       "</span></div></td>" +
       "<td>" + walletCell + "</td>" +
-      '<td class="num">' + r.bal + balUnit + "</td>" +
-      '<td class="num strong' + usdEmph + '">' + r.usd + "</td>" +
+      '<td class="num">' + escapeHtml(r.bal) + balUnit + "</td>" +
+      '<td class="num strong' + usdEmph + '">' + escapeHtml(r.usd) + "</td>" +
       '<td class="' + ovEmph.trim() + '">' + exposureCell(r) + "</td>" +
       "</tr>"
     );
   }
 
-  // 체인 배지 — 실제 체인 브랜드 로고(이미지). 도넛 범례와 동일 소스.
-  const CHAIN_IMG_BY_NAME: Record<string, string> = {
-    Ethereum: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png",
-    Arbitrum: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/info/logo.png",
-    Base: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/base/info/logo.png",
-    Optimism: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/optimism/info/logo.png",
-    Polygon: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png",
-    Hyperliquid: "https://cdn.jsdelivr.net/gh/simplr-sh/coin-logos/images/hyperliquid/large.png",
-  };
-  // 자산 아바타 + 체인 배지(우하단)
+  // 자산 아바타 + 체인 배지(우하단). Extension pages must not fetch token or
+  // chain logos from third-party CDNs because those image requests leak the
+  // user's viewed holdings to the remote host. Use only inline local SVG logos
+  // seeded by donuts.ts; unknown chains get no badge.
   function assetAvatar(r: AggRow): string {
     const base = tokenBase(r);
-    const url = CHAIN_IMG_BY_NAME[r.chain];
-    let badge = "";
-    if (url) {
-      badge = '<span class="chain-badge"><img src="' + url + '" alt="' + r.chain + '" data-onerr="badge"></span>';
-    } else {
-      const L = (window.PASU_CHAIN_LOGOS && window.PASU_CHAIN_LOGOS.byName) || {};
-      badge = L[r.chain] ? '<span class="chain-badge">' + L[r.chain] + "</span>" : "";
-    }
+    const L = (window.PASU_CHAIN_LOGOS && window.PASU_CHAIN_LOGOS.byName) || {};
+    const badge = Object.prototype.hasOwnProperty.call(L, r.chain) ? '<span class="chain-badge">' + L[r.chain] + "</span>" : "";
     return '<span class="asset-av">' + base + badge + "</span>";
   }
 
@@ -397,7 +351,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     const head = wallets
       .slice(0, max)
       .map(function (w) {
-        return '<button class="wallet-jump" data-jump="' + w + '">' + WLABEL[w] + "</button>";
+        return '<button class="wallet-jump" data-jump="' + escapeAttr(w) + '">' + escapeHtml(WLABEL[w]) + "</button>";
       })
       .join("");
     const more = wallets.length > max ? '<span class="w-more">+' + (wallets.length - max) + "</span>" : "";
@@ -407,11 +361,11 @@ export function initAssetsApp(root: HTMLElement): () => void {
   // 구간 헤더 행
   function groupHead(cls: string, title: string, n: number, amountText: string): string {
     return (
-      '<tr class="grp-head ' + cls + '"><td colspan="5"><div class="gh-row">' +
+      '<tr class="grp-head ' + safeClassToken(cls) + '"><td colspan="5"><div class="gh-row">' +
       (cls === "warn" ? '<span class="gh-ic">⚠</span>' : "") +
-      '<span class="gh-t">' + title + "</span>" +
-      '<span class="gh-n">' + T("assets.holdings.count", { count: n }) + "</span>" +
-      '<span class="gh-m">' + amountText + "</span>" +
+      '<span class="gh-t">' + escapeHtml(title) + "</span>" +
+      '<span class="gh-n">' + escapeHtml(T("assets.holdings.count", { count: n })) + "</span>" +
+      '<span class="gh-m">' + escapeHtml(amountText) + "</span>" +
       "</div></td></tr>"
     );
   }
@@ -446,7 +400,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
               return rowHtml(r, isAll);
             })
             .join("")
-        : '<tr><td colspan="5" class="lens-empty-note">' + T("assets.holdings.searchEmpty", { q: esc(holdingsFilter) }) + "</td></tr>";
+        : '<tr><td colspan="5" class="lens-empty-note">' + escapeHtml(T("assets.holdings.searchEmpty", { q: holdingsFilter })) + "</td></tr>";
     } else {
       const atRisk = all.filter(function (r) {
         return expSeverity(r) !== "none";
@@ -497,10 +451,10 @@ export function initAssetsApp(root: HTMLElement): () => void {
       host.innerHTML =
         '<div class="tbl-wrap lens-' + lens + scrollCls + '">' +
         "<table><thead><tr>" +
-        "<th>" + T("assets.cols.asset") + "</th><th>" + T("assets.cols.wallet") + "</th>" +
-        '<th class="num">' + T("assets.cols.balance") + "</th>" +
-        '<th class="num' + usdEmph + '">' + T("assets.cols.usd") + "</th>" +
-        '<th class="' + ovEmph.trim() + '"><span class="th-help">' + T("assets.cols.riskExposure") + '<span class="th-q">?</span><span class="th-tip">' +
+        "<th>" + escapeHtml(T("assets.cols.asset")) + "</th><th>" + escapeHtml(T("assets.cols.wallet")) + "</th>" +
+        '<th class="num">' + escapeHtml(T("assets.cols.balance")) + "</th>" +
+        '<th class="num' + usdEmph + '">' + escapeHtml(T("assets.cols.usd")) + "</th>" +
+        '<th class="' + ovEmph.trim() + '"><span class="th-help">' + escapeHtml(T("assets.cols.riskExposure")) + '<span class="th-q">?</span><span class="th-tip">' +
         riskLegend() +
         "</span></span></th>" +
         "</tr></thead><tbody>" +
@@ -545,18 +499,18 @@ export function initAssetsApp(root: HTMLElement): () => void {
               : '<span style="font-size:11px; color:var(--slate-400);">—</span>';
             return (
               "<tr>" +
-              '<td class="strong" style="text-transform:uppercase; font-size:11px;">' + r.type + "</td>" +
-              '<td class="mono">' + r.token + "</td>" +
-              '<td class="mono">' + WLABEL[r.w] + "</td>" +
-              '<td><span class="mono">' + r.spender + "</span></td>" +
-              '<td class="mono num">' + r.amount + "</td>" +
+              '<td class="strong" style="text-transform:uppercase; font-size:11px;">' + escapeHtml(r.type) + "</td>" +
+              '<td class="mono">' + escapeHtml(r.token) + "</td>" +
+              '<td class="mono">' + escapeHtml(WLABEL[r.w]) + "</td>" +
+              '<td><span class="mono">' + escapeHtml(r.spender) + "</span></td>" +
+              '<td class="mono num">' + escapeHtml(r.amount) + "</td>" +
               "<td>" +
               (function () {
                 const v = visibleRisk(r.risk);
                 return v.length
                   ? v
                       .map(function (t) {
-                        return '<span class="risk-tag ' + t + '" title="' + riskDesc(t) + '">' + riskLabel(t) + "</span>";
+                        return '<span class="risk-tag ' + safeClassToken(t) + '" title="' + escapeAttr(riskDesc(t)) + '">' + escapeHtml(riskLabel(t)) + "</span>";
                       })
                       .join("")
                   : '<span class="r-safe">—</span>';
@@ -567,14 +521,14 @@ export function initAssetsApp(root: HTMLElement): () => void {
             );
           })
           .join("")
-      : '<tr><td colspan="7" class="empty-cell">' + T("assets.approvals.empty") + "</td></tr>";
+      : '<tr><td colspan="7" class="empty-cell">' + escapeHtml(T("assets.approvals.empty")) + "</td></tr>";
 
     const host = el("approvals-host");
     if (host) {
       host.innerHTML =
         '<div class="tbl-wrap"><table><thead><tr>' +
-        "<th>" + T("assets.cols.type") + "</th><th>" + T("assets.cols.tokenOrCollection") + "</th><th>" + T("assets.cols.wallet") + "</th><th>" + T("assets.cols.spenderOperator") + "</th><th>" + T("assets.cols.amount") + "</th><th>" + T("assets.cols.risk") + "</th>" +
-        '<th style="width:80px;">' + T("assets.cols.action") + "</th>" +
+        "<th>" + escapeHtml(T("assets.cols.type")) + "</th><th>" + escapeHtml(T("assets.cols.tokenOrCollection")) + "</th><th>" + escapeHtml(T("assets.cols.wallet")) + "</th><th>" + escapeHtml(T("assets.cols.spenderOperator")) + "</th><th>" + escapeHtml(T("assets.cols.amount")) + "</th><th>" + escapeHtml(T("assets.cols.risk")) + "</th>" +
+        '<th style="width:80px;">' + escapeHtml(T("assets.cols.action")) + "</th>" +
         "</tr></thead><tbody>" +
         body +
         "</tbody></table></div>";
@@ -600,9 +554,9 @@ export function initAssetsApp(root: HTMLElement): () => void {
       if (host0)
         host0.innerHTML =
           '<div class="tbl-wrap"><table><thead><tr>' +
-          "<th>" + T("assets.cols.type") + "</th><th>" + T("assets.cols.wallet") + "</th><th>" + T("assets.cols.summary") + "</th><th class=\"num\">" + T("assets.cols.signedAt") + "</th>" +
+          "<th>" + escapeHtml(T("assets.cols.type")) + "</th><th>" + escapeHtml(T("assets.cols.wallet")) + "</th><th>" + escapeHtml(T("assets.cols.summary")) + "</th><th class=\"num\">" + escapeHtml(T("assets.cols.signedAt")) + "</th>" +
           "</tr></thead><tbody>" +
-          '<tr><td colspan="4" class="empty-cell">' + T("assets.pending.empty") + "</td></tr>" +
+          '<tr><td colspan="4" class="empty-cell">' + escapeHtml(T("assets.pending.empty")) + "</td></tr>" +
           "</tbody></table></div>";
       return;
     }
@@ -615,20 +569,20 @@ export function initAssetsApp(root: HTMLElement): () => void {
         const ic = p.kind === "intent" ? icIntent : icPermit;
         const summary =
           p.kind === "intent"
-            ? '<span class="ps-leg"><span class="ps-k">' + T("assets.pending.sellMax") + "</span><b>" + p.sell + "</b></span>" +
+            ? '<span class="ps-leg"><span class="ps-k">' + escapeHtml(T("assets.pending.sellMax")) + "</span><b>" + escapeHtml(p.sell) + "</b></span>" +
               '<span class="ps-arrow"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></span>' +
-              '<span class="ps-leg"><span class="ps-k">' + T("assets.pending.buyMin") + "</span><b>" + p.buy + "</b></span>"
-            : '<span class="ps-leg"><span class="ps-k">' + T("assets.pending.allowance") + "</span><b>" +
-              (p.amount || "—") +
+              '<span class="ps-leg"><span class="ps-k">' + escapeHtml(T("assets.pending.buyMin")) + "</span><b>" + escapeHtml(p.buy) + "</b></span>"
+            : '<span class="ps-leg"><span class="ps-k">' + escapeHtml(T("assets.pending.allowance")) + "</span><b>" +
+              escapeHtml(p.amount || "—") +
               "</b></span>" +
-              '<span class="ps-spender">spender ' + (p.spender || "—") + "</span>";
-        const venue = p.venue ? '<span class="pend-venue">' + p.venue + "</span>" : "";
+              '<span class="ps-spender">spender ' + escapeHtml(p.spender || "—") + "</span>";
+        const venue = p.venue ? '<span class="pend-venue">' + escapeHtml(p.venue) + "</span>" : "";
         return (
           "<tr>" +
-          '<td><span class="pend-type ' + p.kind + '"><span class="pt-ic">' + ic + "</span>" + p.type + "</span>" + venue + "</td>" +
-          '<td class="mono">' + WLABEL[p.w] + "</td>" +
+          '<td><span class="pend-type ' + safeClassToken(p.kind) + '"><span class="pt-ic">' + ic + "</span>" + escapeHtml(p.type) + "</span>" + venue + "</td>" +
+          '<td class="mono">' + escapeHtml(WLABEL[p.w]) + "</td>" +
           '<td class="pend-sum">' + summary + "</td>" +
-          '<td class="mono num pend-at">' + p.at + "</td>" +
+          '<td class="mono num pend-at">' + escapeHtml(p.at) + "</td>" +
           "</tr>"
         );
       })
@@ -638,7 +592,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (host)
       host.innerHTML =
         '<div class="tbl-wrap"><table><thead><tr>' +
-        "<th>" + T("assets.cols.type") + "</th><th>" + T("assets.cols.wallet") + "</th><th>" + T("assets.cols.summary") + "</th><th class=\"num\">" + T("assets.cols.signedAt") + "</th>" +
+        "<th>" + escapeHtml(T("assets.cols.type")) + "</th><th>" + escapeHtml(T("assets.cols.wallet")) + "</th><th>" + escapeHtml(T("assets.cols.summary")) + "</th><th class=\"num\">" + escapeHtml(T("assets.cols.signedAt")) + "</th>" +
         "</tr></thead><tbody>" +
         body +
         "</tbody></table></div>";
@@ -663,17 +617,17 @@ export function initAssetsApp(root: HTMLElement): () => void {
           .map(function (p) {
             const sideCls = p.side === "long" ? "long" : "short";
             return (
-              '<tr class="' + sideCls + '">' +
-              '<td class="sym">' + p.sym + "</td>" +
-              '<td><span class="hl-side ' + sideCls + '">' + (p.side === "long" ? T("hl.long") : T("hl.short")) + '</span><span class="hl-lev">' + p.leverage + "</span></td>" +
-              '<td class="num">' + p.size + "</td>" +
-              '<td class="num">' + p.entry + "</td>" +
-              '<td class="num val">' + money2int(p.value) + "</td>" +
+              '<tr class="' + safeClassToken(sideCls) + '">' +
+              '<td class="sym">' + escapeHtml(p.sym) + "</td>" +
+              '<td><span class="hl-side ' + safeClassToken(sideCls) + '">' + escapeHtml(p.side === "long" ? T("hl.long") : T("hl.short")) + '</span><span class="hl-lev">' + escapeHtml(p.leverage) + "</span></td>" +
+              '<td class="num">' + escapeHtml(p.size) + "</td>" +
+              '<td class="num">' + escapeHtml(p.entry) + "</td>" +
+              '<td class="num val">' + escapeHtml(money2int(p.value)) + "</td>" +
               "</tr>"
             );
           })
           .join("")
-      : '<tr><td colspan="5" class="empty-cell">' + T("assets.hl.posEmpty") + "</td></tr>";
+      : '<tr><td colspan="5" class="empty-cell">' + escapeHtml(T("assets.hl.posEmpty")) + "</td></tr>";
 
     const ordRows = a.orders.length
       ? a.orders
@@ -682,35 +636,35 @@ export function initAssetsApp(root: HTMLElement): () => void {
             const kindCls = o.kind === "tp" ? "hl-tp" : "hl-sl";
             return (
               "<tr>" +
-              '<td class="sym">' + o.sym + "</td>" +
-              '<td><span class="hl-side ' + sideCls + '">' + T("assets.hl." + (o.side === "buy" ? "buy" : "sell")) + '</span><span class="' + kindCls + '">' + T("assets.hl." + o.kind) + "</span></td>" +
-              '<td class="num"><b>' + o.trigger + "</b> → <b>" + o.limit + "</b></td>" +
-              '<td class="cond num">' + o.cond + "</td>" +
+              '<td class="sym">' + escapeHtml(o.sym) + "</td>" +
+              '<td><span class="hl-side ' + safeClassToken(sideCls) + '">' + escapeHtml(T("assets.hl." + (o.side === "buy" ? "buy" : "sell"))) + '</span><span class="' + safeClassToken(kindCls) + '">' + escapeHtml(T("assets.hl." + o.kind)) + "</span></td>" +
+              '<td class="num"><b>' + escapeHtml(o.trigger) + "</b> → <b>" + escapeHtml(o.limit) + "</b></td>" +
+              '<td class="cond num">' + escapeHtml(o.cond) + "</td>" +
               "</tr>"
             );
           })
           .join("")
-      : '<tr><td colspan="4" class="empty-cell">' + T("assets.hl.ordEmpty") + "</td></tr>";
+      : '<tr><td colspan="4" class="empty-cell">' + escapeHtml(T("assets.hl.ordEmpty")) + "</td></tr>";
 
     return (
       '<div class="hl-card-head">' +
-      '<span class="hl-wallet"><span class="hl-venue">HL</span>' + a.walletLabel + "</span>" +
+      '<span class="hl-wallet"><span class="hl-venue">HL</span>' + escapeHtml(a.walletLabel) + "</span>" +
       '<div class="hl-meta">' +
-      '<span class="hl-bal"><span class="bk">Perp</span><span class="bv">' + money2dec(a.perpUsd) + "</span></span>" +
-      '<span class="hl-bal"><span class="bk">Spot</span><span class="bv">' + money2dec(a.spotUsd) + "</span></span>" +
+      '<span class="hl-bal"><span class="bk">Perp</span><span class="bv">' + escapeHtml(money2dec(a.perpUsd)) + "</span></span>" +
+      '<span class="hl-bal"><span class="bk">Spot</span><span class="bv">' + escapeHtml(money2dec(a.spotUsd)) + "</span></span>" +
       "</div>" +
       "</div>" +
       '<div class="hl-cols">' +
       '<div class="hl-col">' +
-      '<div class="hl-block-label">' + T("assets.hl.positions") + ' <span class="hl-n">' + a.positions.length + "</span></div>" +
+      '<div class="hl-block-label">' + escapeHtml(T("assets.hl.positions")) + ' <span class="hl-n">' + escapeHtml(a.positions.length) + "</span></div>" +
       '<table class="hl-tbl">' +
-      "<thead><tr><th>" + T("assets.hl.sym") + "</th><th>" + T("assets.hl.side") + "</th><th class=\"num\">" + T("assets.hl.size") + "</th><th class=\"num\">" + T("assets.hl.entry") + "</th><th class=\"num\">" + T("assets.hl.value") + "</th></tr></thead>" +
+      "<thead><tr><th>" + escapeHtml(T("assets.hl.sym")) + "</th><th>" + escapeHtml(T("assets.hl.side")) + "</th><th class=\"num\">" + escapeHtml(T("assets.hl.size")) + "</th><th class=\"num\">" + escapeHtml(T("assets.hl.entry")) + "</th><th class=\"num\">" + escapeHtml(T("assets.hl.value")) + "</th></tr></thead>" +
       "<tbody>" + posRows + "</tbody></table>" +
       "</div>" +
       '<div class="hl-col">' +
-      '<div class="hl-block-label">' + T("assets.hl.openOrders") + ' <span class="hl-n">' + a.orders.length + "</span></div>" +
+      '<div class="hl-block-label">' + escapeHtml(T("assets.hl.openOrders")) + ' <span class="hl-n">' + escapeHtml(a.orders.length) + "</span></div>" +
       '<table class="hl-tbl">' +
-      "<thead><tr><th>" + T("assets.hl.sym") + "</th><th>" + T("assets.hl.kind") + "</th><th class=\"num\">" + T("assets.hl.triggerLimit") + "</th><th class=\"num\">" + T("assets.hl.cond") + "</th></tr></thead>" +
+      "<thead><tr><th>" + escapeHtml(T("assets.hl.sym")) + "</th><th>" + escapeHtml(T("assets.hl.kind")) + "</th><th class=\"num\">" + escapeHtml(T("assets.hl.triggerLimit")) + "</th><th class=\"num\">" + escapeHtml(T("assets.hl.cond")) + "</th></tr></thead>" +
       "<tbody>" + ordRows + "</tbody></table>" +
       "</div>" +
       "</div>"
@@ -741,7 +695,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
       const mk = (key: string, label: string) =>
         '<button type="button" class="hl-tab' +
         (hlSel === key ? " on" : "") +
-        '" data-hl="' + key + '">' + label + "</button>";
+        '" data-hl="' + escapeAttr(key) + '">' + escapeHtml(label) + "</button>";
       const tabs = document.createElement("div");
       tabs.className = "hl-tabs";
       tabs.setAttribute("role", "tablist");
@@ -792,8 +746,8 @@ export function initAssetsApp(root: HTMLElement): () => void {
     }
 
     let statusChips = "";
-    if (m.fail > 0) statusChips += '<span class="l2-chip fail"><span class="lc-dot"></span>FAIL <b>' + m.fail + "</b></span>";
-    if (m.warn > 0) statusChips += '<span class="l2-chip warn"><span class="lc-dot"></span>WARN <b>' + m.warn + "</b></span>";
+    if (m.fail > 0) statusChips += '<span class="l2-chip fail"><span class="lc-dot"></span>FAIL <b>' + escapeHtml(m.fail) + "</b></span>";
+    if (m.warn > 0) statusChips += '<span class="l2-chip warn"><span class="lc-dot"></span>WARN <b>' + escapeHtml(m.warn) + "</b></span>";
     if (m.fail === 0 && m.warn === 0) statusChips += '<span class="l2-chip calm"><span class="lc-dot"></span>Calm</span>';
 
     const short = m.full.slice(0, 6) + "···" + m.full.slice(-4);
@@ -802,28 +756,28 @@ export function initAssetsApp(root: HTMLElement): () => void {
 
     const riskRows =
       '<div class="wrisk-row' + (varNum > 0 ? " on" : "") + '">' +
-      '<span class="wr-dot warn"></span><span class="wr-k">' + T("assets.l2.currentVar") + "</span>" +
-      '<span class="wr-v' + (varNum > 0 ? " warn" : "") + '">' + m.varUsd + "</span></div>" +
+      '<span class="wr-dot warn"></span><span class="wr-k">' + escapeHtml(T("assets.l2.currentVar")) + "</span>" +
+      '<span class="wr-v' + (varNum > 0 ? " warn" : "") + '">' + escapeHtml(m.varUsd) + "</span></div>" +
       '<div class="wrisk-row' + (m.unlimited > 0 ? " on" : "") + '">' +
-      '<span class="wr-dot warn"></span><span class="wr-k">' + T("assets.l2.unlimitedApprovals") + "</span>" +
-      '<span class="wr-v' + (m.unlimited > 0 ? " warn" : "") + '">' + T("assets.l2.countCases", { count: m.unlimited }) + "</span></div>" +
+      '<span class="wr-dot warn"></span><span class="wr-k">' + escapeHtml(T("assets.l2.unlimitedApprovals")) + "</span>" +
+      '<span class="wr-v' + (m.unlimited > 0 ? " warn" : "") + '">' + escapeHtml(T("assets.l2.countCases", { count: m.unlimited })) + "</span></div>" +
       (m.pending > 0
-        ? '<div class="wrisk-row"><span class="wr-dot slate"></span><span class="wr-k">' + T("assets.l2.pendingOrders") + '</span><span class="wr-v">' + T("assets.l2.countCases", { count: m.pending }) + "</span></div>"
+        ? '<div class="wrisk-row"><span class="wr-dot slate"></span><span class="wr-k">' + escapeHtml(T("assets.l2.pendingOrders")) + '</span><span class="wr-v">' + escapeHtml(T("assets.l2.countCases", { count: m.pending })) + "</span></div>"
         : "");
 
     const wriskBody = calm
-      ? '<div class="wrisk-calm">' + T("assets.l2.calm") + "</div>"
+      ? '<div class="wrisk-calm">' + escapeHtml(T("assets.l2.calm")) + "</div>"
       : '<div class="wrisk-rows">' + riskRows + "</div>";
 
     const band =
       '<div class="wsum-grid">' +
       '<div class="chain-card wsum-card">' +
-      '<div class="cc-head"><span class="cc-ttl">' + T("assets.l2.overview") + "</span>" + statusChips + "</div>" +
-      '<div class="wsum-total"><span class="wsum-k">' + T("assets.l2.totalAssets") + '</span><span class="wsum-v">' + m.totalUsd + "</span></div>" +
-      '<div class="wsum-id"><span class="wsum-name">' + m.label + '</span><span class="wsum-addr mono">' + short + "</span></div>" +
+      '<div class="cc-head"><span class="cc-ttl">' + escapeHtml(T("assets.l2.overview")) + "</span>" + statusChips + "</div>" +
+      '<div class="wsum-total"><span class="wsum-k">' + escapeHtml(T("assets.l2.totalAssets")) + '</span><span class="wsum-v">' + escapeHtml(m.totalUsd) + "</span></div>" +
+      '<div class="wsum-id"><span class="wsum-name">' + escapeHtml(m.label) + '</span><span class="wsum-addr mono">' + escapeHtml(short) + "</span></div>" +
       "</div>" +
       '<div class="chain-card wrisk-card">' +
-      '<div class="cc-head"><span class="cc-ttl">' + T("assets.l2.riskExposure") + "</span></div>" +
+      '<div class="cc-head"><span class="cc-ttl">' + escapeHtml(T("assets.l2.riskExposure")) + "</span></div>" +
       wriskBody +
       "</div>" +
       "</div>";
@@ -858,8 +812,8 @@ export function initAssetsApp(root: HTMLElement): () => void {
       host.innerHTML =
         '<div class="risk-suggest">' +
         '<span class="rs-ic">⚠</span>' +
-        '<span class="rs-txt">' + msg + "</span>" +
-        '<button class="rs-act" id="banner-switch">' + T("assets.banner.switch") + "</button>" +
+      '<span class="rs-txt">' + escapeHtml(msg) + "</span>" +
+      '<button class="rs-act" id="banner-switch">' + escapeHtml(T("assets.banner.switch")) + "</button>" +
         '<button class="rs-dismiss" id="banner-x" aria-label="dismiss">✕</button>' +
         "</div>";
       const bs = el("banner-switch");
@@ -888,16 +842,16 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (!track) return;
     const keys = Object.keys(WMETA);
     const total = keys.length;
-    let html = '<button class="ws-chip" data-wallet="all">' + T("assets.allWallets") + ' <span class="ws-amt">' + total + "</span></button>";
+    let html = '<button class="ws-chip" data-wallet="all">' + escapeHtml(T("assets.allWallets")) + ' <span class="ws-amt">' + escapeHtml(total) + "</span></button>";
     keys.forEach(function (k) {
       const m = WMETA[k];
       const dot = m.fail > 0 ? "fail" : m.warn > 0 ? "warn" : "calm";
       const label = WLABEL[k] || m.label || k;
       html +=
-        '<button class="ws-chip" data-wallet="' + k + '">' +
-        '<span class="ws-dot ' + dot + '"></span>' +
-        label +
-        ' <span class="ws-amt">' + shortFull(m.full) + "</span></button>";
+        '<button class="ws-chip" data-wallet="' + escapeAttr(k) + '">' +
+        '<span class="ws-dot ' + safeClassToken(dot) + '"></span>' +
+        escapeHtml(label) +
+        ' <span class="ws-amt">' + escapeHtml(shortFull(m.full)) + "</span></button>";
     });
     track.innerHTML = html;
   }
