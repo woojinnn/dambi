@@ -15,12 +15,13 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use policy_db::{GlobalDb, MultiUserStore};
-use policy_state::U256;
+use policy_db::{GlobalDb, MultiUserStore, PostgresWalletStore};
+use policy_state::{WalletState, U256};
 use policy_sync::sources::fetchers::rpc::multicall::{
     decode_aggregate3_returndata, encode_aggregate3_calldata, Call3,
 };
@@ -33,7 +34,7 @@ use crate::dashboard_handlers;
 use crate::dto::EvaluateRequest;
 use crate::events::{EventBus, EventPublisher};
 use crate::handler::{
-    evaluate, ExternalEnrichment, HandlerError, NftFloorOracle, OutboundTransfer,
+    evaluate_loaded_state, ExternalEnrichment, HandlerError, NftFloorOracle, OutboundTransfer,
     PoolLiquidityFacts, PriceBook, PriceFact, SanctionsScreen, TokenMarketData, TokenSecurityFlags,
 };
 use crate::market_handlers;
@@ -131,8 +132,7 @@ pub struct ShutdownRx(pub tokio::sync::watch::Receiver<bool>);
 /// - `GET  /auth/google`                    — redirect to Google consent.
 /// - `GET  /auth/google/callback`           — finish OAuth → JWT.
 ///
-/// Authenticated (`Authorization: Bearer <jwt>` OR `?token=<jwt>` on
-/// SSE — see `auth::middleware` for the resolution order):
+/// Authenticated (`Authorization: Bearer <jwt>`):
 /// - `GET  /auth/me`                        — current user (id + email).
 /// - `POST /evaluate`                       — simulate action envelope(s).
 /// - `GET  /wallets`                        — list user's wallets.
@@ -274,11 +274,24 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
 
     public
         .merge(protected)
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(sanitized_trace_span))
         .layer(RequestBodyLimitLayer::new(config.http_body_limit_bytes))
         .layer(cors_layer(config))
         .layer(from_fn(add_security_headers))
         .with_state(state)
+}
+
+fn sanitized_trace_span(req: &Request) -> tracing::Span {
+    tracing::info_span!(
+        "request",
+        method = %req.method(),
+        path = %sanitized_trace_path(req),
+        version = ?req.version(),
+    )
+}
+
+fn sanitized_trace_path(req: &Request) -> &str {
+    req.uri().path()
 }
 
 fn cors_layer(config: &ServerConfig) -> CorsLayer {
@@ -395,7 +408,8 @@ impl PriceBook for DbPriceBook {
             }),
             Ok(None) => None,
             Err(err) => {
-                tracing::warn!(%chain, %address, error = %err, "global price lookup failed");
+                let safe_error = crate::logging::redact_sensitive_log_text(&err);
+                tracing::warn!(%chain, %address, error = %safe_error, "global price lookup failed");
                 None
             }
         }
@@ -405,7 +419,8 @@ impl PriceBook for DbPriceBook {
         match self.global_db.latest_token_decimals(chain, address).await {
             Ok(decimals) => decimals,
             Err(err) => {
-                tracing::warn!(%chain, %address, error = %err, "global decimals lookup failed");
+                let safe_error = crate::logging::redact_sensitive_log_text(&err);
+                tracing::warn!(%chain, %address, error = %safe_error, "global decimals lookup failed");
                 None
             }
         }
@@ -606,28 +621,24 @@ impl PriceBook for LayeredPriceBook {
     }
 }
 
-/// Per-chain JSON-RPC URLs for the on-demand Chainlink price fallback. Defaults
-/// to the keyless public RPCs `values-m3.yaml` already uses for the sync worker,
-/// so the fix works without new config. Override per chain with
-/// `POLICY_PRICE_RPC_URL_<numeric-chain-id>` (empty disables that chain), or
-/// disable the whole fallback with `POLICY_PRICE_ONCHAIN_FALLBACK=0` (the price
-/// book then collapses to the wallet-derived DB source, pre-fix behavior).
+/// Per-chain JSON-RPC URLs for the on-demand Chainlink price fallback. The
+/// fallback is host-configured: without explicit `POLICY_PRICE_RPC_URL_*` envs
+/// it stays inert, so a non-Helm binary cannot silently start sending
+/// evaluate-time `eth_call`s to a third-party public RPC. Empty values disable a
+/// chain, and `POLICY_PRICE_ONCHAIN_FALLBACK=0` disables the whole fallback.
 fn price_rpc_urls() -> HashMap<String, String> {
     let mut urls = HashMap::new();
     if std::env::var("POLICY_PRICE_ONCHAIN_FALLBACK").is_ok_and(|v| v == "0") {
         return urls;
     }
-    for (caip, id, default_url) in [
-        ("eip155:1", "1", "https://ethereum-rpc.publicnode.com"),
-        (
-            "eip155:42161",
-            "42161",
-            "https://arbitrum-one-rpc.publicnode.com",
-        ),
-        ("eip155:8453", "8453", "https://base-rpc.publicnode.com"),
+    for (caip, id) in [
+        ("eip155:1", "1"),
+        ("eip155:42161", "42161"),
+        ("eip155:8453", "8453"),
     ] {
-        let url = std::env::var(format!("POLICY_PRICE_RPC_URL_{id}"))
-            .unwrap_or_else(|_| default_url.to_owned());
+        let Ok(url) = std::env::var(format!("POLICY_PRICE_RPC_URL_{id}")) else {
+            continue;
+        };
         if !url.is_empty() {
             urls.insert(caip.to_owned(), url);
         }
@@ -1109,6 +1120,24 @@ fn normalize_evm_address(value: &str) -> Option<String> {
     Some(format!("0x{addr}"))
 }
 
+/// Normalize an AMM pool key for the `GeckoTerminal` `/pools/{key}` path.
+///
+/// Unlike [`normalize_evm_address`] (a strict 20-byte EVM address), a pool key
+/// may be EITHER a 20-byte pool/pair contract address (Uniswap V2/V3, Curve, …)
+/// OR a 32-byte pool id (Uniswap V4 `PoolId`, Balancer v2/v3 pool id). Uniswap V4
+/// uses a singleton `PoolManager`, so its pools have no per-pool contract address;
+/// `GeckoTerminal` indexes them under that 64-hex id verbatim
+/// (`/networks/eth/pools/0x<64-hex>` → 200, live-verified). Accept both 40- and
+/// 64-hex lengths; keep the same hex-only validation so URL-injection shapes
+/// (`..`, `%`, `/`, `&`, `?`) are still rejected.
+fn normalize_pool_key(value: &str) -> Option<String> {
+    let key = value.trim_start_matches("0x").to_ascii_lowercase();
+    if (key.len() != 40 && key.len() != 64) || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("0x{key}"))
+}
+
 /// Live external enrichment for the token policies: `GoPlus` malicious-address
 /// reputation (`address.reputation`) and the owner's transfer history
 /// (`stat_window.snapshot` / `address.similarity`, Phase 2 via Alchemy
@@ -1181,7 +1210,10 @@ impl ExternalEnrichment for LiveEnrichment {
     ) -> Option<PoolLiquidityFacts> {
         // Resolve the pool key from the internally-tagged `AmmVenue`
         // (`.pool` / `.pool_id` / `.pair`); non-pool / unknown venue → dormant.
-        let pool_key = normalize_evm_address(crate::handler::amm_venue_pool_key(venue)?)?;
+        // Pool keys are 20-byte addresses (V2/V3/Curve) OR 32-byte pool ids
+        // (Uniswap V4 / Balancer) — `normalize_pool_key` accepts both, so a V4
+        // `pool_id` is no longer killed before the GeckoTerminal lookup.
+        let pool_key = normalize_pool_key(crate::handler::amm_venue_pool_key(venue)?)?;
         // `GeckoTerminal` keys pools by its own network SLUG, not eip155 chainId.
         let network = geckoterminal_network_slug(chain_id)?;
         let base = self
@@ -1457,14 +1489,20 @@ impl LiveEnrichment {
 
 const EVALUATE_MAX_ENVELOPES: usize = 128;
 const EVALUATE_MAX_CALL_SPECS: usize = 64;
+const EVALUATE_MAX_CALL_ID_CHARS: usize = 256;
+const EVALUATE_MAX_METHOD_CHARS: usize = 128;
+const EVALUATE_TIMEOUT_SECS: u64 = 8;
 
 async fn evaluate_handler(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Json(req): Json<EvaluateRequest>,
 ) -> Response {
-    if let Some(reason) = evaluate_request_limit_violation(&req) {
-        return request_too_large(reason);
+    if let Some(rejection) = evaluate_request_rejection(&req) {
+        return match rejection {
+            EvaluateRequestRejection::TooLarge(reason) => request_too_large(reason),
+            EvaluateRequestRejection::BadRequest(reason) => bad_evaluate_request(reason),
+        };
     }
 
     tracing::debug!(
@@ -1478,6 +1516,10 @@ async fn evaluate_handler(
     let store = match state.multi_user.for_user(&user.user_id) {
         Ok(s) => s,
         Err(e) => return internal_server_error(&format!("open user store: {e}")),
+    };
+    let active_state = match require_active_evaluate_wallet(&store, &req).await {
+        Ok(active_state) => active_state,
+        Err(response) => return response,
     };
     // F-ENRICH-1 fix: DB-derived price (primary) + on-demand Chainlink fallback
     // (DB miss) so a USD-cap can value a canonical token NO synced wallet holds.
@@ -1510,33 +1552,131 @@ async fn evaluate_handler(
             .ok()
             .or_else(|| std::env::var("ALCHEMY_RPC_URL").ok()),
     };
-    match evaluate(
-        &*store,
+    evaluate_with_timeout(evaluate_loaded_state(
+        active_state,
         &price_book,
         &sanctions,
         &floor,
         &external,
         &onchain,
         req,
-    )
+    ))
     .await
-    {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err @ HandlerError::Reducer(_)) => {
-            (StatusCode::UNPROCESSABLE_ENTITY, err.to_string()).into_response()
+}
+
+async fn require_active_evaluate_wallet(
+    store: &PostgresWalletStore,
+    req: &EvaluateRequest,
+) -> Result<WalletState, Response> {
+    let active = store
+        .load_active_by_address(req.wallet_id.address)
+        .await
+        .map_err(|e| internal_server_error(&format!("load active evaluate wallet: {e}")))?;
+    let Some(active) = active else {
+        return Err((StatusCode::NOT_FOUND, "wallet not tracked for this user").into_response());
+    };
+    if let Some(violation) = evaluate_wallet_scope_violation(&active, req) {
+        return Err((StatusCode::BAD_REQUEST, violation.as_str()).into_response());
+    }
+    Ok(active)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EvaluateWalletScopeViolation {
+    EvalChainUntracked,
+    WalletIdChainUntracked,
+}
+
+impl EvaluateWalletScopeViolation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::EvalChainUntracked => "wallet does not track evaluation chain",
+            Self::WalletIdChainUntracked => "wallet_id contains an untracked chain",
         }
-        Err(err @ HandlerError::Store(_)) => internal_server_error(&err.to_string()),
     }
 }
 
-fn evaluate_request_limit_violation(req: &EvaluateRequest) -> Option<&'static str> {
-    if req.envelopes.len() > EVALUATE_MAX_ENVELOPES {
-        Some("too many envelopes")
-    } else if req.call_specs.len() > EVALUATE_MAX_CALL_SPECS {
-        Some("too many call_specs")
-    } else {
-        None
+fn evaluate_wallet_scope_violation(
+    active: &policy_state::WalletState,
+    req: &EvaluateRequest,
+) -> Option<EvaluateWalletScopeViolation> {
+    let active_chains = &active.wallet_id.chains;
+    if is_eip155_chain(&req.eval_context.chain) && !active_chains.contains(&req.eval_context.chain)
+    {
+        return Some(EvaluateWalletScopeViolation::EvalChainUntracked);
     }
+    if req
+        .wallet_id
+        .chains
+        .iter()
+        .any(|chain| is_eip155_chain(chain) && !active_chains.contains(chain))
+    {
+        return Some(EvaluateWalletScopeViolation::WalletIdChainUntracked);
+    }
+    None
+}
+
+fn is_eip155_chain(chain: &policy_state::primitives::ChainId) -> bool {
+    chain.as_str().starts_with("eip155:")
+}
+
+async fn evaluate_with_timeout<F>(evaluation: F) -> Response
+where
+    F: Future<Output = Result<crate::dto::EvaluateResponse, HandlerError>>,
+{
+    evaluate_with_timeout_budget(evaluation, Duration::from_secs(EVALUATE_TIMEOUT_SECS)).await
+}
+
+async fn evaluate_with_timeout_budget<F>(evaluation: F, timeout: Duration) -> Response
+where
+    F: Future<Output = Result<crate::dto::EvaluateResponse, HandlerError>>,
+{
+    match tokio::time::timeout(timeout, evaluation).await {
+        Ok(Ok(resp)) => Json(resp).into_response(),
+        Ok(Err(err @ HandlerError::Reducer(_))) => {
+            (StatusCode::UNPROCESSABLE_ENTITY, err.to_string()).into_response()
+        }
+        Ok(Err(err @ HandlerError::Store(_))) => internal_server_error(&err.to_string()),
+        Err(_) => evaluate_timeout_response(),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EvaluateRequestRejection {
+    TooLarge(&'static str),
+    BadRequest(&'static str),
+}
+
+fn evaluate_request_rejection(req: &EvaluateRequest) -> Option<EvaluateRequestRejection> {
+    if req.envelopes.len() > EVALUATE_MAX_ENVELOPES {
+        Some(EvaluateRequestRejection::TooLarge("too many envelopes"))
+    } else if req.call_specs.len() > EVALUATE_MAX_CALL_SPECS {
+        Some(EvaluateRequestRejection::TooLarge("too many call_specs"))
+    } else {
+        evaluate_call_specs_shape_violation(req).map(EvaluateRequestRejection::BadRequest)
+    }
+}
+
+fn evaluate_call_specs_shape_violation(req: &EvaluateRequest) -> Option<&'static str> {
+    let mut seen = BTreeSet::new();
+    for spec in &req.call_specs {
+        if spec.call_id.trim().is_empty() {
+            return Some("call_id must be non-empty");
+        }
+        if spec.call_id.chars().count() > EVALUATE_MAX_CALL_ID_CHARS {
+            return Some("call_id too long");
+        }
+        if !seen.insert(spec.call_id.as_str()) {
+            return Some("duplicate call_id");
+        }
+        if spec.method.trim().is_empty() {
+            return Some("method must be non-empty");
+        }
+        if spec.method.chars().count() > EVALUATE_MAX_METHOD_CHARS {
+            return Some("method too long");
+        }
+    }
+    None
 }
 
 fn request_too_large(reason: &str) -> Response {
@@ -1552,16 +1692,76 @@ fn request_too_large(reason: &str) -> Response {
         .into_response()
 }
 
+fn bad_evaluate_request(reason: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": "invalid_evaluate_request",
+            "reason": reason,
+        })),
+    )
+        .into_response()
+}
+
+fn evaluate_timeout_response() -> Response {
+    (
+        StatusCode::GATEWAY_TIMEOUT,
+        Json(serde_json::json!({
+            "error": "evaluate_timeout",
+            "reason": "evaluation exceeded the server work budget",
+        })),
+    )
+        .into_response()
+}
+
 fn internal_server_error(reason: &str) -> Response {
-    tracing::error!(error = %reason, "app handler internal error");
+    let safe_reason = crate::logging::redact_sensitive_log_text(reason);
+    tracing::error!(error = %safe_reason, "app handler internal error");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use std::collections::BTreeSet;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
     use time::format_description::well_known::Rfc3339;
     use time::OffsetDateTime;
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn restore_env(name: &str, value: Option<OsString>) {
+        match value {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
+    }
+
+    fn clear_price_rpc_env() -> Vec<(&'static str, Option<OsString>)> {
+        let keys = [
+            "POLICY_PRICE_ONCHAIN_FALLBACK",
+            "POLICY_PRICE_RPC_URL_1",
+            "POLICY_PRICE_RPC_URL_42161",
+            "POLICY_PRICE_RPC_URL_8453",
+        ];
+        keys.into_iter()
+            .map(|key| {
+                let old = std::env::var_os(key);
+                std::env::remove_var(key);
+                (key, old)
+            })
+            .collect()
+    }
+
+    fn restore_price_rpc_env(saved: Vec<(&'static str, Option<OsString>)>) {
+        for (key, old) in saved {
+            restore_env(key, old);
+        }
+    }
 
     #[tokio::test]
     async fn internal_server_error_does_not_echo_reason() {
@@ -1609,6 +1809,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn trace_span_path_drops_sensitive_query_tokens() {
+        let req = axum::http::Request::builder()
+            .uri("/events/stream?token=header.payload.signature&other=value")
+            .body(axum::body::Body::empty())
+            .unwrap();
+
+        let path = super::sanitized_trace_path(&req);
+
+        assert_eq!(path, "/events/stream");
+        assert!(
+            !path.contains("token"),
+            "trace path leaked token key: {path}"
+        );
+        assert!(
+            !path.contains("header.payload.signature"),
+            "trace path leaked token value: {path}"
+        );
+    }
+
     fn empty_evaluate_request() -> crate::dto::EvaluateRequest {
         use std::str::FromStr;
 
@@ -1644,20 +1864,123 @@ mod tests {
         }
     }
 
+    fn active_wallet_state(
+        chains: impl IntoIterator<Item = policy_state::primitives::ChainId>,
+    ) -> policy_state::WalletState {
+        use std::str::FromStr;
+
+        policy_state::WalletState::new(policy_state::WalletId::new(
+            policy_state::primitives::Address::from_str(
+                "0x000000000000000000000000000000000000a01c",
+            )
+            .unwrap(),
+            chains,
+        ))
+    }
+
     #[test]
     fn evaluate_request_limit_accepts_boundary_and_rejects_excess_call_specs() {
         let mut req = empty_evaluate_request();
         req.call_specs = (0..super::EVALUATE_MAX_CALL_SPECS)
             .map(sample_call_spec)
             .collect();
-        assert!(super::evaluate_request_limit_violation(&req).is_none());
+        assert!(super::evaluate_request_rejection(&req).is_none());
 
         req.call_specs
             .push(sample_call_spec(super::EVALUATE_MAX_CALL_SPECS));
         assert_eq!(
-            super::evaluate_request_limit_violation(&req),
-            Some("too many call_specs")
+            super::evaluate_request_rejection(&req),
+            Some(super::EvaluateRequestRejection::TooLarge(
+                "too many call_specs"
+            ))
         );
+    }
+
+    #[test]
+    fn evaluate_request_rejects_duplicate_and_malformed_call_specs() {
+        let mut req = empty_evaluate_request();
+        req.call_specs = vec![sample_call_spec(1), sample_call_spec(1)];
+        assert_eq!(
+            super::evaluate_request_rejection(&req),
+            Some(super::EvaluateRequestRejection::BadRequest(
+                "duplicate call_id"
+            ))
+        );
+
+        req.call_specs = vec![sample_call_spec(1)];
+        req.call_specs[0].call_id = " ".to_owned();
+        assert_eq!(
+            super::evaluate_request_rejection(&req),
+            Some(super::EvaluateRequestRejection::BadRequest(
+                "call_id must be non-empty"
+            ))
+        );
+
+        req.call_specs = vec![sample_call_spec(1)];
+        req.call_specs[0].method.clear();
+        assert_eq!(
+            super::evaluate_request_rejection(&req),
+            Some(super::EvaluateRequestRejection::BadRequest(
+                "method must be non-empty"
+            ))
+        );
+    }
+
+    #[test]
+    fn evaluate_wallet_scope_accepts_registered_evm_chain() {
+        let active = active_wallet_state([policy_state::primitives::ChainId::ethereum_mainnet()]);
+        let req = empty_evaluate_request();
+
+        assert_eq!(super::evaluate_wallet_scope_violation(&active, &req), None);
+    }
+
+    #[test]
+    fn evaluate_wallet_scope_rejects_untracked_evm_eval_chain() {
+        let active = active_wallet_state([policy_state::primitives::ChainId::ethereum_mainnet()]);
+        let mut req = empty_evaluate_request();
+        req.eval_context.chain = policy_state::primitives::ChainId::arbitrum();
+        req.wallet_id.chains =
+            BTreeSet::from([policy_state::primitives::ChainId::ethereum_mainnet()]);
+
+        assert_eq!(
+            super::evaluate_wallet_scope_violation(&active, &req),
+            Some(super::EvaluateWalletScopeViolation::EvalChainUntracked)
+        );
+    }
+
+    #[test]
+    fn evaluate_wallet_scope_rejects_untracked_evm_wallet_id_chain() {
+        let active = active_wallet_state([policy_state::primitives::ChainId::ethereum_mainnet()]);
+        let mut req = empty_evaluate_request();
+        req.wallet_id.chains = BTreeSet::from([policy_state::primitives::ChainId::arbitrum()]);
+
+        assert_eq!(
+            super::evaluate_wallet_scope_violation(&active, &req),
+            Some(super::EvaluateWalletScopeViolation::WalletIdChainUntracked)
+        );
+    }
+
+    #[test]
+    fn evaluate_wallet_scope_allows_non_eip155_venue_chain_for_active_wallet() {
+        let active = active_wallet_state([policy_state::primitives::ChainId::ethereum_mainnet()]);
+        let mut req = empty_evaluate_request();
+        let venue_chain = policy_state::primitives::ChainId::new("hl-mainnet");
+        req.eval_context.chain = venue_chain.clone();
+        req.wallet_id.chains = BTreeSet::from([venue_chain]);
+
+        assert_eq!(super::evaluate_wallet_scope_violation(&active, &req), None);
+    }
+
+    #[tokio::test]
+    async fn bad_evaluate_request_response_is_bounded_json() {
+        let response = super::bad_evaluate_request("duplicate call_id");
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "invalid_evaluate_request");
+        assert_eq!(json["reason"], "duplicate call_id");
     }
 
     #[tokio::test]
@@ -1674,6 +1997,23 @@ mod tests {
             json["max_call_specs"],
             serde_json::json!(super::EVALUATE_MAX_CALL_SPECS)
         );
+    }
+
+    #[tokio::test]
+    async fn evaluate_timeout_response_is_bounded_json() {
+        let response = super::evaluate_with_timeout_budget(
+            std::future::pending::<Result<crate::dto::EvaluateResponse, super::HandlerError>>(),
+            std::time::Duration::from_millis(1),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "evaluate_timeout");
+        assert_eq!(json["reason"], "evaluation exceeded the server work budget");
     }
 
     fn at(ts: &str) -> OffsetDateTime {
@@ -1728,6 +2068,52 @@ mod tests {
                 .is_none()
         );
         assert!(super::normalize_evm_address("0xabc").is_none());
+    }
+
+    #[test]
+    fn normalize_pool_key_accepts_v4_pool_id_and_addresses() {
+        // 20-byte pool/pair contract address (Uniswap V2/V3, Curve, …) — same
+        // shape as an EVM address.
+        assert_eq!(
+            super::normalize_pool_key("0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"),
+            Some("0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_owned())
+        );
+        // 32-byte Uniswap V4 `PoolId` — GeckoTerminal indexes singleton-PoolManager
+        // V4 pools under this 64-hex id verbatim (`/pools/0x<64-hex>` → 200).
+        let v4 = "0xf2df4f75505a4e1e5bfb6e36b3be82c2e03d5d8f8f9c6b7caa1cbd059ec5c2ee";
+        assert_eq!(super::normalize_pool_key(v4), Some(v4.to_owned()));
+        // 0x optional + case-normalized.
+        assert_eq!(
+            super::normalize_pool_key(
+                "F2DF4F75505A4E1E5BFB6E36B3BE82C2E03D5D8F8F9C6B7CAA1CBD059EC5C2EE"
+            ),
+            Some(v4.to_owned())
+        );
+        // URL-injection shapes + wrong lengths rejected (mirrors the address gate).
+        assert!(
+            super::normalize_pool_key("0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640&x=1").is_none()
+        );
+        assert!(super::normalize_pool_key("0xabc").is_none()); // too short
+        assert!(super::normalize_pool_key(&"0".repeat(63)).is_none()); // 63 ≠ 40/64
+    }
+
+    #[test]
+    fn pool_liquidity_seam_v4_venue_key_survives_normalization() {
+        // The exact bug under fix: `amm_venue_pool_key` extracts the v4 `pool_id`,
+        // but the old 40-hex-only `normalize_evm_address` rejected it before the
+        // GeckoTerminal call ever ran. Pin that the extracted v4 key now survives
+        // pool-key normalization (a regression here re-dormants the V4 LP warn).
+        let venue = json!({
+            "name": "uniswap_v4",
+            "pool_id": "0xf2df4f75505a4e1e5bfb6e36b3be82c2e03d5d8f8f9c6b7caa1cbd059ec5c2ee",
+            "pool_manager": "0x000000000004444c5dc75cb358380d2e3de08a90",
+            "hooks": "0x0000000000000000000000000000000000000000"
+        });
+        let key = crate::handler::amm_venue_pool_key(&venue).expect("v4 venue exposes pool_id");
+        assert!(
+            super::normalize_pool_key(key).is_some(),
+            "v4 pool_id must survive pool-key normalization (was killed by the 40-hex gate)"
+        );
     }
 
     // ── F-ENRICH-1: on-demand Chainlink price fallback ──────────────────────
@@ -1813,17 +2199,63 @@ mod tests {
         assert_eq!(decimals, Some(6));
     }
 
+    #[test]
+    fn price_rpc_urls_default_empty_without_explicit_config() {
+        let _guard = env_lock();
+        let saved = clear_price_rpc_env();
+
+        assert!(
+            super::price_rpc_urls().is_empty(),
+            "price fallback must stay inert unless hosts configure explicit RPC URLs"
+        );
+
+        restore_price_rpc_env(saved);
+    }
+
+    #[test]
+    fn price_rpc_urls_reads_only_explicit_chain_envs() {
+        let _guard = env_lock();
+        let saved = clear_price_rpc_env();
+
+        std::env::set_var("POLICY_PRICE_RPC_URL_1", "https://mainnet.example");
+        std::env::set_var("POLICY_PRICE_RPC_URL_42161", "");
+        std::env::set_var("POLICY_PRICE_RPC_URL_8453", "https://base.example");
+        let urls = super::price_rpc_urls();
+        assert_eq!(
+            urls.get("eip155:1").map(String::as_str),
+            Some("https://mainnet.example")
+        );
+        assert_eq!(
+            urls.get("eip155:8453").map(String::as_str),
+            Some("https://base.example")
+        );
+        assert!(!urls.contains_key("eip155:42161"));
+
+        std::env::set_var("POLICY_PRICE_ONCHAIN_FALLBACK", "0");
+        assert!(
+            super::price_rpc_urls().is_empty(),
+            "global off switch must override per-chain URLs"
+        );
+
+        restore_price_rpc_env(saved);
+    }
+
     /// LIVE e2e (run with `--ignored`): the REAL on-demand fallback prices
-    /// mainnet USDC from publicnode end-to-end — the exact F-ENRICH-1 case (a
-    /// token the test wallets never held). Off by default (network dependent).
+    /// mainnet USDC from the configured RPC end-to-end — the exact F-ENRICH-1
+    /// case (a token the test wallets never held). Off by default (network
+    /// dependent); set `POLICY_PRICE_RPC_URL_1` to run it.
     #[tokio::test]
-    #[ignore = "hits live publicnode RPC"]
+    #[ignore = "hits live configured RPC"]
     async fn live_onchain_usdc_price() {
         use crate::handler::PriceBook;
         let pb = super::OnchainChainlinkPriceBook {
             client: reqwest::Client::new(),
             rpc_urls: super::price_rpc_urls(),
         };
+        assert!(
+            pb.rpc_urls.contains_key("eip155:1"),
+            "set POLICY_PRICE_RPC_URL_1 for this ignored live test"
+        );
         let fact = pb
             .price("eip155:1", "0xA0b86991c6218b36c1D19D4a2e9Eb0cE3606eB48")
             .await;

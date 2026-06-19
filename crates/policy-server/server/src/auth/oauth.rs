@@ -22,6 +22,7 @@
 use std::{
     env,
     sync::{Mutex, OnceLock},
+    time::Duration,
 };
 
 use axum::extract::{Query, State};
@@ -40,6 +41,7 @@ const OAUTH_STATE_SUBJECT: &str = "oauth-state";
 const OAUTH_STATE_TTL_SECS: i64 = jwt::OAUTH_STATE_TTL_SECS;
 const OAUTH_STATE_COOKIE: &str = "scopeball_oauth_state";
 const OAUTH_STATE_COOKIE_PATH: &str = "/auth/google";
+const OAUTH_HTTP_TIMEOUT_SECS: u64 = 10;
 
 /// Optional query for [`start_google_login`]. `redirect_uri`, when present,
 /// names where the callback delivers the token fragment instead of the
@@ -236,7 +238,7 @@ pub async fn refresh_token(
     let claims = match jwt::verify(&req.refresh_token) {
         Ok(c) if c.is_refresh() => c,
         Ok(_) => return user_error("access token cannot refresh a session"),
-        Err(e) => return user_error(&format!("invalid refresh token: {e}")),
+        Err(e) => return reject_refresh_verify_error(&e),
     };
     let Some(old_jti) = claims.token_id() else {
         return user_error("invalid refresh token");
@@ -413,7 +415,7 @@ async fn exchange_code_for_id_token(code: &str) -> Result<String, String> {
         ("grant_type", "authorization_code"),
     ];
 
-    let resp: TokenResp = reqwest::Client::new()
+    let resp: TokenResp = oauth_http_client()?
         .post("https://oauth2.googleapis.com/token")
         .form(&body)
         .send()
@@ -508,7 +510,7 @@ async fn verify_identity_from_google_id_token(
 }
 
 async fn fetch_google_jwks() -> Result<GoogleJwkSet, String> {
-    reqwest::Client::new()
+    oauth_http_client()?
         .get("https://www.googleapis.com/oauth2/v3/certs")
         .send()
         .await
@@ -518,6 +520,13 @@ async fn fetch_google_jwks() -> Result<GoogleJwkSet, String> {
         .json::<GoogleJwkSet>()
         .await
         .map_err(|e| format!("jwks JSON decode: {e}"))
+}
+
+fn oauth_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(OAUTH_HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("oauth HTTP client: {e}"))
 }
 
 async fn fetch_google_jwks_cached(now: i64) -> Result<GoogleJwkSet, String> {
@@ -665,7 +674,8 @@ fn env_missing(var: &str) -> Response {
 }
 
 fn server_error(reason: &str) -> Response {
-    eprintln!("oauth server_error: {reason}");
+    let safe_reason = crate::logging::redact_sensitive_log_text(reason);
+    tracing::error!(error = %safe_reason, "oauth handler internal error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": "server_error", "reason": "Internal server error" })),
@@ -679,6 +689,12 @@ fn user_error(reason: &str) -> Response {
         Json(json!({ "error": "bad_request", "reason": reason })),
     )
         .into_response()
+}
+
+fn reject_refresh_verify_error(error: &jwt::AuthError) -> Response {
+    let safe_error = crate::logging::redact_sensitive_log_text(error);
+    tracing::warn!(error = %safe_error, "refresh token verification failed");
+    user_error("invalid or expired refresh token")
 }
 
 #[cfg(test)]
@@ -860,6 +876,28 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(json["error"], "server_error");
         assert_eq!(json["reason"], "Internal server error");
+    }
+
+    #[tokio::test]
+    async fn refresh_verify_errors_do_not_echo_internal_reason() {
+        let response = reject_refresh_verify_error(&jwt::AuthError::MissingSecret);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            text.contains("invalid or expired refresh token"),
+            "body: {text}"
+        );
+        assert!(!text.contains("JWT_SECRET"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn oauth_http_client_has_bounded_timeout() {
+        assert!(OAUTH_HTTP_TIMEOUT_SECS > 0);
+        assert!(OAUTH_HTTP_TIMEOUT_SECS <= 10);
+        oauth_http_client().expect("bounded OAuth HTTP client");
     }
 
     #[test]

@@ -1,97 +1,79 @@
-//! `/docs` + `/openapi.yaml` — public, no-auth API browser.
-//! Loads the `OpenAPI` spec from `openapi.yaml` (embedded at compile
-//! time via `include_str!`) and renders a Swagger UI page that pulls
-//! the JS/CSS from the public unpkg CDN. Keeps the server zero-asset —
-//! nothing to copy at deploy time, nothing to chmod.
+//! `/docs` + `/openapi.yaml` — public, no-auth API documentation.
+//! The `OpenAPI` spec is embedded at compile time. The HTML page intentionally
+//! avoids third-party JavaScript so a token-bearing docs URL cannot expose a JWT
+//! to a CDN-hosted Swagger bundle.
 
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use base64::Engine;
 
 const OPENAPI_YAML: &str = include_str!("../openapi.yaml");
 
-const SWAGGER_HTML_TEMPLATE: &str = r##"<!doctype html>
+const DOCS_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dambi API</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
-  <style nonce="__CSP_NONCE__">
-    body { margin: 0; background: #fafafa; }
-    .topbar { display: none; }
+  <style>
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 64px 24px;
+    }
+    h1 {
+      font-size: 32px;
+      line-height: 1.2;
+      margin: 0 0 12px;
+    }
+    p {
+      color: #475569;
+      line-height: 1.6;
+      margin: 0 0 20px;
+    }
+    a {
+      color: #0f766e;
+      font-weight: 700;
+    }
+    code {
+      background: #e2e8f0;
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
   </style>
 </head>
 <body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
-  <script nonce="__CSP_NONCE__">
-    // Pick up a JWT passed as a URL fragment (#token=...). Hash beats
-    // query because tokens in query strings end up in access logs.
-    function readTokenFromHash() {
-      const h = window.location.hash || "";
-      const m = h.match(/(?:^|[#&])token=([^&]+)/);
-      return m ? decodeURIComponent(m[1]) : null;
-    }
-    // Falls back to localStorage (same-origin only — won't see the
-    // dashboard's token, but lets a user paste once and have it stick).
-    function readTokenFromStorage() {
-      try { return window.localStorage.getItem("dambi_docs_jwt"); }
-      catch { return null; }
-    }
-    function persistToken(t) {
-      try { window.localStorage.setItem("dambi_docs_jwt", t); }
-      catch { /* private mode */ }
-    }
-    window.onload = () => {
-      const token = readTokenFromHash() || readTokenFromStorage();
-      window.ui = SwaggerUIBundle({
-        url: "/openapi.yaml",
-        dom_id: "#swagger-ui",
-        deepLinking: true,
-        persistAuthorization: true,
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIStandalonePreset,
-        ],
-        layout: "BaseLayout",
-        onComplete: () => {
-          if (token) {
-            window.ui.preauthorizeApiKey("bearerAuth", token);
-            persistToken(token);
-            // Clear the hash so the token doesn't sit in the URL bar /
-            // browser history.
-            if (window.location.hash.includes("token=")) {
-              history.replaceState(null, "", window.location.pathname);
-            }
-          }
-        },
-      });
-    };
-  </script>
+  <main>
+    <h1>Dambi API</h1>
+    <p>The OpenAPI specification is available as a static YAML document.</p>
+    <p><a href="/openapi.yaml">Open <code>/openapi.yaml</code></a></p>
+  </main>
 </body>
-</html>"##;
+</html>"#;
 
 /// `GET /docs` — Swagger UI HTML page.
 pub async fn docs_html() -> Response {
-    let nonce = csp_nonce();
-    let csp = swagger_csp(&nonce);
-    let html = SWAGGER_HTML_TEMPLATE.replace("__CSP_NONCE__", &nonce);
     let mut response = (
         StatusCode::OK,
         [
             (CONTENT_TYPE, "text/html; charset=utf-8"),
             (CACHE_CONTROL, "public, max-age=300"),
         ],
-        html,
+        DOCS_HTML,
     )
         .into_response();
     insert_security_headers(response.headers_mut());
     response.headers_mut().insert(
         HeaderName::from_static("content-security-policy"),
-        HeaderValue::from_str(&csp).expect("static CSP plus base64 nonce is valid"),
+        HeaderValue::from_static(
+            "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; style-src 'unsafe-inline'; connect-src 'self'",
+        ),
     );
     response
 }
@@ -135,25 +117,6 @@ fn insert_security_headers(headers: &mut axum::http::HeaderMap) {
     );
 }
 
-fn csp_nonce() -> String {
-    base64::engine::general_purpose::STANDARD.encode(uuid::Uuid::new_v4().as_bytes())
-}
-
-fn swagger_csp(nonce: &str) -> String {
-    format!(
-        "default-src 'none'; \
-         base-uri 'none'; \
-         object-src 'none'; \
-         frame-ancestors 'none'; \
-         form-action 'none'; \
-         img-src 'self' data: https:; \
-         font-src https://unpkg.com data:; \
-         style-src 'self' 'unsafe-inline' https://unpkg.com; \
-         script-src 'self' 'nonce-{nonce}' https://unpkg.com; \
-         connect-src 'self'"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,19 +135,18 @@ mod tests {
             .to_str()
             .unwrap();
         assert!(csp.contains("frame-ancestors 'none'"), "csp={csp}");
-        assert!(csp.contains("script-src 'self' 'nonce-"), "csp={csp}");
-        let script_src = csp
-            .split(';')
-            .find(|part| part.trim_start().starts_with("script-src "))
-            .unwrap();
-        assert!(!script_src.contains("'unsafe-inline'"), "csp={csp}");
+        assert!(!csp.contains("script-src"), "csp={csp}");
+        assert!(!csp.contains("unpkg.com"), "csp={csp}");
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(html.contains("nonce=\""), "html={html}");
-        assert!(!html.contains("__CSP_NONCE__"), "nonce placeholder leaked");
+        assert!(html.contains("/openapi.yaml"), "html={html}");
+        assert!(!html.contains("SwaggerUIBundle"), "html={html}");
+        assert!(!html.contains("unpkg.com"), "html={html}");
+        assert!(!html.contains("localStorage"), "html={html}");
+        assert!(!html.contains("token="), "html={html}");
     }
 
     #[tokio::test]
@@ -199,5 +161,37 @@ mod tests {
             "max-age=31536000; includeSubDomains"
         );
         assert!(headers.get("content-security-policy").is_none());
+    }
+
+    #[test]
+    fn openapi_tracks_router_paths_and_omits_removed_spenders_api() {
+        for path in [
+            "  /readyz:",
+            "  /auth/refresh:",
+            "  /wallets/{address}/permits:",
+            "  /wallets/{address}/positions:",
+            "  /wallets/{address}/pending:",
+            "  /market/listings:",
+            "  /market/activity-summary:",
+            "  /market/listings/{slug}:",
+            "  /market/listings/id/{id}:",
+            "  /market/listings/id/{id}/versions:",
+            "  /market/listings/id/{id}/versions/{ver}:",
+            "  /market/listings/id/{id}/install:",
+            "  /market/listings/id/{id}/reviews:",
+            "  /market/listings/id/{id}/watch:",
+            "  /market/watches:",
+            "  /market/reviews/{id}/helpful:",
+        ] {
+            assert!(OPENAPI_YAML.contains(path), "missing OpenAPI path {path}");
+        }
+        assert!(
+            !OPENAPI_YAML.contains("/spenders/"),
+            "stale spender API leaked into spec"
+        );
+        assert!(
+            !OPENAPI_YAML.contains("reporter_id"),
+            "OpenAPI must not document raw internal marketplace reporter ids"
+        );
     }
 }

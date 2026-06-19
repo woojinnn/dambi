@@ -102,7 +102,8 @@ async fn shutdown_signal(tx: tokio::sync::watch::Sender<bool>) {
                 s.recv().await;
             }
             Err(e) => {
-                tracing::error!(error = %e, "failed to install SIGTERM handler");
+                let safe_error = policy_server::logging::redact_sensitive_log_text(&e);
+                tracing::error!(error = %safe_error, "failed to install SIGTERM handler");
                 std::future::pending::<()>().await;
             }
         }

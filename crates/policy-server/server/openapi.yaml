@@ -5,7 +5,8 @@ info:
     Backend for the Dambi wallet simulator. Cedar policy installation,
     policy evaluation, verdict history, audit views, and finding feeds are
     browser-extension local state. Public routes (`/health`, `/docs`,
-    `/openapi.yaml`, `/auth/*`)
+    `/readyz`, `/openapi.yaml`, `/auth/google`, `/auth/google/callback`,
+    `/auth/refresh`)
     are open; everything else requires `Authorization: Bearer <jwt>` where
     the JWT is obtained from the Google OAuth flow.
 
@@ -51,6 +52,20 @@ paths:
             text/plain:
               schema: { type: string, example: ok }
 
+  /readyz:
+    get:
+      tags: [meta]
+      summary: Readiness probe
+      security: []
+      responses:
+        "200":
+          description: Database and runtime dependencies are ready
+          content:
+            application/json:
+              schema: { type: object }
+        "503":
+          description: Not ready
+
   /docs:
     get:
       tags: [meta]
@@ -94,7 +109,33 @@ paths:
         - { name: state, in: query, required: true, schema: { type: string } }
       responses:
         "302":
-          description: Redirect to dashboard with `#token=<jwt>`
+          description: Redirect to dashboard with `#access_token=<jwt>` and, for extension redirects, `refresh_token`
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate a refresh token and mint a new access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: Rotated tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+        "400": { description: Invalid or replayed refresh token }
 
   /auth/me:
     get:
@@ -108,7 +149,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  user_id: { type: string, example: "google:117234567890" }
+                  user_id: { type: string, example: "user_8f1a2b3c4d5e6f70" }
                   email:   { type: string, example: "alice@gmail.com" }
 
   /evaluate:
@@ -215,6 +256,36 @@ paths:
         "404": { description: Wallet not tracked }
         "500": { description: Sync error }
 
+  /wallets/{address}/permits:
+    parameters:
+      - $ref: "#/components/parameters/AddressParam"
+    post:
+      tags: [wallets]
+      summary: Record a decoded off-chain permit observed by the extension
+      description: |
+        Persists a pending permit/permit2 entry for an owned wallet. The server
+        stores decoded parameters, not the raw signature. Watch-only wallets are
+        rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Pending ids produced by the reducer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending_ids:
+                    type: array
+                    items: { type: string }
+        "400": { description: Invalid permit body or untracked chain }
+        "403": { description: Wallet is not owned by the user }
+        "404": { description: Wallet not tracked }
+
   /wallets/{address}/state:
     parameters:
       - $ref: "#/components/parameters/AddressParam"
@@ -243,10 +314,40 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/TokenHolding" }
 
+  /wallets/{address}/positions:
+    parameters:
+      - $ref: "#/components/parameters/AddressParam"
+    get:
+      tags: [wallets]
+      summary: Protocol positions
+      responses:
+        "200":
+          description: Position[]
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+
+  /wallets/{address}/pending:
+    parameters:
+      - $ref: "#/components/parameters/AddressParam"
+    get:
+      tags: [wallets]
+      summary: Pending off-chain intents and signed permits
+      responses:
+        "200":
+          description: PendingTx[]
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+
   /wallets/{address}/approvals:
     parameters:
       - $ref: "#/components/parameters/AddressParam"
-      - { name: with_risk, in: query, schema: { type: boolean, default: false }, description: "Server-classify each approval with risk[] + spender_meta" }
+      - { name: with_risk, in: query, schema: { type: boolean, default: false }, description: "Server-classify each approval with risk[]" }
     get:
       tags: [wallets]
       summary: Full ApprovalSet (raw or classified-with-risk)
@@ -255,8 +356,7 @@ paths:
           description: |
             Default: ApprovalSet (raw on-chain shape).
             `?with_risk=true`: ClassifiedApprovals — each entry carries
-            `risk: [UNLIMITED | KNOWN_VENUE | BLOCKED | OLD | EXPIRED][]`
-            plus `spender_meta` from /spenders/:addr when known.
+            `risk: [UNLIMITED | OLD | EXPIRED][]`.
           content:
             application/json:
               schema: { type: object }
@@ -310,28 +410,6 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/TxRow" }
 
-  /spenders/{addr}:
-    parameters:
-      - { name: addr, in: path, required: true, schema: { type: string }, example: "0xe592427a0aece92de3edee1f18e0157c05861564" }
-    get:
-      tags: [wallets]
-      summary: Spender reputation lookup (known / blocked)
-      description: 404 means "unknown" — the FE should render the address with a neutral icon.
-      responses:
-        "200":
-          description: SpenderMeta
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  addr:  { type: string }
-                  label: { type: string }
-                  rep:   { type: string, enum: [known, blocked] }
-                  chain: { type: string, nullable: true }
-                  notes: { type: string, nullable: true }
-        "404": { description: Address not in catalog }
-
   /dashboard/summary:
     get:
       tags: [meta]
@@ -380,6 +458,176 @@ paths:
                         unlimited_count: { type: integer }
                         pending_count:   { type: integer }
 
+  /market/listings:
+    get:
+      tags: [market]
+      summary: Browse published marketplace listings
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [policy, set] } }
+        - { name: domain, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: category, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: publisher_id, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: publisher_tier, in: query, schema: { type: string, enum: [official, verified, community] } }
+        - { name: q, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: sort, in: query, schema: { type: string, enum: [popular, new, rating], default: popular } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 30 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, maximum: 10000, default: 0 } }
+      responses:
+        "200":
+          description: ListingSummary[]
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+        "400": { description: Invalid filter }
+    post:
+      tags: [market]
+      summary: Publish a new marketplace listing and initial version
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Created listing summary
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { description: Invalid listing body }
+
+  /market/activity-summary:
+    get:
+      tags: [market]
+      summary: Recent install activity by listing
+      parameters:
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 90, default: 7 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        "200":
+          description: ActivitySummary
+          content:
+            application/json:
+              schema: { type: object }
+
+  /market/listings/{slug}:
+    get:
+      tags: [market]
+      summary: Listing detail by slug
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Listing detail plus latest version and recent reviews
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { description: Listing not found }
+
+  /market/listings/id/{id}:
+    delete:
+      tags: [market]
+      summary: Delete a listing owned by the caller
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Listing not found or not owned by caller }
+
+  /market/listings/id/{id}/versions:
+    post:
+      tags: [market]
+      summary: Publish a new version for a caller-owned listing
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: ListingVersion
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { description: Invalid version body }
+        "403": { description: Caller is not the publisher }
+        "404": { description: Listing not found }
+
+  /market/listings/id/{id}/versions/{ver}:
+    get:
+      tags: [market]
+      summary: Fetch a specific listing version body
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: ver, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: ListingVersion
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { description: Version not found }
+
+  /market/listings/id/{id}/install:
+    post:
+      tags: [market]
+      summary: Record an install and return the selected version body
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: string }
+      responses:
+        "200":
+          description: ListingVersion
+          content:
+            application/json:
+              schema: { type: object }
+        "404": { description: Version not found }
+
+  /market/listings/id/{id}/reviews:
+    get:
+      tags: [market]
+      summary: Reviews for a listing
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Review[]
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+    post:
+      tags: [market]
+      summary: Create or replace caller's review
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Review
+          content:
+            application/json:
+              schema: { type: object }
+        "400": { description: Invalid review }
+        "403": { description: Publishers cannot review their own listings }
+        "404": { description: Published version not found }
+
   /market/listings/id/{id}/report:
     post:
       tags: [market]
@@ -419,6 +667,54 @@ paths:
               schema: { $ref: "#/components/schemas/MarketReport" }
         "400": { description: Invalid report body }
         "404": { description: Review not found }
+
+  /market/reviews/{id}/helpful:
+    post:
+      tags: [market]
+      summary: Mark a review helpful
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Whether the vote was newly inserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  newly_voted: { type: boolean }
+        "403": { description: Review authors cannot vote on their own reviews }
+        "404": { description: Review not found }
+
+  /market/listings/id/{id}/watch:
+    post:
+      tags: [market]
+      summary: Watch a listing for new-version notifications
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Watched }
+        "404": { description: Listing not found }
+    delete:
+      tags: [market]
+      summary: Stop watching a listing
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Unwatched }
+
+  /market/watches:
+    get:
+      tags: [market]
+      summary: Listings watched by the caller
+      responses:
+        "200":
+          description: ListingSummary[]
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
 
   /market/reports/mine:
     get:
@@ -486,9 +782,7 @@ paths:
     get:
       tags: [meta]
       summary: Server-Sent Events feed (wallet sync and tx lifecycle)
-      description: Auth via `?token=<jwt>` query param (EventSource can't set headers).
-      parameters:
-        - { name: token, in: query, schema: { type: string } }
+      description: Requires `Authorization: Bearer <jwt>`. Native EventSource cannot set headers; clients must use a header-capable SSE/fetch stream.
       responses:
         "200":
           description: SSE stream
@@ -523,12 +817,12 @@ components:
 
     MarketReport:
       type: object
-      required: [id, reporter_id, reason, status, created_at]
+      required: [id, reporter_handle, reason, status, created_at]
       properties:
         id: { type: string, format: uuid }
         listing_id: { type: string, format: uuid, nullable: true }
         review_id: { type: string, format: uuid, nullable: true }
-        reporter_id: { type: string }
+        reporter_handle: { type: string, example: "reporter-1a2b3c4d5e6f" }
         reason:
           type: string
           enum: [unsafe_policy, misleading, spam, abuse, other]
@@ -536,7 +830,7 @@ components:
         status:
           type: string
           enum: [open, resolved]
-        resolved_by: { type: string, nullable: true }
+        resolved_by_handle: { type: string, nullable: true, example: "moderator-1a2b3c4d5e6f" }
         resolved_at: { type: integer, nullable: true }
         created_at: { type: integer }
 
