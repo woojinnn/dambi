@@ -222,7 +222,7 @@ describe("generateManifest", () => {
 
     const merged: EnrichmentRegistry = {
       buyTokenLiquidityUsd: {
-        type: "Decimal",
+        type: "decimal",
         label: { ko: "", en: "" },
         appliesTo: ["swap"],
         method: "pool.liquidity",
@@ -236,7 +236,9 @@ describe("generateManifest", () => {
     // deny hinges on enrichment → the feeding call is required + non-optional.
     expect(ok.manifest?.policy_rpc[0].optional).toBe(false);
     expect(ok.manifest?.policy_rpc[0].outputs[0].required).toBe(true);
-    expect(ok.manifest?.custom_context.fields).toEqual({ buyTokenLiquidityUsd: "Decimal" });
+    // output projection type is capitalized; the custom_context spelling is raw.
+    expect(ok.manifest?.policy_rpc[0].outputs[0].type).toBe("Decimal");
+    expect(ok.manifest?.custom_context.fields).toEqual({ buyTokenLiquidityUsd: "decimal" });
   });
 
   it("generates for a field lifted from the seeded defaults (pctOfHolding)", () => {

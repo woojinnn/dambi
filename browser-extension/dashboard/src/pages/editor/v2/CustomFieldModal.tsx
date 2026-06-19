@@ -167,8 +167,16 @@ export function CustomFieldModal({
   );
   const [projection, setProjection] = useState(METHOD_CATALOG[0].projection);
 
-  // 내부 필드 이름(manifest의 id)은 메서드에서 자동 생성 — 사용자는 안 만진다.
-  const name = useMemo(() => autoName(method.method, existingNames), [method.method, existingNames]);
+  // context.custom.<name> 식별자(manifest의 id). 메서드에서 자동 생성하되 사용자가
+  // 직접 고칠 수 있다 — 정책 조건이 참조하는 ID라 기존 정책과 정확히 맞춰야 할 수
+  // 있다(예: 이미 작성된 policy 가 context.custom.buyTokenLiquidityUsd 를 읽는 경우).
+  const [name, setName] = useState(() => autoName(METHOD_CATALOG[0].method, existingNames));
+  const [nameTouched, setNameTouched] = useState(false);
+  const trimmedName = name.trim();
+  // context.custom.<name> 으로 들어가고 custom_context 키가 되므로 Cedar 식별자
+  // 규칙을 강제한다(아니면 정책 파싱이 깨진다).
+  const nameValid = /^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmedName);
+  const nameDup = nameValid && existingNames.includes(trimmedName);
 
   // 같은 표시 이름 금지 + 같은 메서드를 같은 입력으로 부르는 필드가 이미 있으면
   // 그 이름을 안내하고 생성을 막는다 (조용히 덮어쓰거나 쌍둥이가 생기지 않게).
@@ -188,27 +196,29 @@ export function CustomFieldModal({
     );
   }, [existing, method.method, projection, params]);
 
+  const nameMsg = !trimmedName ? null : !nameValid ? t("customField.idInvalid") : nameDup ? t("customField.idDup") : null;
   const blockMsg = sameCall
     ? t("customField.sameCallBlock", { name: sameCall.label.ko })
     : labelDup
       ? t("customField.labelDupBlock")
-      : null;
-  const canCreate = label.trim().length > 0 && !blockMsg;
+      : nameMsg;
+  const canCreate = label.trim().length > 0 && nameValid && !nameDup && !sameCall && !labelDup;
 
   const pickMethod = (m: MethodSpec) => {
     setMethod(m);
     setParams(defaultParams(m, allOptions));
     setProjection(m.projection);
     if (!labelTouched) setLabel(methodLabel(m));
+    if (!nameTouched) setName(autoName(m.method, existingNames));
   };
 
   const create = () => {
     if (!canCreate) return;
     onCreate({
-      name,
+      name: trimmedName,
       field: {
         type: method.type,
-        label: { ko: label.trim() || name, en: name },
+        label: { ko: label.trim() || trimmedName, en: trimmedName },
         appliesTo: actionTag ? [actionTag] : [],
         method: method.method,
         projection,
@@ -305,6 +315,21 @@ export function CustomFieldModal({
               setLabelTouched(true);
             }}
             placeholder={t("customField.namePlaceholder")}
+          />
+        </label>
+        <label className="cfm-row">
+          <span className="cfm-label">{t("customField.idLabel")}</span>
+          <input
+            className={`pf-val wide mono${trimmedName && !nameValid ? " invalid" : ""}`}
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setNameTouched(true);
+            }}
+            placeholder={t("customField.idPlaceholder")}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
           />
         </label>
         <div className="cfm-autoname">
