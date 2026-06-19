@@ -15,7 +15,7 @@ use sqlx_core::query::query;
 use sqlx_core::row::Row;
 use sqlx_postgres::{PgPool, PgPoolOptions, PgRow};
 
-use policy_state::primitives::ChainId;
+use policy_state::primitives::{Address, ChainId};
 use policy_state::store::{StoreError, WalletStore};
 use policy_state::{WalletId, WalletState};
 
@@ -653,15 +653,22 @@ impl PostgresGlobalDb {
         let address_lc = address.to_lowercase();
         // `tokens` is a JSONB array of `[key, holding]` pairs; `t->1` is the
         // holding. Native tokens carry no `key.address`, so the address filter
-        // also excludes them. Most-recently-synced wallet wins on ties.
+        // also excludes them. Freshest token price field wins; state `updated_at`
+        // is only a tie-breaker because a wallet row can be saved for unrelated
+        // sync fields while carrying an older token price.
         let row = query(
             "SELECT (t->1->>'decimals')::int AS decimals, \
                     (t->1->'price_usd'->>'value') AS price \
-             FROM wallet_states w, jsonb_array_elements(w.state_json->'tokens') AS t \
-             WHERE lower(t->1->'key'->>'address') = $1 \
+             FROM wallet_states s \
+             JOIN wallets w ON w.user_id = s.user_id AND w.address = s.address \
+             CROSS JOIN jsonb_array_elements(s.state_json->'tokens') AS t \
+             WHERE w.archived = FALSE \
+               AND lower(t->1->'key'->>'address') = $1 \
                AND (t->1->'key'->>'chain') = $2 \
                AND (t->1->'price_usd'->>'value') IS NOT NULL \
-             ORDER BY w.updated_at DESC \
+               AND (t->1->'price_usd'->>'synced_at') ~ '^[0-9]+$' \
+             ORDER BY ((t->1->'price_usd'->>'synced_at')::BIGINT) DESC, \
+                      s.updated_at DESC \
              LIMIT 1",
         )
         .bind(&address_lc)
@@ -699,11 +706,16 @@ impl PostgresGlobalDb {
         let address_lc = address.to_lowercase();
         let row = query(
             "SELECT (t->1->>'decimals')::int AS decimals \
-             FROM wallet_states w, jsonb_array_elements(w.state_json->'tokens') AS t \
-             WHERE lower(t->1->'key'->>'address') = $1 \
+             FROM wallet_states s \
+             JOIN wallets w ON w.user_id = s.user_id AND w.address = s.address \
+             CROSS JOIN jsonb_array_elements(s.state_json->'tokens') AS t \
+             WHERE w.archived = FALSE \
+               AND lower(t->1->'key'->>'address') = $1 \
                AND (t->1->'key'->>'chain') = $2 \
                AND (t->1->>'decimals') IS NOT NULL \
-             ORDER BY w.updated_at DESC \
+               AND (t->1->>'last_synced_at') ~ '^[0-9]+$' \
+             ORDER BY ((t->1->>'last_synced_at')::BIGINT) DESC, \
+                      s.updated_at DESC \
              LIMIT 1",
         )
         .bind(&address_lc)
@@ -819,7 +831,7 @@ impl PostgresWalletStore {
             "INSERT INTO wallets (user_id, address, chains, owned, created_at, updated_at)
              VALUES ($1, $2, $3, TRUE, $4, $4)
              ON CONFLICT(user_id, address) DO UPDATE
-             SET chains = excluded.chains,
+             SET chains = CASE WHEN $5 THEN excluded.chains ELSE wallets.chains END,
                  archived = CASE WHEN $5 THEN FALSE ELSE wallets.archived END,
                  updated_at = excluded.updated_at",
         )
@@ -871,6 +883,48 @@ impl PostgresWalletStore {
         rows.iter()
             .map(row_to_wallet_metadata)
             .collect::<Result<Vec<_>, _>>()
+    }
+
+    /// Load a wallet state only while the metadata row is still active.
+    ///
+    /// This closes read races where a caller first lists active wallets and then
+    /// separately loads `wallet_states` after the wallet has been archived.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if the metadata/state query or JSON decode fails.
+    pub async fn load_active_by_address(
+        &self,
+        address: Address,
+    ) -> Result<Option<WalletState>, StoreError> {
+        let address = format!("{address:#x}");
+        let row = query(
+            "SELECT w.address, w.chains, s.state_json
+             FROM wallets w
+             LEFT JOIN wallet_states s
+               ON s.user_id = w.user_id AND s.address = w.address
+             WHERE w.user_id = $1 AND w.address = $2 AND w.archived = FALSE",
+        )
+        .bind(&self.user_id)
+        .bind(&address)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let id = wallet_id_from_row(&row)?;
+        let state_json: Option<serde_json::Value> = row.get("state_json");
+        match state_json {
+            Some(value) => {
+                let mut state = serde_json::from_value::<WalletState>(value)
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+                state.wallet_id = id;
+                Ok(Some(state))
+            }
+            None => Ok(Some(WalletState::new(id))),
+        }
     }
 
     /// Update mutable wallet metadata. Returns `false` when the wallet is absent.

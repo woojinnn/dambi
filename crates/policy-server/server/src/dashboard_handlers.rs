@@ -20,7 +20,7 @@ use serde::Serialize;
 use policy_db::PostgresWalletMetadata;
 use policy_state::position::{HlAccount, HlSpotBalance, PositionKind};
 use policy_state::primitives::ChainId;
-use policy_state::{WalletId, WalletStore};
+use policy_state::WalletId;
 
 use crate::app::AppState;
 use crate::auth::AuthUser;
@@ -84,8 +84,9 @@ pub async fn get_summary(
             Ok(wallet_id) => wallet_id,
             Err(e) => return internal(&e),
         };
-        let mut s = match store.load(&wallet_id).await {
-            Ok(state) => state,
+        let mut s = match store.load_active_by_address(wallet_id.address).await {
+            Ok(Some(state)) => state,
+            Ok(None) => continue,
             Err(e) => {
                 return internal(&format!("dashboard wallet state {}: {e}", w_row.address));
             }
@@ -252,7 +253,8 @@ fn decimal_to_f64(decimal: &policy_state::Decimal) -> Option<f64> {
 }
 
 fn internal(reason: &str) -> Response {
-    tracing::error!(error = %reason, "dashboard handler internal error");
+    let safe_reason = crate::logging::redact_sensitive_log_text(reason);
+    tracing::error!(error = %safe_reason, "dashboard handler internal error");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 

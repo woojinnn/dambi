@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use alloy_primitives::keccak256;
 use policy_state::U256;
 
-use crate::handler::{asset_address, chain_id_to_eip155_num};
+use crate::handler::{asset_address, optional_chain_id_or_mainnet};
 
 // ---------------------------------------------------------------------------
 // I/O seam
@@ -128,7 +128,7 @@ impl HfParams {
     /// field (→ dormancy).
     #[must_use]
     pub fn parse(params: &Value) -> Option<Self> {
-        let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+        let chain_id = optional_chain_id_or_mainnet(params.get("chain_id"))?;
         let owner = params.get("owner").and_then(asset_address)?;
         let venue = params.get("venue")?.clone();
         let kind = match params.get("action_kind").and_then(Value::as_str)? {
@@ -1056,6 +1056,10 @@ mod tests {
         bad.as_object_mut().unwrap().remove("venue");
         assert!(HfParams::parse(&bad).is_none());
         assert!(HfParams::parse(&params("liquidate", "0x64")).is_none());
+
+        let mut bad_chain = params("borrow", "0x64");
+        bad_chain["chain_id"] = json!("eip155:not-a-number");
+        assert!(HfParams::parse(&bad_chain).is_none());
     }
 
     #[test]

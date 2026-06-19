@@ -322,7 +322,30 @@ pub async fn evaluate(
     // This handler is db-agnostic: production passes the PostgreSQL-backed
     // store, while narrow unit tests can pass `InMemoryWalletStore`.
     let state_before = store.load(&req.wallet_id).await?;
+    evaluate_loaded_state(
+        state_before,
+        price_book,
+        sanctions,
+        floor,
+        external,
+        onchain,
+        req,
+    )
+    .await
+}
 
+/// Simulate an evaluation from a state the caller already loaded and authorized.
+/// The HTTP adapter uses this after its active-wallet gate so stale serialized
+/// `state_json.wallet_id` values cannot override the active wallet metadata.
+pub async fn evaluate_loaded_state(
+    state_before: WalletState,
+    price_book: &dyn PriceBook,
+    sanctions: &dyn SanctionsScreen,
+    floor: &dyn NftFloorOracle,
+    external: &dyn ExternalEnrichment,
+    onchain: &dyn crate::lending_hf::OnchainView,
+    req: EvaluateRequest,
+) -> Result<EvaluateResponse, HandlerError> {
     // Running state, folded forward one envelope at a time.
     //
     // A reducer rejection is NON-FATAL. Enrichment below sources its facts from
@@ -455,6 +478,53 @@ async fn execute_call_specs(
                     call_id: Some(spec.call_id.clone()),
                 }),
             },
+            "approval.allowance" => match crate::methods::approval_allowance(state, &spec.params) {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "approval.allowance: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "approval.allowance: missing synced allowance row or malformed params \
+                         (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
+            "approval.cover_inputs" => match crate::methods::approval_cover_inputs(&spec.params) {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "approval.cover_inputs: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "approval.cover_inputs: missing allowance or requested amount \
+                         (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
+            "oracle.effective_rate_bps" => {
+                match oracle_effective_rate_bps(state, &spec.params, price_book).await {
+                    Some(value) => {
+                        tracing::debug!(call_id = %spec.call_id, "oracle.effective_rate_bps: OK");
+                        results.insert(spec.call_id.clone(), value);
+                    }
+                    None => diagnostics.push(Diagnostic {
+                        level: "warn".to_owned(),
+                        message: format!(
+                            "oracle.effective_rate_bps: unpriced leg, zero input value, or \
+                             unparseable params (call {}) — field left unset",
+                            spec.call_id
+                        ),
+                        call_id: Some(spec.call_id.clone()),
+                    }),
+                }
+            }
             "bridge.value_loss_pct" => {
                 match bridge_value_loss_pct(state, &spec.params, price_book).await {
                     Some(value) => {
@@ -690,6 +760,21 @@ async fn execute_call_specs(
                     call_id: Some(spec.call_id.clone()),
                 }),
             },
+            "portfolio.balance" => match crate::methods::portfolio_balance(state, &spec.params) {
+                Some(value) => {
+                    tracing::debug!(call_id = %spec.call_id, "portfolio.balance: OK");
+                    results.insert(spec.call_id.clone(), value);
+                }
+                None => diagnostics.push(Diagnostic {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "portfolio.balance: asset not present in synced state or malformed params \
+                         (call {}) — field left unset",
+                        spec.call_id
+                    ),
+                    call_id: Some(spec.call_id.clone()),
+                }),
+            },
             "portfolio.input_fraction_bps" => {
                 match crate::methods::input_fraction_bps(state, &spec.params) {
                     Some(value) => {
@@ -876,6 +961,36 @@ async fn token_amount_usd(
         return None;
     }
     Some(amount_f / divisor * price_f)
+}
+
+/// Server-side `oracle.effective_rate_bps`: compare the swap's output value
+/// against its input value using the same valuation source as
+/// [`oracle_usd_value`]. Positive bps means better than mid-market, negative bps
+/// means unfavorable. Returns `None` when either leg is unpriced, unparseable, or
+/// the input side has zero USD value.
+async fn oracle_effective_rate_bps(
+    state: &WalletState,
+    params: &Value,
+    price_book: &dyn PriceBook,
+) -> Option<Value> {
+    let chain = params.get("chain_id").and_then(Value::as_str)?;
+    let token_in = params.get("token_in").and_then(asset_address)?;
+    let token_out = params.get("token_out").and_then(asset_address)?;
+    let amount_in = params.get("amount_in").and_then(Value::as_str)?;
+    let amount_out = params.get("amount_out").and_then(Value::as_str)?;
+    let amount_in = U256::from_str_radix(amount_in.trim_start_matches("0x"), 16).ok()?;
+    let amount_out = U256::from_str_radix(amount_out.trim_start_matches("0x"), 16).ok()?;
+
+    let input_usd = token_amount_usd(state, chain, &token_in, amount_in, price_book).await?;
+    let output_usd = token_amount_usd(state, chain, &token_out, amount_out, price_book).await?;
+    if input_usd <= 0.0 || !(input_usd.is_finite() && output_usd.is_finite()) {
+        return None;
+    }
+    let bps = ((output_usd / input_usd) - 1.0) * 10_000.0;
+    if !bps.is_finite() {
+        return None;
+    }
+    Some(json!({ "bps": bps.round() as i64 }))
 }
 
 /// Server-side `bridge.value_loss_pct` (Bridge preset P3 — output-value-loss
@@ -1182,7 +1297,11 @@ async fn normalize_to_nano(params: &Value, price_book: &dyn PriceBook) -> Option
 pub(crate) fn asset_address(v: &Value) -> Option<String> {
     let raw = match v {
         Value::String(s) => s.clone(),
-        Value::Object(_) => v.get("address").and_then(Value::as_str)?.to_owned(),
+        Value::Object(_) => v
+            .get("address")
+            .or_else(|| v.get("key").and_then(|key| key.get("address")))
+            .and_then(Value::as_str)?
+            .to_owned(),
         _ => return None,
     };
     Some(raw.to_lowercase())
@@ -1201,9 +1320,9 @@ pub(crate) fn asset_address(v: &Value) -> Option<String> {
 async fn address_sanctions(params: &Value, sanctions: &dyn SanctionsScreen) -> Option<Value> {
     let address = params.get("address").and_then(asset_address)?;
     // Accept both a numeric chain id and a CAIP-2 string (`"eip155:1"`), matching
-    // `address_reputation`; `as_i64` alone silently dropped the string form to the
-    // default 1, so a non-mainnet sanctions screen could mis-key.
-    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    // `address_reputation`. Missing legacy params default to mainnet, but a present
+    // malformed chain id stays dormant instead of silently mis-keying to mainnet.
+    let chain_id = chain_id_param_or_mainnet(params)?;
     let flag = sanctions.is_sanctioned(chain_id, &address).await?;
     Some(json!({ "sanctioned": flag }))
 }
@@ -1216,7 +1335,7 @@ async fn address_sanctions(params: &Value, sanctions: &dyn SanctionsScreen) -> O
 /// optional call), never a fabricated `false`.
 async fn address_reputation(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
     let address = params.get("address").and_then(asset_address)?;
-    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let chain_id = chain_id_param_or_mainnet(params)?;
     let flag = external.reputation_flagged(chain_id, &address).await?;
     Some(json!({ "flagged": flag }))
 }
@@ -1233,7 +1352,7 @@ async fn address_reputation(params: &Value, external: &dyn ExternalEnrichment) -
 /// (fail-open for the optional call), never a fabricated "clean".
 async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
     let token = params.get("token").and_then(asset_address)?;
-    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let chain_id = chain_id_param_or_mainnet(params)?;
     let f = external.token_security_flags(chain_id, &token).await?;
     let mut out = serde_json::Map::new();
     out.insert("tokenIsHoneypot".to_owned(), json!(f.is_honeypot));
@@ -1257,7 +1376,7 @@ async fn token_security(params: &Value, external: &dyn ExternalEnrichment) -> Op
 /// could not answer → result omitted (fail-open for the optional call).
 async fn token_market_data(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
     let token = params.get("token").and_then(Value::as_str)?;
-    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let chain_id = chain_id_param_or_mainnet(params)?;
     let f = external.token_market_data(chain_id, token).await?;
     let mut out = serde_json::Map::new();
     if let Some(v) = f.fdv_usd {
@@ -1301,7 +1420,7 @@ pub(crate) fn amm_venue_pool_key(venue: &Value) -> Option<&str> {
 /// unrecognized or the feed could not answer → result omitted (fail-open for the
 /// optional call), never a fabricated volume.
 async fn pool_liquidity(params: &Value, external: &dyn ExternalEnrichment) -> Option<Value> {
-    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let chain_id = chain_id_param_or_mainnet(params)?;
     let venue = params.get("venue")?;
     let f = external.pool_liquidity(chain_id, venue).await?;
     let mut out = serde_json::Map::new();
@@ -1318,23 +1437,38 @@ async fn pool_liquidity(params: &Value, external: &dyn ExternalEnrichment) -> Op
 }
 
 /// Numeric EIP-155 chain id from a params value that may be a JSON number or a
-/// CAIP-2 string (`"eip155:1"`) — the form `$.root.chain_id` resolves to. Falls
-/// back to `1` (Ethereum mainnet; the v1 token policies are mainnet-scoped).
-pub(crate) fn chain_id_to_eip155_num(v: &Value) -> i64 {
+/// CAIP-2 string (`"eip155:1"`) — the form `$.root.chain_id` resolves to.
+/// Returns `None` for malformed or non-positive values so present bad params do
+/// not silently evaluate against Ethereum mainnet.
+pub(crate) fn chain_id_to_eip155_num(v: &Value) -> Option<i64> {
     if let Some(n) = v.as_i64() {
-        return n;
+        return (n > 0).then_some(n);
     }
     if let Some(s) = v.as_str() {
         if let Some(rest) = s.strip_prefix("eip155:") {
             if let Ok(n) = rest.parse::<i64>() {
-                return n;
+                return (n > 0).then_some(n);
             }
         }
         if let Ok(n) = s.parse::<i64>() {
-            return n;
+            return (n > 0).then_some(n);
         }
     }
-    1
+    None
+}
+
+/// Legacy enrichment specs may omit `chain_id`; keep those mainnet-scoped
+/// policies working, but reject malformed *present* values.
+pub(crate) fn chain_id_param_or_mainnet(params: &Value) -> Option<i64> {
+    params
+        .get("chain_id")
+        .map_or(Some(1), chain_id_to_eip155_num)
+}
+
+/// Same semantics as [`chain_id_param_or_mainnet`] for helpers that receive the
+/// already-extracted optional value.
+pub(crate) fn optional_chain_id_or_mainnet(value: Option<&Value>) -> Option<i64> {
+    value.map_or(Some(1), chain_id_to_eip155_num)
 }
 
 /// Mainnet WETH — price proxy for valuing native-coin outflow.
@@ -1403,7 +1537,7 @@ async fn address_similarity(
     external: &dyn ExternalEnrichment,
 ) -> Option<Value> {
     let candidate = params.get("candidate").and_then(asset_address)?;
-    let chain_id = params.get("chain_id").map_or(1, chain_id_to_eip155_num);
+    let chain_id = chain_id_param_or_mainnet(params)?;
     let owner = format!("{:#x}", state.wallet_id.address);
     let transfers = external.recent_outbound(chain_id, &owner, 0).await?;
 
@@ -1569,6 +1703,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn chain_id_parser_accepts_valid_forms_and_rejects_malformed_present_values() {
+        assert_eq!(
+            super::chain_id_to_eip155_num(&serde_json::json!("eip155:1")),
+            Some(1)
+        );
+        assert_eq!(
+            super::chain_id_to_eip155_num(&serde_json::json!("8453")),
+            Some(8453)
+        );
+        assert_eq!(
+            super::chain_id_to_eip155_num(&serde_json::json!(42161)),
+            Some(42161)
+        );
+        assert_eq!(
+            super::chain_id_param_or_mainnet(&serde_json::json!({})),
+            Some(1)
+        );
+
+        for bad in [
+            serde_json::json!("hl-mainnet"),
+            serde_json::json!("eip155:"),
+            serde_json::json!("eip155:abc"),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(true),
+        ] {
+            assert_eq!(super::chain_id_to_eip155_num(&bad), None, "{bad}");
+            assert_eq!(
+                super::chain_id_param_or_mainnet(&serde_json::json!({ "chain_id": bad })),
+                None
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_chain_ids_keep_external_enrichment_dormant() {
+        let bad_chain = serde_json::json!("not-an-eip155-chain");
+
+        assert!(super::address_reputation(
+            &serde_json::json!({
+                "address": "0x0000000000000000000000000000000000000001",
+                "chain_id": bad_chain.clone()
+            }),
+            &StubEnrichment {
+                flagged: Some(true),
+                outbound: None,
+            },
+        )
+        .await
+        .is_none());
+        assert!(super::address_sanctions(
+            &serde_json::json!({
+                "address": "0x0000000000000000000000000000000000000001",
+                "chain_id": bad_chain.clone()
+            }),
+            &StubSanctions(Some(true)),
+        )
+        .await
+        .is_none());
+        assert!(super::address_similarity(
+            &WalletState::new(WalletId::new(Address::ZERO, [ChainId::ethereum_mainnet()])),
+            &serde_json::json!({
+                "candidate": "0x1234bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb5678",
+                "chain_id": bad_chain.clone()
+            }),
+            &StubEnrichment {
+                flagged: None,
+                outbound: Some(vec![OutboundTransfer {
+                    to: "0x1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa5678".into(),
+                    asset: None,
+                    amount: 1.0,
+                    ts_unix: now_secs(),
+                }]),
+            },
+        )
+        .await
+        .is_none());
+    }
+
     /// A test [`ExternalEnrichment`] returning a fixed token-security verdict (the
     /// other legs stay dormant), for the `token.security_flags` server fn.
     struct StubTokenSec(Option<TokenSecurityFlags>);
@@ -1648,6 +1862,23 @@ mod tests {
     #[tokio::test]
     async fn token_security_missing_token_is_none() {
         let params = serde_json::json!({ "chain_id": "eip155:1" });
+        assert!(super::token_security(
+            &params,
+            &StubTokenSec(Some(TokenSecurityFlags {
+                is_malicious: true,
+                ..Default::default()
+            })),
+        )
+        .await
+        .is_none());
+    }
+
+    #[tokio::test]
+    async fn token_security_malformed_chain_id_is_none() {
+        let params = serde_json::json!({
+            "token": "0x0000000000000000000000000000000000000001",
+            "chain_id": "eip155:not-a-number"
+        });
         assert!(super::token_security(
             &params,
             &StubTokenSec(Some(TokenSecurityFlags {
@@ -1768,6 +1999,26 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn pool_liquidity_malformed_chain_id_is_none() {
+        let params = serde_json::json!({
+            "chain_id": "eip155:not-a-number",
+            "venue": {
+                "name": "uniswap_v3",
+                "pool": "0xABCdef0000000000000000000000000000000001"
+            }
+        });
+        assert!(super::pool_liquidity(
+            &params,
+            &StubPoolLiq(Some(PoolLiquidityFacts {
+                vol_24h_usd: Some(5000.0),
+                reserve_usd: Some(2_000_000.0),
+            })),
+        )
+        .await
+        .is_none());
+    }
+
     // ── token.market_data (microcap / thin-token buy) ───────────────────────
 
     /// A test [`ExternalEnrichment`] returning a fixed token market-data verdict.
@@ -1843,6 +2094,23 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn token_market_data_malformed_chain_id_is_none() {
+        let params = serde_json::json!({
+            "chain_id": "eip155:not-a-number",
+            "token": "0x0000000000000000000000000000000000000001"
+        });
+        assert!(super::token_market_data(
+            &params,
+            &StubTokenMkt(Some(TokenMarketData {
+                fdv_usd: Some(500_000.0),
+                total_reserve_usd: Some(12_345.0),
+            })),
+        )
+        .await
+        .is_none());
     }
 
     // ── address.reputation (TOKEN-003) ──────────────────────────────────────
@@ -3038,6 +3306,65 @@ mod tests {
         assert_eq!(
             resp.policy_request.results["swap-usdc-usd-cap-deny::usd"],
             serde_json::json!({ "usd": "0.0600" })
+        );
+    }
+
+    /// `oracle.effective_rate_bps` is a public catalog method, so the server
+    /// dispatch must serve it with the same asset-shape tolerance as
+    /// `oracle.usd_value`: 100 USDC input vs 90 USDC output = -1000 bps.
+    #[tokio::test]
+    async fn oracle_effective_rate_bps_dispatch_computes_rate() {
+        let store = InMemoryWalletStore::new();
+        let mut req = empty_envelope_request();
+        req.call_specs.push(CallSpec {
+            manifest_id: "swap-rate-cap-deny".into(),
+            call_id: "swap-rate-cap-deny::effective-rate".into(),
+            method: "oracle.effective_rate_bps".into(),
+            params: serde_json::json!({
+                "chain_id": "eip155:1",
+                "token_in": {
+                    "key": {
+                        "standard": "erc20",
+                        "chain": "eip155:1",
+                        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    }
+                },
+                "amount_in": "0x5f5e100",
+                "token_out": {
+                    "key": {
+                        "standard": "erc20",
+                        "chain": "eip155:1",
+                        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+                    }
+                },
+                "amount_out": "0x55d4a80"
+            }),
+            outputs: Vec::new(),
+            optional: true,
+        });
+        let price_book = StubPriceBook(
+            Some(PriceFact {
+                price_usd: "1.0000".into(),
+                decimals: 6,
+            }),
+            None,
+        );
+
+        let resp = evaluate(
+            &store,
+            &price_book,
+            &no_sanctions(),
+            &NoFloorOracle,
+            &NoEnrichment,
+            &crate::lending_hf::NoOnchain,
+            req,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            resp.policy_request.results["swap-rate-cap-deny::effective-rate"],
+            serde_json::json!({ "bps": -1000 })
         );
     }
 
