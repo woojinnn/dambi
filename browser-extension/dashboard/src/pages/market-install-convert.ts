@@ -6,7 +6,7 @@
  *  manifest에 동봉한 x_dambi_holes 스펙(블랭킹된 칸)은 같은 위치 규칙으로
  *  계산된 것이라 이름이 일치하며, 해당 hole은 `required`로 표시되고
  *  defaults.params에서 빠진다 — SW가 충전 전 바인딩을 거부하는 판정 기준. */
-import type { PolicyDef } from "../../../sdk/policy-store-types";
+import type { PolicyDef, PolicyDoc } from "../../../sdk/policy-store-types";
 import type { PolicyIR } from "../cedar/blocks";
 import { formToIr, irToForm, normalizeDecimal } from "../cedar/form";
 import { canonicalizeModel, parameterizeModel } from "../cedar/form/parameterize";
@@ -20,6 +20,9 @@ export interface ListingMeta {
   displayName: string;
   version: string;
   cat: string | undefined;
+  /** 단일 정책 리스팅의 설명(정의/범위/대상/데이터). 설치된 def.doc 로 그대로 넘어간다.
+   *  set 리스팅은 멤버별 doc 이 없어 적용하지 않는다. */
+  doc?: PolicyDoc | undefined;
 }
 
 export interface VersionBody {
@@ -52,6 +55,7 @@ export async function listingToDefs(
           name: m.display_name || m.slug,
           cedar: m.cedar_text,
           manifest: m.manifest,
+          doc: undefined as PolicyDoc | undefined, // set 멤버는 개별 doc 없음
         }))
       : [
           {
@@ -59,6 +63,7 @@ export async function listingToDefs(
             name: meta.displayName,
             cedar: body.cedar_text ?? "",
             manifest: body.manifest,
+            doc: meta.doc,
           },
         ];
   if (items.length === 0) throw new Error("리스팅에 설치할 정책이 없어요");
@@ -102,6 +107,7 @@ export async function listingToDefs(
       id: it.id,
       displayName: it.name,
       cat: meta.cat,
+      ...(it.doc ? { doc: it.doc } : {}),
       skeleton: { ir: skeletonIr, manifest },
       holes,
       defaults: { enabled: false, params, packageId: undefined }, // 설치 선택이 채움
