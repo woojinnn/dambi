@@ -9,6 +9,8 @@ const tokenStore = vi.hoisted(() => ({
 vi.mock("../dambi-auth/tokenStore", () => tokenStore);
 
 import {
+  getServerBaseUrl,
+  normalizeServerBaseUrl,
   request,
   ServerError,
   setOnSessionExpired,
@@ -21,6 +23,77 @@ describe("dambi-auth client", () => {
     vi.unstubAllGlobals();
     setOnSessionExpired(null);
     resetSessionExpiredGuard();
+  });
+
+  it("normalizes only trusted server base URL overrides", () => {
+    expect(normalizeServerBaseUrl("https://dambi-policy.duckdns.org/")).toBe(
+      "https://dambi-policy.duckdns.org",
+    );
+    expect(normalizeServerBaseUrl("https://pasu-policy.duckdns.org/")).toBe(
+      "https://dambi-policy.duckdns.org",
+    );
+    expect(normalizeServerBaseUrl("http://127.0.0.1:8788")).toBe(
+      "http://127.0.0.1:8788",
+    );
+    expect(normalizeServerBaseUrl("https://evil.example")).toBeNull();
+    expect(normalizeServerBaseUrl("https://dambi-policy.duckdns.org.evil.example")).toBeNull();
+    expect(normalizeServerBaseUrl("https://user@dambi-policy.duckdns.org")).toBeNull();
+    expect(normalizeServerBaseUrl("https://dambi-policy.duckdns.org/api")).toBeNull();
+  });
+
+  it("keeps runtime storage server overrides on the trusted allowlist", async () => {
+    vi.resetModules();
+    const listeners: Array<(changes: Record<string, { newValue?: unknown }>, area: string) => void> = [];
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn().mockResolvedValue({
+            dambi_server_url: "https://evil.example",
+          }),
+        },
+        onChanged: {
+          addListener: vi.fn(
+            (listener: (changes: Record<string, { newValue?: unknown }>, area: string) => void) =>
+              listeners.push(listener),
+          ),
+        },
+      },
+    });
+
+    const client = await import("../dambi-auth/client");
+    await Promise.resolve();
+
+    expect(client.getServerBaseUrl()).toBe("https://dambi-policy.duckdns.org");
+    expect(getServerBaseUrl()).toBe("https://dambi-policy.duckdns.org");
+    expect(listeners).toHaveLength(1);
+    const onChanged = listeners[0]!;
+
+    onChanged(
+      {
+        dambi_server_url: { newValue: "http://127.0.0.1:8788" },
+      },
+      "local",
+    );
+    expect(client.getServerBaseUrl()).toBe("http://127.0.0.1:8788");
+
+    onChanged(
+      {
+        dambi_server_url: { newValue: "https://evil.example" },
+      },
+      "local",
+    );
+    expect(client.getServerBaseUrl()).toBe("https://dambi-policy.duckdns.org");
+  });
+
+  it("refuses absolute requests to untrusted hosts before attaching auth", async () => {
+    tokenStore.getAccessToken.mockResolvedValue("access-token");
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("https://evil.example/wallets")).rejects.toThrow(
+      "untrusted server URL",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refreshes the access token once and retries after a 401", async () => {

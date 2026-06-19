@@ -5,6 +5,7 @@ import { sendToExtension } from "./extension-bridge";
 describe("extension bridge", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("uses chrome.runtime.sendMessage when the dashboard runs inside the extension", async () => {
@@ -35,5 +36,59 @@ describe("extension bridge", () => {
       kind: "parse_failed",
       message: "bad cedar",
     });
+  });
+
+  it("accepts postMessage bridge responses only from the same window, origin, and request id", async () => {
+    const requestId = "00000000-0000-4000-8000-000000000000";
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(requestId);
+
+    const pending = sendToExtension<string>({ type: "dashboard:ping" }, 100);
+
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: window,
+        origin: "https://evil.example",
+        data: {
+          source: "dambi-extension",
+          id: requestId,
+          response: { ok: true, data: "evil-origin" },
+        },
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: window,
+        origin: window.location.origin,
+        data: {
+          source: "dambi-extension",
+          id: "wrong-id",
+          response: { ok: true, data: "wrong-id" },
+        },
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: window,
+        origin: window.location.origin,
+        data: {
+          source: "dambi-extension",
+          id: "__broadcast__",
+          response: { ok: true, data: "broadcast" },
+        },
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: window,
+        origin: window.location.origin,
+        data: {
+          source: "dambi-extension",
+          id: requestId,
+          response: { ok: true, data: "accepted" },
+        },
+      }),
+    );
+
+    await expect(pending).resolves.toBe("accepted");
   });
 });

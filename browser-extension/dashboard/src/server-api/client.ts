@@ -10,15 +10,79 @@
  * - Stay tiny and dependency-free — no axios, no React.
  */
 
+const CURRENT_PRODUCTION_BASE = "https://dambi-policy.duckdns.org";
+const LEGACY_PRODUCTION_BASES = new Map([
+  ["https://pasu-policy.duckdns.org", CURRENT_PRODUCTION_BASE],
+]);
+const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
+
+const RAW_DEFAULT_BASE = import.meta.env.VITE_DAMBI_SERVER_URL || CURRENT_PRODUCTION_BASE;
 const DEFAULT_BASE =
-  import.meta.env.VITE_DAMBI_SERVER_URL || "https://dambi-policy.duckdns.org";
+  normalizeServerBaseUrl(RAW_DEFAULT_BASE, RAW_DEFAULT_BASE) ?? CURRENT_PRODUCTION_BASE;
+
+function parseHttpUrl(input: string): URL | null {
+  try {
+    const url = new URL(input);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalOrigin(url: URL): string {
+  return LEGACY_PRODUCTION_BASES.get(url.origin) ?? url.origin;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function trustedOriginForUrl(url: URL, trustedBase = RAW_DEFAULT_BASE): string | null {
+  const origin = canonicalOrigin(url);
+  const trustedUrl = parseHttpUrl(trustedBase);
+  const trustedOrigin = trustedUrl ? canonicalOrigin(trustedUrl) : CURRENT_PRODUCTION_BASE;
+  if (origin === CURRENT_PRODUCTION_BASE || origin === trustedOrigin) return origin;
+  if (isLoopbackHost(url.hostname)) return origin;
+  return null;
+}
+
+export function normalizeServerBaseUrl(
+  input: string | null | undefined,
+  trustedBase = RAW_DEFAULT_BASE,
+): string | null {
+  const trimmed = input?.trim();
+  if (!trimmed) return null;
+  const url = parseHttpUrl(trimmed);
+  if (!url) return null;
+  if (url.pathname !== "" && url.pathname !== "/") return null;
+  if (url.search || url.hash) return null;
+  return trustedOriginForUrl(url, trustedBase);
+}
+
+function resolveRequestUrl(path: string): string {
+  const absolute = parseHttpUrl(path);
+  if (!absolute) {
+    if (URL_SCHEME_RE.test(path)) {
+      throw new Error("Refusing to send request to unsupported server URL scheme");
+    }
+    return `${SERVER_BASE_URL}${path}`;
+  }
+  const trustedOrigin = trustedOriginForUrl(absolute);
+  if (!trustedOrigin) {
+    throw new Error("Refusing to send authenticated request to untrusted server URL");
+  }
+  return `${trustedOrigin}${absolute.pathname}${absolute.search}`;
+}
 
 /** Resolve the server URL — env > localStorage > default. Read once at
  * import time; we don't expect users to swap servers mid-session. */
 function resolveBaseUrl(): string {
   if (typeof window !== "undefined") {
     const stored = window.localStorage.getItem("dambi_server_url");
-    if (stored) return stored;
+    const normalized = normalizeServerBaseUrl(stored);
+    if (normalized) return normalized;
   }
   return DEFAULT_BASE;
 }
@@ -133,7 +197,7 @@ async function refreshAccessToken(): Promise<string | null> {
 
 /** Core request primitive. Returns parsed JSON. Throws `ServerError`. */
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const url = path.startsWith("http") ? path : `${SERVER_BASE_URL}${path}`;
+  const url = resolveRequestUrl(path);
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
@@ -181,17 +245,4 @@ async function parseResponse<T>(res: Response): Promise<T> {
   // 204 No Content
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
-}
-
-const SSE_STREAM_PATH = "/events/stream";
-
-/** Build a URL with `?token=...` for the SSE `EventSource` endpoint only. */
-export function urlWithTokenQuery(path: string, token: string): string {
-  const queryStart = path.indexOf("?");
-  const pathname = queryStart === -1 ? path : path.slice(0, queryStart);
-  if (pathname !== SSE_STREAM_PATH) {
-    throw new Error("token query URLs are only supported for /events/stream");
-  }
-  const sep = path.includes("?") ? "&" : "?";
-  return `${SERVER_BASE_URL}${path}${sep}token=${encodeURIComponent(token)}`;
 }

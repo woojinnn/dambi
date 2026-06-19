@@ -44,7 +44,7 @@ export interface ListingSummary {
   id: string;
   slug: string;
   kind: ListingKind;
-  publisher_id: string;
+  publisher_id?: string;
   publisher_tier: PublisherTier;
   display_name: I18nText;
   description?: I18nText;
@@ -65,8 +65,7 @@ export interface ListingSummary {
   /** True when the currently-authenticated user has installed this listing
    *  at least once (event log row, not state). Drives the 설치/설치됨 badge. */
   is_installed: boolean;
-  /** Publisher's email, joined from `users` on read. Use `publisherDisplay`
-   *  to derive a human-friendly label (handles the official tier fallback). */
+  /** Public publisher handle. Legacy field name is kept for compatibility. */
   publisher_email?: string;
 }
 
@@ -87,7 +86,8 @@ export interface ListingVersion {
 export interface Review {
   id: string;
   listing_id: string;
-  user_id: string;
+  user_id?: string;
+  reviewer_handle?: string;
   version: string;
   rating: number;
   body: I18nText;
@@ -108,11 +108,13 @@ export interface MarketReport {
   id: string;
   listing_id?: string;
   review_id?: string;
-  reporter_id: string;
+  reporter_id?: string;
+  reporter_handle?: string;
   reason: ReportReason;
   details?: string;
   status: ReportStatus;
   resolved_by?: string;
+  resolved_by_handle?: string;
   resolved_at?: number;
   created_at: number;
 }
@@ -278,8 +280,8 @@ export async function createListing(
   return request<ListingSummary>("/market/listings", { method: "POST", body });
 }
 
-/** `DELETE /market/listings/id/:id` — remove a listing the caller published.
- *  Only the publisher can delete; the server cascades versions/installs/reviews. */
+/** `DELETE /market/listings/id/:id` — hide a listing the caller published.
+ *  The server archives it and retains versions/reviews/reports for audit history. */
 export async function deleteListing(listingId: string): Promise<void> {
   await request<void>(`/market/listings/id/${listingId}`, { method: "DELETE" });
 }
@@ -408,9 +410,9 @@ export function pickI18n(t: I18nText | undefined, locale: "en" | "ko" = "ko"): s
 }
 
 /**
- * Human-friendly publisher label. Official listings get a fixed brand name
- * (the seed user's email is `official@dambi.seed`, ugly to render);
- * everyone else gets the email's local part (`alice@example.com` → `alice`).
+ * Human-friendly publisher label. Official listings get a fixed brand name;
+ * everyone else gets the server-provided public handle. Older local seed data
+ * may still provide an email-looking value, so strip the domain defensively.
  */
 export function publisherDisplay(
   tier: PublisherTier,

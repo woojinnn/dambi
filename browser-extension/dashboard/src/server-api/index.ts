@@ -12,8 +12,8 @@ export {
   getStoredRefreshToken,
   setStoredToken,
   setStoredRefreshToken,
+  normalizeServerBaseUrl,
   request,
-  urlWithTokenQuery,
 } from "./client";
 
 export {
