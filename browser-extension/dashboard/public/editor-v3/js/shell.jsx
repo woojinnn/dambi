@@ -26,7 +26,12 @@ function navigate(to, opts) {
     const seg = String(to).split("?")[0].split("/").filter(Boolean);
     const isDetail = seg[0] === "editor" && seg.length >= 2;
     if (isDetail && window.parent && window.parent !== window) {
-      window.parent.postMessage({ source: "dambi-editor-v3", type: "open-policy", to: to }, "*");
+      // opts.state(newPolicy seed 등)도 함께 넘긴다 — 빠지면 부모 에디터가 그 id의
+      // 기존 def 를 조회하다 "정책을 찾을 수 없습니다"가 뜬다(새 정책은 아직 저장 전).
+      window.parent.postMessage(
+        { source: "dambi-editor-v3", type: "open-policy", to: to, state: (opts && opts.state) || null },
+        "*",
+      );
       return;
     }
   } catch (e) {}
