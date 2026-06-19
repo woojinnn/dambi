@@ -14,7 +14,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
-import type { EnrichmentField, EnrichmentRegistry, ParamSpec } from "../../../editor-v9/manifest-gen";
+import type { CustomType, EnrichmentField, EnrichmentRegistry, ParamSpec } from "../../../editor-v9/manifest-gen";
 import { i18n } from "../../../i18n";
 import type { FieldOption } from "../../../cedar/form";
 
@@ -142,6 +142,7 @@ export function CustomFieldModal({
   existing,
   actionTag,
   fields,
+  catalog,
   onCreate,
   onClose,
 }: {
@@ -151,26 +152,41 @@ export function CustomFieldModal({
   actionTag: string | null;
   /** 폼의 필드 카탈로그 — 파라미터 드롭다운의 "이 거래에서 가져오기" 항목. */
   fields: readonly FieldOption[];
+  /** 서버가 서빙하는 메서드 카탈로그(get-method-catalog 유래). 드롭다운을 채우고
+   *  미서빙 method 입력을 경고하는 데 쓴다. null = 브리지 불가 → 정적 목록 fallback. */
+  catalog?: MethodSpec[] | null;
   onCreate: (draft: CustomFieldDraft) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation("editor");
   const existingNames = Object.keys(existing);
   const allOptions = useMemo(() => buildOptions(fields), [fields]);
-  const [method, setMethod] = useState<MethodSpec>(METHOD_CATALOG[0]);
+  // 드롭다운 = 서버 카탈로그(있으면), 아니면 정적 목록. 서빙 메서드 집합은 검증용
+  // (비어 있으면 = 카탈로그 모름 → 미서빙 경고 끔, false alarm 방지).
+  const methods = catalog && catalog.length > 0 ? catalog : METHOD_CATALOG;
+  const servedNames = useMemo(() => new Set((catalog ?? []).map((m) => m.method)), [catalog]);
+  const [method, setMethod] = useState<MethodSpec>(methods[0]);
   // 표시 이름은 메서드 라벨이 기본값 — 사용자가 고치기 전까지 메서드를 따라간다.
-  const [label, setLabel] = useState(() => methodLabel(METHOD_CATALOG[0]));
+  const [label, setLabel] = useState(() => methodLabel(methods[0]));
   const [labelTouched, setLabelTouched] = useState(false);
   // 파라미터 기본값: 메서드 템플릿을 이 액션의 선택지로 해석한 것.
   const [params, setParams] = useState<Record<string, string>>(() =>
-    defaultParams(METHOD_CATALOG[0], buildOptions(fields)),
+    defaultParams(methods[0], buildOptions(fields)),
   );
-  const [projection, setProjection] = useState(METHOD_CATALOG[0].projection);
+  const [projection, setProjection] = useState(methods[0].projection);
+  // 실제로 호출할 메서드 문자열 — 드롭다운 선택을 따르되 "직접 입력"(자유 method)으로
+  // 덮어쓸 수 있다(아직 번들 카탈로그에 없는 신규 서버 메서드 등).
+  const [methodName, setMethodName] = useState(methods[0].method);
+  const [methodNameTouched, setMethodNameTouched] = useState(false);
+  // 출력 타입 — 드롭다운 메서드의 기본 타입을 따르되 record 반환 leaf 를 다른
+  // 타입으로 가져올 때 직접 고를 수 있다.
+  const [outputType, setOutputType] = useState<CustomType>(methods[0].type);
+  const [typeTouched, setTypeTouched] = useState(false);
 
   // context.custom.<name> 식별자(manifest의 id). 메서드에서 자동 생성하되 사용자가
   // 직접 고칠 수 있다 — 정책 조건이 참조하는 ID라 기존 정책과 정확히 맞춰야 할 수
   // 있다(예: 이미 작성된 policy 가 context.custom.buyTokenLiquidityUsd 를 읽는 경우).
-  const [name, setName] = useState(() => autoName(METHOD_CATALOG[0].method, existingNames));
+  const [name, setName] = useState(() => autoName(methods[0].method, existingNames));
   const [nameTouched, setNameTouched] = useState(false);
   const trimmedName = name.trim();
   // context.custom.<name> 으로 들어가고 custom_context 키가 되므로 Cedar 식별자
@@ -184,25 +200,34 @@ export function CustomFieldModal({
     const want = label.trim();
     return want ? Object.values(existing).find((f) => f.label.ko === want) ?? null : null;
   }, [existing, label]);
+  const trimmedMethod = methodName.trim();
+  // 메서드 문자열은 manifest policy_rpc[].method 로 그대로 나가므로 공백 금지.
+  const methodValid = trimmedMethod.length > 0 && !/\s/.test(trimmedMethod);
+  // 미서빙 method = 비차단 경고. deny 정책에 쓰면 결과가 required 라 fail-closed
+  // (매칭 거래 전부 차단)지만, 모달은 정책 severity 를 모르므로 일반 경고로 안내.
+  const unservedWarn = methodValid && servedNames.size > 0 && !servedNames.has(trimmedMethod);
+
   const sameCall = useMemo(() => {
     const wantParams = JSON.stringify(sortedParams(paramSpecs(params)));
     return (
       Object.values(existing).find(
         (f) =>
-          f.method === method.method &&
+          f.method === trimmedMethod &&
           f.projection === projection &&
           JSON.stringify(sortedParams(f.params)) === wantParams,
       ) ?? null
     );
-  }, [existing, method.method, projection, params]);
+  }, [existing, trimmedMethod, projection, params]);
 
   const nameMsg = !trimmedName ? null : !nameValid ? t("customField.idInvalid") : nameDup ? t("customField.idDup") : null;
   const blockMsg = sameCall
     ? t("customField.sameCallBlock", { name: sameCall.label.ko })
     : labelDup
       ? t("customField.labelDupBlock")
-      : nameMsg;
-  const canCreate = label.trim().length > 0 && nameValid && !nameDup && !sameCall && !labelDup;
+      : !methodValid
+        ? t("customField.methodInvalid")
+        : nameMsg;
+  const canCreate = label.trim().length > 0 && methodValid && nameValid && !nameDup && !sameCall && !labelDup;
 
   const pickMethod = (m: MethodSpec) => {
     setMethod(m);
@@ -210,6 +235,8 @@ export function CustomFieldModal({
     setProjection(m.projection);
     if (!labelTouched) setLabel(methodLabel(m));
     if (!nameTouched) setName(autoName(m.method, existingNames));
+    if (!methodNameTouched) setMethodName(m.method);
+    if (!typeTouched) setOutputType(m.type);
   };
 
   const create = () => {
@@ -217,10 +244,10 @@ export function CustomFieldModal({
     onCreate({
       name: trimmedName,
       field: {
-        type: method.type,
+        type: outputType,
         label: { ko: label.trim() || trimmedName, en: trimmedName },
         appliesTo: actionTag ? [actionTag] : [],
-        method: method.method,
+        method: trimmedMethod,
         projection,
         params: paramSpecs(params),
       },
@@ -246,11 +273,11 @@ export function CustomFieldModal({
             className="pf-select"
             value={method.method}
             onChange={(e) => {
-              const m = METHOD_CATALOG.find((x) => x.method === e.target.value);
+              const m = methods.find((x) => x.method === e.target.value);
               if (m) pickMethod(m);
             }}
           >
-            {METHOD_CATALOG.map((m) => (
+            {methods.map((m) => (
               <option key={m.method} value={m.method}>
                 {m.mock ? methodLabel(m) + t("customField.mockSuffix") : methodLabel(m)}
               </option>
@@ -261,6 +288,7 @@ export function CustomFieldModal({
           {methodDesc(method)}
           {method.mock && <span className="cfm-mock"> · {t("customField.mockNote")}</span>}
         </div>
+        {unservedWarn && <div className="cfm-block">⚠ {t("customField.unservedWarn", { method: trimmedMethod })}</div>}
 
         <div className="cfm-params">
           <div className="cfm-step">{t("customField.step2")}</div>
@@ -282,6 +310,20 @@ export function CustomFieldModal({
           })}
           <details className="cfm-adv">
             <summary>{t("customField.advanced")}</summary>
+            <label className="cfm-row">
+              <span className="cfm-label mono">{t("customField.methodName")}</span>
+              <input
+                className={`pf-val wide mono${methodValid ? "" : " invalid"}`}
+                value={methodName}
+                onChange={(e) => {
+                  setMethodName(e.target.value);
+                  setMethodNameTouched(true);
+                }}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+            </label>
             {Object.entries(params).map(([key, v]) => (
               <label key={key} className="cfm-row">
                 <span className="cfm-label mono">{key}</span>
@@ -299,6 +341,22 @@ export function CustomFieldModal({
                 value={projection}
                 onChange={(e) => setProjection(e.target.value)}
               />
+            </label>
+            <label className="cfm-row">
+              <span className="cfm-label mono">{t("customField.outputType")}</span>
+              <select
+                className="pf-select"
+                value={outputType}
+                onChange={(e) => {
+                  setOutputType(e.target.value as CustomType);
+                  setTypeTouched(true);
+                }}
+              >
+                <option value="decimal">{t("type.decimal")}</option>
+                <option value="Long">{t("type.long")}</option>
+                <option value="Bool">{t("type.bool")}</option>
+                <option value="String">{t("type.string")}</option>
+              </select>
             </label>
           </details>
         </div>
@@ -335,11 +393,11 @@ export function CustomFieldModal({
         <div className="cfm-autoname">
           {t("customField.autoNote", {
             type:
-              method.type === "decimal"
+              outputType === "decimal"
                 ? t("type.decimal")
-                : method.type === "Long"
+                : outputType === "Long"
                   ? t("type.long")
-                  : method.type === "Bool"
+                  : outputType === "Bool"
                     ? t("type.bool")
                     : t("type.string"),
           })}{" "}
