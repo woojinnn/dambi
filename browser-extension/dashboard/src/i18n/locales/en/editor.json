@@ -392,6 +392,8 @@
     "dupTitle": "Duplicate into which folder?",
     "dupHint": "Pick a folder to save the copy in — you'll jump straight to editing.",
     "dupUncatSub": "Keep it as an individual policy (no folder)",
+    "docTab": "Description",
+    "docReadOnlyHint": "This policy's description. This screen only changes values (parameters), so the description is read-only here.",
     "formTab": "Form",
     "llmTab": "LLM",
     "llmBadModel": "The policy the LLM produced isn't in a valid shape. Please try again.",
