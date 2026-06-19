@@ -1121,7 +1121,7 @@ function DocField(props: {
           className="ev2-doc-input"
           value={props.value}
           onChange={(e) => props.onChange(e.target.value)}
-          rows={2}
+          rows={3}
           placeholder={props.hint}
         />
       )}
