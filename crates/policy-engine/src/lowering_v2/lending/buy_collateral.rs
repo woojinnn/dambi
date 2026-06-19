@@ -46,3 +46,29 @@ pub(crate) fn lower(
 
     Ok(ctx.lowered(r#"Lending::Action::"BuyCollateral""#, Value::Object(m)))
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use policy_state::primitives::U256;
+    use policy_transition::action::lending::{BuyCollateralAction, LendingAction};
+    use policy_transition::action::ActionBody;
+
+    use super::super::test_support::{
+        assert_conforms, onchain_meta, other, usdc, venue_compound_v3, weth,
+    };
+
+    #[test]
+    fn buy_collateral_lowering_conforms_to_schema() {
+        let body = ActionBody::Lending(LendingAction::BuyCollateral(BuyCollateralAction {
+            venue: venue_compound_v3(),
+            collateral_asset: weth(),
+            base_asset: usdc(),
+            min_collateral_amount: U256::from(300_000_000_000_000_000u64),
+            base_amount: U256::from(1_000_000_000u64),
+            recipient: other(),
+        }));
+
+        assert_conforms("buy_collateral", &body, &onchain_meta());
+    }
+}
