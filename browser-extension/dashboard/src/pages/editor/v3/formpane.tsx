@@ -133,8 +133,8 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly, onCh
   onChangeRef.current = onChange;
   React.useEffect(() => {
     const cedarText = Cedar.serializeCedar(model, model.id, model.severity, model.reason);
-    onChangeRef.current({ cedarText, model, manifest: effectiveManifest, manifestOverridden: manifestText !== null });
-  }, [model, effectiveManifest, manifestText]);
+    onChangeRef.current({ cedarText, model, manifest: effectiveManifest, manifestOverridden: manifestText !== null, registry });
+  }, [model, effectiveManifest, manifestText, registry]);
 
   const patch = (next) => setModel((m) => ({ ...m, ...next }));
   const setTrigger = (next) =>

@@ -82,6 +82,12 @@ export interface PolicyFormPaneProps {
     model: FormModel;
     manifest: unknown;
     manifestOverridden: boolean;
+    /** The merged enrichment registry this form used to generate `manifest`
+     *  (built-in fields + manifest-derived + modal-created user fields). The
+     *  parent must reuse it when it regenerates the manifest at save from the
+     *  concretized IR — otherwise a modal-created field that previews fine here
+     *  is rejected at save with `noBinding`. */
+    registry: EnrichmentRegistry;
   }) => void;
   /** 유효성 변화 보고 — Cedar 변환 실패나 형식 오류(잘못된 decimal 등)를
    *  부모(저장 버튼)가 알 수 있게 한다. 값 시트에서 "빨간불 + 되돌리기"에 쓰임. */
@@ -574,6 +580,7 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
             model,
             manifest: effectiveManifest,
             manifestOverridden: manifestText !== null,
+            registry,
           });
         })
         .catch((err: unknown) => {
@@ -585,7 +592,7 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [ir, model, effectiveManifest, manifestText]);
+  }, [ir, model, effectiveManifest, manifestText, registry]);
 
   const patch = (next: Partial<FormModel>) => setModel((m) => ({ ...m, ...next }));
 

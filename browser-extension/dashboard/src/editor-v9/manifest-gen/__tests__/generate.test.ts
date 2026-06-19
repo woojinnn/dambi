@@ -208,6 +208,37 @@ describe("generateManifest", () => {
     expect(errors.some((e) => e.message.includes("action"))).toBe(true);
   });
 
+  // The save-path asymmetry guard: a modal-created custom field is absent from
+  // the built-in registry, so generating with the default registry fails closed
+  // with `noBinding` — which is exactly what made a modal field preview green but
+  // fail at save until EditorDetailPageV2 / v3 detail.tsx began passing the form's
+  // merged registry into the save-time regeneration.
+  it("a custom field rejects with noBinding under the default registry but resolves with the merged registry", () => {
+    const policy = enrichmentPolicy({ id: "p", severity: "deny", field: "buyTokenLiquidityUsd" });
+
+    const def = generateManifest(policy); // default ENRICHMENT_FIELDS registry
+    expect(def.manifest).toBeUndefined();
+    expect(def.errors.some((e) => e.field === "buyTokenLiquidityUsd")).toBe(true);
+
+    const merged: EnrichmentRegistry = {
+      buyTokenLiquidityUsd: {
+        type: "Decimal",
+        label: { ko: "", en: "" },
+        appliesTo: ["swap"],
+        method: "pool.liquidity",
+        projection: "$.result.vol24hUsd",
+        params: { venue: "$.action.venue" },
+      },
+    };
+    const ok = generateManifest(policy, merged, { id: "p", severity: "deny" });
+    expect(ok.errors).toEqual([]);
+    expect(ok.manifest?.policy_rpc[0].method).toBe("pool.liquidity");
+    // deny hinges on enrichment → the feeding call is required + non-optional.
+    expect(ok.manifest?.policy_rpc[0].optional).toBe(false);
+    expect(ok.manifest?.policy_rpc[0].outputs[0].required).toBe(true);
+    expect(ok.manifest?.custom_context.fields).toEqual({ buyTokenLiquidityUsd: "Decimal" });
+  });
+
   it("generates for a field lifted from the seeded defaults (pctOfHolding)", () => {
     // pctOfHolding is registered from phase1A-seed.json with appliesTo
     // ["erc20_transfer"] — the action tag is snake_cased, so it must match.

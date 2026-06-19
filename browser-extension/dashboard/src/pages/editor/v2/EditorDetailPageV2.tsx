@@ -42,7 +42,7 @@ import { holesFromIr } from "./save-def";
 import { Topbar } from "../../../shell/Topbar";
 
 import { stampAnnotations } from "../../../editor-v9/annotations";
-import { generateManifest } from "../../../editor-v9/manifest-gen";
+import { generateManifest, type EnrichmentRegistry } from "../../../editor-v9/manifest-gen";
 import type { PolicyIR } from "../../../cedar/blocks";
 
 import { severityFromCedar } from "../policy-meta";
@@ -270,6 +270,13 @@ function EditorBody({
   // A hand-edited manifest from the form, wrapped so `null` = no override
   // (auto-generate) is distinct from an override whose value is `undefined`.
   const [manifestOverride, setManifestOverride] = useState<{ value: unknown } | null>(null);
+  // The merged enrichment registry the form pane used (built-in + manifest-derived
+  // + modal-created user fields). Save regenerates the manifest from the
+  // concretized IR, so it must reuse this registry — otherwise a modal-created
+  // custom field that previews fine is rejected at save with `noBinding`.
+  // `undefined` (form never mounted, e.g. pure Cedar-tab authoring) falls back to
+  // the built-in registry inside generateManifest.
+  const [formRegistry, setFormRegistry] = useState<EnrichmentRegistry | undefined>(undefined);
   const [tab, setTab] = useState<Tab>(() => policy.initialTab ?? defaultTab(policy.method));
   const [publishOpen, setPublishOpen] = useState(false);
   // Manifest computed at publish time so an UNSAVED policy still ships its
@@ -414,7 +421,7 @@ function EditorBody({
     } else {
       // manifest 생성은 홀을 기본값으로 굳힌 구체 IR로 — 평가 시 렌더는 바인딩
       // 파라미터를 채운 IR을 따로 쓴다.
-      const gen = generateManifest(concretizeIr(finalIr), undefined, { id: policy.id, severity });
+      const gen = generateManifest(concretizeIr(finalIr), formRegistry, { id: policy.id, severity });
       if (gen.errors.length > 0) {
         throw new Error(gen.errors.map((e) => e.message).join("\n"));
       }
@@ -1009,10 +1016,13 @@ function EditorBody({
                     onSeverityChange: (s: "deny" | "warn") => setSeverity(s),
                   }
                 : {})}
-              onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden }) => {
+              onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden, registry }) => {
                 setCedarText(c);
                 setIr(nextIr);
                 setLastModel(model);
+                // Reuse the form's merged registry when save regenerates the
+                // manifest (so modal-created custom fields survive save).
+                setFormRegistry(registry);
                 // Keep the header severity in sync so save stamps it correctly.
                 // 단 바인딩 모드(값 전용 폼)에선 헤더 셀렉트가 severity override 를
                 // 소유하므로 폼이 def 선언값으로 덮어쓰지 않게 둔다.
