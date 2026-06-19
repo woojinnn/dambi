@@ -264,7 +264,12 @@ export function ListingConditionTree(props: { cedarText: string; manifest?: unkn
   const { cedarText, manifest } = props;
   const { t } = useTranslation("editor");
   const model = useFormModel(cedarText, toParameterized);
-  const shipped = splitManifestHoles(manifest).shipped;
+  let shipped: ReturnType<typeof splitManifestHoles>["shipped"] = [];
+  try {
+    shipped = splitManifestHoles(manifest).shipped;
+  } catch {
+    shipped = [];
+  }
   const byName = new Map(shipped.map((s) => [s.name, s]));
 
   if (model === "loading")

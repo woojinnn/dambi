@@ -9,9 +9,10 @@
 import type { PolicyDef } from "../../../sdk/policy-store-types";
 import type { PolicyIR } from "../cedar/blocks";
 import { formToIr, irToForm, normalizeDecimal } from "../cedar/form";
-import { canonicalizeModel, parameterizeModel } from "../cedar/form/parameterize";
+import type { FormValue } from "../cedar/form";
+import { canonicalizeModel, collectLeaves, parameterizeModel } from "../cedar/form/parameterize";
 import type { HoleSpec, HoleValue } from "../server-api/policy-store";
-import { splitManifestHoles } from "./editor/publish-holes";
+import { splitManifestHoles, type ShippedHoleSpec } from "./editor/publish-holes";
 import { holesFromIr } from "./editor/v2/save-def";
 
 export interface ListingMeta {
@@ -36,6 +37,51 @@ function holedIrOf(ir: PolicyIR): PolicyIR | null {
     return formToIr(parameterizeModel(canonicalizeModel(model)));
   } catch {
     return null;
+  }
+}
+
+function holeTypeFromValue(v: FormValue): HoleSpec["type"] {
+  switch (v.kind) {
+    case "set":
+      return "addressSet";
+    case "string":
+      return v.value.startsWith("0x") ? "address" : "string";
+    case "long":
+      return "long";
+    case "decimal":
+      return "decimal";
+    case "bool":
+      return "bool";
+    case "field":
+      return "field";
+  }
+}
+
+function paramTypesFromHoledIr(ir: PolicyIR): Map<string, HoleSpec["type"]> {
+  const model = irToForm(ir);
+  if (!model) return new Map();
+  const out = new Map<string, HoleSpec["type"]>();
+  for (const leaf of collectLeaves(model)) {
+    if (leaf.param?.name) out.set(leaf.param.name, holeTypeFromValue(leaf.value));
+  }
+  return out;
+}
+
+function validateShippedHolesAgainstForm(
+  shipped: ShippedHoleSpec[],
+  actualTypes: Map<string, HoleSpec["type"]>,
+  listingName: string,
+): void {
+  for (const s of shipped) {
+    const actual = actualTypes.get(s.name);
+    if (!actual) {
+      throw new Error(`정책 "${listingName}"의 빈칸 메타데이터가 존재하지 않는 필드(${s.name})를 가리켜요`);
+    }
+    if (actual !== s.type) {
+      throw new Error(
+        `정책 "${listingName}"의 빈칸 메타데이터 타입이 실제 조건과 달라요 (${s.name}: ${s.type} != ${actual})`,
+      );
+    }
   }
 }
 
@@ -80,6 +126,7 @@ export async function listingToDefs(
     const holed = holedIrOf(ir);
     if (holed) {
       const derived = holesFromIr(holed);
+      validateShippedHolesAgainstForm(shipped, paramTypesFromHoledIr(holed), it.name);
       const byName = new Map(shipped.map((s) => [s.name, s]));
       skeletonIr = holed;
       holes = derived.holes.map((h) => {

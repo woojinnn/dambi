@@ -37,6 +37,19 @@ export interface ShippedHoleSpec {
   required: true;
 }
 
+const SHIPPED_HOLE_TYPES = new Set<HoleSpec["type"]>([
+  "addressSet",
+  "address",
+  "long",
+  "decimal",
+  "string",
+  "bool",
+  "field",
+]);
+const SHIPPED_HOLE_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+const MAX_SHIPPED_HOLES = 64;
+const MAX_SHIPPED_HOLE_LABEL_LEN = 160;
+
 /** redact 결과 leaf 값이 해당 hole의 플레이스홀더인가. */
 function isPlaceholder(v: FormValue, kind: PublishHole["kind"]): boolean {
   if (kind === "address") {
@@ -126,6 +139,32 @@ export function manifestWithHoles(
   return { ...base, [MANIFEST_HOLES_KEY]: shipped };
 }
 
+function isHoleType(v: unknown): v is HoleSpec["type"] {
+  return typeof v === "string" && SHIPPED_HOLE_TYPES.has(v as HoleSpec["type"]);
+}
+
+function parseShippedHoleSpec(raw: unknown, idx: number): ShippedHoleSpec {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`Invalid ${MANIFEST_HOLES_KEY}[${idx}]: expected object`);
+  }
+  const rec = raw as Record<string, unknown>;
+  const name = rec.name;
+  if (typeof name !== "string" || !SHIPPED_HOLE_NAME_RE.test(name)) {
+    throw new Error(`Invalid ${MANIFEST_HOLES_KEY}[${idx}].name`);
+  }
+  if (!isHoleType(rec.type)) {
+    throw new Error(`Invalid ${MANIFEST_HOLES_KEY}[${idx}].type`);
+  }
+  const label = typeof rec.label === "string" ? rec.label.trim() : "";
+  if (!label || label.length > MAX_SHIPPED_HOLE_LABEL_LEN) {
+    throw new Error(`Invalid ${MANIFEST_HOLES_KEY}[${idx}].label`);
+  }
+  if (rec.required !== true) {
+    throw new Error(`Invalid ${MANIFEST_HOLES_KEY}[${idx}].required`);
+  }
+  return { name, type: rec.type, label, required: true };
+}
+
 /** 설치 측: manifest에서 hole 스펙을 분리한다. */
 export function splitManifestHoles(manifest: unknown): {
   shipped: ShippedHoleSpec[];
@@ -134,12 +173,17 @@ export function splitManifestHoles(manifest: unknown): {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
     return { shipped: [], manifest };
   const o = manifest as Record<string, unknown>;
-  const raw = o[MANIFEST_HOLES_KEY];
-  if (!Array.isArray(raw)) return { shipped: [], manifest };
-  const shipped = raw.filter(
-    (s): s is ShippedHoleSpec =>
-      !!s && typeof s === "object" && typeof (s as ShippedHoleSpec).name === "string",
-  );
-  const { [MANIFEST_HOLES_KEY]: _drop, ...rest } = o;
+  const { [MANIFEST_HOLES_KEY]: raw, ...rest } = o;
+  if (!(MANIFEST_HOLES_KEY in o)) return { shipped: [], manifest };
+  if (!Array.isArray(raw)) throw new Error(`Invalid ${MANIFEST_HOLES_KEY}: expected array`);
+  if (raw.length > MAX_SHIPPED_HOLES) {
+    throw new Error(`Invalid ${MANIFEST_HOLES_KEY}: too many holes`);
+  }
+  const shipped = raw.map(parseShippedHoleSpec);
+  const seen = new Set<string>();
+  for (const s of shipped) {
+    if (seen.has(s.name)) throw new Error(`Invalid ${MANIFEST_HOLES_KEY}: duplicate ${s.name}`);
+    seen.add(s.name);
+  }
   return { shipped, manifest: rest };
 }

@@ -120,12 +120,9 @@ function shortAddr(a: string): string {
 export function extractHoles(cedarText: string): PublishHole[] {
   const ruleId = ruleIdOf(cedarText);
   const holes: PublishHole[] = [];
-  const seen = new Set<string>(); // raw substrings already captured
   let n = 0;
 
   const push = (h: Omit<PublishHole, "key" | "ruleId">) => {
-    if (seen.has(h.raw)) return;
-    seen.add(h.raw);
     if (h.kind === "address" && allSentinel(h.raw)) return; // 보편 상수 — 가리지 않는다
     holes.push({ ...h, key: `${ruleId}#${n++}`, ruleId });
   };

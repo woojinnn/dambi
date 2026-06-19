@@ -91,12 +91,13 @@ when { context.amountUsd.greaterThanOrEqual(decimal("3.0")) };`;
     expect(out).not.toContain('decimal("3.0")');
   });
 
-  it("replaces EVERY occurrence of a repeated literal", () => {
+  it("creates one hole per repeated literal occurrence so every placeholder can be installed", () => {
     const cedar = `@id("p")
 forbid(principal, action, resource)
 when { context.recipient == "0xA1c4000000000000000000000000000000007e29"
   || context.sender == "0xA1c4000000000000000000000000000000007e29" };`;
     const holes = extractHoles(cedar);
+    expect(holes.map((h) => h.path)).toEqual(["context.recipient", "context.sender"]);
     const out = redactCedar(cedar, holes, new Set());
     expect(out).not.toContain("0xA1c4000000000000000000000000000000007e29");
   });

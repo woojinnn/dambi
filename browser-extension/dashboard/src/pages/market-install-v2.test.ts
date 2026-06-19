@@ -111,6 +111,75 @@ describe("listingToDefs", () => {
     expect(JSON.stringify(def.skeleton.ir)).toContain('"hole"');
     expect(def.skeleton.manifest).toEqual({ id: "p", schema_version: 2 });
   });
+
+  it("rejects shipped hole metadata whose type does not match the parameterized condition", async () => {
+    const model: FormModel = {
+      trigger: { kind: "actionEq", entityType: "Dambi::Action", id: "swap" },
+      when: [
+        {
+          joiner: "and",
+          fieldPath: "context.recipient",
+          op: "==",
+          value: { kind: "string", value: ZERO_ADDR },
+        },
+      ],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    };
+    await expect(
+      listingToDefs(
+        { id: "L5", kind: "policy", displayName: "수신자 제한", version: "1.0.0", cat: undefined },
+        {
+          cedar_text: "forbid(...)",
+          manifest: {
+            id: "p",
+            schema_version: 2,
+            [MANIFEST_HOLES_KEY]: [
+              { name: "v1", type: "string", label: "받는 주소", required: true },
+            ],
+          },
+        } as never,
+        async () => [formToIr(model)],
+      ),
+    ).rejects.toThrow(/타입/);
+  });
+
+  it("accepts decimal shipped holes by checking the restored form leaf type", async () => {
+    const model: FormModel = {
+      trigger: { kind: "actionEq", entityType: "Dambi::Action", id: "swap" },
+      when: [
+        {
+          joiner: "and",
+          fieldPath: "context.custom.inputUsd",
+          op: ">=",
+          value: { kind: "decimal", value: "0.0" },
+        },
+      ],
+      unless: [],
+      id: "p",
+      severity: "warn",
+      reason: "",
+    };
+    const defs = await listingToDefs(
+      { id: "L6", kind: "policy", displayName: "USD 제한", version: "1.0.0", cat: undefined },
+      {
+        cedar_text: "forbid(...)",
+        manifest: {
+          id: "p",
+          schema_version: 2,
+          [MANIFEST_HOLES_KEY]: [
+            { name: "v1", type: "decimal", label: "들어가는 금액(USD)", required: true },
+          ],
+        },
+      } as never,
+      async () => [formToIr(model)],
+    );
+    expect(requiredHolesOf(defs[0]).map((h) => ({ name: h.name, type: h.type, label: h.label }))).toEqual([
+      { name: "v1", type: "decimal", label: "들어가는 금액(USD)" },
+    ]);
+  });
 });
 
 describe("holeInputToValue", () => {
