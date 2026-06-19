@@ -9,7 +9,7 @@
 #
 # Trigger model:
 #   • push a tag `registry-proxy-v*`  → build + deploy (intentional release)
-#   • workflow_dispatch               → deploy current main by hand
+#   • workflow_dispatch               → deploy current default branch by hand
 #
 # Config (project / region / service / runtime flags / env-vars) is sourced from
 # scripts/deploy/_common.sh — the SAME single source of truth the local
@@ -49,6 +49,32 @@ jobs:
       CLOUDSDK_BILLING_QUOTA_PROJECT: dambi-registry
     steps:
       - uses: actions/checkout@v4
+
+      - name: Require registry proxy release ref
+        run: |
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            test "${GITHUB_REF_TYPE}" = "branch" || {
+              echo "::error::manual registry proxy deploy must run from the default branch, got ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}"
+              exit 1
+            }
+            test "${GITHUB_REF_NAME}" = "${DEFAULT_BRANCH}" || {
+              echo "::error::manual registry proxy deploy must run from ${DEFAULT_BRANCH}, got ${GITHUB_REF_NAME}"
+              exit 1
+            }
+            exit 0
+          fi
+          test "${GITHUB_REF_TYPE}" = "tag" || {
+            echo "::error::registry proxy deploy must run from a registry-proxy-v* tag or manual default-branch dispatch, got ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}"
+            exit 1
+          }
+          case "${GITHUB_REF_NAME}" in
+            registry-proxy-v*) ;;
+            *)
+              echo "::error::registry proxy deploy tag must start with registry-proxy-v, got ${GITHUB_REF_NAME}"
+              exit 1
+              ;;
+          esac
 
       - name: Authenticate to Google Cloud (keyless WIF)
         uses: google-github-actions/auth@v2

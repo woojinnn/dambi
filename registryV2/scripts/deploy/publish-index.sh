@@ -16,7 +16,7 @@ rv3_activate_and_guard
 
 cd "${RV2_DIR}"
 echo "=== build-index (registryV2 → index/) ==="
-npm install --no-audit --no-fund --silent
+npm ci --ignore-scripts --no-audit --no-fund --silent
 # --strict-callkeys: abort the publish on a (chain,to,selector) collision rather
 # than shipping a last-wins-resolved index that could route a callkey to the
 # wrong adapter (a benign decoder shadowing a stricter one). Green today, so this

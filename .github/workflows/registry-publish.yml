@@ -2,7 +2,7 @@
 #
 # Trigger model (orthogonal axes — see registryV2/docs/REGISTRY_ARCHITECTURE.md):
 #   • push a tag `registry-v*`           → incremental publish (additive, default)
-#   • workflow_dispatch (mode=full-sync) → full sync (prunes orphans — destructive)
+#   • workflow_dispatch from default branch → manual incremental/full-sync
 # The `production` Environment gate (configure required-reviewers in repo settings)
 # means a human approves the run before anything reaches the live bucket.
 #
@@ -66,6 +66,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Require registry publish release ref
+        run: |
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            test "${GITHUB_REF_TYPE}" = "branch" || {
+              echo "::error::manual registry publish must run from the default branch, got ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}"
+              exit 1
+            }
+            test "${GITHUB_REF_NAME}" = "${DEFAULT_BRANCH}" || {
+              echo "::error::manual registry publish must run from ${DEFAULT_BRANCH}, got ${GITHUB_REF_NAME}"
+              exit 1
+            }
+            exit 0
+          fi
+          test "${GITHUB_REF_TYPE}" = "tag" || {
+            echo "::error::registry publish must run from a registry-v* tag or manual default-branch dispatch, got ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}"
+            exit 1
+          }
+          case "${GITHUB_REF_NAME}" in
+            registry-v*) ;;
+            *)
+              echo "::error::registry publish tag must start with registry-v, got ${GITHUB_REF_NAME}"
+              exit 1
+              ;;
+          esac
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -82,7 +108,7 @@ jobs:
       - name: Build index
         working-directory: registryV2
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npx tsx scripts/build-index.ts --strict-callkeys
 
       # Gate: prove every served bundle (concrete + materialized) hashes to its
@@ -91,7 +117,7 @@ jobs:
       - name: Parity gate (canonicalize + materialization)
         working-directory: registry-api
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npx vitest run src/__tests__/materialization-parity.test.ts
 
       # Gate: the KMS key version used for signing MUST match the public key

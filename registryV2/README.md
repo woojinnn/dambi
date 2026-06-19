@@ -250,13 +250,17 @@ smoke testing.
 The pinned key in `.env.example` is byte-identical to the live KMS public key.
 
 **(2) Pre-flight, before flipping enforcement on.**
-- `scripts/verify-prod-registry.ts` samples `by-callkey` entries from a live
-  `REGISTRY_BASE_URL` and runs three checks per entry: **reconcile** (local index
-  `bundle_sha256` == served), **parity** (recompute `sha256(canonicalize(served bundle))`
-  == served `bundle_sha256`), and — if `PINNED_BUNDLE_PUBLIC_KEY` is set — **signature**
-  (`subtle.verify` against the pinned key, exactly as the extension does). It fails *open*
-  on the signature check if the pin is unset (reconcile-only), so always run it with the
-  pin to get a real cryptographic check.
+- `scripts/verify-prod-registry.ts` samples route-index entries, or checks every
+  currently-built `by-callkey`, `by-typed-data`, and `by-selector` route with
+  `--all-routes`, from a live `REGISTRY_BASE_URL`. It runs three checks per entry:
+  **reconcile** (local index `bundle_sha256` == served), **parity** (recompute
+  `sha256(canonicalize(served bundle))` == served `bundle_sha256`), and — if
+  `PINNED_BUNDLE_PUBLIC_KEY` is set — **signature** (`subtle.verify` against the pinned
+  key, exactly as the extension does). It fails *open* on the signature check if the pin
+  is unset (reconcile-only), so always run it with the pin to get a real cryptographic
+  check. The extension release workflow builds the representative source-ref index and
+  runs a bounded deterministic `--sample=200 --concurrency=1 --timeout-ms=8000`
+  live-proxy preflight before producing store-upload zips.
 - `scripts/deploy/verify-bucket-parity.sh` does **full** signature-coverage (`comm` of
   local bundle shas vs every `signatures/*.sig` in the bucket) plus migration faithfulness
   (crc32c diff) — full coverage lives bucket-side because proxy rate limits forbid ~31 k
