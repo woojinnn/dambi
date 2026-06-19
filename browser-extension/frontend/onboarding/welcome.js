@@ -183,14 +183,15 @@ async function renderStep3() {
     try { await S.loadState(); } catch (e) { /* 폴백: 빈 목록 */ }
     if (!flow.baseline.size) flow.baseline = new Set((S.BASELINE || []).map((b) => b.id));
   }
-  const items = (S.BASELINE || []).map((b) => ({ id: b.id, title: b.title, sev: b.sev }));
+  // .cd 표시는 내부 def id(def::builtin.*) 접두어를 떼 짧게(토글용 data-id는 실제 id 유지).
+  const items = (S.BASELINE || []).map((b) => ({ id: b.id, title: b.title, sev: b.sev, slug: String(b.id).replace(/^def::builtin\./, "") }));
   card.innerHTML =
     '<div class="ob-shead"><div class="st">베이스라인 정책</div><div class="ss">스왑 트랜잭션을 검사하는 기본 가드예요. 기본으로 모두 켜져 있어요.</div></div>' +
     '<div class="ob-checks" id="checks">' +
       items.map((p) =>
-        '<div class="ob-check ' + (flow.baseline.has(p.id) ? "on" : "") + '" data-id="' + p.id + '">' +
+        '<div class="ob-check ' + (flow.baseline.has(p.id) ? "on" : "") + '" data-id="' + escapeHtml(p.id) + '">' +
           '<span class="box">' + CHECK + '</span>' +
-          '<span class="cmain"><span class="cn">' + p.title + '</span><span class="cd">' + p.id + '</span></span>' +
+          '<span class="cmain"><span class="cn">' + escapeHtml(p.title) + '</span><span class="cd">' + escapeHtml(p.slug) + '</span></span>' +
           '<span class="sev ' + p.sev + '" title="' + sevLabel(p.sev) + '"></span>' +
         '</div>').join("") +
     '</div>' +
