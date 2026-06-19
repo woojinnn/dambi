@@ -109,11 +109,24 @@ function swapBlockToHole(
   holeBlock.render();
 
   if (parent && parentInputName) {
-    parent.getInput(parentInputName)?.connection?.connect(holeBlock.outputConnection);
+    connectValueInput(parent as Blockly.BlockSvg, parentInputName, holeBlock);
   } else {
     holeBlock.moveTo(oldBlock.getRelativeToSurfaceXY());
   }
   oldBlock.dispose(false);
+}
+
+function connectValueInput(
+  parent: Blockly.BlockSvg,
+  inputName: string,
+  child: Blockly.BlockSvg,
+): void {
+  const source = parent.getInput(inputName)?.connection;
+  const target = child.outputConnection;
+  if (!source || !target) {
+    throw new Error(`Cannot connect value input ${parent.type}.${inputName} to ${child.type}`);
+  }
+  source.connect(target);
 }
 
 function findInputNameTargeting(parent: Blockly.Block, child: Blockly.Block): string | null {

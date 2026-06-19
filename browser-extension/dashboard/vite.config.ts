@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import fs from "node:fs";
 import path from "node:path";
 
 export function resolveServerUrlEnv(mode: string, dashboardDir: string = __dirname): string {
@@ -15,6 +16,19 @@ export function resolveServerUrlEnv(mode: string, dashboardDir: string = __dirna
     rootEnv.VITE_DAMBI_SERVER_URL ||
     ""
   );
+}
+
+function stripExtensionTestFixtures(outDir: string) {
+  return {
+    name: "dambi-strip-extension-test-fixtures",
+    apply: "build" as const,
+    closeBundle() {
+      fs.rmSync(path.join(outDir, "editor-v3", "tests"), {
+        recursive: true,
+        force: true,
+      });
+    },
+  };
 }
 
 // Two output modes share this single config:
@@ -42,9 +56,11 @@ export default defineConfig(({ mode }) => {
   // `loadEnv(mode, dir, "")` reads .env files + process.env with no prefix
   // filter; legacy `VITE_DAMBI_SERVER_URL` is still honored as a fallback.
   const serverUrl = resolveServerUrlEnv(mode);
+  const targetBrowser = process.env.TARGET_BROWSER || "chrome";
+  const outDir = path.resolve(__dirname, "..", "dist", targetBrowser);
 
   return {
-    plugins: [react()],
+    plugins: [react(), stripExtensionTestFixtures(outDir)],
     base: "./",
     // Feed the unified server URL to the dashboard client (client.ts reads
     // `import.meta.env.VITE_DAMBI_SERVER_URL`).
@@ -54,12 +70,7 @@ export default defineConfig(({ mode }) => {
     build: {
       // Target-aware so `build:firefox` lands options.html in dist/firefox, not
       // always dist/chrome. Defaults to chrome (the standalone `vite build` case).
-      outDir: path.resolve(
-        __dirname,
-        "..",
-        "dist",
-        process.env.TARGET_BROWSER || "chrome",
-      ),
+      outDir,
       emptyOutDir: false,
       rollupOptions: {
         input: {
