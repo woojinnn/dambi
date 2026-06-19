@@ -141,6 +141,18 @@ spec:
             - name: POLICY_LENDING_RPC_URL
               value: {{ .Values.oracleRpc.lendingUrl | quote }}
             {{- end }}
+            {{- if .Values.oracleRpc.priceUsd.ethereumUrl }}
+            - name: POLICY_PRICE_RPC_URL_1
+              value: {{ .Values.oracleRpc.priceUsd.ethereumUrl | quote }}
+            {{- end }}
+            {{- if .Values.oracleRpc.priceUsd.arbitrumUrl }}
+            - name: POLICY_PRICE_RPC_URL_42161
+              value: {{ .Values.oracleRpc.priceUsd.arbitrumUrl | quote }}
+            {{- end }}
+            {{- if .Values.oracleRpc.priceUsd.baseUrl }}
+            - name: POLICY_PRICE_RPC_URL_8453
+              value: {{ .Values.oracleRpc.priceUsd.baseUrl | quote }}
+            {{- end }}
             # Alchemy archive-node RPC (eth_getAssetTransfers etc.) for the
             # stat_window / similarity class-B enrichers. Carries a private API
             # key in the URL → secret, NEVER values.yaml. Optional: when the key
