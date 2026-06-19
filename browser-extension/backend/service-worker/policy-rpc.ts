@@ -76,7 +76,7 @@ async function serveEnrichmentViaEvaluate(
   const out: Record<string, unknown> = {};
   if (pr && typeof pr.results === "object" && pr.results !== null) {
     for (const [k, v] of Object.entries(pr.results as Record<string, unknown>)) {
-      out[k] = v;
+      if (remoteCallIds.has(k)) out[k] = v;
     }
   }
   return out;
@@ -422,6 +422,8 @@ export async function dispatchCallsV2(
   }
 
   // Fold: `ok: true` → unwrapped `result`; anything else is omitted (fail closed).
+  // The legacy sidecar is dev-only, but still keep local call ids authoritative:
+  // a buggy sidecar response must not overwrite in-process pure results.
   for (const entry of remoteResponse.results) {
     if (
       typeof entry !== "object" ||
@@ -431,7 +433,7 @@ export async function dispatchCallsV2(
       continue;
     }
     const rec = entry as { id: string; ok?: unknown; result?: unknown };
-    if (rec.ok === true) {
+    if (rec.ok === true && remoteCallIds.has(rec.id)) {
       results[rec.id] = rec.result;
     }
   }

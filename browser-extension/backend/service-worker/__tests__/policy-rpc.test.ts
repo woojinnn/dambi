@@ -288,6 +288,45 @@ describe("dispatchCallsV2", () => {
     });
   });
 
+  it("ignores legacy /v1/rpc results for call_ids that were not sent remotely", async () => {
+    process.env.POLICY_RPC_ENABLE_LEGACY_V1_RPC = "true";
+    const local: PlannedCallV2Dto = {
+      manifest_id: "m",
+      call_id: "m::nano",
+      method: "token.normalize_to_nano",
+      params: { amount: "1000000", decimals: 6 },
+      outputs: [],
+      optional: false,
+    };
+    const remote = plannedRemote();
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        request_id: `action-v2:${remote.call_id}`,
+        results: [
+          { id: local.call_id, ok: true, result: { nano: 1 } },
+          { id: remote.call_id, ok: true, result: { usd: "12.00" } },
+        ],
+      }),
+    } as Response);
+
+    const results = await dispatchCallsV2(
+      [local, remote],
+      "http://127.0.0.1:8787",
+    );
+
+    expect(results).toEqual({
+      [local.call_id]: { nano: 1_000_000_000 },
+      [remote.call_id]: { usd: "12.00" },
+    });
+    const body = JSON.parse(
+      String((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body),
+    );
+    expect(body.calls.map((c: { id: string }) => c.id)).toEqual([
+      remote.call_id,
+    ]);
+  });
+
   // ── SW prereq — authenticated /evaluate path: wallet_id identity ─────────
   // The server loads wallet state by `wallet_id.address`. The dispatcher also
   // supports an explicit state identity override so venue-order callers can
@@ -340,6 +379,41 @@ describe("dispatchCallsV2", () => {
         wallet_id: { address: string };
       };
       expect(req.wallet_id.address).toBe(ctxBase.tx.from);
+    });
+
+    it("ignores authenticated /evaluate results for call_ids that were not sent remotely", async () => {
+      const local: PlannedCallV2Dto = {
+        manifest_id: "m",
+        call_id: "m::nano",
+        method: "token.normalize_to_nano",
+        params: { amount: "1000000", decimals: 6 },
+        outputs: [],
+        optional: false,
+      };
+      const remote = plannedRemote();
+      authMocks.serverEvaluate.mockResolvedValueOnce({
+        policyRequest: {
+          results: {
+            [local.call_id]: { nano: 1 },
+            [remote.call_id]: { usd: "12.00" },
+          },
+        },
+      });
+
+      const results = await dispatchCallsV2(
+        [local, remote],
+        "http://127.0.0.1:8787",
+        ctxBase,
+      );
+
+      expect(results).toEqual({
+        [local.call_id]: { nano: 1_000_000_000 },
+        [remote.call_id]: { usd: "12.00" },
+      });
+      const req = authMocks.serverEvaluate.mock.calls[0][0] as {
+        call_specs: readonly { call_id: string }[];
+      };
+      expect(req.call_specs.map((c) => c.call_id)).toEqual([remote.call_id]);
     });
   });
 });

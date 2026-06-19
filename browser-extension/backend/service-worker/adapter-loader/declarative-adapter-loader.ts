@@ -320,45 +320,73 @@ export async function installDeclarativeBundleV3(
     // Cache desync — fall through to a full re-hydration.
   }
 
+  const baseUrl = args.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
+  const doFetch = args.fetchImpl ?? fetch;
+
   // chrome.storage.local mirror. After a service-worker cold start the
   // process-local cache is empty, but a prior lifetime may have persisted the
   // bundle. On hit, reinstall into WASM and rebuild the in-memory cache without
   // a registry round-trip.
   //
-  // Signature trust: the verify gate runs BEFORE install (and install precedes
-  // persistence), so only signature-verified bundles are ever persisted here.
-  // Rehydrate therefore reinstalls a previously-verified bundle without a fresh
-  // sig fetch. Defeating this requires DIRECT chrome.storage tampering — a
-  // strictly stronger local attacker than the registry-MITM this guards — which
-  // is out of scope for v1 (documented in REGISTRY_ARCHITECTURE.md).
+  // Signature trust: builds that enforce signatures must re-check persisted
+  // entries before reinstalling them. A user can update from an older
+  // require=false build whose storage cache was populated without a real
+  // signature check; blindly trusting that cache would make the require flip
+  // non-load-bearing for already-installed users.
   try {
     const storageEntry = await declarativeV3Cache.get(cacheKey);
     if (storageEntry) {
-      const reinstalled = await declarativeInstallV3(
-        JSON.stringify(storageEntry.bundle),
-      );
-      v3InstallCache.set(cacheKey, reinstalled);
-      v3CachedBundleByCallKey.set(cacheKey, storageEntry.bundle);
-      v3InstalledBundleIds.add(reinstalled.bundle_id);
-      // chain_to_addresses cross-mirror (Layer 1 측). storage 측은 이미
-      // 직전 lifetime fresh-install 시 자체 cross-mirror 됨 — 본 hit 도
-      // touch 로 LRU 만 갱신.
-      const sel = storageEntry.bundle.match.selector.toLowerCase();
-      for (const [cid, addr] of matchEntriesV3(storageEntry.bundle.match)) {
-        const k = v3CallkeyCacheKey(cid, addr, sel);
-        v3InstallCache.set(k, reinstalled);
-        v3CachedBundleByCallKey.set(k, storageEntry.bundle);
+      let storageTrusted = true;
+      if (bundleSigDefines.require) {
+        const verifyResult = await verifyBundleSignature({
+          bundle: storageEntry.bundle,
+          claimedSha256: storageEntry.bundleSha256,
+          baseUrl,
+          fetchImpl: doFetch,
+          ...bundleSigDefines,
+        });
+        if (!verifyResult.ok) {
+          console.warn(
+            "[Dambi] installDeclarativeBundleV3 storage reverify failed",
+            {
+              callkey: cacheKey,
+              reason: verifyResult.reason,
+              localSha: verifyResult.localSha,
+              sigUrl: verifyResult.sigUrl,
+              detail: verifyResult.detail,
+            },
+          );
+          storageTrusted = false;
+        }
       }
-      console.info("[Dambi] installDeclarativeBundleV3 storage-hit", {
-        callkey: cacheKey,
-        bundleId: reinstalled.bundle_id,
-        decoderId: reinstalled.decoder_id,
-      });
-      return {
-        decoderId: reinstalled.decoder_id,
-        bundleId: reinstalled.bundle_id,
-        bundle: storageEntry.bundle,
-      };
+
+      if (storageTrusted) {
+        const reinstalled = await declarativeInstallV3(
+          JSON.stringify(storageEntry.bundle),
+        );
+        v3InstallCache.set(cacheKey, reinstalled);
+        v3CachedBundleByCallKey.set(cacheKey, storageEntry.bundle);
+        v3InstalledBundleIds.add(reinstalled.bundle_id);
+        // chain_to_addresses cross-mirror (Layer 1 측). storage 측은 이미
+        // 직전 lifetime fresh-install 시 자체 cross-mirror 됨 — 본 hit 도
+        // touch 로 LRU 만 갱신.
+        const sel = storageEntry.bundle.match.selector.toLowerCase();
+        for (const [cid, addr] of matchEntriesV3(storageEntry.bundle.match)) {
+          const k = v3CallkeyCacheKey(cid, addr, sel);
+          v3InstallCache.set(k, reinstalled);
+          v3CachedBundleByCallKey.set(k, storageEntry.bundle);
+        }
+        console.info("[Dambi] installDeclarativeBundleV3 storage-hit", {
+          callkey: cacheKey,
+          bundleId: reinstalled.bundle_id,
+          decoderId: reinstalled.decoder_id,
+        });
+        return {
+          decoderId: reinstalled.decoder_id,
+          bundleId: reinstalled.bundle_id,
+          bundle: storageEntry.bundle,
+        };
+      }
     }
   } catch (err) {
     // chrome.storage 읽기 실패 / WASM install 실패 — 무음으로 cold fetch 로
@@ -369,8 +397,6 @@ export async function installDeclarativeBundleV3(
     );
   }
 
-  const baseUrl = args.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
-  const doFetch = args.fetchImpl ?? fetch;
   const url = v3CallkeyUrl(baseUrl, args.chainId, args.to, args.selector);
 
   let response: Response;
