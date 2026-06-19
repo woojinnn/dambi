@@ -67,6 +67,7 @@
             }
           },
           "amount": "$args.assets",
+          "amount_denomination": "assets",
           "recipient": "$args.receiver",
           "owner": "$args.owner"
         }
