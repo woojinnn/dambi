@@ -37,6 +37,51 @@ done
 
 kms_flags=(--keyring="${KMS_KEYRING}" --location="${KMS_LOCATION}" --project="${PROJECT_ID}")
 
+pinned_bundle_public_key() {
+  if [[ -n "${PINNED_BUNDLE_PUBLIC_KEY:-}" ]]; then
+    printf '%s\n' "${PINNED_BUNDLE_PUBLIC_KEY}"
+    return
+  fi
+  local env_example="${REPO_ROOT}/browser-extension/.env.example"
+  if [[ -f "${env_example}" ]]; then
+    sed -nE 's/^PINNED_BUNDLE_PUBLIC_KEY=(.+)$/\1/p' "${env_example}" | head -1
+  fi
+}
+
+kms_version_public_key_pin() {
+  local version="$1"
+  gcloud kms keys versions get-public-key "${version}" \
+    --key="${KMS_KEY}" \
+    "${kms_flags[@]}" \
+    --format='value(pem)' \
+    | tr -d '\n\r ' \
+    | sed 's/-----BEGINPUBLICKEY-----//;s/-----ENDPUBLICKEY-----//'
+}
+
+require_resign_pin_match() {
+  local version="$1"
+  local pinned
+  pinned="$(pinned_bundle_public_key)"
+  if [[ -z "${pinned}" ]]; then
+    echo "ABORT: PINNED_BUNDLE_PUBLIC_KEY is empty; refusing to overwrite live signatures." >&2
+    echo "  Set PINNED_BUNDLE_PUBLIC_KEY or update browser-extension/.env.example first." >&2
+    exit 1
+  fi
+
+  local kms_pin
+  kms_pin="$(kms_version_public_key_pin "${version}")"
+  if [[ -z "${kms_pin}" ]]; then
+    echo "ABORT: could not read KMS public key for version ${version}." >&2
+    exit 1
+  fi
+  if [[ "${kms_pin}" != "${pinned}" ]]; then
+    echo "ABORT: KMS version ${version} public key does not match PINNED_BUNDLE_PUBLIC_KEY." >&2
+    echo "  Refusing to overwrite live signatures with a key current extension builds do not pin." >&2
+    exit 1
+  fi
+  echo "KMS version ${version} matches PINNED_BUNDLE_PUBLIC_KEY (len=${#pinned})."
+}
+
 case "${SUB}" in
   new-version)
     echo "=== create new version of ${KMS_KEY} (HSM, EC_SIGN_P256_SHA256) ==="
@@ -69,8 +114,10 @@ case "${SUB}" in
   resign)
     [[ -n "${VERSION}" ]] || { echo "resign requires --version NEW" >&2; exit 2; }
     KEYVER="projects/${PROJECT_ID}/locations/${KMS_LOCATION}/keyRings/${KMS_KEYRING}/cryptoKeys/${KMS_KEY}/cryptoKeyVersions/${VERSION}"
+    require_resign_pin_match "${VERSION}"
+    PINNED="$(pinned_bundle_public_key)"
     echo "=== re-sign every bundle with version ${VERSION} (overwrites signatures/) ==="
-    ( cd "${RV2_DIR}" && BUNDLE_SIGNING_MODE=kms KMS_KEY_NAME="${KEYVER}" npx tsx scripts/sign-bundles.ts --force )
+    ( cd "${RV2_DIR}" && PINNED_BUNDLE_PUBLIC_KEY="${PINNED}" BUNDLE_SIGNING_MODE=kms KMS_KEY_NAME="${KEYVER}" npx tsx scripts/sign-bundles.ts --force )
     echo "=== publish signatures/ (leaf only; index pointers unchanged) ==="
     # rsync re-uploads every .sig only because --force above just rewrote them
     # (newer mtime). The filename + 64-byte P1363 length are unchanged, so rsync's

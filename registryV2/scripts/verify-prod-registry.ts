@@ -20,7 +20,7 @@
  *
  *   REGISTRY_BASE_URL=https://…  PINNED_BUNDLE_PUBLIC_KEY=<spki-b64> \
  *     npx tsx scripts/verify-prod-registry.ts [--sample=40 | --all-routes] [--max-entries=N] \
- *       [--concurrency=8] [--timeout-ms=10000]
+ *       [--concurrency=8] [--timeout-ms=10000] [--http-retries=3]
  *
  * Exit 0 = all selected route bundles reconcile + verify; non-zero on any mismatch.
  */
@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import canonicalize from "canonicalize";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, "..");
+const ROOT = resolve(process.env.VERIFY_PROD_REGISTRY_ROOT ?? resolve(HERE, ".."));
 const subtle = webcrypto.subtle;
 
 const BASE = (process.env.REGISTRY_BASE_URL ?? "").replace(/\/$/, "");
@@ -45,6 +45,10 @@ const CONCURRENCY_ARG = process.argv.find((a) => a.startsWith("--concurrency="))
 const CONCURRENCY = CONCURRENCY_ARG === undefined ? 8 : Number(CONCURRENCY_ARG);
 const TIMEOUT_MS_ARG = process.argv.find((a) => a.startsWith("--timeout-ms="))?.split("=")[1];
 const TIMEOUT_MS = TIMEOUT_MS_ARG === undefined ? 10000 : Number(TIMEOUT_MS_ARG);
+const HTTP_RETRIES_ARG = process.argv.find((a) => a.startsWith("--http-retries="))?.split("=")[1];
+const HTTP_RETRIES = HTTP_RETRIES_ARG === undefined ? 3 : Number(HTTP_RETRIES_ARG);
+const RETRY_BASE_MS_ARG = process.argv.find((a) => a.startsWith("--retry-base-ms="))?.split("=")[1];
+const RETRY_BASE_MS = RETRY_BASE_MS_ARG === undefined ? 1000 : Number(RETRY_BASE_MS_ARG);
 const ROUTE_INDEX_DIRS = ["by-callkey", "by-typed-data", "by-selector"] as const;
 
 if (!BASE) {
@@ -65,6 +69,14 @@ if (!Number.isInteger(CONCURRENCY) || CONCURRENCY <= 0) {
 }
 if (!Number.isInteger(TIMEOUT_MS) || TIMEOUT_MS <= 0) {
   console.error("FATAL: --timeout-ms must be a positive integer");
+  process.exit(2);
+}
+if (!Number.isInteger(HTTP_RETRIES) || HTTP_RETRIES < 0) {
+  console.error("FATAL: --http-retries must be a non-negative integer");
+  process.exit(2);
+}
+if (!Number.isInteger(RETRY_BASE_MS) || RETRY_BASE_MS < 0) {
+  console.error("FATAL: --retry-base-ms must be a non-negative integer");
   process.exit(2);
 }
 
@@ -131,16 +143,38 @@ function sha256Hex(bytes: Uint8Array): string {
   return "0x" + createHash("sha256").update(bytes).digest("hex");
 }
 
-async function fetchJson(url: string): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP-${res.status}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+function retryAfterMs(res: Response, attempt: number): number {
+  const retryAfter = res.headers.get("retry-after");
+  if (retryAfter !== null) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
   }
+  return RETRY_BASE_MS * 2 ** attempt;
+}
+
+async function fetchJson(url: string): Promise<unknown> {
+  for (let attempt = 0; attempt <= HTTP_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (res.ok) return await res.json();
+      if (res.status === 429 && attempt < HTTP_RETRIES) {
+        await sleep(retryAfterMs(res, attempt));
+        continue;
+      }
+      throw new Error(`HTTP-${res.status}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error("HTTP-retry-exhausted");
 }
 
 async function main(): Promise<void> {

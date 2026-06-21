@@ -31,6 +31,7 @@ import {
   findMissingSignatures,
   publicKeySpkiBase64,
   signBundles,
+  verifyLocalSignatures,
 } from "../sign-bundles.js";
 
 const subtle = webcrypto.subtle;
@@ -63,6 +64,68 @@ function seedRoot(entries: { seg: string; bundle: Record<string, unknown> }[]): 
 
 function readSig(sha: string): { alg: string; key_id: string; sig_b64: string } {
   return JSON.parse(readFileSync(join(root, "signatures", `${sha}.sig`), "utf8"));
+}
+
+function seedSourceRefRoot(): { sha: string } {
+  const template = {
+    type: "adapter_action",
+    id: "source-template@1",
+    schema_version: "3",
+    source_materialize: { kind: "test" },
+    match: { selector: "0x12345678" },
+    payload: "$source.payload",
+  };
+  const contextDoc = {
+    schema_version: "3-source-context",
+    chain_id: 1,
+    address: "0xAa000000000000000000000000000000000000Aa",
+    context: {
+      id_suffix: "mainnet-0xaa",
+      payload: { risk: "materialized" },
+    },
+  };
+  const materialized = {
+    type: "adapter_action",
+    id: "source-template/mainnet-0xaa@1",
+    schema_version: "3",
+    payload: { risk: "materialized" },
+    match: {
+      selector: "0x12345678",
+      chain_to_addresses: {
+        "1": ["0xaa000000000000000000000000000000000000aa"],
+      },
+    },
+  };
+  const templateSha = bundleSha(template);
+  const materializedSha = bundleSha(materialized);
+  mkdirSync(join(root, "bundles"), { recursive: true });
+  mkdirSync(join(root, "contexts", "test", "1"), { recursive: true });
+  mkdirSync(join(root, "index", "by-callkey"), { recursive: true });
+  writeFileSync(
+    join(root, "bundles", `${templateSha}.json`),
+    JSON.stringify(template, null, 2) + "\n",
+  );
+  writeFileSync(
+    join(root, "contexts", "test", "1", "0xaa.json"),
+    JSON.stringify(contextDoc, null, 2) + "\n",
+  );
+  writeFileSync(
+    join(root, "index", "by-callkey", "1__0xaa__0x12345678.json"),
+    JSON.stringify(
+      {
+        matched: true,
+        schema_version: "3-ref",
+        bundle_id: "source-template/mainnet-0xaa@1",
+        manifest_path: "manifests/source-template.json",
+        bundle_sha256: materializedSha,
+        bundle_ref: `bundles/${templateSha}.json`,
+        context_ref: "contexts/test/1/0xaa.json",
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  return { sha: materializedSha };
 }
 
 // A fresh ephemeral signing key per test run.
@@ -180,6 +243,41 @@ describe("sign-bundles", () => {
     const tampered = new TextEncoder().encode(canonicalize({ ...A, x: 999 }) as string);
     const bad = await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pubKey, sigBytes, tampered);
     expect(bad).toBe(false);
+  });
+
+  it("verifyLocalSignatures verifies all signed bundles under the pinned SPKI key", async () => {
+    seedRoot([
+      { seg: "1__0xaa__0x01", bundle: A },
+      { seg: "1__0xbb__0x02", bundle: B },
+    ]);
+    await signBundles({ registryRoot: root, mode: "local", privKeyHex: privHex });
+    const result = await verifyLocalSignatures(root, spkiB64);
+    expect(result).toEqual({ total: 2, verified: 2, failures: [] });
+  });
+
+  it("verifyLocalSignatures catches hydrated stale signatures that signBundles would skip", async () => {
+    seedRoot([{ seg: "1__0xaa__0x01", bundle: A }]);
+    const stalePrivHex = Buffer.from(p256.utils.randomSecretKey()).toString("hex");
+    await signBundles({ registryRoot: root, mode: "local", privKeyHex: stalePrivHex });
+
+    const skipped = await signBundles({ registryRoot: root, mode: "local", privKeyHex: privHex });
+    expect(skipped).toMatchObject({ total: 1, signed: 0, skipped: 1 });
+
+    const result = await verifyLocalSignatures(root, spkiB64);
+    expect(result.total).toBe(1);
+    expect(result.verified).toBe(0);
+    expect(result.failures).toMatchObject([
+      { sha: bundleSha(A), reason: "signature_invalid" },
+    ]);
+  });
+
+  it("verifyLocalSignatures verifies source-ref bundles after materialization", async () => {
+    const { sha } = seedSourceRefRoot();
+    await signBundles({ registryRoot: root, mode: "local", privKeyHex: privHex });
+    expect(readSig(sha).alg).toBe(SIG_ALG);
+
+    const result = await verifyLocalSignatures(root, spkiB64);
+    expect(result).toEqual({ total: 1, verified: 1, failures: [] });
   });
 
   it("derToP1363: a DER signature (the Cloud KMS shape) converts to a P1363 sig WebCrypto verifies", async () => {

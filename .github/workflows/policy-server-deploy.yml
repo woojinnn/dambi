@@ -38,9 +38,22 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Require policy-server deploy release ref
+        run: |
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          test "${GITHUB_REF_TYPE}" = "branch" || {
+            echo "::error::policy-server deploy must run from ${DEFAULT_BRANCH}, got ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}"
+            exit 1
+          }
+          test "${GITHUB_REF_NAME}" = "${DEFAULT_BRANCH}" || {
+            echo "::error::policy-server deploy must run from ${DEFAULT_BRANCH}, got ${GITHUB_REF_NAME}"
+            exit 1
+          }
 
       - name: Authenticate to Google Cloud (keyless, Workload Identity Federation)
         uses: google-github-actions/auth@v2

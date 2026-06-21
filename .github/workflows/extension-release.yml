@@ -10,7 +10,7 @@
 # In CI there is no gitignored .env, so they come from repo VARIABLES (not
 # secrets — they are public in the shipped bundle anyway; dotenv-webpack
 # systemvars:true lets env override). Set, one-time, in repo Settings → Variables:
-#   REGISTRY_BASE_URL              = https://registry-api-v3-65uggwflcq-du.a.run.app
+#   REGISTRY_BASE_URL              = https://registry-api-v3-1912792298.asia-northeast3.run.app
 #   PINNED_BUNDLE_PUBLIC_KEY       = <prod SPKI base64>
 #   DAMBI_REQUIRE_BUNDLE_SIGNATURE = true
 name: extension-release
@@ -22,6 +22,9 @@ on:
 
 permissions:
   contents: write # create the GitHub Release + upload assets
+
+env:
+  WASM_PACK_VERSION: "0.14.0"
 
 jobs:
   release:
@@ -48,7 +51,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
 
       - uses: actions/setup-node@v4
         with:
@@ -60,7 +63,7 @@ jobs:
           corepack prepare yarn@4.14.1 --activate
 
       - working-directory: browser-extension
-        run: yarn install --immutable
+        run: yarn install --immutable --mode=skip-build
 
       - working-directory: registryV2
         run: npm ci --ignore-scripts

@@ -8,8 +8,8 @@
 # `registry-v*` git tag — see REGISTRY_RUNBOOK.md "Rollback". This script is the
 # surgical, single-object emergency path (e.g. one poisoned by-callkey entry).
 #
-#   bash .../rollback-index.sh index/by-callkey/<chain>/<to>/<selector>.json
-#   bash .../rollback-index.sh <object> --apply --generation 1700000000123456
+#   bash .../rollback-index.sh index/by-callkey/<chain>__<to>__<selector>.json
+#   bash .../rollback-index.sh index/by-callkey/<...>.json --apply --generation 1700000000123456
 #
 # **mutates a live registry object on --apply.** Without --apply it is read-only.
 set -euo pipefail
@@ -22,6 +22,12 @@ if [[ -z "${OBJ}" || "${OBJ}" == --* ]]; then
   exit 2
 fi
 OBJ="${OBJ#/}"   # tolerate a leading slash
+if [[ ! "${OBJ}" =~ ^index/(by-callkey|by-typed-data|by-selector)/[^/]+[.]json$ ]]; then
+  echo "ABORT: rollback-index only restores single route index entries." >&2
+  echo "  Allowed: index/{by-callkey,by-typed-data,by-selector}/<file>.json" >&2
+  echo "  Refusing object: ${OBJ}" >&2
+  exit 2
+fi
 shift
 APPLY=0
 GEN=""
@@ -47,6 +53,7 @@ if [[ "${APPLY}" != "1" ]]; then
 fi
 
 [[ -n "${GEN}" ]] || { echo "--apply requires --generation <GEN>" >&2; exit 2; }
+[[ "${GEN}" =~ ^[0-9]+$ ]] || { echo "--generation must be a numeric GCS generation" >&2; exit 2; }
 # Current live generation — used as an optimistic-concurrency guard so a publish
 # racing this restore can't be silently clobbered. Empty (no live version, e.g.
 # the object was deleted) → guard with 0, which matches "no live version exists";

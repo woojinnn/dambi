@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  WASM_PACK_VERSION: "0.14.0"
+
 # 같은 브랜치에 새 푸시가 오면 돌고 있던 런을 취소한다 — 반복 푸시 워크플로에서
 # 가장 큰 CI 시간 절약. main 푸시 런은 끝까지 돌린다(릴리스 아티팩트 보존).
 concurrency:
@@ -89,7 +92,7 @@ jobs:
           shared-key: "wasm"
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack --version "${WASM_PACK_VERSION}" --locked
 
       # Build the wasm pkg ONCE here with the same out-dir/out-name that
       # scripts/wasm-build.sh produces, so the extension job can download and
@@ -135,7 +138,7 @@ jobs:
           corepack prepare yarn@4.14.1 --activate
 
       - working-directory: browser-extension
-        run: yarn install --immutable
+        run: yarn install --immutable --mode=skip-build
 
       # SKIP_WASM_BUILD=1 + 아래 prebuilt pkg 다운로드로 wasm-build.sh가 빌드를
       # 건너뛰므로 이 잡에는 rust 툴체인/wasm-pack이 필요 없다.

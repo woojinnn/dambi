@@ -34,6 +34,8 @@ describe("extension-release workflow safety", () => {
       join(process.cwd(), "..", ".github/workflows/extension-release.yml"),
       "utf8",
     );
+  const envExampleText = () =>
+    readFileSync(join(process.cwd(), ".env.example"), "utf8");
 
   it("only creates release artifacts from an existing ext-vX.Y.Z tag", () => {
     const workflow = workflowText();
@@ -46,6 +48,14 @@ describe("extension-release workflow safety", () => {
     expect(workflow).toContain("^ext-v[0-9]+[.][0-9]+[.][0-9]+$");
     expect(workflow).toContain("--verify-tag");
     expect(workflow).not.toContain("non-tag ref");
+  });
+
+  it("keeps the documented release registry URL aligned with the extension env example", () => {
+    const envExample = envExampleText();
+    const registryUrl = envExample.match(/^REGISTRY_BASE_URL=(https:\/\/\S+)$/m)?.[1];
+
+    expect(registryUrl).toBeTruthy();
+    expect(workflowText()).toContain(`REGISTRY_BASE_URL              = ${registryUrl}`);
   });
 });
 
