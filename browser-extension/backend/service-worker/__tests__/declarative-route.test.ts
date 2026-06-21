@@ -293,6 +293,20 @@ describe("tryDeclarativeRouteV3", () => {
     expect(mocks.installDeclarativeBundleV3BySelector).not.toHaveBeenCalled();
   });
 
+  it("treats non-hex calldata selectors as no-selector misses", async () => {
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 1,
+      from: "0xf7c57e015b57e2b58949353599e1a7a1e5e7fc01",
+      to: "0x2222222222222222222222222222222222222222",
+      calldataHex: "0xzzzzzzzz0000",
+    });
+
+    expect(outcome).toEqual({ kind: "miss", reason: "no_selector" });
+    expect(mocks.installDeclarativeBundleV3).not.toHaveBeenCalled();
+    expect(mocks.installDeclarativeBundleV3BySelector).not.toHaveBeenCalled();
+    expect(mocks.declarativeRouteRequestV3).not.toHaveBeenCalled();
+  });
+
   it("preinstalls Bundler3 per-leg-to children at each leg's OWN `to`", async () => {
     const zero32 = `0x${"00".repeat(32)}` as Hex;
     // Two GA1 legs (erc4626Deposit 0x6ef5eeae, morphoSupply 0x5b866db6) — the

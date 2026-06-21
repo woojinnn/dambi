@@ -1120,7 +1120,7 @@ fn balancer_v3_swap_path_field(args: &[JsonValue]) -> Result<JsonValue, String> 
             let first_step = steps.first().and_then(JsonValue::as_array);
             let last_step = steps.last().and_then(JsonValue::as_array);
             !steps.is_empty()
-                && p.first().is_some()
+                && !p.is_empty()
                 && p.get(2).is_some()
                 && p.get(3).is_some()
                 && first_step.and_then(|step| step.first()).is_some()

@@ -66,6 +66,7 @@ const V3_BUNDLE: V3Bundle = {
 };
 
 const SHA256 = "0x" + "a".repeat(64);
+const SHA256_UPDATED = "0x" + "b".repeat(64);
 const CALLKEY =
   "v3:1__0x7a250d5630b4cf539739df2c5dacb4c659f2488d__0x18cbafe5";
 
@@ -75,6 +76,28 @@ function freshEntry(now: number = Date.now()): DeclarativeV3CacheEntry {
     bundleId: V3_BUNDLE.id,
     decoderId: V3_BUNDLE.id,
     bundleSha256: SHA256,
+    fetchedAtMs: now,
+  };
+}
+
+function updatedEntry(now: number = Date.now()): DeclarativeV3CacheEntry {
+  const bundle: V3Bundle = {
+    ...V3_BUNDLE,
+    abi_fragment: {
+      ...V3_BUNDLE.abi_fragment,
+      function_name: "swapExactTokensForETHSupportingFeeOnTransferTokens",
+      abi: {
+        name: "swapExactTokensForETHSupportingFeeOnTransferTokens",
+        type: "function",
+        inputs: [],
+      },
+    },
+  };
+  return {
+    bundle,
+    bundleId: V3_BUNDLE.id,
+    decoderId: V3_BUNDLE.id,
+    bundleSha256: SHA256_UPDATED,
     fetchedAtMs: now,
   };
 }
@@ -160,6 +183,25 @@ describe("declarativeV3Cache", () => {
     );
   });
 
+  it("4b. Hydrate: malformed stored v3 bundle is ignored", async () => {
+    const freshMs = Date.now() - 60 * 1000;
+    mocks.localStore.set("registry:adapter-bundles-v3", {
+      schemaVersion: 2,
+      bundles: { [V3_BUNDLE.id]: { id: V3_BUNDLE.id } },
+      callkeys: {
+        [CALLKEY]: {
+          bundleId: V3_BUNDLE.id,
+          decoderId: V3_BUNDLE.id,
+          bundleSha256: SHA256,
+          fetchedAtMs: freshMs,
+        },
+      },
+    });
+
+    const got = await declarativeV3Cache.get(CALLKEY);
+    expect(got).toBeNull();
+  });
+
   it("6. Legacy fat-format storage is dropped on hydrate (migration)", async () => {
     // Pre-v2 storage: bundle copied under every callkey. Must be discarded
     // so the quota-exhausted state self-heals on next SW boot.
@@ -196,6 +238,29 @@ describe("declarativeV3Cache", () => {
     };
     expect(Object.keys(stored.bundles)).toHaveLength(1);
     expect(Object.keys(stored.callkeys)).toHaveLength(8);
+  });
+
+  it("8. Same bundleId with a new sha replaces the stored bundle body", async () => {
+    const now = Date.now();
+    await declarativeV3Cache.put(CALLKEY, freshEntry(now - 1_000));
+    await declarativeV3Cache.put(CALLKEY, updatedEntry(now));
+
+    const got = await declarativeV3Cache.get(CALLKEY);
+    expect(got).not.toBeNull();
+    expect(got!.bundleSha256).toBe(SHA256_UPDATED);
+    expect(got!.bundle.abi_fragment.function_name).toBe(
+      "swapExactTokensForETHSupportingFeeOnTransferTokens",
+    );
+
+    const stored = mocks.localStore.get("registry:adapter-bundles-v3") as {
+      bundles: Record<string, V3Bundle>;
+      callkeys: Record<string, unknown>;
+    };
+    expect(Object.keys(stored.bundles)).toHaveLength(1);
+    expect(stored.bundles[V3_BUNDLE.id].abi_fragment.function_name).toBe(
+      "swapExactTokensForETHSupportingFeeOnTransferTokens",
+    );
+    expect(Object.keys(stored.callkeys)).toHaveLength(1);
   });
 
   it("5. LRU eviction: 257 puts evicts the first-inserted entry", async () => {

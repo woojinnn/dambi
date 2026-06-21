@@ -129,6 +129,24 @@ export class TypedDataRouteError extends Error {
   }
 }
 
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const TYPED_DATA_ROUTE_NAME_RE = /^[A-Za-z0-9_:]+$/;
+const TYPED_DATA_ROUTE_NAME_MAX = 128;
+
+function normalizeRouteAddress(raw: unknown): string | null {
+  return typeof raw === "string" && EVM_ADDRESS_RE.test(raw)
+    ? raw.toLowerCase()
+    : null;
+}
+
+function normalizeTypedDataRouteName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  if (raw.length === 0 || raw.length > TYPED_DATA_ROUTE_NAME_MAX) {
+    return null;
+  }
+  return TYPED_DATA_ROUTE_NAME_RE.test(raw) ? raw : null;
+}
+
 /**
  * Typed-data router entry (async, manifest-driven).
  *
@@ -145,9 +163,10 @@ export async function routeTypedData(args: {
   submittedAt?: number;
 }): Promise<TypedDataRouteResult | null> {
   const chainId = parseDomainChainId(args.typedData.domain.chainId);
-  const verifyingContract =
-    args.typedData.domain.verifyingContract?.toLowerCase();
-  const primaryType = args.typedData.primaryType;
+  const verifyingContract = normalizeRouteAddress(
+    args.typedData.domain.verifyingContract,
+  );
+  const primaryType = normalizeTypedDataRouteName(args.typedData.primaryType);
   if (chainId === null || !verifyingContract || !primaryType) {
     return null;
   }
@@ -157,7 +176,15 @@ export async function routeTypedData(args: {
   // `(chainId, Permit2, "PermitWitnessTransferFrom")`; the actual order type is
   // the EIP-712 `witness` field's struct type, located by field name "witness"
   // (IPermit2 convention). Absent → `undefined` (3-tuple key for non-witness payloads).
-  const witnessType = extractWitnessType(args.typedData, primaryType);
+  const rawWitnessType = extractWitnessType(args.typedData, primaryType);
+  let witnessType: string | undefined;
+  if (rawWitnessType !== undefined) {
+    const normalizedWitnessType = normalizeTypedDataRouteName(rawWitnessType);
+    if (normalizedWitnessType === null) {
+      return null;
+    }
+    witnessType = normalizedWitnessType;
+  }
 
   // Thread witnessType into both the install/fetch key and the WASM route.
   // Spread conditionally so omission keeps the URL and cache key byte-identical

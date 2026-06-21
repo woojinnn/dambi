@@ -211,6 +211,25 @@ function v3CallkeyCacheKey(
   return `v3:${chainId}__${to.toLowerCase()}__${selector.toLowerCase()}`;
 }
 
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const EVM_SELECTOR_RE = /^0x[0-9a-fA-F]{8}$/;
+
+function isValidRouteChainId(chainId: number): boolean {
+  return Number.isSafeInteger(chainId) && chainId > 0;
+}
+
+function isValidCallkeyRouteKey(args: {
+  chainId: number;
+  to: string;
+  selector: string;
+}): boolean {
+  return (
+    isValidRouteChainId(args.chainId) &&
+    EVM_ADDRESS_RE.test(args.to) &&
+    EVM_SELECTOR_RE.test(args.selector)
+  );
+}
+
 function v3CallkeyUrl(
   baseUrl: string,
   chainId: number,
@@ -225,6 +244,28 @@ function v3TypedDataCacheKey(key: TypedDataMatchKey): string {
   const witnessSuffix =
     key.witnessType !== undefined ? `__${key.witnessType}` : "";
   return `td:${key.chainId}__${key.verifyingContract.toLowerCase()}__${key.primaryType}${witnessSuffix}`;
+}
+
+const TYPED_DATA_ROUTE_NAME_RE = /^[A-Za-z0-9_:]+$/;
+const TYPED_DATA_ROUTE_NAME_MAX = 128;
+
+function isValidTypedDataRouteName(value: string | undefined): boolean {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= TYPED_DATA_ROUTE_NAME_MAX &&
+    TYPED_DATA_ROUTE_NAME_RE.test(value)
+  );
+}
+
+function isValidTypedDataRouteKey(key: TypedDataMatchKey): boolean {
+  return (
+    isValidRouteChainId(key.chainId) &&
+    EVM_ADDRESS_RE.test(key.verifyingContract) &&
+    isValidTypedDataRouteName(key.primaryType) &&
+    (key.witnessType === undefined ||
+      isValidTypedDataRouteName(key.witnessType))
+  );
 }
 
 /**
@@ -292,6 +333,10 @@ function v3SelectorUrl(
 export async function installDeclarativeBundleV3(
   args: InstallDeclarativeBundleV3Args,
 ): Promise<InstallDeclarativeV3Result | null> {
+  if (!isValidCallkeyRouteKey(args)) {
+    return null;
+  }
+
   const cacheKey = v3CallkeyCacheKey(args.chainId, args.to, args.selector);
   const cached = v3InstallCache.get(cacheKey);
   if (cached) {
@@ -576,6 +621,10 @@ export async function installDeclarativeBundleV3ByTypedData(
   key: TypedDataMatchKey,
   options: { baseUrl?: string; fetchImpl?: typeof fetch } = {},
 ): Promise<InstallDeclarativeV3ByTypedDataResult> {
+  if (!isValidTypedDataRouteKey(key)) {
+    return { ok: false, reason: "invalid_key" };
+  }
+
   const cacheKey = v3TypedDataCacheKey(key);
   const cached = v3InstallCache.get(cacheKey);
   if (cached) {
@@ -727,6 +776,13 @@ export async function installDeclarativeBundleV3BySelector(args: {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
 }): Promise<InstallDeclarativeV3Result | null> {
+  if (
+    !isValidRouteChainId(args.chainId) ||
+    !EVM_SELECTOR_RE.test(args.selector)
+  ) {
+    return null;
+  }
+
   const cacheKey = v3SelectorCacheKey(args.chainId, args.selector);
   const cached = v3InstallCache.get(cacheKey);
   const cachedBundle = v3CachedBundleByCallKey.get(cacheKey);

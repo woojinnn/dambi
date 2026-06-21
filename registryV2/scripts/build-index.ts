@@ -308,6 +308,8 @@ const GENERATED_CONTEXTS_DIR = join(REGISTRY_ROOT, "contexts");
 
 const SELECTOR_RE = /^0x[0-9a-fA-F]{8}$/;
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const TYPED_DATA_ROUTE_NAME_RE = /^[A-Za-z0-9_:]+$/;
+const TYPED_DATA_ROUTE_NAME_MAX = 128;
 const SCHEMA_VERSION_REQUIRED = "3" as const;
 const ADAPTER_TYPE_REQUIRED = "adapter_action" as const;
 const TOKEN_ERC_KINDS: ReadonlySet<TokenErcKind> = new Set(["erc20", "erc721", "erc1155", "native"]);
@@ -607,6 +609,11 @@ function validateMatchShape(path: string, match: unknown): asserts match is Bund
     }
   } else {
     // hasSource — chain_to_addresses_source + chain_ids
+    if ("typed_data" in m) {
+      throw new Error(
+        `manifests/: ${path} match.chain_to_addresses_source + typed_data is unsupported; use concrete chain_to_addresses so each EIP-712 verifying_contract is explicit`,
+      );
+    }
     if (typeof m.chain_to_addresses_source !== "string") {
       throw new Error(`manifests/: ${path} match.chain_to_addresses_source must be a string`);
     }
@@ -665,15 +672,28 @@ function validateTypedDataShape(path: string, td: unknown): asserts td is V3Type
       `manifests/: ${path} match.typed_data.verifying_contract expected "0x" + 40 hex, got ${JSON.stringify(t.verifying_contract)}`,
     );
   }
-  if (typeof t.primary_type !== "string" || t.primary_type.length === 0) {
-    throw new Error(`manifests/: ${path} match.typed_data.primary_type must be a non-empty string`);
+  if (
+    typeof t.primary_type !== "string" ||
+    t.primary_type.length === 0 ||
+    t.primary_type.length > TYPED_DATA_ROUTE_NAME_MAX ||
+    !TYPED_DATA_ROUTE_NAME_RE.test(t.primary_type)
+  ) {
+    throw new Error(
+      `manifests/: ${path} match.typed_data.primary_type must be a path-safe EIP-712 type name`,
+    );
   }
   // T1 — optional `witness_type` 4th routing-key component. When present it
   // must be a non-empty string (fail-loud, consistent with the other field
   // validators above).
-  if ("witness_type" in t && (typeof t.witness_type !== "string" || t.witness_type.length === 0)) {
+  if (
+    "witness_type" in t &&
+    (typeof t.witness_type !== "string" ||
+      t.witness_type.length === 0 ||
+      t.witness_type.length > TYPED_DATA_ROUTE_NAME_MAX ||
+      !TYPED_DATA_ROUTE_NAME_RE.test(t.witness_type))
+  ) {
     throw new Error(
-      `manifests/: ${path} match.typed_data.witness_type must be a non-empty string when present, got ${JSON.stringify(t.witness_type)}`,
+      `manifests/: ${path} match.typed_data.witness_type must be a path-safe EIP-712 type name when present, got ${JSON.stringify(t.witness_type)}`,
     );
   }
   // T1 hardening — a `PermitWitnessTransferFrom` primary type ALWAYS collides

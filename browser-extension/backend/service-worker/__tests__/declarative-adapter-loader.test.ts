@@ -201,6 +201,37 @@ describe("installDeclarativeBundleV3", () => {
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 
+  it("rejects path-unsafe callkey route keys before fetch", async () => {
+    const cases = [
+      {
+        chainId: 1,
+        to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D/../../bundles/evil",
+        selector: "0x18cbafe5",
+      },
+      {
+        chainId: 1,
+        to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        selector: "0x18cbafe5?x=1",
+      },
+      {
+        chainId: 0,
+        to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        selector: "0x18cbafe5",
+      },
+    ];
+
+    for (const key of cases) {
+      const result = await installDeclarativeBundleV3({
+        ...key,
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
+      expect(result).toBeNull();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
+
   it("returns null when the registry serves a v2 manifest (silent v3 miss)", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
@@ -613,6 +644,26 @@ describe("installDeclarativeBundleV3BySelector", () => {
     ).rejects.toMatchObject({ stage: "parse" });
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
+
+  it("rejects path-unsafe selector route keys before fetch", async () => {
+    const cases = [
+      { chainId: 0, selector: "0xa22cb465" },
+      { chainId: 1, selector: "0xa22cb465?x=1" },
+      { chainId: 1, selector: "../0xa22cb465" },
+      { chainId: 1, selector: "0xzzzzzzzz" },
+    ];
+
+    for (const key of cases) {
+      const result = await installDeclarativeBundleV3BySelector({
+        ...key,
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
+      expect(result).toBeNull();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
 });
 
 describe("bundle signature gate — per-site fail shape", () => {
@@ -702,6 +753,39 @@ describe("bundle signature gate — per-site fail shape", () => {
       },
     );
     expect(r).toEqual({ ok: false, reason: "verify_failed" });
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
+
+  it("typed-data: rejects path-unsafe route keys before fetch", async () => {
+    const cases = [
+      {
+        chainId: 1,
+        verifyingContract:
+          "0x000000000022d473030f116ddee9f6b43ac78ba3/../../bundles/evil",
+        primaryType: "PermitSingle",
+      },
+      {
+        chainId: 1,
+        verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        primaryType: "PermitSingle?x=1",
+      },
+      {
+        chainId: 1,
+        verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        primaryType: "PermitWitnessTransferFrom",
+        witnessType: "../ExclusiveDutchOrder",
+      },
+    ];
+
+    for (const key of cases) {
+      await expect(
+        installDeclarativeBundleV3ByTypedData(key, {
+          baseUrl: "https://example.invalid",
+          fetchImpl: fetchMock as unknown as typeof fetch,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "invalid_key" });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 
