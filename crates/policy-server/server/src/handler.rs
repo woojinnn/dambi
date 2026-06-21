@@ -990,7 +990,15 @@ async fn oracle_effective_rate_bps(
     if !bps.is_finite() {
         return None;
     }
-    Some(json!({ "bps": bps.round() as i64 }))
+    let bps = bps.round();
+    let i64_min_f64 = -9_223_372_036_854_775_808.0;
+    let i64_max_f64 = 9_223_372_036_854_775_807.0;
+    if !(i64_min_f64..=i64_max_f64).contains(&bps) {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let bps = bps as i64;
+    Some(json!({ "bps": bps }))
 }
 
 /// Server-side `bridge.value_loss_pct` (Bridge preset P3 — output-value-loss

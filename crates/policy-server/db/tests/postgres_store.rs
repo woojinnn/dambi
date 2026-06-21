@@ -2,8 +2,8 @@ use policy_db::derive_user_id;
 use policy_db::stores::market::{
     create_listing, create_listing_report, create_review_report, create_version, delete_listing,
     get_latest_version, get_listing_by_id, get_version, install_activity_since,
-    list_reports_by_reporter, list_reviews, list_watches, record_install, upsert_review,
-    vote_helpful, watch, NewListing, VersionBody,
+    list_reports_by_reporter, list_reviews, list_watches, record_install,
+    record_install_and_get_version, upsert_review, vote_helpful, watch, NewListing, VersionBody,
 };
 use policy_db::stores::{PostgresGlobalDb, PostgresWalletStore};
 use policy_db::DbError;
@@ -684,6 +684,13 @@ async fn hidden_market_listings_are_not_directly_actionable() {
         "hidden listing versions must not accept install telemetry writes"
     );
     assert!(
+        record_install_and_get_version(&pool, listing.id, "1.0.0", &viewer_id, unix_now())
+            .await
+            .unwrap()
+            .is_none(),
+        "hidden listing versions must not return a body through the install/download path"
+    );
+    assert!(
         list_reviews(&pool, listing.id, 10)
             .await
             .unwrap()
@@ -846,6 +853,13 @@ async fn marketplace_popularity_counts_unique_installers_not_events() {
             .is_some(),
         "first install should write an event"
     );
+    let downloaded =
+        record_install_and_get_version(&pool, listing.id, "1.0.0", &installer_a, installed_at)
+            .await
+            .unwrap()
+            .expect("atomic install/download should return the version body");
+    assert_eq!(downloaded.listing_id, listing.id);
+    assert_eq!(downloaded.version, "1.0.0");
     assert!(
         record_install(&pool, listing.id, "1.0.0", &installer_a, installed_at)
             .await

@@ -361,6 +361,28 @@ pub async fn get_latest_version(pool: &PgPool, listing_id: Uuid) -> DbResult<Opt
     Ok(row.as_ref().map(row_to_version))
 }
 
+const RECORD_INSTALL_AND_GET_VERSION_SQL: &str = "
+WITH target AS (
+  SELECT v.listing_id, v.version, v.major, v.minor, v.patch,
+         v.cedar_text, v.manifest, v.policy_tree, v.members, v.changelog, v.published_at
+  FROM market_listing_versions v
+  JOIN market_listings l ON l.id = v.listing_id
+  WHERE v.listing_id = $2 AND v.version = $3 AND l.status = 'published'
+),
+inserted AS (
+  INSERT INTO market_installs (id, listing_id, version, user_id, installed_at)
+  SELECT $1, target.listing_id, target.version, $4, $5
+  FROM target
+  RETURNING listing_id, version
+)
+SELECT target.listing_id, target.version, target.major, target.minor, target.patch,
+       target.cedar_text, target.manifest, target.policy_tree, target.members,
+       target.changelog, target.published_at
+FROM target
+JOIN inserted
+  ON inserted.listing_id = target.listing_id
+ AND inserted.version = target.version";
+
 /// Insert the listing row + its initial version row in one transaction. The
 /// caller has already validated the `SemVer` + kind/body invariants; this
 /// function performs the DB-level CHECK enforcement as a backstop only.
@@ -544,6 +566,29 @@ async fn insert_version_row(
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
     Ok(())
+}
+
+/// Atomically record one install event for a currently published listing/version
+/// and return the exact version body being installed. Returning the body from the
+/// same statement prevents a concurrent archive from racing between "body read"
+/// and "install eligibility" checks.
+pub async fn record_install_and_get_version(
+    pool: &PgPool,
+    listing_id: Uuid,
+    version: &str,
+    user_id: &str,
+    now: i64,
+) -> DbResult<Option<VersionRow>> {
+    let row = query(RECORD_INSTALL_AND_GET_VERSION_SQL)
+        .bind(Uuid::new_v4())
+        .bind(listing_id)
+        .bind(version)
+        .bind(user_id)
+        .bind(now)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(row.as_ref().map(row_to_version))
 }
 
 /// Record one install event for a currently published listing/version. The
@@ -743,16 +788,13 @@ pub async fn vote_helpful(
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
-    if visible.is_none() {
+    let Some(visible) = visible else {
         tx.rollback()
             .await
             .map_err(|e| DbError::Invariant(e.to_string()))?;
         return Ok(None);
-    }
-    let author_id: String = visible
-        .as_ref()
-        .expect("visible row checked above")
-        .get("user_id");
+    };
+    let author_id: String = visible.get("user_id");
     if author_id == user_id {
         tx.rollback()
             .await
@@ -1117,5 +1159,21 @@ fn row_to_report(row: &PgRow) -> ReportRow {
         resolved_by: row.get("resolved_by"),
         resolved_at: row.get("resolved_at"),
         created_at: row.get("created_at"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RECORD_INSTALL_AND_GET_VERSION_SQL;
+
+    #[test]
+    fn install_download_sql_records_event_and_returns_body_atomically() {
+        let sql = RECORD_INSTALL_AND_GET_VERSION_SQL;
+
+        assert!(sql.contains("WITH target AS"));
+        assert!(sql.contains("l.status = 'published'"));
+        assert!(sql.contains("INSERT INTO market_installs"));
+        assert!(sql.contains("RETURNING listing_id, version"));
+        assert!(sql.contains("FROM target\nJOIN inserted"));
     }
 }

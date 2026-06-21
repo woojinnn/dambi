@@ -1663,6 +1663,9 @@ fn evaluate_call_specs_shape_violation(req: &EvaluateRequest) -> Option<&'static
         if spec.call_id.trim().is_empty() {
             return Some("call_id must be non-empty");
         }
+        if spec.call_id.trim() != spec.call_id || contains_control_char(&spec.call_id) {
+            return Some("call_id must not contain control characters or surrounding whitespace");
+        }
         if spec.call_id.chars().count() > EVALUATE_MAX_CALL_ID_CHARS {
             return Some("call_id too long");
         }
@@ -1672,11 +1675,25 @@ fn evaluate_call_specs_shape_violation(req: &EvaluateRequest) -> Option<&'static
         if spec.method.trim().is_empty() {
             return Some("method must be non-empty");
         }
+        if spec.method.trim() != spec.method || contains_control_char(&spec.method) {
+            return Some("method must not contain control characters or surrounding whitespace");
+        }
         if spec.method.chars().count() > EVALUATE_MAX_METHOD_CHARS {
             return Some("method too long");
         }
+        if !spec
+            .method
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        {
+            return Some("method contains unsupported characters");
+        }
     }
     None
+}
+
+fn contains_control_char(value: &str) -> bool {
+    value.chars().any(char::is_control)
 }
 
 fn request_too_large(reason: &str) -> Response {
@@ -1922,6 +1939,33 @@ mod tests {
             super::evaluate_request_rejection(&req),
             Some(super::EvaluateRequestRejection::BadRequest(
                 "method must be non-empty"
+            ))
+        );
+
+        req.call_specs = vec![sample_call_spec(1)];
+        req.call_specs[0].call_id = "limit-test::1\nwarning".to_owned();
+        assert_eq!(
+            super::evaluate_request_rejection(&req),
+            Some(super::EvaluateRequestRejection::BadRequest(
+                "call_id must not contain control characters or surrounding whitespace"
+            ))
+        );
+
+        req.call_specs = vec![sample_call_spec(1)];
+        req.call_specs[0].call_id = " limit-test::1".to_owned();
+        assert_eq!(
+            super::evaluate_request_rejection(&req),
+            Some(super::EvaluateRequestRejection::BadRequest(
+                "call_id must not contain control characters or surrounding whitespace"
+            ))
+        );
+
+        req.call_specs = vec![sample_call_spec(1)];
+        req.call_specs[0].method = "oracle/usd_value".to_owned();
+        assert_eq!(
+            super::evaluate_request_rejection(&req),
+            Some(super::EvaluateRequestRejection::BadRequest(
+                "method contains unsupported characters"
             ))
         );
     }

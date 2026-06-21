@@ -115,7 +115,7 @@ pub(crate) fn approval_cover_inputs(params: &Value) -> Option<Value> {
 }
 
 /// `portfolio.balance`: read the synced fungible balance for `(chain, asset)` and
-/// return it in the same lowercase `0x` U256 representation used by ActionBody
+/// return it in the same lowercase `0x` U256 representation used by `ActionBody`
 /// lowering. Missing holdings stay absent rather than fabricating `0x0`.
 pub(crate) fn portfolio_balance(state: &WalletState, params: &Value) -> Option<Value> {
     let chain = params.get("chain_id").and_then(Value::as_str)?;

@@ -7,12 +7,15 @@
 //! Stats (install count, average rating) are computed on read inside the
 //! store layer's `LATERAL` join, not denormalized on `market_listings`.
 
+use std::collections::HashSet;
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use cedar_policy::PolicySet;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -26,7 +29,8 @@ use policy_db::market::{
     get_version as db_get_version, install_activity_since as db_install_activity_since,
     list_listings as db_list_listings, list_reports as db_list_reports,
     list_reports_by_reporter as db_list_reports_by_reporter, list_reviews as db_list_reviews,
-    list_watches as db_list_watches, record_install as db_record_install, unwatch as db_unwatch,
+    list_watches as db_list_watches,
+    record_install_and_get_version as db_record_install_and_get_version, unwatch as db_unwatch,
     update_report_status as db_update_report_status, upsert_review as db_upsert_review,
     validate_semver, vote_helpful as db_vote_helpful, watch as db_watch, ListingFilter, ListingRow,
     ListingSort as DbListingSort, NewListing, ReportRow, ReviewRow, VersionBody, VersionRow,
@@ -426,23 +430,19 @@ pub async fn create_install(
     Json(req): Json<CreateInstallReq>,
 ) -> Response {
     let pool = state.global_db.pool();
-    let version = match db_get_version(pool, listing_id, &req.version).await {
+    let version = match db_record_install_and_get_version(
+        pool,
+        listing_id,
+        &req.version,
+        &user.user_id,
+        now_secs(),
+    )
+    .await
+    {
         Ok(Some(v)) => v,
         Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
         Err(e) => return server_error(&e.to_string()),
     };
-    // Recording the install event (popularity counts) is non-critical telemetry,
-    // but `None` means the version is no longer a published install target.
-    // Never fail the actual download for write errors such as transient DB/FK
-    // failures, but do not return a body after the listing was hidden.
-    match db_record_install(pool, listing_id, &req.version, &user.user_id, now_secs()).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
-        Err(e) => {
-            let safe_error = crate::logging::redact_sensitive_log_text(&e);
-            tracing::warn!(error = %safe_error, user_id = %user.user_id, "market install record failed; returning body anyway");
-        }
-    }
     Json(version_row_to_dto(version)).into_response()
 }
 
@@ -712,6 +712,10 @@ fn validate_policy_body(
         return Err("policy version must not carry members[]".into());
     }
     validate_required_bytes("cedar_text", cedar_text, MARKET_CEDAR_TEXT_MAX_BYTES)?;
+    validate_cedar_text(
+        "cedar_text",
+        cedar_text.expect("required cedar_text already checked"),
+    )?;
     validate_optional_json_size("manifest", manifest, MARKET_MANIFEST_MAX_BYTES)?;
     validate_optional_bytes("policy_tree", policy_tree, MARKET_POLICY_TREE_MAX_BYTES)?;
     Ok(())
@@ -747,8 +751,12 @@ fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
             "set version members[] must contain at most {MARKET_SET_MEMBERS_MAX} entries"
         ));
     }
+    let mut slugs = HashSet::with_capacity(members.len());
     for (idx, member) in members.iter().enumerate() {
         validate_slug(&format!("members[{idx}].slug"), &member.slug)?;
+        if !slugs.insert(member.slug.as_str()) {
+            return Err(format!("members[{idx}].slug must be unique"));
+        }
         validate_required_chars(
             &format!("members[{idx}].display_name"),
             Some(member.display_name.as_str()),
@@ -759,6 +767,10 @@ fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
             Some(member.cedar_text.as_str()),
             MARKET_CEDAR_TEXT_MAX_BYTES,
         )?;
+        validate_cedar_text(
+            &format!("members[{idx}].cedar_text"),
+            member.cedar_text.as_str(),
+        )?;
         validate_optional_json_size(
             &format!("members[{idx}].manifest"),
             member.manifest.as_ref(),
@@ -766,6 +778,12 @@ fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+fn validate_cedar_text(field: &str, raw: &str) -> Result<(), String> {
+    PolicySet::from_str(raw)
+        .map(|_| ())
+        .map_err(|_| format!("{field} must be valid Cedar policy text"))
 }
 
 fn validate_slug(field: &str, raw: &str) -> Result<(), String> {
@@ -1432,6 +1450,33 @@ mod tests {
     }
 
     #[test]
+    fn market_validation_rejects_invalid_cedar_text() {
+        let mut req = policy_listing_req();
+        req.cedar_text = Some("permit(".to_owned());
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+
+        let mut req = policy_version_req();
+        req.cedar_text = Some("forbid principal, action, resource);".to_owned());
+        let err = validate_version_req("policy", &req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![SetMember {
+                cedar_text: "bad cedar".to_owned(),
+                ..set_member()
+            }]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+    }
+
+    #[test]
     fn market_validation_caps_user_controlled_json_and_member_fanout() {
         let mut req = policy_listing_req();
         req.doc = Some(json!({ "body": "x".repeat(MARKET_DOC_MAX_BYTES) }));
@@ -1448,6 +1493,17 @@ mod tests {
         };
         let err = validate_version_req("set", &req).unwrap_err();
         assert!(err.contains("members"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![set_member(), set_member()]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("unique"), "got: {err}");
     }
 
     #[test]
@@ -1463,7 +1519,7 @@ mod tests {
 
         let long = "x".repeat(MARKET_QUERY_TEXT_MAX_CHARS + 1);
         let err = normalize_optional_query_text("q", Some(long)).unwrap_err();
-        assert!(err.contains("q"), "got: {err}");
+        assert!(err.contains('q'), "got: {err}");
 
         assert_eq!(normalize_market_list_offset(Some(-1)).unwrap(), 0);
         assert_eq!(

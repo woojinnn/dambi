@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use policy_db::PostgresWalletMetadata;
 use policy_state::live_field::{DataSource, LiveField, OracleProvider};
+use policy_state::pending::{PendingKind, PendingTx};
 use policy_state::primitives::{Address, ChainId, Duration, Price, Time, U256};
 use policy_state::token::{Balance, TokenHolding, TokenKey, TokenKind, TokenRef};
 use policy_state::{EvalContext, PendingChange, RequestKind, WalletId, WalletState, WalletStore};
@@ -43,6 +44,8 @@ const MAX_EXPLICIT_WALLET_CHAINS: usize = 16;
 /// background work and unpaginated wallet views.
 const MAX_ACTIVE_WALLETS_PER_USER: usize = 128;
 const MAX_WALLET_LABEL_CHARS: usize = 80;
+const MAX_PERMIT_WITNESS_TYPE_CHARS: usize = 128;
+const MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET: usize = 256;
 const ADD_WALLET_DISCOVERY_PUBLIC_ERROR: &str = "wallet discovery failed; retry sync later";
 const ADD_WALLET_SYNC_PUBLIC_ERROR: &str = "wallet sync failed; retry sync later";
 
@@ -981,7 +984,10 @@ async fn ingest_permit_locked(
     };
     loaded.wallet_id = id.clone();
 
-    let pending_ids = upsert_pending_from_delta(&mut loaded, &delta);
+    let pending_ids = match upsert_pending_from_delta(&mut loaded, &delta) {
+        Ok(ids) => ids,
+        Err(e) => return (StatusCode::CONFLICT, e).into_response(),
+    };
 
     if let Err(e) = store.save(&loaded).await {
         return internal(&format!("save: {e}"));
@@ -1107,6 +1113,7 @@ fn build_permit_action(
             let amount = parse_u256("amount", amount)?;
             let word = parse_u256("nonce_word", nonce_word)?;
             let sig_deadline = Time::from_unix(*sig_deadline);
+            let witness_type = validate_witness_type(witness_type.as_deref())?;
             let body = ActionBody::Token(TokenAction::Permit2SignTransfer(
                 Permit2SignTransferAction {
                     token: token_ref,
@@ -1115,7 +1122,7 @@ fn build_permit_action(
                     amount,
                     nonce: LiveField::new((word, *nonce_bit), DataSource::UserSupplied, now),
                     sig_deadline,
-                    witness_type: witness_type.clone(),
+                    witness_type,
                 },
             ));
             (body, sig_deadline)
@@ -1150,7 +1157,7 @@ fn build_permit_action(
 fn upsert_pending_from_delta(
     state: &mut WalletState,
     delta: &policy_state::StateDelta,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let mut ids = Vec::new();
     for change in &delta.pending_changes {
         let PendingChange::Add { pending } = change else {
@@ -1158,10 +1165,52 @@ fn upsert_pending_from_delta(
         };
         ids.push(pending.id.clone());
         if !state.pending.iter().any(|p| p.id == pending.id) {
+            if is_signed_permit_pending(pending)
+                && signed_permit_pending_count(state) >= MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET
+            {
+                return Err(format!(
+                    "too many signed permit pendings: max {MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET}"
+                ));
+            }
             state.pending.push((**pending).clone());
         }
     }
-    ids
+    Ok(ids)
+}
+
+fn signed_permit_pending_count(state: &WalletState) -> usize {
+    state
+        .pending
+        .iter()
+        .filter(|pending| is_signed_permit_pending(pending))
+        .count()
+}
+
+fn is_signed_permit_pending(pending: &PendingTx) -> bool {
+    matches!(
+        &pending.kind,
+        PendingKind::SignedEIP2612 { .. }
+            | PendingKind::SignedPermit2 { .. }
+            | PendingKind::SignedPermit2Transfer { .. }
+    )
+}
+
+fn validate_witness_type(raw: Option<&str>) -> Result<Option<String>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    if raw.trim().is_empty() {
+        return Err("witness_type must not be blank".to_owned());
+    }
+    if raw.chars().count() > MAX_PERMIT_WITNESS_TYPE_CHARS {
+        return Err(format!(
+            "witness_type must be at most {MAX_PERMIT_WITNESS_TYPE_CHARS} characters"
+        ));
+    }
+    if raw.chars().any(char::is_control) {
+        return Err("witness_type must not contain control characters".to_owned());
+    }
+    Ok(Some(raw.to_owned()))
 }
 
 fn erc20_token_ref(chain_id: &str, token: &str) -> Result<TokenRef, String> {
@@ -1491,7 +1540,7 @@ mod tests {
             etherscan: None,
             coingecko: CoinGeckoClient::new(),
             coordinator: Arc::new(BusyCoordinator { seen_key }),
-            sync_lock_ttl: std::time::Duration::from_secs(120),
+            sync_lock_ttl: std::time::Duration::from_mins(2),
         }
     }
 
@@ -1842,14 +1891,21 @@ mod tests {
     }
 
     /// Mirror `ingest_permit`'s core: build the action, run the reducer, upsert
-    /// the resulting pending into a fresh state. Returns `(state, ids)`.
-    fn ingest_into(state: &mut WalletState, req: &IngestPermitReq) -> Vec<String> {
+    /// the resulting pending into a fresh state.
+    fn ingest_into_result(
+        state: &mut WalletState,
+        req: &IngestPermitReq,
+    ) -> Result<Vec<String>, String> {
         let now = Time::from_unix(1_700_000_000);
         let action = build_permit_action(req, wallet_addr(), now).expect("build action");
         let ctx = EvalContext::new(action_chain(&action), now, RequestKind::Transaction);
         let delta =
             apply(&WalletState::new(state.wallet_id.clone()), &action, &ctx).expect("apply");
         upsert_pending_from_delta(state, &delta)
+    }
+
+    fn ingest_into(state: &mut WalletState, req: &IngestPermitReq) -> Vec<String> {
+        ingest_into_result(state, req).expect("upsert pending")
     }
 
     fn fresh_state() -> WalletState {
@@ -1955,6 +2011,78 @@ mod tests {
         let now = Time::from_unix(1_700_000_000);
         let err = build_permit_action(&req, wallet_addr(), now).unwrap_err();
         assert!(err.contains("does not match wallet"), "got: {err}");
+    }
+
+    #[test]
+    fn ingest_permit2_transfer_rejects_oversized_or_control_witness_type() {
+        let mut req = IngestPermitReq::Permit2Transfer {
+            token: usdc_hex().into(),
+            owner: format!("{:#x}", wallet_addr()),
+            spender: spender_hex().into(),
+            amount: "4000000".into(),
+            sig_deadline: 1_700_003_600,
+            nonce_word: "9".into(),
+            nonce_bit: 12,
+            witness_type: Some("x".repeat(MAX_PERMIT_WITNESS_TYPE_CHARS + 1)),
+            chain_id: "eip155:1".into(),
+        };
+        let now = Time::from_unix(1_700_000_000);
+        let err = build_permit_action(&req, wallet_addr(), now).unwrap_err();
+        assert!(err.contains("witness_type"), "got: {err}");
+
+        if let IngestPermitReq::Permit2Transfer { witness_type, .. } = &mut req {
+            *witness_type = Some("Permit\nWitness".to_owned());
+        }
+        let err = build_permit_action(&req, wallet_addr(), now).unwrap_err();
+        assert!(err.contains("control characters"), "got: {err}");
+    }
+
+    #[test]
+    fn ingest_signed_permit_pending_cap_rejects_new_entries_only() {
+        let mut state = fresh_state();
+        let mut first_req = None;
+        let mut first_ids = None;
+        for i in 0..MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET {
+            let req = IngestPermitReq::Eip2612 {
+                token: usdc_hex().into(),
+                spender: spender_hex().into(),
+                amount: "1".into(),
+                deadline: 1_700_003_600,
+                nonce: i.to_string(),
+                chain_id: "eip155:1".into(),
+            };
+            let ids = ingest_into(&mut state, &req);
+            if i == 0 {
+                first_req = Some(req);
+                first_ids = Some(ids);
+            }
+        }
+        assert_eq!(
+            signed_permit_pending_count(&state),
+            MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET
+        );
+
+        let duplicate = ingest_into_result(&mut state, &first_req.expect("first req"))
+            .expect("duplicate idempotent upsert should remain allowed");
+        assert_eq!(duplicate, first_ids.expect("first ids"));
+        assert_eq!(
+            signed_permit_pending_count(&state),
+            MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET
+        );
+
+        let extra = IngestPermitReq::Eip2612 {
+            token: usdc_hex().into(),
+            spender: spender_hex().into(),
+            amount: "1".into(),
+            deadline: 1_700_003_600,
+            nonce: MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET.to_string(),
+            chain_id: "eip155:1".into(),
+        };
+        let err = ingest_into_result(&mut state, &extra).unwrap_err();
+        assert!(
+            err.contains("too many signed permit pendings"),
+            "got: {err}"
+        );
     }
 
     #[test]
