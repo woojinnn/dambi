@@ -21,7 +21,7 @@ import {
   type StoreSnapshot,
 } from "../../../server-api/policy-store";
 import { listWallets } from "../../../server-api/wallets";
-import { buildDefPayload } from "./save-def";
+import { buildDefPayload, buildWalletScopePlan } from "./save-def";
 import {
   ScopeInstallModal,
   type LibraryApply,
@@ -604,37 +604,10 @@ function EditorBody({
           applyToNewWallets: false,
           doc: docPayload(),
         });
+        const plan = buildWalletScopePlan(def, a, snap, SCOPE_DEF_KEY);
         await putDef(def);
-
-        for (const address of a.addresses) {
-          const addr = address.toLowerCase();
-          const w = snap?.wallets.byAddress[addr];
-          for (const key of a.walletPackages[address] ?? []) {
-            let pkgId: string;
-            if (key === "__new__") {
-              const nm = (a.walletNewName[address] ?? "").trim();
-              const existing = Object.values(w?.packages ?? {}).find((q) => q.displayName === nm);
-              if (existing) {
-                pkgId = existing.id;
-              } else {
-                pkgId = `pkg::${crypto.randomUUID()}`;
-                await putWalletPackage({ address: addr, pkg: { id: pkgId, displayName: nm } });
-              }
-            } else {
-              pkgId = key;
-            }
-            const ck = `${address}|${key}`;
-            const params = a.paramsByCombo[ck]?.[SCOPE_DEF_KEY] ?? {};
-            const sev = a.severityByCombo[ck]?.[SCOPE_DEF_KEY];
-            await bindDef({
-              defId: def.id,
-              packageId: pkgId,
-              addresses: [addr],
-              ...(Object.keys(params).length ? { params } : {}),
-              ...(sev ? { severity: sev } : {}),
-            });
-          }
-        }
+        for (const pkg of plan.packages) await putWalletPackage(pkg);
+        for (const binding of plan.bindings) await bindDef(binding);
         return def.id;
       }
 

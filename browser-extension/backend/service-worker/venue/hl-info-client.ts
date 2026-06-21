@@ -153,6 +153,36 @@ export function infoBaseForEndpoint(endpointOrHost: string | undefined): string 
     : HL_INFO_MAINNET;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]"
+  );
+}
+
+/**
+ * Test-only runtime override validator. The override can point to a local stub
+ * but must not redirect account-state enrichment to an arbitrary remote host.
+ */
+export function normalizeRuntimeInfoBase(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    if (!isLoopbackHost(url.hostname)) return null;
+    if (url.pathname !== "/info") return null;
+    if (url.search || url.hash) return null;
+    return `${url.origin}/info`;
+  } catch {
+    return null;
+  }
+}
+
 export class HlInfoClient {
   private meta: MetaEntry | null = null;
   private metaInflight: Promise<MetaUniverseEntry[] | null> | null = null;
@@ -456,12 +486,12 @@ const INFO_BASE_KEY = "dambi_hl_info_base";
 if (typeof chrome !== "undefined" && chrome.storage?.local) {
   void chrome.storage.local.get(INFO_BASE_KEY).then((r) => {
     const v = (r as Record<string, unknown>)[INFO_BASE_KEY];
-    if (typeof v === "string" && v) runtimeInfoBase = v;
+    runtimeInfoBase = normalizeRuntimeInfoBase(v);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && changes[INFO_BASE_KEY]) {
       const v = changes[INFO_BASE_KEY].newValue;
-      runtimeInfoBase = typeof v === "string" && v ? v : null;
+      runtimeInfoBase = normalizeRuntimeInfoBase(v);
     }
   });
 }

@@ -73,6 +73,54 @@ describe("EditorV3 iframe open-policy bridge", () => {
     );
   });
 
+  it("forwards only validated new-policy navigation state from the embedded iframe", () => {
+    const { container } = renderEditorV3();
+    const iframe = container.querySelector("iframe");
+    expect(iframe?.contentWindow).toBeTruthy();
+
+    dispatchEditorMessage(iframe!.contentWindow, {
+      source: "dambi-editor-v3",
+      type: "open-policy",
+      to: "/editor/def%3A%3Anew-form",
+      state: {
+        newPolicy: {
+          method: "form",
+          cedarText: '@id("new-form")\nforbid (principal, action, resource);',
+          displayName: "새 정책",
+          initialTab: "llm",
+          ignored: "drop-me",
+        },
+      },
+    });
+
+    expect(navigate).toHaveBeenCalledWith("/editor/def%3A%3Anew-form", {
+      state: {
+        newPolicy: {
+          method: "form",
+          cedarText: '@id("new-form")\nforbid (principal, action, resource);',
+          displayName: "새 정책",
+          initialTab: "llm",
+        },
+      },
+    });
+
+    navigate.mockReset();
+    dispatchEditorMessage(iframe!.contentWindow, {
+      source: "dambi-editor-v3",
+      type: "open-policy",
+      to: "/editor/def%3A%3Abad-state",
+      state: {
+        newPolicy: {
+          method: "javascript",
+          cedarText: '@id("bad")',
+          displayName: "bad",
+        },
+      },
+    });
+
+    expect(navigate).toHaveBeenCalledWith("/editor/def%3A%3Abad-state");
+  });
+
   it("rejects forged source windows and non-editor destinations", () => {
     const { container } = renderEditorV3();
     const iframe = container.querySelector("iframe");

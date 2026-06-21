@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
 
 import { mutate, readStore } from "./store";
-import { UNCATEGORIZED_PKG, type PolicyDef } from "./types";
+import { isEffectiveOn, UNCATEGORIZED_PKG, type PolicyDef } from "./types";
 
 const def = (id: string): PolicyDef => ({
   id,
@@ -78,7 +78,7 @@ describe("policy-store core", () => {
   it("invariant violation rejects and writes nothing", async () => {
     await expect(
       mutate("u1", (d) => {
-        d.wallets.byAddress["0xabc"] = {
+        d.wallets.byAddress["0xa100000000000000000000000000000000000001"] = {
           bindings: {
             "bind::x": { id: "bind::x", defId: "def::ghost", packageId: UNCATEGORIZED_PKG, enabled: true, updatedAtMs: 1 },
           },
@@ -87,6 +87,29 @@ describe("policy-store core", () => {
         };
       }),
     ).rejects.toThrow(/defId/);
+    expect((await readStore("u1")).rev).toBe(0);
+  });
+
+  it("invariant validation rejects malformed wallet keys and prototype-polluting ids", async () => {
+    await expect(
+      mutate("u1", (d) => {
+        d.wallets.byAddress["0xabc"] = {
+          bindings: {},
+          packages: {},
+          packageEnabled: {},
+        };
+      }),
+    ).rejects.toThrow(/EVM address/);
+
+    await expect(
+      mutate("u1", (d) => {
+        Object.defineProperty(d.library.defs, "__proto__", {
+          value: def("__proto__"),
+          enumerable: true,
+          configurable: true,
+        });
+      }),
+    ).rejects.toThrow(/safe storage key/);
     expect((await readStore("u1")).rev).toBe(0);
   });
 
@@ -114,11 +137,69 @@ describe("policy-store core", () => {
     expect(Object.keys((await readStore("u2")).library.defs)).toEqual([]);
   });
 
+  it("readStore normalizes stale malformed runtime booleans and severity to inert values", async () => {
+    mocks.localStore.set("ps2:u1:library", {
+      schemaVersion: 1,
+      defs: {
+        "def::a": {
+          ...def("def::a"),
+          defaults: { enabled: "false", params: {} },
+        },
+        "def::broken": {
+          id: "def::broken",
+          displayName: "broken",
+          skeleton: { ir: { kind: "policy" } },
+          holes: "not-an-array",
+          source: "mine",
+          updatedAtMs: 1,
+        },
+      },
+      packages: {
+        [UNCATEGORIZED_PKG]: {
+          id: UNCATEGORIZED_PKG,
+          displayName: "미분류",
+          source: "builtin",
+          updatedAtMs: 0,
+        },
+      },
+    });
+    mocks.localStore.set("ps2:u1:wallets", {
+      schemaVersion: 1,
+      byAddress: {
+        "0xa100000000000000000000000000000000000001": {
+          bindings: {
+            "bind::x": {
+              id: "bind::x",
+              defId: "def::a",
+              packageId: UNCATEGORIZED_PKG,
+              enabled: "false",
+              severity: "block",
+              updatedAtMs: 1,
+            },
+          },
+          packages: {},
+          packageEnabled: { [UNCATEGORIZED_PKG]: "false" },
+        },
+      },
+    });
+
+    const s = await readStore("u1");
+    const w = s.wallets.byAddress["0xa100000000000000000000000000000000000001"];
+    const b = w.bindings["bind::x"];
+    expect(s.library.defs["def::a"].defaults.enabled).toBe(false);
+    expect(s.library.defs["def::broken"].defaults).toEqual({ enabled: false, params: {} });
+    expect(s.library.defs["def::broken"].holes).toEqual([]);
+    expect(b.enabled).toBe(false);
+    expect(b.severity).toBeUndefined();
+    expect(w.packageEnabled[UNCATEGORIZED_PKG]).toBe(false);
+    expect(isEffectiveOn(w, b)).toBe(false);
+  });
+
   it("logs a binding enable/disable toggle to the console", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     await mutate("u1", (d) => {
       d.library.defs["def::a"] = def("def::a");
-      d.wallets.byAddress["0xabc"] = {
+      d.wallets.byAddress["0xa100000000000000000000000000000000000001"] = {
         bindings: {
           "bind::x": { id: "bind::x", defId: "def::a", packageId: UNCATEGORIZED_PKG, enabled: true, updatedAtMs: 1 },
         },
@@ -128,11 +209,11 @@ describe("policy-store core", () => {
     });
     infoSpy.mockClear();
     await mutate("u1", (d) => {
-      d.wallets.byAddress["0xabc"].bindings["bind::x"].enabled = false;
+      d.wallets.byAddress["0xa100000000000000000000000000000000000001"].bindings["bind::x"].enabled = false;
     });
     expect(infoSpy).toHaveBeenCalledWith("[Dambi] policy-store bindings toggled", {
       uid: "u1",
-      toggles: [{ address: "0xabc", defId: "def::a", enabled: false }],
+      toggles: [{ address: "0xa100000000000000000000000000000000000001", defId: "def::a", enabled: false }],
     });
     infoSpy.mockRestore();
   });
@@ -141,7 +222,7 @@ describe("policy-store core", () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     await mutate("u1", (d) => {
       d.library.defs["def::a"] = def("def::a");
-      d.wallets.byAddress["0xabc"] = {
+      d.wallets.byAddress["0xa100000000000000000000000000000000000001"] = {
         bindings: {
           "bind::x": { id: "bind::x", defId: "def::a", packageId: "pkg::p", enabled: true, updatedAtMs: 1 },
         },
@@ -151,11 +232,11 @@ describe("policy-store core", () => {
     });
     infoSpy.mockClear();
     await mutate("u1", (d) => {
-      d.wallets.byAddress["0xabc"].packageEnabled["pkg::p"] = false;
+      d.wallets.byAddress["0xa100000000000000000000000000000000000001"].packageEnabled["pkg::p"] = false;
     });
     expect(infoSpy).toHaveBeenCalledWith("[Dambi] policy-store package toggled", {
       uid: "u1",
-      pkgToggles: [{ address: "0xabc", packageId: "pkg::p", enabled: false }],
+      pkgToggles: [{ address: "0xa100000000000000000000000000000000000001", packageId: "pkg::p", enabled: false }],
     });
     infoSpy.mockRestore();
   });
@@ -164,7 +245,7 @@ describe("policy-store core", () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     await mutate("u1", (d) => {
       d.library.defs["def::a"] = def("def::a");
-      d.wallets.byAddress["0xabc"] = {
+      d.wallets.byAddress["0xa100000000000000000000000000000000000001"] = {
         bindings: {
           "bind::x": { id: "bind::x", defId: "def::a", packageId: UNCATEGORIZED_PKG, enabled: true, updatedAtMs: 1 },
         },
@@ -174,11 +255,11 @@ describe("policy-store core", () => {
     });
     infoSpy.mockClear();
     await mutate("u1", (d) => {
-      delete d.wallets.byAddress["0xabc"].bindings["bind::x"];
+      delete d.wallets.byAddress["0xa100000000000000000000000000000000000001"].bindings["bind::x"];
     });
     expect(infoSpy).toHaveBeenCalledWith("[Dambi] policy-store bindings toggled", {
       uid: "u1",
-      toggles: [{ address: "0xabc", defId: "def::a", enabled: false }],
+      toggles: [{ address: "0xa100000000000000000000000000000000000001", defId: "def::a", enabled: false }],
     });
     infoSpy.mockRestore();
   });
@@ -187,7 +268,7 @@ describe("policy-store core", () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     await mutate("u1", (d) => {
       d.library.defs["def::a"] = def("def::a");
-      d.wallets.byAddress["0xabc"] = {
+      d.wallets.byAddress["0xa100000000000000000000000000000000000001"] = {
         bindings: {
           "bind::x": { id: "bind::x", defId: "def::a", packageId: UNCATEGORIZED_PKG, enabled: true, updatedAtMs: 1 },
         },
@@ -197,7 +278,7 @@ describe("policy-store core", () => {
     });
     infoSpy.mockClear();
     await mutate("u1", (d) => {
-      d.wallets.byAddress["0xabc"].bindings["bind::x"].params = { x: 1 };
+      d.wallets.byAddress["0xa100000000000000000000000000000000000001"].bindings["bind::x"].params = { x: 1 };
     });
     expect(infoSpy).not.toHaveBeenCalledWith("[Dambi] policy-store bindings toggled", expect.anything());
     infoSpy.mockRestore();

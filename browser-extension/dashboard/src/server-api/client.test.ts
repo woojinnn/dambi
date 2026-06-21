@@ -75,6 +75,29 @@ describe("dashboard server-api client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("drops malformed stored tokens before attaching auth", async () => {
+    window.localStorage.setItem("dambi_jwt", "bad\naccess");
+    const { request } = await import("./client");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/auth/me")).resolves.toEqual({ ok: true });
+
+    expect(window.localStorage.getItem("dambi_jwt")).toBeNull();
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ headers: {} });
+  });
+
+  it("refuses explicit malformed override tokens before fetch", async () => {
+    const { request } = await import("./client");
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/auth/me", { token: "bad\naccess" })).rejects.toThrow(
+      "request access token",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("refreshes the access token once and retries after a 401", async () => {
     window.localStorage.setItem("dambi_jwt", "old-access");
     window.localStorage.setItem("dambi_jwt_refresh", "refresh-token");
@@ -109,6 +132,50 @@ describe("dashboard server-api client", () => {
         Authorization: "Bearer new-access",
       },
     });
+  });
+
+  it("clears tokens when refresh returns a malformed token", async () => {
+    window.localStorage.setItem("dambi_jwt", "old-access");
+    window.localStorage.setItem("dambi_jwt_refresh", "refresh-token");
+    const { request, setTokenRefreshObserver } = await import("./client");
+    const tokenRefreshObserver = vi.fn();
+    setTokenRefreshObserver(tokenRefreshObserver);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          access_token: "bad\naccess",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/auth/me")).rejects.toMatchObject({ status: 401 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem("dambi_jwt")).toBeNull();
+    expect(window.localStorage.getItem("dambi_jwt_refresh")).toBeNull();
+    expect(tokenRefreshObserver).toHaveBeenCalledWith(null, null);
+  });
+
+  it("notifies token observers when refresh is rejected", async () => {
+    window.localStorage.setItem("dambi_jwt", "old-access");
+    window.localStorage.setItem("dambi_jwt_refresh", "refresh-token");
+    const { request, setTokenRefreshObserver } = await import("./client");
+    const tokenRefreshObserver = vi.fn();
+    setTokenRefreshObserver(tokenRefreshObserver);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(new Response("refresh denied", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/auth/me")).rejects.toMatchObject({ status: 401 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem("dambi_jwt")).toBeNull();
+    expect(window.localStorage.getItem("dambi_jwt_refresh")).toBeNull();
+    expect(tokenRefreshObserver).toHaveBeenCalledWith(null, null);
   });
 
   it("preserves plain-text error bodies", async () => {

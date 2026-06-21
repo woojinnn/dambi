@@ -10,6 +10,15 @@
 import { request } from "./client";
 import type { Address, ChainId, TokenHolding } from "./types";
 
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+export function normalizeWalletAddress(value: unknown): Address {
+  if (typeof value !== "string" || !EVM_ADDRESS_RE.test(value)) {
+    throw new Error("wallet address must be an EVM address");
+  }
+  return value.toLowerCase() as Address;
+}
+
 /** Mirrors `policy_state::WalletId` (address + chains set). */
 export interface WalletId {
   address: string;
@@ -60,27 +69,34 @@ export async function listWallets(): Promise<WalletId[]> {
 
 /** `POST /wallets` — start tracking a new wallet for the authenticated user. */
 export async function addWallet(body: AddWalletBody): Promise<AddWalletResp> {
-  return request<AddWalletResp>("/wallets", { method: "POST", body });
+  return request<AddWalletResp>("/wallets", {
+    method: "POST",
+    body: {
+      address: normalizeWalletAddress(body.address),
+      ...(body.chains !== undefined ? { chains: body.chains } : {}),
+      ...(body.label !== undefined ? { label: body.label } : {}),
+    },
+  });
 }
 
 /** `POST /wallets/:addr/sync` — manual resync (balance + price refresh). */
 export async function syncWallet(address: string): Promise<void> {
-  await request<void>(`/wallets/${address}/sync`, { method: "POST" });
+  await request<void>(`/wallets/${normalizeWalletAddress(address)}/sync`, { method: "POST" });
 }
 
 /** `GET /wallets/:addr/state` — full state snapshot. */
 export async function getWalletState(address: string): Promise<WalletStateView> {
-  return request<WalletStateView>(`/wallets/${address}/state`);
+  return request<WalletStateView>(`/wallets/${normalizeWalletAddress(address)}/state`);
 }
 
 /** `GET /wallets/:addr/holdings` — token holdings array (each with value_usd). */
 export async function getWalletHoldings(address: string): Promise<TokenHolding[]> {
-  return request<TokenHolding[]>(`/wallets/${address}/holdings`);
+  return request<TokenHolding[]>(`/wallets/${normalizeWalletAddress(address)}/holdings`);
 }
 
 /** `GET /wallets/:addr/approvals` — full approval set (ERC20 + setForAll + Permit2). */
 export async function getWalletApprovals(address: string): Promise<unknown> {
-  return request<unknown>(`/wallets/${address}/approvals`);
+  return request<unknown>(`/wallets/${normalizeWalletAddress(address)}/approvals`);
 }
 
 /** Server risk tags. KNOWN_VENUE / BLOCKED depended on the now-removed
@@ -131,7 +147,9 @@ export interface ClassifiedApprovals {
 export async function getWalletApprovalsWithRisk(
   address: string,
 ): Promise<ClassifiedApprovals> {
-  return request<ClassifiedApprovals>(`/wallets/${address}/approvals?with_risk=true`);
+  return request<ClassifiedApprovals>(
+    `/wallets/${normalizeWalletAddress(address)}/approvals?with_risk=true`,
+  );
 }
 
 /** `GET /wallets/:addr/block-heights` — per-chain block height list. */
@@ -139,7 +157,7 @@ export async function getWalletBlockHeights(
   address: string,
 ): Promise<Array<{ chain: string } & BlockHeight>> {
   return request<Array<{ chain: string } & BlockHeight>>(
-    `/wallets/${address}/block-heights`,
+    `/wallets/${normalizeWalletAddress(address)}/block-heights`,
   );
 }
 
@@ -148,10 +166,10 @@ export async function patchWallet(
   address: string,
   patch: { label?: string | null; is_owned?: boolean },
 ): Promise<void> {
-  await request<void>(`/wallets/${address}`, { method: "PATCH", body: patch });
+  await request<void>(`/wallets/${normalizeWalletAddress(address)}`, { method: "PATCH", body: patch });
 }
 
 /** `DELETE /wallets/:addr` — soft delete (archive). */
 export async function deleteWallet(address: string): Promise<void> {
-  await request<void>(`/wallets/${address}`, { method: "DELETE" });
+  await request<void>(`/wallets/${normalizeWalletAddress(address)}`, { method: "DELETE" });
 }

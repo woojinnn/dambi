@@ -24,6 +24,7 @@ const LEGACY_PRODUCTION_BASES = new Map([
   ["https://pasu-policy.duckdns.org", CURRENT_PRODUCTION_BASE],
 ]);
 const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 const RAW_BUILD_BASE_URL =
   (typeof DAMBI_SERVER_URL !== "undefined" && DAMBI_SERVER_URL) ||
@@ -55,6 +56,20 @@ function trustedOriginForUrl(url: URL, trustedBase = RAW_BUILD_BASE_URL): string
   if (origin === CURRENT_PRODUCTION_BASE || origin === trustedOrigin) return origin;
   if (isLoopbackHost(url.hostname)) return origin;
   return null;
+}
+
+function normalizeRequestToken(value: string | null, label: string): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 16_384 ||
+    value.trim() !== value ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${label} must be a non-empty token string`);
+  }
+  return value;
 }
 
 export function normalizeServerBaseUrl(
@@ -191,7 +206,20 @@ async function refreshAccessToken(): Promise<string | null> {
     return null;
   }
   const body = (await res.json()) as RefreshResponse;
-  await setTokens(body.access_token, body.refresh_token ?? refresh);
+  try {
+    await setTokens(body.access_token, body.refresh_token ?? refresh);
+  } catch {
+    await setTokens(null, null);
+    if (!notifiedExpired) {
+      notifiedExpired = true;
+      try {
+        onSessionExpired?.();
+      } catch {
+        /* advisory 전용 — 알림 실패가 auth 흐름에 영향 주지 않게 */
+      }
+    }
+    return null;
+  }
   // 갱신 성공 → 다음 만료에서 다시 알릴 수 있게 가드 해제.
   notifiedExpired = false;
   return body.access_token;
@@ -204,7 +232,10 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
   if (!opts.noAuth) {
-    const token = opts.token ?? (await getAccessToken());
+    const token =
+      opts.token === undefined
+        ? await getAccessToken()
+        : normalizeRequestToken(opts.token, "request access token");
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
@@ -256,6 +287,13 @@ export interface WalletId {
   chains: string[];
 }
 
+export function normalizeWalletAddress(value: unknown): string {
+  if (typeof value !== "string" || !EVM_ADDRESS_RE.test(value)) {
+    throw new Error("wallet address must be an EVM address");
+  }
+  return value.toLowerCase();
+}
+
 /** `GET /auth/me` — current user (or `null` if no token / 401). */
 export async function fetchMe(): Promise<Me | null> {
   if (!(await getAccessToken())) return null;
@@ -294,12 +332,17 @@ export async function updateWallet(
   address: string,
   patch: { label?: string | null },
 ): Promise<void> {
-  await request<void>(`/wallets/${address}`, { method: "PATCH", body: patch });
+  await request<void>(`/wallets/${normalizeWalletAddress(address)}`, {
+    method: "PATCH",
+    body: {
+      ...(patch.label !== undefined ? { label: patch.label } : {}),
+    },
+  });
 }
 
 /** `DELETE /wallets/:address` — soft delete (archive) the wallet. */
 export async function deleteWallet(address: string): Promise<void> {
-  await request<void>(`/wallets/${address}`, { method: "DELETE" });
+  await request<void>(`/wallets/${normalizeWalletAddress(address)}`, { method: "DELETE" });
 }
 
 export interface AddWalletBody {
@@ -322,7 +365,14 @@ export interface AddWalletResp {
  *  bare "400 Bad Request". */
 export async function addWallet(body: AddWalletBody): Promise<AddWalletResp> {
   try {
-    return await request<AddWalletResp>("/wallets", { method: "POST", body });
+    return await request<AddWalletResp>("/wallets", {
+      method: "POST",
+      body: {
+        address: normalizeWalletAddress(body.address),
+        ...(body.chains !== undefined ? { chains: body.chains } : {}),
+        ...(body.label !== undefined ? { label: body.label } : {}),
+      },
+    });
   } catch (e) {
     if (e instanceof ServerError) {
       const reason =
@@ -425,7 +475,7 @@ export async function ingestPermit(
   address: string,
   req: IngestPermitReq,
 ): Promise<IngestPermitResp> {
-  return request<IngestPermitResp>(`/wallets/${address}/permits`, {
+  return request<IngestPermitResp>(`/wallets/${normalizeWalletAddress(address)}/permits`, {
     method: "POST",
     body: req,
   });

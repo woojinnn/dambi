@@ -33,7 +33,13 @@ const mocks = vi.hoisted(() => {
 vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
 
 import { migrateDambiRenameStorageKeys } from "../manifests/dambi-rename-storage-migration";
-import { _resetCacheForTests, getAccessToken, setTokens } from "./tokenStore";
+import {
+  _resetCacheForTests,
+  clearTokens,
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+} from "./tokenStore";
 
 const legacyKey = (suffix: string) => `${"pa" + "su"}_${suffix}`;
 
@@ -70,6 +76,28 @@ describe("tokenStore rename race", () => {
     expect(await getAccessToken()).toBe("late-access-token");
   });
 
+  it("rejects malformed tokens instead of writing them to chrome.storage", async () => {
+    await expect(setTokens("", null)).rejects.toThrow(/access token/);
+    await expect(setTokens(" access-token ", null)).rejects.toThrow(/access token/);
+    await expect(setTokens("access-token", "refresh\n")).rejects.toThrow(/refresh token/);
+    await expect(setTokens(undefined as unknown as string, null)).rejects.toThrow(/access token/);
+
+    expect(mocks.localStore.has("dambi_jwt")).toBe(false);
+    expect(mocks.localStore.has("dambi_jwt_refresh")).toBe(false);
+  });
+
+  it("drops malformed tokens already present in chrome.storage", async () => {
+    mocks.localStore.set("dambi_jwt", "bad\naccess");
+    mocks.localStore.set("dambi_jwt_refresh", " refresh ");
+
+    expect(await getAccessToken()).toBeNull();
+    expect(await getRefreshToken()).toBeNull();
+    expect(mocks.localStore.has("dambi_jwt")).toBe(false);
+    expect(mocks.localStore.has("dambi_jwt_refresh")).toBe(false);
+    expect(mocks.browser.storage.local.remove).toHaveBeenCalledWith("dambi_jwt");
+    expect(mocks.browser.storage.local.remove).toHaveBeenCalledWith("dambi_jwt_refresh");
+  });
+
   it("caches a real token on the fast path (no second storage read)", async () => {
     mocks.localStore.set("dambi_jwt", "cached-access-token");
 
@@ -79,5 +107,19 @@ describe("tokenStore rename race", () => {
     // Second read is served from the in-memory cache: no extra storage hit.
     expect(await getAccessToken()).toBe("cached-access-token");
     expect(mocks.browser.storage.local.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not update the in-memory cache until chrome.storage writes succeed", async () => {
+    await setTokens("old-access-token", "old-refresh-token");
+
+    expect(await getAccessToken()).toBe("old-access-token");
+    expect(await getRefreshToken()).toBe("old-refresh-token");
+
+    mocks.browser.storage.local.remove.mockRejectedValueOnce(new Error("storage unavailable"));
+
+    await expect(clearTokens()).rejects.toThrow("storage unavailable");
+
+    expect(await getAccessToken()).toBe("old-access-token");
+    expect(await getRefreshToken()).toBe("old-refresh-token");
   });
 });

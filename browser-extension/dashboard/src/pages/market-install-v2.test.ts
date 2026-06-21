@@ -49,6 +49,22 @@ describe("listingToDefs", () => {
     expect(defs.every((d) => d.sourceListingId === "L2")).toBe(true);
   });
 
+  it("rejects set listings whose members collapse to the same market def id", async () => {
+    await expect(
+      listingToDefs(
+        { id: "L2", kind: "set", displayName: "팩", version: "1.0.0", cat: undefined },
+        {
+          cedar_text: "",
+          members: [
+            { slug: "dup", cedar_text: "permit(a);" },
+            { slug: "dup", cedar_text: "permit(b);" },
+          ],
+        } as never,
+        textToBlocks,
+      ),
+    ).rejects.toThrow(/중복/);
+  });
+
   it("unconvertible cedar aborts the whole install with the member name", async () => {
     await expect(
       listingToDefs(
@@ -146,6 +162,25 @@ describe("listingToDefs", () => {
     ).rejects.toThrow(/타입/);
   });
 
+  it("rejects shipped hole metadata when the policy cannot be converted to a holed form", async () => {
+    await expect(
+      listingToDefs(
+        { id: "L5b", kind: "policy", displayName: "Cedar only", version: "1.0.0", cat: undefined },
+        {
+          cedar_text: "forbid(...)",
+          manifest: {
+            id: "p",
+            schema_version: 2,
+            [MANIFEST_HOLES_KEY]: [
+              { name: "v1", type: "address", label: "받는 주소", required: true },
+            ],
+          },
+        } as never,
+        async () => [ir],
+      ),
+    ).rejects.toThrow(/필수 입력 메타데이터/);
+  });
+
   it("accepts decimal shipped holes by checking the restored form leaf type", async () => {
     const model: FormModel = {
       trigger: { kind: "actionEq", entityType: "Dambi::Action", id: "swap" },
@@ -207,6 +242,7 @@ describe("holeInputToValue", () => {
   it("long/decimal 검증", () => {
     expect(holeInputToValue("long", "150")).toBe(150);
     expect(holeInputToValue("long", "1.5")).toBeNull();
+    expect(holeInputToValue("long", "9007199254740993")).toBeNull();
     expect(holeInputToValue("decimal", "3")).toBe("3.0"); // Cedar 형식으로 정규화
     expect(holeInputToValue("decimal", "abc")).toBeNull();
   });

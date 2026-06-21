@@ -31,6 +31,8 @@
   },
   "holes": {
     "numberRequired": "숫자를 입력하세요",
+    "addressRequired": "올바른 EVM 주소를 입력하세요",
+    "valueRequired": "값을 입력하세요",
     "fieldPathRequired": "필드 경로를 입력하세요"
   },
   "severity": {

@@ -34,7 +34,8 @@ function e2CountLeaves(nodes) {
   return n;
 }
 function e2NeedsValues(def) {
-  const m = def.skeleton.model;
+  const m = def && def.skeleton && def.skeleton.model;
+  if (!m) return Cedar.missingRequiredHoleLabels(def).length > 0;
   return e2CountLeaves(m.when) + e2CountLeaves(m.unless) > 0;
 }
 function e2Override(base, edited, severity) {
@@ -99,13 +100,9 @@ function Editor2View({ onNewPolicy }) {
       return;
     }
     const name = pkgId === PS.UNCATEGORIZED_PKG ? "\uAC1C\uBCC4" : w.packages?.[pkgId]?.displayName ?? pkgId;
-    const renderMember = (d) => ({
-      slug: d.id.replace(/^def::/, ""),
-      title: d.displayName,
-      cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), d.skeleton.model.severity),
-      manifest: d.skeleton.manifest
-    });
-    setLensPublish({ kind: "package", suggestedDisplayName: name, suggestedSlug: pkgId.replace(/^pkg::/, ""), members: defs.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(defs);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setLensPublish({ kind: "package", suggestedDisplayName: name, suggestedSlug: pkgId.replace(/^pkg::/, ""), members: plan.members });
   };
   const dropWal = snap.wallets.byAddress[activeAddr] || { bindings: {}, packages: {} };
   const dropWalName = (pid) => pid === PS.UNCATEGORIZED_PKG ? "\uAC1C\uBCC4" : dropWal.packages?.[pid]?.displayName ?? pid;
@@ -500,25 +497,24 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
     setConfirmAsk({ title: `\uC815\uCC45 "${d.displayName}"\uC744(\uB97C) \uB77C\uC774\uBE0C\uB7EC\uB9AC\uC5D0\uC11C \uC0AD\uC81C\uD560\uAE4C\uC694?`, body: uses > 0 ? `${uses}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2E4.` : "", danger: true, onConfirm: () => run("\uC815\uCC45 \uC0AD\uC81C", () => PS.deleteDef(d.id)).then((ok) => ok && pushToast("\uC815\uCC45\uC744 \uC0AD\uC81C\uD588\uC5B4\uC694")) });
   };
   const [publishSrc, setPublishSrc] = React.useState(null);
-  const renderMember = (d) => ({
-    slug: d.id.replace(/^def::/, ""),
-    title: d.displayName,
-    cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), d.skeleton.model.severity),
-    manifest: d.skeleton.manifest
-  });
   const publishLibFolder = (id, name) => {
     const members = Object.values(snap.library.defs).filter((d) => !d.hidden && (d.defaults.packageId || UNCAT) === id);
     if (members.length === 0) return pushToast("\uC774 \uD328\uD0A4\uC9C0\uC5D0 \uB4E0 \uC815\uCC45\uC774 \uC5C6\uC5B4\uC694");
-    setPublishSrc({ kind: "package", suggestedDisplayName: name, suggestedSlug: id.replace(/^pkg::/, ""), members: members.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(members);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setPublishSrc({ kind: "package", suggestedDisplayName: name, suggestedSlug: id.replace(/^pkg::/, ""), members: plan.members });
   };
   const publishDef = (d) => {
-    const m = renderMember(d);
+    const m = Cedar.publishMemberFromDef(d);
+    if (!m) return Cedar.rejectUnsupportedPublish(d);
     setPublishSrc({ kind: "policy", cedarText: m.cedarText, manifest: m.manifest, suggestedDisplayName: d.displayName, suggestedSlug: m.slug });
   };
   const publishPackage = (pkgId, members) => {
     const defs = [...new Map(members.map((b) => [b.defId, snap.library.defs[b.defId]])).values()].filter(Boolean);
     if (defs.length === 0) return pushToast("\uC774 \uD328\uD0A4\uC9C0\uC5D0 \uB4E0 \uC815\uCC45\uC774 \uC5C6\uC5B4\uC694");
-    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: defs.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(defs);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: plan.members });
   };
   const [apply, setApply] = React.useState(null);
   const [folderApply, setFolderApply] = React.useState(null);
@@ -535,24 +531,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const forkBinding = (b) => {
     const def = snap.library.defs[b.defId];
     if (!def) return;
-    const model = b.modelOverride || def.skeleton.model;
-    const baseName = b.alias ?? def.displayName;
-    const slug = def.id.replace(/^def::/, "").replace(/-[a-z0-9]{4}$/, "");
-    const newId = `def::${slug}-edit-${Math.random().toString(36).slice(2, 6)}`;
-    navigate(`/editor/${encodeURIComponent(newId)}`, {
-      state: {
-        newPolicy: {
-          method: def.method || "form",
-          model: { ...model },
-          cedarText: Cedar.serializeCedar(model, slug, model.severity, model.reason),
-          displayName: baseName,
-          cat: def.cat,
-          defaultScope: "wallet",
-          defaultWallet: address,
-          replace: { address, bindingId: b.id, packageId: b.packageId, oldName: baseName }
-        }
-      }
-    });
+    navigate(`/editor/${encodeURIComponent(def.id)}?wallet=${address}&binding=${encodeURIComponent(b.id)}`);
   };
   return /* @__PURE__ */ React.createElement("div", { className: `cols${viewAll ? " allview-on" : ""}` }, /* @__PURE__ */ React.createElement("aside", { className: "skel rise" }, /* @__PURE__ */ React.createElement("div", { className: "skel-top" }, /* @__PURE__ */ React.createElement("div", { className: "skel-label" }, /* @__PURE__ */ React.createElement(Ic, { id: "box", cls: "sm" }), "\uB77C\uC774\uBE0C\uB7EC\uB9AC"), /* @__PURE__ */ React.createElement("div", { className: "skel-actions" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "e2-mini", onClick: () => setNewFolderOpen(true) }, /* @__PURE__ */ React.createElement(Ic, { id: "folder", cls: "sm" }), "\uC0C8 \uD3F4\uB354"), /* @__PURE__ */ React.createElement("button", { type: "button", className: "e2-mini", onClick: onNewPolicy }, /* @__PURE__ */ React.createElement(Ic, { id: "plus", cls: "sm" }), "\uC0C8 \uC815\uCC45")), /* @__PURE__ */ React.createElement("div", { className: "searchbox" }, /* @__PURE__ */ React.createElement(Ic, { id: "search", cls: "sm" }), /* @__PURE__ */ React.createElement("input", { value: query, onChange: (e) => setQuery(e.target.value), placeholder: "\uC815\uCC45 \uAC80\uC0C9\u2026" }))), /* @__PURE__ */ React.createElement("div", { className: "skel-body scroll" }, Object.values(snap.library.defs).filter((d) => !d.hidden).length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "pb-empty", style: { padding: "26px 14px" } }, /* @__PURE__ */ React.createElement("div", { style: { fontWeight: 700, color: "var(--ink)" } }, "\uC544\uC9C1 \uC815\uCC45 \uBF08\uB300\uAC00 \uC5C6\uC5B4\uC694"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4 } }, "\uC704 \u201C+ \uC0C8 \uC815\uCC45\u201D\uC73C\uB85C \uCCAB \uC815\uCC45\uC744 \uB9CC\uB4E4\uC5B4 \uBCF4\uC138\uC694.")) : folders.map((f) => {
     const all = defsByFolder.get(f.id) || [];
@@ -795,6 +774,7 @@ function E2ApplyModal({ def, pkgId, pkgName, address, onClose }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
   const submit = async () => {
+    if (!Cedar.canStaticBindDef(def)) return Cedar.rejectUnsupportedApply(def);
     const aliasTrim = alias.trim();
     const finalAlias = aliasTrim && aliasTrim !== def.displayName ? aliasTrim : void 0;
     const ok = await run(
@@ -835,8 +815,11 @@ function E2FolderApplyModal({ folderName, pkgId, pkgName, address, defs, isInPac
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
   const checkedDefs = defs.filter((d) => checked[d.id]);
-  const valDefs = checkedDefs.filter((d) => e2NeedsValues(d));
+  const defsToBind = checkedDefs.filter((d) => !isInPackage(d.id));
+  const valDefs = defsToBind.filter((d) => e2NeedsValues(d));
   const applyAll = async () => {
+    const unsupported = defsToBind.filter((d) => !Cedar.canStaticBindDef(d));
+    if (unsupported.length > 0) return Cedar.rejectUnsupportedApply(unsupported);
     for (let i = 0; i < valDefs.length; i++) {
       const d = valDefs[i];
       if (validMap[d.id] === false) {
@@ -858,6 +841,8 @@ function E2FolderApplyModal({ folderName, pkgId, pkgName, address, defs, isInPac
     }
   };
   const next = () => {
+    const unsupported = defsToBind.filter((d) => !Cedar.canStaticBindDef(d));
+    if (unsupported.length > 0) return Cedar.rejectUnsupportedApply(unsupported);
     if (valDefs.length === 0) return void applyAll();
     setStep(2);
     setValIdx(0);

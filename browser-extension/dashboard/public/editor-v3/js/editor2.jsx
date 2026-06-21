@@ -46,7 +46,8 @@ function e2CountLeaves(nodes) {
   return n;
 }
 function e2NeedsValues(def) {
-  const m = def.skeleton.model;
+  const m = def && def.skeleton && def.skeleton.model;
+  if (!m) return Cedar.missingRequiredHoleLabels(def).length > 0;
   return e2CountLeaves(m.when) + e2CountLeaves(m.unless) > 0;
 }
 function e2Override(base, edited, severity) {
@@ -103,13 +104,9 @@ function Editor2View({ onNewPolicy }) {
     ).values()].filter(Boolean);
     if (defs.length === 0) { pushToast("이 패키지에 든 정책이 없어요"); return; }
     const name = pkgId === PS.UNCATEGORIZED_PKG ? "개별" : (w.packages?.[pkgId]?.displayName ?? pkgId);
-    const renderMember = (d) => ({
-      slug: d.id.replace(/^def::/, ""),
-      title: d.displayName,
-      cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), d.skeleton.model.severity),
-      manifest: d.skeleton.manifest,
-    });
-    setLensPublish({ kind: "package", suggestedDisplayName: name, suggestedSlug: pkgId.replace(/^pkg::/, ""), members: defs.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(defs);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setLensPublish({ kind: "package", suggestedDisplayName: name, suggestedSlug: pkgId.replace(/^pkg::/, ""), members: plan.members });
   };
 
   // 렌즈(말풍선)에 라이브러리 뼈대를 끌어놓으면 — 해당 패키지에 적용(카드 드롭과 동일한 모달).
@@ -580,25 +577,24 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
 
   /* 발행 */
   const [publishSrc, setPublishSrc] = React.useState(null);
-  const renderMember = (d) => ({
-    slug: d.id.replace(/^def::/, ""),
-    title: d.displayName,
-    cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), d.skeleton.model.severity),
-    manifest: d.skeleton.manifest,
-  });
   const publishLibFolder = (id, name) => {
     const members = Object.values(snap.library.defs).filter((d) => !d.hidden && (d.defaults.packageId || UNCAT) === id);
     if (members.length === 0) return pushToast("이 패키지에 든 정책이 없어요");
-    setPublishSrc({ kind: "package", suggestedDisplayName: name, suggestedSlug: id.replace(/^pkg::/, ""), members: members.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(members);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setPublishSrc({ kind: "package", suggestedDisplayName: name, suggestedSlug: id.replace(/^pkg::/, ""), members: plan.members });
   };
   const publishDef = (d) => {
-    const m = renderMember(d);
+    const m = Cedar.publishMemberFromDef(d);
+    if (!m) return Cedar.rejectUnsupportedPublish(d);
     setPublishSrc({ kind: "policy", cedarText: m.cedarText, manifest: m.manifest, suggestedDisplayName: d.displayName, suggestedSlug: m.slug });
   };
   const publishPackage = (pkgId, members) => {
     const defs = [...new Map(members.map((b) => [b.defId, snap.library.defs[b.defId]])).values()].filter(Boolean);
     if (defs.length === 0) return pushToast("이 패키지에 든 정책이 없어요");
-    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: defs.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(defs);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: plan.members });
   };
 
   /* 드롭(적용) 모달 */
@@ -620,24 +616,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const forkBinding = (b) => {
     const def = snap.library.defs[b.defId];
     if (!def) return;
-    const model = b.modelOverride || def.skeleton.model;
-    const baseName = b.alias ?? def.displayName;
-    const slug = def.id.replace(/^def::/, "").replace(/-[a-z0-9]{4}$/, "");
-    const newId = `def::${slug}-edit-${Math.random().toString(36).slice(2, 6)}`;
-    navigate(`/editor/${encodeURIComponent(newId)}`, {
-      state: {
-        newPolicy: {
-          method: def.method || "form",
-          model: { ...model },
-          cedarText: Cedar.serializeCedar(model, slug, model.severity, model.reason),
-          displayName: baseName,
-          cat: def.cat,
-          defaultScope: "wallet",
-          defaultWallet: address,
-          replace: { address, bindingId: b.id, packageId: b.packageId, oldName: baseName },
-        },
-      },
-    });
+    navigate(`/editor/${encodeURIComponent(def.id)}?wallet=${address}&binding=${encodeURIComponent(b.id)}`);
   };
 
   return (
@@ -972,6 +951,7 @@ function E2ApplyModal({ def, pkgId, pkgName, address, onClose }) {
   }, [onClose]);
 
   const submit = async () => {
+    if (!Cedar.canStaticBindDef(def)) return Cedar.rejectUnsupportedApply(def);
     const aliasTrim = alias.trim();
     const finalAlias = aliasTrim && aliasTrim !== def.displayName ? aliasTrim : undefined;
     // 실제 ps2 bind 는 modelOverride 를 받지 않는다. 정책의 심각도/구조는 def 를
@@ -1034,9 +1014,12 @@ function E2FolderApplyModal({ folderName, pkgId, pkgName, address, defs, isInPac
   }, [onClose]);
 
   const checkedDefs = defs.filter((d) => checked[d.id]);
-  const valDefs = checkedDefs.filter((d) => e2NeedsValues(d));
+  const defsToBind = checkedDefs.filter((d) => !isInPackage(d.id));
+  const valDefs = defsToBind.filter((d) => e2NeedsValues(d));
 
   const applyAll = async () => {
+    const unsupported = defsToBind.filter((d) => !Cedar.canStaticBindDef(d));
+    if (unsupported.length > 0) return Cedar.rejectUnsupportedApply(unsupported);
     for (let i = 0; i < valDefs.length; i++) {
       const d = valDefs[i];
       if (validMap[d.id] === false) { setStep(2); setValIdx(i); pushToast(`값을 먼저 채워주세요: ${d.displayName}`); return; }
@@ -1051,7 +1034,13 @@ function E2FolderApplyModal({ folderName, pkgId, pkgName, address, defs, isInPac
     if (ok) { pushToast(`${folderName} → ${pkgName}`); onClose(); }
   };
 
-  const next = () => { if (valDefs.length === 0) return void applyAll(); setStep(2); setValIdx(0); };
+  const next = () => {
+    const unsupported = defsToBind.filter((d) => !Cedar.canStaticBindDef(d));
+    if (unsupported.length > 0) return Cedar.rejectUnsupportedApply(unsupported);
+    if (valDefs.length === 0) return void applyAll();
+    setStep(2);
+    setValIdx(0);
+  };
   const checkedCount = checkedDefs.length;
 
   if (step === 1) {

@@ -20,7 +20,8 @@ function navigate(to, opts) {
     const seg = String(to).split("?")[0].split("/").filter(Boolean);
     const isDetail = seg[0] === "editor" && seg.length >= 2;
     if (isDetail && window.parent && window.parent !== window) {
-      window.parent.postMessage({ source: "dambi-editor-v3", type: "open-policy", to }, window.location.origin);
+      const state = opts && opts.state ? opts.state : void 0;
+      window.parent.postMessage({ source: "dambi-editor-v3", type: "open-policy", to, ...state ? { state } : {} }, window.location.origin);
       return;
     }
   } catch (e) {

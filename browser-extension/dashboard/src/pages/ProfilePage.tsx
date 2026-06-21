@@ -244,7 +244,7 @@ export function ProfilePage() {
                 <ul className="pp-listings">
                   {shownListings.map((l) => (
                     <li key={l.id} className="pp-listing-row">
-                      <Link to={`/market/${l.slug}`} className="pp-listing">
+                      <Link to={`/market/${encodeURIComponent(l.slug)}`} className="pp-listing">
                         <div className="pp-listing-main">
                           <span className="pp-listing-name">{pickI18n(l.display_name)}</span>
                           <span className="pp-listing-slug">{l.slug}</span>
@@ -332,7 +332,7 @@ export function ProfilePage() {
           </div>
         </section>
 
-        {/* settings — OpenAI API key (server-stored, used for LLM drafting) */}
+        {/* settings — OpenAI API key (browser-local, used for LLM drafting) */}
         <section className="pp-card">
           <div className="pp-sec-head">
             <h2>{t("settings.openaiTitle")}</h2>

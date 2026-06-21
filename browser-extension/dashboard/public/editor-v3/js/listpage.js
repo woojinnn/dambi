@@ -49,16 +49,13 @@ ${n}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2E4.
   const publishPackage = (pkg) => {
     const members = Object.values(snap.library.defs).filter((d) => !d.hidden && d.defaults.packageId === pkg.id);
     if (members.length === 0) return pushToast("\uC774 \uD328\uD0A4\uC9C0\uC5D0 \uB4E0 \uC815\uCC45\uC774 \uC5C6\uC5B4\uC694");
+    const plan = Cedar.publishMembersFromDefs(members);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
     setPublishSrc({
       kind: "package",
       suggestedDisplayName: pkg.displayName,
       suggestedSlug: pkg.id.replace(/^pkg::/, ""),
-      members: members.map((d) => ({
-        slug: d.id.replace(/^def::/, ""),
-        title: d.displayName,
-        cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), Cedar.severityFromCedar('@severity("' + d.skeleton.model.severity + '")')),
-        manifest: d.skeleton.manifest
-      }))
+      members: plan.members
     });
   };
   return /* @__PURE__ */ React.createElement("div", { className: "ld-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ev2-ctrl" }, /* @__PURE__ */ React.createElement("div", { className: "ev2-search" }, /* @__PURE__ */ React.createElement(SearchIcon, null), /* @__PURE__ */ React.createElement("input", { value: query, onChange: (e) => setQuery(e.target.value), placeholder: "\uC815\uCC45 \uC774\uB984 \uAC80\uC0C9\u2026" })), /* @__PURE__ */ React.createElement("span", { className: "ev2-spc" }), /* @__PURE__ */ React.createElement("button", { type: "button", className: "ev2-sec", onClick: createPackage }, /* @__PURE__ */ React.createElement(PlusIcon, null), " \uC0C8 \uD328\uD0A4\uC9C0")), presentCats.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "ev2-catbar" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: `ev2-catchip${catFilter === "all" ? " on" : ""}`, onClick: () => setCatFilter("all") }, "\uBAA8\uB4E0 \uCE74\uD14C\uACE0\uB9AC"), presentCats.map((c) => /* @__PURE__ */ React.createElement("button", { key: c, type: "button", className: `ev2-catchip${catFilter === c ? " on" : ""}`, onClick: () => setCatFilter(c) }, /* @__PURE__ */ React.createElement("span", { className: "dot", style: { background: catStyle(c).hex } }), catLabel(c)))), /* @__PURE__ */ React.createElement("div", { className: "ev2-scroll" }, Object.values(snap.library.defs).filter((d) => !d.hidden).length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "ev2-empty" }, /* @__PURE__ */ React.createElement("div", { className: "big" }, "\uC544\uC9C1 \uC815\uCC45 \uC815\uC758\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4"), /* @__PURE__ */ React.createElement("div", { className: "sm" }, "\uC0C1\uB2E8 \u201C+ \uC0C8 \uC815\uCC45\u201D \uBC84\uD2BC\uC73C\uB85C \uCCAB \uC815\uC758\uB97C \uB9CC\uB4E4\uC5B4 \uBCF4\uC138\uC694.")) : /* @__PURE__ */ React.createElement(

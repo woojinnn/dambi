@@ -11,6 +11,18 @@
 import { i18n } from "../i18n";
 import { request } from "./client";
 
+function pathSegment(value: string, label: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${label} is not a safe path segment`);
+  }
+  return encodeURIComponent(value);
+}
+
 export type ListingKind = "policy" | "set";
 export type PublisherTier = "official" | "verified" | "community";
 export type ListingStatus = "pending" | "published" | "archived" | "rejected";
@@ -260,7 +272,9 @@ export async function getActivitySummary(
 
 /** `GET /market/listings/:slug` — listing detail + latest version + recent reviews. */
 export async function getListing(slug: string): Promise<ListingDetail> {
-  return request<ListingDetail>(`/market/listings/${encodeURIComponent(slug)}`);
+  return request<ListingDetail>(
+    `/market/listings/${pathSegment(slug, "listing slug")}`,
+  );
 }
 
 /** `GET /market/listings/id/:id/versions/:ver` — fetch a specific version body. */
@@ -269,7 +283,10 @@ export async function getListingVersion(
   version: string,
 ): Promise<ListingVersion> {
   return request<ListingVersion>(
-    `/market/listings/id/${listingId}/versions/${encodeURIComponent(version)}`,
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/versions/${pathSegment(
+      version,
+      "listing version",
+    )}`,
   );
 }
 
@@ -283,7 +300,10 @@ export async function createListing(
 /** `DELETE /market/listings/id/:id` — hide a listing the caller published.
  *  The server archives it and retains versions/reviews/reports for audit history. */
 export async function deleteListing(listingId: string): Promise<void> {
-  await request<void>(`/market/listings/id/${listingId}`, { method: "DELETE" });
+  await request<void>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}`,
+    { method: "DELETE" },
+  );
 }
 
 /** `POST /market/listings/id/:id/versions` — release a new SemVer version. */
@@ -291,10 +311,13 @@ export async function createVersion(
   listingId: string,
   body: CreateVersionBody,
 ): Promise<ListingVersion> {
-  return request<ListingVersion>(`/market/listings/id/${listingId}/versions`, {
-    method: "POST",
-    body,
-  });
+  return request<ListingVersion>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/versions`,
+    {
+      method: "POST",
+      body,
+    },
+  );
 }
 
 /** `POST /market/listings/id/:id/install` — record install + return version body. */
@@ -302,15 +325,20 @@ export async function installListing(
   listingId: string,
   version: string,
 ): Promise<ListingVersion> {
-  return request<ListingVersion>(`/market/listings/id/${listingId}/install`, {
-    method: "POST",
-    body: { version },
-  });
+  return request<ListingVersion>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/install`,
+    {
+      method: "POST",
+      body: { version },
+    },
+  );
 }
 
 /** `GET /market/listings/id/:id/reviews` — full review list. */
 export async function listReviews(listingId: string): Promise<Review[]> {
-  return request<Review[]>(`/market/listings/id/${listingId}/reviews`);
+  return request<Review[]>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/reviews`,
+  );
 }
 
 /** `POST /market/listings/id/:id/reviews` — write or replace caller's review. */
@@ -318,10 +346,13 @@ export async function createReview(
   listingId: string,
   body: CreateReviewBody,
 ): Promise<Review> {
-  return request<Review>(`/market/listings/id/${listingId}/reviews`, {
-    method: "POST",
-    body,
-  });
+  return request<Review>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/reviews`,
+    {
+      method: "POST",
+      body,
+    },
+  );
 }
 
 /** `POST /market/listings/id/:id/report` — report a listing. */
@@ -329,10 +360,13 @@ export async function reportListing(
   listingId: string,
   body: CreateReportBody,
 ): Promise<MarketReport> {
-  return request<MarketReport>(`/market/listings/id/${listingId}/report`, {
-    method: "POST",
-    body,
-  });
+  return request<MarketReport>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/report`,
+    {
+      method: "POST",
+      body,
+    },
+  );
 }
 
 /** `POST /market/reviews/:id/report` — report a review. */
@@ -340,10 +374,13 @@ export async function reportReview(
   reviewId: string,
   body: CreateReportBody,
 ): Promise<MarketReport> {
-  return request<MarketReport>(`/market/reviews/${reviewId}/report`, {
-    method: "POST",
-    body,
-  });
+  return request<MarketReport>(
+    `/market/reviews/${pathSegment(reviewId, "review id")}/report`,
+    {
+      method: "POST",
+      body,
+    },
+  );
 }
 
 /** `GET /market/reports/mine` — reports submitted by the caller. */
@@ -367,10 +404,13 @@ export async function updateReportStatus(
   reportId: string,
   body: UpdateReportStatusBody,
 ): Promise<MarketReport> {
-  return request<MarketReport>(`/market/reports/${reportId}`, {
-    method: "PATCH",
-    body,
-  });
+  return request<MarketReport>(
+    `/market/reports/${pathSegment(reportId, "report id")}`,
+    {
+      method: "PATCH",
+      body,
+    },
+  );
 }
 
 /** `POST /market/reviews/:id/helpful` — idempotent helpful vote. */
@@ -378,23 +418,29 @@ export async function voteHelpful(
   reviewId: string,
 ): Promise<{ newly_voted: boolean }> {
   return request<{ newly_voted: boolean }>(
-    `/market/reviews/${reviewId}/helpful`,
+    `/market/reviews/${pathSegment(reviewId, "review id")}/helpful`,
     { method: "POST" },
   );
 }
 
 /** `POST /market/listings/id/:id/watch` — subscribe to new-version events. */
 export async function watchListing(listingId: string): Promise<void> {
-  await request<void>(`/market/listings/id/${listingId}/watch`, {
-    method: "POST",
-  });
+  await request<void>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/watch`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 /** `DELETE /market/listings/id/:id/watch` — cancel subscription. */
 export async function unwatchListing(listingId: string): Promise<void> {
-  await request<void>(`/market/listings/id/${listingId}/watch`, {
-    method: "DELETE",
-  });
+  await request<void>(
+    `/market/listings/id/${pathSegment(listingId, "listing id")}/watch`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 /** `GET /market/watches` — caller's watched listings with stats. */

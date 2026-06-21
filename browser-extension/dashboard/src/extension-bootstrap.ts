@@ -13,6 +13,7 @@
  * blank page.
  */
 import { isExtensionContext } from "./env";
+import { normalizeAuthToken } from "./server-api/auth-token";
 
 /** Keys mirrored from the SW's tokenStore (`chrome.storage.local`). */
 const TOKEN_KEYS = ["dambi_jwt", "dambi_jwt_refresh"] as const;
@@ -38,6 +39,16 @@ function extStorage(): ChromeStorage | undefined {
     ?.storage;
 }
 
+function mirrorTokenValue(key: (typeof TOKEN_KEYS)[number], value: unknown): void {
+  try {
+    const token = normalizeAuthToken(value ?? null, key);
+    if (token) localStorage.setItem(key, token);
+    else localStorage.removeItem(key);
+  } catch {
+    localStorage.removeItem(key);
+  }
+}
+
 /** Copy the SW-owned JWT (chrome.storage.local) into this page's localStorage
  * so the localStorage-based server-api client + useAuth pick it up. No-op
  * outside the extension; never throws. Called at boot AND right after an
@@ -49,9 +60,7 @@ export async function syncTokensFromExtensionStorage(): Promise<void> {
     if (!storage?.local) return;
     const got = await storage.local.get([...TOKEN_KEYS]);
     for (const k of TOKEN_KEYS) {
-      const v = got[k];
-      if (typeof v === "string" && v) localStorage.setItem(k, v);
-      else localStorage.removeItem(k);
+      mirrorTokenValue(k, got[k]);
     }
   } catch {
     // Degrade to "no token synced → /login"; never block the render.
@@ -87,9 +96,7 @@ export async function bootstrapExtensionEnv(): Promise<void> {
       if (area !== "local") return;
       for (const k of TOKEN_KEYS) {
         if (!(k in changes)) continue;
-        const v = changes[k]?.newValue;
-        if (typeof v === "string" && v) localStorage.setItem(k, v);
-        else localStorage.removeItem(k);
+        mirrorTokenValue(k, changes[k]?.newValue);
         window.dispatchEvent(new StorageEvent("storage", { key: k }));
       }
     });

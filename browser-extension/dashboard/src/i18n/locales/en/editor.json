@@ -35,6 +35,8 @@
   },
   "holes": {
     "numberRequired": "Enter a number",
+    "addressRequired": "Enter a valid EVM address",
+    "valueRequired": "Enter a value",
     "fieldPathRequired": "Enter a field path"
   },
   "severity": {

@@ -32,7 +32,20 @@ function useWalletLabelBridge() {
 // 빌드 base("./")에 맞춘 정적 자산 경로 — 확장/dev 둘 다에서 동작.
 const SRC = `${import.meta.env.BASE_URL}editor-v3/Editor.html`;
 
-function isEditorOpenMessage(value: unknown): value is { to: string } {
+type EditorOpenState = {
+  newPolicy: {
+    method: "form" | "cedar";
+    cedarText: string;
+    displayName: string;
+    initialTab?: "form" | "cedar" | "llm";
+  };
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object";
+}
+
+function isEditorOpenMessage(value: unknown): value is { to: string; state?: unknown } {
   if (!value || typeof value !== "object") return false;
   const d = value as { source?: unknown; type?: unknown; to?: unknown };
   return (
@@ -40,6 +53,24 @@ function isEditorOpenMessage(value: unknown): value is { to: string } {
     d.type === "open-policy" &&
     typeof d.to === "string"
   );
+}
+
+function sanitizeEditorState(value: unknown): EditorOpenState | undefined {
+  if (!isRecord(value) || !isRecord(value.newPolicy)) return undefined;
+  const p = value.newPolicy;
+  if (p.method !== "form" && p.method !== "cedar") return undefined;
+  if (typeof p.cedarText !== "string" || typeof p.displayName !== "string") return undefined;
+  const state: EditorOpenState = {
+    newPolicy: {
+      method: p.method,
+      cedarText: p.cedarText,
+      displayName: p.displayName,
+    },
+  };
+  if (p.initialTab === "form" || p.initialTab === "cedar" || p.initialTab === "llm") {
+    state.newPolicy.initialTab = p.initialTab;
+  }
+  return state;
 }
 
 function isAllowedEditorRoute(to: string): boolean {
@@ -80,7 +111,9 @@ function useOpenPolicyBridge(iframeRef: RefObject<HTMLIFrameElement>) {
       if (e.source !== iframeRef.current?.contentWindow) return;
       if (!isEditorOpenMessage(e.data)) return;
       if (!isAllowedEditorRoute(e.data.to)) return;
-      navigate(e.data.to); // 예: "/editor/<id>?wallet=..&binding=.." → 실제 EditorDetailPageV2
+      const state = sanitizeEditorState(e.data.state);
+      if (state) navigate(e.data.to, { state });
+      else navigate(e.data.to); // 예: "/editor/<id>?wallet=..&binding=.." → 실제 EditorDetailPageV2
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);

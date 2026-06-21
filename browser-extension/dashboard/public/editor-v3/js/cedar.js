@@ -328,6 +328,98 @@
     const m = String(text || "").match(/@reason\(\s*"((?:[^"\\]|\\.)*)"\s*\)/);
     return m ? m[1].replace(/\\"/g, '"') : "";
   }
+  function validSeverity(s) {
+    return s === "deny" || s === "warn" || s === "info" ? s : undefined;
+  }
+  function irAnnotation(ir, name) {
+    const annotations = ir && Array.isArray(ir.annotations) ? ir.annotations : [];
+    const hit = annotations.find((a) => a && a.name === name);
+    return hit && typeof hit.value === "string" ? hit.value : undefined;
+  }
+  function defSeverity(def) {
+    const skeleton = def && def.skeleton;
+    const model = skeleton && skeleton.model;
+    const fromModel = validSeverity(model && model.severity);
+    if (fromModel) return fromModel;
+    const raw = skeleton && typeof skeleton.rawCedar === "string" ? skeleton.rawCedar : "";
+    if (/@severity\(/.test(raw)) return severityFromCedar(raw);
+    return validSeverity(irAnnotation(skeleton && skeleton.ir, "severity"));
+  }
+  function publishMemberFromDef(def) {
+    const skeleton = def && def.skeleton;
+    if (!def || !skeleton) return null;
+    const slug = String(def.id || "").replace(/^def::/, "");
+    const raw = typeof skeleton.rawCedar === "string" && skeleton.rawCedar.trim() ? skeleton.rawCedar : null;
+    const model = skeleton.model;
+    const cedarText = raw || (model ? serializeCedar(model, slug, defSeverity(def) || model.severity, model.reason) : null);
+    if (!cedarText) return null;
+    return { slug, title: def.displayName, cedarText, manifest: skeleton.manifest };
+  }
+  function publishMembersFromDefs(defs) {
+    const members = [];
+    const unsupported = [];
+    for (const def of defs || []) {
+      const member = publishMemberFromDef(def);
+      if (member) members.push(member);
+      else unsupported.push(def);
+    }
+    return { members, unsupported };
+  }
+  const HOLE_EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+  const HOLE_CEDAR_DECIMAL_RE = /^-?\d+\.\d{1,4}$/;
+  function isValidRequiredHoleValue(type, value) {
+    switch (String(type || "").toLowerCase()) {
+      case "address":
+        return typeof value === "string" && HOLE_EVM_ADDRESS_RE.test(value);
+      case "addressset":
+        return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string" && HOLE_EVM_ADDRESS_RE.test(item));
+      case "long":
+        return typeof value === "number" && Number.isSafeInteger(value);
+      case "decimal":
+        return typeof value === "string" && HOLE_CEDAR_DECIMAL_RE.test(value);
+      case "string":
+        return typeof value === "string" && value.trim().length > 0;
+      case "bool":
+        return typeof value === "boolean";
+      case "field":
+        return value !== null && typeof value === "object" && !Array.isArray(value) && typeof value.field === "string" && value.field.trim().length > 0;
+      default:
+        return value !== undefined;
+    }
+  }
+  function missingRequiredHoleLabels(def, params) {
+    const holes = def && Array.isArray(def.holes) ? def.holes : [];
+    const defaults = def && def.defaults && def.defaults.params ? def.defaults.params : {};
+    const merged = { ...defaults, ...params || {} };
+    return holes.filter((h) => h && h.required && !isValidRequiredHoleValue(h.type, merged[h.name])).map((h) => h.label || h.name);
+  }
+  function canStaticBindDef(def, params) {
+    return missingRequiredHoleLabels(def, params).length === 0;
+  }
+  function rejectUnsupportedPublish(defOrDefs) {
+    const defs = Array.isArray(defOrDefs) ? defOrDefs.filter(Boolean) : [defOrDefs].filter(Boolean);
+    const first = defs[0];
+    const title = first && first.displayName ? `"${first.displayName}"` : "이 정책";
+    const suffix = defs.length > 1 ? ` 외 ${defs.length - 1}개` : "";
+    try {
+      if (typeof pushToast === "function") pushToast(`${title}${suffix}은(는) 이 화면에서 바로 게시할 수 없어요. 정책 편집 화면에서 게시해 주세요.`);
+    } catch (e) {}
+    try {
+      if (first && first.id && typeof navigate === "function") navigate(`/editor/${encodeURIComponent(first.id)}`);
+    } catch (e) {}
+  }
+  function rejectUnsupportedApply(defOrDefs) {
+    const defs = Array.isArray(defOrDefs) ? defOrDefs.filter(Boolean) : [defOrDefs].filter(Boolean);
+    const first = defs[0];
+    const title = first && first.displayName ? `"${first.displayName}"` : "이 정책";
+    const suffix = defs.length > 1 ? ` 외 ${defs.length - 1}개` : "";
+    try {
+      if (typeof pushToast === "function") pushToast(`${title}${suffix}은(는) 빈칸 값을 채워야 적용할 수 있어요. 정책 편집 화면에서 적용해 주세요.`);
+    } catch (e) {}
+    try {
+      if (first && first.id && typeof navigate === "function") navigate(`/editor/${encodeURIComponent(first.id)}`);
+    } catch (e) {}
+  }
 
   /* ── enrichment registry + method catalog + manifest auto-gen ──
    * Faithful port of editor-v9/manifest-gen + custom-field-methods. A policy
@@ -495,6 +587,13 @@
     serializeCedar,
     severityFromCedar,
     reasonFromCedar,
+    defSeverity,
+    publishMemberFromDef,
+    publishMembersFromDefs,
+    missingRequiredHoleLabels,
+    canStaticBindDef,
+    rejectUnsupportedPublish,
+    rejectUnsupportedApply,
     applyParams,
     ENRICHMENT_FIELDS,
     METHOD_CATALOG,

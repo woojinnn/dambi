@@ -15,6 +15,7 @@ export {
   fetchMe,
   listWallets,
   listWalletSummaries,
+  normalizeWalletAddress,
   addWallet,
   updateWallet,
   deleteWallet,

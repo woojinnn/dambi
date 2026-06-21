@@ -5,7 +5,7 @@
  *  게이트는 엔진(WASM trigger 매칭)이 수행한다 — 따라서 여기서는 "확실히 매칭
  *  불가"일 때만 드롭하고, 모르면 통과시킨다. */
 import { ensureSeeded } from "./seed";
-import { readStore } from "./store";
+import { normalizeWalletAddress, readStore } from "./store";
 import { renderDef } from "./render";
 import { isEffectiveOn, missingRequiredHoles, type HoleValue, type PolicyDef } from "./types";
 
@@ -100,7 +100,11 @@ export function filterForAction(bundles: ResolvedBundle[], metas: ActionMeta[]):
  *  걸린다(토글 무시). 주소는 소문자 키. */
 export async function isWalletRegistered(uid: string, address: string): Promise<boolean> {
   const s = await readStore(uid);
-  return s.wallets.byAddress[address.toLowerCase()] !== undefined;
+  try {
+    return s.wallets.byAddress[normalizeWalletAddress(address)] !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 export interface ResolveResult {
@@ -125,8 +129,13 @@ export async function resolveBundlesForWalletWithFaults(
 ): Promise<ResolveResult> {
   await ensureSeeded(uid);
   const s = await readStore(uid);
-  const addr = fromAddress.toLowerCase();
-  const w = s.wallets.byAddress[addr];
+  let addr: string | null = null;
+  try {
+    addr = normalizeWalletAddress(fromAddress);
+  } catch {
+    addr = null;
+  }
+  const w = addr ? s.wallets.byAddress[addr] : undefined;
 
   const wanted: { defId: string; params: Record<string, HoleValue>; severity?: "deny" | "warn" | undefined }[] = [];
   // 정의 수정으로 사라진 홀의 잔존 파라미터 키는 렌더 실패(unknown param)를
