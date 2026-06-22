@@ -102,14 +102,13 @@
     "__chrome__service_worker": "js/background.js",
     "__firefox__scripts": ["js/background.js"]
   },
-  "__chrome__permissions": ["storage", "alarms", "identity", "notifications"],
+  "__chrome__permissions": ["storage", "identity", "notifications"],
   "__firefox__permissions": [
     "<all_urls>",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",
     "http://127.0.0.1:8788/*",
     "storage",
-    "alarms",
     "identity",
     "notifications"
   ],
