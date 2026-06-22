@@ -175,24 +175,24 @@ async fn evaluate_does_not_reactivate_archived_wallet_metadata() {
 
     let token = mint_token(&user_id);
     let addr = spawn_server(state).await;
-    let resp: EvaluateResponse = reqwest::Client::new()
+    // M4-F83 하드닝(a0ae1dd2): /evaluate 는 client-supplied wallet_id 를 신뢰하지 않고
+    // 서버의 user-scoped ACTIVE wallet 을 로드한다. archived wallet 은 active 가 아니므로
+    // 404 로 거부된다 — 그리고 거부된 시도가 그 wallet 을 재활성화해서도 안 된다.
+    let resp = reqwest::Client::new()
         .post(format!("http://{addr}/evaluate"))
         .bearer_auth(&token)
         .json(&empty_envelope_request(id.clone()))
         .send()
         .await
-        .unwrap()
-        .error_for_status()
-        .unwrap()
-        .json()
-        .await
         .unwrap();
-
-    assert_eq!(resp.policy_request.state_before, seeded);
-    assert_eq!(resp.policy_request.state_after, seeded);
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "/evaluate must reject an archived (non-active) wallet, not serve its state"
+    );
     assert!(
         user_store.list_wallets().await.unwrap().is_empty(),
-        "/evaluate must not save predicted state or reactivate archived wallet metadata"
+        "the rejected /evaluate must not reactivate the archived wallet"
     );
 }
 
