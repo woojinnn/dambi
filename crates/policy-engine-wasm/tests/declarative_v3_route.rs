@@ -2491,6 +2491,14 @@ const AAVE_V3_VARIABLE_DEBT_USDC_APPROVE_DELEGATION: &str = include_str!(
 const AAVE_V3_VARIABLE_DEBT_USDC_DELEGATION_WITH_SIG: &str = include_str!(
     "../../../registryV2/manifests/aave/v3/variable-debt-usdc-delegation-with-sig@1.0.0.json"
 );
+const AAVE_SGHO_REDEEM: &str =
+    include_str!("../../../registryV2/manifests/aave/gho/sgho-redeem@1.0.0.json");
+const AAVE_SGHO_WITHDRAW: &str =
+    include_str!("../../../registryV2/manifests/aave/gho/sgho-withdraw@1.0.0.json");
+const AAVE_SGHO_VAULT: &str = "0xe1753f2e00940cc31213dd92013cf019dfe4ca1d";
+const AAVE_GHO: &str = "0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f";
+const AAVE_EXIT_RECEIVER: &str = "0x0000000000000000000000000000000000000b0b";
+const AAVE_EXIT_OWNER: &str = "0x0000000000000000000000000000000000000a01";
 
 #[test]
 fn t6_aave_variable_debt_usdc_approve_delegation() {
@@ -2646,6 +2654,80 @@ fn t6_aave_variable_debt_usdc_delegation_with_sig_typed_data() {
     );
     assert_eq!(body["amount"], "0x2625a0", "{parsed}");
     assert_eq!(body["rate_mode"], "variable", "{parsed}");
+}
+
+#[test]
+fn t6b_aave_sgho_redeem_carries_owner_asset_and_share_denomination() {
+    let install = install_ok(AAVE_SGHO_REDEEM);
+    assert_eq!(install["data"]["bundle_id"], "aave/gho/sgho/redeem@1.0.0");
+
+    let calldata = encode_calldata(
+        "0xba087652",
+        &[
+            DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+            DynSolValue::Address(addr(AAVE_EXIT_RECEIVER)),
+            DynSolValue::Address(addr(AAVE_EXIT_OWNER)),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        AAVE_SGHO_VAULT,
+        "0xba087652",
+        calldata,
+        AAVE_EXIT_OWNER,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "aave/gho/sgho/redeem@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "staking", "{parsed}");
+    assert_eq!(body["action"], "redeem", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aave_savings_gho", "{parsed}");
+    assert_eq!(body["venue"]["vault"], AAVE_SGHO_VAULT, "{parsed}");
+    assert_eq!(body["asset"]["key"]["address"], AAVE_GHO, "{parsed}");
+    assert_eq!(body["amount"], "0xf4240", "{parsed}");
+    assert_eq!(body["amount_denomination"], "shares", "{parsed}");
+    assert_eq!(body["recipient"], AAVE_EXIT_RECEIVER, "{parsed}");
+    assert_eq!(body["owner"], AAVE_EXIT_OWNER, "{parsed}");
+}
+
+#[test]
+fn t6b_aave_sgho_withdraw_carries_owner_asset_and_asset_denomination() {
+    let install = install_ok(AAVE_SGHO_WITHDRAW);
+    assert_eq!(install["data"]["bundle_id"], "aave/gho/sgho/withdraw@1.0.0");
+
+    let calldata = encode_calldata(
+        "0xb460af94",
+        &[
+            DynSolValue::Uint(AlloyU256::from(2_000_000u64), 256),
+            DynSolValue::Address(addr(AAVE_EXIT_RECEIVER)),
+            DynSolValue::Address(addr(AAVE_EXIT_OWNER)),
+        ],
+    );
+    let parsed = route_ok(route_input(
+        1,
+        AAVE_SGHO_VAULT,
+        "0xb460af94",
+        calldata,
+        AAVE_EXIT_OWNER,
+    ));
+    assert_eq!(
+        parsed["data"]["decoder_id"], "aave/gho/sgho/withdraw@1.0.0",
+        "{parsed}"
+    );
+
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "staking", "{parsed}");
+    assert_eq!(body["action"], "redeem", "{parsed}");
+    assert_eq!(body["venue"]["name"], "aave_savings_gho", "{parsed}");
+    assert_eq!(body["venue"]["vault"], AAVE_SGHO_VAULT, "{parsed}");
+    assert_eq!(body["asset"]["key"]["address"], AAVE_GHO, "{parsed}");
+    assert_eq!(body["amount"], "0x1e8480", "{parsed}");
+    assert_eq!(body["amount_denomination"], "assets", "{parsed}");
+    assert_eq!(body["recipient"], AAVE_EXIT_RECEIVER, "{parsed}");
+    assert_eq!(body["owner"], AAVE_EXIT_OWNER, "{parsed}");
 }
 
 // ---------------------------------------------------------------------------

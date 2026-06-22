@@ -25,4 +25,9 @@ describe("extractSelector", () => {
   it("returns null when 0x prefix missing", () => {
     expect(extractSelector("38ed1739")).toBeNull();
   });
+
+  it("returns null when the selector bytes are not hex", () => {
+    expect(extractSelector("0xzzzzzzzzabcd")).toBeNull();
+    expect(extractSelector("0x38ed173?abcd")).toBeNull();
+  });
 });

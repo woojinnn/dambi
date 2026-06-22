@@ -373,7 +373,7 @@ function Reviews({ detail, locale }: { detail: ListingDetail; locale: MarketLoca
       {revOpen && detail.recent_reviews.length > 0 && (
         <div className="rm-rev-list">
           {detail.recent_reviews.map((r) => {
-            const who = r.user_id.slice(0, 6);
+            const who = r.reviewer_handle ?? r.user_id?.slice(0, 6) ?? "reviewer";
             return (
               <div className="rm-rev-item" key={r.id}>
                 <span className="rm-rev-av" style={{ background: "var(--slate-500)" }}>

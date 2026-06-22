@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
   const localStore = new Map<string, unknown>();
   return {
     declarativeInstallV3: vi.fn(),
+    bundleSigDefines: { require: false, pinnedKeySpkiB64: "" },
     // Default: signature gate is a no-op pass, so every existing test exercises
     // the unsigned path unchanged. Fail-shape tests override per-call.
     verifyBundleSignature: vi.fn(
@@ -40,7 +41,7 @@ vi.mock("../wasm-bridge", () => ({
 }));
 
 vi.mock("../adapter-loader/bundle-verify", () => ({
-  readBundleSigDefines: () => ({ require: false, pinnedKeySpkiB64: "" }),
+  readBundleSigDefines: () => mocks.bundleSigDefines,
   verifyBundleSignature: mocks.verifyBundleSignature,
 }));
 
@@ -81,6 +82,8 @@ describe("installDeclarativeBundleV3", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.bundleSigDefines.require = false;
+    mocks.bundleSigDefines.pinnedKeySpkiB64 = "";
     mocks.localStore.clear();
     __resetDeclarativeV3CacheForTest();
     fetchMock.mockReset();
@@ -195,6 +198,37 @@ describe("installDeclarativeBundleV3", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     });
     expect(result).toBeNull();
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
+
+  it("rejects path-unsafe callkey route keys before fetch", async () => {
+    const cases = [
+      {
+        chainId: 1,
+        to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D/../../bundles/evil",
+        selector: "0x18cbafe5",
+      },
+      {
+        chainId: 1,
+        to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        selector: "0x18cbafe5?x=1",
+      },
+      {
+        chainId: 0,
+        to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        selector: "0x18cbafe5",
+      },
+    ];
+
+    for (const key of cases) {
+      const result = await installDeclarativeBundleV3({
+        ...key,
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
+      expect(result).toBeNull();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 
@@ -401,6 +435,96 @@ describe("installDeclarativeBundleV3", () => {
       JSON.stringify(v3Bundle),
     );
   });
+
+  it("re-verifies a persisted storage bundle before rehydrate when signature enforcement is enabled", async () => {
+    const seedKey =
+      "v3:1__0x7a250d5630b4cf539739df2c5dacb4c659f2488d__0x18cbafe5";
+    const seedMeta = {
+      bundleId: v3Bundle.id,
+      decoderId: v3Bundle.id,
+      bundleSha256: "0x" + "b".repeat(64),
+      fetchedAtMs: Date.now() - 60 * 1000,
+    };
+    mocks.localStore.set("registry:adapter-bundles-v3", {
+      schemaVersion: 2,
+      bundles: { [v3Bundle.id]: v3Bundle },
+      callkeys: { [seedKey]: seedMeta },
+    });
+    mocks.bundleSigDefines.require = true;
+    mocks.bundleSigDefines.pinnedKeySpkiB64 = "pinned-key";
+    mocks.verifyBundleSignature.mockResolvedValueOnce({ ok: true });
+    mocks.declarativeInstallV3.mockResolvedValueOnce({
+      decoder_id: v3Bundle.id,
+      bundle_id: v3Bundle.id,
+    });
+
+    const result = await installDeclarativeBundleV3({
+      chainId: 1,
+      to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+      selector: "0x18cbafe5",
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result).not.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.verifyBundleSignature).toHaveBeenCalledWith({
+      bundle: v3Bundle,
+      claimedSha256: seedMeta.bundleSha256,
+      baseUrl: "https://example.invalid",
+      fetchImpl: fetchMock,
+      require: true,
+      pinnedKeySpkiB64: "pinned-key",
+    });
+    expect(mocks.declarativeInstallV3).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not install a persisted storage bundle when required re-verification fails", async () => {
+    const seedKey =
+      "v3:1__0x7a250d5630b4cf539739df2c5dacb4c659f2488d__0x18cbafe5";
+    mocks.localStore.set("registry:adapter-bundles-v3", {
+      schemaVersion: 2,
+      bundles: { [v3Bundle.id]: v3Bundle },
+      callkeys: {
+        [seedKey]: {
+          bundleId: v3Bundle.id,
+          decoderId: v3Bundle.id,
+          bundleSha256: "0x" + "b".repeat(64),
+          fetchedAtMs: Date.now() - 60 * 1000,
+        },
+      },
+    });
+    mocks.bundleSigDefines.require = true;
+    mocks.verifyBundleSignature
+      .mockResolvedValueOnce({ ok: false, reason: "sig_invalid" })
+      .mockResolvedValueOnce({ ok: false, reason: "sig_invalid" });
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          matched: true,
+          bundle_id: v3Bundle.id,
+          manifest_path: "manifests/x",
+          bundle_sha256: "0x" + "a".repeat(64),
+          bundle: v3Bundle,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      installDeclarativeBundleV3({
+        chainId: 1,
+        to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        selector: "0x18cbafe5",
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
+    ).rejects.toMatchObject({ stage: "verify" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mocks.verifyBundleSignature).toHaveBeenCalledTimes(2);
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
 });
 
 describe("installDeclarativeBundleV3BySelector", () => {
@@ -432,6 +556,8 @@ describe("installDeclarativeBundleV3BySelector", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.bundleSigDefines.require = false;
+    mocks.bundleSigDefines.pinnedKeySpkiB64 = "";
     mocks.localStore.clear();
     __resetDeclarativeV3CacheForTest();
     fetchMock.mockReset();
@@ -518,6 +644,26 @@ describe("installDeclarativeBundleV3BySelector", () => {
     ).rejects.toMatchObject({ stage: "parse" });
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
+
+  it("rejects path-unsafe selector route keys before fetch", async () => {
+    const cases = [
+      { chainId: 0, selector: "0xa22cb465" },
+      { chainId: 1, selector: "0xa22cb465?x=1" },
+      { chainId: 1, selector: "../0xa22cb465" },
+      { chainId: 1, selector: "0xzzzzzzzz" },
+    ];
+
+    for (const key of cases) {
+      const result = await installDeclarativeBundleV3BySelector({
+        ...key,
+        baseUrl: "https://example.invalid",
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
+      expect(result).toBeNull();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
 });
 
 describe("bundle signature gate — per-site fail shape", () => {
@@ -559,6 +705,8 @@ describe("bundle signature gate — per-site fail shape", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.bundleSigDefines.require = false;
+    mocks.bundleSigDefines.pinnedKeySpkiB64 = "";
     mocks.localStore.clear();
     __resetDeclarativeV3CacheForTest();
     fetchMock.mockReset();
@@ -605,6 +753,39 @@ describe("bundle signature gate — per-site fail shape", () => {
       },
     );
     expect(r).toEqual({ ok: false, reason: "verify_failed" });
+    expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
+  });
+
+  it("typed-data: rejects path-unsafe route keys before fetch", async () => {
+    const cases = [
+      {
+        chainId: 1,
+        verifyingContract:
+          "0x000000000022d473030f116ddee9f6b43ac78ba3/../../bundles/evil",
+        primaryType: "PermitSingle",
+      },
+      {
+        chainId: 1,
+        verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        primaryType: "PermitSingle?x=1",
+      },
+      {
+        chainId: 1,
+        verifyingContract: "0x000000000022d473030f116ddee9f6b43ac78ba3",
+        primaryType: "PermitWitnessTransferFrom",
+        witnessType: "../ExclusiveDutchOrder",
+      },
+    ];
+
+    for (const key of cases) {
+      await expect(
+        installDeclarativeBundleV3ByTypedData(key, {
+          baseUrl: "https://example.invalid",
+          fetchImpl: fetchMock as unknown as typeof fetch,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "invalid_key" });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.declarativeInstallV3).not.toHaveBeenCalled();
   });
 

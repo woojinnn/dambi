@@ -40,6 +40,7 @@
     "presetProd": "Production",
     "urlPlaceholder": "http://127.0.0.1:8788  (empty = build default)",
     "savedNote": "Saved — applied to the service worker immediately. The dashboard picks it up after a <reload>reload</reload>.",
+    "invalidServerUrl": "Refused to save this server URL. Use the production server, the build-time server, or a loopback development URL.",
     "languageTitle": "Language",
     "languageDesc": "Choose the language for the dashboard UI.",
     "languageKo": "한국어",

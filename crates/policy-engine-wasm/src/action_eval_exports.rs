@@ -7,8 +7,9 @@
 //! 1. [`plan_action_rpc_v2_json`] — lower the action, plan the v2 policy-RPC
 //!    calls, return `{ planned: [...] }` for the host to dispatch.
 //! 2. [`evaluate_action_v2_json`] — lower the action again, replay the host's
-//!    raw results into `context.custom`, then evaluate every matching bundle's
-//!    Cedar policy against its own per-policy schema and aggregate the verdict.
+//!    raw results into each matching bundle's own `context.custom`, then
+//!    evaluate every matching bundle's Cedar policy against its per-policy
+//!    schema and aggregate the verdict.
 //!
 //! The input JSON reuses the trigger export's `{ manifests, action, tx }`
 //! shape, extended with `meta: ActionMeta` (the lowering needs it) and — for
@@ -27,17 +28,18 @@
 //! evaluated by a policy that the plan phase did not enrich. v2 has no
 //! installed engine to hash against — the policies arrive inline as `bundles`.
 //! The equivalent invariant is therefore restored structurally:
-//! [`evaluate_action_v2_json`] PLANS and MATERIALIZES from the **bundles' own
-//! manifests**, never from a host-supplied side list. Every bundle that is
-//! evaluated thus has its required (`optional == false`) calls in the planned
-//! set; a missing result for any of them surfaces as
+//! [`evaluate_action_v2_json`] PLANS from the **bundles' own valid matching
+//! manifests**, never from a host-supplied side list, then MATERIALIZES per
+//! bundle so custom-context fields are isolated by policy schema. Every valid
+//! bundle that is evaluated thus has its required (`optional == false`) calls in
+//! the planned set; a missing result for any of them surfaces as
 //! [`PolicyRpcError::SystemFail`] → a fail-closed `__system__` verdict. The
 //! boundary cannot fail-open by the host passing inconsistent manifest lists,
 //! because there is only one list.
 //!
 //! [`ActionBody`]: policy_transition::action::ActionBody
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -237,7 +239,8 @@ pub fn plan_action_rpc_v2_json(input_json: String) -> String {
             &leverage,
             &input.order_enrichment,
         )?;
-        let planned = plan(&input.manifests, &input.action, &lowered, &input.tx)?;
+        let manifests = matching_valid_manifests(input.manifests.iter(), &input.action, &input.tx)?;
+        let planned = plan(&manifests, &input.action, &lowered, &input.tx)?;
         Ok(PlanActionOutput {
             planned: planned.iter().map(planned_to_dto).collect(),
         })
@@ -249,18 +252,17 @@ pub fn plan_action_rpc_v2_json(input_json: String) -> String {
     }
 }
 
-/// EVALUATE phase: replay the host's raw results into `context.custom`, then
-/// evaluate every matching bundle and aggregate the verdict.
+/// EVALUATE phase: replay the host's raw results into a bundle-local
+/// `context.custom`, then evaluate every matching bundle and aggregate the
+/// verdict.
 ///
 /// Parses [`EvaluateActionInput`], re-lowers the action (to recover the
 /// principal/action/resource uids + base context), plans the calls **from the
-/// bundles' own manifests** so the planned set materialized into the context is
-/// exactly the set the evaluated policies depend on (see the module-level
-/// boundary invariant), writes the host `results` into `context.custom.*`,
-/// then — for each bundle whose [`Trigger`](policy_engine::policy_rpc::Trigger)
-/// matches the action — composes its per-policy schema, builds a single
-/// per-policy engine, and evaluates. The per-bundle verdicts are aggregated by
-/// deny-overrides ([`Verdict::aggregate`]).
+/// bundles' own valid matching manifests** (see the module-level boundary
+/// invariant), then — for each matching bundle — replays that bundle's host
+/// `results` into its own `context.custom.*`, composes its per-policy schema,
+/// builds a single per-policy engine, and evaluates. The per-bundle verdicts
+/// are aggregated by deny-overrides ([`Verdict::aggregate`]).
 ///
 /// A [`PolicyRpcError::SystemFail`] during materialization is translated here
 /// into the synthetic `__system__` `Verdict::Fail` (mirroring v1's `d9_branch`);
@@ -286,30 +288,27 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
             &input.order_enrichment,
         )?;
 
-        // Boundary invariant: PLAN over the bundles' own manifests, never a
-        // host-supplied side list, and apply the same scope-position gate that
-        // evaluation uses. This ties the `SystemFail` gate (driven by the
-        // planned set below) to the exact manifests whose schemas/policies are
-        // evaluated, so a bundle requiring an un-planned RPC call cannot silently
-        // fail-open and a skipped Inner/Outer position cannot false-deny.
-        let manifests: Vec<ManifestV2> = input.bundles.iter().map(|b| b.manifest.clone()).collect();
+        // Boundary invariant: PLAN over the bundles' own valid matching
+        // manifests, never a host-supplied side list, and apply the same
+        // scope-position + trigger gate that evaluation uses. Invalid matching
+        // manifests are deliberately excluded from materialization so the
+        // per-bundle quarantine path below can isolate them to a visible warn
+        // instead of letting one broken bundle blanket-fail global planning.
+        let manifests = matching_valid_manifests(
+            input.bundles.iter().map(|bundle| &bundle.manifest),
+            &input.action,
+            &input.tx,
+        )?;
         let planned = plan(&manifests, &input.action, &lowered, &input.tx)?;
 
-        // Replay the host's raw results into context.custom.* . A required
-        // call that is missing / fails projection surfaces as `SystemFail`,
-        // which we translate to a fail-closed verdict at this boundary
-        // (mirroring v1's `evaluate_policy_rpc_json` D9 branch).
-        let mut context = lowered.context.clone();
-        if let Err(error) =
-            policy_engine::policy_rpc::materialize_v2(&mut context, &planned, &input.results)
-        {
-            if let Some(verdict) = system_fail_verdict(&error) {
-                return Ok(verdict);
-            }
-            return Err(EngineErrorDto::new("projection_failed", error.to_string()));
-        }
-
-        evaluate_matching_bundles(&input.bundles, &input.action, &input.tx, &lowered, &context)
+        evaluate_matching_bundles(
+            &input.bundles,
+            &input.action,
+            &input.tx,
+            &lowered,
+            &planned,
+            &input.results,
+        )
     })();
 
     let dto = match verdict {
@@ -319,17 +318,17 @@ pub fn evaluate_action_v2_json(input_json: String) -> String {
     Envelope::ok(EvaluateActionOutput { verdict: dto }).to_json()
 }
 
-/// DEBUG (diagnostic-only): lower the action and return the exact Cedar entity
-/// uids + context the engine evaluates — base lowering plus the host `results`
+/// DEBUG (diagnostic-only): lower the action and return Cedar entity uids plus a
+/// best-effort materialized context — base lowering plus the host `results`
 /// replayed into `context.custom.*`.
 ///
 /// Reuses the [`evaluate_action_v2_json`] input shape, so the host can pass the
 /// same `{ action, meta, tx, bundles, results }` and see the camelCase,
 /// cedarschema-shaped context (e.g. `direction.amountIn`, `slippageBp`,
-/// `tokenIn`) that Cedar policies actually read — the artifact that otherwise
-/// lives only inside the engine and is never surfaced. Best-effort: a
-/// plan/materialize fault is swallowed so the base lowered context is still
-/// returned. Has NO effect on the verdict path.
+/// `tokenIn`) that Cedar policies read. For multiple bundles, the verdict path
+/// materializes custom fields per bundle; this debug export returns a single
+/// merged best-effort context only. A plan/materialize fault is swallowed so the
+/// base lowered context is still returned. Has NO effect on the verdict path.
 #[wasm_bindgen]
 #[must_use]
 pub fn debug_lowered_context_v2_json(input_json: String) -> String {
@@ -348,7 +347,11 @@ pub fn debug_lowered_context_v2_json(input_json: String) -> String {
             &leverage,
             &input.order_enrichment,
         )?;
-        let manifests: Vec<ManifestV2> = input.bundles.iter().map(|b| b.manifest.clone()).collect();
+        let manifests = matching_valid_manifests(
+            input.bundles.iter().map(|bundle| &bundle.manifest),
+            &input.action,
+            &input.tx,
+        )?;
         let mut context = lowered.context.clone();
         // Best-effort replay so `context.custom.*` shows when enrichment is wired;
         // ignore a plan/materialize fault and surface the base lowered context.
@@ -405,12 +408,49 @@ fn plan(
         .map_err(|error| EngineErrorDto::new("plan_failed", error.to_string()))
 }
 
-/// Rebuild the EXACT materialized context the evaluate path feeds Cedar:
-/// lower the action, plan from the bundles' manifests, replay `results` into
-/// `context.custom.*`. This MIRRORS `evaluate_action_v2_json`'s
-/// lower→plan→materialize sequence (which inlines its own copy — the two are NOT
-/// shared and must be kept in sync) so a diagnosis probe sees the identical
-/// environment as the verdict.
+/// Runtime materialization only uses matching manifests that are structurally
+/// valid. Matching invalid manifests are still evaluated later and quarantined
+/// per bundle; filtering them here prevents one broken policy bundle from
+/// turning the whole action into a global `__engine::plan_failed` verdict before
+/// the quarantine boundary runs.
+fn matching_valid_manifests<'a, I>(
+    manifests: I,
+    action: &ActionBody,
+    tx: &TxInput,
+) -> Result<Vec<ManifestV2>, EngineErrorDto>
+where
+    I: IntoIterator<Item = &'a ManifestV2>,
+{
+    let view = action.view();
+    let tx_view = tx_view(tx);
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for manifest in manifests {
+        if !trigger_scope_matches_position(manifest.trigger.scope, &view)
+            || !policy_engine::policy_rpc::evaluate_trigger(&manifest.trigger, &view, &tx_view)
+            || manifest.validate().is_err()
+        {
+            continue;
+        }
+        if !seen.insert(manifest.id.as_str()) {
+            return Err(EngineErrorDto::new(
+                "duplicate_manifest_id",
+                format!(
+                    "matching policy-rpc manifest id `{}` appears more than once",
+                    manifest.id
+                ),
+            ));
+        }
+        out.push(manifest.clone());
+    }
+    Ok(out)
+}
+
+/// Rebuild a diagnostic materialized context: lower the action, plan from the
+/// bundles' valid matching manifests, replay `results` into `context.custom.*`.
+/// This mirrors the verdict path for single-bundle probes; for multi-bundle
+/// inputs, verdict evaluation materializes custom fields per bundle while this
+/// helper returns one merged best-effort context.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn materialized_context(
     action: &ActionBody,
@@ -423,7 +463,7 @@ pub(crate) fn materialized_context(
     enrichment: &OrderEnrichment,
 ) -> Result<(LoweredAction, Value), EngineErrorDto> {
     let lowered = lower(action, meta, tx, decimals, leverage, enrichment)?;
-    let manifests: Vec<ManifestV2> = bundles.iter().map(|b| b.manifest.clone()).collect();
+    let manifests = matching_valid_manifests(bundles.iter().map(|b| &b.manifest), action, tx)?;
     let planned = plan(&manifests, action, &lowered, tx)?;
     let mut context = lowered.context.clone();
     if let Err(error) = policy_engine::policy_rpc::materialize_v2(&mut context, &planned, results) {
@@ -473,7 +513,8 @@ fn evaluate_matching_bundles(
     action: &ActionBody,
     tx: &TxInput,
     lowered: &LoweredAction,
-    context: &Value,
+    planned: &[PlannedCallV2],
+    results: &BTreeMap<String, Value>,
 ) -> Result<Verdict, EngineErrorDto> {
     let view = action.view();
     let tx_view = tx_view(tx);
@@ -499,12 +540,13 @@ fn evaluate_matching_bundles(
         // discarding every already-collected healthy verdict AND skipping every
         // later bundle (this is the F-SCHEMA-1 / F-REQRPC amplification: one
         // policy typo → tag-wide outage / false denials). Now each bundle is
-        // evaluated in isolation: a fault becomes a warn-closed
+        // evaluated in isolation: a bundle-local fault becomes a warn-closed
         // `__engine::quarantine::<kind>` verdict (auditable, surfaced, but not a
         // hard block), and the healthy bundles still evaluate and drive the
         // aggregate — deny-overrides is preserved, so a healthy deny still Fails
-        // the action. (Genuine WHOLE-engine faults — lower / plan / materialize,
-        // handled ABOVE this loop — remain fail-closed via `?`.)
+        // the action. Global lower/plan faults are handled ABOVE this loop and
+        // remain fail-closed via `?`; missing required bundle RPC results still
+        // become `__system__` Fail verdicts below.
         let outcome: Result<Option<Verdict>, EngineErrorDto> = (|| {
             if !trigger_scope_matches_position(bundle.manifest.trigger.scope, &view) {
                 return Ok(None);
@@ -521,6 +563,24 @@ fn evaluate_matching_bundles(
                 .validate()
                 .map_err(|error| EngineErrorDto::new("invalid_manifest", error.to_string()))?;
 
+            // Materialize `context.custom` per bundle. The schema is per-policy,
+            // so two healthy bundles may reuse the same custom field name without
+            // colliding; required RPC misses still fail closed as `__system__`.
+            let bundle_planned: Vec<PlannedCallV2> = planned
+                .iter()
+                .filter(|call| call.manifest_id == bundle.manifest.id)
+                .cloned()
+                .collect();
+            let mut context = lowered.context.clone();
+            if let Err(error) =
+                policy_engine::policy_rpc::materialize_v2(&mut context, &bundle_planned, results)
+            {
+                if let Some(verdict) = system_fail_verdict(&error) {
+                    return Ok(Some(verdict));
+                }
+                return Err(EngineErrorDto::new("projection_failed", error.to_string()));
+            }
+
             let schema = compose_per_policy(&bundle.manifest)
                 .map_err(|error| EngineErrorDto::new("schema_failed", error.to_string()))?;
             let engine = PolicyEngine::build_from_per_policy(&[(bundle.policy.clone(), schema)])
@@ -531,7 +591,7 @@ fn evaluate_matching_bundles(
                     &lowered.action_uid,
                     &lowered.resource,
                     &entities,
-                    context,
+                    &context,
                 )
                 .map_err(|error| EngineErrorDto::new("policy", error.to_string()))?;
             Ok(Some(verdict))
@@ -805,6 +865,12 @@ pub(crate) mod tests {
             }],
             "custom_context": { "fields": { "totalInputUsd": "decimal" } }
         })
+    }
+
+    fn swap_manifest_with_id(id: &str) -> Value {
+        let mut manifest = swap_manifest();
+        manifest["id"] = json!(id);
+        manifest
     }
 
     /// A Cedar policy that warns when `context.custom.totalInputUsd` exceeds
@@ -1088,6 +1154,168 @@ pub(crate) mod tests {
             "pass",
             "invalid non-matching bundle must not fail or warn an unrelated swap: {out}"
         );
+    }
+
+    /// An invalid bundle whose trigger DOES match the action must still be
+    /// isolated by the per-bundle quarantine path. Global planning must not
+    /// fail the entire verdict before `evaluate_matching_bundles` can quarantine
+    /// the broken bundle.
+    #[test]
+    fn evaluate_action_v2_invalid_matching_manifest_quarantined_to_warn() {
+        let (body, meta) = swap_sample();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [{
+                    "policy": "permit(principal, action, resource);",
+                    "manifest": {
+                        "id": "invalid-matching-duplicate-rpc",
+                        "schema_version": 2,
+                        "trigger": { "where": { "action.tag": { "eq": "swap" } } },
+                        "policy_rpc": [
+                            { "id": "dup", "method": "oracle.usd_value", "outputs": [] },
+                            { "id": "dup", "method": "oracle.usd_value", "outputs": [] }
+                        ]
+                    }
+                }],
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["kind"], "warn",
+            "invalid matching manifest must quarantine to warn, not blanket fail planning: {parsed}"
+        );
+        let pid = parsed["data"]["verdict"]["matched"][0]["policy_id"]
+            .as_str()
+            .unwrap_or_default();
+        assert_eq!(
+            pid, "__engine::quarantine::invalid_manifest",
+            "invalid matching manifest must surface as per-bundle quarantine: {parsed}"
+        );
+    }
+
+    /// The extension calls PLAN before EVALUATE. Runtime planning must therefore
+    /// skip invalid matching manifests instead of throwing, while still planning
+    /// required RPC calls from healthy siblings.
+    #[test]
+    fn plan_action_rpc_v2_skips_invalid_matching_manifest_preserves_healthy_sibling() {
+        let (body, meta) = swap_sample();
+        let out = plan_action_rpc_v2_json(
+            json!({
+                "manifests": [
+                    {
+                        "id": "invalid-matching-duplicate-rpc",
+                        "schema_version": 2,
+                        "trigger": { "where": { "action.tag": { "eq": "swap" } } },
+                        "policy_rpc": [
+                            { "id": "dup", "method": "oracle.usd_value", "outputs": [] },
+                            { "id": "dup", "method": "oracle.usd_value", "outputs": [] }
+                        ]
+                    },
+                    swap_manifest()
+                ],
+                "action": body,
+                "meta": meta,
+                "tx": tx()
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        let planned = parsed["data"]["planned"].as_array().unwrap();
+        assert_eq!(
+            planned.len(),
+            1,
+            "invalid matching manifest must not block healthy sibling planning: {parsed}"
+        );
+        assert_eq!(
+            planned[0]["call_id"], "large-swap-usd-warning::total-input-usd",
+            "{parsed}"
+        );
+    }
+
+    /// `call_id` is `<manifest_id>::<spec_id>`, so matching valid manifests must
+    /// have unique ids before host dispatch builds the result map.
+    #[test]
+    fn plan_action_rpc_v2_rejects_duplicate_matching_manifest_ids() {
+        let (body, meta) = swap_sample();
+        let out = plan_action_rpc_v2_json(
+            json!({
+                "manifests": [swap_manifest(), swap_manifest()],
+                "action": body,
+                "meta": meta,
+                "tx": tx()
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], false, "{parsed}");
+        assert_eq!(parsed["error"]["kind"], "duplicate_manifest_id", "{parsed}");
+    }
+
+    #[test]
+    fn evaluate_action_v2_duplicate_matching_manifest_ids_fail_closed() {
+        let (body, meta) = swap_sample();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [
+                    { "policy": warn_policy(), "manifest": swap_manifest() },
+                    { "policy": "permit(principal, action, resource);", "manifest": swap_manifest() }
+                ],
+                "results": {}
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(parsed["data"]["verdict"]["kind"], "fail", "{parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["matched"][0]["policy_id"], "__engine::duplicate_manifest_id",
+            "{parsed}"
+        );
+    }
+
+    /// `context.custom` is a per-policy schema extension. Two healthy matching
+    /// bundles may legitimately use the same custom field name; materialization
+    /// must isolate them per bundle instead of treating the shared field as a
+    /// global overwrite fault.
+    #[test]
+    fn evaluate_action_v2_custom_context_field_collision_is_per_bundle() {
+        let (body, meta) = swap_sample();
+        let out = evaluate_action_v2_json(
+            json!({
+                "action": body, "meta": meta, "tx": tx(),
+                "bundles": [
+                    { "policy": warn_policy(), "manifest": swap_manifest() },
+                    {
+                        "policy": "permit(principal, action, resource);",
+                        "manifest": swap_manifest_with_id("large-swap-usd-warning-copy")
+                    }
+                ],
+                "results": {
+                    "large-swap-usd-warning::total-input-usd": { "usd": "1500.0000" },
+                    "large-swap-usd-warning-copy::total-input-usd": { "usd": "1.0000" }
+                }
+            })
+            .to_string(),
+        );
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["ok"], true, "{parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["kind"], "warn",
+            "shared custom field names across healthy bundles must not blanket-fail projection: {parsed}"
+        );
+        let ids: Vec<&str> = parsed["data"]["verdict"]["matched"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|matched| matched["policy_id"].as_str())
+            .collect();
+        assert!(ids.contains(&"large-input"), "{parsed}");
     }
 
     /// A broken bundle must NOT poison a sibling HEALTHY policy that passes. The

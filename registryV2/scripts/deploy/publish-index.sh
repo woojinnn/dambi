@@ -14,22 +14,49 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 rv3_activate_and_guard
 
+pinned_bundle_public_key() {
+  if [[ -n "${PINNED_BUNDLE_PUBLIC_KEY:-}" ]]; then
+    printf '%s\n' "${PINNED_BUNDLE_PUBLIC_KEY}"
+    return
+  fi
+  local env_example="${REPO_ROOT}/browser-extension/.env.example"
+  if [[ -f "${env_example}" ]]; then
+    sed -nE 's/^PINNED_BUNDLE_PUBLIC_KEY=(.+)$/\1/p' "${env_example}" | head -1
+  fi
+}
+
 cd "${RV2_DIR}"
 echo "=== build-index (registryV2 → index/) ==="
-npm install --no-audit --no-fund --silent
+npm ci --ignore-scripts --no-audit --no-fund --silent
 # --strict-callkeys: abort the publish on a (chain,to,selector) collision rather
 # than shipping a last-wins-resolved index that could route a callkey to the
 # wrong adapter (a benign decoder shadowing a stricter one). Green today, so this
 # is zero-cost now and a guard against a future colliding manifest going live.
 npx tsx scripts/build-index.ts --strict-callkeys
 
-# Sign every unique bundle (detached signatures/<sha>.sig). In CI this runs in
-# KMS mode (BUNDLE_SIGNING_MODE=kms + KMS_KEY_NAME, set by registry-publish.yml);
-# run locally it uses the dev key. Idempotent — only newly-built shas are signed.
+# Sign every unique bundle (detached signatures/<sha>.sig). Publish defaults to
+# KMS mode even for local operator runs; dev-key signing must be explicit because
+# this script uploads to the live bucket by default.
 # The extension fetches signatures/<bundle_sha256>.sig and verifies it against the
 # pinned key before installing the decoder.
 echo "=== sign bundles (signatures/<sha>.sig) ==="
-KMS_KEY_NAME="${KMS_KEY_NAME}" npx tsx scripts/sign-bundles.ts
+BUNDLE_SIGNING_MODE="${BUNDLE_SIGNING_MODE:-kms}"
+if [[ "${BUNDLE_SIGNING_MODE}" == "kms" ]]; then
+  PINNED="$(pinned_bundle_public_key)"
+  if [[ -z "${PINNED}" ]]; then
+    echo "ABORT: PINNED_BUNDLE_PUBLIC_KEY is empty; refusing to publish unverifiable signatures." >&2
+    echo "  Set PINNED_BUNDLE_PUBLIC_KEY or update browser-extension/.env.example first." >&2
+    exit 1
+  fi
+  PINNED_BUNDLE_PUBLIC_KEY="${PINNED}" BUNDLE_SIGNING_MODE=kms KMS_KEY_NAME="${KMS_KEY_NAME}" npx tsx scripts/sign-bundles.ts
+else
+  if [[ "${ALLOW_LOCAL_BUNDLE_SIGNING:-0}" != "1" ]]; then
+    echo "ABORT: local bundle signing is disabled for publish-index.sh." >&2
+    echo "  Use BUNDLE_SIGNING_MODE=kms, or set ALLOW_LOCAL_BUNDLE_SIGNING=1 for an explicit non-prod/dev publish." >&2
+    exit 1
+  fi
+  BUNDLE_SIGNING_MODE=local npx tsx scripts/sign-bundles.ts
+fi
 
 # Served prefixes only (build/dev artefacts surface/·cache/ excluded — cost + exposure).
 # Must match the proxy path allowlist (registry-api/src/validation.ts): index / tokens

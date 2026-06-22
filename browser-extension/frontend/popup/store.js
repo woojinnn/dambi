@@ -118,6 +118,7 @@
     loud: { desk: "all", modal: "both", ribbon: true, sound: true },
   };
   const SETTINGS_DEFAULT = { preset: "std", ...SETTINGS_PRESETS.std };
+  const MAX_WALLET_LABEL_CHARS = 80;
 
 
   /* ---------- 계정별 로컬 프로필 (지갑·별칭·핀·주소별 정책) ----------
@@ -255,14 +256,16 @@
     }
 
     // 서버 지갑 → 표시 지갑. 닉네임은 서버 label, 핀은 로컬 보조.
-    const wallets = summaries.map((s) => {
-      const a = (s.address || "").toLowerCase();
+    const wallets = summaries.flatMap((s) => {
+      const summary = normalizeWalletSummary(s);
+      if (!summary) return [];
+      const a = summary.address;
       const local = localByAddr.get(a);
-      return {
+      return [{
         address: a,
-        nickname: s.label || "",
+        nickname: summary.label,
         pinned: !!(local && local.pinned),
-      };
+      }];
     });
 
     // ps2 라이브러리 — 패키지 카드/베이스라인 목록의 원천. 실패 시 빈 라이브러리.
@@ -417,13 +420,32 @@
 
   /* ---------- 주소 유틸 ---------- */
   function shortAddr(a) {
-    return a ? a.slice(0, 6) + "…" + a.slice(-4) : "";
+    const addr = normalizeAddress(a);
+    return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : "";
   }
   function isAddressShape(a) {
     return /^0x[0-9a-fA-F]{40}$/.test((a || "").trim());
   }
+  function normalizeAddress(a) {
+    const addr = String(a == null ? "" : a).trim().toLowerCase();
+    return isAddressShape(addr) ? addr : null;
+  }
+  function normalizeWalletLabel(label) {
+    if (typeof label !== "string") return "";
+    const trimmed = label.trim();
+    if (!trimmed) return "";
+    return [...trimmed].slice(0, MAX_WALLET_LABEL_CHARS).join("");
+  }
+  function normalizeWalletSummary(summary) {
+    const address = normalizeAddress(summary && summary.address);
+    if (!address) return null;
+    return {
+      address,
+      label: normalizeWalletLabel(summary.label),
+    };
+  }
   function checksumWarn(a) {
-    const body = a.slice(2);
+    const body = String(a || "").trim().slice(2);
     const mixed = /[a-f]/.test(body) && /[A-F]/.test(body);
     return mixed
       ? null

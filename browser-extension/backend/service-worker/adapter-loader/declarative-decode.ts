@@ -15,5 +15,7 @@ export function extractSelector(calldataHex: string | undefined): string | null 
   if (!calldataHex || !calldataHex.startsWith("0x")) return null;
   // 2 ("0x") + 8 = 10 chars minimum
   if (calldataHex.length < 10) return null;
-  return ("0x" + calldataHex.slice(2, 10)).toLowerCase();
+  const selector = "0x" + calldataHex.slice(2, 10);
+  if (!/^0x[0-9a-fA-F]{8}$/.test(selector)) return null;
+  return selector.toLowerCase();
 }

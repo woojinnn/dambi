@@ -8,8 +8,9 @@
 use serde_json::{json, Map, Value};
 
 use policy_state::pending::{AssetCommitment, PendingKind, PendingStatus};
-use policy_state::primitives::U256;
+use policy_state::primitives::{Address, ChainId, U256};
 use policy_state::{HlAccount, PositionKind, WalletState};
+use std::str::FromStr;
 
 /// The reserved HL account position id — mirrors the reducer's
 /// `effect/hyperliquid_core/common.rs::HL_ACCOUNT_ID` (which is `pub(super)`
@@ -42,6 +43,15 @@ fn parse_hex_u256(v: &Value) -> Option<U256> {
     U256::from_str_radix(s.trim_start_matches("0x"), 16).ok()
 }
 
+fn parse_u256_string(v: &Value) -> Option<U256> {
+    let s = v.as_str()?;
+    if let Some(hex) = s.strip_prefix("0x") {
+        U256::from_str_radix(hex, 16).ok()
+    } else {
+        U256::from_str_radix(s, 10).ok()
+    }
+}
+
 /// Lowercase hex address from a token-ish param in any shape the planner emits: a
 /// bare address string, `{ address }`, or a lowered token ref
 /// `{ key: { standard, chain, address } }` (what `$.action.token` resolves to —
@@ -53,6 +63,72 @@ fn token_param_address(v: &Value) -> Option<String> {
     v.get("key")
         .and_then(|k| k.get("address"))
         .and_then(asset_hex)
+}
+
+fn address_param(v: &Value) -> Option<Address> {
+    Address::from_str(&asset_hex(v)?).ok()
+}
+
+/// `approval.allowance`: read the synced ERC20 allowance for `(chain, asset,
+/// spender)` from the loaded wallet state. Returns `None` when the state has no
+/// explicit allowance row; absence is ambiguous between zero allowance and
+/// unsynced approval inventory, so callers should keep this optional unless they
+/// intentionally want missing data to fail closed.
+pub(crate) fn approval_allowance(state: &WalletState, params: &Value) -> Option<Value> {
+    let chain = ChainId::new(params.get("chain_id").and_then(Value::as_str)?);
+    let asset = params.get("asset").and_then(token_param_address)?;
+    let spender = params.get("spender").and_then(address_param)?;
+    let token = Address::from_str(&asset).ok()?;
+    let allowance = state.approvals.allowance(&(chain, token), &spender)?;
+    let requested = params.get("requested_amount").and_then(parse_u256_string);
+    let mut out = Map::new();
+    out.insert(
+        "allowance".to_owned(),
+        json!(format!("{:#x}", allowance.amount)),
+    );
+    out.insert(
+        "hasExisting".to_owned(),
+        json!(allowance.amount != U256::ZERO),
+    );
+    out.insert("isUnlimited".to_owned(), json!(allowance.is_unlimited));
+    if let Some(requested) = requested {
+        out.insert(
+            "coversRequestedAmount".to_owned(),
+            json!(allowance.amount >= requested),
+        );
+    }
+    Some(Value::Object(out))
+}
+
+/// `approval.cover_inputs`: pure helper for policies that already have allowance
+/// and requested-amount facts in their params.
+pub(crate) fn approval_cover_inputs(params: &Value) -> Option<Value> {
+    if let Some(v) = params
+        .get("allowances_cover_inputs")
+        .and_then(Value::as_bool)
+    {
+        return Some(json!({ "allowancesCoverInputs": v }));
+    }
+    let allowance = params.get("allowance").and_then(parse_u256_string)?;
+    let requested = params.get("requested_amount").and_then(parse_u256_string)?;
+    Some(json!({ "allowancesCoverInputs": allowance >= requested }))
+}
+
+/// `portfolio.balance`: read the synced fungible balance for `(chain, asset)` and
+/// return it in the same lowercase `0x` U256 representation used by `ActionBody`
+/// lowering. Missing holdings stay absent rather than fabricating `0x0`.
+pub(crate) fn portfolio_balance(state: &WalletState, params: &Value) -> Option<Value> {
+    let chain = params.get("chain_id").and_then(Value::as_str)?;
+    let asset = params.get("asset").and_then(token_param_address)?;
+    let matches = |k: &policy_state::token::TokenKey| -> bool {
+        k.chain().as_str() == chain
+            && k.contract().map(|a| format!("{a:#x}")).as_deref() == Some(asset.as_str())
+    };
+    let balance = state
+        .tokens
+        .values()
+        .find_map(|h| matches(&h.key).then(|| h.balance.as_fungible()).flatten())?;
+    Some(json!({ "balance": format!("{balance:#x}") }))
 }
 
 /// `intent.pending_cap_over_balance`: do the wallet's already-open signed orders
@@ -427,6 +503,7 @@ pub(crate) fn input_fraction_bps(state: &WalletState, params: &Value) -> Option<
 mod tests {
     use std::str::FromStr;
 
+    use policy_state::approval::AllowanceSpec;
     use serde_json::Value;
 
     use policy_state::pending::{
@@ -607,6 +684,71 @@ mod tests {
         }
         let st = state(vec![holding(SELL, 100)], vec![p]);
         assert_eq!(over(&st, &params(SELL, 5)), Some(true));
+    }
+
+    #[test]
+    fn portfolio_balance_returns_lowered_hex_string() {
+        let st = state(vec![holding(SELL, 100)], vec![]);
+        let out = super::portfolio_balance(
+            &st,
+            &serde_json::json!({
+                "chain_id": "eip155:1",
+                "asset": { "key": { "standard": "erc20", "chain": "eip155:1", "address": SELL } }
+            }),
+        )
+        .unwrap();
+        assert_eq!(out, serde_json::json!({ "balance": "0x64" }));
+    }
+
+    #[test]
+    fn approval_allowance_reads_synced_erc20_allowance() {
+        let mut st = state(vec![], vec![]);
+        st.approvals
+            .erc20
+            .entry((
+                ChainId::ethereum_mainnet(),
+                Address::from_str(SELL).unwrap(),
+            ))
+            .or_default()
+            .insert(
+                Address::from_str(OTHER).unwrap(),
+                AllowanceSpec::new(U256::from(500u64), Time::from_unix(0)),
+            );
+        let out = super::approval_allowance(
+            &st,
+            &serde_json::json!({
+                "chain_id": "eip155:1",
+                "asset": { "key": { "standard": "erc20", "chain": "eip155:1", "address": SELL } },
+                "spender": OTHER,
+                "requested_amount": "0x100"
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            serde_json::json!({
+                "allowance": "0x1f4",
+                "hasExisting": true,
+                "isUnlimited": false,
+                "coversRequestedAmount": true
+            })
+        );
+    }
+
+    #[test]
+    fn approval_cover_inputs_compares_hex_or_decimal_amounts() {
+        assert_eq!(
+            super::approval_cover_inputs(
+                &serde_json::json!({ "allowance": "0x100", "requested_amount": "255" })
+            ),
+            Some(serde_json::json!({ "allowancesCoverInputs": true }))
+        );
+        assert_eq!(
+            super::approval_cover_inputs(
+                &serde_json::json!({ "allowance": "0xff", "requested_amount": "0x100" })
+            ),
+            Some(serde_json::json!({ "allowancesCoverInputs": false }))
+        );
     }
 
     // --- intent.near_duplicate_pending ---

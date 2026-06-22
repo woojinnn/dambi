@@ -17,13 +17,14 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import { i18n } from "../../../i18n";
-import { blocksToText } from "../../../cedar";
+import { blocksToText, fetchMethodCatalog } from "../../../cedar";
 import type { PolicyIR } from "../../../cedar/blocks/ir";
 import { pathByNode } from "../../../cedar/diagnosis/path";
 import { naturalCondition, withJosa } from "../../../cedar/nl";
 import { useAddressBook, shortAddress, type AddressEntry } from "../../../hooks/useAddressBook";
 import { PolicyDiagram } from "../../../cedar/diagram/PolicyDiagram";
 import { AddressInput, AddressSetInput } from "./AddressPicker";
+import { SetInput } from "./SetInput";
 import {
   emptyFormModel,
   fieldsForTrigger,
@@ -57,7 +58,7 @@ import {
 } from "../../../editor-v9/manifest-gen";
 
 import { CustomFieldModal } from "./CustomFieldModal";
-import { methodDerivedFields } from "./custom-field-methods";
+import { methodDerivedFields, servedMethodSpecs, type MethodSpec } from "./custom-field-methods";
 import { FieldCombobox, ROLE_ORDER, roleColor, roleLabel, typeChip } from "./FieldCombobox";
 
 import "./policy-form.css";
@@ -81,6 +82,12 @@ export interface PolicyFormPaneProps {
     model: FormModel;
     manifest: unknown;
     manifestOverridden: boolean;
+    /** The merged enrichment registry this form used to generate `manifest`
+     *  (built-in fields + manifest-derived + modal-created user fields). The
+     *  parent must reuse it when it regenerates the manifest at save from the
+     *  concretized IR — otherwise a modal-created field that previews fine here
+     *  is rejected at save with `noBinding`. */
+    registry: EnrichmentRegistry;
   }) => void;
   /** 유효성 변화 보고 — Cedar 변환 실패나 형식 오류(잘못된 decimal 등)를
    *  부모(저장 버튼)가 알 수 있게 한다. 값 시트에서 "빨간불 + 되돌리기"에 쓰임. */
@@ -351,6 +358,23 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
     userFieldsFromManifest(initialManifest, actionTagOf((initialModel ?? emptyFormModel()).trigger)),
   );
   const [fieldModalOpen, setFieldModalOpen] = useState(false);
+  // 서버가 실제로 서빙하는 메서드 카탈로그 — 한 번 가져와 모달 메서드 드롭다운에
+  // 쓴다(드롭다운=서빙 메서드, 미서빙 method 입력 시 경고). 브리지 불가 시 null →
+  // 모달은 정적 목록으로 degrade.
+  const [servedCatalog, setServedCatalog] = useState<MethodSpec[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    void fetchMethodCatalog()
+      .then((methods) => {
+        if (live && methods) setServedCatalog(servedMethodSpecs(methods));
+      })
+      .catch(() => {
+        /* 브리지 없음/타임아웃 — 모달이 정적 목록으로 degrade */
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const baseFields = useMemo(() => fieldsForTrigger(model.trigger), [model.trigger]);
   // 이 액션에 적용 가능한 실구현(real) 메서드를 보강 필드로 전개. 폼·LLM·서버가
@@ -573,6 +597,7 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
             model,
             manifest: effectiveManifest,
             manifestOverridden: manifestText !== null,
+            registry,
           });
         })
         .catch((err: unknown) => {
@@ -584,7 +609,7 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [ir, model, effectiveManifest, manifestText]);
+  }, [ir, model, effectiveManifest, manifestText, registry]);
 
   const patch = (next: Partial<FormModel>) => setModel((m) => ({ ...m, ...next }));
 
@@ -826,6 +851,7 @@ export function PolicyFormPane({ initialModel, initialManifest, valuesOnly = fal
           existing={registry}
           actionTag={actionTagOf(model.trigger)}
           fields={fields}
+          catalog={servedCatalog}
           onCreate={({ name, field }) => setUserFields((prev) => ({ ...prev, [name]: field }))}
           onClose={() => setFieldModalOpen(false)}
         />
@@ -1901,14 +1927,15 @@ function ValueInput({
           />
         );
       }
+      // Plain string set (e.g. market symbols). SetInput keeps a local draft
+      // buffer so a separator typed at the end survives the keystroke — without
+      // it, a trailing comma normalized itself away (see SetInput).
       return (
-        <input
-          className="pf-val wide"
-          value={value.values.join(", ")}
-          onChange={(e) =>
-            onChange({ kind: "set", values: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })
-          }
+        <SetInput
+          values={value.values}
+          invalid={invalid}
           placeholder={t("form.setPlaceholder")}
+          onChange={(values) => onChange({ kind: "set", values })}
         />
       );
     }

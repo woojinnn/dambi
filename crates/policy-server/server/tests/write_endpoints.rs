@@ -23,6 +23,7 @@ use policy_state::{
 };
 use policy_sync::{HyperliquidConfig, Orchestrator, SyncConfig};
 use serde_json::{json, Value};
+use sqlx_core::query::query;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -115,9 +116,13 @@ fn hyperliquid_info_response(req: &Value, withdrawable: &str) -> Value {
             "assetPositions": [],
             "time": 1_710_000_000_123_u64
         }),
-        "frontendOpenOrders" | "extraAgents" | "perpDexs" | "delegations" | "userVaultEquities" => {
-            json!([])
-        }
+        "frontendOpenOrders"
+        | "extraAgents"
+        | "perpDexs"
+        | "delegations"
+        | "userVaultEquities"
+        | "userFills"
+        | "userNonFundingLedgerUpdates" => json!([]),
         "spotClearinghouseState" => json!({
             "balances": [],
             "tokenToAvailableAfterMaintenance": []
@@ -149,6 +154,23 @@ fn hyperliquid_perp_usdc(state: &WalletState) -> Option<Decimal> {
             PositionKind::HyperliquidAccount(account) => account.perp_usdc.clone(),
             _ => None,
         })
+}
+
+async fn overwrite_wallet_chains(
+    store: &policy_db::stores::PostgresWalletStore,
+    user_id: &str,
+    address: Address,
+    chains: Vec<ChainId>,
+) {
+    let chains_json = serde_json::to_value(chains).unwrap();
+    let result = query("UPDATE wallets SET chains = $1 WHERE user_id = $2 AND address = $3")
+        .bind(chains_json)
+        .bind(user_id)
+        .bind(format!("{address:#x}"))
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(result.rows_affected(), 1);
 }
 
 async fn spawn_server_with_hyperliquid(
@@ -247,6 +269,45 @@ async fn post_wallets_rejects_new_wallet_over_active_quota() {
         store.list_wallets().await.unwrap().len(),
         128,
         "quota rejection must not create the overflow wallet"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn post_wallets_reactivates_archived_wallet_with_requested_chains() {
+    let (addr, mu, token, user_id) = spawn_server().await;
+    let store = mu.for_user(&user_id).unwrap();
+    let wallet_addr = Address::from_str("0x000000000000000000000000000000000000a01c").unwrap();
+    let old_id = WalletId::new(wallet_addr, [ChainId::ethereum_mainnet()]);
+    store.save(&WalletState::new(old_id)).await.unwrap();
+    assert!(
+        store
+            .archive_wallet(&format!("{wallet_addr:#x}"), 1_700_000_000)
+            .await
+            .unwrap(),
+        "setup should archive the wallet before re-add"
+    );
+
+    let body = serde_json::json!({
+        "address": format!("{wallet_addr:#x}"),
+        "chains": ["eip155:42161"],
+        "label": "restored",
+    });
+    let resp = reqwest::Client::new()
+        .post(format!("http://{addr}/wallets"))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let wallets = store.list_wallets().await.unwrap();
+    assert_eq!(wallets.len(), 1);
+    assert_eq!(
+        wallets[0],
+        WalletId::new(wallet_addr, [ChainId::new("eip155:42161")]),
+        "re-adding a soft-deleted wallet must honor the requested chain set",
     );
 }
 
@@ -357,6 +418,40 @@ async fn sync_known_wallet_returns_204() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn sync_preserves_active_metadata_chains_over_stale_state_json() {
+    let (addr, mu, token, user_id) = spawn_server().await;
+    let store = mu.for_user(&user_id).unwrap();
+    let wallet_addr = Address::from_str("0x000000000000000000000000000000000000a01c").unwrap();
+    let stale_id = WalletId::new(wallet_addr, [ChainId::ethereum_mainnet()]);
+    let active_id = WalletId::new(wallet_addr, [ChainId::new("eip155:42161")]);
+    store.save(&WalletState::new(stale_id)).await.unwrap();
+    overwrite_wallet_chains(
+        &store,
+        &user_id,
+        wallet_addr,
+        vec![ChainId::new("eip155:42161")],
+    )
+    .await;
+
+    let addr_lower = format!("{wallet_addr:#x}");
+    let resp = reqwest::Client::new()
+        .post(format!("http://{addr}/wallets/{addr_lower}/sync"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 204);
+
+    let wallets = store.list_wallets().await.unwrap();
+    assert_eq!(
+        wallets,
+        vec![active_id],
+        "sync must not persist stale state_json wallet_id chains back into active metadata",
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
 async fn sync_known_wallet_runs_hyperliquid_account_sync() {
     let (addr, mu, token, user_id) = spawn_server_with_hyperliquid("456.78").await;
     let store = mu.for_user(&user_id).unwrap();
@@ -433,6 +528,53 @@ async fn post_permit_records_pending_and_is_idempotent() {
     assert_eq!(resp2.status(), 200);
     let state2 = store.load(&id).await.unwrap();
     assert_eq!(state2.pending.len(), 1, "re-POST must not duplicate");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn post_permit_preserves_active_metadata_chains_over_stale_state_json() {
+    let (addr, mu, token, user_id) = spawn_server().await;
+    let store = mu.for_user(&user_id).unwrap();
+    let wallet_addr = Address::from_str("0x000000000000000000000000000000000000a01c").unwrap();
+    let stale_id = WalletId::new(wallet_addr, [ChainId::ethereum_mainnet()]);
+    let active_id = WalletId::new(wallet_addr, [ChainId::new("eip155:42161")]);
+    store.save(&WalletState::new(stale_id)).await.unwrap();
+    overwrite_wallet_chains(
+        &store,
+        &user_id,
+        wallet_addr,
+        vec![ChainId::new("eip155:42161")],
+    )
+    .await;
+
+    let addr_lower = format!("{wallet_addr:#x}");
+    let body = json!({
+        "kind": "eip2612",
+        "token": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+        "spender": "0x00000000000000000000000000000000deadbeef",
+        "amount": "1000000000",
+        "deadline": 1_700_003_600u64,
+        "nonce": "7",
+        "chain_id": "eip155:42161",
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{addr}/wallets/{addr_lower}/permits"))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    let wallets = store.list_wallets().await.unwrap();
+    assert_eq!(
+        wallets,
+        vec![active_id.clone()],
+        "permit ingest must not persist stale state_json wallet_id chains back into active metadata",
+    );
+    let state = store.load(&active_id).await.unwrap();
+    assert_eq!(state.pending.len(), 1, "permit recorded as pending");
 }
 
 /// `POST /wallets/:addr/permits` for a wallet this user does not track → 404
@@ -595,5 +737,57 @@ async fn evaluate_serves_oracle_usd_value_from_synced_price() {
         parsed["policyRequest"]["results"]["swap-input-usd-cap-deny::inputUsd"],
         json!({ "usd": "100.0100" }),
         "server should serve oracle.usd_value from synced price; got: {parsed}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL PostgreSQL integration database"]
+async fn evaluate_uses_active_metadata_wallet_id_over_stale_state_json() {
+    let (addr, mu, token, user_id) = spawn_server().await;
+    let store = mu.for_user(&user_id).unwrap();
+    let wallet_addr = Address::from_str("0x000000000000000000000000000000000000a01c").unwrap();
+    let stale_id = WalletId::new(wallet_addr, [ChainId::ethereum_mainnet()]);
+    let active_id = WalletId::new(wallet_addr, [ChainId::new("eip155:42161")]);
+
+    store.save(&WalletState::new(stale_id)).await.unwrap();
+    overwrite_wallet_chains(
+        &store,
+        &user_id,
+        wallet_addr,
+        vec![ChainId::new("eip155:42161")],
+    )
+    .await;
+
+    let eval_ctx = EvalContext::new(
+        ChainId::new("eip155:42161"),
+        Time::from_unix(1_700_000_000),
+        RequestKind::Transaction,
+    );
+    let body = json!({
+        "wallet_id": active_id,
+        "envelopes": [],
+        "eval_context": eval_ctx,
+        "call_specs": [],
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!("http://{addr}/evaluate"))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "evaluate should accept active metadata");
+
+    let parsed: Value = resp.json().await.unwrap();
+    assert_eq!(
+        parsed["policyRequest"]["state_before"]["wallet_id"]["chains"],
+        json!(["eip155:42161"]),
+        "evaluate must use active wallet metadata over stale state_json wallet_id; got: {parsed}"
+    );
+    assert_eq!(
+        parsed["policyRequest"]["state_after"]["wallet_id"]["chains"],
+        json!(["eip155:42161"]),
+        "predicted state must keep the canonical active wallet id; got: {parsed}"
     );
 }

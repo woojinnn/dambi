@@ -264,7 +264,10 @@ function LibraryDirectory(props) {
                         <span className="pol-nm">{d.displayName}</span>
                         <span className={`pol-desc${d.doc && d.doc.definition ? "" : " add"}`}>{d.doc && d.doc.definition ? d.doc.definition : "설명 추가"}</span>
                       </span>
-                      {sevLabel(d.skeleton.model.severity) && <span className={`pol-sev ${d.skeleton.model.severity}`}>{sevLabel(d.skeleton.model.severity)}</span>}
+                      {(() => {
+                        const sev = Cedar.defSeverity(d);
+                        return sevLabel(sev) && <span className={`pol-sev ${sev}`}>{sevLabel(sev)}</span>;
+                      })()}
                       <span className="ld-src">{SOURCE_LABEL[d.source]}</span>
                       {mode === "manage" && (
                         <>

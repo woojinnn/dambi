@@ -21,7 +21,7 @@ import {
   type StoreSnapshot,
 } from "../../../server-api/policy-store";
 import { listWallets } from "../../../server-api/wallets";
-import { buildDefPayload } from "./save-def";
+import { buildDefPayload, buildWalletScopePlan } from "./save-def";
 import {
   ScopeInstallModal,
   type LibraryApply,
@@ -42,7 +42,7 @@ import { holesFromIr } from "./save-def";
 import { Topbar } from "../../../shell/Topbar";
 
 import { stampAnnotations } from "../../../editor-v9/annotations";
-import { generateManifest } from "../../../editor-v9/manifest-gen";
+import { generateManifest, type EnrichmentRegistry } from "../../../editor-v9/manifest-gen";
 import type { PolicyIR } from "../../../cedar/blocks";
 
 import { severityFromCedar } from "../policy-meta";
@@ -56,6 +56,7 @@ import { catLabel, catStyle } from "./categories";
 import { CatIcon, ShieldIcon, WarnIcon } from "./icons";
 import { blocksToText, textToBlocks } from "../../../cedar";
 import { blocksToEst, concretizeIr } from "../../../cedar/blocks";
+import { concretizeDefIr } from "../../../cedar/binding-ir";
 import { llmDraftPolicy } from "../../../server-api/llm-draft";
 import { PolicyFormPane } from "./PolicyFormPane";
 import {
@@ -133,17 +134,12 @@ export function EditorDetailPageV2() {
   const bindingCtx = storedDef && walletAddr && binding ? { address: walletAddr, binding } : null;
 
   // 폼/텍스트의 기준 IR: 바인딩 모드면 그 지갑의 파라미터를 적용한 구체 IR.
+  // 병합은 concretizeDefIr 하나로 통일 — history 다이어그램과 같은 경로를 써야
+  // 둘이 어긋나지 않는다(어긋나서 history가 stale 기본값을 그렸던 버그).
   const baseIr = useMemo(() => {
     if (!storedDef) return null;
-    const ir = storedDef.skeleton.ir as PolicyIR;
-    if (!bindingCtx) return ir;
-    const live = new Set(storedDef.holes.map((h) => h.name));
-    const merged = Object.fromEntries(
-      Object.entries({ ...storedDef.defaults.params, ...bindingCtx.binding.params }).filter(
-        ([k]) => live.has(k),
-      ),
-    );
-    return concretizeIr(ir, merged as never);
+    if (!bindingCtx) return storedDef.skeleton.ir as PolicyIR;
+    return concretizeDefIr(storedDef, bindingCtx.binding);
   }, [storedDef, bindingCtx]);
 
   // def 뼈대(BlockIR)는 텍스트가 아니므로 Cedar 탭용 텍스트는 비동기로 렌더한다.
@@ -274,6 +270,13 @@ function EditorBody({
   // A hand-edited manifest from the form, wrapped so `null` = no override
   // (auto-generate) is distinct from an override whose value is `undefined`.
   const [manifestOverride, setManifestOverride] = useState<{ value: unknown } | null>(null);
+  // The merged enrichment registry the form pane used (built-in + manifest-derived
+  // + modal-created user fields). Save regenerates the manifest from the
+  // concretized IR, so it must reuse this registry — otherwise a modal-created
+  // custom field that previews fine is rejected at save with `noBinding`.
+  // `undefined` (form never mounted, e.g. pure Cedar-tab authoring) falls back to
+  // the built-in registry inside generateManifest.
+  const [formRegistry, setFormRegistry] = useState<EnrichmentRegistry | undefined>(undefined);
   const [tab, setTab] = useState<Tab>(() => policy.initialTab ?? defaultTab(policy.method));
   const [publishOpen, setPublishOpen] = useState(false);
   // Manifest computed at publish time so an UNSAVED policy still ships its
@@ -413,7 +416,7 @@ function EditorBody({
     } else {
       // manifest 생성은 홀을 기본값으로 굳힌 구체 IR로 — 평가 시 렌더는 바인딩
       // 파라미터를 채운 IR을 따로 쓴다.
-      const gen = generateManifest(concretizeIr(finalIr), undefined, { id: policy.id, severity });
+      const gen = generateManifest(concretizeIr(finalIr), formRegistry, { id: policy.id, severity });
       if (gen.errors.length > 0) {
         throw new Error(gen.errors.map((e) => e.message).join("\n"));
       }
@@ -596,37 +599,10 @@ function EditorBody({
           applyToNewWallets: false,
           doc: docPayload(),
         });
+        const plan = buildWalletScopePlan(def, a, snap, SCOPE_DEF_KEY);
         await putDef(def);
-
-        for (const address of a.addresses) {
-          const addr = address.toLowerCase();
-          const w = snap?.wallets.byAddress[addr];
-          for (const key of a.walletPackages[address] ?? []) {
-            let pkgId: string;
-            if (key === "__new__") {
-              const nm = (a.walletNewName[address] ?? "").trim();
-              const existing = Object.values(w?.packages ?? {}).find((q) => q.displayName === nm);
-              if (existing) {
-                pkgId = existing.id;
-              } else {
-                pkgId = `pkg::${crypto.randomUUID()}`;
-                await putWalletPackage({ address: addr, pkg: { id: pkgId, displayName: nm } });
-              }
-            } else {
-              pkgId = key;
-            }
-            const ck = `${address}|${key}`;
-            const params = a.paramsByCombo[ck]?.[SCOPE_DEF_KEY] ?? {};
-            const sev = a.severityByCombo[ck]?.[SCOPE_DEF_KEY];
-            await bindDef({
-              defId: def.id,
-              packageId: pkgId,
-              addresses: [addr],
-              ...(Object.keys(params).length ? { params } : {}),
-              ...(sev ? { severity: sev } : {}),
-            });
-          }
-        }
+        for (const pkg of plan.packages) await putWalletPackage(pkg);
+        for (const binding of plan.bindings) await bindDef(binding);
         return def.id;
       }
 
@@ -1011,10 +987,13 @@ function EditorBody({
                     onSeverityChange: (s: "deny" | "warn") => setSeverity(s),
                   }
                 : {})}
-              onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden }) => {
+              onChange={({ cedarText: c, ir: nextIr, model, manifest, manifestOverridden, registry }) => {
                 setCedarText(c);
                 setIr(nextIr);
                 setLastModel(model);
+                // Reuse the form's merged registry when save regenerates the
+                // manifest (so modal-created custom fields survive save).
+                setFormRegistry(registry);
                 // Keep the header severity in sync so save stamps it correctly.
                 // 단 바인딩 모드(값 전용 폼)에선 헤더 셀렉트가 severity override 를
                 // 소유하므로 폼이 def 선언값으로 덮어쓰지 않게 둔다.

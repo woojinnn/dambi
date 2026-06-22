@@ -45,7 +45,7 @@ worker:
       memory: 512Mi
 
 runtime:
-  rustLog: info,policy_server=debug,policy_sync=info
+  rustLog: info,policy_sync=info
   requireSyncConfig: true
   requireRedis: false
   requireOAuthConfig: false

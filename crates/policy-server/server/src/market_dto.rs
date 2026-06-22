@@ -79,7 +79,7 @@ pub struct ListListingsQuery {
     pub q: Option<String>,
     #[serde(default)]
     pub sort: ListingSort,
-    /// Cap at 100 server-side regardless of caller value.
+    /// Capped server-side regardless of caller value.
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -91,6 +91,9 @@ pub struct ListingSummary {
     pub id: Uuid,
     pub slug: String,
     pub kind: ListingKind,
+    /// Internal stable user id. Used server-side for ownership/filtering, but
+    /// not serialized to public marketplace clients.
+    #[serde(skip_serializing)]
     pub publisher_id: String,
     pub publisher_tier: PublisherTier,
     pub display_name: I18nText,
@@ -119,9 +122,8 @@ pub struct ListingSummary {
     /// True when the currently-authenticated user has at least one row in
     /// `market_installs` for this listing.
     pub is_installed: bool,
-    /// Publisher's email, joined from `users` on read. The frontend renders
-    /// the local part (before `@`) as a display name for non-official
-    /// publishers; official listings keep their tier badge.
+    /// Public publisher handle. This is intentionally not the raw OAuth/user id.
+    /// The legacy field name is kept for frontend compatibility.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publisher_email: Option<String>,
 }
@@ -284,7 +286,10 @@ pub struct CreateInstallReq {
 pub struct Review {
     pub id: Uuid,
     pub listing_id: Uuid,
+    /// Internal stable user id. Not serialized to public marketplace clients.
+    #[serde(skip_serializing)]
     pub user_id: String,
+    pub reviewer_handle: String,
     pub version: String,
     pub rating: i16,
     pub body: I18nText,
@@ -328,13 +333,18 @@ pub struct MarketReport {
     pub listing_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_id: Option<Uuid>,
+    #[serde(skip_serializing)]
     pub reporter_id: String,
+    pub reporter_handle: String,
     pub reason: ReportReason,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
     pub status: ReportStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing)]
     pub resolved_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_by_handle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_at: Option<i64>,
     pub created_at: i64,

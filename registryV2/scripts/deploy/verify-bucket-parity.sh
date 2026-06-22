@@ -14,13 +14,20 @@
 #   bash registryV2/scripts/deploy/verify-bucket-parity.sh
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1   # registryV2/
-PROD_BUCKET="${PROD_BUCKET:-dambi-registry-v3-seoul}"
+PROD_BUCKET="${PROD_BUCKET:-${BUCKET:-dambi-registry-v3-seoul}}"
 POC_BUCKET="${POC_BUCKET:-scopeball-registry-v3-seoul}"
 RC=0
 
 echo "=== (1) signature coverage: local index shas ⊆ gs://${PROD_BUCKET}/signatures/ ==="
-npx tsx -e 'import {collectBundleShas} from "./scripts/sign-bundles.ts"; for (const s of collectBundleShas(".")) console.log(s)' 2>/dev/null \
-  | sort -u > /tmp/vbp_local_shas.txt
+if ! npx tsx -e 'import {collectBundleShas} from "./scripts/sign-bundles.ts"; for (const s of collectBundleShas(".")) console.log(s)' \
+  | sort -u > /tmp/vbp_local_shas.txt; then
+  echo "  FAIL: could not collect local bundle shas from the built registry index"
+  exit 1
+fi
+if [ ! -s /tmp/vbp_local_shas.txt ]; then
+  echo "  FAIL: collected zero local bundle shas; run build-index before this gate"
+  exit 1
+fi
 gcloud storage ls --recursive "gs://${PROD_BUCKET}/signatures/**" 2>/dev/null \
   | sed -nE 's#.*/(0x[0-9a-f]{64})\.sig$#\1#p' | sort -u > /tmp/vbp_prod_sig_shas.txt
 LOCAL=$(wc -l < /tmp/vbp_local_shas.txt | tr -d ' ')
@@ -54,7 +61,8 @@ if [ "${SKIP_FAITHFULNESS:-0}" != "1" ]; then
       echo "  faithfulness OK ✓ (byte-identical copy)"
     fi
   else
-    echo "  SKIP: could not list one of the buckets (crc32c field empty or access denied)."
+    echo "  FAIL: could not list one of the buckets (crc32c field empty or access denied)."
+    RC=1
   fi
 fi
 

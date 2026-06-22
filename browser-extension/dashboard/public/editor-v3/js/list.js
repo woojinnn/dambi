@@ -184,7 +184,10 @@ function LibraryDirectory(props) {
           },
           /* @__PURE__ */ React.createElement("span", { className: "pol-ic", style: famStyle(d.cat).tile, title: catLabel(cat) }, /* @__PURE__ */ React.createElement(CatIcon, { cat: d.cat })),
           /* @__PURE__ */ React.createElement("span", { className: "pol-main" }, /* @__PURE__ */ React.createElement("span", { className: "pol-nm" }, d.displayName), /* @__PURE__ */ React.createElement("span", { className: `pol-desc${d.doc && d.doc.definition ? "" : " add"}` }, d.doc && d.doc.definition ? d.doc.definition : "\uC124\uBA85 \uCD94\uAC00")),
-          sevLabel(d.skeleton.model.severity) && /* @__PURE__ */ React.createElement("span", { className: `pol-sev ${d.skeleton.model.severity}` }, sevLabel(d.skeleton.model.severity)),
+          (() => {
+            const sev = Cedar.defSeverity(d);
+            return sevLabel(sev) && /* @__PURE__ */ React.createElement("span", { className: `pol-sev ${sev}` }, sevLabel(sev));
+          })(),
           /* @__PURE__ */ React.createElement("span", { className: "ld-src" }, SOURCE_LABEL[d.source]),
           mode === "manage" && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "ld-meta" }, usage > 0 ? `\uC9C0\uAC11 ${usage}` : ""), /* @__PURE__ */ React.createElement(
             "button",

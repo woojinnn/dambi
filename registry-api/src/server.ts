@@ -31,6 +31,8 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createHash } from "node:crypto";
+import canonicalize from "canonicalize";
 import type { RegistryApiConfig } from "./config.js";
 import type { ObjectReader, ObjectResult } from "./gcs-client.js";
 import { ObjectCache, type CacheValue } from "./cache.js";
@@ -494,6 +496,27 @@ function appendIdSuffix(id: string, suffix: string): string {
   return `${id.slice(0, at)}/${clean}${id.slice(at)}`;
 }
 
+function bundleSha256(bundle: unknown): string {
+  const canonical = canonicalize(bundle);
+  if (typeof canonical !== "string") {
+    throw new Error("bundle canonicalization failed");
+  }
+  return "0x" + createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+function assertBundleSha256(
+  bundle: unknown,
+  claimedSha256: string,
+  objectName: string,
+): void {
+  const recomputed = bundleSha256(bundle);
+  if (recomputed !== claimedSha256.toLowerCase()) {
+    throw new Error(
+      `${objectName}: materialized bundle hash mismatch: claimed=${claimedSha256} recomputed=${recomputed}`,
+    );
+  }
+}
+
 export function materializeSourceBundle(
   template: unknown,
   contextDoc: SourceContextDocument,
@@ -567,6 +590,7 @@ async function materializeIfRefIndex(
     "bundle",
   );
   if (entry.context_ref === undefined) {
+    assertBundleSha256(template, entry.bundle_sha256, objectName);
     const response = {
       matched: true,
       bundle_id: entry.bundle_id,
@@ -586,6 +610,7 @@ async function materializeIfRefIndex(
     "context",
   );
   const bundle = materializeSourceBundle(template, contextDoc);
+  assertBundleSha256(bundle, entry.bundle_sha256, objectName);
   const response = {
     matched: true,
     bundle_id: bundle.id,
@@ -720,17 +745,46 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+function redactSensitiveLogText(value: string): string {
+  return value
+    .replace(
+      /([A-Za-z0-9_.-]*(?:secret|token|password|api[_-]?key|authorization)[A-Za-z0-9_.-]*\s*[:=]\s*)([^,\s"'}]+)/gi,
+      "[REDACTED]",
+    )
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]");
+}
+
+function isSensitiveLogKey(key: string): boolean {
+  return /(secret|token|password|api[_-]?key|authorization)/i.test(key);
+}
+
+function redactSensitiveLogValue(value: unknown): unknown {
+  if (typeof value === "string") return redactSensitiveLogText(value);
+  if (Array.isArray(value)) return value.map((v) => redactSensitiveLogValue(v));
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      out[key] = isSensitiveLogKey(key)
+        ? "[REDACTED]"
+        : redactSensitiveLogValue(nested);
+    }
+    return out;
+  }
+  return value;
+}
+
 function logServerError(
   code: "internal_error" | "ref_materialization_failed" | "upstream_error",
   error: unknown,
   fields: Record<string, unknown> = {},
 ): void {
+  const redactedFields = redactSensitiveLogValue(fields);
   console.error(
     JSON.stringify({
       event: "registry_api_error",
       code,
-      message: errorMessage(error),
-      ...fields,
+      message: redactSensitiveLogText(errorMessage(error)),
+      ...(isRecord(redactedFields) ? redactedFields : {}),
     }),
   );
 }

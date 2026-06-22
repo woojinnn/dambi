@@ -169,3 +169,76 @@ pub(crate) mod test_support {
             .unwrap_or_else(|e| panic!("{tag} context must conform: {e:?}"));
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod lifecycle_tests {
+    use policy_state::primitives::U256;
+    use policy_transition::action::governance::{
+        GovernanceAction, GovernanceProposalRefAction, GovernanceRedeemCancellationFeeAction,
+    };
+    use policy_transition::action::ActionBody;
+
+    use super::test_support::{
+        aave_governance_v3, aave_voting_machine, assert_conforms, onchain_meta,
+    };
+
+    fn proposal_ref() -> GovernanceProposalRefAction {
+        GovernanceProposalRefAction {
+            venue: aave_governance_v3(),
+            proposal_id: U256::from(42u64),
+        }
+    }
+
+    fn voting_machine_proposal_ref() -> GovernanceProposalRefAction {
+        GovernanceProposalRefAction {
+            venue: aave_voting_machine(),
+            proposal_id: U256::from(42u64),
+        }
+    }
+
+    #[test]
+    fn governance_core_lifecycle_lowerings_conform_to_schema() {
+        for (tag, action) in [
+            ("cancel", GovernanceAction::Cancel(proposal_ref())),
+            (
+                "activate_voting",
+                GovernanceAction::ActivateVoting(proposal_ref()),
+            ),
+            ("queue", GovernanceAction::Queue(proposal_ref())),
+            ("execute", GovernanceAction::Execute(proposal_ref())),
+        ] {
+            let body = ActionBody::Governance(action);
+            assert_conforms(tag, &body, &onchain_meta());
+        }
+    }
+
+    #[test]
+    fn governance_voting_machine_lifecycle_lowerings_conform_to_schema() {
+        for (tag, action) in [
+            (
+                "start_vote",
+                GovernanceAction::StartVote(voting_machine_proposal_ref()),
+            ),
+            (
+                "close_vote",
+                GovernanceAction::CloseVote(voting_machine_proposal_ref()),
+            ),
+        ] {
+            let body = ActionBody::Governance(action);
+            assert_conforms(tag, &body, &onchain_meta());
+        }
+    }
+
+    #[test]
+    fn governance_redeem_cancellation_fee_lowering_conforms_to_schema() {
+        let body = ActionBody::Governance(GovernanceAction::RedeemCancellationFee(
+            GovernanceRedeemCancellationFeeAction {
+                venue: aave_governance_v3(),
+                proposal_id: U256::from(42u64),
+            },
+        ));
+
+        assert_conforms("redeem_cancellation_fee", &body, &onchain_meta());
+    }
+}

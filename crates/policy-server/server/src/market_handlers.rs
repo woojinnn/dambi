@@ -7,14 +7,18 @@
 //! Stats (install count, average rating) are computed on read inside the
 //! store layer's `LATERAL` join, not denormalized on `market_listings`.
 
+use std::collections::HashSet;
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use cedar_policy::PolicySet;
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use policy_db::market::{
@@ -25,12 +29,14 @@ use policy_db::market::{
     get_version as db_get_version, install_activity_since as db_install_activity_since,
     list_listings as db_list_listings, list_reports as db_list_reports,
     list_reports_by_reporter as db_list_reports_by_reporter, list_reviews as db_list_reviews,
-    list_watches as db_list_watches, record_install as db_record_install, unwatch as db_unwatch,
+    list_watches as db_list_watches,
+    record_install_and_get_version as db_record_install_and_get_version, unwatch as db_unwatch,
     update_report_status as db_update_report_status, upsert_review as db_upsert_review,
     validate_semver, vote_helpful as db_vote_helpful, watch as db_watch, ListingFilter, ListingRow,
     ListingSort as DbListingSort, NewListing, ReportRow, ReviewRow, VersionBody, VersionRow,
-    LIST_LIMIT_DEFAULT,
+    LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX,
 };
+use policy_db::DbError;
 
 use crate::app::AppState;
 use crate::auth::AuthUser;
@@ -51,6 +57,8 @@ const MARKET_MANIFEST_MAX_BYTES: usize = 128 * 1024;
 const MARKET_CEDAR_TEXT_MAX_BYTES: usize = 256 * 1024;
 const MARKET_POLICY_TREE_MAX_BYTES: usize = 256 * 1024;
 const MARKET_SET_MEMBERS_MAX: usize = 100;
+const MARKET_QUERY_TEXT_MAX_CHARS: usize = 120;
+const MARKET_LIST_OFFSET_MAX: i64 = 10_000;
 
 // ---------------------------------------------------------------------------
 // Read endpoints
@@ -62,22 +70,45 @@ pub async fn list_listings(
     Extension(user): Extension<AuthUser>,
     Query(q): Query<ListListingsQuery>,
 ) -> Response {
+    let domain = match normalize_optional_query_text("domain", q.domain) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let category = match normalize_optional_query_text("category", q.category) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let publisher_id = match normalize_optional_query_text("publisher_id", q.publisher_id) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let search = match normalize_optional_query_text("q", q.q) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+    let offset = match normalize_market_list_offset(q.offset) {
+        Ok(v) => v,
+        Err(msg) => return (StatusCode::BAD_REQUEST, msg).into_response(),
+    };
+
     let pool = state.global_db.pool();
     let filter = ListingFilter {
         kind: q.kind.map(|k| serde_kind(k).to_owned()),
-        domain: q.domain,
-        category: q.category,
-        publisher_id: q.publisher_id,
+        domain,
+        category,
+        publisher_id,
         publisher_tier: q.publisher_tier.map(|t| serde_tier(t).to_owned()),
-        q: q.q,
+        q: search,
     };
     let sort = match q.sort {
         ListingSort::Popular => DbListingSort::Popular,
         ListingSort::New => DbListingSort::New,
         ListingSort::Rating => DbListingSort::Rating,
     };
-    let limit = q.limit.unwrap_or(LIST_LIMIT_DEFAULT);
-    let offset = q.offset.unwrap_or(0);
+    let limit = q
+        .limit
+        .unwrap_or(LIST_LIMIT_DEFAULT)
+        .clamp(1, LIST_LIMIT_MAX);
 
     match db_list_listings(pool, &filter, sort, limit, offset, Some(&user.user_id)).await {
         Ok(rows) => {
@@ -375,6 +406,9 @@ pub async fn create_version(
 
     match db_create_version(pool, listing_id, &req.version, body, now_secs()).await {
         Ok(v) => Json(version_row_to_dto(v)).into_response(),
+        Err(DbError::NotFound { .. }) => {
+            (StatusCode::NOT_FOUND, "listing not found").into_response()
+        }
         Err(e) => {
             let msg = e.to_string();
             if let Some(resp) = db_constraint_bad_request(&msg) {
@@ -396,22 +430,19 @@ pub async fn create_install(
     Json(req): Json<CreateInstallReq>,
 ) -> Response {
     let pool = state.global_db.pool();
-    let version = match db_get_version(pool, listing_id, &req.version).await {
+    let version = match db_record_install_and_get_version(
+        pool,
+        listing_id,
+        &req.version,
+        &user.user_id,
+        now_secs(),
+    )
+    .await
+    {
         Ok(Some(v)) => v,
         Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
         Err(e) => return server_error(&e.to_string()),
     };
-    // Recording the install event (popularity counts) is non-critical telemetry,
-    // but `None` means the version is no longer a published install target.
-    // Never fail the actual download for write errors such as transient DB/FK
-    // failures, but do not return a body after the listing was hidden.
-    match db_record_install(pool, listing_id, &req.version, &user.user_id, now_secs()).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
-        Err(e) => {
-            tracing::warn!(error = %e, user_id = %user.user_id, "market install record failed; returning body anyway");
-        }
-    }
     Json(version_row_to_dto(version)).into_response()
 }
 
@@ -445,6 +476,7 @@ pub async fn create_review(
     {
         Ok(Some(r)) => Json(review_row_to_dto(&r)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "published version not found").into_response(),
+        Err(DbError::Forbidden { reason }) => (StatusCode::FORBIDDEN, reason).into_response(),
         Err(e) => server_error(&e.to_string()),
     }
 }
@@ -540,6 +572,7 @@ pub async fn vote_helpful(
     match db_vote_helpful(state.global_db.pool(), review_id, &user.user_id, now_secs()).await {
         Ok(Some(inserted)) => Json(serde_json::json!({ "newly_voted": inserted })).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "review not found").into_response(),
+        Err(DbError::Forbidden { reason }) => (StatusCode::FORBIDDEN, reason).into_response(),
         Err(e) => server_error(&e.to_string()),
     }
 }
@@ -576,10 +609,10 @@ pub async fn unwatch(
     }
 }
 
-/// `DELETE /market/listings/id/:id` — remove a listing you published. Only the
-/// publisher can delete their own listing; child rows (versions, installs,
-/// reviews, watches) cascade. Returns 404 when the listing doesn't exist or
-/// belongs to someone else.
+/// `DELETE /market/listings/id/:id` — hide a listing you published. Only the
+/// publisher can archive their own published listing; child rows are retained
+/// for audit and moderation history. Returns 404 when the listing doesn't exist,
+/// is no longer published, or belongs to someone else.
 pub async fn delete_listing(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -679,6 +712,10 @@ fn validate_policy_body(
         return Err("policy version must not carry members[]".into());
     }
     validate_required_bytes("cedar_text", cedar_text, MARKET_CEDAR_TEXT_MAX_BYTES)?;
+    validate_cedar_text(
+        "cedar_text",
+        cedar_text.expect("required cedar_text already checked"),
+    )?;
     validate_optional_json_size("manifest", manifest, MARKET_MANIFEST_MAX_BYTES)?;
     validate_optional_bytes("policy_tree", policy_tree, MARKET_POLICY_TREE_MAX_BYTES)?;
     Ok(())
@@ -714,8 +751,12 @@ fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
             "set version members[] must contain at most {MARKET_SET_MEMBERS_MAX} entries"
         ));
     }
+    let mut slugs = HashSet::with_capacity(members.len());
     for (idx, member) in members.iter().enumerate() {
         validate_slug(&format!("members[{idx}].slug"), &member.slug)?;
+        if !slugs.insert(member.slug.as_str()) {
+            return Err(format!("members[{idx}].slug must be unique"));
+        }
         validate_required_chars(
             &format!("members[{idx}].display_name"),
             Some(member.display_name.as_str()),
@@ -726,6 +767,10 @@ fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
             Some(member.cedar_text.as_str()),
             MARKET_CEDAR_TEXT_MAX_BYTES,
         )?;
+        validate_cedar_text(
+            &format!("members[{idx}].cedar_text"),
+            member.cedar_text.as_str(),
+        )?;
         validate_optional_json_size(
             &format!("members[{idx}].manifest"),
             member.manifest.as_ref(),
@@ -733,6 +778,12 @@ fn validate_set_members(members: Option<&[SetMember]>) -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+fn validate_cedar_text(field: &str, raw: &str) -> Result<(), String> {
+    PolicySet::from_str(raw)
+        .map(|_| ())
+        .map_err(|_| format!("{field} must be valid Cedar policy text"))
 }
 
 fn validate_slug(field: &str, raw: &str) -> Result<(), String> {
@@ -779,6 +830,33 @@ fn validate_optional_short_text(field: &str, raw: Option<&str>) -> Result<(), St
         Some(raw) => validate_required_chars(field, Some(raw), MARKET_SHORT_TEXT_MAX_CHARS),
         None => Ok(()),
     }
+}
+
+fn normalize_optional_query_text(
+    field: &str,
+    raw: Option<String>,
+) -> Result<Option<String>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() > MARKET_QUERY_TEXT_MAX_CHARS {
+        return Err(format!(
+            "{field} must be at most {MARKET_QUERY_TEXT_MAX_CHARS} characters"
+        ));
+    }
+    Ok(Some(value.to_owned()))
+}
+
+fn normalize_market_list_offset(offset: Option<i64>) -> Result<i64, String> {
+    let offset = offset.unwrap_or(0).max(0);
+    if offset > MARKET_LIST_OFFSET_MAX {
+        return Err(format!("offset must be at most {MARKET_LIST_OFFSET_MAX}"));
+    }
+    Ok(offset)
 }
 
 fn validate_intents(intents: Option<&[String]>) -> Result<(), String> {
@@ -933,8 +1011,16 @@ fn listing_row_to_summary(r: &ListingRow) -> ListingSummary {
         rating_avg: r.rating_avg,
         rating_count: r.rating_count,
         is_installed: r.is_installed,
-        publisher_email: r.publisher_email.clone(),
+        publisher_email: r
+            .publisher_email
+            .as_deref()
+            .map(|_| public_user_handle("publisher", &r.publisher_id)),
     }
+}
+
+fn public_user_handle(prefix: &str, user_id: &str) -> String {
+    let digest = Sha256::digest(user_id.as_bytes());
+    format!("{prefix}-{}", hex::encode(&digest[..6]))
 }
 
 fn version_row_to_dto(v: VersionRow) -> ListingVersion {
@@ -958,6 +1044,7 @@ fn review_row_to_dto(r: &ReviewRow) -> Review {
         id: r.id,
         listing_id: r.listing_id,
         user_id: r.user_id.clone(),
+        reviewer_handle: public_user_handle("reviewer", &r.user_id),
         version: r.version.clone(),
         rating: r.rating,
         body: json_to_i18n(&r.body),
@@ -972,10 +1059,15 @@ fn report_row_to_dto(r: &ReportRow) -> MarketReport {
         listing_id: r.listing_id,
         review_id: r.review_id,
         reporter_id: r.reporter_id.clone(),
+        reporter_handle: public_user_handle("reporter", &r.reporter_id),
         reason: parse_report_reason(&r.reason),
         details: r.details.clone(),
         status: parse_report_status(&r.status),
         resolved_by: r.resolved_by.clone(),
+        resolved_by_handle: r
+            .resolved_by
+            .as_deref()
+            .map(|user_id| public_user_handle("moderator", user_id)),
         resolved_at: r.resolved_at,
         created_at: r.created_at,
     }
@@ -1114,7 +1206,8 @@ fn db_constraint_bad_request(msg: &str) -> Option<Response> {
     if !is_db_constraint_error(msg) {
         return None;
     }
-    tracing::warn!(error = %msg, "market request violated database constraint");
+    let safe_msg = crate::logging::redact_sensitive_log_text(msg);
+    tracing::warn!(error = %safe_msg, "market request violated database constraint");
     Some(
         (
             StatusCode::BAD_REQUEST,
@@ -1132,10 +1225,12 @@ fn is_db_constraint_error(msg: &str) -> bool {
         || msg.contains("check constraint")
         || msg.contains("violates check constraint")
         || msg.contains("forked_from listing must reference a published listing")
+        || msg.contains("new version must be strictly greater than current_version")
 }
 
 fn server_error(msg: &str) -> Response {
-    tracing::error!(error = %msg, "market handler internal error");
+    let safe_msg = crate::logging::redact_sensitive_log_text(msg);
+    tracing::error!(error = %safe_msg, "market handler internal error");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
@@ -1228,6 +1323,91 @@ mod tests {
     }
 
     #[test]
+    fn public_user_handle_is_stable_and_does_not_expose_source_id() {
+        let sensitive = "user_oauth_subject_internal_stable_id";
+        let a = public_user_handle("reviewer", sensitive);
+        let b = public_user_handle("reviewer", sensitive);
+
+        assert_eq!(a, b);
+        assert!(a.starts_with("reviewer-"), "handle={a}");
+        assert!(!a.contains(sensitive), "handle leaked source id: {a}");
+        assert_ne!(a, public_user_handle("publisher", sensitive));
+    }
+
+    #[test]
+    fn marketplace_public_dtos_do_not_serialize_internal_user_ids() {
+        let sensitive_user_id = "user_oauth_subject_internal_stable_id";
+        let sensitive_moderator_id = "moderator_oauth_subject_internal_stable_id";
+        let listing = ListingSummary {
+            id: Uuid::nil(),
+            slug: "safe-policy".to_owned(),
+            kind: ListingKind::Policy,
+            publisher_id: sensitive_user_id.to_owned(),
+            publisher_tier: PublisherTier::Community,
+            display_name: i18n("Safe policy"),
+            description: None,
+            domain: Some("token".to_owned()),
+            category: Some("approvals".to_owned()),
+            doc: None,
+            intents: None,
+            severity: Some(Severity::Warn),
+            status: ListingStatus::Published,
+            current_version: Some("1.0.0".to_owned()),
+            created_at: 1,
+            updated_at: 1,
+            install_count: 0,
+            rating_avg: None,
+            rating_count: 0,
+            is_installed: false,
+            publisher_email: Some(public_user_handle("publisher", sensitive_user_id)),
+        };
+        let listing_json = serde_json::to_string(&listing).unwrap();
+        assert!(!listing_json.contains(sensitive_user_id), "{listing_json}");
+        assert!(!listing_json.contains("publisher_id"), "{listing_json}");
+
+        let review = Review {
+            id: Uuid::nil(),
+            listing_id: Uuid::nil(),
+            user_id: sensitive_user_id.to_owned(),
+            reviewer_handle: public_user_handle("reviewer", sensitive_user_id),
+            version: "1.0.0".to_owned(),
+            rating: 5,
+            body: i18n("Useful"),
+            helpful_count: 0,
+            created_at: 1,
+        };
+        let review_json = serde_json::to_string(&review).unwrap();
+        assert!(!review_json.contains(sensitive_user_id), "{review_json}");
+        assert!(!review_json.contains("user_id"), "{review_json}");
+        assert!(review_json.contains("reviewer_handle"), "{review_json}");
+
+        let report = MarketReport {
+            id: Uuid::nil(),
+            listing_id: Some(Uuid::nil()),
+            review_id: None,
+            reporter_id: sensitive_user_id.to_owned(),
+            reporter_handle: public_user_handle("reporter", sensitive_user_id),
+            reason: ReportReason::Spam,
+            details: Some("spam".to_owned()),
+            status: ReportStatus::Resolved,
+            resolved_by: Some(sensitive_moderator_id.to_owned()),
+            resolved_by_handle: Some(public_user_handle("moderator", sensitive_moderator_id)),
+            resolved_at: Some(2),
+            created_at: 1,
+        };
+        let report_json = serde_json::to_string(&report).unwrap();
+        assert!(!report_json.contains(sensitive_user_id), "{report_json}");
+        assert!(
+            !report_json.contains(sensitive_moderator_id),
+            "{report_json}"
+        );
+        assert!(!report_json.contains("reporter_id"), "{report_json}");
+        assert!(!report_json.contains("resolved_by\""), "{report_json}");
+        assert!(report_json.contains("reporter_handle"), "{report_json}");
+        assert!(report_json.contains("resolved_by_handle"), "{report_json}");
+    }
+
+    #[test]
     fn market_create_validation_rejects_unsafe_slug_and_blank_policy_body() {
         let mut req = policy_listing_req();
         req.slug = "Bad/Slug".to_owned();
@@ -1270,6 +1450,33 @@ mod tests {
     }
 
     #[test]
+    fn market_validation_rejects_invalid_cedar_text() {
+        let mut req = policy_listing_req();
+        req.cedar_text = Some("permit(".to_owned());
+        let err = validate_create_req(&req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+
+        let mut req = policy_version_req();
+        req.cedar_text = Some("forbid principal, action, resource);".to_owned());
+        let err = validate_version_req("policy", &req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![SetMember {
+                cedar_text: "bad cedar".to_owned(),
+                ..set_member()
+            }]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("valid Cedar"), "got: {err}");
+    }
+
+    #[test]
     fn market_validation_caps_user_controlled_json_and_member_fanout() {
         let mut req = policy_listing_req();
         req.doc = Some(json!({ "body": "x".repeat(MARKET_DOC_MAX_BYTES) }));
@@ -1286,6 +1493,41 @@ mod tests {
         };
         let err = validate_version_req("set", &req).unwrap_err();
         assert!(err.contains("members"), "got: {err}");
+
+        let req = CreateVersionReq {
+            version: "1.0.1".to_owned(),
+            cedar_text: None,
+            manifest: None,
+            policy_tree: None,
+            members: Some(vec![set_member(), set_member()]),
+            changelog: None,
+        };
+        let err = validate_version_req("set", &req).unwrap_err();
+        assert!(err.contains("unique"), "got: {err}");
+    }
+
+    #[test]
+    fn market_list_query_normalization_caps_search_text_and_offset() {
+        assert_eq!(
+            normalize_optional_query_text("q", Some("  approvals  ".to_owned())).unwrap(),
+            Some("approvals".to_owned())
+        );
+        assert_eq!(
+            normalize_optional_query_text("q", Some("   ".to_owned())).unwrap(),
+            None
+        );
+
+        let long = "x".repeat(MARKET_QUERY_TEXT_MAX_CHARS + 1);
+        let err = normalize_optional_query_text("q", Some(long)).unwrap_err();
+        assert!(err.contains('q'), "got: {err}");
+
+        assert_eq!(normalize_market_list_offset(Some(-1)).unwrap(), 0);
+        assert_eq!(
+            normalize_market_list_offset(Some(MARKET_LIST_OFFSET_MAX)).unwrap(),
+            MARKET_LIST_OFFSET_MAX
+        );
+        let err = normalize_market_list_offset(Some(MARKET_LIST_OFFSET_MAX + 1)).unwrap_err();
+        assert!(err.contains("offset"), "got: {err}");
     }
 
     #[test]

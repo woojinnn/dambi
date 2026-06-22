@@ -184,6 +184,53 @@ describe("routeTypedSignaturePayload — manifest-driven typed-data router", () 
     expect(mocks.declarativeRouteTypedDataV3).not.toHaveBeenCalled();
   });
 
+  it("returns null for path-unsafe typed-data route keys before install/fetch", async () => {
+    const base = {
+      domain: {
+        name: "Permit2",
+        chainId: 1,
+        verifyingContract: PERMIT2,
+      },
+      primaryType: "PermitSingle",
+      types: { PermitSingle: [{ name: "spender", type: "address" }] },
+      message: { spender: UNISWAPX_REACTOR, sigDeadline: "1700000000" },
+    };
+
+    await expect(
+      routeTypedSignaturePayload(
+        payload({
+          ...base,
+          domain: {
+            ...base.domain,
+            verifyingContract: `${PERMIT2}/../../bundles/evil`,
+          },
+        }),
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      routeTypedSignaturePayload(
+        payload({ ...base, primaryType: "PermitSingle/../../bundles/evil" }),
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      routeTypedSignaturePayload(
+        payload({
+          ...base,
+          primaryType: "PermitWitnessTransferFrom",
+          types: {
+            PermitWitnessTransferFrom: [
+              { name: "witness", type: "ExclusiveDutchOrder?x=1" },
+            ],
+          },
+          message: { witness: {}, spender: UNISWAPX_REACTOR },
+        }),
+      ),
+    ).resolves.toBeNull();
+
+    expect(mocks.installDeclarativeBundleV3ByTypedData).not.toHaveBeenCalled();
+    expect(mocks.declarativeRouteTypedDataV3).not.toHaveBeenCalled();
+  });
+
   it("UniswapX ExclusiveDutchOrder (mainnet) routes", async () => {
     mocks.declarativeRouteTypedDataV3.mockResolvedValue({
       ok: true,

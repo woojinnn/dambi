@@ -38,11 +38,13 @@ import { sendToExtension, ExtensionBridgeTimeout } from "./extension-bridge";
  * panel never gets populated.
  *
  * Idempotent: passing the same access/refresh pair is a no-op on the SW side.
+ * Passing `null/null` clears the SW token store when the dashboard logs out or
+ * rejects a token.
  * Fails soft on bridge timeout (the dashboard runs fine without the extension,
  * just no SW-side enforcement). The caller does not await this in a hot path
  * — fire-and-forget at sign-in / refresh time is enough.
  */
-async function syncTokensToSw(access: string, refresh: string | null): Promise<void> {
+async function syncTokensToSw(access: string | null, refresh: string | null): Promise<void> {
   try {
     await sendToExtension({
       type: "dambi-auth-sync-tokens",
@@ -56,6 +58,14 @@ async function syncTokensToSw(access: string, refresh: string | null): Promise<v
 }
 
 setTokenRefreshObserver((access, refresh) => syncTokensToSw(access, refresh));
+
+function clearAuthHash(): void {
+  window.history.replaceState(
+    null,
+    "",
+    window.location.pathname + window.location.search,
+  );
+}
 
 /** Server's `/auth/me` view of the current user. Mirror of `AuthUser`. */
 export interface Me {
@@ -83,21 +93,33 @@ export function consumeTokensFromHash(): string | null {
   const params = new URLSearchParams(hash);
   const access = params.get("access_token");
   const refresh = params.get("refresh_token");
-  if (!access) return null;
+  if (!access) {
+    if (params.has("access_token") || params.has("refresh_token")) {
+      setStoredToken(null);
+      setStoredRefreshToken(null);
+      void syncTokensToSw(null, null);
+      clearAuthHash();
+    }
+    return null;
+  }
 
-  setStoredToken(access);
-  setStoredRefreshToken(refresh);
+  try {
+    setStoredToken(access);
+    setStoredRefreshToken(refresh);
+  } catch {
+    setStoredToken(null);
+    setStoredRefreshToken(null);
+    void syncTokensToSw(null, null);
+    clearAuthHash();
+    return null;
+  }
 
   // Mirror the tokens to the SW so its `chrome.storage.local` matches.
   // Fire-and-forget — extension-less dev contexts no-op cleanly inside.
   void syncTokensToSw(access, refresh);
 
   // Clear the hash without forcing a reload (preserves the rest of the URL).
-  window.history.replaceState(
-    null,
-    "",
-    window.location.pathname + window.location.search,
-  );
+  clearAuthHash();
   return access;
 }
 
@@ -120,6 +142,7 @@ export async function fetchMe(): Promise<Me | null> {
       // Token rejected — drop it so the UI can re-route to login.
       setStoredToken(null);
       setStoredRefreshToken(null);
+      void syncTokensToSw(null, null);
     }
     throw e;
   }
@@ -130,4 +153,5 @@ export async function fetchMe(): Promise<Me | null> {
 export function logout(): void {
   setStoredToken(null);
   setStoredRefreshToken(null);
+  void syncTokensToSw(null, null);
 }

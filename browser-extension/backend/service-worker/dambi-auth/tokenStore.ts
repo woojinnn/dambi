@@ -28,12 +28,34 @@ const REFRESH_KEY = "dambi_jwt_refresh";
 let accessCache: string | null = null;
 let refreshCache: string | null = null;
 
+function normalizeToken(value: unknown, label: string): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 16_384 ||
+    value.trim() !== value ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${label} must be a non-empty token string`);
+  }
+  return value;
+}
+
 /** Read the access token. `null` when logged out. */
 export async function getAccessToken(): Promise<string | null> {
   if (accessCache !== null) return accessCache;
   const out = (await Browser.storage.local.get(ACCESS_KEY)) as Record<string, unknown>;
   // Cache only a real token; never memoise the empty/logged-out result.
-  if (typeof out[ACCESS_KEY] === "string") accessCache = out[ACCESS_KEY] as string;
+  try {
+    accessCache = normalizeToken(
+      ACCESS_KEY in out ? out[ACCESS_KEY] : null,
+      "stored access token",
+    );
+  } catch {
+    accessCache = null;
+    await Browser.storage.local.remove(ACCESS_KEY);
+  }
   return accessCache;
 }
 
@@ -42,14 +64,22 @@ export async function getRefreshToken(): Promise<string | null> {
   if (refreshCache !== null) return refreshCache;
   const out = (await Browser.storage.local.get(REFRESH_KEY)) as Record<string, unknown>;
   // Cache only a real token; never memoise the empty/logged-out result.
-  if (typeof out[REFRESH_KEY] === "string") refreshCache = out[REFRESH_KEY] as string;
+  try {
+    refreshCache = normalizeToken(
+      REFRESH_KEY in out ? out[REFRESH_KEY] : null,
+      "stored refresh token",
+    );
+  } catch {
+    refreshCache = null;
+    await Browser.storage.local.remove(REFRESH_KEY);
+  }
   return refreshCache;
 }
 
 /** Persist access + refresh tokens. Either can be `null` to drop. */
 export async function setTokens(access: string | null, refresh: string | null = null): Promise<void> {
-  accessCache = access;
-  refreshCache = refresh;
+  access = normalizeToken(access, "access token");
+  refresh = normalizeToken(refresh, "refresh token");
   const toSet: Record<string, string> = {};
   const toRemove: string[] = [];
   if (access === null) toRemove.push(ACCESS_KEY);
@@ -58,6 +88,8 @@ export async function setTokens(access: string | null, refresh: string | null = 
   else toSet[REFRESH_KEY] = refresh;
   if (Object.keys(toSet).length) await Browser.storage.local.set(toSet);
   if (toRemove.length) await Browser.storage.local.remove(toRemove);
+  accessCache = access;
+  refreshCache = refresh;
 }
 
 /** Drop both tokens. Used by sign-out flow. */

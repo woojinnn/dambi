@@ -64,13 +64,13 @@ describe("resolveBundlesForWallet", () => {
   it("registered wallet → effective bindings only, with merged params", async () => {
     await putDef("u", def("def::a"));
     await putDef("u", def("def::b"));
-    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xA1"], params: { cap: 9 } });
-    await bind("u", { defId: "def::b", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"] });
+    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xA100000000000000000000000000000000000001"], params: { cap: 9 } });
+    await bind("u", { defId: "def::b", packageId: UNCATEGORIZED_PKG, addresses: ["0xa100000000000000000000000000000000000001"] });
     const s = await readStore("u");
-    const bb = Object.values(s.wallets.byAddress["0xa1"].bindings).find((b) => b.defId === "def::b")!;
-    await updateBinding("u", { address: "0xa1", bindingId: bb.id, patch: { enabled: false } });
+    const bb = Object.values(s.wallets.byAddress["0xa100000000000000000000000000000000000001"].bindings).find((b) => b.defId === "def::b")!;
+    await updateBinding("u", { address: "0xa100000000000000000000000000000000000001", bindingId: bb.id, patch: { enabled: false } });
 
-    const out = await resolveBundlesForWallet("u", "0xA1");
+    const out = await resolveBundlesForWallet("u", "0xA100000000000000000000000000000000000001");
     expect(out.map((b) => b.id)).toEqual(["def::a"]);
     expect(out[0].policy).toContain('{"cap":9}'); // binding params가 default를 덮음
   });
@@ -78,23 +78,72 @@ describe("resolveBundlesForWallet", () => {
   it("unregistered wallet → defaults.enabled defs with default params (안전 우선)", async () => {
     await putDef("u", def("def::on"));
     await putDef("u", def("def::off", undefined, false));
-    const out = await resolveBundlesForWallet("u", "0xUNKNOWN");
+    const out = await resolveBundlesForWallet("u", "0xffffffffffffffffffffffffffffffffffffffff");
     expect(out.map((b) => b.id)).toEqual(["def::on"]);
     expect(out[0].policy).toContain('{"cap":1}');
   });
 
   it("package-off binding is excluded", async () => {
     await putDef("u", def("def::a"));
-    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"] });
-    await setPackageEnabled("u", { address: "0xa1", packageId: UNCATEGORIZED_PKG, enabled: false });
-    expect(await resolveBundlesForWallet("u", "0xa1")).toEqual([]);
+    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xa100000000000000000000000000000000000001"] });
+    await setPackageEnabled("u", { address: "0xa100000000000000000000000000000000000001", packageId: UNCATEGORIZED_PKG, enabled: false });
+    expect(await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001")).toEqual([]);
+  });
+
+  it("stale malformed truthy booleans do not make persisted bindings effective", async () => {
+    mocks.localStore.set("ps2:u:library", {
+      schemaVersion: 1,
+      defs: { "def::a": def("def::a") },
+      packages: {
+        [UNCATEGORIZED_PKG]: {
+          id: UNCATEGORIZED_PKG,
+          displayName: "미분류",
+          source: "builtin",
+          updatedAtMs: 0,
+        },
+      },
+    });
+    mocks.localStore.set("ps2:u:wallets", {
+      schemaVersion: 1,
+      byAddress: {
+        "0xa100000000000000000000000000000000000001": {
+          bindings: {
+            "bind::x": {
+              id: "bind::x",
+              defId: "def::a",
+              packageId: UNCATEGORIZED_PKG,
+              enabled: "false",
+              updatedAtMs: 1,
+            },
+          },
+          packages: {},
+          packageEnabled: { [UNCATEGORIZED_PKG]: true },
+        },
+        "0xa200000000000000000000000000000000000002": {
+          bindings: {
+            "bind::y": {
+              id: "bind::y",
+              defId: "def::a",
+              packageId: UNCATEGORIZED_PKG,
+              enabled: true,
+              updatedAtMs: 1,
+            },
+          },
+          packages: {},
+          packageEnabled: { [UNCATEGORIZED_PKG]: "false" },
+        },
+      },
+    });
+
+    expect(await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001")).toEqual([]);
+    expect(await resolveBundlesForWallet("u", "0xa200000000000000000000000000000000000002")).toEqual([]);
   });
 
   it("isWalletRegistered: true for a wallet with bindings (case-insensitive), false otherwise", async () => {
     await putDef("u", def("def::a"));
-    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xA1"] });
-    expect(await isWalletRegistered("u", "0xA1")).toBe(true); // 대소문자 무관(소문자 키)
-    expect(await isWalletRegistered("u", "0xUNKNOWN")).toBe(false); // 미등록(=defaults.enabled 폴백)
+    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xA100000000000000000000000000000000000001"] });
+    expect(await isWalletRegistered("u", "0xA100000000000000000000000000000000000001")).toBe(true); // 대소문자 무관(소문자 키)
+    expect(await isWalletRegistered("u", "0xffffffffffffffffffffffffffffffffffffffff")).toBe(false); // 미등록(=defaults.enabled 폴백)
   });
 
   it("manifest 없는 def는 빈 ManifestV2를 합성한다 (null이 plan 입력에 섞이면 평가 전체가 죽음)", async () => {
@@ -106,9 +155,9 @@ describe("resolveBundlesForWallet", () => {
       },
     };
     await putDef("u", noManifest);
-    await bind("u", { defId: "def::base", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"] });
+    await bind("u", { defId: "def::base", packageId: UNCATEGORIZED_PKG, addresses: ["0xa100000000000000000000000000000000000001"] });
 
-    const out = await resolveBundlesForWallet("u", "0xa1");
+    const out = await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001");
     expect(out).toHaveLength(1);
     expect(out[0].manifest).toEqual({ id: "swap-cap", schema_version: 2 });
     expect(out[0].trigger).toBeUndefined(); // 빈 trigger → 항상 평가(엔진이 정밀 게이트)
@@ -121,15 +170,15 @@ describe("resolveBundlesForWallet", () => {
     });
     await putDef("u", def("def::bad"));
     await putDef("u", def("def::good"));
-    const out = await resolveBundlesForWallet("u", "0xa1");
+    const out = await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001");
     expect(out).toHaveLength(1);
   });
 
   it("binding.severity override is threaded to renderDef (re-stamp @severity)", async () => {
     const { renderDef } = await import("./render");
     await putDef("u", def("def::a"));
-    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"], severity: "warn" });
-    await resolveBundlesForWallet("u", "0xa1");
+    await bind("u", { defId: "def::a", packageId: UNCATEGORIZED_PKG, addresses: ["0xa100000000000000000000000000000000000001"], severity: "warn" });
+    await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001");
     expect(vi.mocked(renderDef)).toHaveBeenCalledWith(
       expect.objectContaining({ id: "def::a" }),
       expect.anything(),
@@ -143,8 +192,8 @@ describe("resolveBundlesForWallet", () => {
       throw new Error("boom");
     });
     await putDef("u", def("def::bad"));
-    await bind("u", { defId: "def::bad", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"], severity: "deny" });
-    const { renderFaults } = await resolveBundlesForWalletWithFaults("u", "0xa1");
+    await bind("u", { defId: "def::bad", packageId: UNCATEGORIZED_PKG, addresses: ["0xa100000000000000000000000000000000000001"], severity: "deny" });
+    const { renderFaults } = await resolveBundlesForWalletWithFaults("u", "0xa100000000000000000000000000000000000001");
     expect(renderFaults).toEqual([{ defId: "def::bad", severity: "deny" }]);
   });
 });
@@ -240,10 +289,10 @@ describe("stale param guard", () => {
     await bind("u", {
       defId: "def::a",
       packageId: UNCATEGORIZED_PKG,
-      addresses: ["0xa1"],
+      addresses: ["0xa100000000000000000000000000000000000001"],
       params: { cap: 9, ghost: 1 },
     });
-    const out = await resolveBundlesForWallet("u", "0xa1");
+    const out = await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001");
     expect(out[0].policy).toContain('"cap":9');
     expect(out[0].policy).not.toContain("ghost");
   });
@@ -259,16 +308,16 @@ describe("required hole 미충전 def 방어 스킵", () => {
   it("바인딩이 있어도 required 미충전이면 평가에서 뺀다 (가드 이전 상태 방어)", async () => {
     // bind 가드를 우회해 미충전 바인딩을 만들기 위해 def를 나중에 교체한다.
     await putDef("u", def("def::m"));
-    await bind("u", { defId: "def::m", packageId: UNCATEGORIZED_PKG, addresses: ["0xa1"] });
+    await bind("u", { defId: "def::m", packageId: UNCATEGORIZED_PKG, addresses: ["0xa100000000000000000000000000000000000001"] });
     await putDef("u", holedDef("def::m"));
-    const out = await resolveBundlesForWallet("u", "0xa1");
+    const out = await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001");
     expect(out).toEqual([]);
   });
 
   it("미등록 지갑 defaults 경로도 동일하게 뺀다", async () => {
     await putDef("u", holedDef("def::m"));
     await putDef("u", def("def::ok"));
-    const out = await resolveBundlesForWallet("u", "0xUNKNOWN");
+    const out = await resolveBundlesForWallet("u", "0xffffffffffffffffffffffffffffffffffffffff");
     expect(out.map((b) => b.id)).toEqual(["def::ok"]);
   });
 
@@ -277,10 +326,10 @@ describe("required hole 미충전 def 방어 스킵", () => {
     await bind("u", {
       defId: "def::m",
       packageId: UNCATEGORIZED_PKG,
-      addresses: ["0xa1"],
+      addresses: ["0xa100000000000000000000000000000000000001"],
       params: { v1: "0xabc4000000000000000000000000000000007e29" },
     });
-    const out = await resolveBundlesForWallet("u", "0xa1");
+    const out = await resolveBundlesForWallet("u", "0xa100000000000000000000000000000000000001");
     expect(out.map((b) => b.id)).toEqual(["def::m"]);
   });
 });

@@ -7,11 +7,12 @@ description = "HTTP backend service for wallet state, sync, and simulation. Poli
 publish = false
 
 [dependencies]
-# The service operates on the pure simulation types + reducer. NO cedar /
-# policy-engine dependency: the extension owns Cedar evaluation (LLM-drafted
-# policies are validated client-side via the WASM pipeline).
+# The service operates on the pure simulation types + reducer. Cedar evaluation
+# still lives in the extension; the server only parses marketplace policy text
+# at publish time so direct API writes cannot store syntactically broken Cedar.
 policy-state.workspace = true
 policy-transition.workspace = true
+cedar-policy.workspace = true
 # Sync orchestrator hooks live RPC/oracle fetchers into `LiveField` refresh.
 policy-sync.workspace = true
 # PostgreSQL-backed wallet state persistence. Handlers stay db-agnostic where
@@ -23,6 +24,7 @@ serde_json.workspace = true
 # selectors) + hex (calldata/returndata <-> JSON-RPC eth_call).
 alloy-primitives.workspace = true
 hex.workspace = true
+sha2.workspace = true
 
 # HTTP server stack — versions mirror `adapter-debug-dashboard`.
 axum = "0.7"

@@ -150,19 +150,16 @@ ${uses}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2
 \uC548\uC758 \uC815\uCC45\uC740 \uAC1C\uBCC4\uB85C \uC774\uB3D9\uD574\uC694(\uC0AD\uC81C\uB418\uC9C0 \uC54A\uC544\uC694).`)) return;
     run("\uD3F4\uB354 \uC0AD\uC81C", () => PS.removeWalletFolder({ address, folderId })).then((ok) => ok && pushToast("\uD3F4\uB354\uB97C \uC0AD\uC81C\uD588\uC5B4\uC694 \u2014 \uC815\uCC45\uC740 \uAC1C\uBCC4\uB85C \uC62E\uACBC\uC5B4\uC694"));
   };
-  const renderMember = (d) => ({
-    slug: d.id.replace(/^def::/, ""),
-    title: d.displayName,
-    cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), d.skeleton.model.severity),
-    manifest: d.skeleton.manifest
-  });
   const publishWalletPackage = (pkgId, members) => {
     const defs = [...new Map(members.map((b) => [b.defId, snap.library.defs[b.defId]])).values()].filter(Boolean);
     if (defs.length === 0) return pushToast("\uC774 \uD328\uD0A4\uC9C0\uC5D0 \uB4E0 \uC815\uCC45\uC774 \uC5C6\uC5B4\uC694");
-    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: defs.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(defs);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: plan.members });
   };
   const publishDef = (d) => {
-    const m = renderMember(d);
+    const m = Cedar.publishMemberFromDef(d);
+    if (!m) return Cedar.rejectUnsupportedPublish(d);
     setPublishSrc({ kind: "policy", cedarText: m.cedarText, manifest: m.manifest, suggestedDisplayName: d.displayName, suggestedSlug: m.slug });
   };
   const totalActive = Object.values(wallet.bindings).filter((b) => PS.isEffectiveOn(wallet, b)).length;
@@ -212,7 +209,10 @@ ${uses}\uAC1C \uC9C0\uAC11\uC5D0\uC11C \uD568\uAED8 \uC81C\uAC70\uB429\uB2C8\uB2
         },
         /* @__PURE__ */ React.createElement("span", { className: "pol-ic", style: famStyle(d.cat).tile, title: catLabel(cat) }, /* @__PURE__ */ React.createElement(CatIcon, { cat: d.cat })),
         /* @__PURE__ */ React.createElement("span", { className: "pol-main" }, /* @__PURE__ */ React.createElement("span", { className: `pol-nm${brows.length === 0 ? " dim" : ""}` }, d.displayName), /* @__PURE__ */ React.createElement("span", { className: `pol-desc${d.doc && d.doc.definition ? "" : " add"}` }, d.doc && d.doc.definition ? d.doc.definition : "\uC124\uBA85 \uCD94\uAC00")),
-        sevLabel(d.skeleton.model.severity) && /* @__PURE__ */ React.createElement("span", { className: `pol-sev ${d.skeleton.model.severity}` }, sevLabel(d.skeleton.model.severity)),
+        (() => {
+          const sev = Cedar.defSeverity(d);
+          return sevLabel(sev) && /* @__PURE__ */ React.createElement("span", { className: `pol-sev ${sev}` }, sevLabel(sev));
+        })(),
         opts.walletOnly && (bindingsByDef.get(d.id) || []).filter((b) => PS.isEffectiveOn(wallet, b)).length === 0 && /* @__PURE__ */ React.createElement("span", { className: "pol-badge draft" }, "\uBBF8\uC801\uC6A9 \uCD08\uC548"),
         opts.pkg && (() => {
           const n = defUsageCount(snap, d.id);

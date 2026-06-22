@@ -19,10 +19,91 @@ import { getAccessToken, getRefreshToken, setTokens } from "./tokenStore";
 
 declare const DAMBI_SERVER_URL: string | undefined;
 
+const CURRENT_PRODUCTION_BASE = "https://dambi-policy.duckdns.org";
+const LEGACY_PRODUCTION_BASES = new Map([
+  ["https://pasu-policy.duckdns.org", CURRENT_PRODUCTION_BASE],
+]);
+const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+const RAW_BUILD_BASE_URL =
+  (typeof DAMBI_SERVER_URL !== "undefined" && DAMBI_SERVER_URL) ||
+  CURRENT_PRODUCTION_BASE;
+
+function parseHttpUrl(input: string): URL | null {
+  try {
+    const url = new URL(input);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalOrigin(url: URL): string {
+  return LEGACY_PRODUCTION_BASES.get(url.origin) ?? url.origin;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function trustedOriginForUrl(url: URL, trustedBase = RAW_BUILD_BASE_URL): string | null {
+  const origin = canonicalOrigin(url);
+  const trustedUrl = parseHttpUrl(trustedBase);
+  const trustedOrigin = trustedUrl ? canonicalOrigin(trustedUrl) : CURRENT_PRODUCTION_BASE;
+  if (origin === CURRENT_PRODUCTION_BASE || origin === trustedOrigin) return origin;
+  if (isLoopbackHost(url.hostname)) return origin;
+  return null;
+}
+
+function normalizeRequestToken(value: string | null, label: string): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 16_384 ||
+    value.trim() !== value ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${label} must be a non-empty token string`);
+  }
+  return value;
+}
+
+export function normalizeServerBaseUrl(
+  input: string | null | undefined,
+  trustedBase = RAW_BUILD_BASE_URL,
+): string | null {
+  const trimmed = input?.trim();
+  if (!trimmed) return null;
+  const url = parseHttpUrl(trimmed);
+  if (!url) return null;
+  if (url.pathname !== "" && url.pathname !== "/") return null;
+  if (url.search || url.hash) return null;
+  return trustedOriginForUrl(url, trustedBase);
+}
+
 /** Build-time default (webpack DefinePlugin → `DAMBI_SERVER_URL`). */
 const BUILD_BASE_URL =
-  (typeof DAMBI_SERVER_URL !== "undefined" && DAMBI_SERVER_URL) ||
-  "https://dambi-policy.duckdns.org";
+  normalizeServerBaseUrl(RAW_BUILD_BASE_URL, RAW_BUILD_BASE_URL) ??
+  CURRENT_PRODUCTION_BASE;
+
+function resolveRequestUrl(path: string): string {
+  const absolute = parseHttpUrl(path);
+  if (!absolute) {
+    if (URL_SCHEME_RE.test(path)) {
+      throw new Error("Refusing to send request to unsupported server URL scheme");
+    }
+    return `${getServerBaseUrl()}${path}`;
+  }
+  const trustedOrigin = trustedOriginForUrl(absolute);
+  if (!trustedOrigin) {
+    throw new Error("Refusing to send authenticated request to untrusted server URL");
+  }
+  return `${trustedOrigin}${absolute.pathname}${absolute.search}`;
+}
 
 /** Runtime override key — mirrors the dashboard's
  * `localStorage["dambi_server_url"]`, in `chrome.storage.local`
@@ -45,12 +126,12 @@ export const SERVER_BASE_URL = BUILD_BASE_URL;
 if (typeof chrome !== "undefined" && chrome.storage?.local) {
   void chrome.storage.local.get(SERVER_URL_KEY).then((r) => {
     const v = r[SERVER_URL_KEY];
-    if (typeof v === "string" && v) runtimeBaseUrl = v;
+    runtimeBaseUrl = normalizeServerBaseUrl(typeof v === "string" ? v : null);
   });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && changes[SERVER_URL_KEY]) {
       const v = changes[SERVER_URL_KEY].newValue;
-      runtimeBaseUrl = typeof v === "string" && v ? v : null;
+      runtimeBaseUrl = normalizeServerBaseUrl(typeof v === "string" ? v : null);
     }
   });
 }
@@ -125,7 +206,20 @@ async function refreshAccessToken(): Promise<string | null> {
     return null;
   }
   const body = (await res.json()) as RefreshResponse;
-  await setTokens(body.access_token, body.refresh_token ?? refresh);
+  try {
+    await setTokens(body.access_token, body.refresh_token ?? refresh);
+  } catch {
+    await setTokens(null, null);
+    if (!notifiedExpired) {
+      notifiedExpired = true;
+      try {
+        onSessionExpired?.();
+      } catch {
+        /* advisory 전용 — 알림 실패가 auth 흐름에 영향 주지 않게 */
+      }
+    }
+    return null;
+  }
   // 갱신 성공 → 다음 만료에서 다시 알릴 수 있게 가드 해제.
   notifiedExpired = false;
   return body.access_token;
@@ -133,12 +227,15 @@ async function refreshAccessToken(): Promise<string | null> {
 
 /** Core request primitive. Returns parsed JSON. Throws `ServerError`. */
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const url = path.startsWith("http") ? path : `${getServerBaseUrl()}${path}`;
+  const url = resolveRequestUrl(path);
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
   if (!opts.noAuth) {
-    const token = opts.token ?? (await getAccessToken());
+    const token =
+      opts.token === undefined
+        ? await getAccessToken()
+        : normalizeRequestToken(opts.token, "request access token");
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
@@ -190,6 +287,13 @@ export interface WalletId {
   chains: string[];
 }
 
+export function normalizeWalletAddress(value: unknown): string {
+  if (typeof value !== "string" || !EVM_ADDRESS_RE.test(value)) {
+    throw new Error("wallet address must be an EVM address");
+  }
+  return value.toLowerCase();
+}
+
 /** `GET /auth/me` — current user (or `null` if no token / 401). */
 export async function fetchMe(): Promise<Me | null> {
   if (!(await getAccessToken())) return null;
@@ -228,12 +332,17 @@ export async function updateWallet(
   address: string,
   patch: { label?: string | null },
 ): Promise<void> {
-  await request<void>(`/wallets/${address}`, { method: "PATCH", body: patch });
+  await request<void>(`/wallets/${normalizeWalletAddress(address)}`, {
+    method: "PATCH",
+    body: {
+      ...(patch.label !== undefined ? { label: patch.label } : {}),
+    },
+  });
 }
 
 /** `DELETE /wallets/:address` — soft delete (archive) the wallet. */
 export async function deleteWallet(address: string): Promise<void> {
-  await request<void>(`/wallets/${address}`, { method: "DELETE" });
+  await request<void>(`/wallets/${normalizeWalletAddress(address)}`, { method: "DELETE" });
 }
 
 export interface AddWalletBody {
@@ -256,7 +365,14 @@ export interface AddWalletResp {
  *  bare "400 Bad Request". */
 export async function addWallet(body: AddWalletBody): Promise<AddWalletResp> {
   try {
-    return await request<AddWalletResp>("/wallets", { method: "POST", body });
+    return await request<AddWalletResp>("/wallets", {
+      method: "POST",
+      body: {
+        address: normalizeWalletAddress(body.address),
+        ...(body.chains !== undefined ? { chains: body.chains } : {}),
+        ...(body.label !== undefined ? { label: body.label } : {}),
+      },
+    });
   } catch (e) {
     if (e instanceof ServerError) {
       const reason =
@@ -359,7 +475,7 @@ export async function ingestPermit(
   address: string,
   req: IngestPermitReq,
 ): Promise<IngestPermitResp> {
-  return request<IngestPermitResp>(`/wallets/${address}/permits`, {
+  return request<IngestPermitResp>(`/wallets/${normalizeWalletAddress(address)}/permits`, {
     method: "POST",
     body: req,
   });

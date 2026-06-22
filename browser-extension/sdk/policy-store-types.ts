@@ -127,23 +127,55 @@ export interface StoreSnapshot {
   rev: number;
 }
 
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const CEDAR_DECIMAL_RE = /^-?\d+\.\d{1,4}$/;
+
+function isValidRequiredHoleValue(type: HoleSpec["type"], value: unknown): boolean {
+  switch (type) {
+    case "address":
+      return typeof value === "string" && EVM_ADDRESS_RE.test(value);
+    case "addressSet":
+      return (
+        Array.isArray(value) &&
+        value.length > 0 &&
+        value.every((item) => typeof item === "string" && EVM_ADDRESS_RE.test(item))
+      );
+    case "long":
+      return typeof value === "number" && Number.isSafeInteger(value);
+    case "decimal":
+      return typeof value === "string" && CEDAR_DECIMAL_RE.test(value);
+    case "string":
+      return typeof value === "string" && value.trim().length > 0;
+    case "bool":
+      return typeof value === "boolean";
+    case "field":
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        typeof (value as { field?: unknown }).field === "string" &&
+        (value as { field: string }).field.trim().length > 0
+      );
+  }
+}
+
 /** 패키지에서 빠진 바인딩이 떨어지는 예약 패키지. 삭제 불가. */
 export const UNCATEGORIZED_PKG = "pkg::uncategorized";
 
 /** effective-on = 패키지 토글 ∧ 바인딩 토글 (패키지 미기록 = on). */
 export function isEffectiveOn(w: WalletPolicyState, b: Binding): boolean {
-  return (w.packageEnabled[b.packageId] ?? true) && b.enabled;
+  return (w.packageEnabled[b.packageId] ?? true) === true && b.enabled === true;
 }
 
 /** required hole(마켓 비식별 블랭킹) 중 merged params(def 기본값 ⊕ 바인딩
- *  오버라이드)가 못 덮는 칸의 라벨 목록. 비어 있지 않으면 그 def는 아직
- *  "빈칸" 상태 — 바인딩(패키지 적용)이 거부돼야 한다. */
+ *  오버라이드)가 타입까지 유효하게 못 덮는 칸의 라벨 목록. 비어 있지 않으면
+ *  그 def는 아직 "빈칸" 상태 — 바인딩(패키지 적용)이 거부돼야 한다. */
 export function missingRequiredHoles(
   def: Pick<PolicyDef, "holes" | "defaults">,
   params?: Record<string, HoleValue> | undefined,
 ): string[] {
   const merged = { ...def.defaults.params, ...(params ?? {}) };
   return def.holes
-    .filter((h) => h.required && merged[h.name] === undefined)
+    .filter((h) => h.required && !isValidRequiredHoleValue(h.type, merged[h.name]))
     .map((h) => h.label || h.name);
 }

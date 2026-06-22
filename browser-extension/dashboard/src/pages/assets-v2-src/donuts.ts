@@ -10,9 +10,15 @@
  * KEEP: window.PASU_CHAIN_LOGOS / window.PASU_TOKEN_LOGOS (consumed by
  * assets-app's chain chips + token avatars) are still seeded here.
  *
- * CSP: the legend chain-logo <img> drops its inline onerror; failures are
- * handled by a capture-phase delegated "error" listener on root (data-onerr).
+ * Privacy/CSP: extension pages do not fetch third-party logo images; chain
+ * legends use only local inline SVG logos, with text fallback.
  */
+
+import {
+  escapeAttr,
+  escapeHtml,
+  safeCssColor,
+} from "./html-safe";
 
 interface DonutCfgItem {
   key: string;
@@ -70,24 +76,10 @@ export function initDonuts(root: HTMLElement): () => void {
     ARB: LOGOS.arb,
   };
 
-  // 실제 체인 브랜드 로고 (이미지) — 자산 분포 도넛 범례용. 체인 이름 → CDN 이미지.
-  // (eth/arb/base = TrustWallet, hl = simplr) — 깨지면 capture error 위임으로 숨김.
-  const CHAIN_IMG_BY_NAME: Record<string, string> = {
-    Ethereum: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png",
-    Arbitrum: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/info/logo.png",
-    Base: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/base/info/logo.png",
-    Optimism: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/optimism/info/logo.png",
-    Polygon: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png",
-    Hyperliquid: "https://cdn.jsdelivr.net/gh/simplr-sh/coin-logos/images/hyperliquid/large.png",
-  };
   function chainImgByName(name: string | undefined): string {
     if (!name) return "";
-    const url = CHAIN_IMG_BY_NAME[name];
-    if (url) {
-      return '<img class="dli-img" src="' + url + '" alt="' + name + '" data-onerr="hide">';
-    }
     const L = (window.PASU_CHAIN_LOGOS && window.PASU_CHAIN_LOGOS.byName) || {};
-    return L[name] || "";
+    return Object.prototype.hasOwnProperty.call(L, name) ? L[name] : "";
   }
 
   // ── live → build() cfg shape ─────────────────────────────────────────────
@@ -180,7 +172,7 @@ export function initDonuts(root: HTMLElement): () => void {
       seg.setAttribute("cx", "60");
       seg.setAttribute("cy", "60");
       seg.setAttribute("r", "45");
-      seg.setAttribute("stroke", it.color);
+      seg.setAttribute("stroke", safeCssColor(it.color));
       seg.setAttribute("stroke-dasharray", Math.max(len - GAP, 0.5) + " " + (C - Math.max(len - GAP, 0.5)));
       seg.setAttribute("stroke-dashoffset", String(-acc));
       svg.appendChild(seg);
@@ -193,9 +185,9 @@ export function initDonuts(root: HTMLElement): () => void {
       li.innerHTML =
         (it.logo
           ? '<span class="dli-logo">' + it.logo + "</span>"
-          : '<span class="dli-dot" style="background:' + it.color + '"></span>') +
-        '<span class="dli-name">' + it.name + "</span>" +
-        '<span class="dli-val">' + money(it.usd) + "</span>";
+          : '<span class="dli-dot" style="background:' + escapeAttr(safeCssColor(it.color)) + '"></span>') +
+        '<span class="dli-name">' + escapeHtml(it.name) + "</span>" +
+        '<span class="dli-val">' + escapeHtml(money(it.usd)) + "</span>";
       legend.appendChild(li);
       legEls.push(li);
 
@@ -225,9 +217,9 @@ export function initDonuts(root: HTMLElement): () => void {
 
     function setCenter(k: string, v: string, sub: string, animate: boolean) {
       center!.innerHTML =
-        '<span class="dc-k">' + k + "</span>" +
-        '<span class="dc-v">' + v + "</span>" +
-        (sub ? '<span class="dc-sub">' + sub + "</span>" : "");
+        '<span class="dc-k">' + escapeHtml(k) + "</span>" +
+        '<span class="dc-v">' + escapeHtml(v) + "</span>" +
+        (sub ? '<span class="dc-sub">' + escapeHtml(sub) + "</span>" : "");
       if (animate) {
         center!.animate(
           [
@@ -298,7 +290,7 @@ export function initDonuts(root: HTMLElement): () => void {
       });
       const heading = id === "donut-assets" ? T("assets.donut.includedAssets") : T("assets.donut.holdingWallets");
       center!.innerHTML =
-        '<span class="dc-k">' + heading + "</span>" + '<span class="dc-sub">' + T("assets.donut.ctxBasis", { label: ctxLabel }) + "</span>";
+        '<span class="dc-k">' + escapeHtml(heading) + "</span>" + '<span class="dc-sub">' + escapeHtml(T("assets.donut.ctxBasis", { label: ctxLabel })) + "</span>";
       center!.animate(
         [
           { transform: "scale(0.94)", opacity: 0.45 },
@@ -489,7 +481,7 @@ export function initDonuts(root: HTMLElement): () => void {
     build("donut-assets", DONUTS["donut-assets"]);
   };
 
-  // CSP: delegated capture-phase error handler for legend chain-logo <img>.
+  // Compatibility no-op for old markup that may still carry data-onerr.
   function onError(e: Event) {
     const t = e.target as HTMLElement;
     if (t && t.tagName === "IMG" && t.getAttribute("data-onerr") === "hide") {

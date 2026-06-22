@@ -9,6 +9,12 @@
    Reads live wallet-risk summary from assets-app (window.PASU_getSummary + the
    `pasu:render` event). */
 
+import {
+  escapeAttr,
+  escapeHtml,
+  safeClassToken,
+} from "./html-safe";
+
 interface ModeTweaks {
   layoutMode?: string;
   alertStrip?: boolean;
@@ -95,9 +101,9 @@ export function initLayoutModes(root: HTMLElement): () => void {
       '<span class="as-go"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"></path></svg></span>';
     function item(sev: string, jump: string, label: string, val: string | number): string {
       return (
-        '<button class="as-item" data-jump="' + jump + '">' +
-        '<span class="as-dot ' + sev + '"></span>' +
-        '<span class="as-it-txt">' + label + " <b>" + val + "</b></span>" +
+        '<button class="as-item" data-jump="' + escapeAttr(jump) + '">' +
+        '<span class="as-dot ' + safeClassToken(sev) + '"></span>' +
+        '<span class="as-it-txt">' + escapeHtml(label) + " <b>" + escapeHtml(val) + "</b></span>" +
         arrow +
         "</button>"
       );
@@ -125,7 +131,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
       return (
         '<div class="alert-strip has-risk">' +
         '<span class="as-ic">' + warnIco + "</span>" +
-        '<span class="as-lead">' + Tr("assets.alert.actionNeeded") + ' <span class="as-n">' + cnt + "</span></span>" +
+        '<span class="as-lead">' + escapeHtml(Tr("assets.alert.actionNeeded")) + ' <span class="as-n">' + escapeHtml(cnt) + "</span></span>" +
         '<div class="as-items">' + items + "</div>" +
         "</div>"
       );
@@ -134,7 +140,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
     return (
       '<div class="alert-strip is-calm">' +
       '<span class="as-ic">' + okIco + "</span>" +
-      '<div class="as-items"><span class="as-calm-txt">' + Tr("assets.alert.calm") + extra + "</span></div>" +
+      '<div class="as-items"><span class="as-calm-txt">' + escapeHtml(Tr("assets.alert.calm") + extra) + "</span></div>" +
       "</div>"
     );
   }
@@ -146,13 +152,13 @@ export function initLayoutModes(root: HTMLElement): () => void {
     })
       .map(function (s) {
         const flag = flagOf(s.key);
-        const dot = flag ? '<span class="seg-flag ' + flag + '"></span>' : "";
+        const dot = flag ? '<span class="seg-flag ' + safeClassToken(flag) + '"></span>' : "";
         const cnt = segCount(s.key);
-        const cntHtml = cnt != null ? '<span class="seg-count">' + cnt + "</span>" : "";
+        const cntHtml = cnt != null ? '<span class="seg-count">' + escapeHtml(cnt) + "</span>" : "";
         return (
-          '<button class="seg-tab' + (s.key === activeSeg ? " on" : "") + '" data-seg="' + s.key + '">' +
+          '<button class="seg-tab' + (s.key === activeSeg ? " on" : "") + '" data-seg="' + escapeAttr(s.key) + '">' +
           dot +
-          secLabel(s) +
+          escapeHtml(secLabel(s)) +
           cntHtml +
           "</button>"
         );
@@ -178,11 +184,11 @@ export function initLayoutModes(root: HTMLElement): () => void {
   }
   function ovCard(key: string, kLabel: string, value: string, sub: string, risk: boolean): string {
     return (
-      '<button class="ov-card' + (key === activeSeg ? " on" : "") + (risk ? " risk" : "") + '" data-seg="' + key + '">' +
+      '<button class="ov-card' + (key === activeSeg ? " on" : "") + (risk ? " risk" : "") + '" data-seg="' + escapeAttr(key) + '">' +
       (risk ? '<span class="ov-flag"></span>' : "") +
-      '<span class="ov-k">' + kLabel + "</span>" +
-      '<span class="ov-v">' + value + "</span>" +
-      '<span class="ov-sub">' + sub + "</span></button>"
+      '<span class="ov-k">' + escapeHtml(kLabel) + "</span>" +
+      '<span class="ov-v">' + escapeHtml(value) + "</span>" +
+      '<span class="ov-sub">' + escapeHtml(sub) + "</span></button>"
     );
   }
   interface OvItem {
@@ -241,10 +247,10 @@ export function initLayoutModes(root: HTMLElement): () => void {
     const cells = items
       .map(function (it) {
         return (
-          '<button class="orb' + (it.key === activeSeg ? " on" : "") + (it.risk ? " risk" : "") + '" data-seg="' + it.key + '">' +
-          '<span class="orb-k">' + it.k + (it.risk ? '<span class="orb-flag"></span>' : "") + "</span>" +
-          '<span class="orb-v">' + it.v + "</span>" +
-          '<span class="orb-sub">' + it.sub + "</span></button>"
+          '<button class="orb' + (it.key === activeSeg ? " on" : "") + (it.risk ? " risk" : "") + '" data-seg="' + escapeAttr(it.key) + '">' +
+          '<span class="orb-k">' + escapeHtml(it.k) + (it.risk ? '<span class="orb-flag"></span>' : "") + "</span>" +
+          '<span class="orb-v">' + escapeHtml(it.v) + "</span>" +
+          '<span class="orb-sub">' + escapeHtml(it.sub) + "</span></button>"
         );
       })
       .join("");
@@ -255,17 +261,17 @@ export function initLayoutModes(root: HTMLElement): () => void {
     const hero = items[0];
     const rail = items.slice(1);
     const heroHtml =
-      '<button class="oed-hero' + (hero.key === activeSeg ? " on" : "") + '" data-seg="' + hero.key + '">' +
-      '<span class="oed-k">' + hero.k + "</span>" +
-      '<span class="oed-v">' + hero.v + "</span>" +
-      '<span class="oed-sub">' + hero.sub + "</span></button>";
+      '<button class="oed-hero' + (hero.key === activeSeg ? " on" : "") + '" data-seg="' + escapeAttr(hero.key) + '">' +
+      '<span class="oed-k">' + escapeHtml(hero.k) + "</span>" +
+      '<span class="oed-v">' + escapeHtml(hero.v) + "</span>" +
+      '<span class="oed-sub">' + escapeHtml(hero.sub) + "</span></button>";
     const railHtml = rail
       .map(function (it) {
         return (
-          '<button class="oed-row' + (it.key === activeSeg ? " on" : "") + (it.risk ? " risk" : "") + '" data-seg="' + it.key + '">' +
-          '<span class="oed-row-k">' + it.k + (it.risk ? '<span class="oed-flag"></span>' : "") + "</span>" +
-          '<span class="oed-row-v">' + it.v + "</span>" +
-          '<span class="oed-row-sub">' + it.sub + "</span></button>"
+          '<button class="oed-row' + (it.key === activeSeg ? " on" : "") + (it.risk ? " risk" : "") + '" data-seg="' + escapeAttr(it.key) + '">' +
+          '<span class="oed-row-k">' + escapeHtml(it.k) + (it.risk ? '<span class="oed-flag"></span>' : "") + "</span>" +
+          '<span class="oed-row-v">' + escapeHtml(it.v) + "</span>" +
+          '<span class="oed-row-sub">' + escapeHtml(it.sub) + "</span></button>"
         );
       })
       .join("");
@@ -291,28 +297,28 @@ export function initLayoutModes(root: HTMLElement): () => void {
     })
       .map(function (s) {
         const flag = flagOf(s.key);
-        const dot = flag ? '<span class="jl-flag ' + flag + '"></span>' : "";
+        const dot = flag ? '<span class="jl-flag ' + safeClassToken(flag) + '"></span>' : "";
         const cnt = sectionCount(s.key);
-        const cntHtml = cnt != null ? '<span class="jl-count">' + cnt + "</span>" : "";
+        const cntHtml = cnt != null ? '<span class="jl-count">' + escapeHtml(cnt) + "</span>" : "";
         return (
-          '<button class="jump-link" data-jump="' + s.key + '">' + dot + '<span class="jl-name">' + secLabel(s) + "</span>" + cntHtml + "</button>"
+          '<button class="jump-link" data-jump="' + escapeAttr(s.key) + '">' + dot + '<span class="jl-name">' + escapeHtml(secLabel(s)) + "</span>" + cntHtml + "</button>"
         );
       })
       .join("");
-    const tail = withAcc ? '<button class="jump-allbtn" data-allacc="toggle">' + Tr("assets.acc.expandAll") + "</button>" : "";
+    const tail = withAcc ? '<button class="jump-allbtn" data-allacc="toggle">' + escapeHtml(Tr("assets.acc.expandAll")) + "</button>" : "";
     return '<div class="jump-nav' + (withAcc ? " jump-nav-acc" : "") + '">' + links + tail + "</div>";
   }
 
   function accSummaryHtml(key: string): string {
     const s = lastSummary || ({} as ModeSummary);
     const stat = function (t: string) {
-      return '<span class="acc-sum-stat">' + t + "</span>";
+      return '<span class="acc-sum-stat">' + escapeHtml(t) + "</span>";
     };
     const val = function (t: string) {
-      return '<span class="acc-sum-val">' + t + "</span>";
+      return '<span class="acc-sum-val">' + escapeHtml(t) + "</span>";
     };
     const flag = function (c: string, t: string) {
-      return '<span class="acc-sum-flag ' + c + '">' + t + "</span>";
+      return '<span class="acc-sum-flag ' + safeClassToken(c) + '">' + escapeHtml(t) + "</span>";
     };
     let inner = "";
     if (key === "holdings") {
@@ -556,10 +562,23 @@ export function initLayoutModes(root: HTMLElement): () => void {
   // ════════════════════════════════════════════════════════════════════════
   let panel: HTMLElement | null = null;
 
+  function editHostTargetOrigin(): string {
+    return window.location.origin;
+  }
+
+  function postEditHostMessage(message: Record<string, unknown>): void {
+    if (!window.PASU_EDIT_HOST) return;
+    window.parent.postMessage(message, editHostTargetOrigin());
+  }
+
+  function isTrustedEditHostMessage(e: MessageEvent): boolean {
+    return e.origin === editHostTargetOrigin() && e.source === window.parent;
+  }
+
   function persist(edits: Record<string, unknown>): void {
     if (!window.PASU_EDIT_HOST) return;
     try {
-      window.parent.postMessage({ type: "__edit_mode_set_keys", edits: edits }, "*");
+      postEditHostMessage({ type: "__edit_mode_set_keys", edits: edits });
     } catch (err) {
       void err;
     }
@@ -720,7 +739,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
     if (panel) panel.hidden = true;
     if (dismiss && window.PASU_EDIT_HOST) {
       try {
-        window.parent.postMessage({ type: "__edit_mode_dismissed" }, "*");
+        postEditHostMessage({ type: "__edit_mode_dismissed" });
       } catch (err) {
         void err;
       }
@@ -729,6 +748,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
 
   // ── Tweaks host protocol — only when PASU_EDIT_HOST ────────────────────────
   const messageHandler = function (e: MessageEvent) {
+    if (!isTrustedEditHostMessage(e)) return;
     const d = e.data || {};
     if (d.type === "__activate_edit_mode") showPanel();
     else if (d.type === "__deactivate_edit_mode") hidePanel(false);
@@ -740,7 +760,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
   applyMode();
   if (window.PASU_EDIT_HOST) {
     try {
-      window.parent.postMessage({ type: "__edit_mode_available" }, "*");
+      postEditHostMessage({ type: "__edit_mode_available" });
     } catch (err) {
       void err;
     }

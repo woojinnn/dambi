@@ -1,7 +1,10 @@
 const { merge } = require("webpack-merge");
 process.env.NODE_ENV = process.env.NODE_ENV || "production";
 const common = require("./webpack.common.js");
-const { assertProdSignatureEnforced } = require("./env.js");
+const {
+  assertProdServerUrlSecure,
+  assertProdSignatureEnforced,
+} = require("./env.js");
 
 // Audit Round 7+ (P1) — production builds must point at a real HTTPS
 // registry. A missing or `http://localhost:*` `REGISTRY_BASE_URL` in a
@@ -27,6 +30,10 @@ if (process.env.DAMBI_ALLOW_INSECURE_REGISTRY !== "1") {
     );
   }
 }
+
+// Production builds also carry authenticated dashboard/SW traffic. Do not let
+// a distributed build bake an insecure or malformed policy-server origin.
+assertProdServerUrlSecure(process.env);
 
 // Bundle-signature ENFORCEMENT guard. A production-distributed build must verify
 // bundle signatures; otherwise the shipped extension trusts an unsigned registry

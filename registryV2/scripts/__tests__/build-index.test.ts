@@ -254,6 +254,49 @@ describe("build-index by-typed-data emission", () => {
     expect(listTypedData(root)).toEqual([`999__${vc}__HyperliquidTransaction__UsdSend.json`]);
   });
 
+  it("(2b) rejects path-unsafe typed-data primary and witness names", () => {
+    const primaryPath = permit2Manifest({
+      match: {
+        selector: "0x2b67b570",
+        chain_to_addresses: { "1": [PERMIT2] },
+        typed_data: {
+          domain_name: "Permit2",
+          verifying_contract: PERMIT2,
+          primary_type: "PermitSingle/../../bundles/evil",
+          types: { "PermitSingle/../../bundles/evil": [{ name: "spender", type: "address" }] },
+        },
+      },
+    });
+    const rootA = track(scaffold({ "bad-primary.json": primaryPath }));
+    const resA = runBuild(rootA);
+    expect(resA.status).not.toBe(0);
+    expect(resA.stderr + resA.stdout).toMatch(/primary_type.*path-safe/);
+    expect(listTypedData(rootA)).toEqual([]);
+
+    const witnessPath = permit2Manifest({
+      match: {
+        selector: "0x30f28b7a",
+        chain_to_addresses: { "1": [PERMIT2] },
+        typed_data: {
+          domain_name: "Permit2",
+          verifying_contract: PERMIT2,
+          primary_type: "PermitWitnessTransferFrom",
+          witness_type: "ExclusiveDutchOrder?x=1",
+          types: {
+            PermitWitnessTransferFrom: [
+              { name: "witness", type: "ExclusiveDutchOrder?x=1" },
+            ],
+          },
+        },
+      },
+    });
+    const rootB = track(scaffold({ "bad-witness.json": witnessPath }));
+    const resB = runBuild(rootB);
+    expect(resB.status).not.toBe(0);
+    expect(resB.stderr + resB.stdout).toMatch(/witness_type.*path-safe/);
+    expect(listTypedData(rootB)).toEqual([]);
+  });
+
   it("(3) rejects a manifest whose typed_data.verifying_contract is absent from chain_to_addresses", () => {
     const vc = "0x2222222222222222222222222222222222222222";
     const manifest = permit2Manifest({
@@ -421,6 +464,38 @@ describe("build-index by-typed-data emission", () => {
 });
 
 describe("build-index token source expansion", () => {
+  it("rejects sourced typed-data manifests instead of silently dropping typed-data routes", () => {
+    const manifest = erc20TransferManifest({
+      match: {
+        selector: "0xd505accf",
+        chain_to_addresses_source: "tokens:erc20",
+        chain_ids: [1],
+        typed_data: {
+          domain_name: "USD Coin",
+          verifying_contract: ERC20_TOKEN,
+          primary_type: "Permit",
+          types: {
+            Permit: [
+              { name: "owner", type: "address" },
+              { name: "spender", type: "address" },
+              { name: "value", type: "uint256" },
+              { name: "nonce", type: "uint256" },
+              { name: "deadline", type: "uint256" },
+            ],
+          },
+        },
+      },
+    });
+    const root = track(scaffold({ "sourced-permit.json": manifest }));
+    writeToken(root, 1, ERC20_TOKEN, "erc20", { symbol: "USDC" });
+
+    const res = runBuild(root);
+
+    expect(res.status).not.toBe(0);
+    expect(res.stderr + res.stdout).toMatch(/chain_to_addresses_source \+ typed_data is unsupported/);
+    expect(listTypedData(root)).toEqual([]);
+  });
+
   it("expands tokens:erc20 into concrete callkeys backed by a shared bundle ref", () => {
     const root = track(scaffold({ "transfer.json": erc20TransferManifest() }));
     writeToken(root, 1, ERC20_TOKEN, "erc20", { symbol: "T20" });
@@ -673,11 +748,19 @@ describe("manifest live-input regressions", () => {
 
     for (const rel of manifestPaths) {
       const manifest = JSON.parse(readFileSync(join(REGISTRY_V2_ROOT, rel), "utf8"));
-      const poolAddr =
-        manifest.emit.body.amm.swap.live_inputs.route.source.resource.pool_addr;
+      const poolMeta: { file: string; path: string; resource: Record<string, unknown> }[] = [];
+      collectPoolMetaResources(manifest, poolMeta, rel);
 
-      expect(poolAddr, rel).not.toBe("0x0000000000000000000000000000000000000000");
-      expect(poolAddr?.$fn, rel).toBe("balancer_pool_id_to_address");
+      expect(poolMeta.length, rel).toBeGreaterThanOrEqual(1);
+      for (const entry of poolMeta) {
+        const poolAddr = entry.resource.pool_addr as Record<string, unknown> | string | undefined;
+        expect(poolAddr, `${rel}:${entry.path}`).not.toBe(
+          "0x0000000000000000000000000000000000000000",
+        );
+        expect((poolAddr as Record<string, unknown> | undefined)?.$fn, `${rel}:${entry.path}`).toBe(
+          "balancer_pool_id_to_address",
+        );
+      }
     }
   });
 });

@@ -227,3 +227,23 @@ export async function fetchFieldCatalog(): Promise<SchemaDescriptor | null> {
     throw err;
   }
 }
+
+/** Fetch the executable policy-RPC method catalog from the SW
+ *  (`manifest:get-method-catalog`, backed by the bundled `method-catalog.json`
+ *  which the build gates against the real `execute_call_specs` dispatch). The
+ *  custom-field modal uses it so the method dropdown offers exactly the methods
+ *  the server can actually serve, and so it can warn on a method that isn't
+ *  served. Soft-fails to `null` when the extension bridge is unavailable; the
+ *  modal then falls back to its static method list. */
+export async function fetchMethodCatalog(): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await sendToExtension<{ methods?: Record<string, unknown> }>(
+      { type: "manifest:get-method-catalog" },
+      BRIDGE_TIMEOUT_MS,
+    );
+    return res?.methods ?? {};
+  } catch (err) {
+    if (isMissingBridge(err)) return null;
+    throw err;
+  }
+}

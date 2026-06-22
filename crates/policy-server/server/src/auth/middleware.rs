@@ -35,12 +35,9 @@ impl From<Claims> for AuthUser {
 
 /// `axum::middleware::from_fn(require_auth)` — wraps a route so every
 /// downstream handler can rely on `Extension<AuthUser>` being present.
-/// Token resolution order:
-/// 1. `Authorization: Bearer <jwt>` header (preferred — used by all
-///    standard fetch/HTTP clients).
-/// 2. `?token=<jwt>` query string for `/events/stream` only (fallback — the
-///    browser `EventSource` API cannot set custom headers, so SSE callers pass
-///    the token here). Other routes must not accept URL tokens.
+/// Token resolution: `Authorization: Bearer <jwt>` header only. Bearer tokens
+/// are deliberately not accepted from query strings, including SSE routes,
+/// because URL credentials are commonly captured by proxies and access logs.
 pub async fn require_auth(mut req: Request, next: Next) -> Response {
     let user = match extract_user(&req) {
         Ok(u) => u,
@@ -50,21 +47,16 @@ pub async fn require_auth(mut req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
-/// Pulls the bearer token out of either `Authorization` or the SSE-only
-/// `?token=…` fallback and verifies it. Only access tokens are accepted —
-/// refresh tokens reach `/auth/refresh` instead.
+/// Pulls the bearer token out of `Authorization` and verifies it. Only access
+/// tokens are accepted — refresh tokens reach `/auth/refresh` instead.
 fn extract_user(req: &Request) -> Result<AuthUser, Box<Response>> {
-    // Prefer the header; fall back to query string for SSE callers.
     let token = match token_from_header(req.headers()) {
         Some(Ok(t)) => t,
         Some(Err(reason)) => return Err(Box::new(reject(reason))),
-        None => match token_from_query(req.uri().path(), req.uri().query()) {
-            Some(t) => t,
-            None => return Err(Box::new(reject("missing Authorization header"))),
-        },
+        None => return Err(Box::new(reject("missing Authorization header"))),
     };
 
-    let claims = jwt::verify(&token).map_err(|e| Box::new(reject(&e.to_string())))?;
+    let claims = jwt::verify(&token).map_err(|e| Box::new(reject_token_verify_error(&e)))?;
     if !claims.is_access() {
         return Err(Box::new(reject(
             "non-access token cannot be used as an access token",
@@ -88,28 +80,18 @@ fn token_from_header(headers: &HeaderMap) -> Option<Result<String, &'static str>
     })())
 }
 
-/// Pull `token=<jwt>` out of the query string for `/events/stream` only.
-/// Returns `None` if the path is not SSE, query is absent, or no `token` key is
-/// found. URL-decoded.
-fn token_from_query(path: &str, query: Option<&str>) -> Option<String> {
-    if path != "/events/stream" {
-        return None;
-    }
-    let q = query?;
-    for pair in q.split('&') {
-        if let Some(rest) = pair.strip_prefix("token=") {
-            return Some(urlencoding::decode(rest).ok()?.into_owned());
-        }
-    }
-    None
-}
-
 fn reject(reason: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({ "error": "unauthorized", "reason": reason })),
     )
         .into_response()
+}
+
+fn reject_token_verify_error(error: &jwt::AuthError) -> Response {
+    let safe_error = crate::logging::redact_sensitive_log_text(error);
+    tracing::warn!(error = %safe_error, "access token verification failed");
+    reject("invalid or expired token")
 }
 
 #[cfg(test)]
@@ -179,6 +161,18 @@ mod tests {
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
     }
 
+    #[tokio::test]
+    async fn token_verify_errors_do_not_echo_internal_reason() {
+        let response = reject_token_verify_error(&jwt::AuthError::MissingSecret);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("invalid or expired token"), "body: {text}");
+        assert!(!text.contains("JWT_SECRET"), "body leaked: {text}");
+    }
+
     #[test]
     fn oauth_state_token_rejected_as_access() {
         set_secret();
@@ -199,15 +193,15 @@ mod tests {
     }
 
     #[test]
-    fn token_via_query_string_accepted_for_sse_only() {
+    fn token_via_query_string_rejected_for_sse_routes() {
         set_secret();
         let token = issue("u_eve", "eve@e.com", TokenType::Access, None).unwrap();
-        let user = extract_user(&req_with(
+        let err = extract_user(&req_with(
             HeaderMap::new(),
             &format!("/events/stream?token={token}"),
         ))
-        .unwrap();
-        assert_eq!(user.user_id, "u_eve");
+        .unwrap_err();
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[test]
@@ -220,21 +214,6 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[test]
-    fn token_via_query_string_requires_exact_sse_path() {
-        set_secret();
-        let token = issue("u_eve", "eve@e.com", TokenType::Access, None).unwrap();
-
-        for uri in [
-            format!("/events/stream/?token={token}"),
-            format!("/events/stream/extra?token={token}"),
-            format!("/events%2Fstream?token={token}"),
-        ] {
-            let err = extract_user(&req_with(HeaderMap::new(), &uri)).unwrap_err();
-            assert_eq!(err.status(), StatusCode::UNAUTHORIZED, "uri={uri}");
-        }
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 import { request } from "./client";
 import type { ChainId, Decimal } from "./types";
+import { normalizeWalletAddress } from "./wallets";
 
 // ── Hyperliquid account ──────────────────────────────────────────────────
 
@@ -163,12 +164,12 @@ export interface PendingTx {
 
 /** `GET /wallets/:addr/positions` — protocol positions (incl. the HL account). */
 export async function getWalletPositions(address: string): Promise<Position[]> {
-  return request<Position[]>(`/wallets/${address}/positions`);
+  return request<Position[]>(`/wallets/${normalizeWalletAddress(address)}/positions`);
 }
 
 /** `GET /wallets/:addr/pending` — off-chain / unsettled intent orders. */
 export async function getWalletPending(address: string): Promise<PendingTx[]> {
-  return request<PendingTx[]>(`/wallets/${address}/pending`);
+  return request<PendingTx[]>(`/wallets/${normalizeWalletAddress(address)}/pending`);
 }
 
 /** Extract the single HL account from a positions array, if present. */

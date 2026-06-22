@@ -173,19 +173,16 @@ function WalletWorkspace({ snap, address }) {
     if (!window.confirm(`"${name}" 폴더를 삭제할까요?\n안의 정책은 개별로 이동해요(삭제되지 않아요).`)) return;
     run("폴더 삭제", () => PS.removeWalletFolder({ address, folderId })).then((ok) => ok && pushToast("폴더를 삭제했어요 — 정책은 개별로 옮겼어요"));
   };
-  const renderMember = (d) => ({
-    slug: d.id.replace(/^def::/, ""),
-    title: d.displayName,
-    cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), d.skeleton.model.severity),
-    manifest: d.skeleton.manifest,
-  });
   const publishWalletPackage = (pkgId, members) => {
     const defs = [...new Map(members.map((b) => [b.defId, snap.library.defs[b.defId]])).values()].filter(Boolean);
     if (defs.length === 0) return pushToast("이 패키지에 든 정책이 없어요");
-    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: defs.map(renderMember) });
+    const plan = Cedar.publishMembersFromDefs(defs);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
+    setPublishSrc({ kind: "package", suggestedDisplayName: walletPkgName(pkgId), suggestedSlug: pkgId.replace(/^pkg::/, ""), members: plan.members });
   };
   const publishDef = (d) => {
-    const m = renderMember(d);
+    const m = Cedar.publishMemberFromDef(d);
+    if (!m) return Cedar.rejectUnsupportedPublish(d);
     setPublishSrc({ kind: "policy", cedarText: m.cedarText, manifest: m.manifest, suggestedDisplayName: d.displayName, suggestedSlug: m.slug });
   };
 
@@ -230,7 +227,10 @@ function WalletWorkspace({ snap, address }) {
                       <span className={`pol-nm${brows.length === 0 ? " dim" : ""}`}>{d.displayName}</span>
                       <span className={`pol-desc${d.doc && d.doc.definition ? "" : " add"}`}>{d.doc && d.doc.definition ? d.doc.definition : "설명 추가"}</span>
                     </span>
-                    {sevLabel(d.skeleton.model.severity) && <span className={`pol-sev ${d.skeleton.model.severity}`}>{sevLabel(d.skeleton.model.severity)}</span>}
+                    {(() => {
+                      const sev = Cedar.defSeverity(d);
+                      return sevLabel(sev) && <span className={`pol-sev ${sev}`}>{sevLabel(sev)}</span>;
+                    })()}
                     {opts.walletOnly && (bindingsByDef.get(d.id) || []).filter((b) => PS.isEffectiveOn(wallet, b)).length === 0 && (
                       <span className="pol-badge draft">미적용 초안</span>
                     )}

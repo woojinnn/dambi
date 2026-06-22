@@ -48,24 +48,23 @@ worker:
       memory: 1Gi
 
 runtime:
-  rustLog: info,policy_server=debug,policy_sync=info
+  rustLog: info,policy_sync=info
   requireSyncConfig: true
   requireRedis: true
   requireOAuthConfig: true
   runMigrationsOnStartup: false
   redisEventsChannel: policy-server:events
 
-# Evaluate-time on-chain oracle RPCs (eth_call). Keyless public RPC by default.
-# Both readers are mainnet-only (Chainalysis sanctions oracle 0x40C5…c8fb; Aave/
-# EigenLayer health-factor). When the env is UNSET the reader returns None and the
-# OPTIONAL enrichment fail-opens → the policy silently no-ops. That dormancy is the
-# root cause of address.sanctions / lending.health_factor never firing on the
-# cluster (the env was simply never injected). Set "" to keep a reader dormant.
-# (oracle.usd_value needs NO url here — price_rpc_urls() carries publicnode
-# defaults in-code; it only needs the LayeredPriceBook image deployed.)
+# Evaluate-time on-chain oracle RPCs (eth_call). These are explicit host
+# dependencies, not hidden binary defaults. When a value is empty or omitted, the
+# corresponding OPTIONAL enrichment stays dormant instead of fabricating a value.
 oracleRpc:
   sanctionsUrl: "https://ethereum-rpc.publicnode.com" # → POLICY_SANCTIONS_RPC_URL
   lendingUrl: "https://ethereum-rpc.publicnode.com" # → POLICY_LENDING_RPC_URL
+  priceUsd:
+    ethereumUrl: "https://ethereum-rpc.publicnode.com" # → POLICY_PRICE_RPC_URL_1
+    arbitrumUrl: "https://arbitrum-one-rpc.publicnode.com" # → POLICY_PRICE_RPC_URL_42161
+    baseUrl: "https://base-rpc.publicnode.com" # → POLICY_PRICE_RPC_URL_8453
 
 ingress:
   enabled: true

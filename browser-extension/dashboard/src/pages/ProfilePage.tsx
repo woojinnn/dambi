@@ -8,6 +8,7 @@ import {
   deleteWallet,
   listListings,
   listWallets,
+  normalizeServerBaseUrl,
   pickI18n,
 } from "../server-api";
 import { deleteDef, deletePackage, getOverview, UNCATEGORIZED_PKG } from "../server-api/policy-store";
@@ -34,7 +35,7 @@ const LISTINGS_PAGE_SIZE = 8;
 const SERVER_URL_KEY = "dambi_server_url";
 const SERVER_PRESETS = [
   { labelKey: "settings.presetLocal", url: "http://127.0.0.1:8788" },
-  { labelKey: "settings.presetProd", url: "https://pasu-policy.duckdns.org" },
+  { labelKey: "settings.presetProd", url: "https://dambi-policy.duckdns.org" },
 ];
 const LANGUAGES: Array<{ code: "ko" | "en"; labelKey: string }> = [
   { code: "ko", labelKey: "settings.languageKo" },
@@ -75,10 +76,18 @@ export function ProfilePage() {
   const [banner, setBanner] = useState<string | null>(null);
 
   // 서버 환경 설정 (구 /settings 에서 이전).
-  const [serverUrl, setServerUrl] = useState(() => window.localStorage.getItem(SERVER_URL_KEY) ?? "");
+  const [serverUrl, setServerUrl] = useState(
+    () => normalizeServerBaseUrl(window.localStorage.getItem(SERVER_URL_KEY)) ?? "",
+  );
   const [serverSaved, setServerSaved] = useState(false);
   const saveServerUrl = () => {
-    const url = serverUrl.trim();
+    const rawUrl = serverUrl.trim();
+    const url = normalizeServerBaseUrl(rawUrl);
+    if (rawUrl && !url) {
+      setServerSaved(false);
+      setBanner(t("settings.invalidServerUrl"));
+      return;
+    }
     if (url) window.localStorage.setItem(SERVER_URL_KEY, url);
     else window.localStorage.removeItem(SERVER_URL_KEY);
     const sw = swStorage();
@@ -86,6 +95,7 @@ export function ProfilePage() {
       if (url) void sw.set({ [SERVER_URL_KEY]: url });
       else void sw.remove(SERVER_URL_KEY);
     }
+    setServerUrl(url ?? "");
     setServerSaved(true);
   };
 
@@ -234,7 +244,7 @@ export function ProfilePage() {
                 <ul className="pp-listings">
                   {shownListings.map((l) => (
                     <li key={l.id} className="pp-listing-row">
-                      <Link to={`/market/${l.slug}`} className="pp-listing">
+                      <Link to={`/market/${encodeURIComponent(l.slug)}`} className="pp-listing">
                         <div className="pp-listing-main">
                           <span className="pp-listing-name">{pickI18n(l.display_name)}</span>
                           <span className="pp-listing-slug">{l.slug}</span>
@@ -322,7 +332,7 @@ export function ProfilePage() {
           </div>
         </section>
 
-        {/* settings — OpenAI API key (server-stored, used for LLM drafting) */}
+        {/* settings — OpenAI API key (browser-local, used for LLM drafting) */}
         <section className="pp-card">
           <div className="pp-sec-head">
             <h2>{t("settings.openaiTitle")}</h2>

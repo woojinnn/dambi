@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use policy_db::PostgresWalletMetadata;
 use policy_state::live_field::{DataSource, LiveField, OracleProvider};
+use policy_state::pending::{PendingKind, PendingTx};
 use policy_state::primitives::{Address, ChainId, Duration, Price, Time, U256};
 use policy_state::token::{Balance, TokenHolding, TokenKey, TokenKind, TokenRef};
 use policy_state::{EvalContext, PendingChange, RequestKind, WalletId, WalletState, WalletStore};
@@ -31,6 +32,7 @@ use policy_transition::{apply, Action, ActionBody, ActionMeta, ActionNature, Eip
 
 use crate::app::AppState;
 use crate::auth::AuthUser;
+use crate::coordination::{Coordinator, LockToken};
 use crate::events::types::{Event, WalletSync};
 
 /// User-supplied explicit chain sets drive synchronous discovery/sync work.
@@ -42,6 +44,8 @@ const MAX_EXPLICIT_WALLET_CHAINS: usize = 16;
 /// background work and unpaginated wallet views.
 const MAX_ACTIVE_WALLETS_PER_USER: usize = 128;
 const MAX_WALLET_LABEL_CHARS: usize = 80;
+const MAX_PERMIT_WITNESS_TYPE_CHARS: usize = 128;
+const MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET: usize = 256;
 const ADD_WALLET_DISCOVERY_PUBLIC_ERROR: &str = "wallet discovery failed; retry sync later";
 const ADD_WALLET_SYNC_PUBLIC_ERROR: &str = "wallet sync failed; retry sync later";
 
@@ -88,26 +92,23 @@ pub async fn add_wallet(
     Extension(user): Extension<AuthUser>,
     Json(req): Json<AddWalletReq>,
 ) -> Response {
-    let lock_key = format!("sync:user:{}", user.user_id);
-    let lock = match state
-        .coordinator
-        .try_lock(&lock_key, state.sync_lock_ttl)
-        .await
+    let lock = match acquire_user_wallet_lock(
+        &*state.coordinator,
+        state.sync_lock_ttl,
+        &user.user_id,
+        "wallet operation already running for this user",
+        "wallet add lock",
+    )
+    .await
     {
-        Ok(Some(lock)) => lock,
-        Ok(None) => {
-            return (
-                StatusCode::CONFLICT,
-                "wallet operation already running for this user",
-            )
-                .into_response()
-        }
-        Err(e) => return internal(&format!("wallet add lock: {e}")),
+        Ok(lock) => lock,
+        Err(response) => return response,
     };
 
     let response = add_wallet_locked(state.clone(), user, req).await;
     if let Err(e) = state.coordinator.release_lock(lock).await {
-        tracing::warn!(error = %e, "failed to release wallet add lock");
+        let safe_error = crate::logging::redact_sensitive_log_text(&e);
+        tracing::warn!(error = %safe_error, "failed to release wallet add lock");
     }
     response
 }
@@ -150,10 +151,18 @@ async fn add_wallet_locked(state: AppState, user: AuthUser, req: AddWalletReq) -
         Ok(s) => s,
         Err(e) => return internal(&format!("load: {e}")),
     };
-    let is_new = existing == WalletState::new(id.clone());
+    let base_state = if existing.wallet_id == id {
+        existing
+    } else {
+        // A soft-deleted wallet can be re-added with a different explicit chain
+        // set. The add request is the new tracking contract, so do not resurrect
+        // stale chain metadata from the archived state snapshot.
+        WalletState::new(id.clone())
+    };
+    let is_new = base_state == WalletState::new(id.clone());
     let mut discovery_failed = false;
     let discovered_count = if is_new {
-        let mut seeded = existing.clone();
+        let mut seeded = base_state.clone();
         let n = match seed_holdings(&mut seeded, &id, &state).await {
             Ok(n) => n,
             Err(e) => {
@@ -161,15 +170,16 @@ async fn add_wallet_locked(state: AppState, user: AuthUser, req: AddWalletReq) -
                 // continue into `run_sync`: venue snapshots such as
                 // Hyperliquid are independent from token discovery and should
                 // be visible immediately after adding a wallet.
-                if let Err(save_err) = store.save(&existing).await {
+                if let Err(save_err) = store.reactivate_wallet(&base_state).await {
                     return internal(&format!("save: {save_err}"));
                 }
-                tracing::warn!(error = %e, "add wallet discovery failed");
+                let safe_error = crate::logging::redact_sensitive_log_text(&e);
+                tracing::warn!(error = %safe_error, "add wallet discovery failed");
                 discovery_failed = true;
                 0
             }
         };
-        if let Err(e) = store.save(&seeded).await {
+        if let Err(e) = store.reactivate_wallet(&seeded).await {
             return internal(&format!("save: {e}"));
         }
         n
@@ -179,7 +189,7 @@ async fn add_wallet_locked(state: AppState, user: AuthUser, req: AddWalletReq) -
         // looks "not new" here. Reactivate explicitly before the label write —
         // plain state saves preserve `archived` so in-flight syncs cannot
         // resurrect a user-deleted wallet.
-        if let Err(e) = store.reactivate_wallet(&existing).await {
+        if let Err(e) = store.reactivate_wallet(&base_state).await {
             return internal(&format!("reactivate wallet: {e}"));
         }
         0
@@ -220,7 +230,8 @@ async fn add_wallet_locked(state: AppState, user: AuthUser, req: AddWalletReq) -
             (true, None)
         }
         Err(e) => {
-            tracing::warn!(error = %e, "add wallet initial sync failed");
+            let safe_error = crate::logging::redact_sensitive_log_text(&e);
+            tracing::warn!(error = %safe_error, "add wallet initial sync failed");
             (false, Some(()))
         }
     };
@@ -271,10 +282,11 @@ async fn seed_holdings(
                 count += 1;
             }
             Err(e) => {
+                let safe_error = crate::logging::redact_sensitive_log_text(&e);
                 tracing::warn!(
                     chain = %chain,
                     address = %format!("{:#x}", id.address),
-                    error = %e,
+                    error = %safe_error,
                     "seed: native balance failed"
                 );
                 return Err(format!("native {chain}: {e}"));
@@ -313,18 +325,23 @@ async fn seed_holdings(
                         "top-tokens"
                     };
                     if let Some(es_err) = &etherscan_failed {
+                        let safe_error = crate::logging::redact_sensitive_log_text(es_err);
                         tracing::warn!(
                             chain = %chain,
-                            etherscan_error = %es_err,
+                            etherscan_error = %safe_error,
                             "seed: etherscan failed, falling back to top-tokens multicall"
                         );
                     }
                 }
                 Err(top_err) => {
+                    let safe_etherscan_error = crate::logging::redact_sensitive_log_text(
+                        etherscan_failed.as_deref().unwrap_or("(no etherscan)"),
+                    );
+                    let safe_top_tokens_error = crate::logging::redact_sensitive_log_text(&top_err);
                     tracing::warn!(
                         chain = %chain,
-                        etherscan_error = %etherscan_failed.unwrap_or_else(|| "(no etherscan)".into()),
-                        top_tokens_error = %top_err,
+                        etherscan_error = %safe_etherscan_error,
+                        top_tokens_error = %safe_top_tokens_error,
                         "seed: both erc20 paths failed — keeping wallet without tokens"
                     );
                     continue;
@@ -396,9 +413,10 @@ async fn seed_approvals_for_chain(
             inserted
         }
         Err(e) => {
+            let safe_error = crate::logging::redact_sensitive_log_text(&e);
             tracing::warn!(
                 chain = %chain,
-                error = %e,
+                error = %safe_error,
                 "seed: approval discovery failed (best-effort)"
             );
             0
@@ -576,6 +594,34 @@ pub async fn patch_wallet(
         Ok(a) => a,
         Err(e) => return bad_request(&format!("invalid address `{address}`: {e}")),
     };
+
+    let lock = match acquire_user_wallet_lock(
+        &*state.coordinator,
+        state.sync_lock_ttl,
+        &user.user_id,
+        "wallet metadata update already running for this user",
+        "wallet patch lock",
+    )
+    .await
+    {
+        Ok(lock) => lock,
+        Err(response) => return response,
+    };
+
+    let response = patch_wallet_locked(state.clone(), user, addr, req).await;
+    if let Err(e) = state.coordinator.release_lock(lock).await {
+        let safe_error = crate::logging::redact_sensitive_log_text(&e);
+        tracing::warn!(error = %safe_error, "failed to release wallet patch lock");
+    }
+    response
+}
+
+async fn patch_wallet_locked(
+    state: AppState,
+    user: AuthUser,
+    addr: Address,
+    req: PatchWalletReq,
+) -> Response {
     let store = match state.multi_user.for_user(&user.user_id) {
         Ok(s) => s,
         Err(e) => return internal(&format!("open user store: {e}")),
@@ -608,6 +654,29 @@ pub async fn delete_wallet(
         Ok(a) => a,
         Err(e) => return bad_request(&format!("invalid address `{address}`: {e}")),
     };
+
+    let lock = match acquire_user_wallet_lock(
+        &*state.coordinator,
+        state.sync_lock_ttl,
+        &user.user_id,
+        "wallet delete already running for this user",
+        "wallet delete lock",
+    )
+    .await
+    {
+        Ok(lock) => lock,
+        Err(response) => return response,
+    };
+
+    let response = delete_wallet_locked(state.clone(), user, addr).await;
+    if let Err(e) = state.coordinator.release_lock(lock).await {
+        let safe_error = crate::logging::redact_sensitive_log_text(&e);
+        tracing::warn!(error = %safe_error, "failed to release wallet delete lock");
+    }
+    response
+}
+
+async fn delete_wallet_locked(state: AppState, user: AuthUser, addr: Address) -> Response {
     let store = match state.multi_user.for_user(&user.user_id) {
         Ok(s) => s,
         Err(e) => return internal(&format!("open user store: {e}")),
@@ -633,26 +702,23 @@ pub async fn sync_wallet(
         Err(e) => return bad_request(&format!("invalid address `{address}`: {e}")),
     };
 
-    let lock_key = format!("sync:user:{}", user.user_id);
-    let lock = match state
-        .coordinator
-        .try_lock(&lock_key, state.sync_lock_ttl)
-        .await
+    let lock = match acquire_user_wallet_lock(
+        &*state.coordinator,
+        state.sync_lock_ttl,
+        &user.user_id,
+        "wallet sync already running for this user",
+        "sync lock",
+    )
+    .await
     {
-        Ok(Some(lock)) => lock,
-        Ok(None) => {
-            return (
-                StatusCode::CONFLICT,
-                "wallet sync already running for this user",
-            )
-                .into_response()
-        }
-        Err(e) => return internal(&format!("sync lock: {e}")),
+        Ok(lock) => lock,
+        Err(response) => return response,
     };
 
     let response = sync_wallet_locked(state.clone(), user, addr).await;
     if let Err(e) = state.coordinator.release_lock(lock).await {
-        tracing::warn!(error = %e, "failed to release sync lock");
+        let safe_error = crate::logging::redact_sensitive_log_text(&e);
+        tracing::warn!(error = %safe_error, "failed to release sync lock");
     }
     response
 }
@@ -675,10 +741,11 @@ async fn sync_wallet_locked(state: AppState, user: AuthUser, addr: Address) -> R
     // Re-run discovery if (a) the wallet has no holdings at all, or
     // (b) it has only native gas balances and zero ERC-20s. The latter
     // means the original Etherscan discovery silently bailed out and
-    let pre = match store.load(&id).await {
+    let mut pre = match store.load(&id).await {
         Ok(s) => s,
         Err(e) => return internal(&format!("pre-sync load: {e}")),
     };
+    pre.wallet_id = id.clone();
     let has_any_erc20 = pre
         .tokens
         .keys()
@@ -699,7 +766,8 @@ async fn sync_wallet_locked(state: AppState, user: AuthUser, addr: Address) -> R
                 }
             }
             Err(e) => {
-                tracing::warn!(error = %e, "sync: discovery failed — proceeding with previous wallet");
+                let safe_error = crate::logging::redact_sensitive_log_text(&e);
+                tracing::warn!(error = %safe_error, "sync: discovery failed — proceeding with previous wallet");
             }
         }
     } else if let Some(router) = state.orchestrator.router_arc() {
@@ -846,6 +914,33 @@ pub async fn ingest_permit(
         Err(e) => return bad_request(&format!("invalid address `{address}`: {e}")),
     };
 
+    let lock = match acquire_user_wallet_lock(
+        &*state.coordinator,
+        state.sync_lock_ttl,
+        &user.user_id,
+        "wallet permit ingest already running for this user",
+        "permit ingest lock",
+    )
+    .await
+    {
+        Ok(lock) => lock,
+        Err(response) => return response,
+    };
+
+    let response = ingest_permit_locked(state.clone(), user, addr, req).await;
+    if let Err(e) = state.coordinator.release_lock(lock).await {
+        let safe_error = crate::logging::redact_sensitive_log_text(&e);
+        tracing::warn!(error = %safe_error, "failed to release permit ingest lock");
+    }
+    response
+}
+
+async fn ingest_permit_locked(
+    state: AppState,
+    user: AuthUser,
+    addr: Address,
+    req: IngestPermitReq,
+) -> Response {
     let store = match state.multi_user.for_user(&user.user_id) {
         Ok(s) => s,
         Err(e) => return internal(&format!("open user store: {e}")),
@@ -887,14 +982,33 @@ pub async fn ingest_permit(
         Ok(s) => s,
         Err(e) => return internal(&format!("load: {e}")),
     };
+    loaded.wallet_id = id.clone();
 
-    let pending_ids = upsert_pending_from_delta(&mut loaded, &delta);
+    let pending_ids = match upsert_pending_from_delta(&mut loaded, &delta) {
+        Ok(ids) => ids,
+        Err(e) => return (StatusCode::CONFLICT, e).into_response(),
+    };
 
     if let Err(e) = store.save(&loaded).await {
         return internal(&format!("save: {e}"));
     }
 
     (StatusCode::OK, Json(IngestPermitResp { pending_ids })).into_response()
+}
+
+async fn acquire_user_wallet_lock(
+    coordinator: &dyn Coordinator,
+    ttl: std::time::Duration,
+    user_id: &str,
+    busy_message: &'static str,
+    error_context: &'static str,
+) -> Result<LockToken, Response> {
+    let lock_key = format!("sync:user:{user_id}");
+    match coordinator.try_lock(&lock_key, ttl).await {
+        Ok(Some(lock)) => Ok(lock),
+        Ok(None) => Err((StatusCode::CONFLICT, busy_message).into_response()),
+        Err(e) => Err(internal(&format!("{error_context}: {e}"))),
+    }
 }
 
 /// The chain the action's token lives on (for the `EvalContext`). Permit
@@ -999,6 +1113,7 @@ fn build_permit_action(
             let amount = parse_u256("amount", amount)?;
             let word = parse_u256("nonce_word", nonce_word)?;
             let sig_deadline = Time::from_unix(*sig_deadline);
+            let witness_type = validate_witness_type(witness_type.as_deref())?;
             let body = ActionBody::Token(TokenAction::Permit2SignTransfer(
                 Permit2SignTransferAction {
                     token: token_ref,
@@ -1007,7 +1122,7 @@ fn build_permit_action(
                     amount,
                     nonce: LiveField::new((word, *nonce_bit), DataSource::UserSupplied, now),
                     sig_deadline,
-                    witness_type: witness_type.clone(),
+                    witness_type,
                 },
             ));
             (body, sig_deadline)
@@ -1042,7 +1157,7 @@ fn build_permit_action(
 fn upsert_pending_from_delta(
     state: &mut WalletState,
     delta: &policy_state::StateDelta,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let mut ids = Vec::new();
     for change in &delta.pending_changes {
         let PendingChange::Add { pending } = change else {
@@ -1050,10 +1165,52 @@ fn upsert_pending_from_delta(
         };
         ids.push(pending.id.clone());
         if !state.pending.iter().any(|p| p.id == pending.id) {
+            if is_signed_permit_pending(pending)
+                && signed_permit_pending_count(state) >= MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET
+            {
+                return Err(format!(
+                    "too many signed permit pendings: max {MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET}"
+                ));
+            }
             state.pending.push((**pending).clone());
         }
     }
-    ids
+    Ok(ids)
+}
+
+fn signed_permit_pending_count(state: &WalletState) -> usize {
+    state
+        .pending
+        .iter()
+        .filter(|pending| is_signed_permit_pending(pending))
+        .count()
+}
+
+fn is_signed_permit_pending(pending: &PendingTx) -> bool {
+    matches!(
+        &pending.kind,
+        PendingKind::SignedEIP2612 { .. }
+            | PendingKind::SignedPermit2 { .. }
+            | PendingKind::SignedPermit2Transfer { .. }
+    )
+}
+
+fn validate_witness_type(raw: Option<&str>) -> Result<Option<String>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    if raw.trim().is_empty() {
+        return Err("witness_type must not be blank".to_owned());
+    }
+    if raw.chars().count() > MAX_PERMIT_WITNESS_TYPE_CHARS {
+        return Err(format!(
+            "witness_type must be at most {MAX_PERMIT_WITNESS_TYPE_CHARS} characters"
+        ));
+    }
+    if raw.chars().any(char::is_control) {
+        return Err("witness_type must not contain control characters".to_owned());
+    }
+    Ok(Some(raw.to_owned()))
 }
 
 fn erc20_token_ref(chain_id: &str, token: &str) -> Result<TokenRef, String> {
@@ -1110,6 +1267,7 @@ async fn run_sync(
         .load(id)
         .await
         .map_err(|e| format!("load before sync: {e}"))?;
+    state.wallet_id = id.clone();
     let now = Time::from_unix(unix_now_u64());
 
     let prim = orchestrator
@@ -1221,6 +1379,7 @@ fn resolve_explicit_wallet_chains(
     }
 
     let mut chains = Vec::with_capacity(raw_chains.len());
+    let mut seen = BTreeSet::new();
     for raw in raw_chains {
         let chain = parse_eip155_chain_id(raw)?;
         if let Some(supported) = supported {
@@ -1228,7 +1387,9 @@ fn resolve_explicit_wallet_chains(
                 return Err(format!("unsupported chain `{raw}`"));
             }
         }
-        chains.push(chain);
+        if seen.insert(chain.clone()) {
+            chains.push(chain);
+        }
     }
     Ok(chains)
 }
@@ -1308,7 +1469,8 @@ fn forbidden(reason: &str) -> Response {
 }
 
 fn internal(reason: &str) -> Response {
-    tracing::error!(error = %reason, "write handler internal error");
+    let safe_reason = crate::logging::redact_sensitive_log_text(reason);
+    tracing::error!(error = %safe_reason, "write handler internal error");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
@@ -1325,7 +1487,69 @@ fn unix_now_u64() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
     use policy_state::U256;
+
+    #[derive(Clone)]
+    struct BusyCoordinator {
+        seen_key: Arc<Mutex<Option<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Coordinator for BusyCoordinator {
+        async fn try_lock(
+            &self,
+            key: &str,
+            _ttl: std::time::Duration,
+        ) -> Result<Option<LockToken>, crate::coordination::CoordinationError> {
+            *self.seen_key.lock().expect("busy coordinator mutex") = Some(key.to_owned());
+            Ok(None)
+        }
+
+        async fn release_lock(
+            &self,
+            _token: LockToken,
+        ) -> Result<(), crate::coordination::CoordinationError> {
+            Ok(())
+        }
+
+        async fn mark_idempotent(
+            &self,
+            _key: &str,
+            _ttl: std::time::Duration,
+        ) -> Result<bool, crate::coordination::CoordinationError> {
+            Ok(false)
+        }
+    }
+
+    fn busy_app_state(seen_key: Arc<Mutex<Option<String>>>) -> AppState {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.keep();
+        let global_db = policy_db::GlobalDb::open(root.join("global.db")).unwrap();
+        let multi_user = policy_db::MultiUserStore::new(root.join("users"));
+        let event_bus = crate::events::EventBus::new();
+        AppState {
+            multi_user,
+            global_db,
+            event_bus: event_bus.clone(),
+            publisher: Arc::new(crate::events::LocalEventPublisher::new(event_bus)),
+            orchestrator: Arc::new(
+                Orchestrator::from_sync_config(&policy_sync::SyncConfig::default()).unwrap(),
+            ),
+            etherscan: None,
+            coingecko: CoinGeckoClient::new(),
+            coordinator: Arc::new(BusyCoordinator { seen_key }),
+            sync_lock_ttl: std::time::Duration::from_mins(2),
+        }
+    }
+
+    fn auth_user(id: &str) -> AuthUser {
+        AuthUser {
+            user_id: id.to_owned(),
+            email: format!("{id}@example.com"),
+        }
+    }
 
     #[tokio::test]
     async fn internal_errors_do_not_echo_reason() {
@@ -1337,6 +1561,91 @@ mod tests {
         let text = String::from_utf8(body.to_vec()).unwrap();
         assert_eq!(text, "Internal server error");
         assert!(!text.contains("secret"), "body leaked: {text}");
+    }
+
+    #[tokio::test]
+    async fn permit_ingest_uses_user_wallet_lock_before_state_mutation() {
+        let seen_key = Arc::new(Mutex::new(None));
+        let state = busy_app_state(seen_key.clone());
+        let req = IngestPermitReq::Eip2612 {
+            token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into(),
+            spender: "0x00000000000000000000000000000000deadbeef".into(),
+            amount: "1".into(),
+            deadline: 1_700_003_600,
+            nonce: "1".into(),
+            chain_id: "eip155:1".into(),
+        };
+
+        let response = ingest_permit(
+            axum::extract::State(state),
+            axum::Extension(auth_user("u_lock")),
+            axum::extract::Path("0x000000000000000000000000000000000000a01c".to_owned()),
+            axum::Json(req),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "wallet permit ingest already running for this user");
+        assert_eq!(
+            seen_key.lock().expect("busy coordinator mutex").as_deref(),
+            Some("sync:user:u_lock")
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_wallet_uses_user_wallet_lock_before_metadata_mutation() {
+        let seen_key = Arc::new(Mutex::new(None));
+        let state = busy_app_state(seen_key.clone());
+
+        let response = patch_wallet(
+            axum::extract::State(state),
+            axum::Extension(auth_user("u_patch")),
+            axum::extract::Path("0x000000000000000000000000000000000000a01c".to_owned()),
+            axum::Json(PatchWalletReq {
+                label: Some(Some("renamed".to_owned())),
+                is_owned: Some(false),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "wallet metadata update already running for this user");
+        assert_eq!(
+            seen_key.lock().expect("busy coordinator mutex").as_deref(),
+            Some("sync:user:u_patch")
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_wallet_uses_user_wallet_lock_before_archive_mutation() {
+        let seen_key = Arc::new(Mutex::new(None));
+        let state = busy_app_state(seen_key.clone());
+
+        let response = delete_wallet(
+            axum::extract::State(state),
+            axum::Extension(auth_user("u_delete")),
+            axum::extract::Path("0x000000000000000000000000000000000000a01c".to_owned()),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert_eq!(text, "wallet delete already running for this user");
+        assert_eq!(
+            seen_key.lock().expect("busy coordinator mutex").as_deref(),
+            Some("sync:user:u_delete")
+        );
     }
 
     #[test]
@@ -1381,6 +1690,23 @@ mod tests {
         assert!(
             resolve_explicit_wallet_chains(&chains, Some(&empty)).is_ok(),
             "empty router configs are accepted for local compatibility"
+        );
+    }
+
+    #[test]
+    fn explicit_wallet_chains_deduplicate_repeated_ids_before_sync_fanout() {
+        let chains = vec![
+            "eip155:1".to_owned(),
+            "eip155:1".to_owned(),
+            "eip155:42161".to_owned(),
+            "eip155:42161".to_owned(),
+        ];
+        let resolved =
+            resolve_explicit_wallet_chains(&chains, None).expect("duplicates should normalize");
+
+        assert_eq!(
+            resolved,
+            vec![ChainId::ethereum_mainnet(), ChainId::arbitrum()]
         );
     }
 
@@ -1565,14 +1891,21 @@ mod tests {
     }
 
     /// Mirror `ingest_permit`'s core: build the action, run the reducer, upsert
-    /// the resulting pending into a fresh state. Returns `(state, ids)`.
-    fn ingest_into(state: &mut WalletState, req: &IngestPermitReq) -> Vec<String> {
+    /// the resulting pending into a fresh state.
+    fn ingest_into_result(
+        state: &mut WalletState,
+        req: &IngestPermitReq,
+    ) -> Result<Vec<String>, String> {
         let now = Time::from_unix(1_700_000_000);
         let action = build_permit_action(req, wallet_addr(), now).expect("build action");
         let ctx = EvalContext::new(action_chain(&action), now, RequestKind::Transaction);
         let delta =
             apply(&WalletState::new(state.wallet_id.clone()), &action, &ctx).expect("apply");
         upsert_pending_from_delta(state, &delta)
+    }
+
+    fn ingest_into(state: &mut WalletState, req: &IngestPermitReq) -> Vec<String> {
+        ingest_into_result(state, req).expect("upsert pending")
     }
 
     fn fresh_state() -> WalletState {
@@ -1678,6 +2011,78 @@ mod tests {
         let now = Time::from_unix(1_700_000_000);
         let err = build_permit_action(&req, wallet_addr(), now).unwrap_err();
         assert!(err.contains("does not match wallet"), "got: {err}");
+    }
+
+    #[test]
+    fn ingest_permit2_transfer_rejects_oversized_or_control_witness_type() {
+        let mut req = IngestPermitReq::Permit2Transfer {
+            token: usdc_hex().into(),
+            owner: format!("{:#x}", wallet_addr()),
+            spender: spender_hex().into(),
+            amount: "4000000".into(),
+            sig_deadline: 1_700_003_600,
+            nonce_word: "9".into(),
+            nonce_bit: 12,
+            witness_type: Some("x".repeat(MAX_PERMIT_WITNESS_TYPE_CHARS + 1)),
+            chain_id: "eip155:1".into(),
+        };
+        let now = Time::from_unix(1_700_000_000);
+        let err = build_permit_action(&req, wallet_addr(), now).unwrap_err();
+        assert!(err.contains("witness_type"), "got: {err}");
+
+        if let IngestPermitReq::Permit2Transfer { witness_type, .. } = &mut req {
+            *witness_type = Some("Permit\nWitness".to_owned());
+        }
+        let err = build_permit_action(&req, wallet_addr(), now).unwrap_err();
+        assert!(err.contains("control characters"), "got: {err}");
+    }
+
+    #[test]
+    fn ingest_signed_permit_pending_cap_rejects_new_entries_only() {
+        let mut state = fresh_state();
+        let mut first_req = None;
+        let mut first_ids = None;
+        for i in 0..MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET {
+            let req = IngestPermitReq::Eip2612 {
+                token: usdc_hex().into(),
+                spender: spender_hex().into(),
+                amount: "1".into(),
+                deadline: 1_700_003_600,
+                nonce: i.to_string(),
+                chain_id: "eip155:1".into(),
+            };
+            let ids = ingest_into(&mut state, &req);
+            if i == 0 {
+                first_req = Some(req);
+                first_ids = Some(ids);
+            }
+        }
+        assert_eq!(
+            signed_permit_pending_count(&state),
+            MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET
+        );
+
+        let duplicate = ingest_into_result(&mut state, &first_req.expect("first req"))
+            .expect("duplicate idempotent upsert should remain allowed");
+        assert_eq!(duplicate, first_ids.expect("first ids"));
+        assert_eq!(
+            signed_permit_pending_count(&state),
+            MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET
+        );
+
+        let extra = IngestPermitReq::Eip2612 {
+            token: usdc_hex().into(),
+            spender: spender_hex().into(),
+            amount: "1".into(),
+            deadline: 1_700_003_600,
+            nonce: MAX_SIGNED_PERMIT_PENDINGS_PER_WALLET.to_string(),
+            chain_id: "eip155:1".into(),
+        };
+        let err = ingest_into_result(&mut state, &extra).unwrap_err();
+        assert!(
+            err.contains("too many signed permit pendings"),
+            "got: {err}"
+        );
     }
 
     #[test]

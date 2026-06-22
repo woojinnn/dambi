@@ -65,16 +65,13 @@ function LibraryTab({ snap }) {
   const publishPackage = (pkg) => {
     const members = Object.values(snap.library.defs).filter((d) => !d.hidden && d.defaults.packageId === pkg.id);
     if (members.length === 0) return pushToast("이 패키지에 든 정책이 없어요");
+    const plan = Cedar.publishMembersFromDefs(members);
+    if (plan.unsupported.length > 0) return Cedar.rejectUnsupportedPublish(plan.unsupported);
     setPublishSrc({
       kind: "package",
       suggestedDisplayName: pkg.displayName,
       suggestedSlug: pkg.id.replace(/^pkg::/, ""),
-      members: members.map((d) => ({
-        slug: d.id.replace(/^def::/, ""),
-        title: d.displayName,
-        cedarText: Cedar.serializeCedar(d.skeleton.model, d.id.replace(/^def::/, ""), Cedar.severityFromCedar("@severity(\"" + d.skeleton.model.severity + "\")")),
-        manifest: d.skeleton.manifest,
-      })),
+      members: plan.members,
     });
   };
 

@@ -36,6 +36,7 @@ import {
   updateWallet,
   deleteWallet,
   setTokens,
+  normalizeWalletAddress as normalizeServerWalletAddress,
   setOnSessionExpired,
   resetSessionExpiredGuard,
   startGoogleLogin,
@@ -270,10 +271,11 @@ interface DambiAuthSignOutRequest {
  *  successful dashboard sign-in, and `recordSimulationOnServer` returns
  *  silently at its `hasToken` guard — leaving the HistoryPage's state-diff
  *  panel permanently empty. The dashboard calls this after every
- *  `fetchMe()` that resolves to a real user, so the sync is idempotent. */
+ *  `fetchMe()` that resolves to a real user, so the sync is idempotent. A
+ *  `null/null` pair is a dashboard-initiated clear. */
 interface DambiAuthSyncTokensRequest {
   type: "dambi-auth-sync-tokens";
-  access: string;
+  access: string | null;
   refresh: string | null;
 }
 interface DambiListWalletsRequest {
@@ -916,13 +918,15 @@ Browser.runtime.onMessage.addListener(
     // 중단시켜 잔액이 0 으로 남는다.
     if (req.type === "dambi-add-wallet") {
       const r = req as DambiAddWalletRequest;
-      const addBody: { address: string; chains: string[]; label?: string } = {
-        address: r.address.toLowerCase(),
-        chains: ["eip155:1", "eip155:42161", "eip155:8453"],
-      };
-      if (r.label) addBody.label = r.label;
       void bootReady
-        .then(() => addWallet(addBody))
+        .then(() => {
+          const addBody: { address: string; chains: string[]; label?: string } = {
+            address: normalizeServerWalletAddress(r.address),
+            chains: ["eip155:1", "eip155:42161", "eip155:8453"],
+          };
+          if (r.label) addBody.label = r.label;
+          return addWallet(addBody);
+        })
         .then((resp: AddWalletResp) => sendResponse({ ok: true, data: resp }))
         .catch((err: unknown) =>
           sendResponse({
@@ -940,7 +944,7 @@ Browser.runtime.onMessage.addListener(
       const patch: { label?: string | null } = {};
       if (r.label !== undefined) patch.label = r.label === "" ? null : r.label;
       void bootReady
-        .then(() => updateWallet(r.address.toLowerCase(), patch))
+        .then(() => updateWallet(normalizeServerWalletAddress(r.address), patch))
         .then(() => sendResponse({ ok: true, data: null }))
         .catch((err: unknown) =>
           sendResponse({
@@ -955,7 +959,7 @@ Browser.runtime.onMessage.addListener(
     if (req.type === "dambi-delete-wallet") {
       const r = req as DambiDeleteWalletRequest;
       void bootReady
-        .then(() => deleteWallet(r.address.toLowerCase()))
+        .then(() => deleteWallet(normalizeServerWalletAddress(r.address)))
         .then(() => sendResponse({ ok: true, data: null }))
         .catch((err: unknown) =>
           sendResponse({

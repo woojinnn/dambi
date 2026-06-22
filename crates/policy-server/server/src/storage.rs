@@ -93,7 +93,8 @@ impl StorageBackend {
                             Duration::from_secs(config.db_connect_backoff_secs),
                             Duration::from_secs(30),
                         );
-                        tracing::warn!(attempt, ?delay, error = %e, "db connect failed; retrying");
+                        let safe_error = crate::logging::redact_sensitive_log_text(&e);
+                        tracing::warn!(attempt, ?delay, error = %safe_error, "db connect failed; retrying");
                         tokio::time::sleep(delay).await;
                     }
                 }

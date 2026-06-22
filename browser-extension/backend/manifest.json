@@ -87,12 +87,6 @@
       "resources": [
         "js/injected/proxy-injected-providers.js",
         "js/injected/fetch-hook.js",
-        "js/confirm/index.js",
-        "confirm.html",
-        "default-policies/schema.cedarschema",
-        "default-policies/policy-set.json",
-        "default-policies/policy-set-v2.json",
-        "seed-bundles/*.json",
         "advisory.css",
         "picture/*"
       ]
@@ -101,12 +95,6 @@
   "__firefox__web_accessible_resources": [
     "js/injected/proxy-injected-providers.js",
     "js/injected/fetch-hook.js",
-    "js/confirm/index.js",
-    "confirm.html",
-    "default-policies/schema.cedarschema",
-    "default-policies/policy-set.json",
-    "default-policies/policy-set-v2.json",
-    "seed-bundles/*.json",
     "advisory.css",
     "picture/*"
   ],

@@ -74,7 +74,7 @@ function attachScope(
   const child = createScopeBlock(ws, scope);
   child.initSvg();
   child.render();
-  parent.getInput(inputName)?.connection?.connect(child.outputConnection);
+  connectValueInput(parent, inputName, child);
 }
 
 function createScopeBlock(ws: Blockly.WorkspaceSvg, scope: Scope): Blockly.BlockSvg {
@@ -115,7 +115,7 @@ function attachActionScope(
   const child = createActionScopeBlock(ws, scope);
   child.initSvg();
   child.render();
-  parent.getInput(inputName)?.connection?.connect(child.outputConnection);
+  connectValueInput(parent, inputName, child);
 }
 
 function createActionScopeBlock(ws: Blockly.WorkspaceSvg, scope: ActionScope): Blockly.BlockSvg {
@@ -139,9 +139,9 @@ function createActionScopeBlock(ws: Blockly.WorkspaceSvg, scope: ActionScope): B
         item.initSvg();
         item.render();
         if (prev === null) {
-          b.getInput("ITEMS")?.connection?.connect(item.previousConnection);
+          connectStatementInput(b, "ITEMS", item);
         } else {
-          prev.nextConnection?.connect(item.previousConnection);
+          connectNextStatement(prev, item);
         }
         prev = item;
       }
@@ -173,9 +173,9 @@ function attachConditions(
     block.initSvg();
     block.render();
     if (prev === null) {
-      parent.getInput(inputName)?.connection?.connect(block.previousConnection);
+      connectStatementInput(parent, inputName, block);
     } else {
-      prev.nextConnection?.connect(block.previousConnection);
+      connectNextStatement(prev, block);
     }
     prev = block;
   }
@@ -199,7 +199,7 @@ function attachExpr(
   blockIdByNode?.set(expr, child.id);
   child.initSvg();
   child.render();
-  parent.getInput(inputName)?.connection?.connect(child.outputConnection);
+  connectValueInput(parent, inputName, child);
 }
 
 function createExprBlock(
@@ -248,9 +248,9 @@ function createExprBlock(
         item.initSvg();
         item.render();
         if (prev === null) {
-          block.getInput("ITEMS")?.connection?.connect(item.previousConnection);
+          connectStatementInput(block, "ITEMS", item);
         } else {
-          prev.nextConnection?.connect(item.previousConnection);
+          connectNextStatement(prev, item);
         }
         prev = item;
       }
@@ -265,9 +265,9 @@ function createExprBlock(
         item.initSvg();
         item.render();
         if (prev === null) {
-          block.getInput("PAIRS")?.connection?.connect(item.previousConnection);
+          connectStatementInput(block, "PAIRS", item);
         } else {
-          prev.nextConnection?.connect(item.previousConnection);
+          connectNextStatement(prev, item);
         }
         prev = item;
       }
@@ -313,9 +313,9 @@ function createExprBlock(
         arg.initSvg();
         arg.render();
         if (prev === null) {
-          block.getInput("ARGS")?.connection?.connect(arg.previousConnection);
+          connectStatementInput(block, "ARGS", arg);
         } else {
-          prev.nextConnection?.connect(arg.previousConnection);
+          connectNextStatement(prev, arg);
         }
         prev = arg;
       }
@@ -348,6 +348,44 @@ function createExprBlock(
     }
   }
   return block;
+}
+
+function connectValueInput(
+  parent: Blockly.BlockSvg,
+  inputName: string,
+  child: Blockly.BlockSvg,
+): void {
+  const source = parent.getInput(inputName)?.connection;
+  const target = child.outputConnection;
+  if (!source || !target) {
+    throw new Error(`Cannot connect value input ${parent.type}.${inputName} to ${child.type}`);
+  }
+  source.connect(target);
+}
+
+function connectStatementInput(
+  parent: Blockly.BlockSvg,
+  inputName: string,
+  child: Blockly.BlockSvg,
+): void {
+  const source = parent.getInput(inputName)?.connection;
+  const target = child.previousConnection;
+  if (!source || !target) {
+    throw new Error(`Cannot connect statement input ${parent.type}.${inputName} to ${child.type}`);
+  }
+  source.connect(target);
+}
+
+function connectNextStatement(
+  previous: Blockly.BlockSvg,
+  child: Blockly.BlockSvg,
+): void {
+  const source = previous.nextConnection;
+  const target = child.previousConnection;
+  if (!source || !target) {
+    throw new Error(`Cannot connect statement ${previous.type} to ${child.type}`);
+  }
+  source.connect(target);
 }
 
 function placeholderBool(ws: Blockly.WorkspaceSvg): Blockly.BlockSvg {

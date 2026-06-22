@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildDefPayload, type SaveScope } from "./save-def";
-import type { PolicyDef } from "../../../server-api/policy-store";
+import { buildDefPayload, buildWalletScopePlan, type SaveScope } from "./save-def";
+import type { PolicyDef, StoreSnapshot } from "../../../server-api/policy-store";
 
 const ir = { kind: "policy" } as never;
 
@@ -98,5 +98,66 @@ describe("holesFromIr", () => {
     const out = holesFromIr(holed);
     expect(out.holes).toEqual([{ name: "cap", type: "long", label: "한도" }]);
     expect(out.paramDefaults).toEqual({ cap: 7 });
+  });
+});
+
+describe("buildWalletScopePlan", () => {
+  const holedDef = {
+    id: "def::new",
+    displayName: "새 정책",
+    skeleton: { ir },
+    holes: [{ name: "recipient", type: "address", label: "받는 주소", required: true }],
+    defaults: { enabled: false, params: {} },
+    source: "mine",
+    updatedAtMs: 1,
+  } as PolicyDef;
+  const emptySnap = { library: { schemaVersion: 1, defs: {}, packages: {} }, wallets: { schemaVersion: 1, byAddress: {} }, rev: 0 } as StoreSnapshot;
+
+  it("rejects missing required holes before producing wallet-scope writes", () => {
+    expect(() =>
+      buildWalletScopePlan(
+        holedDef,
+        {
+          addresses: ["0xa100000000000000000000000000000000000001"],
+          walletPackages: { "0xa100000000000000000000000000000000000001": ["pkg::uncat"] },
+          walletNewName: {},
+          paramsByCombo: {},
+          severityByCombo: {},
+        },
+        emptySnap,
+        "new",
+      ),
+    ).toThrow(/받는 주소|Fill required/);
+  });
+
+  it("dedupes duplicate new-package selections and skips existing bindings", () => {
+    const address = "0xa100000000000000000000000000000000000001";
+    const plan = buildWalletScopePlan(
+      holedDef,
+      {
+        addresses: [address, "0xA100000000000000000000000000000000000001"],
+        walletPackages: { [address]: ["__new__", "__new__"] },
+        walletNewName: { [address]: "거래소" },
+        paramsByCombo: {
+          [`${address}|__new__`]: { new: { recipient: "0xb200000000000000000000000000000000000002" } },
+        },
+        severityByCombo: {
+          [`${address}|__new__`]: { new: "warn" },
+        },
+      },
+      emptySnap,
+      "new",
+    );
+
+    expect(plan.packages).toHaveLength(1);
+    expect(plan.bindings).toEqual([
+      expect.objectContaining({
+        defId: "def::new",
+        packageId: plan.packages[0].pkg.id,
+        addresses: [address],
+        params: { recipient: "0xb200000000000000000000000000000000000002" },
+        severity: "warn",
+      }),
+    ]);
   });
 });

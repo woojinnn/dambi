@@ -1,5 +1,5 @@
 /** 도메인 연산 — 전부 mutate() 한 번으로 끝나는 thin wrapper. */
-import { mutate } from "./store";
+import { assertSafeRecordKey, mutate, normalizeWalletAddress } from "./store";
 import {
   UNCATEGORIZED_PKG,
   missingRequiredHoles,
@@ -29,6 +29,22 @@ function assertNotBuiltinPackage(d: StoreSnapshot, pkgId: string): void {
   }
 }
 
+function assertNotBuiltinNamespace(value: string, label: string): void {
+  if (value.startsWith("def::builtin.") || value.startsWith("pkg::builtin.")) {
+    throw new Error(`${label} cannot use the builtin safety-pack namespace`);
+  }
+}
+
+function assertMarketDefCanWrite(d: StoreSnapshot, defId: string): void {
+  assertNotBuiltinNamespace(defId, "market def id");
+  assertNotBuiltinDef(d, defId);
+}
+
+function assertMarketPackageCanWrite(d: StoreSnapshot, pkgId: string): void {
+  assertNotBuiltinNamespace(pkgId, "market package id");
+  assertNotBuiltinPackage(d, pkgId);
+}
+
 /** 마켓 게시 때 블랭킹된 required hole이 안 채워진 def는 지갑에 바인딩
  *  (패키지 적용)할 수 없다 — 플레이스홀더(제로주소/0)로 평가되면 조용히
  *  무용지물이거나(양성 비교) 모든 거래에 오발화한다(부정 비교). */
@@ -45,14 +61,41 @@ function assertHolesFilled(
   }
 }
 
-function walletAt(draft: StoreSnapshot, address: string): WalletPolicyState {
-  const addr = address.toLowerCase();
-  return (draft.wallets.byAddress[addr] ??= { bindings: {}, packages: {}, packageEnabled: {} });
+function refreshBindingParamsForUpdatedDef(
+  def: PolicyDef,
+  binding: Binding,
+  provided: Record<string, HoleValue> | undefined,
+): void {
+  const live = new Set(def.holes.map((h) => h.name));
+  const current = Object.fromEntries(
+    Object.entries(binding.params ?? {}).filter(([k]) => live.has(k)),
+  );
+  const providedLive = Object.fromEntries(
+    Object.entries(provided ?? {}).filter(([k]) => live.has(k)),
+  );
+  const next = { ...providedLive, ...current };
+  binding.params = Object.keys(next).length ? next : undefined;
+  assertHolesFilled(def, binding.params);
+}
+
+function walletAt(
+  draft: StoreSnapshot,
+  address: string,
+  opts: { provisionDefaults?: boolean } = {},
+): WalletPolicyState {
+  const addr = normalizeWalletAddress(address);
+  const existing = draft.wallets.byAddress[addr];
+  if (existing) return existing;
+  const w: WalletPolicyState = { bindings: {}, packages: {}, packageEnabled: {} };
+  draft.wallets.byAddress[addr] = w;
+  if (opts.provisionDefaults === true) bindDefaultDefs(draft, w);
+  return w;
 }
 
 /** 지갑 패키지 실체화: 라이브러리 폴더 id로 바인딩이 들어오면(마켓/시드/범위
  *  프로비저닝) 같은 id·이름의 지갑 패키지를 만들어 소속시킨다. */
 function ensureWalletPackage(d: StoreSnapshot, w: WalletPolicyState, packageId: string): void {
+  assertSafeRecordKey(packageId, "package id");
   if (packageId === UNCATEGORIZED_PKG || w.packages[packageId]) return;
   w.packages[packageId] = {
     id: packageId,
@@ -61,8 +104,31 @@ function ensureWalletPackage(d: StoreSnapshot, w: WalletPolicyState, packageId: 
   };
 }
 
+function bindDefaultDefs(d: StoreSnapshot, w: WalletPolicyState): void {
+  for (const def of Object.values(d.library.defs)) {
+    if (!def.defaults.enabled) continue;
+    if (def.hidden === true) continue;
+    if (missingRequiredHoles(def).length > 0) continue;
+    const packageId = def.defaults.packageId ?? UNCATEGORIZED_PKG;
+    if (Object.values(w.bindings).some((b) => b.defId === def.id && b.packageId === packageId)) {
+      continue;
+    }
+    const b: Binding = {
+      id: newBindingId(),
+      defId: def.id,
+      packageId,
+      enabled: true,
+      params: Object.keys(def.defaults.params).length ? { ...def.defaults.params } : undefined,
+      updatedAtMs: Date.now(),
+    };
+    ensureWalletPackage(d, w, b.packageId);
+    w.bindings[b.id] = b;
+  }
+}
+
 export function putDef(uid: string, def: PolicyDef): Promise<void> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(def.id, "def id");
     assertNotBuiltinDef(d, def.id); // 기존 builtin 덮어쓰기(=수정) 금지
     d.library.defs[def.id] = def;
   });
@@ -71,6 +137,7 @@ export function putDef(uid: string, def: PolicyDef): Promise<void> {
 /** 정의 삭제 — 모든 지갑의 해당 바인딩도 함께 삭제(cascade). */
 export function deleteDef(uid: string, defId: string): Promise<void> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(defId, "def id");
     assertNotBuiltinDef(d, defId);
     delete d.library.defs[defId];
     for (const w of Object.values(d.wallets.byAddress)) {
@@ -86,6 +153,8 @@ export function deleteDef(uid: string, defId: string): Promise<void> {
  *  `UNCATEGORIZED_PKG`면 폴더 없음(개별)으로 둔다. 안 주면 원본 폴더를 따른다. */
 export function duplicateDef(uid: string, defId: string, packageId?: string): Promise<string> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(defId, "def id");
+    if (packageId !== undefined) assertSafeRecordKey(packageId, "package id");
     const src = d.library.defs[defId];
     if (!src) throw new Error(`정의가 없습니다: ${defId}`);
     const newId = `def::${crypto.randomUUID()}`;
@@ -109,6 +178,7 @@ export function duplicateDef(uid: string, defId: string, packageId?: string): Pr
 
 export function putPackage(uid: string, pkg: PackageDef): Promise<void> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(pkg.id, "package id");
     assertNotBuiltinPackage(d, pkg.id); // 기존 builtin 덮어쓰기(=이름변경 등) 금지
     d.library.packages[pkg.id] = pkg;
   });
@@ -117,6 +187,7 @@ export function putPackage(uid: string, pkg: PackageDef): Promise<void> {
 /** 패키지 삭제 — 멤버 바인딩은 미분류로 이동(정책 인스턴스는 살아남는다). */
 export function deletePackage(uid: string, pkgId: string): Promise<void> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(pkgId, "package id");
     if (pkgId === UNCATEGORIZED_PKG) throw new Error("미분류 패키지는 삭제할 수 없습니다");
     assertNotBuiltinPackage(d, pkgId);
     delete d.library.packages[pkgId];
@@ -134,8 +205,9 @@ export function putWalletPackage(
   opts: { address: string; pkg: { id: string; displayName: string; desc?: string } },
 ): Promise<void> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.pkg.id, "wallet package id");
     if (opts.pkg.id === UNCATEGORIZED_PKG) throw new Error("미분류는 이름을 바꿀 수 없습니다");
-    const w = walletAt(d, opts.address);
+    const w = walletAt(d, opts.address, { provisionDefaults: true });
     w.packages[opts.pkg.id] = { ...opts.pkg, updatedAtMs: Date.now() };
   });
 }
@@ -147,9 +219,10 @@ export function removePackageFromWallet(
   opts: { address: string; packageId: string },
 ): Promise<void> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.packageId, "package id");
     // 기본 안전팩은 모든 지갑에 상주해야 한다 — 지갑에서 빼기 금지.
     assertNotBuiltinPackage(d, opts.packageId);
-    const w = d.wallets.byAddress[opts.address.toLowerCase()];
+    const w = d.wallets.byAddress[normalizeWalletAddress(opts.address)];
     if (!w) return;
     for (const b of Object.values(w.bindings)) {
       if (b.packageId === opts.packageId) delete w.bindings[b.id];
@@ -167,7 +240,8 @@ export function putWalletFolder(
   opts: { address: string; folder: { id: string; displayName: string } },
 ): Promise<void> {
   return mutate(uid, (d) => {
-    const w = walletAt(d, opts.address);
+    assertSafeRecordKey(opts.folder.id, "wallet folder id");
+    const w = walletAt(d, opts.address, { provisionDefaults: true });
     (w.folders ??= {})[opts.folder.id] = {
       id: opts.folder.id,
       displayName: opts.folder.displayName,
@@ -182,7 +256,8 @@ export function removeWalletFolder(
   opts: { address: string; folderId: string },
 ): Promise<void> {
   return mutate(uid, (d) => {
-    const addr = opts.address.toLowerCase();
+    assertSafeRecordKey(opts.folderId, "wallet folder id");
+    const addr = normalizeWalletAddress(opts.address);
     const w = d.wallets.byAddress[addr];
     if (w?.folders) delete w.folders[opts.folderId];
     for (const def of Object.values(d.library.defs)) {
@@ -207,6 +282,8 @@ export function bind(
   },
 ): Promise<void> {
   return mutate(uid, (d) => {
+    assertSafeRecordKey(opts.defId, "def id");
+    assertSafeRecordKey(opts.packageId, "package id");
     assertHolesFilled(d.library.defs[opts.defId], opts.params);
     for (const address of opts.addresses) {
       const w = walletAt(d, address);
@@ -231,7 +308,9 @@ export function updateBinding(
   opts: { address: string; bindingId: string; patch: Partial<Pick<Binding, "enabled" | "params" | "packageId" | "alias" | "severity">> },
 ): Promise<void> {
   return mutate(uid, (d) => {
-    const w = d.wallets.byAddress[opts.address.toLowerCase()];
+    assertSafeRecordKey(opts.bindingId, "binding id");
+    if (opts.patch.packageId !== undefined) assertSafeRecordKey(opts.patch.packageId, "package id");
+    const w = d.wallets.byAddress[normalizeWalletAddress(opts.address)];
     const b = w?.bindings[opts.bindingId];
     if (!b) throw new Error(`바인딩이 없습니다: ${opts.bindingId}`);
     // params를 갈아끼우는 패치는 required hole을 다시 비울 수 있다.
@@ -258,7 +337,8 @@ function pruneHiddenDefs(d: StoreSnapshot): void {
 
 export function removeBinding(uid: string, opts: { address: string; bindingId: string }): Promise<void> {
   return mutate(uid, (d) => {
-    const w = d.wallets.byAddress[opts.address.toLowerCase()];
+    assertSafeRecordKey(opts.bindingId, "binding id");
+    const w = d.wallets.byAddress[normalizeWalletAddress(opts.address)];
     if (w) delete w.bindings[opts.bindingId];
     pruneHiddenDefs(d);
   });
@@ -270,10 +350,11 @@ export function copyBindings(
   opts: { fromAddress: string; toAddress: string; bindingIds: string[] },
 ): Promise<void> {
   return mutate(uid, (d) => {
-    const from = d.wallets.byAddress[opts.fromAddress.toLowerCase()];
+    const from = d.wallets.byAddress[normalizeWalletAddress(opts.fromAddress, "source wallet address")];
     if (!from) throw new Error(`지갑이 없습니다: ${opts.fromAddress}`);
     const to = walletAt(d, opts.toAddress);
     for (const bid of opts.bindingIds) {
+      assertSafeRecordKey(bid, "binding id");
       const src = from.bindings[bid];
       if (!src) continue;
       if (src.packageId !== UNCATEGORIZED_PKG && !to.packages[src.packageId]) {
@@ -296,7 +377,8 @@ export function setPackageEnabled(
   opts: { address: string; packageId: string; enabled: boolean },
 ): Promise<void> {
   return mutate(uid, (d) => {
-    const w = walletAt(d, opts.address);
+    assertSafeRecordKey(opts.packageId, "package id");
+    const w = walletAt(d, opts.address, { provisionDefaults: true });
     w.packageEnabled[opts.packageId] = opts.enabled;
   });
 }
@@ -320,6 +402,17 @@ export function installMarket(
   },
 ): Promise<void> {
   return mutate(uid, (d) => {
+    if (opts.pkg) {
+      assertSafeRecordKey(opts.pkg.id, "package id");
+      assertMarketPackageCanWrite(d, opts.pkg.id);
+    }
+    const seenDefIds = new Set<string>();
+    for (const def of opts.defs) {
+      assertSafeRecordKey(def.id, "def id");
+      assertMarketDefCanWrite(d, def.id);
+      if (seenDefIds.has(def.id)) throw new Error(`market install contains duplicate def id: ${def.id}`);
+      seenDefIds.add(def.id);
+    }
     if (opts.pkg) d.library.packages[opts.pkg.id] = { ...opts.pkg, source: "market" };
     const defaultPkg = opts.pkg?.id ?? UNCATEGORIZED_PKG;
 
@@ -327,13 +420,12 @@ export function installMarket(
       const isUpdate = !!d.library.defs[def.id];
       d.library.defs[def.id] = { ...def, source: "market" };
       if (isUpdate) {
-        // 업데이트: 모든 지갑의 해당 바인딩에서 사라진 hole 키를 정리.
-        const live = new Set(def.holes.map((h) => h.name));
+        // 업데이트: 사라진 hole 키는 정리하고, 새 required hole 값이 설치
+        // payload에 있으면 기존 사용자 값을 덮지 않는 선에서 보강한다.
         for (const w of Object.values(d.wallets.byAddress)) {
           for (const b of Object.values(w.bindings)) {
-            if (b.defId !== def.id || !b.params) continue;
-            b.params = Object.fromEntries(Object.entries(b.params).filter(([k]) => live.has(k)));
-            if (Object.keys(b.params).length === 0) b.params = undefined;
+            if (b.defId !== def.id) continue;
+            refreshBindingParamsForUpdatedDef(def, b, opts.params?.[def.id]);
           }
         }
       }
@@ -344,15 +436,19 @@ export function installMarket(
     // 한다 — 채움값은 defaults.params(클라이언트가 병합) 또는 opts.params.
     for (const def of opts.defs) assertHolesFilled(def, opts.params?.[def.id]);
     const addresses =
-      opts.scope.kind === "all" ? Object.keys(d.wallets.byAddress) : opts.scope.addresses.map((a) => a.toLowerCase());
+      opts.scope.kind === "all" ? Object.keys(d.wallets.byAddress) : opts.scope.addresses.map((a) => normalizeWalletAddress(a));
     for (const address of addresses) {
       const w = walletAt(d, address);
       for (const def of opts.defs) {
         const params = opts.params?.[def.id];
+        const packageId = def.defaults.packageId ?? defaultPkg;
+        if (Object.values(w.bindings).some((b) => b.defId === def.id && b.packageId === packageId)) {
+          continue;
+        }
         const b: Binding = {
           id: newBindingId(),
           defId: def.id,
-          packageId: def.defaults.packageId ?? defaultPkg,
+          packageId,
           enabled: true,
           params: params && Object.keys(params).length ? { ...params } : undefined,
           updatedAtMs: Date.now(),
@@ -369,27 +465,9 @@ export function installMarket(
 export function provisionWallets(uid: string, addresses: string[]): Promise<void> {
   return mutate(uid, (d) => {
     for (const address of addresses) {
-      const addr = address.toLowerCase();
+      const addr = normalizeWalletAddress(address);
       if (d.wallets.byAddress[addr]) continue;
-      const w = walletAt(d, addr);
-      for (const def of Object.values(d.library.defs)) {
-        if (!def.defaults.enabled) continue;
-        // 지갑 전용 템플릿은 다른 지갑에 자동 적용되지 않는다.
-        if (def.hidden === true) continue;
-        // 자동 경로라 throw 대신 스킵 — 빈칸이 남은 def는 새 지갑에 적용하지
-        // 않는다(채우면 그때 수동 적용).
-        if (missingRequiredHoles(def).length > 0) continue;
-        const b: Binding = {
-          id: newBindingId(),
-          defId: def.id,
-          packageId: def.defaults.packageId ?? UNCATEGORIZED_PKG,
-          enabled: true,
-          params: Object.keys(def.defaults.params).length ? { ...def.defaults.params } : undefined,
-          updatedAtMs: Date.now(),
-        };
-        ensureWalletPackage(d, w, b.packageId);
-        w.bindings[b.id] = b;
-      }
+      walletAt(d, addr, { provisionDefaults: true });
     }
   });
 }

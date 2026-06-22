@@ -79,16 +79,23 @@ export async function startGoogleLogin(): Promise<{ access: string; refresh: str
   const { access, refresh } = parseTokensFromUrl(redirectUrl);
   if (!access) {
     // launchWebAuthFlow 가 토큰 fragment 없이 resolve 됐다 — 흔히 서버가
-    // "redirect_uri not allowed" 같은 에러 페이지로 바운스한 경우다. 받은 URL 을
-    // 그대로 노출해 서버 쪽 거부인지(allowlist 누락) 바로 보이게 한다.
+    // "redirect_uri not allowed" 같은 에러 페이지로 바운스한 경우다. URL
+    // fragment can contain bearer material on malformed server/proxy responses,
+    // so keep the origin/path for diagnosis but never echo the fragment.
     throw new Error(
       `로그인 응답에 access_token 이 없습니다. 서버가 redirect_uri 를 거부했을 ` +
         `수 있습니다 (OAUTH_ALLOWED_REDIRECT_URIS 에 ${redirectUri} 추가 필요). ` +
-        `받은 redirect: ${redirectUrl}`,
+        `받은 redirect: ${redactRedirectForError(redirectUrl)}`,
     );
   }
   await setTokens(access, refresh);
   return { access, refresh };
+}
+
+function redactRedirectForError(redirectUrl: string): string {
+  const hashIndex = redirectUrl.indexOf("#");
+  if (hashIndex < 0) return redirectUrl;
+  return `${redirectUrl.slice(0, hashIndex)}#<redacted>`;
 }
 
 /** Pull `access_token` (and optional `refresh_token`) out of a URL

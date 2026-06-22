@@ -73,8 +73,61 @@ export function isManifestRequest(value: unknown): value is ManifestRequest {
   );
 }
 
-function fail(kind: string, message: string): ManifestResponse {
+function fail<T = unknown>(kind: string, message: string): ManifestResponse<T> {
   return { ok: false, error: { kind, message } };
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
+function normalizeLegacyEndpointUrl(raw: string | null): ManifestResponse<string | null> {
+  const trimmed = typeof raw === "string" ? raw.trim() : null;
+  if (trimmed === null || trimmed === "") {
+    return { ok: true, data: null };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return fail(
+      "invalid_endpoint_url",
+      `endpoint URL must be an http(s) origin, got: ${trimmed.slice(0, 40)}`,
+    );
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return fail(
+      "invalid_endpoint_url",
+      `endpoint URL must use http:// or https://, got: ${trimmed.slice(0, 40)}`,
+    );
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    return fail(
+      "invalid_endpoint_url",
+      "endpoint URL must be an origin only, without credentials, path, query, or hash",
+    );
+  }
+  if (parsed.protocol === "http:" && !isLoopbackHost(parsed.hostname)) {
+    return fail(
+      "invalid_endpoint_url",
+      "plain-http legacy endpoints are limited to loopback hosts",
+    );
+  }
+
+  return { ok: true, data: parsed.origin };
 }
 
 function classify(err: unknown): { kind: string; message: string } {
@@ -284,19 +337,12 @@ export async function handleManifestRequest(
       }
 
       case "manifest:set-endpoint-url": {
-        // Validate the URL scheme server-side — the SDK is reachable from
-        // any content script and we cannot rely on the caller to honour
-        // the contract. Only `http(s)://...` (or `null`) may land in storage.
-        const url = typeof req.url === "string" ? req.url.trim() : null;
-        if (url !== null && url !== "") {
-          if (!/^https?:\/\/[^\s]+/i.test(url)) {
-            return fail(
-              "invalid_endpoint_url",
-              `endpoint URL must use http:// or https://, got: ${url.slice(0, 40)}`,
-            );
-          }
-        }
-        await store.setEndpointUrl(url && url.length > 0 ? url : null);
+        // Validate and canonicalize server-side. This value is later used as a
+        // fetch base for the retired legacy sidecar, so only an origin may land
+        // in storage. HTTP is loopback-only for local experiments.
+        const normalized = normalizeLegacyEndpointUrl(req.url);
+        if (!normalized.ok) return normalized;
+        await store.setEndpointUrl(normalized.data);
         return { ok: true, data: { url: await store.getEndpointUrl() } };
       }
 

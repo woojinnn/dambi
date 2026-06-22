@@ -267,9 +267,17 @@ export async function exportVerdictsAsCsv(
 
 function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  let text = String(value);
+  if (isFormulaLikeCsvCell(text)) {
+    text = `'${text}`;
+  }
   if (/[",\n]/.test(text)) {
     return `"${text.replace(/"/g, '""')}"`;
   }
   return text;
+}
+
+function isFormulaLikeCsvCell(text: string): boolean {
+  if (text.length === 0) return false;
+  return /^[\t\r\n=+\-@]/.test(text) || /^[ ]+[=+\-@]/.test(text);
 }

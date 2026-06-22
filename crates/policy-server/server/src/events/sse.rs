@@ -3,9 +3,9 @@
 //! and streams matching events as SSE messages. Browser `EventSource`
 //! auto-reconnects via `Last-Event-ID` (we re-emit the broadcast id as
 //! the SSE id).
-//! Auth: standard `Authorization: Bearer …` header. `EventSource` cannot
-//! set custom headers, so dashboard clients use a tiny polyfill (or pass
-//! the token via `?token=` and let the middleware accept either) — see
+//! Auth: standard `Authorization: Bearer …` header. Native `EventSource`
+//! cannot set custom headers, so dashboard clients must use a header-capable
+//! SSE/fetch stream polyfill rather than putting bearer tokens in the URL.
 
 use std::convert::Infallible;
 use std::time::Duration;

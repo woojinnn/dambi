@@ -1,7 +1,34 @@
 /** 에디터 저장 → ps2 페이로드 변환(순수). 신규 def는 범위 모달 입력을 defaults에 기록. */
 import { attrExprToPath, extractParams } from "../../../cedar/blocks";
 import type { PolicyIR } from "../../../cedar/blocks";
-import type { HoleSpec, HoleValue, PolicyDef, PolicyDoc } from "../../../server-api/policy-store";
+import {
+  missingRequiredHoles,
+  type HoleSpec,
+  type HoleValue,
+  type PolicyDef,
+  type PolicyDoc,
+  type StoreSnapshot,
+} from "../../../server-api/policy-store";
+
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const FORBIDDEN_STORAGE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
+function normalizeWalletAddress(value: string, label = "wallet address"): string {
+  if (!EVM_ADDRESS_RE.test(value)) throw new Error(`${label} must be an EVM address`);
+  return value.toLowerCase();
+}
+
+function assertSafeStorageKey(value: string, label: string): void {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    FORBIDDEN_STORAGE_KEYS.has(value)
+  ) {
+    throw new Error(`${label} is not a safe storage key`);
+  }
+}
 
 /** holed IR에서 def.holes + 기본 파라미터 값을 파생한다. expected → HoleSpec.type
  *  매핑은 입력 위젯 선택용(평가에는 영향 없음). */
@@ -54,6 +81,25 @@ export interface BindPlan {
   defId: string;
   packageId: string;
   addresses: string[];
+}
+
+export interface WalletScopeApplyInput {
+  addresses: string[];
+  walletPackages: Record<string, string[]>;
+  walletNewName: Record<string, string>;
+  paramsByCombo: Record<string, Record<string, Record<string, HoleValue>>>;
+  severityByCombo: Record<string, Record<string, "deny" | "warn">>;
+}
+
+export interface WalletScopePlan {
+  packages: { address: string; pkg: { id: string; displayName: string } }[];
+  bindings: {
+    defId: string;
+    packageId: string;
+    addresses: string[];
+    params?: Record<string, HoleValue>;
+    severity?: "deny" | "warn";
+  }[];
 }
 
 export function buildDefPayload(opts: {
@@ -115,4 +161,79 @@ export function buildDefPayload(opts: {
       ? { defId: def.id, packageId: opts.packageId, addresses: opts.scope.addresses }
       : null;
   return { def, bindPlan };
+}
+
+export function buildWalletScopePlan(
+  def: PolicyDef,
+  apply: WalletScopeApplyInput,
+  snap: StoreSnapshot | null,
+  defParamKey: string,
+): WalletScopePlan {
+  assertSafeStorageKey(def.id, "def id");
+  const plan: WalletScopePlan = { packages: [], bindings: [] };
+  const seenAddresses = new Set<string>();
+  const plannedPackageByWalletName = new Map<string, string>();
+
+  for (const rawAddress of apply.addresses) {
+    const address = normalizeWalletAddress(rawAddress);
+    if (seenAddresses.has(address)) continue;
+    seenAddresses.add(address);
+
+    const w = snap?.wallets.byAddress[address];
+    const seenBindings = new Set(
+      Object.values(w?.bindings ?? {}).map((b) => `${b.defId}\u0000${b.packageId}`),
+    );
+    const packageKeys = apply.walletPackages[rawAddress] ?? apply.walletPackages[address] ?? [];
+    for (const key of packageKeys) {
+      assertSafeStorageKey(key, "wallet package key");
+      let pkgId: string;
+      if (key === "__new__") {
+        const newName = (apply.walletNewName[rawAddress] ?? apply.walletNewName[address] ?? "").trim();
+        if (!newName) throw new Error("New package name is required");
+        const existing = Object.values(w?.packages ?? {}).find((pkg) => pkg.displayName === newName);
+        if (existing) {
+          assertSafeStorageKey(existing.id, "existing wallet package id");
+          pkgId = existing.id;
+        } else {
+          const plannedKey = `${address}\u0000${newName}`;
+          const planned = plannedPackageByWalletName.get(plannedKey);
+          if (planned) {
+            pkgId = planned;
+          } else {
+            pkgId = `pkg::${crypto.randomUUID()}`;
+            plannedPackageByWalletName.set(plannedKey, pkgId);
+            plan.packages.push({ address, pkg: { id: pkgId, displayName: newName } });
+          }
+        }
+      } else {
+        pkgId = key;
+      }
+      assertSafeStorageKey(pkgId, "wallet package id");
+
+      const bindingKey = `${def.id}\u0000${pkgId}`;
+      if (seenBindings.has(bindingKey)) continue;
+      const comboKey = `${rawAddress}|${key}`;
+      const normalizedComboKey = `${address}|${key}`;
+      const params =
+        apply.paramsByCombo[comboKey]?.[defParamKey] ??
+        apply.paramsByCombo[normalizedComboKey]?.[defParamKey] ??
+        {};
+      const missing = missingRequiredHoles(def, params);
+      if (missing.length > 0) {
+        throw new Error(`Fill required fields for "${def.displayName}" before applying: ${missing.join(", ")}`);
+      }
+      const severity =
+        apply.severityByCombo[comboKey]?.[defParamKey] ??
+        apply.severityByCombo[normalizedComboKey]?.[defParamKey];
+      plan.bindings.push({
+        defId: def.id,
+        packageId: pkgId,
+        addresses: [address],
+        ...(Object.keys(params).length ? { params } : {}),
+        ...(severity ? { severity } : {}),
+      });
+      seenBindings.add(bindingKey);
+    }
+  }
+  return plan;
 }

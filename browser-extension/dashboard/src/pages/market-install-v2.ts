@@ -5,7 +5,12 @@
  *  {@link requiredHoleInputs}로 입력 칸을 그리고, 채워진 값이 choice.params로
  *  들어온다 — defaults.params(라이브러리 기본값)와 바인딩 params 양쪽에
  *  기록된다. 안 채우면 SW의 install-market/bind-def 가드가 거부한다. */
-import { installListing, pickI18n, type ListingDetail } from "../server-api";
+import {
+  getListingVersion,
+  installListing,
+  pickI18n,
+  type ListingDetail,
+} from "../server-api";
 import type { PolicyDoc } from "../../../sdk/policy-store-types";
 import {
   bindDef,
@@ -17,6 +22,7 @@ import {
   type PackageDef,
   type StoreSnapshot,
 } from "../server-api/policy-store";
+import { missingRequiredHoles } from "../../../sdk/policy-store-types";
 import { textToBlocks } from "../cedar";
 import type { PolicyIR } from "../cedar/blocks";
 import { irToForm, type FormModel } from "../cedar/form";
@@ -49,13 +55,20 @@ export interface InstallChoice {
   snap?: StoreSnapshot | null;
 }
 
-/** 서버 install 기록 → def 변환 → ps2:install-market. 설치된 def id들을 반환. */
+/** 서버의 원자 install/download 경로 → def 변환 → ps2:install-market. 설치된 def id들을 반환. */
 export async function installListingV2(
   detail: ListingDetail,
   locale: "ko" | "en",
   choice: InstallChoice,
 ): Promise<{ kind: "policy" | "set"; defIds: string[] }> {
-  const { meta, defs } = await convertListing(detail, locale);
+  const filled = choice.params ?? {};
+  const preflight = await convertListing(detail, locale);
+  const preflightPackageId =
+    detail.kind === "set" ? `pkg::market.${detail.id}` : choice.packageId ?? undefined;
+  applyStandardInstallDefaults(preflight.defs, choice, preflightPackageId, filled);
+  assertInstallDefsReady(preflight.defs, locale);
+
+  const { meta, defs } = await convertListing(detail, locale, { recordInstall: true });
 
   const pkg: PackageDef | undefined =
     detail.kind === "set"
@@ -70,7 +83,19 @@ export async function installListingV2(
       : undefined;
 
   const packageId = pkg?.id ?? choice.packageId ?? undefined;
-  const filled = choice.params ?? {};
+  applyStandardInstallDefaults(defs, choice, packageId, filled);
+  assertInstallDefsReady(defs, locale);
+
+  await installMarket({ defs, ...(pkg ? { pkg } : {}), scope: choice.scope, params: filled });
+  return { kind: detail.kind, defIds: defs.map((d) => d.id) };
+}
+
+function applyStandardInstallDefaults(
+  defs: Awaited<ReturnType<typeof listingToDefs>>,
+  choice: InstallChoice,
+  packageId: string | undefined,
+  filled: InstallParams,
+): void {
   for (const d of defs) {
     // 기본값 병합 순서: 변환이 파생한 추천값 < 재설치 전 채워둔 값 < 이번에 채운 값.
     const prev = choice.snap?.library.defs[d.id];
@@ -80,9 +105,22 @@ export async function installListingV2(
       packageId,
     };
   }
+}
 
-  await installMarket({ defs, ...(pkg ? { pkg } : {}), scope: choice.scope, params: filled });
-  return { kind: detail.kind, defIds: defs.map((d) => d.id) };
+function assertInstallDefsReady(
+  defs: Awaited<ReturnType<typeof listingToDefs>>,
+  locale: "ko" | "en",
+): void {
+  for (const d of defs) {
+    const missing = missingRequiredHoles(d);
+    if (missing.length > 0) {
+      throw new Error(
+        locale === "ko"
+          ? `정책 "${d.displayName}"의 빈칸(${missing.join(", ")})을 채워야 설치할 수 있어요`
+          : `Fill required fields for "${d.displayName}" before installing: ${missing.join(", ")}`,
+      );
+    }
+  }
 }
 
 /** 패키지 선택 키 — 기존 패키지 id, 미분류 센티널(UNCATEGORIZED_PKG), 또는
@@ -107,6 +145,139 @@ export interface WalletOnlyInstallChoice {
   severityByAddressPkg?: Record<string, Record<WalletPkgKey, Record<string, "deny" | "warn">>>;
 }
 
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const FORBIDDEN_STORAGE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+
+function normalizeWalletAddress(value: string, label = "wallet address"): string {
+  if (!EVM_ADDRESS_RE.test(value)) throw new Error(`${label} must be an EVM address`);
+  return value.toLowerCase();
+}
+
+function assertSafeStorageKey(value: string, label: string): void {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    FORBIDDEN_STORAGE_KEYS.has(value)
+  ) {
+    throw new Error(`${label} is not a safe storage key`);
+  }
+}
+
+interface WalletOnlyPlan {
+  packages: { address: string; pkg: { id: string; displayName: string } }[];
+  bindings: {
+    address: string;
+    defId: string;
+    packageId: string;
+    params?: Record<string, HoleValue>;
+    severity?: "deny" | "warn";
+  }[];
+}
+
+function walletOnlyParamsFor(
+  choice: WalletOnlyInstallChoice,
+  address: string,
+  packageKey: string,
+  fallback: InstallParams,
+): InstallParams {
+  const normalized = normalizeWalletAddress(address);
+  return (
+    choice.paramsByAddressPkg?.[address]?.[packageKey] ??
+    choice.paramsByAddressPkg?.[normalized]?.[packageKey] ??
+    fallback
+  );
+}
+
+function walletOnlySeverityFor(
+  choice: WalletOnlyInstallChoice,
+  address: string,
+  packageKey: string,
+  defId: string,
+): "deny" | "warn" | undefined {
+  const normalized = normalizeWalletAddress(address);
+  return (
+    choice.severityByAddressPkg?.[address]?.[packageKey]?.[defId] ??
+    choice.severityByAddressPkg?.[normalized]?.[packageKey]?.[defId]
+  );
+}
+
+function buildWalletOnlyPlan(
+  defs: Awaited<ReturnType<typeof listingToDefs>>,
+  choice: WalletOnlyInstallChoice,
+  filled: InstallParams,
+  locale: "ko" | "en",
+): WalletOnlyPlan {
+  const plan: WalletOnlyPlan = { packages: [], bindings: [] };
+  const seenAddresses = new Set<string>();
+  const plannedPackageByWalletName = new Map<string, string>();
+  for (const rawAddress of choice.addresses) {
+    const address = normalizeWalletAddress(rawAddress);
+    if (seenAddresses.has(address)) continue;
+    seenAddresses.add(address);
+    const w = choice.snap.wallets.byAddress[address];
+    const seenBindings = new Set(
+      Object.values(w?.bindings ?? {}).map((b) => `${b.defId}\u0000${b.packageId}`),
+    );
+    const packageKeys = choice.walletPackages[rawAddress] ?? choice.walletPackages[address] ?? [];
+    for (const key of packageKeys) {
+      assertSafeStorageKey(key, "wallet package key");
+      let pkgId: string;
+      if (key === "__new__") {
+        const newName = (choice.walletNewName?.[rawAddress] ?? choice.walletNewName?.[address] ?? "").trim();
+        if (!newName) {
+          throw new Error(locale === "ko" ? "새 패키지 이름을 입력해야 해요" : "New package name is required");
+        }
+        const existing = Object.values(w?.packages ?? {}).find((p) => p.displayName === newName);
+        if (existing) {
+          assertSafeStorageKey(existing.id, "existing wallet package id");
+          pkgId = existing.id;
+        } else {
+          const plannedKey = `${address}\u0000${newName}`;
+          const planned = plannedPackageByWalletName.get(plannedKey);
+          if (planned) {
+            pkgId = planned;
+          } else {
+            pkgId = `pkg::${crypto.randomUUID()}`;
+            plannedPackageByWalletName.set(plannedKey, pkgId);
+            plan.packages.push({ address, pkg: { id: pkgId, displayName: newName } });
+          }
+        }
+      } else {
+        pkgId = key;
+      }
+      assertSafeStorageKey(pkgId, "wallet package id");
+
+      const pkgFilled = walletOnlyParamsFor(choice, rawAddress, key, filled);
+      for (const d of defs) {
+        assertSafeStorageKey(d.id, "market def id");
+        const bindingKey = `${d.id}\u0000${pkgId}`;
+        if (seenBindings.has(bindingKey)) continue;
+        const params = pkgFilled[d.id];
+        const missing = missingRequiredHoles(d, params);
+        if (missing.length > 0) {
+          throw new Error(
+            locale === "ko"
+              ? `정책 "${d.displayName}"의 빈칸(${missing.join(", ")})을 채워야 적용할 수 있어요`
+              : `Fill required fields for "${d.displayName}" before applying: ${missing.join(", ")}`,
+          );
+        }
+        const severity = walletOnlySeverityFor(choice, rawAddress, key, d.id);
+        plan.bindings.push({
+          address,
+          defId: d.id,
+          packageId: pkgId,
+          ...(params && Object.keys(params).length ? { params } : {}),
+          ...(severity ? { severity } : {}),
+        });
+        seenBindings.add(bindingKey);
+      }
+    }
+  }
+  return plan;
+}
+
 /** 지갑 전용 설치(이름 유지, 동작 변경): 템플릿 def는 **라이브러리에 보이게**
  *  넣고(숨김 개념 폐기), 지갑마다 선택한 **여러 패키지**에 각각 바인딩한다 —
  *  패키지별로 채운 값(params)을 따로 적용. 선택 패키지가 없는 지갑은 바인딩 없이
@@ -116,9 +287,42 @@ export async function installListingWalletOnlyV2(
   locale: "ko" | "en",
   choice: WalletOnlyInstallChoice,
 ): Promise<{ kind: "policy" | "set"; defIds: string[] }> {
-  const { defs } = await convertListing(detail, locale);
   const filled = choice.params ?? {};
 
+  // Wallet-only installs can fail during local planning before any policy-store
+  // write. Run that pure preflight against the non-mutating version body first;
+  // after it succeeds, use the server's atomic install/download body for the
+  // actual local write so archived listings cannot race between read and install.
+  const { defs: preflightDefs } = await convertListing(detail, locale);
+  applyWalletOnlyDefaults(preflightDefs, choice, filled);
+  buildWalletOnlyPlan(preflightDefs, choice, filled, locale);
+
+  const { defs } = await convertListing(detail, locale, { recordInstall: true });
+  applyWalletOnlyDefaults(defs, choice, filled);
+  const plan = buildWalletOnlyPlan(defs, choice, filled, locale);
+
+  await installMarket({ defs, scope: { kind: "library-only" }, params: {} });
+
+  for (const pkg of plan.packages) {
+    await putWalletPackage(pkg);
+  }
+  for (const binding of plan.bindings) {
+    await bindDef({
+      defId: binding.defId,
+      packageId: binding.packageId,
+      addresses: [binding.address],
+      ...(binding.params ? { params: binding.params } : {}),
+      ...(binding.severity ? { severity: binding.severity } : {}),
+    });
+  }
+  return { kind: detail.kind, defIds: defs.map((d) => d.id) };
+}
+
+function applyWalletOnlyDefaults(
+  defs: Awaited<ReturnType<typeof listingToDefs>>,
+  choice: WalletOnlyInstallChoice,
+  filled: InstallParams,
+): void {
   for (const d of defs) {
     const prev = choice.snap.library.defs[d.id];
     if (prev) {
@@ -137,46 +341,6 @@ export async function installListingWalletOnlyV2(
       };
     }
   }
-  await installMarket({ defs, scope: { kind: "library-only" }, params: {} });
-
-  for (const address of choice.addresses) {
-    const w = choice.snap.wallets.byAddress[address];
-    const keys = choice.walletPackages[address] ?? [];
-    for (const key of keys) {
-      let pkgId: string;
-      if (key === "__new__") {
-        const newName = (choice.walletNewName?.[address] ?? "").trim();
-        const existing = Object.values(w?.packages ?? {}).find((p) => p.displayName === newName);
-        if (existing) {
-          pkgId = existing.id;
-        } else {
-          pkgId = `pkg::${crypto.randomUUID()}`;
-          await putWalletPackage({ address, pkg: { id: pkgId, displayName: newName } });
-        }
-      } else {
-        pkgId = key; // UNCATEGORIZED_PKG 또는 기존 패키지 id
-      }
-      const pkgFilled = choice.paramsByAddressPkg?.[address]?.[key] ?? filled;
-      for (const d of defs) {
-        // 같은 패키지에 이미 들어 있으면 줄을 또 만들지 않는다(재설치 멱등).
-        const dup = Object.values(w?.bindings ?? {}).some(
-          (b) => b.defId === d.id && b.packageId === pkgId,
-        );
-        if (!dup) {
-          const params = pkgFilled[d.id];
-          const sev = choice.severityByAddressPkg?.[address]?.[key]?.[d.id];
-          await bindDef({
-            defId: d.id,
-            packageId: pkgId,
-            addresses: [address],
-            ...(params && Object.keys(params).length ? { params } : {}),
-            ...(sev ? { severity: sev } : {}),
-          });
-        }
-      }
-    }
-  }
-  return { kind: detail.kind, defIds: defs.map((d) => d.id) };
 }
 
 /** 설치 전에 사용자가 조정할 수 있는 칸 — def별 파라미터 목록.
@@ -281,17 +445,20 @@ export async function installFormDefs(
   return out;
 }
 
-/** 공통: 서버 install 기록 → meta + ps2 def 변환. */
+/** 공통: 버전 본문 fetch → meta + ps2 def 변환. */
 async function convertListing(
   detail: ListingDetail,
   locale: "ko" | "en",
+  opts: { recordInstall?: boolean } = {},
 ): Promise<{ meta: ListingMeta; defs: Awaited<ReturnType<typeof listingToDefs>> }> {
   if (!detail.current_version) {
     throw new Error(
       locale === "ko" ? "이 listing에는 발행된 버전이 없습니다." : "This listing has no published version.",
     );
   }
-  const body = await installListing(detail.id, detail.current_version);
+  const body = opts.recordInstall
+    ? await installListing(detail.id, detail.current_version)
+    : await getListingVersion(detail.id, detail.current_version);
   const meta: ListingMeta = {
     id: detail.id,
     kind: detail.kind,

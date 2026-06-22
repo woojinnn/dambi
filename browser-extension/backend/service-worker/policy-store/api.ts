@@ -21,7 +21,7 @@ import {
   type MarketInstallScope,
 } from "./ops";
 import { ensureSeeded } from "./seed";
-import { readStore } from "./store";
+import { normalizeWalletAddress, readStore } from "./store";
 import type { Binding, HoleValue, PackageDef, PolicyDef } from "./types";
 
 export type Ps2Request =
@@ -69,68 +69,75 @@ export function isPs2Request(req: { type?: unknown }): req is Ps2Request {
   return typeof req.type === "string" && req.type.startsWith("ps2:");
 }
 
-async function uidOrAnonymous(): Promise<string> {
-  return (await getCurrentUserId()) ?? "anonymous";
+function requireUid(uid: string | null): string {
+  if (!uid) {
+    throw new Error("no_user: cannot mutate policy store without an authenticated user");
+  }
+  return uid;
 }
 
 /** 메시지 한 건 처리. 응답 봉투({ok, data|error})는 index.ts 쪽 공통 패턴이 입힌다. */
 export async function handlePs2Request(req: Ps2Request): Promise<unknown> {
-  const uid = await uidOrAnonymous();
-  await ensureSeeded(uid);
+  const activeUid = await getCurrentUserId();
+  const readUid = activeUid ?? "anonymous";
+  await ensureSeeded(readUid);
 
   switch (req.type) {
     case "ps2:get-library": {
-      const s = await readStore(uid);
+      const s = await readStore(readUid);
       return { library: s.library, rev: s.rev };
     }
     case "ps2:get-wallet-state": {
-      const addr = req.address.toLowerCase();
-      let s = await readStore(uid);
+      const addr = normalizeWalletAddress(req.address);
+      let s = await readStore(readUid);
       if (!s.wallets.byAddress[addr]) {
+        if (!activeUid) {
+          return { bindings: {}, packages: {}, packageEnabled: {} };
+        }
         // 처음 보는 지갑 = 아직 프로비저닝 전(첫 설치/첫 로그인). 여기서
         // 기본 정책을 깔아줘야 popup이 첫 화면부터 "보호 꺼짐"이 아니게
         // 된다 — 대시보드만 프로비저닝하던 구멍의 SW측 봉합.
-        await provisionWallets(uid, [addr]);
-        s = await readStore(uid);
+        await provisionWallets(activeUid, [addr]);
+        s = await readStore(activeUid);
       }
       return s.wallets.byAddress[addr] ?? { bindings: {}, packages: {}, packageEnabled: {} };
     }
     case "ps2:get-overview": {
       // 계정 전체 뷰(지갑×패키지 매트릭스)용 스냅샷.
-      return readStore(uid);
+      return readStore(readUid);
     }
     case "ps2:put-def":
-      return putDef(uid, req.def);
+      return putDef(requireUid(activeUid), req.def);
     case "ps2:delete-def":
-      return deleteDef(uid, req.defId);
+      return deleteDef(requireUid(activeUid), req.defId);
     case "ps2:duplicate-def":
-      return duplicateDef(uid, req.defId, req.packageId);
+      return duplicateDef(requireUid(activeUid), req.defId, req.packageId);
     case "ps2:put-package":
-      return putPackage(uid, req.pkg);
+      return putPackage(requireUid(activeUid), req.pkg);
     case "ps2:delete-package":
-      return deletePackage(uid, req.packageId);
+      return deletePackage(requireUid(activeUid), req.packageId);
     case "ps2:bind":
-      return bind(uid, req);
+      return bind(requireUid(activeUid), req);
     case "ps2:update-binding":
-      return updateBinding(uid, req);
+      return updateBinding(requireUid(activeUid), req);
     case "ps2:remove-binding":
-      return removeBinding(uid, req);
+      return removeBinding(requireUid(activeUid), req);
     case "ps2:remove-wallet-package":
-      return removePackageFromWallet(uid, req);
+      return removePackageFromWallet(requireUid(activeUid), req);
     case "ps2:put-wallet-package":
-      return putWalletPackage(uid, req);
+      return putWalletPackage(requireUid(activeUid), req);
     case "ps2:put-wallet-folder":
-      return putWalletFolder(uid, req);
+      return putWalletFolder(requireUid(activeUid), req);
     case "ps2:remove-wallet-folder":
-      return removeWalletFolder(uid, req);
+      return removeWalletFolder(requireUid(activeUid), req);
     case "ps2:copy-bindings":
-      return copyBindings(uid, req);
+      return copyBindings(requireUid(activeUid), req);
     case "ps2:set-package-enabled":
-      return setPackageEnabled(uid, req);
+      return setPackageEnabled(requireUid(activeUid), req);
     case "ps2:provision-wallets":
-      return provisionWallets(uid, req.addresses);
+      return provisionWallets(requireUid(activeUid), req.addresses);
     case "ps2:install-market":
-      return installMarket(uid, { defs: req.defs, pkg: req.pkg, scope: req.scope, params: req.params });
+      return installMarket(requireUid(activeUid), { defs: req.defs, pkg: req.pkg, scope: req.scope, params: req.params });
     default:
       // 새 메시지를 유니언에만 추가하고 케이스를 빠뜨리면 조용한 no-op이 된다 —
       // 시끄럽게 실패시킨다.

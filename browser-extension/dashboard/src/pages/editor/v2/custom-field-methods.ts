@@ -25,16 +25,94 @@ export interface MethodSpec {
   params: Record<string, ParamSpec>;
   /** True = 서버 미구현 예시(형태 시연용). 모달에 "(예시)"로 표시. */
   mock?: boolean;
+  /** 서버 카탈로그(get-method-catalog)에서 온 항목이면 그 name/description —
+   *  i18n 키가 없을 때 라벨/설명 fallback 으로 쓴다. */
+  label?: string;
+  desc?: string;
+  /** 서버가 실제로 서빙하는 메서드면 true (= 실행 가능). 정적 mock/예시와 구분. */
+  served?: boolean;
 }
 
-/** 메서드 표시 이름 — i18n 키 `editor:methods.<method>.label` (점은 `_`로). */
+/** 메서드 표시 이름 — i18n 키 `editor:methods.<method>.label` (점은 `_`로),
+ *  없으면 서버 카탈로그 라벨/메서드명으로 fallback. */
 export function methodLabel(m: MethodSpec): string {
-  return i18n.t(`editor:methods.${m.method.replace(/\./g, "_")}.label`);
+  return i18n.t(`editor:methods.${m.method.replace(/\./g, "_")}.label`, {
+    defaultValue: m.label ?? m.method,
+  });
 }
 
-/** 메서드 설명 — i18n 키 `editor:methods.<method>.desc`. */
+/** 메서드 설명 — i18n 키 `editor:methods.<method>.desc`, 없으면 카탈로그 설명. */
 export function methodDesc(m: MethodSpec): string {
-  return i18n.t(`editor:methods.${m.method.replace(/\./g, "_")}.desc`);
+  return i18n.t(`editor:methods.${m.method.replace(/\./g, "_")}.desc`, {
+    defaultValue: m.desc ?? "",
+  });
+}
+
+/** `returns.type` (카탈로그 철자) → custom-context CustomType. */
+const RETURN_TYPE_TO_CUSTOM: Record<string, CustomType> = {
+  Long: "Long",
+  Decimal: "decimal",
+  decimal: "decimal",
+  Bool: "Bool",
+  String: "String",
+  string: "String",
+};
+
+/** record 반환 메서드의 잘 알려진 leaf projection/type 큐레이션 — 흔한 케이스를
+ *  turnkey 로 만든다. 미큐레이션 record 는 `$.result` + decimal 기본값으로 두고
+ *  사용자가 고급(결과 위치·타입)에서 다듬는다. */
+const RECORD_LEAF: Record<string, { projection: string; type: CustomType }> = {
+  "oracle.usd_value": { projection: "$.result.usd", type: "decimal" },
+  "pool.liquidity": { projection: "$.result.vol24hUsd", type: "decimal" },
+  "token.market_data": { projection: "$.result.tokenLiquidityUsd", type: "decimal" },
+  "approval.allowance": { projection: "$.result.unlimited", type: "Bool" },
+  "oracle.steth_peg_status_bps": { projection: "$.result.deviationBps", type: "Long" },
+};
+
+interface ServedMethod {
+  name?: string;
+  description?: string;
+  params?: Record<
+    string,
+    { type?: string; required?: boolean; defaultSelector?: string; default?: unknown } | null
+  >;
+  returns?:
+    | { kind?: "scalar"; type?: string; from?: string }
+    | { kind?: "record"; type?: string };
+}
+
+/** Convert the served `manifest:get-method-catalog` `{methods}` map into the
+ *  modal's MethodSpec list. Scalar returns use the catalog's `from`/`type`
+ *  directly; record returns use a curated leaf (or `$.result`/decimal that the
+ *  user refines in Advanced). Params keep their `defaultSelector`; required
+ *  params with no default surface as an empty literal for the user to fill. */
+export function servedMethodSpecs(methods: Record<string, unknown>): MethodSpec[] {
+  const out: MethodSpec[] = [];
+  for (const [key, raw] of Object.entries(methods)) {
+    const m = (raw ?? {}) as ServedMethod;
+    const name = m.name ?? key;
+    const params: Record<string, ParamSpec> = {};
+    for (const [pk, p] of Object.entries(m.params ?? {})) {
+      const spec = p ?? {};
+      if (spec.defaultSelector) params[pk] = spec.defaultSelector;
+      else if (spec.required) params[pk] = { literal: "" };
+      // optional params with no default are omitted (the user can add via Advanced).
+    }
+    const ret = m.returns;
+    let projection: string;
+    let type: CustomType;
+    if (ret && ret.kind === "scalar") {
+      projection = (ret as { from?: string }).from ?? "$.result";
+      type = RETURN_TYPE_TO_CUSTOM[ret.type ?? ""] ?? "String";
+    } else {
+      const curated = RECORD_LEAF[name];
+      projection = curated?.projection ?? "$.result";
+      type = curated?.type ?? "decimal";
+    }
+    out.push({ method: name, type, projection, params, label: name, desc: m.description, served: true });
+  }
+  out.sort((a, b) => a.method.localeCompare(b.method));
+  return out;
 }
 
 export const METHOD_CATALOG: MethodSpec[] = [

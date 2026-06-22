@@ -10,15 +10,81 @@
  * - Stay tiny and dependency-free — no axios, no React.
  */
 
+import { normalizeAuthToken } from "./auth-token";
+
+const CURRENT_PRODUCTION_BASE = "https://dambi-policy.duckdns.org";
+const LEGACY_PRODUCTION_BASES = new Map([
+  ["https://pasu-policy.duckdns.org", CURRENT_PRODUCTION_BASE],
+]);
+const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
+
+const RAW_DEFAULT_BASE = import.meta.env.VITE_DAMBI_SERVER_URL || CURRENT_PRODUCTION_BASE;
 const DEFAULT_BASE =
-  import.meta.env.VITE_DAMBI_SERVER_URL || "https://dambi-policy.duckdns.org";
+  normalizeServerBaseUrl(RAW_DEFAULT_BASE, RAW_DEFAULT_BASE) ?? CURRENT_PRODUCTION_BASE;
+
+function parseHttpUrl(input: string): URL | null {
+  try {
+    const url = new URL(input);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalOrigin(url: URL): string {
+  return LEGACY_PRODUCTION_BASES.get(url.origin) ?? url.origin;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function trustedOriginForUrl(url: URL, trustedBase = RAW_DEFAULT_BASE): string | null {
+  const origin = canonicalOrigin(url);
+  const trustedUrl = parseHttpUrl(trustedBase);
+  const trustedOrigin = trustedUrl ? canonicalOrigin(trustedUrl) : CURRENT_PRODUCTION_BASE;
+  if (origin === CURRENT_PRODUCTION_BASE || origin === trustedOrigin) return origin;
+  if (isLoopbackHost(url.hostname)) return origin;
+  return null;
+}
+
+export function normalizeServerBaseUrl(
+  input: string | null | undefined,
+  trustedBase = RAW_DEFAULT_BASE,
+): string | null {
+  const trimmed = input?.trim();
+  if (!trimmed) return null;
+  const url = parseHttpUrl(trimmed);
+  if (!url) return null;
+  if (url.pathname !== "" && url.pathname !== "/") return null;
+  if (url.search || url.hash) return null;
+  return trustedOriginForUrl(url, trustedBase);
+}
+
+function resolveRequestUrl(path: string): string {
+  const absolute = parseHttpUrl(path);
+  if (!absolute) {
+    if (URL_SCHEME_RE.test(path)) {
+      throw new Error("Refusing to send request to unsupported server URL scheme");
+    }
+    return `${SERVER_BASE_URL}${path}`;
+  }
+  const trustedOrigin = trustedOriginForUrl(absolute);
+  if (!trustedOrigin) {
+    throw new Error("Refusing to send authenticated request to untrusted server URL");
+  }
+  return `${trustedOrigin}${absolute.pathname}${absolute.search}`;
+}
 
 /** Resolve the server URL — env > localStorage > default. Read once at
  * import time; we don't expect users to swap servers mid-session. */
 function resolveBaseUrl(): string {
   if (typeof window !== "undefined") {
     const stored = window.localStorage.getItem("dambi_server_url");
-    if (stored) return stored;
+    const normalized = normalizeServerBaseUrl(stored);
+    if (normalized) return normalized;
   }
   return DEFAULT_BASE;
 }
@@ -31,24 +97,36 @@ const REFRESH_KEY = "dambi_jwt_refresh";
 /** Persisted access token. Returns `null` when the user is logged out. */
 export function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  try {
+    return normalizeAuthToken(token, "stored access token");
+  } catch {
+    window.localStorage.removeItem(TOKEN_KEY);
+    return null;
+  }
 }
 
 export function getStoredRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(REFRESH_KEY);
+  const token = window.localStorage.getItem(REFRESH_KEY);
+  try {
+    return normalizeAuthToken(token, "stored refresh token");
+  } catch {
+    window.localStorage.removeItem(REFRESH_KEY);
+    return null;
+  }
 }
 
 export function setStoredToken(token: string | null): void {
   if (typeof window === "undefined") return;
   if (token === null) window.localStorage.removeItem(TOKEN_KEY);
-  else window.localStorage.setItem(TOKEN_KEY, token);
+  else window.localStorage.setItem(TOKEN_KEY, normalizeAuthToken(token, "access token")!);
 }
 
 export function setStoredRefreshToken(token: string | null): void {
   if (typeof window === "undefined") return;
   if (token === null) window.localStorage.removeItem(REFRESH_KEY);
-  else window.localStorage.setItem(REFRESH_KEY, token);
+  else window.localStorage.setItem(REFRESH_KEY, normalizeAuthToken(token, "refresh token")!);
 }
 
 /** Error surfaced by every server-api call on non-2xx. */
@@ -86,7 +164,7 @@ interface RefreshResponse {
 }
 
 type TokenRefreshObserver = (
-  access: string,
+  access: string | null,
   refresh: string | null,
 ) => void | Promise<void>;
 
@@ -98,7 +176,7 @@ export function setTokenRefreshObserver(
   tokenRefreshObserver = observer;
 }
 
-function notifyTokenRefresh(access: string, refresh: string | null): void {
+function notifyTokenRefresh(access: string | null, refresh: string | null): void {
   const observer = tokenRefreshObserver;
   if (!observer) return;
   try {
@@ -110,6 +188,12 @@ function notifyTokenRefresh(access: string, refresh: string | null): void {
   }
 }
 
+function clearStoredTokensAndNotify(): void {
+  setStoredToken(null);
+  setStoredRefreshToken(null);
+  notifyTokenRefresh(null, null);
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   const refresh = getStoredRefreshToken();
   if (!refresh) return null;
@@ -119,26 +203,37 @@ async function refreshAccessToken(): Promise<string | null> {
     body: JSON.stringify({ refresh_token: refresh }),
   });
   if (!res.ok) {
-    setStoredToken(null);
-    setStoredRefreshToken(null);
+    clearStoredTokensAndNotify();
     return null;
   }
   const body = (await res.json()) as RefreshResponse;
-  const nextRefresh = body.refresh_token ?? refresh;
-  setStoredToken(body.access_token);
-  setStoredRefreshToken(nextRefresh);
-  notifyTokenRefresh(body.access_token, nextRefresh);
-  return body.access_token;
+  try {
+    const access = normalizeAuthToken(body.access_token, "refreshed access token")!;
+    const nextRefresh =
+      body.refresh_token === undefined
+        ? refresh
+        : normalizeAuthToken(body.refresh_token, "refreshed refresh token");
+    setStoredToken(access);
+    setStoredRefreshToken(nextRefresh);
+    notifyTokenRefresh(access, nextRefresh);
+    return access;
+  } catch {
+    clearStoredTokensAndNotify();
+    return null;
+  }
 }
 
 /** Core request primitive. Returns parsed JSON. Throws `ServerError`. */
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const url = path.startsWith("http") ? path : `${SERVER_BASE_URL}${path}`;
+  const url = resolveRequestUrl(path);
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
 
   if (!opts.noAuth) {
-    const token = opts.token ?? getStoredToken();
+    const token =
+      opts.token === undefined
+        ? getStoredToken()
+        : normalizeAuthToken(opts.token, "request access token");
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
@@ -181,17 +276,4 @@ async function parseResponse<T>(res: Response): Promise<T> {
   // 204 No Content
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
-}
-
-const SSE_STREAM_PATH = "/events/stream";
-
-/** Build a URL with `?token=...` for the SSE `EventSource` endpoint only. */
-export function urlWithTokenQuery(path: string, token: string): string {
-  const queryStart = path.indexOf("?");
-  const pathname = queryStart === -1 ? path : path.slice(0, queryStart);
-  if (pathname !== SSE_STREAM_PATH) {
-    throw new Error("token query URLs are only supported for /events/stream");
-  }
-  const sep = path.includes("?") ? "&" : "?";
-  return `${SERVER_BASE_URL}${path}${sep}token=${encodeURIComponent(token)}`;
 }

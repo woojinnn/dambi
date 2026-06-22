@@ -5,11 +5,90 @@
  */
 import Browser from "webextension-polyfill";
 
-import { UNCATEGORIZED_PKG, type LibraryDoc, type StoreSnapshot, type WalletsDoc } from "./types";
+import {
+  UNCATEGORIZED_PKG,
+  type Binding,
+  type HoleValue,
+  type LibraryDoc,
+  type PolicyDef,
+  type StoreSnapshot,
+  type WalletPolicyState,
+  type WalletsDoc,
+} from "./types";
+
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const FORBIDDEN_RECORD_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 const libKey = (uid: string) => `ps2:${uid}:library`;
 const walKey = (uid: string) => `ps2:${uid}:wallets`;
 const revKey = (uid: string) => `ps2:${uid}:rev`;
+
+export function normalizeWalletAddress(value: unknown, label = "wallet address"): string {
+  if (typeof value !== "string" || !EVM_ADDRESS_RE.test(value)) {
+    throw new Error(`${label} must be an EVM address`);
+  }
+  return value.toLowerCase();
+}
+
+export function assertSafeRecordKey(value: unknown, label: string): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    FORBIDDEN_RECORD_KEYS.has(value)
+  ) {
+    throw new Error(`${label} is not a safe storage key`);
+  }
+}
+
+function validateParamKeys(
+  params: Record<string, HoleValue> | undefined,
+  label: string,
+): void {
+  for (const key of Object.keys(params ?? {})) {
+    assertSafeRecordKey(key, label);
+  }
+}
+
+function assertBoolean(value: unknown, label: string): asserts value is boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${label} must be a boolean`);
+  }
+}
+
+function assertOptionalSeverity(
+  value: unknown,
+  label: string,
+): asserts value is "deny" | "warn" | undefined {
+  if (value !== undefined && value !== "deny" && value !== "warn") {
+    throw new Error(`${label} must be deny or warn`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validatePolicyDef(def: PolicyDef): void {
+  assertBoolean(def.defaults.enabled, "default enabled");
+  if (def.defaults.packageId !== undefined) {
+    assertSafeRecordKey(def.defaults.packageId, "default package id");
+  }
+  if (def.walletFolderId !== undefined) {
+    assertSafeRecordKey(def.walletFolderId, "wallet folder id");
+  }
+  validateParamKeys(def.defaults.params, "default param key");
+
+  const holeNames = new Set<string>();
+  for (const hole of def.holes) {
+    assertSafeRecordKey(hole.name, "hole name");
+    if (holeNames.has(hole.name)) {
+      throw new Error(`duplicate hole name: ${hole.name}`);
+    }
+    holeNames.add(hole.name);
+  }
+}
 
 function emptyLibrary(): LibraryDoc {
   return {
@@ -34,9 +113,69 @@ export async function readStore(uid: string): Promise<StoreSnapshot> {
     wallets: (got[walKey(uid)] as WalletsDoc | undefined) ?? emptyWallets(),
     rev: (got[revKey(uid)] as number | undefined) ?? 0,
   };
+  normalizeRuntimeShape(snap);
   normalizeWallets(snap);
   normalizeHiddenDefs(snap);
   return snap;
+}
+
+/** 읽기 시점 방어: 과거 런타임 메시지/스토리지 오염으로 boolean/enum 필드가
+ *  문자열 같은 truthy 값으로 남아 있어도 정책이 켜지지 않게 inert 값으로
+ *  정규화한다. 다음 mutate 때 정규화된 값이 자연히 영속화된다. */
+function normalizeRuntimeShape(s: StoreSnapshot): void {
+  if (!isRecord(s.library)) s.library = emptyLibrary();
+  if (!isRecord(s.library.defs)) s.library.defs = {};
+  if (!isRecord(s.library.packages)) s.library.packages = emptyLibrary().packages;
+  if (!isRecord(s.wallets)) s.wallets = emptyWallets();
+  if (!isRecord(s.wallets.byAddress)) s.wallets.byAddress = {};
+
+  type RuntimePolicyDef = Omit<PolicyDef, "defaults" | "holes"> & {
+    defaults?: Partial<PolicyDef["defaults"]> | null;
+    holes?: unknown;
+  };
+  for (const raw of Object.values(s.library.defs)) {
+    const def = raw as RuntimePolicyDef;
+    if (!isRecord(def.defaults)) {
+      def.defaults = { enabled: false, params: {} };
+    }
+    if (typeof def.defaults.enabled !== "boolean") {
+      def.defaults.enabled = false;
+    }
+    if (!isRecord(def.defaults.params)) {
+      def.defaults.params = {};
+    }
+    if (!Array.isArray(def.holes)) {
+      def.holes = [];
+    }
+  }
+  type RuntimeWallet = Omit<WalletPolicyState, "bindings" | "packages" | "packageEnabled"> & {
+    bindings?: unknown;
+    packages?: unknown;
+    packageEnabled?: unknown;
+  };
+  type RuntimeBinding = Binding & { enabled?: unknown; severity?: unknown };
+  for (const raw of Object.values(s.wallets.byAddress)) {
+    const w = raw as RuntimeWallet;
+    if (!isRecord(w.bindings)) w.bindings = {};
+    if (!isRecord(w.packages)) w.packages = {};
+    if (!isRecord(w.packageEnabled)) w.packageEnabled = {};
+    const bindings = w.bindings as Record<string, unknown>;
+    const packageEnabled = w.packageEnabled as Record<string, unknown>;
+    for (const b of Object.values(bindings)) {
+      const binding = b as RuntimeBinding;
+      if (typeof binding.enabled !== "boolean") {
+        binding.enabled = false;
+      }
+      if (binding.severity !== undefined && binding.severity !== "deny" && binding.severity !== "warn") {
+        binding.severity = undefined;
+      }
+    }
+    for (const [pkgId, enabled] of Object.entries(packageEnabled)) {
+      if (typeof enabled !== "boolean") {
+        packageEnabled[pkgId] = false;
+      }
+    }
+  }
 }
 
 /** 불변식: 바인딩의 defId 실재 + packageId는 그 지갑의 패키지(또는 미분류),
@@ -45,13 +184,46 @@ function validate(s: StoreSnapshot): void {
   if (!s.library.packages[UNCATEGORIZED_PKG]) {
     throw new Error("미분류 패키지(pkg::uncategorized)는 삭제할 수 없습니다");
   }
+  for (const [defId, def] of Object.entries(s.library.defs)) {
+    assertSafeRecordKey(defId, "def id");
+    if (def.id !== defId) throw new Error(`정의 키와 id가 다릅니다: ${defId}`);
+    validatePolicyDef(def);
+    if (def.homeWallet) {
+      const home = normalizeWalletAddress(def.homeWallet, "home wallet");
+      if (def.homeWallet !== home) throw new Error(`homeWallet은 소문자여야 합니다: ${def.homeWallet}`);
+    }
+  }
+  for (const [pkgId, pkg] of Object.entries(s.library.packages)) {
+    assertSafeRecordKey(pkgId, "package id");
+    if (pkg.id !== pkgId) throw new Error(`패키지 키와 id가 다릅니다: ${pkgId}`);
+  }
   for (const [addr, w] of Object.entries(s.wallets.byAddress)) {
-    if (addr !== addr.toLowerCase()) throw new Error(`지갑 주소는 소문자여야 합니다: ${addr}`);
-    for (const b of Object.values(w.bindings)) {
+    const normalized = normalizeWalletAddress(addr);
+    if (addr !== normalized) throw new Error(`지갑 주소는 소문자여야 합니다: ${addr}`);
+    for (const [folderId, folder] of Object.entries(w.folders ?? {})) {
+      assertSafeRecordKey(folderId, "wallet folder id");
+      if (folder.id !== folderId) throw new Error(`지갑 폴더 키와 id가 다릅니다: ${folderId}`);
+    }
+    for (const [pkgId, pkg] of Object.entries(w.packages)) {
+      assertSafeRecordKey(pkgId, "wallet package id");
+      if (pkg.id !== pkgId) throw new Error(`지갑 패키지 키와 id가 다릅니다: ${pkgId}`);
+    }
+    for (const [bindingId, b] of Object.entries(w.bindings)) {
+      assertSafeRecordKey(bindingId, "binding id");
+      if (b.id !== bindingId) throw new Error(`바인딩 키와 id가 다릅니다: ${bindingId}`);
+      assertSafeRecordKey(b.defId, "binding def id");
+      assertSafeRecordKey(b.packageId, "binding package id");
+      assertBoolean(b.enabled, "binding enabled");
+      assertOptionalSeverity(b.severity, "binding severity");
+      validateParamKeys(b.params, "binding param key");
       if (!s.library.defs[b.defId]) throw new Error(`바인딩 ${b.id}의 defId가 라이브러리에 없습니다: ${b.defId}`);
       if (b.packageId !== UNCATEGORIZED_PKG && !w.packages[b.packageId]) {
         throw new Error(`바인딩 ${b.id}의 packageId가 지갑에 없습니다: ${b.packageId}`);
       }
+    }
+    for (const [pkgId, enabled] of Object.entries(w.packageEnabled)) {
+      assertSafeRecordKey(pkgId, "wallet package gate id");
+      assertBoolean(enabled, "wallet package gate");
     }
   }
 }

@@ -26,7 +26,7 @@
  * historical bound, both enforced after every put.
  */
 import Browser from "webextension-polyfill";
-import type { V3Bundle } from "./bundle-schema";
+import { parseBundleV3, type V3Bundle } from "./bundle-schema";
 
 const STORAGE_KEY_V3 = "registry:adapter-bundles-v3";
 const SCHEMA_VERSION = 2;
@@ -66,8 +66,14 @@ function isCallkeyMeta(v: unknown): v is CallkeyMeta {
   );
 }
 
-function isV3Bundle(v: unknown): v is V3Bundle {
-  return !!v && typeof v === "object" && typeof (v as { id?: unknown }).id === "string";
+function parsePersistedV3Bundle(bundleId: string, v: unknown): V3Bundle | null {
+  try {
+    const parsed = parseBundleV3(v);
+    if (!parsed || parsed.id !== bundleId) return null;
+    return v as V3Bundle;
+  } catch {
+    return null;
+  }
 }
 
 function isPersistedV3Cache(v: unknown): v is PersistedV3Cache {
@@ -108,9 +114,10 @@ class PersistentDeclarativeV3Cache {
       }
       const now = Date.now();
       for (const [bid, bundle] of Object.entries(stored.bundles)) {
-        if (isV3Bundle(bundle)) {
-          this.bundles.set(bid, bundle);
-          const bytes = JSON.stringify(bundle).length;
+        const parsed = parsePersistedV3Bundle(bid, bundle);
+        if (parsed) {
+          this.bundles.set(bid, parsed);
+          const bytes = JSON.stringify(parsed).length;
           this.bundleBytes.set(bid, bytes);
           this.totalBundleBytes += bytes;
         }
@@ -246,12 +253,15 @@ class PersistentDeclarativeV3Cache {
       bundleSha256: entry.bundleSha256,
       fetchedAtMs: entry.fetchedAtMs,
     };
-    if (!this.bundles.has(entry.bundleId)) {
-      this.bundles.set(entry.bundleId, entry.bundle);
-      const bytes = JSON.stringify(entry.bundle).length;
-      this.bundleBytes.set(entry.bundleId, bytes);
-      this.totalBundleBytes += bytes;
+    const nextBytes = JSON.stringify(entry.bundle).length;
+    const previousBytes = this.bundleBytes.get(entry.bundleId);
+    if (previousBytes !== undefined) {
+      this.totalBundleBytes += nextBytes - previousBytes;
+    } else {
+      this.totalBundleBytes += nextBytes;
     }
+    this.bundles.set(entry.bundleId, entry.bundle);
+    this.bundleBytes.set(entry.bundleId, nextBytes);
     this.callkeys.delete(callkey);
     this.callkeys.set(callkey, meta);
     this.enforceBounds();

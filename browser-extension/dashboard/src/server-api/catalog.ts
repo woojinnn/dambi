@@ -7,6 +7,7 @@
 import type { Address, I18nString, PolicySeverity } from "./types";
 
 import { request } from "./client";
+import { normalizeWalletAddress } from "./wallets";
 
 // ---------- /policy-schema ----------
 
@@ -94,7 +95,7 @@ export interface SpenderMeta {
 /** Returns `null` for addresses not in the catalog (server 404 = "unknown"). */
 export async function getSpender(addr: Address): Promise<SpenderMeta | null> {
   try {
-    return await request<SpenderMeta>(`/spenders/${addr}`);
+    return await request<SpenderMeta>(`/spenders/${normalizeWalletAddress(addr)}`);
   } catch (e) {
     // Lazy import to avoid coupling client.ts here.
     if (

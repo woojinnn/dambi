@@ -55,7 +55,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("webextension-polyfill", () => ({ default: mocks.browser }));
 
-import { HlInfoClient } from "../hl-info-client";
+import { HlInfoClient, normalizeRuntimeInfoBase } from "../hl-info-client";
 import {
   clearConnectedAccount,
   getConnectedAccount,
@@ -272,6 +272,23 @@ describe("HlInfoClient.leverageFor", () => {
     client.invalidate(MASTER, "BTC");
     expect(await client.leverageFor(MASTER, "BTC")).toBe(7);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("normalizeRuntimeInfoBase", () => {
+  it("allows only loopback /info overrides", () => {
+    expect(normalizeRuntimeInfoBase("http://127.0.0.1:8789/info")).toBe(
+      "http://127.0.0.1:8789/info",
+    );
+    expect(normalizeRuntimeInfoBase("http://localhost:8789/info")).toBe(
+      "http://localhost:8789/info",
+    );
+
+    expect(normalizeRuntimeInfoBase("https://evil.example/info")).toBeNull();
+    expect(normalizeRuntimeInfoBase("https://user@localhost/info")).toBeNull();
+    expect(normalizeRuntimeInfoBase("http://localhost:8789/other")).toBeNull();
+    expect(normalizeRuntimeInfoBase("http://localhost:8789/info?x=1")).toBeNull();
+    expect(normalizeRuntimeInfoBase("javascript:alert(1)")).toBeNull();
   });
 });
 

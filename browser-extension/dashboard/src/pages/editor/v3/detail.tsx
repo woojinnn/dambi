@@ -140,6 +140,9 @@ function EditorBody({ policy, storedDef, snap, bindingCtx, isNew, defaultScope, 
   const [model, setModel] = React.useState(policy.model);
   const [cedarText, setCedarText] = React.useState(policy.text);
   const [manifest, setManifest] = React.useState(policy.manifest);
+  // Merged enrichment registry last reported by the form pane — reused when this
+  // page regenerates the manifest (LLM-apply) so modal-created custom fields survive.
+  const [formRegistry, setFormRegistry] = React.useState(undefined);
   const [tab, setTab] = React.useState(initialTab && !bindingCtx ? initialTab : defaultTab(policy.method));
   const initialDoc = (storedDef && storedDef.doc) || {};
   const [docDefinition, setDocDefinition] = React.useState(initialDoc.definition || "");
@@ -297,10 +300,13 @@ function EditorBody({ policy, storedDef, snap, bindingCtx, isNew, defaultScope, 
     }
   };
 
-  const onFormChange = ({ cedarText: c, model: nextModel, manifest: nextManifest }) => {
+  const onFormChange = ({ cedarText: c, model: nextModel, manifest: nextManifest, registry }) => {
     setModel(nextModel);
     setCedarText(c);
     setManifest(nextManifest);
+    // Reuse the form's merged registry when regenerating the manifest (e.g. the
+    // LLM-apply path), so modal-created custom fields aren't rejected with noBinding.
+    if (registry) setFormRegistry(registry);
   };
   const onCedarChange = (next) => {
     setCedarText(next);
@@ -345,7 +351,7 @@ function EditorBody({ policy, storedDef, snap, bindingCtx, isNew, defaultScope, 
     }
     setModel(normalized);
     setCedarText(Cedar.serializeCedar(normalized, normalized.id, normalized.severity, normalized.reason));
-    setManifest(Cedar.generateManifest(normalized, undefined, { id: normalized.id, severity: normalized.severity }).manifest);
+    setManifest(Cedar.generateManifest(normalized, formRegistry, { id: normalized.id, severity: normalized.severity }).manifest);
     setLlmWarn(warnings && warnings.length ? warnings.join(" · ") : null);
     setResetToken((t) => t + 1);
     setTab("form");

@@ -9,9 +9,10 @@
 import type { PolicyDef, PolicyDoc } from "../../../sdk/policy-store-types";
 import type { PolicyIR } from "../cedar/blocks";
 import { formToIr, irToForm, normalizeDecimal } from "../cedar/form";
-import { canonicalizeModel, parameterizeModel } from "../cedar/form/parameterize";
+import type { FormValue } from "../cedar/form";
+import { canonicalizeModel, collectLeaves, parameterizeModel } from "../cedar/form/parameterize";
 import type { HoleSpec, HoleValue } from "../server-api/policy-store";
-import { splitManifestHoles } from "./editor/publish-holes";
+import { splitManifestHoles, type ShippedHoleSpec } from "./editor/publish-holes";
 import { holesFromIr } from "./editor/v2/save-def";
 
 export interface ListingMeta {
@@ -42,6 +43,51 @@ function holedIrOf(ir: PolicyIR): PolicyIR | null {
   }
 }
 
+function holeTypeFromValue(v: FormValue): HoleSpec["type"] {
+  switch (v.kind) {
+    case "set":
+      return "addressSet";
+    case "string":
+      return v.value.startsWith("0x") ? "address" : "string";
+    case "long":
+      return "long";
+    case "decimal":
+      return "decimal";
+    case "bool":
+      return "bool";
+    case "field":
+      return "field";
+  }
+}
+
+function paramTypesFromHoledIr(ir: PolicyIR): Map<string, HoleSpec["type"]> {
+  const model = irToForm(ir);
+  if (!model) return new Map();
+  const out = new Map<string, HoleSpec["type"]>();
+  for (const leaf of collectLeaves(model)) {
+    if (leaf.param?.name) out.set(leaf.param.name, holeTypeFromValue(leaf.value));
+  }
+  return out;
+}
+
+function validateShippedHolesAgainstForm(
+  shipped: ShippedHoleSpec[],
+  actualTypes: Map<string, HoleSpec["type"]>,
+  listingName: string,
+): void {
+  for (const s of shipped) {
+    const actual = actualTypes.get(s.name);
+    if (!actual) {
+      throw new Error(`정책 "${listingName}"의 빈칸 메타데이터가 존재하지 않는 필드(${s.name})를 가리켜요`);
+    }
+    if (actual !== s.type) {
+      throw new Error(
+        `정책 "${listingName}"의 빈칸 메타데이터 타입이 실제 조건과 달라요 (${s.name}: ${s.type} != ${actual})`,
+      );
+    }
+  }
+}
+
 /** 변환 실패 항목이 있으면 전체 설치 중단(부분 설치 없음). */
 export async function listingToDefs(
   meta: ListingMeta,
@@ -67,6 +113,13 @@ export async function listingToDefs(
           },
         ];
   if (items.length === 0) throw new Error("리스팅에 설치할 정책이 없어요");
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (ids.has(item.id)) {
+      throw new Error(`리스팅 "${meta.displayName}"에 중복 정책 식별자가 있어 설치할 수 없어요`);
+    }
+    ids.add(item.id);
+  }
 
   const defs: PolicyDef[] = [];
   for (const it of items) {
@@ -85,6 +138,7 @@ export async function listingToDefs(
     const holed = holedIrOf(ir);
     if (holed) {
       const derived = holesFromIr(holed);
+      validateShippedHolesAgainstForm(shipped, paramTypesFromHoledIr(holed), it.name);
       const byName = new Map(shipped.map((s) => [s.name, s]));
       skeletonIr = holed;
       holes = derived.holes.map((h) => {
@@ -98,9 +152,7 @@ export async function listingToDefs(
         Object.entries(derived.paramDefaults).filter(([k]) => !byName.has(k)),
       );
     } else if (shipped.length > 0) {
-      // 게시자는 빈칸을 안내했지만 이쪽에서 폼으로 못 여는 정책 — 게이트를
-      // 적용할 방법이 없으므로 기존 동작(있는 그대로 설치)으로 둔다.
-      console.warn(`[Dambi] 리스팅 "${it.name}": hole 안내를 적용할 수 없어 무시함`);
+      throw new Error(`정책 "${it.name}"의 필수 입력 메타데이터를 적용할 수 없어요`);
     }
 
     defs.push({
@@ -139,7 +191,11 @@ export function holeInputToValue(type: HoleSpec["type"], raw: string): HoleValue
       return items.map((a) => a.toLowerCase());
     }
     case "long":
-      return /^-?\d+$/.test(t) ? Number(t) : null;
+      if (!/^-?\d+$/.test(t)) return null;
+      {
+        const n = Number(t);
+        return Number.isSafeInteger(n) ? n : null;
+      }
     case "decimal":
       return t ? normalizeDecimal(t) : null;
     case "bool":

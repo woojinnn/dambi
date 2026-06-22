@@ -6,6 +6,13 @@ declare module "*.html?raw" {
   export default content;
 }
 
+declare module "jsdom" {
+  export class JSDOM {
+    constructor(html?: string, options?: { url?: string });
+    window: Window & typeof globalThis;
+  }
+}
+
 // Globals the ASS_v2 prototype scripts read/write. React injects PASU_DATA from
 // live server data; the prototype's render/donut/summary functions consume it.
 interface Window {

@@ -22,6 +22,7 @@
 use std::{
     env,
     sync::{Mutex, OnceLock},
+    time::Duration,
 };
 
 use axum::extract::{Query, State};
@@ -40,6 +41,7 @@ const OAUTH_STATE_SUBJECT: &str = "oauth-state";
 const OAUTH_STATE_TTL_SECS: i64 = jwt::OAUTH_STATE_TTL_SECS;
 const OAUTH_STATE_COOKIE: &str = "scopeball_oauth_state";
 const OAUTH_STATE_COOKIE_PATH: &str = "/auth/google";
+const OAUTH_HTTP_TIMEOUT_SECS: u64 = 10;
 
 /// Optional query for [`start_google_login`]. `redirect_uri`, when present,
 /// names where the callback delivers the token fragment instead of the
@@ -236,7 +238,7 @@ pub async fn refresh_token(
     let claims = match jwt::verify(&req.refresh_token) {
         Ok(c) if c.is_refresh() => c,
         Ok(_) => return user_error("access token cannot refresh a session"),
-        Err(e) => return user_error(&format!("invalid refresh token: {e}")),
+        Err(e) => return reject_refresh_verify_error(&e),
     };
     let Some(old_jti) = claims.token_id() else {
         return user_error("invalid refresh token");
@@ -413,7 +415,7 @@ async fn exchange_code_for_id_token(code: &str) -> Result<String, String> {
         ("grant_type", "authorization_code"),
     ];
 
-    let resp: TokenResp = reqwest::Client::new()
+    let resp: TokenResp = oauth_http_client()?
         .post("https://oauth2.googleapis.com/token")
         .form(&body)
         .send()
@@ -503,12 +505,13 @@ async fn verify_identity_from_google_id_token(
     let client_id =
         env::var("GOOGLE_CLIENT_ID").map_err(|_| "GOOGLE_CLIENT_ID unset".to_string())?;
     let now = now_secs();
-    let jwks = fetch_google_jwks_cached(now).await?;
+    let kid = google_id_token_signing_kid(id_token)?;
+    let jwks = fetch_google_jwks_for_kid(now, &kid).await?;
     verify_identity_from_id_token_with_jwks(id_token, &client_id, now, &jwks)
 }
 
 async fn fetch_google_jwks() -> Result<GoogleJwkSet, String> {
-    reqwest::Client::new()
+    oauth_http_client()?
         .get("https://www.googleapis.com/oauth2/v3/certs")
         .send()
         .await
@@ -520,8 +523,15 @@ async fn fetch_google_jwks() -> Result<GoogleJwkSet, String> {
         .map_err(|e| format!("jwks JSON decode: {e}"))
 }
 
-async fn fetch_google_jwks_cached(now: i64) -> Result<GoogleJwkSet, String> {
-    if let Some(cached) = cached_google_jwks(now) {
+fn oauth_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(OAUTH_HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("oauth HTTP client: {e}"))
+}
+
+async fn fetch_google_jwks_for_kid(now: i64, kid: &str) -> Result<GoogleJwkSet, String> {
+    if let Some(cached) = cached_google_jwks_for_kid(now, kid) {
         return Ok(cached);
     }
     let jwks = fetch_google_jwks().await?;
@@ -543,6 +553,10 @@ fn cached_google_jwks(now: i64) -> Option<GoogleJwkSet> {
     }
 }
 
+fn cached_google_jwks_for_kid(now: i64, kid: &str) -> Option<GoogleJwkSet> {
+    cached_google_jwks(now).filter(|jwks| google_jwks_contains_signing_key(jwks, kid))
+}
+
 fn store_google_jwks(now: i64, jwks: GoogleJwkSet) {
     if let Ok(mut guard) = google_jwks_cache().lock() {
         *guard = Some(CachedGoogleJwks {
@@ -556,29 +570,38 @@ fn google_jwks_cache_is_fresh(fetched_at: i64, now: i64) -> bool {
     now.saturating_sub(fetched_at) < GOOGLE_JWKS_CACHE_TTL_SECS
 }
 
+fn google_id_token_signing_kid(id_token: &str) -> Result<String, String> {
+    let header = jsonwebtoken::decode_header(id_token).map_err(|e| format!("jwt header: {e}"))?;
+    if header.alg != jsonwebtoken::Algorithm::RS256 {
+        return Err("id_token alg is not RS256".into());
+    }
+    header.kid.ok_or_else(|| "id_token kid missing".to_string())
+}
+
+fn google_jwks_contains_signing_key(jwks: &GoogleJwkSet, kid: &str) -> bool {
+    jwks.keys
+        .iter()
+        .any(|key| google_jwk_is_signing_key(key, kid))
+}
+
+fn google_jwk_is_signing_key(key: &GoogleJwk, kid: &str) -> bool {
+    key.kid == kid
+        && key.kty == "RSA"
+        && key.alg.as_deref().is_none_or(|alg| alg == "RS256")
+        && key.key_use.as_deref().is_none_or(|use_| use_ == "sig")
+}
+
 fn verify_identity_from_id_token_with_jwks(
     id_token: &str,
     client_id: &str,
     now: i64,
     jwks: &GoogleJwkSet,
 ) -> Result<VerifiedGoogleIdentity, String> {
-    let header = jsonwebtoken::decode_header(id_token).map_err(|e| format!("jwt header: {e}"))?;
-    if header.alg != jsonwebtoken::Algorithm::RS256 {
-        return Err("id_token alg is not RS256".into());
-    }
-    let kid = header
-        .kid
-        .as_deref()
-        .ok_or_else(|| "id_token kid missing".to_string())?;
+    let kid = google_id_token_signing_kid(id_token)?;
     let jwk = jwks
         .keys
         .iter()
-        .find(|key| {
-            key.kid == kid
-                && key.kty == "RSA"
-                && key.alg.as_deref().is_none_or(|alg| alg == "RS256")
-                && key.key_use.as_deref().is_none_or(|use_| use_ == "sig")
-        })
+        .find(|key| google_jwk_is_signing_key(key, &kid))
         .ok_or_else(|| "id_token signing key not found in Google JWKS".to_string())?;
     let key = jsonwebtoken::DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
         .map_err(|e| format!("jwk rsa key: {e}"))?;
@@ -665,7 +688,8 @@ fn env_missing(var: &str) -> Response {
 }
 
 fn server_error(reason: &str) -> Response {
-    eprintln!("oauth server_error: {reason}");
+    let safe_reason = crate::logging::redact_sensitive_log_text(reason);
+    tracing::error!(error = %safe_reason, "oauth handler internal error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": "server_error", "reason": "Internal server error" })),
@@ -681,6 +705,12 @@ fn user_error(reason: &str) -> Response {
         .into_response()
 }
 
+fn reject_refresh_verify_error(error: &jwt::AuthError) -> Response {
+    let safe_error = crate::logging::redact_sensitive_log_text(error);
+    tracing::warn!(error = %safe_error, "refresh token verification failed");
+    user_error("invalid or expired refresh token")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,11 +723,19 @@ mod tests {
         );
     }
 
-    fn encode_id_token(payload: &serde_json::Value) -> String {
-        let header = "eyJhbGciOiJSUzI1NiJ9"; // {"alg":"RS256"} — not validated by us
+    fn encode_id_token_with_header(
+        header: &serde_json::Value,
+        payload: &serde_json::Value,
+    ) -> String {
+        let header_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header.to_string().as_bytes());
         let payload_b64 =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());
-        format!("{header}.{payload_b64}.signature-not-verified")
+        format!("{header_b64}.{payload_b64}.signature-not-verified")
+    }
+
+    fn encode_id_token(payload: &serde_json::Value) -> String {
+        encode_id_token_with_header(&json!({ "alg": "RS256" }), payload)
     }
 
     fn valid_claims() -> serde_json::Value {
@@ -822,6 +860,30 @@ mod tests {
     }
 
     #[test]
+    fn google_id_token_signing_kid_requires_rs256_and_kid() {
+        let tok = encode_id_token_with_header(
+            &json!({ "alg": "RS256", "kid": "kid-2" }),
+            &valid_claims(),
+        );
+        assert_eq!(
+            google_id_token_signing_kid(&tok).unwrap(),
+            "kid-2",
+            "RS256 tokens with a kid should expose the requested signing key id"
+        );
+
+        let no_kid = encode_id_token(&valid_claims());
+        let err = google_id_token_signing_kid(&no_kid).unwrap_err();
+        assert!(err.contains("kid missing"), "got: {err}");
+
+        let wrong_alg = encode_id_token_with_header(
+            &json!({ "alg": "HS256", "kid": "kid-2" }),
+            &valid_claims(),
+        );
+        let err = google_id_token_signing_kid(&wrong_alg).unwrap_err();
+        assert!(err.contains("not RS256"), "got: {err}");
+    }
+
+    #[test]
     fn google_jwks_cache_reuses_fresh_value_and_expires() {
         if let Ok(mut guard) = google_jwks_cache().lock() {
             *guard = None;
@@ -840,8 +902,52 @@ mod tests {
         store_google_jwks(100, jwks);
 
         assert_eq!(cached_google_jwks(100).unwrap().keys[0].kid, "kid-1");
+        assert!(cached_google_jwks_for_kid(100, "kid-1").is_some());
+        assert!(
+            cached_google_jwks_for_kid(100, "kid-2").is_none(),
+            "fresh cache entries missing the requested kid must force a JWKS refresh"
+        );
         assert!(cached_google_jwks(100 + GOOGLE_JWKS_CACHE_TTL_SECS - 1).is_some());
         assert!(cached_google_jwks(100 + GOOGLE_JWKS_CACHE_TTL_SECS).is_none());
+        assert!(cached_google_jwks_for_kid(100 + GOOGLE_JWKS_CACHE_TTL_SECS, "kid-1").is_none());
+
+        if let Ok(mut guard) = google_jwks_cache().lock() {
+            *guard = None;
+        }
+    }
+
+    #[test]
+    fn cached_google_jwks_for_kid_requires_usable_rsa_signing_key() {
+        if let Ok(mut guard) = google_jwks_cache().lock() {
+            *guard = None;
+        }
+
+        store_google_jwks(
+            100,
+            GoogleJwkSet {
+                keys: vec![
+                    GoogleJwk {
+                        kid: "kid-1".to_owned(),
+                        kty: "EC".to_owned(),
+                        alg: Some("RS256".to_owned()),
+                        key_use: Some("sig".to_owned()),
+                        n: "n".to_owned(),
+                        e: "AQAB".to_owned(),
+                    },
+                    GoogleJwk {
+                        kid: "kid-2".to_owned(),
+                        kty: "RSA".to_owned(),
+                        alg: Some("RS256".to_owned()),
+                        key_use: Some("enc".to_owned()),
+                        n: "n".to_owned(),
+                        e: "AQAB".to_owned(),
+                    },
+                ],
+            },
+        );
+
+        assert!(cached_google_jwks_for_kid(100, "kid-1").is_none());
+        assert!(cached_google_jwks_for_kid(100, "kid-2").is_none());
 
         if let Ok(mut guard) = google_jwks_cache().lock() {
             *guard = None;
@@ -860,6 +966,30 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(json["error"], "server_error");
         assert_eq!(json["reason"], "Internal server error");
+    }
+
+    #[tokio::test]
+    async fn refresh_verify_errors_do_not_echo_internal_reason() {
+        let response = reject_refresh_verify_error(&jwt::AuthError::MissingSecret);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            text.contains("invalid or expired refresh token"),
+            "body: {text}"
+        );
+        assert!(!text.contains("JWT_SECRET"), "body leaked: {text}");
+    }
+
+    #[test]
+    fn oauth_http_client_has_bounded_timeout() {
+        const {
+            assert!(OAUTH_HTTP_TIMEOUT_SECS > 0);
+            assert!(OAUTH_HTTP_TIMEOUT_SECS <= 10);
+        }
+        oauth_http_client().expect("bounded OAuth HTTP client");
     }
 
     #[test]

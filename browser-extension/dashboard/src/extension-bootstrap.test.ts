@@ -76,6 +76,16 @@ describe("extension dashboard bootstrap", () => {
     expect(window.localStorage.getItem("dambi_jwt_refresh")).toBeNull();
   });
 
+  it("removes malformed service-worker tokens instead of mirroring them", async () => {
+    pageStore.set("dambi_jwt", "old-access");
+    extensionStore.set("dambi_jwt", "bad\naccess");
+    const { syncTokensFromExtensionStorage } = await import("./extension-bootstrap");
+
+    await syncTokensFromExtensionStorage();
+
+    expect(window.localStorage.getItem("dambi_jwt")).toBeNull();
+  });
+
   it("mirrors token removal events from service-worker storage", async () => {
     pageStore.set("dambi_jwt", "access");
     pageStore.set("dambi_jwt_refresh", "refresh");
@@ -92,5 +102,20 @@ describe("extension dashboard bootstrap", () => {
 
     expect(window.localStorage.getItem("dambi_jwt")).toBeNull();
     expect(window.localStorage.getItem("dambi_jwt_refresh")).toBeNull();
+  });
+
+  it("removes malformed service-worker token update events", async () => {
+    pageStore.set("dambi_jwt", "access");
+    const { bootstrapExtensionEnv } = await import("./extension-bootstrap");
+
+    await bootstrapExtensionEnv();
+    onChanged?.(
+      {
+        dambi_jwt: { newValue: "bad\naccess" },
+      },
+      "local",
+    );
+
+    expect(window.localStorage.getItem("dambi_jwt")).toBeNull();
   });
 });

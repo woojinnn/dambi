@@ -132,6 +132,7 @@ impl Scheduler {
                     continue;
                 }
             };
+            state.wallet_id = wid.clone();
 
             let mut w_updated: usize = 0;
             let mut w_failed: usize = 0;

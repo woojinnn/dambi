@@ -346,11 +346,12 @@ pub async fn get_version(
 
 pub async fn get_latest_version(pool: &PgPool, listing_id: Uuid) -> DbResult<Option<VersionRow>> {
     let row = query(
-        "SELECT listing_id, version, major, minor, patch,
-                cedar_text, manifest, policy_tree, members, changelog, published_at
-         FROM market_listing_versions
-         WHERE listing_id = $1
-         ORDER BY major DESC, minor DESC, patch DESC
+        "SELECT v.listing_id, v.version, v.major, v.minor, v.patch,
+                v.cedar_text, v.manifest, v.policy_tree, v.members, v.changelog, v.published_at
+         FROM market_listing_versions v
+         JOIN market_listings l ON l.id = v.listing_id
+         WHERE v.listing_id = $1 AND l.status = 'published'
+         ORDER BY v.major DESC, v.minor DESC, v.patch DESC
          LIMIT 1",
     )
     .bind(listing_id)
@@ -359,6 +360,28 @@ pub async fn get_latest_version(pool: &PgPool, listing_id: Uuid) -> DbResult<Opt
     .map_err(|e| DbError::Invariant(e.to_string()))?;
     Ok(row.as_ref().map(row_to_version))
 }
+
+const RECORD_INSTALL_AND_GET_VERSION_SQL: &str = "
+WITH target AS (
+  SELECT v.listing_id, v.version, v.major, v.minor, v.patch,
+         v.cedar_text, v.manifest, v.policy_tree, v.members, v.changelog, v.published_at
+  FROM market_listing_versions v
+  JOIN market_listings l ON l.id = v.listing_id
+  WHERE v.listing_id = $2 AND v.version = $3 AND l.status = 'published'
+),
+inserted AS (
+  INSERT INTO market_installs (id, listing_id, version, user_id, installed_at)
+  SELECT $1, target.listing_id, target.version, $4, $5
+  FROM target
+  RETURNING listing_id, version
+)
+SELECT target.listing_id, target.version, target.major, target.minor, target.patch,
+       target.cedar_text, target.manifest, target.policy_tree, target.members,
+       target.changelog, target.published_at
+FROM target
+JOIN inserted
+  ON inserted.listing_id = target.listing_id
+ AND inserted.version = target.version";
 
 /// Insert the listing row + its initial version row in one transaction. The
 /// caller has already validated the `SemVer` + kind/body invariants; this
@@ -453,6 +476,39 @@ pub async fn create_version(
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
 
+    let locked = query(
+        "SELECT current_version
+         FROM market_listings
+         WHERE id = $1 AND status = 'published'
+         FOR UPDATE",
+    )
+    .bind(listing_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    let Some(row) = locked else {
+        tx.rollback()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        return Err(DbError::NotFound {
+            kind: "market_listing",
+            id: listing_id.to_string(),
+        });
+    };
+
+    let current_version: Option<String> = row.get("current_version");
+    if let Some(current) = current_version.as_deref() {
+        let current_tuple = validate_semver(current)?;
+        if (major, minor, patch) <= current_tuple {
+            tx.rollback()
+                .await
+                .map_err(|e| DbError::Invariant(e.to_string()))?;
+            return Err(DbError::Invariant(
+                "new version must be strictly greater than current_version".to_owned(),
+            ));
+        }
+    }
+
     insert_version_row(
         &mut tx, listing_id, version, major, minor, patch, &body, now,
     )
@@ -461,7 +517,7 @@ pub async fn create_version(
     query(
         "UPDATE market_listings
          SET current_version = $1, updated_at = $2
-         WHERE id = $3",
+         WHERE id = $3 AND status = 'published'",
     )
     .bind(version)
     .bind(now)
@@ -510,6 +566,29 @@ async fn insert_version_row(
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
     Ok(())
+}
+
+/// Atomically record one install event for a currently published listing/version
+/// and return the exact version body being installed. Returning the body from the
+/// same statement prevents a concurrent archive from racing between "body read"
+/// and "install eligibility" checks.
+pub async fn record_install_and_get_version(
+    pool: &PgPool,
+    listing_id: Uuid,
+    version: &str,
+    user_id: &str,
+    now: i64,
+) -> DbResult<Option<VersionRow>> {
+    let row = query(RECORD_INSTALL_AND_GET_VERSION_SQL)
+        .bind(Uuid::new_v4())
+        .bind(listing_id)
+        .bind(version)
+        .bind(user_id)
+        .bind(now)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(row.as_ref().map(row_to_version))
 }
 
 /// Record one install event for a currently published listing/version. The
@@ -626,6 +705,27 @@ pub async fn upsert_review(
     body: &Value,
     now: i64,
 ) -> DbResult<Option<ReviewRow>> {
+    let target = query(
+        "SELECT l.publisher_id
+         FROM market_listing_versions v
+         JOIN market_listings l ON l.id = v.listing_id
+         WHERE v.listing_id = $1 AND v.version = $2 AND l.status = 'published'",
+    )
+    .bind(listing_id)
+    .bind(version)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    let Some(row) = target else {
+        return Ok(None);
+    };
+    let publisher_id: String = row.get("publisher_id");
+    if publisher_id == user_id {
+        return Err(DbError::Forbidden {
+            reason: "publishers cannot review their own listings",
+        });
+    }
+
     let id = Uuid::new_v4();
     let res = query(
         "INSERT INTO market_reviews (id, listing_id, user_id, version, rating, body, created_at)
@@ -679,7 +779,7 @@ pub async fn vote_helpful(
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
     let visible = query(
-        "SELECT r.id
+        "SELECT r.id, r.user_id
          FROM market_reviews r
          JOIN market_listings l ON l.id = r.listing_id
          WHERE r.id = $1 AND l.status = 'published'",
@@ -688,11 +788,20 @@ pub async fn vote_helpful(
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
-    if visible.is_none() {
+    let Some(visible) = visible else {
         tx.rollback()
             .await
             .map_err(|e| DbError::Invariant(e.to_string()))?;
         return Ok(None);
+    };
+    let author_id: String = visible.get("user_id");
+    if author_id == user_id {
+        tx.rollback()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        return Err(DbError::Forbidden {
+            reason: "review authors cannot vote helpful on their own reviews",
+        });
     }
 
     let res = query(
@@ -861,20 +970,31 @@ pub async fn update_report_status(
 }
 
 pub async fn watch(pool: &PgPool, user_id: &str, listing_id: Uuid, now: i64) -> DbResult<bool> {
-    let res = query(
-        "INSERT INTO market_watches (user_id, listing_id, subscribed_at)
-         SELECT $1, l.id, $3
-         FROM market_listings l
-         WHERE l.id = $2 AND l.status = 'published'
-         ON CONFLICT DO NOTHING",
+    let row = query(
+        "WITH target AS (
+           SELECT id
+           FROM market_listings
+           WHERE id = $2 AND status = 'published'
+         ),
+         inserted AS (
+           INSERT INTO market_watches (user_id, listing_id, subscribed_at)
+           SELECT $1, target.id, $3
+           FROM target
+           ON CONFLICT DO NOTHING
+           RETURNING listing_id
+         )
+         SELECT
+           EXISTS (SELECT 1 FROM target) AS target_visible,
+           EXISTS (SELECT 1 FROM inserted) AS inserted",
     )
     .bind(user_id)
     .bind(listing_id)
     .bind(now)
-    .execute(pool)
+    .fetch_one(pool)
     .await
     .map_err(|e| DbError::Invariant(e.to_string()))?;
-    Ok(res.rows_affected() > 0)
+    let target_visible: bool = row.get("target_visible");
+    Ok(target_visible)
 }
 
 pub async fn unwatch(pool: &PgPool, user_id: &str, listing_id: Uuid) -> DbResult<()> {
@@ -887,10 +1007,11 @@ pub async fn unwatch(pool: &PgPool, user_id: &str, listing_id: Uuid) -> DbResult
     Ok(())
 }
 
-/// Hard-delete a listing owned by `publisher_id`. Child rows (versions,
-/// installs, reviews, watches) cascade via FK; any listing forked from this one
-/// has its `forked_from` cleared first (that FK has no cascade). Returns true
-/// when a row owned by the caller was actually removed.
+/// Archive a published listing owned by `publisher_id`. Child rows are kept so
+/// reviews, install history, and moderation reports remain available for audit;
+/// public read/write helpers already require `status = 'published'`, so archived
+/// listings disappear from the marketplace surface. Any listing forked from this
+/// one has its `forked_from` cleared to avoid exposing hidden provenance ids.
 pub async fn delete_listing(pool: &PgPool, listing_id: Uuid, publisher_id: &str) -> DbResult<bool> {
     let mut tx = pool
         .begin()
@@ -900,7 +1021,7 @@ pub async fn delete_listing(pool: &PgPool, listing_id: Uuid, publisher_id: &str)
     let owned = query(
         "SELECT id
          FROM market_listings
-         WHERE id = $1 AND publisher_id = $2
+         WHERE id = $1 AND publisher_id = $2 AND status = 'published'
          FOR UPDATE",
     )
     .bind(listing_id)
@@ -921,12 +1042,17 @@ pub async fn delete_listing(pool: &PgPool, listing_id: Uuid, publisher_id: &str)
         .execute(&mut *tx)
         .await
         .map_err(|e| DbError::Invariant(e.to_string()))?;
-    let res = query("DELETE FROM market_listings WHERE id = $1 AND publisher_id = $2")
-        .bind(listing_id)
-        .bind(publisher_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| DbError::Invariant(e.to_string()))?;
+    let res = query(
+        "UPDATE market_listings
+         SET status = 'archived',
+             updated_at = EXTRACT(EPOCH FROM NOW())::bigint
+         WHERE id = $1 AND publisher_id = $2 AND status = 'published'",
+    )
+    .bind(listing_id)
+    .bind(publisher_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
 
     tx.commit()
         .await
@@ -1033,5 +1159,21 @@ fn row_to_report(row: &PgRow) -> ReportRow {
         resolved_by: row.get("resolved_by"),
         resolved_at: row.get("resolved_at"),
         created_at: row.get("created_at"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RECORD_INSTALL_AND_GET_VERSION_SQL;
+
+    #[test]
+    fn install_download_sql_records_event_and_returns_body_atomically() {
+        let sql = RECORD_INSTALL_AND_GET_VERSION_SQL;
+
+        assert!(sql.contains("WITH target AS"));
+        assert!(sql.contains("l.status = 'published'"));
+        assert!(sql.contains("INSERT INTO market_installs"));
+        assert!(sql.contains("RETURNING listing_id, version"));
+        assert!(sql.contains("FROM target\nJOIN inserted"));
     }
 }

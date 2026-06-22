@@ -15,7 +15,7 @@ use policy_db::MultiUserStore;
 use policy_state::approval::ApprovalSet;
 use policy_state::primitives::{Address, BlockHeight, ChainId};
 use policy_state::token::{TokenHolding, TokenKey};
-use policy_state::{WalletId, WalletState, WalletStore};
+use policy_state::{WalletState, WalletStore};
 
 use crate::app::AppState;
 use crate::auth::AuthUser;
@@ -303,24 +303,23 @@ async fn load_state(
         .for_user(user_id)
         .map_err(|e| open_store_error(&e.to_string()))?;
 
-    let known = store
-        .list_wallets()
-        .await
-        .map_err(|e| internal_server_error(&format!("list_wallets: {e}")))?;
-    let id = tracked_wallet_id(known, addr)?;
-
     store
-        .load(&id)
+        .load_active_by_address(addr)
         .await
-        .map_err(|e| internal_server_error(&format!("load: {e}")))
+        .map_err(|e| internal_server_error(&format!("load active wallet: {e}")))?
+        .ok_or_else(|| not_found("wallet not tracked for this user"))
 }
 
 fn not_found(reason: &str) -> Response {
     (StatusCode::NOT_FOUND, reason.to_owned()).into_response()
 }
 
+#[cfg(test)]
 #[allow(clippy::result_large_err)]
-fn tracked_wallet_id(known: Vec<WalletId>, addr: Address) -> Result<WalletId, Response> {
+fn tracked_wallet_id(
+    known: Vec<policy_state::WalletId>,
+    addr: Address,
+) -> Result<policy_state::WalletId, Response> {
     known
         .into_iter()
         .find(|w| w.address == addr)
@@ -336,7 +335,8 @@ fn open_store_error(reason: &str) -> Response {
 }
 
 fn internal_server_error(reason: &str) -> Response {
-    tracing::error!(error = %reason, "read handler internal error");
+    let safe_reason = crate::logging::redact_sensitive_log_text(reason);
+    tracing::error!(error = %safe_reason, "read handler internal error");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
@@ -422,8 +422,9 @@ pub async fn list_tokens(
     let mut rows = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for wallet in wallets {
-        let state = match store.load(&wallet).await {
-            Ok(state) => state,
+        let state = match store.load_active_by_address(wallet.address).await {
+            Ok(Some(state)) => state,
+            Ok(None) => continue,
             Err(e) => return store_error(&e),
         };
         for (key, holding) in state.tokens {
@@ -453,6 +454,7 @@ pub async fn list_tokens(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use policy_state::WalletId;
 
     #[tokio::test]
     async fn internal_errors_do_not_echo_reason() {

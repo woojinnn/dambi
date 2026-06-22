@@ -22,6 +22,51 @@ function resolveServerUrl(env = process.env) {
   return env.DAMBI_SERVER_URL || DEFAULT_SERVER_URL;
 }
 
+function parseServerUrlForProd(rawUrl) {
+  try {
+    return new URL(rawUrl);
+  } catch {
+    return null;
+  }
+}
+
+function assertProdServerUrlSecure(env = process.env) {
+  const optedOut =
+    env.DAMBI_ALLOW_INSECURE_SERVER === "1" ||
+    env.DAMBI_ALLOW_INSECURE_REGISTRY === "1";
+  if (optedOut) return;
+
+  const serverUrl = resolveServerUrl(env);
+  const parsed = parseServerUrlForProd(serverUrl);
+  if (!parsed) {
+    throw new Error(
+      `[webpack.prod] DAMBI_SERVER_URL must be an absolute https:// origin (got ${JSON.stringify(
+        serverUrl,
+      )}).`,
+    );
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(
+      `[webpack.prod] DAMBI_SERVER_URL must be https:// (got ${JSON.stringify(
+        serverUrl,
+      )}). Export DAMBI_ALLOW_INSECURE_SERVER=1 only for local smoke tests.`,
+    );
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(
+      `[webpack.prod] DAMBI_SERVER_URL must be a bare origin without credentials, path, query, or hash (got ${JSON.stringify(
+        serverUrl,
+      )}).`,
+    );
+  }
+}
+
 // Channel-specific PINNED registry-bundle signing public key (SPKI base64). The
 // SW verifies each bundle's detached ECDSA P-256 signature against this before
 // installing the decoder. Empty when signing is not yet pinned on this channel.
@@ -71,6 +116,7 @@ module.exports = {
   envPathForMode,
   loadBuildEnv,
   resolveServerUrl,
+  assertProdServerUrlSecure,
   resolvePinnedBundleKey,
   resolveRequireBundleSig,
   assertProdSignatureEnforced,

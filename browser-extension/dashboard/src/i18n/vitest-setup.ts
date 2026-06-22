@@ -15,3 +15,26 @@ const i18n = initI18n();
 if (!i18n.isInitialized) {
   await new Promise<void>((resolve) => i18n.on("initialized", () => resolve()));
 }
+
+const originalFetch = globalThis.fetch?.bind(globalThis);
+
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : typeof Request !== "undefined" && input instanceof Request
+          ? input.url
+          : "";
+
+  if (url.startsWith("https://static.blockly.com/media/")) {
+    return new Response(new ArrayBuffer(0), { status: 200 });
+  }
+
+  if (!originalFetch) {
+    throw new TypeError("fetch is not available in this test environment");
+  }
+
+  return originalFetch(input, init);
+};

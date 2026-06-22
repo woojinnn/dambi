@@ -11,6 +11,7 @@
    ============================================================ */
 const S = window.DambiStore;
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function cls(s) { return String(s == null ? "" : s).replace(/[^a-zA-Z0-9_-]/g, "") || "unknown"; }
 const ASSET = (typeof window !== "undefined" && window.DAMBI_ASSET_BASE) || "picture/";
 // §2.2 — dev 하드코딩 제거. 배포 URL 은 빌드시 window.DAMBI_DASHBOARD_URL 로 주입.
 const DASHBOARD_URL = (typeof window !== "undefined" && window.DAMBI_DASHBOARD_URL) || "https://app.dambi.xyz/";
@@ -242,7 +243,7 @@ function renderMain() {
   const set = enabledSet();
   const w = activeWallet();
   let html = "";
-  html += '<div class="pc-scopebar">이 주소의 정책 — <span class="a">' + S.shortAddr(w ? w.address : "") + (walletName(w) ? " · " + esc(walletName(w)) : "") + '</span></div>';
+  html += '<div class="pc-scopebar">이 주소의 정책 — <span class="a">' + esc(S.shortAddr(w ? w.address : "")) + (walletName(w) ? " · " + esc(walletName(w)) : "") + '</span></div>';
   if (set.size === 0) html += '<div class="pc-banner">이 주소는 모든 정책이 꺼져 있어요 — 트랜잭션이 검사 없이 통과돼요. 최소 한 개는 켜두세요.</div>';
 
   const pkgs = S.PACKAGES.filter((p) => pkgInCat(p) && pkgMatches(p, state.search));
@@ -255,11 +256,11 @@ function renderMain() {
     const st = S.pkgState(pkg, set);
     const open = state.expanded.has(pkg.id);
     const onCount = pkg.members.filter((id) => set.has(id)).length;
-    html += '<div class="pc-pkg ' + (st === "off" ? "dim" : "") + (open ? " open" : "") + '" data-pkg="' + pkg.id + '">';
+    html += '<div class="pc-pkg ' + (st === "off" ? "dim" : "") + (open ? " open" : "") + '" data-pkg="' + esc(pkg.id) + '">';
     html +=   '<div class="pc-pkg-head" data-act="expand">' + I.chev +
                 '<div class="pc-pkg-main"><div class="pc-pkg-titlerow">' +
-                  '<span class="pc-pkg-name">' + pkg.name + '</span>' +
-                  '<span class="pc-src ' + pkg.source.kind + '">' + pkg.source.label + '</span>' +
+                  '<span class="pc-pkg-name">' + esc(pkg.name) + '</span>' +
+                  '<span class="pc-src ' + cls(pkg.source.kind) + '">' + esc(pkg.source.label) + '</span>' +
                 '</div>' +
                 '<div class="pc-pkg-meta"><b>' + onCount + '/' + pkg.members.length + '</b> 정책 활성</div></div>' +
                 '<button class="pc-tog ' + (st === "on" ? "" : st === "off" ? "off" : "mixed") + '" data-act="master" role="switch" aria-checked="' + (st === "on") + '"></button>' +
@@ -270,9 +271,9 @@ function renderMain() {
         const p = S.POLICIES[id];
         const memOn = set.has(id);
         html += '<div class="pc-mem">' +
-                  '<span class="pc-mem-sev ' + p.sev + '"></span>' +
-                  '<span class="pc-mem-name">' + p.title + '</span>' +
-                  '<button class="pc-tog sm ' + (memOn ? "" : "off") + '" data-act="member" data-id="' + id + '" role="switch" aria-checked="' + memOn + '"></button>' +
+                  '<span class="pc-mem-sev ' + cls(p && p.sev) + '"></span>' +
+                  '<span class="pc-mem-name">' + esc(p && p.title) + '</span>' +
+                  '<button class="pc-tog sm ' + (memOn ? "" : "off") + '" data-act="member" data-id="' + esc(id) + '" role="switch" aria-checked="' + memOn + '"></button>' +
                 '</div>';
       }
       html += '</div>';
@@ -477,8 +478,8 @@ function renderOvlBody() {
   html += '<div class="pc-acard">' +
             '<span class="av">' + (w ? S.identiconSVG(w.address, 36) : "") + '</span>' +
             '<div class="ac-tx">' +
-              '<div class="ac-name">' + (nm ? esc(nm) : '<span class="only">' + S.shortAddr(w ? w.address : "") + '</span>') + '<span class="pc-pin-tag">' + I.pin + '</span></div>' +
-              '<div class="ac-addr"><span class="ac-short">' + S.shortAddr(w ? w.address : "") + '</span><button class="pc-copy" id="acCopy" aria-label="주소 복사">' + I.copy + '</button></div>' +
+              '<div class="ac-name">' + (nm ? esc(nm) : '<span class="only">' + esc(S.shortAddr(w ? w.address : "")) + '</span>') + '<span class="pc-pin-tag">' + I.pin + '</span></div>' +
+              '<div class="ac-addr"><span class="ac-short">' + esc(S.shortAddr(w ? w.address : "")) + '</span><button class="pc-copy" id="acCopy" aria-label="주소 복사">' + I.copy + '</button></div>' +
             '</div>' +
             '<div class="ac-status"><span class="pc-statline">패키지 <span class="n">' + st.pkgCount + '</span> · 정책 <span class="n">' + st.polCount + '</span></span></div>' +
           '</div>';
@@ -512,7 +513,7 @@ function renderOvlList() {
     if (state.manage) {
       row.innerHTML =
         '<span class="av">' + S.identiconSVG(w.address, 30) + '</span>' +
-        '<input class="pc-alias-edit" value="' + esc(nm) + '" placeholder="' + S.shortAddr(w.address) + '" />' +
+        '<input class="pc-alias-edit" value="' + esc(nm) + '" placeholder="' + esc(S.shortAddr(w.address)) + '" />' +
         '<div class="pc-mgmt">' +
           '<button class="pin ' + (w.pinned ? "on" : "") + '" title="맨 위로 고정">' + I.pin + '</button>' +
           '<button class="trash" title="삭제"' + (state.wallets.length <= 1 ? " disabled style=\"opacity:.4;cursor:not-allowed\"" : "") + '>' + I.trash + '</button>' +
@@ -539,8 +540,8 @@ function renderOvlList() {
     } else {
       row.innerHTML =
         '<span class="av">' + S.identiconSVG(w.address, 30) + '</span>' +
-        '<div class="ar-tx"><div class="ar-name">' + (nm ? esc(nm) : '<span class="only">' + S.shortAddr(w.address) + '</span>') + '</div>' +
-          (nm ? '<div class="ar-short">' + S.shortAddr(w.address) + '</div>' : "") + '</div>' +
+        '<div class="ar-tx"><div class="ar-name">' + (nm ? esc(nm) : '<span class="only">' + esc(S.shortAddr(w.address)) + '</span>') + '</div>' +
+          (nm ? '<div class="ar-short">' + esc(S.shortAddr(w.address)) + '</div>' : "") + '</div>' +
         '<div class="ar-status"><div class="ar-statline">패키지 <span class="n">' + st.pkgCount + '</span> · 정책 <span class="n">' + st.polCount + '</span></div></div>';
       row.addEventListener("click", () => switchTo(w.address));
     }
@@ -601,7 +602,7 @@ function openConfirm(addr) {
   m.innerHTML =
     '<div class="pc-dialog"><h3>이 주소를 삭제할까요?</h3>' +
     '<p>' + (w && w.nickname ? esc(w.nickname) + " · " : "") + '등록 목록과 이 주소의 정책 적용 상태가 영구 삭제돼요. 되돌릴 수 없어요.</p>' +
-    '<div class="dlg-addr">' + addr + '</div>' +
+    '<div class="dlg-addr">' + esc(addr) + '</div>' +
     '<div class="pc-dialog-foot"><button class="pc-dlg-btn ghost" id="dlgCancel">취소</button><button class="pc-dlg-btn danger" id="dlgDel">삭제</button></div></div>';
   m.classList.add("show");
   document.getElementById("dlgCancel").addEventListener("click", closeConfirm);
@@ -853,7 +854,7 @@ function onbStep3() {
         '<div class="onb-check ' + (state.onb.baseline.has(p.id) ? "on" : "") + '" data-id="' + esc(p.id) + '">' +
           '<span class="box">' + I.check + '</span>' +
           '<span class="cmain"><span class="cn">' + esc(p.title) + '</span><span class="cd">' + esc(p.slug) + '</span></span>' +
-          '<span class="sev ' + p.sev + '"></span>' +
+          '<span class="sev ' + cls(p.sev) + '"></span>' +
         '</div>').join("") +
     '</div>' +
     '<button class="onb-cta" id="onbNext3">베이스라인 켜고 계속 →</button>' +

@@ -68,6 +68,38 @@ describe("computeShippedHoles", () => {
     ]);
   });
 
+  it("maps repeated redacted literals to every positional placeholder", async () => {
+    const repeated: FormModel = {
+      ...REDACTED,
+      when: [
+        {
+          joiner: "and",
+          fieldPath: "context.recipient",
+          op: "==",
+          value: { kind: "string", value: ZERO_ADDR },
+        },
+        {
+          joiner: "or",
+          fieldPath: "context.sender",
+          op: "==",
+          value: { kind: "string", value: ZERO_ADDR },
+        },
+      ],
+    };
+    const shipped = await computeShippedHoles(
+      "x",
+      [
+        hole("context.recipient", "address", "받는 주소"),
+        hole("context.sender", "address", "보내는 주소"),
+      ],
+      async () => [formToIr(repeated)],
+    );
+    expect(shipped).toEqual([
+      { name: "v1", type: "address", label: "받는 주소", required: true },
+      { name: "v2", type: "address", label: "보내는 주소", required: true },
+    ]);
+  });
+
   it("skips holes whose leaf is not in placeholder state (kept 추천값)", async () => {
     const shipped = await computeShippedHoles(
       "x",
@@ -126,6 +158,44 @@ describe("manifestWithHoles / splitManifestHoles", () => {
     const { shipped, manifest } = splitManifestHoles(m);
     expect(shipped).toEqual(SHIPPED);
     expect(manifest).toEqual({ id: "x", schema_version: 2, trigger: { scope: "inner" } });
+  });
+
+  it("rejects malformed shipped hole metadata instead of silently dropping install gates", () => {
+    const malformed = [
+      { [MANIFEST_HOLES_KEY]: { name: "v1" } },
+      { [MANIFEST_HOLES_KEY]: [null] },
+      { [MANIFEST_HOLES_KEY]: [{ name: "bad-name!", type: "address", label: "받는 주소", required: true }] },
+      { [MANIFEST_HOLES_KEY]: [{ name: "v1", type: "object", label: "받는 주소", required: true }] },
+      { [MANIFEST_HOLES_KEY]: [{ name: "v1", type: "address", label: "", required: true }] },
+      { [MANIFEST_HOLES_KEY]: [{ name: "v1", type: "address", label: "받는 주소", required: false }] },
+      {
+        [MANIFEST_HOLES_KEY]: [
+          { name: "v1", type: "address", label: "받는 주소", required: true },
+          { name: "v1", type: "address", label: "다른 주소", required: true },
+        ],
+      },
+    ];
+    for (const manifest of malformed) {
+      expect(() => splitManifestHoles(manifest)).toThrow(/x_dambi_holes/);
+    }
+  });
+
+  it("normalizes valid shipped hole metadata and strips transport-only keys", () => {
+    const { shipped, manifest } = splitManifestHoles({
+      id: "x",
+      schema_version: 2,
+      [MANIFEST_HOLES_KEY]: [
+        {
+          name: "v1",
+          type: "address",
+          label: "  받는 주소  ",
+          required: true,
+          ignored: "not persisted",
+        },
+      ],
+    });
+    expect(shipped).toEqual([{ name: "v1", type: "address", label: "받는 주소", required: true }]);
+    expect(manifest).toEqual({ id: "x", schema_version: 2 });
   });
 
   it("no holes → manifest untouched", () => {

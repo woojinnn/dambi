@@ -4,6 +4,12 @@
 
 const CHECK = '<svg viewBox="0 0 24 24" fill="none" width="13" height="13"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const G_SVG = '<svg class="gg" viewBox="0 0 48 48"><path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/><path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.69 28.18c-.44-1.32-.69-2.73-.69-4.18s.25-2.86.69-4.18v-5.7H4.34A21.99 21.99 0 0 0 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z"/><path fill="#EA4335" d="M24 9.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 2.97 29.93 1 24 1 15.4 1 7.96 5.93 4.34 13.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/></svg>';
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function classToken(s) {
+  return String(s == null ? "" : s).replace(/[^a-zA-Z0-9_-]/g, "") || "unknown";
+}
 
 const S = window.DambiStore;
 
@@ -67,7 +73,7 @@ function renderStep1() {
       '<div class="gs">' + (flow.email ? "이 계정에 지갑과 정책이 동기화돼요." : "키는 받지 않아요 — 읽기 전용으로 정책만 묶어요.") + '</div>' +
     '</div>' +
     (flow.email
-      ? '<div class="ob-authed"><div class="chk">' + CHECK + '</div><div><div class="at">Google 계정 연결됨</div><div class="ae" id="authedEmail">' + flow.email + '</div></div></div>' +
+      ? '<div class="ob-authed"><div class="chk">' + CHECK + '</div><div><div class="at">Google 계정 연결됨</div><div class="ae" id="authedEmail">' + escapeHtml(flow.email) + '</div></div></div>' +
         '<button class="ob-cta" id="next1">계속 →</button>'
       : '<button class="ob-google" id="glogin">' + G_SVG + '<span>Google 계정으로 계속</span></button>' +
         '<div class="ob-note">// chrome.identity.launchWebAuthFlow (client type = chromeExtension). OAuth Client ID 무료 · Identity Platform 비활성화.</div>');
@@ -192,7 +198,7 @@ async function renderStep3() {
         '<div class="ob-check ' + (flow.baseline.has(p.id) ? "on" : "") + '" data-id="' + escapeHtml(p.id) + '">' +
           '<span class="box">' + CHECK + '</span>' +
           '<span class="cmain"><span class="cn">' + escapeHtml(p.title) + '</span><span class="cd">' + escapeHtml(p.slug) + '</span></span>' +
-          '<span class="sev ' + p.sev + '" title="' + sevLabel(p.sev) + '"></span>' +
+          '<span class="sev ' + classToken(p.sev) + '" title="' + escapeHtml(sevLabel(p.sev)) + '"></span>' +
         '</div>').join("") +
     '</div>' +
     '<button class="ob-cta" id="next3">베이스라인 켜고 계속 →</button>' +
@@ -262,7 +268,6 @@ async function finish() {
 /* ---- helpers ---- */
 const RENDER = { 1: renderStep1, 2: renderStep2, 3: renderStep3, 4: renderStep4 };
 function sevLabel(s) { return s === "deny" ? "차단" : s === "warn" ? "검토" : "확인"; }
-function escapeHtml(s) { return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 /* ============================================================
    INIT — 현재 로그인/지갑 상태를 보고 적절한 스텝으로 자동 진입.

@@ -474,11 +474,12 @@ fn bridge_recipient(args: &[JsonValue]) -> Result<JsonValue, String> {
     const NON_EVM_SENTINEL: &str = "0x11f111f111f111f111f111f111f111f111f111f1";
     let mut m = serde_json::Map::new();
     if format!("{evm:#x}") == NON_EVM_SENTINEL {
-        let bytes32 = args[1]
-            .as_str()
-            .ok_or("bridge_recipient: bytes32_receiver arg is not a string")?;
+        let bytes32 = json_bytes32(&args[1], "bridge_recipient: bytes32_receiver")?;
         m.insert("kind".to_owned(), JsonValue::String("raw".to_owned()));
-        m.insert("bytes32".to_owned(), JsonValue::String(bytes32.to_owned()));
+        m.insert(
+            "bytes32".to_owned(),
+            JsonValue::String(format!("0x{}", hex::encode(bytes32))),
+        );
     } else {
         m.insert("kind".to_owned(), JsonValue::String("evm".to_owned()));
         m.insert("address".to_owned(), JsonValue::String(format!("{evm:#x}")));
@@ -1008,8 +1009,6 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
         .as_str()
         .ok_or("balancer_v2_batch_swap_field: field arg is not a string")?;
     let first = swaps.first().and_then(JsonValue::as_array);
-    let last = swaps.last().and_then(JsonValue::as_array);
-
     let index_in_bounds = |idx_val: Option<&JsonValue>| -> bool {
         let Some(idx) = idx_val
             .and_then(|v| json_u256(v, "idx").ok())
@@ -1040,26 +1039,42 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
             .cloned()
             .ok_or_else(|| format!("balancer_v2_batch_swap_field: {label} index out of range"))
     };
-    match field {
-        "shape" => Ok(JsonValue::String(
+    if field == "shape" {
+        return Ok(JsonValue::String(
             if single_step_supported {
                 "single_step"
             } else {
                 "unsupported"
             }
             .to_owned(),
-        )),
+        ));
+    }
+    if !matches!(
+        field,
+        "token_in" | "token_out" | "pool_id" | "amount" | "direction_kind"
+    ) {
+        return Err(format!(
+            "balancer_v2_batch_swap_field: unsupported field '{field}'"
+        ));
+    }
+    if !single_step_supported {
+        return Err(
+            "balancer_v2_batch_swap_field: unsupported batchSwap shape for scalar field".to_owned(),
+        );
+    }
+    let first = first.expect("single_step_supported requires first swap");
+    match field {
         // BatchSwapStep = [poolId(0), assetInIndex(1), assetOutIndex(2), amount(3), userData(4)].
-        "token_in" => asset_at(first.and_then(|s| s.get(1)), "assetInIndex"),
-        "token_out" => asset_at(last.and_then(|s| s.get(2)), "assetOutIndex"),
+        "token_in" => asset_at(first.get(1), "assetInIndex"),
+        "token_out" => asset_at(first.get(2), "assetOutIndex"),
         "pool_id" => Ok(first
-            .and_then(|s| s.first())
+            .first()
             .cloned()
-            .unwrap_or_else(|| JsonValue::String(format!("0x{}", "0".repeat(64))))),
+            .expect("single_step_supported requires a non-empty swap")),
         "amount" => Ok(first
-            .and_then(|s| s.get(3))
+            .get(3)
             .cloned()
-            .unwrap_or_else(|| JsonValue::String("0".to_owned()))),
+            .expect("single_step_supported requires amount")),
         "direction_kind" => match kind {
             Some(0) => Ok(JsonValue::String("exact_input".to_owned())),
             Some(1) => Ok(JsonValue::String("exact_output".to_owned())),
@@ -1067,9 +1082,7 @@ fn balancer_v2_batch_swap_field(args: &[JsonValue]) -> Result<JsonValue, String>
                 "balancer_v2_batch_swap_field: unsupported kind {other:?}"
             )),
         },
-        other => Err(format!(
-            "balancer_v2_batch_swap_field: unsupported field '{other}'"
-        )),
+        _ => unreachable!("field allowlist checked above"),
     }
 }
 
@@ -1097,49 +1110,75 @@ fn balancer_v3_swap_path_field(args: &[JsonValue]) -> Result<JsonValue, String> 
     let field = args[1]
         .as_str()
         .ok_or("balancer_v3_swap_path_field: field arg is not a string")?;
-    const ZERO_ADDR: &str = "0x0000000000000000000000000000000000000000";
-    let zero_addr = || JsonValue::String(ZERO_ADDR.to_owned());
     let p0 = paths.first().and_then(JsonValue::as_array);
     let steps = p0.and_then(|p| p.get(1)).and_then(JsonValue::as_array);
-    match field {
-        "shape" => Ok(JsonValue::String(
-            if paths.len() == 1 && steps.is_some_and(|s| !s.is_empty()) {
+    let single_nonempty_supported = paths.len() == 1
+        && p0.is_some_and(|p| {
+            let Some(steps) = p.get(1).and_then(JsonValue::as_array) else {
+                return false;
+            };
+            let first_step = steps.first().and_then(JsonValue::as_array);
+            let last_step = steps.last().and_then(JsonValue::as_array);
+            !steps.is_empty()
+                && !p.is_empty()
+                && p.get(2).is_some()
+                && p.get(3).is_some()
+                && first_step.and_then(|step| step.first()).is_some()
+                && last_step.and_then(|step| step.get(1)).is_some()
+        });
+    if field == "shape" {
+        return Ok(JsonValue::String(
+            if single_nonempty_supported {
                 "single_nonempty"
             } else {
                 "unsupported"
             }
             .to_owned(),
-        )),
+        ));
+    }
+    if !matches!(
+        field,
+        "token_in" | "token_out" | "pool" | "amount_in" | "min_out"
+    ) {
+        return Err(format!(
+            "balancer_v3_swap_path_field: unsupported field '{field}'"
+        ));
+    }
+    if !single_nonempty_supported {
+        return Err(
+            "balancer_v3_swap_path_field: unsupported swap path shape for scalar field".to_owned(),
+        );
+    }
+    let p0 = p0.expect("single_nonempty_supported requires first path");
+    let steps = steps.expect("single_nonempty_supported requires steps");
+    match field {
         // path[0] = [tokenIn(0), steps(1), exactAmountIn(2), minAmountOut(3)].
         "token_in" => Ok(p0
-            .and_then(|p| p.first())
+            .first()
             .cloned()
-            .unwrap_or_else(zero_addr)),
-        // step = [pool(0), tokenOut(1), isBuffer(2)]; last step's tokenOut, else tokenIn (no-step fuzz).
+            .expect("single_nonempty_supported requires tokenIn")),
+        // step = [pool(0), tokenOut(1), isBuffer(2)]; token_out is the last step's tokenOut.
         "token_out" => Ok(steps
-            .and_then(|s| s.last())
+            .last()
             .and_then(JsonValue::as_array)
             .and_then(|st| st.get(1))
             .cloned()
-            .or_else(|| p0.and_then(|p| p.first()).cloned())
-            .unwrap_or_else(zero_addr)),
+            .expect("single_nonempty_supported requires last step tokenOut")),
         "pool" => Ok(steps
-            .and_then(|s| s.first())
+            .first()
             .and_then(JsonValue::as_array)
             .and_then(|st| st.first())
             .cloned()
-            .unwrap_or_else(zero_addr)),
+            .expect("single_nonempty_supported requires first step pool")),
         "amount_in" => Ok(p0
-            .and_then(|p| p.get(2))
+            .get(2)
             .cloned()
-            .unwrap_or_else(|| JsonValue::String("0".to_owned()))),
+            .expect("single_nonempty_supported requires exactAmountIn")),
         "min_out" => Ok(p0
-            .and_then(|p| p.get(3))
+            .get(3)
             .cloned()
-            .unwrap_or_else(|| JsonValue::String("0".to_owned()))),
-        other => Err(format!(
-            "balancer_v3_swap_path_field: unsupported field '{other}'"
-        )),
+            .expect("single_nonempty_supported requires minAmountOut")),
+        _ => unreachable!("field allowlist checked above"),
     }
 }
 
@@ -2333,6 +2372,11 @@ mod tests {
         );
         assert!(evm.get("bytes32").is_none());
         assert!(bridge_recipient(&[json!("0x0")]).is_err());
+        assert!(bridge_recipient(&[
+            json!("0x11f111f111f111F111f111f111F111f111f111F1"),
+            json!("0x1234")
+        ])
+        .is_err());
     }
 
     #[test]
@@ -2720,19 +2764,23 @@ mod tests {
             [B, [[C, A, false]], "500", "490"]
         ]);
         assert_eq!(
-            balancer_v3_swap_path_field(&[multi_path, json!("shape")]).unwrap(),
+            balancer_v3_swap_path_field(&[multi_path.clone(), json!("shape")]).unwrap(),
             json!("unsupported")
         );
         let empty_steps = json!([[A, [], "1000", "990"]]);
         assert_eq!(
-            balancer_v3_swap_path_field(&[empty_steps, json!("shape")]).unwrap(),
+            balancer_v3_swap_path_field(&[empty_steps.clone(), json!("shape")]).unwrap(),
             json!("unsupported")
         );
-        // empty paths (fuzz) → zero/0, not an error.
+        assert!(balancer_v3_swap_path_field(&[multi_path, json!("token_in")]).is_err());
+        assert!(balancer_v3_swap_path_field(&[empty_steps, json!("token_out")]).is_err());
+        assert!(balancer_v3_swap_path_field(&[json!([]), json!("token_in")]).is_err());
+        let missing_amount = json!([[A, [[C, B, false]]]]);
         assert_eq!(
-            balancer_v3_swap_path_field(&[json!([]), json!("token_in")]).unwrap(),
-            json!("0x0000000000000000000000000000000000000000")
+            balancer_v3_swap_path_field(&[missing_amount.clone(), json!("shape")]).unwrap(),
+            json!("unsupported")
         );
+        assert!(balancer_v3_swap_path_field(&[missing_amount, json!("amount_in")]).is_err());
         // unknown field errors (structural).
         assert!(balancer_v3_swap_path_field(&[paths, json!("nope")]).is_err());
     }
@@ -2874,10 +2922,22 @@ mod tests {
             [POOL2, "1", "2", "0", "0x"]
         ]);
         assert_eq!(
-            balancer_v2_batch_swap_field(&[json!(0), multi, json!([A, B, C]), json!("shape")])
-                .unwrap(),
+            balancer_v2_batch_swap_field(&[
+                json!(0),
+                multi.clone(),
+                json!([A, B, C]),
+                json!("shape")
+            ])
+            .unwrap(),
             json!("unsupported")
         );
+        assert!(balancer_v2_batch_swap_field(&[
+            json!(0),
+            multi,
+            json!([A, B, C]),
+            json!("amount")
+        ])
+        .is_err());
         // Out-of-range indices are unsupported; do not wrap modulo into a
         // different token.
         let bad = json!([[POOL1, "0", "9", "1", "0x"]]);
@@ -2895,6 +2955,17 @@ mod tests {
             balancer_v2_batch_swap_field(&[json!(0), ok_swaps.clone(), json!([]), json!("shape")])
                 .unwrap(),
             json!("unsupported")
+        );
+        assert!(balancer_v2_batch_swap_field(&[
+            json!(0),
+            ok_swaps.clone(),
+            json!([]),
+            json!("amount")
+        ])
+        .is_err());
+        assert!(
+            balancer_v2_batch_swap_field(&[json!(0), json!([]), json!([A]), json!("pool_id")])
+                .is_err()
         );
         // unsupported field still errors (structural manifest bug, not data).
         assert!(
