@@ -180,15 +180,24 @@ function paintGate2() {
 /* ============================================================
    STEP 3 — 베이스라인 정책 체크리스트 (최소 1)
    ============================================================ */
-function renderStep3() {
-  const items = (S.BASELINE || []).map((b) => ({ id: b.id, title: b.title, sev: b.sev }));
+async function renderStep3() {
+  // initWelcome() 의 loadState 는 "로그인 전"에 돌면 account 가 없어 ps2 라이브러리를
+  // 읽지 않고 조기 반환한다 → S.BASELINE 이 빈 채로 남는다. 온보딩 안에서 로그인·지갑
+  // 등록을 마치고 이 스텝에 들어왔으니 여기서 한 번 더 읽어 builtin 베이스라인을 채운다.
+  // (이게 비어 있으면 체크박스가 0개라 "최소 1개" 게이트에 영구히 막힌다.)
+  if (!(S.BASELINE && S.BASELINE.length)) {
+    try { await S.loadState(); } catch (e) { /* 폴백: 빈 목록 */ }
+    if (!flow.baseline.size) flow.baseline = new Set((S.BASELINE || []).map((b) => b.id));
+  }
+  // .cd 표시는 내부 def id(def::builtin.*) 접두어를 떼 짧게(토글용 data-id는 실제 id 유지).
+  const items = (S.BASELINE || []).map((b) => ({ id: b.id, title: b.title, sev: b.sev, slug: String(b.id).replace(/^def::builtin\./, "") }));
   card.innerHTML =
     '<div class="ob-shead"><div class="st">베이스라인 정책</div><div class="ss">스왑 트랜잭션을 검사하는 기본 가드예요. 기본으로 모두 켜져 있어요.</div></div>' +
     '<div class="ob-checks" id="checks">' +
       items.map((p) =>
         '<div class="ob-check ' + (flow.baseline.has(p.id) ? "on" : "") + '" data-id="' + escapeHtml(p.id) + '">' +
           '<span class="box">' + CHECK + '</span>' +
-          '<span class="cmain"><span class="cn">' + escapeHtml(p.title) + '</span><span class="cd">' + escapeHtml(p.id) + '</span></span>' +
+          '<span class="cmain"><span class="cn">' + escapeHtml(p.title) + '</span><span class="cd">' + escapeHtml(p.slug) + '</span></span>' +
           '<span class="sev ' + classToken(p.sev) + '" title="' + escapeHtml(sevLabel(p.sev)) + '"></span>' +
         '</div>').join("") +
     '</div>' +

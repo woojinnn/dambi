@@ -845,14 +845,15 @@ function paintOnbGate2() {
 /* ----- step 3: 베이스라인 ----- */
 function onbStep3() {
   const card = document.getElementById("onbCard");
-  const items = (S.BASELINE || []).map((b) => ({ id: b.id, title: b.title, sev: b.sev }));
+  // .cd 표시는 내부 def id(def::builtin.*) 접두어를 떼 짧게(토글용 data-id는 실제 id 유지).
+  const items = (S.BASELINE || []).map((b) => ({ id: b.id, title: b.title, sev: b.sev, slug: String(b.id).replace(/^def::builtin\./, "") }));
   card.innerHTML =
     '<div class="onb-shead"><div class="st">베이스라인 정책</div><div class="ss">트랜잭션을 검사하는 기본 가드예요. 필요한 것만 켜세요 — 최소 한 개는 켜야 검사가 동작해요.</div></div>' +
     '<div class="onb-checks" id="onbChecks">' +
       items.map((p) =>
         '<div class="onb-check ' + (state.onb.baseline.has(p.id) ? "on" : "") + '" data-id="' + esc(p.id) + '">' +
           '<span class="box">' + I.check + '</span>' +
-          '<span class="cmain"><span class="cn">' + esc(p.title) + '</span><span class="cd">' + esc(p.id) + '</span></span>' +
+          '<span class="cmain"><span class="cn">' + esc(p.title) + '</span><span class="cd">' + esc(p.slug) + '</span></span>' +
           '<span class="sev ' + cls(p.sev) + '"></span>' +
         '</div>').join("") +
     '</div>' +

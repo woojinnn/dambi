@@ -107,6 +107,8 @@ function useOpenPolicyBridge(iframeRef: RefObject<HTMLIFrameElement>) {
   const navigate = useNavigate();
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
+      // origin/source/shape/route 검증 후, state(newPolicy seed)가 있으면 sanitize 해
+      // 라우터 state 로 함께 넘긴다 — EditorDetailPageV2 가 location.state.newPolicy 로 시드.
       if (e.origin !== window.location.origin) return;
       if (e.source !== iframeRef.current?.contentWindow) return;
       if (!isEditorOpenMessage(e.data)) return;

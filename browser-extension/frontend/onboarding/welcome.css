@@ -92,8 +92,9 @@ body { font-family: var(--ff-sans); }
 .ob-witem .av { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; flex: 0 0 auto; display: block; }
 .ob-witem .av svg { display: block; border-radius: 8px; }
 .ob-witem .wtext { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.ob-witem .wn { font-size: 13px; font-weight: 700; color: #fff; }
-.ob-witem .wa { font-family: var(--ff-mono); font-size: 11px; color: var(--brand-300); margin-top: 1px; }
+.ob-witem .wn { font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 지갑 주소(.wa)는 공백 없는 긴 문자열이라 줄바꿈이 안 돼 박스를 뚫고 나간다 — 잘라서 … 처리. */
+.ob-witem .wa { font-family: var(--ff-mono); font-size: 11px; color: var(--brand-300); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ob-witem .wa.only { color: #E7ECF5; font-size: 12px; }
 .ob-witem .wx { appearance: none; width: 26px; height: 26px; flex: 0 0 auto; display: grid; place-items: center; cursor: pointer;
   border-radius: 7px; background: transparent; border: 0; color: var(--slate-400); font-size: 16px; transition: background .12s, color .12s; }
@@ -101,13 +102,13 @@ body { font-family: var(--ff-sans); }
 
 /* ---------- baseline checklist (step 3) ---------- */
 .ob-checks { display: flex; flex-direction: column; gap: 8px; }
-.ob-check { display: flex; align-items: center; gap: 11px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 11px; padding: 12px 13px; cursor: pointer; transition: background .12s, border-color .12s; }
+.ob-check { display: flex; align-items: center; gap: 11px; min-width: 0; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 11px; padding: 12px 13px; cursor: pointer; transition: background .12s, border-color .12s; }
 .ob-check:hover { background: rgba(255,255,255,0.1); }
 .ob-check .box { width: 20px; height: 20px; border-radius: 6px; flex: 0 0 auto; border: 1.5px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.04); display: grid; place-items: center; color: transparent; transition: background .12s, border-color .12s, color .12s; }
 .ob-check.on .box { background: var(--pass-500); border-color: var(--pass-500); color: #fff; }
 .ob-check .cmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ob-check .cn { font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ob-check .cd { font-family: var(--ff-mono); font-size: 10.5px; color: var(--brand-300); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-check .cn { display: block; max-width: 100%; font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ob-check .cd { display: block; max-width: 100%; font-family: var(--ff-mono); font-size: 10.5px; color: var(--brand-300); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ob-check .sev { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .ob-check .sev.deny { background: var(--fail-500); } .ob-check .sev.warn { background: var(--warn-500); } .ob-check .sev.unknown { background: var(--slate-300); }
 

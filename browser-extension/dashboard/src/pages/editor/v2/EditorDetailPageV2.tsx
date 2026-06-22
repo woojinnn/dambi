@@ -68,7 +68,7 @@ import {
   type FormModel,
 } from "../../../cedar/form";
 
-type Tab = "cedar" | "form" | "llm";
+type Tab = "doc" | "cedar" | "form" | "llm";
 
 function defaultTab(method: PolicyMethod | undefined): Tab {
   // Legacy `block`-method policies fall through to Cedar — they keep their full
@@ -305,11 +305,6 @@ function EditorBody({
   const [docScope, setDocScope] = useState(() => storedDef?.doc?.scope ?? "");
   const [docAudience, setDocAudience] = useState(() => storedDef?.doc?.audience ?? "");
   const [docUsedData, setDocUsedData] = useState(() => storedDef?.doc?.usedData ?? "");
-  // 기본은 접힘 — 이미 내용이 있는 정책만 펼쳐서 보여준다(빈 새 정책은 깔끔하게).
-  const [docOpen, setDocOpen] = useState(() => {
-    const d = storedDef?.doc;
-    return !!(d && (d.definition || d.scope || d.audience || d.usedData));
-  });
   const docPayload = (): PolicyDoc | undefined => {
     const d: PolicyDoc = {
       definition: docDefinition.trim() || undefined,
@@ -806,49 +801,14 @@ function EditorBody({
           )}
         </div>
 
-        {!lockEdit && (
-          <div className={`ev2-doc-sec${docOpen ? " open" : ""}`}>
-            <button
-              type="button"
-              className="ev2-doc-toggle"
-              onClick={() => setDocOpen((v) => !v)}
-              aria-expanded={docOpen}
-            >
-              <svg className="ev2-doc-caret" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="m9 6 6 6-6 6" /></svg>
-              {t("detail.docSectionTitle")}
-            </button>
-            {docOpen && (
-              <div className="ev2-detail-doc">
-                <DocField
-                  label={t("detail.docDefinitionLabel")}
-                  hint={t("detail.docDefinitionHint")}
-                  value={docDefinition}
-                  onChange={setDocDefinition}
-                />
-                <DocField
-                  label={t("detail.docScopeLabel")}
-                  hint={t("detail.docScopeHint")}
-                  value={docScope}
-                  onChange={setDocScope}
-                />
-                <DocField
-                  label={t("detail.docAudienceLabel")}
-                  hint={t("detail.docAudienceHint")}
-                  value={docAudience}
-                  onChange={setDocAudience}
-                />
-                <DocField
-                  label={t("detail.docUsedDataLabel")}
-                  hint={t("detail.docUsedDataHint")}
-                  value={docUsedData}
-                  onChange={setDocUsedData}
-                />
-              </div>
-            )}
-          </div>
-        )}
 
         <div className="ev2-detail-tabs" role="tablist">
+          <TabBtn
+            label={t("detail.docTab")}
+            active={tab === "doc"}
+            badge={lockEdit ? t("detail.readOnlyBadge") : undefined}
+            onClick={() => handleTabChange("doc")}
+          />
           <TabBtn
             label="Cedar"
             active={tab === "cedar"}
@@ -959,6 +919,44 @@ function EditorBody({
       )}
 
       <div className="ev2-detail-tabbody">
+        {tab === "doc" && (
+          <div className="ev2-doc-pane">
+            <div className="ev2-doc-pane-head">
+              <div className="t">{t("detail.docSectionTitle")}</div>
+              {lockEdit && <div className="s">{t("detail.docReadOnlyHint")}</div>}
+            </div>
+            <div className="ev2-detail-doc">
+              <DocField
+                label={t("detail.docDefinitionLabel")}
+                hint={t("detail.docDefinitionHint")}
+                value={docDefinition}
+                onChange={setDocDefinition}
+                readOnly={lockEdit}
+              />
+              <DocField
+                label={t("detail.docScopeLabel")}
+                hint={t("detail.docScopeHint")}
+                value={docScope}
+                onChange={setDocScope}
+                readOnly={lockEdit}
+              />
+              <DocField
+                label={t("detail.docAudienceLabel")}
+                hint={t("detail.docAudienceHint")}
+                value={docAudience}
+                onChange={setDocAudience}
+                readOnly={lockEdit}
+              />
+              <DocField
+                label={t("detail.docUsedDataLabel")}
+                hint={t("detail.docUsedDataHint")}
+                value={docUsedData}
+                onChange={setDocUsedData}
+                readOnly={lockEdit}
+              />
+            </div>
+          </div>
+        )}
         {tab === "cedar" && (
           <CedarPane
             value={cedarText}
@@ -1083,23 +1081,29 @@ function EditorBody({
   );
 }
 
-/** 한 개의 정책 문서 칸(라벨 + textarea). 정의/범위/대상/데이터에 재사용. */
+/** 한 개의 정책 문서 칸(라벨 + textarea). 정의/범위/대상/데이터에 재사용.
+ *  readOnly(파라미터 변경 모드)면 입력은 막고 내용만 보여준다. */
 function DocField(props: {
   label: string;
   hint: string;
   value: string;
   onChange: (v: string) => void;
+  readOnly?: boolean;
 }) {
   return (
-    <label className="ev2-doc-field">
+    <label className={`ev2-doc-field${props.readOnly ? " ro" : ""}`}>
       <span className="ev2-doc-label">{props.label}</span>
-      <textarea
-        className="ev2-doc-input"
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        rows={2}
-        placeholder={props.hint}
-      />
+      {props.readOnly ? (
+        <div className="ev2-doc-input ro">{props.value || <span className="ev2-doc-empty">—</span>}</div>
+      ) : (
+        <textarea
+          className="ev2-doc-input"
+          value={props.value}
+          onChange={(e) => props.onChange(e.target.value)}
+          rows={3}
+          placeholder={props.hint}
+        />
+      )}
     </label>
   );
 }

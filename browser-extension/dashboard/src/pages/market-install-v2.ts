@@ -11,6 +11,7 @@ import {
   pickI18n,
   type ListingDetail,
 } from "../server-api";
+import type { PolicyDoc } from "../../../sdk/policy-store-types";
 import {
   bindDef,
   installMarket,
@@ -29,6 +30,16 @@ import { holeInputToValue, listingToDefs, type ListingMeta } from "./market-inst
 
 export { listingToDefs } from "./market-install-convert";
 export { diffParamValues } from "../cedar/form/parameterize";
+
+/** 리스팅 상세 → 설치될 def 의 doc(정의/범위/대상/데이터). 구조화된 doc 이 있으면 그대로,
+ *  없으면 일반 설명(description)을 '정책 정의' 칸으로 넣는다. set 리스팅은 convert 가
+ *  멤버에 적용하지 않으므로 안전하다. */
+function listingDocOf(detail: ListingDetail): PolicyDoc | undefined {
+  const d = detail.doc;
+  if (d && (d.definition || d.scope || d.audience || d.usedData)) return d;
+  const desc = pickI18n(detail.description);
+  return desc ? { definition: desc } : undefined;
+}
 
 /** defId → (hole 이름 → 값). 설치 모달의 "빈칸 채우기" 출력. */
 export type InstallParams = Record<string, Record<string, HoleValue>>;
@@ -365,6 +376,7 @@ export async function requiredHoleInputs(
     displayName: pickI18n(detail.display_name) || detail.slug,
     version: detail.current_version,
     cat: detail.category ?? detail.domain ?? undefined,
+    doc: listingDocOf(detail),
   };
   const defs = await listingToDefs(
     meta,
@@ -417,6 +429,7 @@ export async function installFormDefs(
     displayName: pickI18n(detail.display_name) || detail.slug,
     version: detail.current_version,
     cat: detail.category ?? detail.domain ?? undefined,
+    doc: listingDocOf(detail),
   };
   const defs = await listingToDefs(
     meta,
@@ -452,6 +465,7 @@ async function convertListing(
     displayName: pickI18n(detail.display_name) || detail.slug,
     version: detail.current_version,
     cat: detail.category ?? detail.domain ?? undefined,
+    doc: listingDocOf(detail),
   };
   const defs = await listingToDefs(meta, body, textToBlocks);
   return { meta, defs };
