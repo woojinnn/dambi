@@ -824,25 +824,34 @@ Browser.runtime.onMessage.addListener(
     }
 
     if (req.type === "dambi-auth-sign-in") {
-      void bootReady
-        // 새 로그인 전에 이전 계정 토큰을 먼저 비운다. 그래야 OAuth 진행 중
-        // 같은 storage 를 공유하는 대시보드(options.html)가 옛 계정으로 잠깐
-        // 인증되거나, 계정 전환 시 stale 토큰이 남는 race 를 막는다. 새 토큰은
-        // startGoogleLogin 성공 시에만 기록된다.
-        .then(() => clearTokens())
-        .then(() => startGoogleLogin())
-        .then(async () => {
+      // launchWebAuthFlow(interactive) 는 클릭의 user activation 이 살아있는 동안
+      // "동기적으로" 호출해야 크롬이 OAuth 팝업을 연다. 예전처럼 bootReady/clearTokens
+      // 를 먼저 await 하면 그 사이 제스처가 만료돼, 콜드 부팅한 SW 에서는 팝업이
+      // 에러도 없이 "조용히" 안 뜬다(따뜻한 SW 는 bootReady 가 즉시 끝나 우연히 됐을
+      // 뿐). 그래서 startGoogleLogin() 을 핸들러 진입 즉시(이 동기 턴에서) 호출해
+      // 제스처를 소비한다.
+      //
+      // clearTokens() 도 같은 동기 턴에서 먼저 dispatch 한다: storage.remove 는
+      // 곧바로 큐잉되어, OAuth 가 끝난 뒤에야 실행되는 startGoogleLogin 의 setTokens
+      // 보다 항상 먼저 완료된다 → 이전 계정 토큰만 비우고, 새로 발급된 토큰은
+      // 덮어쓰지 않는다(계정 전환 race 방지 의도는 그대로 유지).
+      void clearTokens();
+      const loginFlow = startGoogleLogin();
+      void (async () => {
+        try {
+          await loginFlow;
+          await bootReady;
           // 재로그인 성공 → 다음 만료에서 다시 알림 발사 가능하게 가드 해제.
           resetSessionExpiredGuard();
           const me = await fetchMe();
           sendResponse({ ok: true, data: me });
-        })
-        .catch((err: unknown) =>
+        } catch (err: unknown) {
           sendResponse({
             ok: false,
             error: { kind: "dambi_sign_in_failed", message: String(err) },
-          }),
-        );
+          });
+        }
+      })();
       return true;
     }
 
