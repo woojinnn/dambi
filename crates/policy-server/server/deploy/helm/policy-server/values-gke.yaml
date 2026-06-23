@@ -5,7 +5,7 @@
 #     -f <chart>/values-gke.yaml --set image.tag=$(git rev-parse --short HEAD)
 
 image:
-  repository: asia-northeast3-docker.pkg.dev/policy-engine-498313/dambi/dambi-policy-server
+  repository: asia-northeast3-docker.pkg.dev/plenary-office-500208-e4/dambi/dambi-policy-server
   # tag is supplied at deploy time via --set image.tag=<git short sha>
   pullPolicy: IfNotPresent
 
