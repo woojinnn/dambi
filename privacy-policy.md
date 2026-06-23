@@ -56,6 +56,8 @@ Dambi 계정 로그인은 **선택 사항**이며, 클라우드 대시보드와 
 - **제3자 애널리틱스나 행동 추적을 사용하지 않습니다.**
 - 사용자 데이터를 신용도 평가나 대출 목적으로 사용하지 않습니다.
 - 수집된 데이터는 본 확장 프로그램의 단일 목적(서명 전 보안 분석)과 사용자 본인의 대시보드 조회에만 사용되며, **행동 프로파일링·ML 학습·교차 지갑 상관 분석·네트워크 모니터링에 사용하지 않습니다.** 운영 로그(타이밍·오류)는 진단 목적에 한합니다.
+- Dambi의 데이터 사용은 **Chrome Web Store User Data Policy의 Limited Use 요건**을 준수합니다. Google 로그인으로 받은 정보를 포함해, 수집한 데이터는 위 단일 목적과 본 방침에 공개한 용도로만 사용·전송하며, 그 외 목적으로 사용하지 않습니다.
+  - *The use of information received from Google APIs will adhere to the [Chrome Web Store User Data Policy](https://developer.chrome.com/docs/webstore/program-policies/limited-use), including the Limited Use requirements.*
 
 ## 8. 데이터 보관 및 삭제
 
