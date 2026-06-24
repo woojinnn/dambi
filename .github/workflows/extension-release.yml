@@ -1,7 +1,8 @@
-# Build + package the browser extension on a release tag and attach the
-# Chrome/Firefox zips to a GitHub Release. The store upload (Chrome Web Store /
-# AMO) stays MANUAL — this only produces the reproducible, prod-pinned artifacts
-# to upload, so a human still gates what reaches users.
+# Build + package the browser extension on a release tag and attach the zips to
+# a GitHub Release. Store uploads stay MANUAL, so a human still gates what
+# reaches users. Chrome emits two packages from the same build:
+#   - chrome.zip: key-included unpacked/QA package for direct loading.
+#   - chrome-webstore.zip: key-stripped package for Chrome Web Store upload.
 #
 # Trigger: push a tag `ext-v*` (e.g. ext-v1.2.0), or run by hand from the
 # same ext-vX.Y.Z tag ref. Branch dispatches must not create release artifacts.
@@ -128,6 +129,7 @@ jobs:
           yarn build:chrome
           yarn build:firefox
           yarn zip:chrome
+          yarn zip:chrome:webstore
           yarn zip:firefox
 
       - name: Create GitHub Release with extension zips
@@ -136,7 +138,8 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             browser-extension/dist/chrome.zip \
+            browser-extension/dist/chrome-webstore.zip \
             browser-extension/dist/firefox.zip \
             --verify-tag \
             --title "${GITHUB_REF_NAME}" \
-            --notes "Reproducible extension build for ${GITHUB_REF_NAME}. Registry URL + pinned key baked at build time. Upload chrome.zip → Chrome Web Store and firefox.zip → AMO manually."
+            --notes "Reproducible extension build for ${GITHUB_REF_NAME}. Registry URL + pinned key baked at build time. Use chrome.zip for direct unpacked QA, upload chrome-webstore.zip → Chrome Web Store, and upload firefox.zip → AMO manually."
