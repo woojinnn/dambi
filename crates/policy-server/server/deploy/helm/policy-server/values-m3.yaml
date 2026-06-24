@@ -4,7 +4,7 @@
 #     -f <chart>/values-m3.yaml --set image.tag=<git short sha>
 
 image:
-  repository: asia-northeast3-docker.pkg.dev/policy-engine-498313/dambi/dambi-policy-server
+  repository: asia-northeast3-docker.pkg.dev/plenary-office-500208-e4/dambi/dambi-policy-server
   pullPolicy: IfNotPresent
 
 api:

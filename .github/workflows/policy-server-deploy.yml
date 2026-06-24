@@ -23,7 +23,7 @@ on:
 # CHANGE THESE for your own project (see deploy-guideline.md "customize" list).
 # ----------------------------------------------------------------------------
 env:
-  PROJECT_ID: policy-engine-498313
+  PROJECT_ID: plenary-office-500208-e4
   REGION: asia-northeast3
   AR_REPO: dambi
   IMAGE_NAME: dambi-policy-server
