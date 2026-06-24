@@ -11,14 +11,16 @@ api:
   replicas: 2
   publicApiUrl: https://dambi-policy.duckdns.org
   dashboardUrl: https://dambi-policy.duckdns.org
-  # Local-unpacked browser extension (stable id via manifest key) logging in
-  # through chrome.identity.launchWebAuthFlow. Must EQUAL getRedirectURL()
-  # byte-for-byte (trailing slash included).
-  oauthAllowedRedirectUris: "https://fbadoakiikjmgdpdhpcohaddifhaggki.chromiumapp.org/"
+  # Browser extension(s) logging in through chrome.identity.launchWebAuthFlow.
+  # Comma-separated; each MUST EQUAL getRedirectURL() byte-for-byte (trailing
+  # slash included). First = local-unpacked dev build (stable id via manifest
+  # key); second = Chrome Web Store build (store-assigned id).
+  oauthAllowedRedirectUris: "https://fbadoakiikjmgdpdhpcohaddifhaggki.chromiumapp.org/,https://licmpapbfngdlpbkbmbelldnkgefgbpi.chromiumapp.org/"
   marketAdminEmails: "dandi@upside.center"
   corsAllowedOrigins:
     - https://dambi-policy.duckdns.org
     - chrome-extension://fbadoakiikjmgdpdhpcohaddifhaggki
+    - chrome-extension://licmpapbfngdlpbkbmbelldnkgefgbpi
 
 # GCE Ingress backend → ClusterIP (no external LB on the Service itself).
 service:
