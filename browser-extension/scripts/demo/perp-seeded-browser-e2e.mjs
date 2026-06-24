@@ -13,7 +13,7 @@ const OUT_FILE =
 const PAGE_URL =
   process.env.DAMBI_E2E_PAGE_URL ?? "https://app.hyperliquid.xyz/";
 const EXPECTED_EXTENSION_ID =
-  process.env.DAMBI_E2E_EXTENSION_ID ?? "fbadoakiikjmgdpdhpcohaddifhaggki";
+  process.env.DAMBI_E2E_EXTENSION_ID ?? "licmpapbfngdlpbkbmbelldnkgefgbpi";
 
 function parseSeed(text) {
   const out = {};

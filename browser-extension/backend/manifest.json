@@ -4,7 +4,7 @@
   "name": "Dambi",
   "description": "서명 직전 모든 Web3 트랜잭션을 정책으로 검사하는 보안 가드",
   "version": "0.1.1",
-  "__chrome__key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt6ysSqYb9nhjL3WLzdCy0vOP7fhCBHLctl6WMlDjokTZJlrAglv7Cfro/SohLztFOJ1De3iTnyznrmE2ksKvThrlByoooX0haZCc8Y+EXxTf8Hs7hq2kmTsw4LuyAO0GHbrxqn+9jYODpMiNNRuCx9pmz10fDePKJVn2P2F6aoiMVh2mbRxxJNwPcS0+5hImBLisUpYxkv6/FMXfaDqmUYVEjNO08tHhMfggCW8u38HXGAqHS43KK6g7Izd3NjaQiDB5ywopY6ZJigXP1UXc+v+IdFg46aAp3aay7Swwc5j6eMy1e8vFCoXMzT3kza4XHMxHis5E0Q3dc6JJKeHL2QIDAQAB",
+  "__chrome__key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtAb2dH2va37/sCLa2itAkAf1fNrbfyybdqbVbuv4huy1sF5f63zkMp0lb8HABW1ox+dxvWFQkk1tkrJkcqG6mkU8li1sLn3okbx0hP1MDshuP4+NUgnV2/3qnk6tc8UzGKn/GsOhs+JS/iBD0AKeOPRpJStWJy7gUOkvGONzF10769FkPY9WDsSdxkAxA2G1mxogNhHJhGOOE2uBeKFeKhQk4M1V0F6csEtnoNyyJWRgQC6cZQC1iwpKNluXH2QPMjT+8J1hkF4eSx5O05x/K1FTReYuxDLFmlz+NOgamq++vQRmY1gi+XM/km9Uni/7G9EGedWaBy/1kbnxM6Y5uQIDAQAB",
   "icons": {
     "48": "picture/icon-48.png",
     "128": "picture/icon-128.png"
@@ -102,14 +102,13 @@
     "__chrome__service_worker": "js/background.js",
     "__firefox__scripts": ["js/background.js"]
   },
-  "__chrome__permissions": ["storage", "alarms", "identity", "notifications"],
+  "__chrome__permissions": ["storage", "identity", "notifications"],
   "__firefox__permissions": [
     "<all_urls>",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",
     "http://127.0.0.1:8788/*",
     "storage",
-    "alarms",
     "identity",
     "notifications"
   ],
