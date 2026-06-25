@@ -12,7 +12,8 @@
  * the subset (deep nesting, if/then/else, …) the editor hands off to the Block
  * tab.
  */
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -1619,17 +1620,51 @@ function RhsCombobox({
   const { t } = useTranslation("editor");
   const book = useAddressBook();
   const [open, setOpen] = useState(false);
+  const [popStyle, setPopStyle] = useState<CSSProperties | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const fieldMode = value.kind === "field";
   const selected = fieldMode ? rhsOptions.find((f) => f.path === value.path) : undefined;
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || popRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const position = () => {
+      const root = rootRef.current;
+      if (!root) return;
+      const rect = root.getBoundingClientRect();
+      const viewportW = window.innerWidth || document.documentElement.clientWidth;
+      const viewportH = window.innerHeight || document.documentElement.clientHeight;
+      const margin = 8;
+      const compactSheet = Boolean(root.closest(".pv-blank"));
+      const width = Math.min(compactSheet ? 280 : 320, Math.max(220, viewportW - margin * 2));
+      const anchorLeft = compactSheet ? rect.right - width : rect.left;
+      const left = Math.min(Math.max(margin, anchorLeft), Math.max(margin, viewportW - width - margin));
+      const belowTop = rect.bottom + 4;
+      const belowSpace = viewportH - belowTop - margin;
+      const aboveSpace = rect.top - margin - 4;
+      const openAbove = belowSpace < 180 && aboveSpace > belowSpace;
+      const maxHeight = Math.max(120, Math.min(420, openAbove ? aboveSpace : belowSpace));
+      const top = openAbove ? Math.max(margin, rect.top - maxHeight - 4) : belowTop;
+      setPopStyle({ position: "fixed", top, left, width, maxHeight });
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
   }, [open]);
 
   // 값 입력 위젯에 채울 값 — 필드 모드면 빈 리터럴부터 시작(입력 즉시 값 비교로).
@@ -1663,13 +1698,92 @@ function RhsCombobox({
     }
     return ROLE_ORDER.filter((r) => m.has(r)).map((r) => ({ role: r, items: m.get(r)! }));
   }, [rhsOptions]);
+  const toggleOpen = () => {
+    setPopStyle(null);
+    setOpen((o) => !o);
+  };
+
+  const popup =
+    open && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="fc-pop portal"
+            ref={popRef}
+            style={popStyle ?? { position: "fixed", top: 0, left: 0, visibility: "hidden" }}
+          >
+            <div className="fc-valbox">
+              <span className="fc-valbox-h">{t("combobox.literalHead")}</span>
+              <ValueInput value={literal} field={field} invalid={invalid} noDatalist onChange={onChange} />
+            </div>
+            {(suggestions.length > 0 || groups.length > 0) && (
+              <div className="fc-list">
+                {suggestions.length > 0 && (
+                  <div className="fc-group">
+                    <div className="fc-cmp-h">{t("combobox.suggestHead")}</div>
+                    {suggestions.map((s) => (
+                      <button
+                        type="button"
+                        key={s.value}
+                        className={`fc-opt${valueSel === s.value ? " sel" : ""}`}
+                        onClick={() => {
+                          onChange({ kind: "string", value: s.value });
+                          setOpen(false);
+                        }}
+                      >
+                        <div className="fc-opt-top">
+                          {s.kind && <span className={`pf-addr-dot ${s.kind}`} aria-hidden />}
+                          <span className="fc-opt-label">{s.label}</span>
+                          {s.sub && <span className="fc-opt-sub">{s.sub}</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {groups.length > 0 && (
+                  <details className="fc-cmp-more" open={suggestions.length === 0}>
+                    <summary>{t("combobox.fieldsHead")}</summary>
+                    {groups.map((g) => (
+                      <div key={g.role} className="fc-group">
+                        <div className="fc-group-h">
+                          <span className="fc-dot" style={{ background: roleColor(g.role) }} />
+                          {roleLabel(g.role)}
+                        </div>
+                        {g.items.map((f) => (
+                          <button
+                            type="button"
+                            key={f.path}
+                            className={`fc-opt${fieldMode && f.path === value.path ? " sel" : ""}`}
+                            onClick={() => {
+                              onChange({ kind: "field", path: f.path });
+                              setOpen(false);
+                            }}
+                          >
+                            <div className="fc-opt-top">
+                              <span className="fc-opt-label">{f.label}</span>
+                              {f.source === "custom" && <span className="fc-badge">{t("combobox.enrichBadge")}</span>}
+                              {f.unit && <span className="fc-unit">{f.unit}</span>}
+                              <span className="fc-chip">{typeChip(f, t)}</span>
+                            </div>
+                            {f.desc && <div className="fc-opt-desc">{f.desc}</div>}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </details>
+                )}
+              </div>
+            )}
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
     <div className="fc" ref={rootRef}>
       <button
         type="button"
         className={`fc-btn${selected || btnText ? "" : " empty"}${invalid ? " invalid" : ""}`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
       >
         {selected ? (
           <>
@@ -1682,73 +1796,7 @@ function RhsCombobox({
         )}
         <span className="fc-caret">▾</span>
       </button>
-
-      {open && (
-        <div className="fc-pop">
-          <div className="fc-valbox">
-            <span className="fc-valbox-h">{t("combobox.literalHead")}</span>
-            <ValueInput value={literal} field={field} invalid={invalid} noDatalist onChange={onChange} />
-          </div>
-          {(suggestions.length > 0 || groups.length > 0) && (
-            <div className="fc-list">
-              {suggestions.length > 0 && (
-                <div className="fc-group">
-                  <div className="fc-cmp-h">{t("combobox.suggestHead")}</div>
-                  {suggestions.map((s) => (
-                    <button
-                      type="button"
-                      key={s.value}
-                      className={`fc-opt${valueSel === s.value ? " sel" : ""}`}
-                      onClick={() => {
-                        onChange({ kind: "string", value: s.value });
-                        setOpen(false);
-                      }}
-                    >
-                      <div className="fc-opt-top">
-                        {s.kind && <span className={`pf-addr-dot ${s.kind}`} aria-hidden />}
-                        <span className="fc-opt-label">{s.label}</span>
-                        {s.sub && <span className="fc-opt-sub">{s.sub}</span>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {groups.length > 0 && (
-                <details className="fc-cmp-more" open={suggestions.length === 0}>
-                  <summary>{t("combobox.fieldsHead")}</summary>
-                  {groups.map((g) => (
-                    <div key={g.role} className="fc-group">
-                      <div className="fc-group-h">
-                        <span className="fc-dot" style={{ background: roleColor(g.role) }} />
-                        {roleLabel(g.role)}
-                      </div>
-                      {g.items.map((f) => (
-                        <button
-                          type="button"
-                          key={f.path}
-                          className={`fc-opt${fieldMode && f.path === value.path ? " sel" : ""}`}
-                          onClick={() => {
-                            onChange({ kind: "field", path: f.path });
-                            setOpen(false);
-                          }}
-                        >
-                          <div className="fc-opt-top">
-                            <span className="fc-opt-label">{f.label}</span>
-                            {f.source === "custom" && <span className="fc-badge">{t("combobox.enrichBadge")}</span>}
-                            {f.unit && <span className="fc-unit">{f.unit}</span>}
-                            <span className="fc-chip">{typeChip(f, t)}</span>
-                          </div>
-                          {f.desc && <div className="fc-opt-desc">{f.desc}</div>}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </details>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {popup}
     </div>
   );
 }
