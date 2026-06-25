@@ -61,15 +61,15 @@
   color: var(--slate-900); overflow: hidden;
   display: flex; flex-direction: column; justify-content: space-between;
   background: linear-gradient(162deg, var(--wc-tint) 0%, #FFFFFF 60%);
-  --wc-tint: var(--neutral-100); --wc-accent: var(--neutral-500); /* ③-3 default tone → neutral */
+  --wc-tint: var(--blue-100); --wc-accent: var(--blue-500); /* 기본 calm → blue(자산) · 옆에서 violet 교대 */
   border: 1px solid var(--hairline-soft);
   box-shadow: 0 12px 28px rgba(72,90,94,0.13);
   will-change: transform, opacity;
   cursor: pointer;
 }
+.wcard:nth-of-type(2n) { --wc-tint: var(--violet-100); --wc-accent: var(--violet-500); } /* 교대로 violet */
 .wcard[data-tone="fail"] { --wc-tint: var(--red-100); --wc-accent: var(--red-600); }
 .wcard[data-tone="warn"] { --wc-tint: var(--lemon-100); --wc-accent: var(--lemon-700); }
-.wcard[data-tone="calm"] { --wc-tint: var(--neutral-100); --wc-accent: var(--neutral-500); }
 /* tone glow (top-right) under the white sheen */
 /* left tone accent bar */
 .wcard::before {
@@ -84,7 +84,7 @@
 .wd-stage.wd-ready .wcard { transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms ease, box-shadow 340ms ease; }
 .wd-stage.dragging .wcard { transition: none; }
 .wcard.is-active {
-  box-shadow: 0 20px 40px rgba(72,90,94,0.26), 0 0 0 3px var(--surface), 0 0 0 5px var(--cyan-500);
+  box-shadow: 0 20px 40px rgba(6,32,63,0.26), 0 0 0 3px var(--surface), 0 0 0 5px var(--navy-500);
 }
 
 /* card chrome */

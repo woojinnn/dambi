@@ -1275,7 +1275,7 @@ function BindingItem(props: {
           )
         }
       >
-        <Ic id={b.enabled ? "check" : "x"} />
+        <Ic id={b.enabled ? "shield" : "x"} />
       </button>
       {!readOnly && (
         <button

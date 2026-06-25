@@ -361,7 +361,7 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
                           aria-label={b.enabled ? "정책 끄기" : "정책 켜기"}
                           onClick={() => run("토글", () => PS.updateBinding({ address: activeAddr, bindingId: b.id, patch: { enabled: !b.enabled } }))}
                         >
-                          <Ic id={b.enabled ? "check" : "x"} />
+                          <Ic id={b.enabled ? "shield" : "x"} />
                         </button>
                         <button type="button" className="ib danger" title="이 패키지에서 제거" onClick={() => run("제거", () => PS.removeBinding({ address: activeAddr, bindingId: b.id }))}><Ic id="trash" cls="sm" /></button>
                       </div>

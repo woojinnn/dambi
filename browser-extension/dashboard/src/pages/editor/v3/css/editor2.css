@@ -475,10 +475,11 @@
 }
 .ev3 .e2 .prow-pols .pb-empty { grid-column:1 / -1; }
 .ev3 .e2 .prow-pols .pb-item { background:var(--surface); }
-.ev3 .e2 .ox { width:23px; height:23px; border-radius:50%; border:1.5px solid var(--line); background:var(--surface); cursor:pointer;
+.ev3 .e2 .ox { width:24px; height:24px; border-radius:7px; border:1.5px solid var(--line); background:var(--surface); cursor:pointer;
   display:grid; place-items:center; color:#BABCC0; transition:all .16s; flex:none; }
 .ev3 .e2 .ox:hover { border-color:var(--slate-soft); }
-.ev3 .e2 .ox.on { border-color:var(--sage); color:var(--sage); background:var(--sage-soft); }
+/* 자동 차단(방패 채움): on = navy 채운 둥근사각 + 흰 방패 */
+.ev3 .e2 .ox.on { border-color:var(--navy-500); color:#fff; background:var(--navy-500); }
 .ev3 .e2 .ox .ic { width:12px; height:12px; stroke-width:2.4; }
 .ev3 .e2 .addpkg { width:100%; padding:16px; border:1.5px dashed #D7D9DC; border-radius:14px; display:flex; flex-direction:row; gap:9px;
   align-items:center; justify-content:center; color:var(--mut); cursor:pointer; transition:all .16s; background:transparent; }
