@@ -14,11 +14,7 @@ import { appendVerdict, type VerdictInsert } from "./verdict-storage";
 import { refreshBadge } from "./mascot-badge";
 import { appendStateDelta } from "./state-delta-storage";
 import { appendDiagnosisContext } from "./diagnosis-context-storage";
-import {
-  EngineError,
-  evaluateActionV2,
-  planActionRpcV2,
-} from "./wasm-bridge";
+import { EngineError, evaluateActionV2, planActionRpcV2 } from "./wasm-bridge";
 import {
   dispatchCallsV2,
   formatAuditMatched,
@@ -64,7 +60,7 @@ import {
   leverageUnevaluatedVerdict,
 } from "./venue/leverage-cap-guard";
 import { resolveOrderSymbol } from "./venue/resolve-order-symbol";
-import { resolveHlMaster } from "./venue/resolve-hl-master";
+import { resolveHlMasterDetailed } from "./venue/resolve-hl-master";
 import {
   normalizeTypedDataPayload,
   routeTypedSignaturePayload,
@@ -444,7 +440,10 @@ async function appendAudit(
   void appendVerdictsForMessage(message, verdict, userDecision)
     .then(() => refreshBadge())
     .catch((err) => {
-      console.warn("[Dambi] verdict-storage append / badge refresh failed", err);
+      console.warn(
+        "[Dambi] verdict-storage append / badge refresh failed",
+        err,
+      );
     });
 }
 
@@ -483,7 +482,10 @@ async function appendVerdictsForMessage(
 
   // 매칭된 정책의 def 참조를 박제 — 이름 변경/삭제 후에도 과거 기록이 유효하다. best-effort.
   const uid = (await getCurrentUserId()) ?? "anonymous";
-  const refCache = new Map<string, { defId: string; displayName: string } | null>();
+  const refCache = new Map<
+    string,
+    { defId: string; displayName: string } | null
+  >();
   for (const matched of verdict.matched) {
     let ref = refCache.get(matched.policy_id);
     if (ref === undefined) {
@@ -542,7 +544,7 @@ function inferContractSelector(message: Message): {
 
 function effectiveTypedDataChainId(message: Message): number {
   return isTypedSignature(message)
-    ? (typedDataDomainChainId(message.data.typedData) ?? message.data.chainId)
+    ? typedDataDomainChainId(message.data.typedData) ?? message.data.chainId
     : 1;
 }
 
@@ -709,7 +711,9 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
                         name: v3Outcome.cause.name,
                         message: v3Outcome.cause.message,
                         ...("kind" in v3Outcome.cause
-                          ? { kind: (v3Outcome.cause as { kind: unknown }).kind }
+                          ? {
+                              kind: (v3Outcome.cause as { kind: unknown }).kind,
+                            }
                           : {}),
                       }
                     : v3Outcome.cause,
@@ -778,7 +782,9 @@ async function runLifecycle(message: Message): Promise<LifecycleResult> {
     verdictSource: "fail_closed",
     verdict: "warn",
     nature,
-    ...(v2Fault ? { engineError: { kind: v2Fault.kind, message: v2Fault.message } } : {}),
+    ...(v2Fault
+      ? { engineError: { kind: v2Fault.kind, message: v2Fault.message } }
+      : {}),
   });
   return {
     verdict: evaluateFaultVerdict(v2Fault),
@@ -799,7 +805,10 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
   const nature: ActionNatureKind = "offchain_sig";
   if (!isVenueOrder(message)) {
     // Unreachable (caller guards), but keeps the type narrow + fail-closed.
-    return { verdict: venueDenyVerdict("not a venue order"), verdictSource: "fail_closed" };
+    return {
+      verdict: venueDenyVerdict("not a venue order"),
+      verdictSource: "fail_closed",
+    };
   }
 
   let action: Record<string, unknown>;
@@ -848,11 +857,36 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
   // agent-key signature라 master address를 직접 담지 않지만, fetch-hook이
   // `eth_accounts`에서 읽은 trusted wallet_id를 stamp한다. 그 master가 있으면
   // policy-set selection뿐 아니라 v2 lowering의 Cedar principal(`tx.from`)과
-  // `context.meta.submitter`도 같은 actor로 맞춘다. 해석 실패 시에만 sentinel로
-  // degrade(= defaults.enabled 폴백, best-effort, never throws).
+  // `context.meta.submitter`도 같은 actor로 맞춘다. 해석 실패 중 "여러 synced
+  // wallet 중 어느 것인지 모름"은 per-wallet 정책을 잘못 적용하거나 조용히
+  // 떨어뜨릴 수 있어 deny-close 한다. 로그인/프로비저닝이 비어 있는 경우에만
+  // sentinel로 degrade(= defaults.enabled 폴백)한다.
   const fallbackSubmitter = String(meta.submitter ?? HL_TO_SENTINEL);
   const venueUid = (await getCurrentUserId()) ?? "anonymous";
-  const master = await resolveHlMaster(message.data);
+  const masterResolution = await resolveHlMasterDetailed(message.data);
+  const master = masterResolution.master;
+  if (
+    master === null &&
+    masterResolution.reason === "multiple_synced_wallets"
+  ) {
+    console.warn("[Dambi] HL venue deny-close: ambiguous master account", {
+      requestId: message.requestId,
+      venueUid,
+      hasWalletId: typeof message.data.wallet_id?.address === "string",
+      syncedWalletCount: masterResolution.syncedWallets.length,
+    });
+    return {
+      verdict: venueDenyVerdict(
+        "ambiguous Hyperliquid master account; connect or select the trading wallet",
+      ),
+      verdictSource: "fail_closed",
+      declarativeV3: {
+        outcome: "fault",
+        nature,
+        reason: "ambiguous_hl_master",
+      },
+    };
+  }
   const evalAddress = master ?? fallbackSubmitter;
   if (master !== null) {
     meta = { ...meta, submitter: master };
@@ -887,6 +921,10 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
     requestId: message.requestId,
     venueUid,
     master,
+    masterResolution:
+      master !== null ? masterResolution.source : masterResolution.reason,
+    hasWalletId: typeof message.data.wallet_id?.address === "string",
+    syncedWalletCount: masterResolution.syncedWallets.length,
     evalAddress,
     registered,
     bundleCount: resolved.length,
@@ -998,7 +1036,11 @@ async function venueOrderLifecycle(message: Message): Promise<LifecycleResult> {
       verdict: verdict.kind,
       // Injected order-time leverage (empty `{}` means enrichment was dormant for this order).
       account_leverage,
-      matched: verdict.matched?.map((m) => ({ id: m.policy_id, severity: m.severity })) ?? [],
+      matched:
+        verdict.matched?.map((m) => ({
+          id: m.policy_id,
+          severity: m.severity,
+        })) ?? [],
     });
     // TEST-ONLY verdict tap (storage flag `dambi_e2e_tap`): record this venue
     // verdict at decision-time — BEFORE the warn modal blocks `decideMessage` —
@@ -1079,14 +1121,17 @@ function summarizeBodyFields(body: unknown): string {
         value.forEach((item, i) => walk(item, `${path}[${i}]`));
         return;
       }
-      for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      for (const [key, val] of Object.entries(
+        value as Record<string, unknown>,
+      )) {
         if (path === "" && (key === "domain" || key === "action")) continue;
         if (key === "source" || key === "synced_at" || key === "ttl") continue;
         walk(val, path ? `${path}.${key}` : key);
       }
       return;
     }
-    const rendered = typeof value === "string" ? abbrevHex(value) : String(value);
+    const rendered =
+      typeof value === "string" ? abbrevHex(value) : String(value);
     pairs.push(`${path}=${rendered}`);
   };
   walk(body, "");
@@ -1105,7 +1150,7 @@ function leafBodies(body: unknown): unknown[] {
     (body as { domain?: unknown }).domain === "multicall" &&
     Array.isArray((body as { actions?: unknown }).actions)
   ) {
-    return ((body as { actions: unknown[] }).actions).flatMap(leafBodies);
+    return (body as { actions: unknown[] }).actions.flatMap(leafBodies);
   }
   return [body];
 }
@@ -1116,7 +1161,10 @@ function leafBodies(body: unknown): unknown[] {
  * signed, the routing decoder, and one `domain/action  field=value …` line per
  * decoded (leaf) `ActionBody`. Complements the full JSON dump.
  */
-function logParsedSignature(message: Message, routed: { actions: unknown[]; decoderId: string }): void {
+function logParsedSignature(
+  message: Message,
+  routed: { actions: unknown[]; decoderId: string },
+): void {
   const td = isTypedSignature(message)
     ? normalizeTypedDataPayload(message.data.typedData)
     : null;
@@ -1165,9 +1213,7 @@ async function typedSignatureLifecycle(
     });
   } catch (err) {
     const reason =
-      err instanceof TypedDataRouteError
-        ? err.reason
-        : "typed_sig_route_threw";
+      err instanceof TypedDataRouteError ? err.reason : "typed_sig_route_threw";
     console.warn("[Dambi] typed-sig route threw", {
       requestId: message.requestId,
       reason,
@@ -1187,7 +1233,11 @@ async function typedSignatureLifecycle(
     return {
       verdict: noDecoderVerdict(),
       verdictSource: "fail_closed",
-      declarativeV3: { outcome: "miss", nature, reason: "typed_sig_no_manifest" },
+      declarativeV3: {
+        outcome: "miss",
+        nature,
+        reason: "typed_sig_no_manifest",
+      },
     };
   }
 
@@ -1241,8 +1291,7 @@ async function typedSignatureLifecycle(
   const verifyingContract =
     normalizeTypedDataPayload(
       message.data.typedData,
-    )?.domain.verifyingContract?.toLowerCase() ??
-    "0x" + "0".repeat(40);
+    )?.domain.verifyingContract?.toLowerCase() ?? "0x" + "0".repeat(40);
   const signedChainId = effectiveTypedDataChainId(message);
   const tx = {
     chain_id: `eip155:${signedChainId}`,
@@ -1265,10 +1314,7 @@ async function typedSignatureLifecycle(
     try {
       // Resolve token decimals once per body so each fungible amount gets its
       // `amountNano` sibling (non-fatal — a miss just omits that token's nano).
-      const tokenDecimals = await collectTokenDecimals(
-        action,
-        signedChainId,
-      );
+      const tokenDecimals = await collectTokenDecimals(action, signedChainId);
       verdicts.push(
         ...(await evaluateBodyTree(
           action,
@@ -1342,10 +1388,7 @@ function venueDenyVerdict(reason: string): VerdictDto {
 }
 
 function isHlUnknownAction(action: Record<string, unknown>): boolean {
-  return (
-    action.domain === "hyperliquid_core" &&
-    action.action === "hl_unknown"
-  );
+  return action.domain === "hyperliquid_core" && action.action === "hl_unknown";
 }
 
 /**
@@ -1394,7 +1437,11 @@ async function evaluateBodyTree(
     });
     const results =
       planned.length > 0
-        ? await dispatchCallsV2(planned, policyRpcUrl, { action: body, meta, tx })
+        ? await dispatchCallsV2(planned, policyRpcUrl, {
+            action: body,
+            meta,
+            tx,
+          })
         : {};
     const verdict = await evaluateActionV2({
       action: body,
@@ -1533,9 +1580,7 @@ async function tryV2VerdictPath(
       // source of truth; recording is purely for the dashboard history view.
       // The server's `deltas[0]` is also cached locally so the history page's
       // `delta_id` join works without an extra server round-trip.
-      const tx0 = isTransaction(message)
-        ? message.data.transaction
-        : undefined;
+      const tx0 = isTransaction(message) ? message.data.transaction : undefined;
       void recordSimulationOnServer({
         action,
         meta,

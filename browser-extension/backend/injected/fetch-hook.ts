@@ -46,14 +46,16 @@ import { createVerdictReceiver } from "@lib/verdict-channel";
 import type { MessageData, VenueOrderPayload } from "@lib/types";
 import { buildHyperliquidExecutionReport } from "./hl-execution-report";
 import {
+  createEthereumProviderDiscovery,
+  resolveUniqueConnectedAccount,
+} from "./connected-account";
+import {
   matchVenue,
   decideVenueBody,
   type VenueBodyDecision,
 } from "./hl-exchange-parse";
 
-const FETCH_INSTALL_STATE = Symbol.for(
-  "__dambi_fetch_hook_install_state__",
-);
+const FETCH_INSTALL_STATE = Symbol.for("__dambi_fetch_hook_install_state__");
 /** Per-XHR-instance metadata captured at `open()` for use in `send()`. */
 const XHR_META = Symbol.for("__dambi_xhr_meta__");
 
@@ -80,7 +82,9 @@ function install(): void {
   // C1: venue verdicts are read ONLY from the authenticated MessageChannel the
   // ISOLATED fetch bridge transfers — never the page-observable stream — so a
   // page cannot forge an `allow` and slip a venue order past deny-closed gating.
-  const verdictReceiver = createVerdictReceiver(Identifier.FETCH_VERDICT_PORT_INIT);
+  const verdictReceiver = createVerdictReceiver(
+    Identifier.FETCH_VERDICT_PORT_INIT,
+  );
   w[FETCH_INSTALL_STATE] = { stream };
 
   function recordVerdict(url: string, venue: string, allowed: boolean): void {
@@ -89,8 +93,7 @@ function install(): void {
     // error. Harmless in production.
     try {
       const ww = window as unknown as Record<string, unknown>;
-      ww.__dambi_intercepts__ =
-        ((ww.__dambi_intercepts__ as number) ?? 0) + 1;
+      ww.__dambi_intercepts__ = ((ww.__dambi_intercepts__ as number) ?? 0) + 1;
       ww.__dambi_last_verdict__ = { url, venue, allowed, at: Date.now() };
     } catch {
       /* ignore */
@@ -108,7 +111,11 @@ function install(): void {
     // logged SW-side; this is the wire-level parse the page actually produced.)
     const actions = payloads.map((p) => ({ ...p.hlAction }));
     // eslint-disable-next-line no-console
-    console.info("[Dambi] HL /exchange parsed (in-page):", { url, venue, actions });
+    console.info("[Dambi] HL /exchange parsed (in-page):", {
+      url,
+      venue,
+      actions,
+    });
     try {
       const ww = window as unknown as Record<string, unknown>;
       ww.__dambi_last_parse__ = { url, venue, actions, at: Date.now() };
@@ -119,43 +126,39 @@ function install(): void {
 
   // ── connected master-account capture (order-time leverage enrichment) ──────
   // The /exchange body carries no master account (the order is agent-signed),
-  // but the dApp connected a normal EVM wallet via `window.ethereum`. We read
-  // that account (non-prompting `eth_accounts`, which the provider proxy passes
-  // through ungated) and stamp it onto each venue payload as `wallet_id`, so the
-  // SW can key the `activeAssetData` leverage lookup to the right account.
-  // Best-effort + cached: a read failure / no wallet just leaves `wallet_id`
-  // unset — leverage enrichment then stays dormant (never blocks the order).
-  interface InpageEthProvider {
-    request?: (args: { method: string }) => Promise<unknown>;
-    on?: (event: string, cb: (...args: unknown[]) => void) => void;
-  }
-  const ethProvider = (): InpageEthProvider | undefined =>
-    (window as unknown as { ethereum?: InpageEthProvider }).ethereum;
-
+  // but the dApp connected a normal EVM wallet. On real wallet stacks that
+  // account may live on `window.ethereum`, `window.ethereum.providers`, or an
+  // EIP-6963 announced provider. Query every discovered provider and stamp the
+  // account only when the result is unique; ambiguity is left unstamped so the
+  // service worker can fail closed instead of applying the wrong wallet policy.
   let connectedAccount: string | null = null;
-  const setAccountFrom = (accts: unknown): void => {
-    connectedAccount =
-      Array.isArray(accts) && typeof accts[0] === "string"
-        ? accts[0].toLowerCase()
-        : null;
-  };
+  let lastAccountResolutionLog: string | null = null;
+  const providerDiscovery = createEthereumProviderDiscovery(window, () => {
+    connectedAccount = null;
+    lastAccountResolutionLog = null;
+  });
+
   async function ensureConnectedAccount(): Promise<void> {
     if (connectedAccount) return;
     try {
-      const eth = ethProvider();
-      if (!eth?.request) return;
-      setAccountFrom(await eth.request({ method: "eth_accounts" }));
+      const resolved = await resolveUniqueConnectedAccount(
+        providerDiscovery.providers(),
+      );
+      connectedAccount = resolved.account;
+      if (resolved.reason !== "single") {
+        const logKey = `${resolved.reason}:${resolved.providerCount}:${resolved.accounts.join(",")}`;
+        if (logKey !== lastAccountResolutionLog) {
+          lastAccountResolutionLog = logKey;
+          console.info("[Dambi] HL connected account unresolved", {
+            reason: resolved.reason,
+            providerCount: resolved.providerCount,
+            accountCount: resolved.accounts.length,
+          });
+        }
+      }
     } catch {
-      /* no wallet / read failed → leverage enrichment stays dormant */
+      /* no wallet / read failed → SW attribution handles the fallback */
     }
-  }
-  // Keep the cache fresh when the user connects / switches accounts.
-  try {
-    ethProvider()?.on?.("accountsChanged", (...args: unknown[]) =>
-      setAccountFrom(args[0]),
-    );
-  } catch {
-    /* provider has no event emitter → rely on lazy reads */
   }
 
   // Evaluate every order in a POST body; return false if ANY is denied
@@ -306,7 +309,8 @@ function install(): void {
             );
             if (decision.kind === "deny") {
               recordVerdict(url, venue, false);
-              if (decision.payloads) logInPageParse(url, venue, decision.payloads);
+              if (decision.payloads)
+                logInPageParse(url, venue, decision.payloads);
               throw new Error(
                 decision.reason === "unreadable_body"
                   ? "Dambi: venue order blocked (unreadable body)"
@@ -446,10 +450,7 @@ function install(): void {
           // down, parse throw, SW unreachable, …) must BLOCK, not waive the
           // order through — matches the fetch path + the SW lifecycle's
           // deny-closed contract.
-          console.error(
-            "[Dambi] xhr-hook fault — blocking (fail-closed)",
-            err,
-          );
+          console.error("[Dambi] xhr-hook fault — blocking (fail-closed)", err);
           decision = { kind: "deny", reason: "policy", payloads: null };
         }
         const parsedPayloads =
@@ -469,10 +470,7 @@ function install(): void {
             xhr.addEventListener("loadend", reportOnce);
             xhr.addEventListener("error", reportOnce);
           }
-          originalSend.call(
-            xhr,
-            body as Parameters<XMLHttpRequest["send"]>[0],
-          );
+          originalSend.call(xhr, body as Parameters<XMLHttpRequest["send"]>[0]);
           return;
         }
         // DENY: do not call the native send. Simulate a failed request so the
