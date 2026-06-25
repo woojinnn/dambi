@@ -2,6 +2,7 @@
 // store(DambiStore) 를 먼저 실행해야 welcome.js 가 window.DambiStore 를 읽는다.
 import '../popup/dambi.css';
 import './welcome.css';
+import '../tokens.css'; // DEEP 토큰: 마지막 import → :root DEEP 값이 dambi.css 옛값을 덮음
 import { deriveBaseline, derivePopupPackages } from '../popup/ps2-derive';
 
 declare global {
