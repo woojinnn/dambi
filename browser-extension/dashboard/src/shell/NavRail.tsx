@@ -7,7 +7,8 @@ import { listFindings } from "../server-api";
 import { useAuth } from "../hooks/useAuth";
 
 /**
- * Persistent left nav. Hover/focus expands to 256px (CSS-driven, no JS state).
+ * Persistent left nav. Hover/focus expands the rail 88→340px (CSS-driven);
+ * leaving the rail (onMouseLeave) also closes the account popover.
  * Findings count drives the History badge — refetched every 30s.
  */
 export function NavRail() {
@@ -52,10 +53,16 @@ export function NavRail() {
   };
 
   return (
-    <nav className="nav-rail" tabIndex={0} aria-label="Dambi global nav">
+    // onMouseLeave: 레일이 접힐 때(커서가 레일을 벗어날 때) 계정 팝오버도 함께 닫는다(spec §1/§5).
+    <nav
+      className="nav-rail"
+      tabIndex={0}
+      aria-label="Dambi global nav"
+      onMouseLeave={() => setMenuOpen(false)}
+    >
       <div className="nav-logo">
-        <img className="mark" src="logo.png" alt="dambi" />
-        <div className="word">dambi</div>
+        <img className="mark" src="dambi-mark2.png" alt="" />
+        <img className="word" src="dambi-text.png" alt="DAMBI" />
       </div>
 
       <div className="nav-divider" />
@@ -89,6 +96,7 @@ export function NavRail() {
               <ProfileIcon />
               {t("nav.profile")}
             </button>
+            <div className="nav-usermenu-divider" role="separator" />
             <button type="button" className="nav-usermenu-item danger" onClick={onSignOut} role="menuitem">
               <SignOutIcon />
               {t("nav.signOut")}

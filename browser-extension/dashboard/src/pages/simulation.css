@@ -11,7 +11,7 @@
 /* ── run strip ──────────────────────────────────────────────────────── */
 .sim-runstrip {
   display: flex; align-items: center; gap: 12px;
-  background: var(--surface);
+  background: var(--neutral-50); /* ③-1 step3 BASE(실행 스트립) neutral-50 */
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
   padding: 10px 14px;
@@ -24,7 +24,7 @@
   margin-left: auto; display: flex; align-items: center; gap: 10px;
   padding: 4px 10px; border-radius: var(--r-pill);
 }
-.sim-runstrip .rs-overall.pass { background: var(--pass-50);  border: 1px solid var(--pass-300); }
+.sim-runstrip .rs-overall.pass { background: var(--neutral-50);  border: 1px solid var(--neutral-300); }
 .sim-runstrip .rs-overall.warn { background: var(--warn-50);  border: 1px solid var(--warn-300); }
 .sim-runstrip .rs-overall.fail { background: var(--fail-50);  border: 1px solid var(--fail-300); }
 .sim-runstrip .ov-pill {
@@ -32,7 +32,7 @@
   padding: 4px 8px; border-radius: var(--r-pill);
   background: var(--surface); color: var(--slate-900);
 }
-.sim-runstrip .rs-overall.pass .ov-pill { color: var(--pass-800); }
+.sim-runstrip .rs-overall.pass .ov-pill { color: var(--neutral-700); }
 .sim-runstrip .rs-overall.warn .ov-pill { color: var(--warn-800); }
 .sim-runstrip .rs-overall.fail .ov-pill { color: var(--fail-800); }
 .sim-runstrip .ov-sub { font-size: 12px; color: var(--slate-500); }
@@ -79,13 +79,18 @@
 .btn.xs { font-size: 11px; padding: 2px 8px; }
 
 /* ── verdict pills ──────────────────────────────────────────────────── */
+/* ③-3 verdict 칩: soft-rect(5px)+border+아이콘, 점 제거 */
 .vpill {
+  display: inline-flex; align-items: center; gap: 5px;
   font: 700 10.5px/1 var(--ff-mono); letter-spacing: 0.04em;
-  padding: 3px 8px; border-radius: var(--r-pill); text-transform: uppercase;
+  padding: 3px 8px; border-radius: 5px; border: 1px solid transparent; text-transform: uppercase;
 }
-.vpill.pass { background: var(--pass-100); color: var(--pass-800); }
-.vpill.warn { background: var(--warn-100); color: var(--warn-800); }
-.vpill.fail { background: var(--fail-100); color: var(--fail-800); }
+.vpill.pass { background: var(--neutral-100); color: var(--neutral-700); border-color: var(--neutral-300); }
+.vpill.pass::before { content: "✓"; }
+.vpill.warn { background: var(--warn-100); color: var(--warn-800); border-color: var(--warn-300); }
+.vpill.warn::before { content: "⚠"; }
+.vpill.fail { background: var(--fail-100); color: var(--fail-800); border-color: var(--fail-300); }
+.vpill.fail::before { content: "✕"; }
 .vpill.sm   { font-size: 10px; padding: 2px 6px; }
 .vpill.xs   { font-size: 9px;  padding: 1px 4px; }
 
@@ -133,12 +138,12 @@
   background: var(--cyan-50);
   box-shadow: 0 0 0 2px var(--cyan-200) inset;
 }
-.tx-card.verdict-pass { border-left: 3px solid var(--pass-500); }
+.tx-card.verdict-pass { border-left: 3px solid var(--neutral-400); }
 .tx-card.verdict-warn { border-left: 3px solid var(--warn-500); }
 .tx-card.verdict-fail { border-left: 3px solid var(--fail-500); }
 @keyframes flashPulse {
-  0%   { box-shadow: 0 0 0 0   var(--warn-300); }
-  50%  { box-shadow: 0 0 0 6px var(--warn-100); }
+  0%   { box-shadow: 0 0 0 0   var(--navy-300); } /* ③-2B 짝꿍 보완: 주목 펄스 → navy (.policy-row.is-flash와 일치) */
+  50%  { box-shadow: 0 0 0 6px var(--navy-100); }
   100% { box-shadow: 0 0 0 0   transparent; }
 }
 .tx-card.is-flash { animation: flashPulse 900ms ease-out; }
@@ -219,7 +224,7 @@
   border-color: var(--cyan-600); background: var(--cyan-50);
   box-shadow: 0 0 0 2px var(--cyan-200) inset;
 }
-.scr-node.verdict-pass { border-top: 3px solid var(--pass-500); }
+.scr-node.verdict-pass { border-top: 3px solid var(--neutral-400); }
 .scr-node.verdict-warn { border-top: 3px solid var(--warn-500); }
 .scr-node.verdict-fail { border-top: 3px solid var(--fail-500); }
 .scr-label { font-size: 12px; font-weight: 700; color: var(--slate-900); }
@@ -457,8 +462,8 @@
   transition: box-shadow 200ms ease;
 }
 .policy-row.is-flash {
-  box-shadow: 0 0 0 2px var(--warn-300);
-  background: var(--warn-50);
+  box-shadow: 0 0 0 2px var(--navy-300); /* ③-2B 주목 펄스 → navy */
+  background: var(--navy-50);
 }
 .policy-row .policy-body { flex: 1; min-width: 0; }
 .policy-row .policy-row-head {
@@ -478,7 +483,7 @@
   padding: 2px 6px; border-radius: var(--r-pill);
 }
 .out-pill.deny  { background: var(--fail-100); color: var(--fail-800); }
-.out-pill.allow { background: var(--pass-100); color: var(--pass-800); }
+.out-pill.allow { background: var(--neutral-100); color: var(--neutral-700); }
 .matched-line { color: var(--slate-500); }
 
 /* on/off switch */
@@ -495,10 +500,10 @@
 .sw .sw-slider::before {
   content: ""; position: absolute;
   width: 14px; height: 14px; left: 2px; top: 2px;
-  background: #fff; border-radius: 50%;
+  background: var(--surface-raised); border-radius: 50%;
   transition: transform 120ms;
 }
-.sw input:checked + .sw-slider { background: var(--pass-500); }
+.sw input:checked + .sw-slider { background: var(--navy-500); }
 .sw input:checked + .sw-slider::before { transform: translateX(12px); }
 
 /* ── WASM step probe ───────────────────────────────────────────────────── */
@@ -533,7 +538,7 @@
 .sim-wasm-probe .probe-meta {
   font: 500 11.5px/1 var(--ff-mono);
 }
-.sim-wasm-probe .probe-meta.ok  { color: var(--pass-800); }
+.sim-wasm-probe .probe-meta.ok  { color: var(--neutral-700); }
 .sim-wasm-probe .probe-meta.err { color: var(--fail-800); }
 .sim-wasm-probe .probe-output {
   max-height: 360px; overflow: auto;
@@ -567,7 +572,7 @@
 }
 .sim-wasm-probe .probe-grid input:focus,
 .sim-wasm-probe .probe-grid textarea:focus {
-  outline: none; border-color: var(--pass-500);
+  outline: none; border-color: var(--navy-300);
 }
 .sim-wasm-probe .probe-meta code {
   font: 500 11px/1 var(--ff-mono);
@@ -655,8 +660,8 @@
   padding: 3px 7px; border-radius: 999px;
 }
 .sim-wasm-probe .probe-step-badge-pass {
-  background: var(--pass-100, #e6f7ee);
-  color: var(--pass-800, #036b3f);
+  background: var(--neutral-100);
+  color: var(--neutral-700);
 }
 .sim-wasm-probe .probe-step-badge-warn {
   background: var(--warn-100, #fff4d6);
@@ -793,12 +798,12 @@
   background: var(--surface);
 }
 .wallet-selector-card .wallet-row.is-on {
-  border-color: var(--brand-400, #6c8cff);
-  background: var(--brand-50, #f1f5ff);
+  border-color: var(--navy-500); /* ③-2C 온체인 선택 → navy-500 (기존 미정의 --brand) */
+  background: var(--navy-50);
 }
 .wallet-selector-card .wallet-row.is-off-chain.is-on {
-  border-color: var(--warn-400, #f0c060);
-  background: var(--warn-50, #fff8e6);
+  border-color: var(--navy-300); /* ③-2C 오프체인 선택 → navy-300 (온체인과 톤 구분). 경고는 .wallet-row-warn(아래)이 담당 */
+  background: var(--navy-50);
 }
 .wallet-selector-card .wallet-row-label {
   display: flex; align-items: center; gap: 8px;
@@ -903,7 +908,7 @@
 }
 .wallets-state-card .wallets-state-section {
   border: 1px solid var(--fog-600); border-radius: 6px;
-  padding: 8px 10px; background: var(--surface);
+  padding: 8px 10px; background: var(--neutral-50); /* ③-1 step3 BASE(카드 내부 섹션) neutral-50 */
 }
 .wallets-state-card .wallets-state-section.is-step-owner {
   border-color: var(--brand-400, #6c8cff);
@@ -1040,3 +1045,19 @@
   border: 1px solid var(--fog-600); border-radius: 4px;
   background: var(--surface);
 }
+
+/* ③-3 STEP4 verdict chip sweep (append-override) */
+.out-pill { border-radius:5px; border:1px solid transparent; display:inline-flex; align-items:center; gap:4px; }
+.out-pill.allow { border-color: var(--neutral-300); } .out-pill.allow::before { content: "✓"; }
+.out-pill.deny  { border-color: var(--fail-300); }    .out-pill.deny::before  { content: "✕"; }
+.sev-tag { border-radius:5px; border:1px solid transparent; display:inline-flex; align-items:center; gap:4px; }
+.sev-tag.deny { border-color: var(--fail-300); } .sev-tag.deny::before { content: "✕"; }
+.sev-tag.warn { border-color: var(--warn-300); } .sev-tag.warn::before { content: "⚠"; }
+.sev-tag.info { border-color: var(--cyan-300); }
+.block-tag { border-radius:5px; border:1px solid transparent; display:inline-flex; align-items:center; gap:4px; }
+.block-tag.sev-deny { border-color: var(--fail-300); } .block-tag.sev-deny::before { content: "✕"; }
+.block-tag.sev-warn { border-color: var(--warn-300); } .block-tag.sev-warn::before { content: "⚠"; }
+.sim-runstrip .rs-overall { border-radius: 5px; } /* run-strip 배너: 형태만(rect) */
+
+/* ── STEP 4-B 타입스케일 매핑 (append-override) ── */
+.sim-login-gate h2 { font-size: var(--text-title-size); font-weight: var(--text-title-weight); line-height: var(--text-title-lh); letter-spacing: var(--text-title-ls); }

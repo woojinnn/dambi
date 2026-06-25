@@ -7,92 +7,78 @@
 .app-frame { display: flex; min-height: 100vh; }
 .app-content {
   flex: 1;
-  margin-left: 64px;
+  margin-left: 120px; /* 레일 inset16 + 접힘폭88 + 16 갭 = 120 예약(overlay: 펼침340은 콘텐츠 위를 덮음, 밀지 않음) */
   padding: 24px 32px 32px;
   min-width: 0;
 }
 
 /* ── NAV RAIL ── */
+/* floating: spec는 컨테이너기준 absolute(inset16). 실앱은 .app-frame이 static이라
+   absolute면 스크롤 시 레일이 떠내려가 전역 nav 지속성이 깨짐 → 동일 비주얼을 주는
+   fixed+inset16으로 구현(스크롤 고정 유지). */
 .nav-rail {
-  position: fixed; left: 0; top: 0; bottom: 0;
-  width: 64px; background: var(--surface);
-  border-right: 1px solid var(--hairline);
+  position: fixed; left: 16px; top: 16px; bottom: 16px;
+  width: 88px; background: var(--surface-raised);
+  border: 1px solid var(--divider);
+  border-radius: 26px;
   z-index: 50;
   display: flex; flex-direction: column;
   padding: 14px 0; overflow: hidden;
-  transition: width 240ms cubic-bezier(0.32,0.04,0.2,1), box-shadow 240ms ease;
+  box-shadow: 0 12px 40px rgba(6,32,63,.10);
+  transition: width .42s cubic-bezier(.22,1,.36,1), box-shadow .42s ease;
 }
-.nav-rail:hover, .nav-rail:focus-within { width: 256px; box-shadow: 8px 0 32px rgba(15,23,42,0.06); }
+.nav-rail:hover, .nav-rail:focus-within { width: 340px; box-shadow: 0 18px 56px rgba(6,32,63,.18); }
 
-.nav-logo { display: flex; align-items: center; gap: 12px; height: 40px; margin: 0 14px 18px; }
+.nav-logo { display: flex; align-items: center; gap: 4px; height: 50px; margin: 0 14px 18px; }
 .nav-logo .mark {
-  width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px;
-  display: block; object-fit: cover;
-  /* 로고 배경(짙은 네이비/검정)과 맞춰 — 투명·검정 PNG 둘 다 자연스럽게 */
-  background: #0b1430;
+  width: 40px; height: 50px; flex-shrink: 0;
+  display: block; object-fit: contain;
 }
+/* §4 워드마크: 라벨과 동일 비대칭 페이드 + max-width 0↔90 (.42s). */
 .nav-logo .word {
-  font-weight: 700; font-size: 16px; color: var(--slate-900); letter-spacing: -0.01em; white-space: nowrap;
-  opacity: 0; transform: translateX(-6px);
-  transition: opacity 180ms 80ms ease, transform 180ms 80ms ease;
+  width: 90px; height: 32px; object-fit: contain; flex-shrink: 0; overflow: hidden; margin-top: 4px;
+  opacity: 0; max-width: 0;
+  transition: opacity .1s ease, max-width .42s cubic-bezier(.22,1,.36,1);
 }
-.nav-rail:hover .nav-logo .word, .nav-rail:focus-within .nav-logo .word { opacity: 1; transform: translateX(0); }
+.nav-rail:hover .nav-logo .word, .nav-rail:focus-within .nav-logo .word {
+  opacity: 1; max-width: 90px;
+  transition: opacity .26s ease .12s, max-width .42s cubic-bezier(.22,1,.36,1);
+}
 
-.nav-divider { height: 1px; background: var(--hairline-soft); margin: 6px 16px; }
-
-/* "새 정책" CTA in nav rail */
-.nav-cta {
-  margin: 4px 14px 8px;
-  height: 38px;
-  border-radius: 9px;
-  background: var(--slate-700);
-  color: var(--fog-50);
-  display: flex; align-items: center; gap: 12px;
-  padding: 0 12px;
-  font-size: 13px; font-weight: 600;
-  transition: background 120ms ease;
-}
-.nav-cta:hover { background: var(--slate-900); }
-.nav-cta .plus { width: 18px; height: 18px; flex-shrink: 0; }
-.nav-cta .label {
-  white-space: nowrap;
-  opacity: 0; transform: translateX(-6px);
-  transition: opacity 180ms 80ms ease, transform 180ms 80ms ease;
-}
-.nav-rail:hover .nav-cta .label, .nav-rail:focus-within .nav-cta .label {
-  opacity: 1; transform: translateX(0);
-}
-.nav-rail:not(:hover):not(:focus-within) .nav-cta .label { display: none; }
-.nav-rail:not(:hover):not(:focus-within) .nav-cta { justify-content: center; padding: 0; }
+.nav-divider { height: 1px; background: var(--divider); margin: 6px 16px; }
 .nav-group { padding: 6px 0; display: flex; flex-direction: column; }
 
 .nav-item {
-  position: relative; display: flex; align-items: center; gap: 14px;
-  height: 38px; margin: 0 10px; padding: 0 10px;
-  border-radius: 9px; color: var(--slate-500); font-size: 14px; font-weight: 500;
-  cursor: pointer; letter-spacing: -0.005em;
-  transition: background 120ms ease, color 120ms ease;
+  position: relative; display: flex; align-items: center; gap: 0; /* §3: 아이콘↔라벨 간격은 라벨 margin-left(0→13)로 */
+  height: 48px; margin: 0 10px; padding: 0 10px;
+  border-radius: 12px; color: var(--text-secondary); font-size: 15.5px; font-weight: 500;
+  cursor: pointer; letter-spacing: -0.01em;
+  transition: background .16s ease, padding .42s cubic-bezier(.22,1,.36,1);
 }
-.nav-item:hover { background: var(--fog-300); color: var(--slate-800); }
-.nav-item.active { background: var(--sage-50); color: var(--slate-900); font-weight: 600; }
-.nav-item.active::before {
-  content: ""; position: absolute; left: -10px; top: 8px; bottom: 8px;
-  width: 3px; background: var(--pass-500); border-radius: 0 2px 2px 0;
-}
+.nav-item:hover { background: var(--neutral-100); }
+/* active = face 변형(spec 권장): navy-50 면 + navy-600 라벨 + navy-500 아이콘. 좌측 bar(border 변형)는 미채택. */
+.nav-item.active { background: var(--navy-50); color: var(--interactive-active); font-weight: 600; }
+.nav-item.active .icon { color: var(--interactive-default); }
 .nav-item.disabled { opacity: 0.5; cursor: not-allowed; }
-.nav-item.disabled:hover { background: transparent; color: var(--slate-500); }
+.nav-item.disabled:hover { background: transparent; }
 
-.nav-item .icon { width: 20px; height: 20px; display: grid; place-items: center; flex-shrink: 0; }
-.nav-item .icon svg { width: 18px; height: 18px; }
+.nav-item .icon { width: 21px; height: 21px; display: grid; place-items: center; flex-shrink: 0; color: var(--text-muted); }
+.nav-item .icon svg { width: 21px; height: 21px; stroke-width: 1.7; } /* CSS가 NavRail.tsx의 strokeWidth=1.8 속성을 덮음 */
+.nav-item.active .icon svg { stroke-width: 1.9; }
+/* §3 라벨 페이드: 펼침=opacity .26s ease .12s(지연), 접힘=opacity .1s(즉시) — 비대칭.
+   max-width 0↔180·margin-left 0↔13 은 양방향 .42s cubic-bezier(.22,1,.36,1). */
 .nav-item .label {
-  flex: 1; white-space: nowrap;
-  opacity: 0; transform: translateX(-6px);
-  transition: opacity 180ms 80ms ease, transform 180ms 80ms ease;
+  flex: 1; white-space: nowrap; overflow: hidden;
+  opacity: 0; max-width: 0; margin-left: 0;
+  transition: opacity .1s ease, max-width .42s cubic-bezier(.22,1,.36,1), margin-left .42s cubic-bezier(.22,1,.36,1);
 }
-.nav-rail:hover .nav-item .label, .nav-rail:focus-within .nav-item .label { opacity: 1; transform: translateX(0); }
+.nav-rail:hover .nav-item .label, .nav-rail:focus-within .nav-item .label {
+  opacity: 1; max-width: 180px; margin-left: 13px;
+  transition: opacity .26s ease .12s, max-width .42s cubic-bezier(.22,1,.36,1), margin-left .42s cubic-bezier(.22,1,.36,1);
+}
 
 .nav-item .badge {
-  background: var(--fail-500); color: var(--fog-50);
+  background: var(--red-500); color: var(--white);
   font-family: var(--ff-mono); font-size: 10px; font-weight: 600;
   padding: 2px 7px; border-radius: var(--r-pill);
   opacity: 0; transition: opacity 180ms 100ms ease;
@@ -100,65 +86,68 @@
 .nav-rail:hover .nav-item .badge, .nav-rail:focus-within .nav-item .badge { opacity: 1; }
 .nav-item .dot-badge {
   position: absolute; right: 8px; top: 6px;
-  width: 8px; height: 8px; border-radius: 50%; background: var(--fail-500);
-  box-shadow: 0 0 0 2px var(--surface);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--red-500);
+  box-shadow: 0 0 0 2px var(--surface-raised);
   transition: opacity 120ms ease;
 }
 .nav-rail:hover .nav-item .dot-badge, .nav-rail:focus-within .nav-item .dot-badge { opacity: 0; }
 
 .nav-bottom { margin-top: auto; padding-top: 8px; position: relative; }
+/* §5 계정 바: 흰 면 + 테두리 모델. 기본 border-default, 팝오버 열림 border-strong, 접힘 투명. */
 .nav-user {
   display: flex; align-items: center; gap: 12px;
-  margin: 0 10px; padding: 8px 10px; border-radius: 10px;
-  transition: background 120ms ease; cursor: pointer;
+  margin: 0 10px; padding: 8px 10px; border-radius: 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  transition: border-color .16s ease; cursor: pointer;
 }
-.nav-user:hover, .nav-user.open { background: var(--fog-300); }
+.nav-user.open { border-color: var(--border-strong); }
+.nav-rail:not(:hover):not(:focus-within) .nav-user { border-color: transparent; }
 .nav-user-caret {
-  margin-left: auto; color: var(--slate-400); display: grid; place-items: center;
-  opacity: 0; transition: opacity 180ms 100ms ease;
+  margin-left: auto; color: var(--text-muted); display: grid; place-items: center;
+  opacity: 0; transform: rotate(180deg); /* 닫힘=180(아래) */
+  transition: opacity 180ms 100ms ease, transform .15s ease;
 }
+.nav-user.open .nav-user-caret { transform: rotate(0deg); } /* 열림=0(위) */
 .nav-rail:hover .nav-user-caret, .nav-rail:focus-within .nav-user-caret { opacity: 1; }
 .nav-rail:not(:hover):not(:focus-within) .nav-user-caret { display: none; }
 
 /* account popover above the user row */
 .nav-usermenu {
   position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px);
-  background: var(--surface);
-  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
   border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 10px 30px rgba(6,32,63,.16);
   padding: 6px; z-index: 40;
   display: flex; flex-direction: column; gap: 2px;
 }
 .nav-usermenu-item {
   display: flex; align-items: center; gap: 9px;
   padding: 9px 11px; border-radius: 8px;
-  font-size: 13px; font-weight: 600; color: var(--slate-700);
+  font-size: 15px; font-weight: 600; color: var(--text-primary);
   background: transparent; border: 0; cursor: pointer; text-align: left;
 }
-.nav-usermenu-item:hover { background: var(--fog-300); }
-.nav-usermenu-item.danger { color: var(--fail-700); }
-.nav-usermenu-item.danger:hover { background: var(--fail-50); }
+.nav-usermenu-item:hover { background: var(--neutral-100); }
+.nav-usermenu-item.danger { color: var(--red-600); }
+.nav-usermenu-item.danger:hover { background: var(--red-50); }
+.nav-usermenu-divider { height: 1px; background: var(--divider); } /* §5 프로필/로그아웃 사이 구분선 */
 .nav-rail:not(:hover):not(:focus-within) .nav-usermenu { display: none; }
 .nav-user .av {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: var(--slate-500); color: var(--fog-50);
-  display: grid; place-items: center; font-size: 11px; font-weight: 700; flex-shrink: 0;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--interactive-default); color: var(--white);
+  display: grid; place-items: center; font-size: 14px; font-weight: 700; flex-shrink: 0;
 }
 .nav-user .meta {
-  flex: 1; opacity: 0; transform: translateX(-6px);
-  transition: opacity 180ms 100ms ease, transform 180ms 100ms ease;
-  overflow: hidden;
+  flex: 1; opacity: 0; max-width: 0; overflow: hidden;
+  transition: opacity .1s ease, max-width .42s cubic-bezier(.22,1,.36,1);
 }
-.nav-user .meta .nm { font-size: 13px; color: var(--slate-900); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nav-user .meta .em { font-family: var(--ff-mono); font-size: 10.5px; color: var(--slate-400); margin-top: -2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nav-rail:hover .nav-user .meta, .nav-rail:focus-within .nav-user .meta { opacity: 1; transform: translateX(0); }
+.nav-user .meta .nm { font-size: 14.5px; color: var(--text-secondary); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-user .meta .em { font-family: var(--ff-mono); font-size: 11.5px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-rail:hover .nav-user .meta, .nav-rail:focus-within .nav-user .meta { opacity: 1; max-width: 200px; transition: opacity .26s ease .12s, max-width .42s cubic-bezier(.22,1,.36,1); }
 
-/* hide trailing meta when collapsed (avoids ghost layout shifts) */
-.nav-rail:not(:hover):not(:focus-within) .nav-logo .word,
-.nav-rail:not(:hover):not(:focus-within) .nav-item .label,
-.nav-rail:not(:hover):not(:focus-within) .nav-item .badge,
-.nav-rail:not(:hover):not(:focus-within) .nav-user .meta { display: none; }
+/* 접힘: 라벨/워드마크/메타는 max-width 0으로 부드럽게 접힘(§3 모션). badge만 display:none, 아이콘은 가운데. */
+.nav-rail:not(:hover):not(:focus-within) .nav-item .badge { display: none; }
 .nav-rail:not(:hover):not(:focus-within) .nav-item,
 .nav-rail:not(:hover):not(:focus-within) .nav-user,
 .nav-rail:not(:hover):not(:focus-within) .nav-logo { justify-content: center; padding-left: 0; padding-right: 0; }
@@ -211,7 +200,7 @@
 .search-wrap .search { margin: 0; }
 .search-pop {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-  background: var(--surface);
+  background: var(--surface-raised);
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
   box-shadow: 0 12px 32px rgba(15,23,42,0.12);
@@ -245,7 +234,7 @@
   font-family: var(--ff-mono); font-size: 11px; font-weight: 700;
   background: var(--cyan-100); color: var(--cyan-800);
 }
-.search-item-ico.verdict.pass { background: var(--pass-100); color: var(--pass-800); }
+.search-item-ico.verdict.pass { background: var(--neutral-100); color: var(--neutral-700); }
 .search-item-ico.verdict.warn { background: var(--warn-100); color: var(--warn-800); }
 .search-item-ico.verdict.fail { background: var(--fail-100); color: var(--fail-800); }
 .search-item-main { display: flex; flex-direction: column; min-width: 0; }

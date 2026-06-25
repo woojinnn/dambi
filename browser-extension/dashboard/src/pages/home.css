@@ -11,7 +11,7 @@
 }
 .ctx-bar .protected {
   display: inline-flex; align-items: center; gap: 8px;
-  font-weight: 600; color: var(--pass-800);
+  font-weight: 600; color: var(--neutral-700);
 }
 .ctx-bar .sep { width: 1px; height: 14px; background: var(--sage-300); }
 .ctx-bar .summary { display: flex; align-items: baseline; gap: 6px; }
@@ -111,7 +111,7 @@
   padding: 2px 7px; border-radius: var(--r-pill);
   font-family: var(--ff-mono);
 }
-.wallets-head h2 .submeta-chips .chip.pass { background: var(--pass-100); color: var(--pass-800); }
+.wallets-head h2 .submeta-chips .chip.pass { background: var(--neutral-100); color: var(--neutral-700); }
 .wallets-head h2 .submeta-chips .chip.warn { background: var(--warn-100); color: var(--warn-800); }
 .wallets-head h2 .submeta-chips .chip.fail { background: var(--fail-100); color: var(--fail-800); }
 
@@ -124,7 +124,7 @@
 }
 .wallet-card.fail { border-left: 3px solid var(--fail-500); }
 .wallet-card.warn { border-left: 3px solid var(--warn-500); }
-.wallet-card.calm { border-left: 3px solid var(--pass-500); }
+.wallet-card.calm { border-left: 3px solid var(--neutral-400); }
 .wallet-head {
   display: grid;
   grid-template-columns: 36px 1fr auto auto auto;
@@ -156,8 +156,8 @@
   letter-spacing: 0.02em;
 }
 .wallet-head .w-pill .pd { width: 7px; height: 7px; border-radius: 50%; }
-.wallet-head .w-pill.calm { background: var(--pass-100); color: var(--pass-800); }
-.wallet-head .w-pill.calm .pd { background: var(--pass-500); }
+.wallet-head .w-pill.calm { background: var(--neutral-100); color: var(--neutral-700); }
+.wallet-head .w-pill.calm .pd { background: var(--neutral-400); }
 .wallet-head .w-pill.warn { background: var(--warn-100); color: var(--warn-800); }
 .wallet-head .w-pill.warn .pd { background: var(--warn-500); }
 .wallet-head .w-pill.fail { background: var(--fail-100); color: var(--fail-800); }
@@ -275,9 +275,9 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface-raised);
   transition: transform 120ms ease;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
 }
-.wp-tg.on { background: var(--pass-500, #22c55e); }
+.wp-tg.on { background: var(--navy-500); }
 .wp-tg.on .sw { transform: translateX(15px); }

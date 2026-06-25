@@ -4,7 +4,7 @@
 .filter-bar {
   display: flex; flex-direction: column; gap: 12px;
   padding: 14px 18px;
-  background: var(--surface);
+  background: var(--neutral-50); /* ③-1 step3 BASE(필터 바) neutral-50 */
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
   margin-bottom: 14px;
@@ -40,7 +40,7 @@
 }
 .count-chip.warn { background: var(--warn-100); color: var(--warn-800); }
 .count-chip.fail { background: var(--fail-100); color: var(--fail-800); }
-.count-chip.pass { background: var(--pass-100); color: var(--pass-800); }
+.count-chip.pass { background: var(--neutral-100); color: var(--neutral-700); }
 
 .seg-group {
   display: inline-flex; gap: 0; background: var(--fog-200);
@@ -119,9 +119,9 @@
 }
 .vtoggle:hover { background: var(--fog-200); }
 .vtoggle.pass.on {
-  border-color: var(--pass-500);
-  background: var(--pass-100);
-  color: var(--pass-800);
+  border-color: var(--neutral-400);
+  background: var(--neutral-100);
+  color: var(--neutral-700);
 }
 .vtoggle.warn.on {
   border-color: var(--warn-500);
@@ -171,7 +171,7 @@
 }
 .v-group-head.gh-fail .gh-title { color: var(--fail-700); }
 .v-group-head.gh-warn .gh-title { color: var(--warn-700); }
-.v-group-head.gh-pass .gh-title { color: var(--pass-700); }
+.v-group-head.gh-pass .gh-title { color: var(--neutral-600); }
 
 /* Policy structure + diagnosis section in a deny row's detail. */
 .v-struct-section { margin-top: 10px; }
@@ -225,7 +225,7 @@
 .gh-mini { display: inline-flex; gap: 10px; font-size: 11.5px; }
 .gh-mini .mini-fail { color: var(--fail-700); }
 .gh-mini .mini-warn { color: var(--warn-700); }
-.gh-mini .mini-pass { color: var(--pass-700); }
+.gh-mini .mini-pass { color: var(--neutral-600); }
 
 .v-table-wrap {
   background: var(--surface);
@@ -259,7 +259,7 @@
 .v-table .pill-row { display: flex; gap: 4px; align-items: center; }
 .v-table .deco-trusted {
   display: inline-block; padding: 2px 8px; border-radius: var(--r-pill);
-  background: var(--pass-100); color: var(--pass-800);
+  background: var(--neutral-100); color: var(--neutral-700);
   font-size: 11px; font-weight: 600;
 }
 .v-table .deco-cancelled {
@@ -441,3 +441,10 @@
   color: var(--slate-900);
 }
 .v-delta-amt.neg { color: var(--fail-800, #8a1f1f); }
+
+/* ③-3 STEP4 verdict chip sweep (append-override) */
+.count-chip { border-radius:5px; border:1px solid transparent; display:inline-flex; align-items:center; gap:4px; }
+.count-chip.pass { border-color: var(--neutral-300); } .count-chip.pass::before { content: "✓"; }
+.count-chip.warn { border-color: var(--warn-300); }    .count-chip.warn::before { content: "⚠"; }
+.count-chip.fail { border-color: var(--fail-300); }    .count-chip.fail::before { content: "✕"; }
+.vtoggle.pass.on, .vtoggle.warn.on, .vtoggle.fail.on { border-radius: 5px; } /* 필터 토글: 형태만(rect), 아이콘 생략 */

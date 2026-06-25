@@ -19,7 +19,7 @@
 .ws-chip .ws-dot { width: 8px; height: 8px; border-radius: 50%; }
 .ws-chip .ws-dot.fail { background: var(--fail-500); }
 .ws-chip .ws-dot.warn { background: var(--warn-500); }
-.ws-chip .ws-dot.calm { background: var(--pass-500); }
+.ws-chip .ws-dot.calm { background: var(--neutral-400); }
 .ws-chip .ws-amt {
   font-family: var(--ff-mono); font-size: 11px; opacity: 0.7;
 }
@@ -41,6 +41,7 @@
   margin-bottom: 8px;
 }
 .sum-cell .sc-v {
+  font-family: var(--font-mono); /* STEP2 mono: 요약셀 수치 */
   display: block; font-size: 24px; font-weight: 700;
   color: var(--slate-900); font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -148,7 +149,7 @@
   background: var(--fog-200);
 }
 
-.kind-tag.spam { background: var(--fail-100); color: var(--fail-800); }
+.kind-tag.spam { background: var(--violet-50); border: 1px solid var(--violet-200); color: var(--violet-700); } /* ③-2A 카테고리 톤 50/200/600(red) */
 
 /* 구간 헤더 행 — 주의 / 보유 등 섹션 구분 */
 .tbl-wrap tbody tr.grp-head td {
@@ -212,7 +213,7 @@
   margin-right: 4px; letter-spacing: 0.04em;
 }
 .risk-tag.UNLIMITED { background: var(--warn-100); color: var(--warn-800); }
-.risk-tag.KNOWN_VENUE { background: var(--pass-100); color: var(--pass-800); }
+.risk-tag.KNOWN_VENUE { background: var(--neutral-100); color: var(--neutral-700); }
 .risk-tag.BLOCKED { background: var(--fail-100); color: var(--fail-800); }
 .risk-tag.OLD { background: var(--slate-100); color: var(--slate-700); }
 .risk-tag.EXPIRED { background: var(--fail-100); color: var(--fail-800); }
@@ -229,7 +230,7 @@
 .th-tip {
   position: absolute; top: calc(100% + 9px); right: 0; left: auto; z-index: 30;
   width: 280px; padding: 12px 13px;
-  background: var(--surface); border: 1px solid var(--hairline);
+  background: var(--surface-raised); border: 1px solid var(--hairline);
   border-radius: var(--r-md); box-shadow: 0 8px 28px rgba(13,17,24,0.16);
   opacity: 0; visibility: hidden; transform: translateY(-3px);
   transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s;
@@ -287,8 +288,8 @@
 .l2-chip.fail .lc-dot { background: var(--fail-500); }
 .l2-chip.warn { background: var(--warn-100); color: var(--warn-800); }
 .l2-chip.warn .lc-dot { background: var(--warn-500); }
-.l2-chip.calm { background: var(--pass-100); color: var(--pass-800); }
-.l2-chip.calm .lc-dot { background: var(--pass-500); }
+.l2-chip.calm { background: var(--neutral-100); color: var(--neutral-700); }
+.l2-chip.calm .lc-dot { background: var(--neutral-400); }
 .l2-pending {
   font-family: var(--ff-mono); font-size: 11px;
   padding: 3px 9px; border-radius: var(--r-pill);
@@ -325,6 +326,7 @@
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .wsum-v {
+  font-family: var(--font-mono); /* STEP2 mono: 지갑 요약 큰수치 */
   font-size: 30px; font-weight: 700; color: var(--slate-900);
   font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1.05;
 }
@@ -359,8 +361,8 @@
 .wr-v.warn { color: var(--warn-700); }
 .wrisk-calm {
   margin-top: 2px; padding: 14px; border-radius: var(--r-sm);
-  background: var(--pass-50); border: 1px solid var(--pass-200);
-  font-size: 13px; font-weight: 600; color: var(--pass-800);
+  background: var(--neutral-50); border: 1px solid var(--neutral-200);
+  font-size: 13px; font-weight: 600; color: var(--neutral-700);
 }
 
 /* action items folded into 위험 노출 — the actionable detail of the metrics */
@@ -460,7 +462,7 @@
   text-transform: uppercase;
 }
 .type-tag.detection { background: var(--cyan-100); color: var(--cyan-800); }
-.type-tag.approval { background: var(--warn-100); color: var(--warn-800); }
+.type-tag.approval { background: var(--blue-50); border: 1px solid var(--blue-200); color: var(--blue-700); } /* ③-2A 카테고리 톤 50/200/700 */
 .v-pill {
   font-family: var(--ff-mono); font-size: 10.5px; font-weight: 700;
   padding: 2px 8px; border-radius: var(--r-pill);
@@ -494,7 +496,7 @@
 }
 .asset-ic.native { background: var(--cyan-100); color: var(--cyan-800); }
 .asset-ic.erc20 { background: var(--sage-100); color: var(--sage-800); }
-.asset-ic.nft { background: var(--warn-100); color: var(--warn-800); }
+.asset-ic.nft { background: var(--blue-50); border: 1px solid var(--blue-200); color: var(--blue-700); } /* ③-2A 카테고리 톤 50/200/700 */
 /* 체인 배지 — 아바타 우하단 */
 .chain-badge {
   position: absolute; right: -3px; bottom: -3px;
@@ -515,7 +517,7 @@
   padding: 1px 5px; border-radius: var(--r-pill);
   text-transform: uppercase; letter-spacing: 0.02em;
 }
-.kind-tag.nft { background: var(--warn-100); color: var(--warn-800); }
+.kind-tag.nft { background: var(--blue-50); border: 1px solid var(--blue-200); color: var(--blue-700); } /* ③-2A 카테고리 톤 50/200/700 */
 .kind-tag.native { background: var(--cyan-100); color: var(--cyan-800); }
 
 .r-safe { font-size: 11px; color: var(--slate-400); }
@@ -717,3 +719,15 @@
 }
 .pend-sum .ps-spender { margin-left: 14px; font-family: var(--ff-mono); font-size: 11.5px; color: var(--slate-400); }
 .pend-at { color: var(--slate-500); }
+
+/* ③-3 STEP4 verdict chip sweep (append-override) */
+.risk-chip { border-radius:5px; border:1px solid transparent; display:inline-flex; align-items:center; gap:4px; } .risk-chip .rc-dot { display: none; }
+.risk-chip.fail { border-color: var(--fail-300); } .risk-chip.fail::before { content: "✕"; }
+.risk-chip.unl  { border-color: var(--warn-300); } .risk-chip.unl::before  { content: "⚠"; }
+.l2-chip { border-radius:5px; border:1px solid transparent; display:inline-flex; align-items:center; gap:4px; } .l2-chip .lc-dot { display: none; }
+.l2-chip.calm { border-color: var(--neutral-300); } .l2-chip.calm::before { content: "✓"; }
+.l2-chip.warn { border-color: var(--warn-300); }    .l2-chip.warn::before { content: "⚠"; }
+.l2-chip.fail { border-color: var(--fail-300); }    .l2-chip.fail::before { content: "✕"; }
+
+/* ── STEP 4-B 타입스케일 매핑 (append-override) ── */
+.sec-head h3 { font-size: var(--text-subhead-size); font-weight: var(--text-subhead-weight); line-height: var(--text-subhead-lh); letter-spacing: var(--text-subhead-ls); }

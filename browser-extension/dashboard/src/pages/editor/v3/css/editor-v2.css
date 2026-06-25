@@ -207,8 +207,8 @@
   flex-shrink: 0;
 }
 .ev3 .ev2-pkgtip-row.on .ev2-pkgtip-dot {
-  background: var(--pass-500, #22c55e);
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  background: var(--pass-500, #06203F);
+  box-shadow: 0 0 0 3px rgba(6,32,63, 0.18);
 }
 .ev3 .ev2-pkgtip-nm {
   flex: 1;
@@ -225,7 +225,7 @@
   flex-shrink: 0;
 }
 .ev3 .ev2-pkgtip-row.on .ev2-pkgtip-st {
-  color: var(--pass-400, #4ade80);
+  color: var(--pass-400, #294970);
 }
 .ev3 .ev2-trow {
   cursor: grab;
@@ -1739,14 +1739,14 @@
 }
 .ev3 /* LLM 프리뷰 — sage 프롬프트 바 + 화살표 + 결과 행 */
 .ev2-mpc-prev.llm { height: auto; min-height: 78px; justify-content: center; align-items: stretch; gap: 4px; }
-.ev3 .ev2-mpc-prev.llm .prompt { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; background: var(--sage-50, #eef3ee); border: 1px solid var(--sage-200, #cdddcd); border-radius: 8px; padding: 6px 8px; }
-.ev3 .ev2-mpc-prev.llm .prompt .spark { color: var(--sage-600, #5f7d5f); font-size: 11px; flex: none; }
-.ev3 .ev2-mpc-prev.llm .prompt .ln { height: 7px; border-radius: var(--r-pill); background: var(--sage-300, #b9ccb9); }
+.ev3 .ev2-mpc-prev.llm .prompt { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; background: var(--sage-50, #eef3ee); border: 1px solid var(--sage-200, #D7D9DC); border-radius: 8px; padding: 6px 8px; }
+.ev3 .ev2-mpc-prev.llm .prompt .spark { color: var(--sage-600, #294970); font-size: 11px; flex: none; }
+.ev3 .ev2-mpc-prev.llm .prompt .ln { height: 7px; border-radius: var(--r-pill); background: var(--sage-300, #BABCC0); }
 .ev3 .ev2-mpc-prev.llm .prompt .ln.l1 { flex: 1; }
 .ev3 .ev2-mpc-prev.llm .prompt .ln.l2 { width: 28px; flex: none; }
 .ev3 .ev2-mpc-prev.llm .and { font-family: var(--ff-mono); font-size: 11px; color: var(--slate-400); }
 .ev3 .ev2-mpc-prev.llm .row { display: flex; align-items: center; gap: 6px; height: 18px; }
-.ev3 .ev2-mpc-prev.llm .cap { width: 16px; height: 16px; border-radius: 5px; background: var(--sage-200, #cdddcd); }
+.ev3 .ev2-mpc-prev.llm .cap { width: 16px; height: 16px; border-radius: 5px; background: var(--sage-200, #D7D9DC); }
 .ev3 .ev2-mpc-prev.llm .fld { width: 80px; height: 10px; border-radius: var(--r-pill); background: var(--slate-200); }
 .ev3 .ev2-mpc-prev.llm .op { font-family: var(--ff-mono); font-size: 11px; color: var(--slate-500); font-weight: 700; }
 .ev3 .ev2-mpc-prev.llm .val { background: var(--slate-50); border: 1px solid var(--slate-200); font-family: var(--ff-mono); font-size: 10px; padding: 1px 7px; border-radius: var(--r-pill); }
@@ -2169,7 +2169,7 @@
   transition: transform 120ms ease;
 }
 .ev3 .pm-switch input:checked + .trk {
-  background: var(--sage-500, #4c7a5e);
+  background: var(--sage-500, #06203F);
 }
 .ev3 .pm-switch input:checked + .trk::after {
   transform: translateX(12px);
@@ -2404,8 +2404,8 @@
   opacity: 0.45;
 }
 .ev3 .ev2-pkgrow.wd-scope.droptarget {
-  background: var(--sage-100, #eaf3ee);
-  border-left-color: var(--sage-500, #4c7a5e);
+  background: var(--sage-100, #F1F3F6);
+  border-left-color: var(--sage-500, #06203F);
   opacity: 1;
 }
 .ev3 .wd-cards {
@@ -2448,8 +2448,8 @@
   overflow: hidden;
 }
 .ev3 .ld-folder.droptarget {
-  border-color: var(--sage-500, #4c7a5e);
-  background: var(--sage-100, #eaf3ee);
+  border-color: var(--sage-500, #06203F);
+  background: var(--sage-100, #F1F3F6);
 }
 .ev3 .ld-folderhead {
   display: flex;
@@ -2495,8 +2495,8 @@
 }
 .ev3 /* 지갑 전용 폴더 헤더에 템플릿을 드래그해 폴더 이동 */
 .ld-folderhead.droptarget {
-  background: var(--sage-100, #eaf3ee);
-  outline: 1.5px dashed var(--sage-500, #4c7a5e);
+  background: var(--sage-100, #F1F3F6);
+  outline: 1.5px dashed var(--sage-500, #06203F);
   outline-offset: -1.5px;
 }
 .ev3 .ld-folderhead:hover .acts {
@@ -2578,8 +2578,8 @@
   color: var(--slate-600);
 }
 .ev3 .ld-defaultchip.on {
-  border-color: var(--pass-500, #22c55e);
-  color: var(--pass-700, #15803d);
+  border-color: var(--pass-500, #06203F);
+  color: var(--pass-700, #041222);
 }
 .ev3 .ld-def .acts {
   display: none;
@@ -2692,8 +2692,8 @@
   width: 160px;
 }
 .ev3 .pm-count.on {
-  border-color: var(--sage-500, #4c7a5e);
-  color: var(--sage-600, #3c6a4e);
+  border-color: var(--sage-500, #06203F);
+  color: var(--sage-600, #05182E);
 }
 .ev3 .wt-params {
   padding: 6px 14px 10px 72px;
@@ -2724,9 +2724,9 @@
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 .ev3 .ev2-ox.on {
-  border-color: var(--pass-300, #86efac);
-  background: var(--pass-50, #f0fdf4);
-  color: var(--pass-600, #16a34a);
+  border-color: var(--pass-300, #6F91B8);
+  background: var(--pass-50, #F1F3F6);
+  color: var(--pass-600, #05182E);
 }
 .ev3 .ev2-ox:hover {
   border-color: var(--slate-400);
@@ -2837,7 +2837,7 @@
   border-left-color: var(--slate-900);
 }
 .ev3 .ev2-pkgrow.wd-pkg svg.wd-pkgico {
-  color: var(--sage-600, #4c7a5e);
+  color: var(--sage-600, #06203F);
 }
 .ev3 .ev2-pkgrow.wd-pkg.dim svg.wd-pkgico {
   color: var(--slate-300);
@@ -2891,7 +2891,7 @@
   font-style: italic;
 }
 .ev3 .ld-def:hover .pol-desc.add {
-  color: var(--sage-600, #4c7a5e);
+  color: var(--sage-600, #06203F);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -2918,10 +2918,10 @@
 }
 .ev3 /* 라이브러리 디렉토리(관리 탭)에서도 패키지 폴더헤드 박스 아이콘 + 액센트 */
 .ld-folder.is-pkg > .ld-folderhead svg.ld-pkgico {
-  color: var(--sage-600, #4c7a5e);
+  color: var(--sage-600, #06203F);
 }
 .ev3 .ld-folder.is-pkg {
-  border-left: 2px solid var(--sage-200, #cfe2d6);
+  border-left: 2px solid var(--sage-200, #D7D9DC);
 }
 .ev3 /* ── ② 배지: 미적용 초안 / 공유 ── */
 .pol-badge {
@@ -2949,7 +2949,7 @@
   padding: 10px 11px;
   margin-top: 4px;
   background: var(--sage-50, #eef4ef);
-  border: 1px solid var(--sage-200, #cfe2d6);
+  border: 1px solid var(--sage-200, #D7D9DC);
   border-radius: 9px;
 }
 .ev3 .ptm-field.ssm-applynow input {
@@ -2963,7 +2963,7 @@
 .ev3 .ptm-field.ssm-applynow b {
   font-size: 13px;
   font-weight: 600;
-  color: var(--sage-700, #2f5840);
+  color: var(--sage-700, #05182E);
 }
 .ev3 .ptm-field.ssm-applynow small {
   font-size: 11.5px;
@@ -3067,7 +3067,7 @@
 .ev3 .ev2-llm-head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline-soft); }
 .ev3 .ev2-llm-spark {
   flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff;
-  background: linear-gradient(145deg, #7d9b7d, #5f7d5f); box-shadow: 0 4px 10px -5px rgba(95, 125, 95, 0.5);
+  background: linear-gradient(145deg, #6F91B8, #294970); box-shadow: 0 4px 10px -5px rgba(95, 125, 95, 0.5);
 }
 .ev3 .ev2-llm-spark svg { width: 17px; height: 17px; }
 .ev3 .ev2-llm-headtext { display: flex; flex-direction: column; gap: 3px; padding-top: 1px; }
@@ -3078,7 +3078,7 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 18px 40px -30px rgba(15, 23, 42, 0.25);
   overflow: hidden; transition: border-color 140ms ease, box-shadow 140ms ease;
 }
-.ev3 .ev2-llm-inputwrap:focus-within { border-color: var(--sage-500, #7d9b7d); box-shadow: 0 0 0 4px var(--sage-100, #e8efe8); }
+.ev3 .ev2-llm-inputwrap:focus-within { border-color: var(--sage-500, #6F91B8); box-shadow: 0 0 0 4px var(--sage-100, #F1F3F6); }
 .ev3 .ev2-llm-inputwrap.busy { opacity: 0.85; }
 .ev3 .ev2-llm-textarea {
   display: block; width: 100%; min-height: 150px; appearance: none; resize: vertical;
@@ -3123,7 +3123,7 @@
 }
 .ev3 .ev2-llm-chip .plus {
   flex: none; width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center;
-  font-size: 14px; line-height: 1; color: var(--sage-700, #5f7d5f); background: var(--sage-100, #e8efe8);
+  font-size: 14px; line-height: 1; color: var(--sage-700, #294970); background: var(--sage-100, #F1F3F6);
 }
-.ev3 .ev2-llm-chip:hover:not(:disabled) { background: #fff; border-color: var(--sage-300, #b9ccb9); color: var(--slate-900); transform: translateX(2px); }
+.ev3 .ev2-llm-chip:hover:not(:disabled) { background: #fff; border-color: var(--sage-300, #BABCC0); color: var(--slate-900); transform: translateX(2px); }
 .ev3 .ev2-llm-chip:disabled { opacity: 0.5; cursor: default; }

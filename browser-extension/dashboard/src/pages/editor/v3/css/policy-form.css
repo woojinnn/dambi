@@ -588,9 +588,9 @@
   gap: 3px;
 }
 .ev3 .pf-status.ok {
-  background: #f0fdf4;
-  border: 1px solid #dcfce7;
-  color: #15803d;
+  background: #F1F3F6;
+  border: 1px solid #DCE2EA;
+  color: #041222;
 }
 .ev3 .pf-status.bad {
   background: #fef2f2;
@@ -626,8 +626,8 @@
 }
 .ev3 .pf-sync {
   font-size: 11px;
-  color: #34d399;
-  background: rgba(52, 211, 153, 0.12);
+  color: #294970;
+  background: rgba(6,32,63, 0.12);
   border-radius: 6px;
   padding: 2px 8px;
 }
@@ -647,11 +647,11 @@
 }
 .ev3 /* ── address picker (name-resolving 0x input) ── */
 .pf-addr { position: relative; display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
-.ev3 .pf-val.resolved { border-color: var(--pass-400, #4ade80); background: var(--pass-50, #f0fdf4); }
+.ev3 .pf-val.resolved { border-color: var(--pass-400, #294970); background: var(--pass-50, #F1F3F6); }
 .ev3 .pf-addr-name {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 12px; font-weight: 600; color: var(--pass-800, #166534);
-  background: var(--pass-100, #dcfce7); border-radius: var(--r-pill, 999px);
+  font-size: 12px; font-weight: 600; color: var(--pass-800, #041222);
+  background: var(--pass-100, #DCE2EA); border-radius: var(--r-pill, 999px);
   padding: 2px 9px; white-space: nowrap; flex-shrink: 0;
 }
 .ev3 .pf-addr-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
@@ -969,7 +969,7 @@
   font-size: 11px;
   color: var(--slate-500);
 }
-.ev3 .pf-manifest-status.ok { color: var(--pass-700, #15803d); }
+.ev3 .pf-manifest-status.ok { color: var(--pass-700, #041222); }
 .ev3 .pf-manifest-status.err { color: var(--fail-700, #b91c1c); }
 .ev3 .pf-manifest-btn {
   margin-left: auto;
@@ -1008,9 +1008,9 @@
 }
 .ev3 .pf-param.on {
   border-style: solid;
-  border-color: var(--sage-500, #4c7a5e);
-  color: var(--sage-600, #3c6a4e);
-  background: var(--sage-100, #eaf3ee);
+  border-color: var(--sage-500, #06203F);
+  color: var(--sage-600, #05182E);
+  background: var(--sage-100, #F1F3F6);
 }
 .ev3 .pf-param-label {
   flex: none;
