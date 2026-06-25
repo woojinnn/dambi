@@ -10,11 +10,12 @@ vi.mock("../server-api/policy-store", () => ({
 }));
 
 import { useProvisionWallets } from "./use-provision-wallets";
+import type { StoreSnapshot } from "../server-api/policy-store";
 
 const A = "0xa100000000000000000000000000000000000001";
 const B = "0xb200000000000000000000000000000000000002";
 
-function snap(addresses: string[]) {
+function snap(addresses: string[]): StoreSnapshot {
   return {
     library: { schemaVersion: 1, defs: {}, packages: {} },
     wallets: {
