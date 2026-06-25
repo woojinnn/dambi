@@ -42,7 +42,9 @@
 .e2 .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); border-color: var(--slate-soft); }
 .e2 .btn:active { transform: translateY(0); }
 .e2 .btn.pri { background: var(--slate); color: #fff; border-color: var(--slate); }
-.e2 .btn.sage { background: var(--sage); color: #fff; border-color: var(--sage); }
+/* 주 액션 버튼은 앱 전체 DEEP 네이비로 통일 — 예전 sage(녹색)는 토글·선택 같은
+ * 액센트 역할로만 남기고, 버튼은 .pri(네이비)와 같은 색을 쓴다. */
+.e2 .btn.sage { background: var(--slate); color: #fff; border-color: var(--slate); }
 .e2 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 .e2 .muted { color: var(--mut); }
