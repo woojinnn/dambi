@@ -66,6 +66,11 @@ output**, never hand-edited.
 | `signatures/<sha>.sig` | gitignored | Detached signatures (~31 k). The **bucket** is the source of truth for these; CI hydrates from it. |
 | `docs/` | source | `REGISTRY_ARCHITECTURE.md`, `REGISTRY_RUNBOOK.md`. |
 
+The live bucket may also contain `docs/` and `surface/` provenance snapshots. They are
+useful for operators and audits, but they are **not** part of the public proxy surface:
+`registry-api` only allowlists the runtime prefixes it serves to the extension
+(`index/`, `tokens/`, `bundles/`, `signatures/`, `contexts/`).
+
 ---
 
 ## The bundle model & `bundle_sha256`
@@ -303,6 +308,12 @@ The canonical deployment, verified against the live project:
 | `registry-signer@dambi-registry.iam.gserviceaccount.com` | `roles/cloudkms.signerVerifier` on the key (sign + `getPublicKey`, **not** export) + `roles/storage.objectAdmin` on the bucket + Cloud Run deployer | CI publish & proxy-deploy (the WIF identity) |
 | `registry-api-v3-sa@dambi-registry.iam.gserviceaccount.com` | `roles/storage.objectViewer` on the bucket | the proxy **runtime** (read-only) |
 
+The bucket is not anonymously readable (`Public Access Prevention` is enforced and there
+is no `allUsers` bucket binding). Admin/project legacy IAM bindings still exist, so the
+precise serving claim is narrower: anonymous extension reads are exposed only through the
+Cloud Run proxy, while CI/operator identities retain the permissions needed to publish and
+operate the registry.
+
 **Keyless CI auth (Workload Identity Federation):** pool `github-pool`, provider
 `github-provider` (OIDC issuer `https://token.actions.githubusercontent.com`). The provider
 condition `assertion.repository == 'woojinnn/dambi'` and a `principalSet` binding for
@@ -404,7 +415,8 @@ proxy). Routine data updates: `scripts/deploy/publish-index.sh`.
   acceptable bundle; it can only withhold or corrupt (caught fail-closed when enforced).
 - The signing private key is **non-extractable** in a Cloud KMS HSM; CI signs via keyless
   WIF restricted to one GitHub repo. No private key material is ever written to disk in prod.
-- Bucket is private + versioned; the proxy runtime SA is read-only.
+- Bucket is private to anonymous users + versioned; the proxy runtime SA is read-only for
+  the public serving path, while CI/operator identities keep separate publish/ops grants.
 - Build-time gates (`$fn` whitelist, strict callkeys, surface/universe/token completeness,
   Rust harness) keep a malformed or surface-incomplete manifest out of the published index.
 - Enforcement (`DAMBI_REQUIRE_BUNDLE_SIGNATURE`) is forced **on** for production extension

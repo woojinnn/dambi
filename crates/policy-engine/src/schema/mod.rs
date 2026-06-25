@@ -272,6 +272,8 @@ const TOKEN_PERMIT2_TRANSFER_FROM_SCHEMA: &str = include_str!(
 );
 const TOKEN_REVOKE_APPROVAL_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/token/revoke_approval.cedarschema");
+const TOKEN_REFUND_NATIVE_SCHEMA: &str =
+    include_str!("../../../../schema/policy-schema/actions/token/refund_native.cedarschema");
 const TOKEN_UNWRAP_NATIVE_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/token/unwrap_native.cedarschema");
 const TOKEN_WRAP_NATIVE_SCHEMA: &str =
@@ -395,6 +397,7 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     TOKEN_PERMIT2_SIGN_TRANSFER_SCHEMA,
     TOKEN_PERMIT2_TRANSFER_FROM_SCHEMA,
     TOKEN_REVOKE_APPROVAL_SCHEMA,
+    TOKEN_REFUND_NATIVE_SCHEMA,
     TOKEN_UNWRAP_NATIVE_SCHEMA,
     TOKEN_WRAP_NATIVE_SCHEMA,
     HL_WITHDRAW_SCHEMA,
@@ -895,6 +898,7 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     ("permit2_sign_transfer", "Permit2SignTransferContext"),
     ("permit2_transfer_from", "Permit2TransferFromContext"),
     ("revoke_approval", "RevokeApprovalContext"),
+    ("refund_native", "RefundNativeContext"),
     ("unwrap_native", "UnwrapNativeContext"),
     ("wrap_native", "WrapNativeContext"),
     // hyperliquid_core (alphabetical) — `hl_`-prefixed tags keep these globally

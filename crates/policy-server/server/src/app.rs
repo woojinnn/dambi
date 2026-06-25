@@ -28,6 +28,7 @@ use policy_sync::sources::fetchers::rpc::multicall::{
 use policy_sync::{CoinGeckoClient, EtherscanClient, Orchestrator};
 
 use crate::auth::{require_auth, AuthUser};
+use crate::capabilities_handlers;
 use crate::config::ServerConfig;
 use crate::coordination::DynCoordinator;
 use crate::dashboard_handlers;
@@ -134,6 +135,7 @@ pub struct ShutdownRx(pub tokio::sync::watch::Receiver<bool>);
 ///
 /// Authenticated (`Authorization: Bearer <jwt>`):
 /// - `GET  /auth/me`                        — current user (id + email).
+/// - `GET  /capabilities/sync-chains`       — sync chains backed by RPC config.
 /// - `POST /evaluate`                       — simulate action envelope(s).
 /// - `GET  /wallets`                        — list user's wallets.
 /// - `POST /wallets`                        — start tracking a new wallet.
@@ -163,6 +165,10 @@ pub fn build_router(state: AppState) -> Router {
 pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Router {
     let protected = Router::new()
         .route("/auth/me", get(auth_me_handler))
+        .route(
+            "/capabilities/sync-chains",
+            get(capabilities_handlers::sync_chains),
+        )
         .route("/evaluate", post(evaluate_handler))
         .route(
             "/wallets",

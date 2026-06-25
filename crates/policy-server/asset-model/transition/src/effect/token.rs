@@ -27,8 +27,8 @@ use policy_state::{DataSource, EvalContext, PendingChange, StateDelta, TokenKey,
 use crate::action::token::{
     Erc20ApproveAction, Erc20PermitAction, Erc20TransferAction, NftApproveAction,
     NftSetForAllAction, NftTransferAction, Permit2ApproveAction, Permit2SignAction,
-    Permit2SignTransferAction, Permit2TransferFromAction, RevokeApprovalAction, RevokeScope,
-    TokenAction, UnwrapNativeAction, WrapNativeAction,
+    Permit2SignTransferAction, Permit2TransferFromAction, RefundNativeAction, RevokeApprovalAction,
+    RevokeScope, TokenAction, UnwrapNativeAction, WrapNativeAction,
 };
 use crate::apply::Reducer;
 use crate::error::{ReducerError, ReducerResult};
@@ -85,6 +85,7 @@ impl Reducer for TokenAction {
             Self::NftSetApprovalForAll(a) => a.apply(state, ctx),
             Self::NftTransfer(a) => a.apply(state, ctx),
             Self::RevokeApproval(a) => a.apply(state, ctx),
+            Self::RefundNative(a) => a.apply(state, ctx),
             Self::WrapNative(a) => a.apply(state, ctx),
             Self::UnwrapNative(a) => a.apply(state, ctx),
         }
@@ -107,6 +108,12 @@ impl Reducer for WrapNativeAction {
 }
 
 impl Reducer for UnwrapNativeAction {
+    fn apply(&self, _state: &WalletState, _ctx: &EvalContext) -> ReducerResult<StateDelta> {
+        Ok(StateDelta::new())
+    }
+}
+
+impl Reducer for RefundNativeAction {
     fn apply(&self, _state: &WalletState, _ctx: &EvalContext) -> ReducerResult<StateDelta> {
         Ok(StateDelta::new())
     }

@@ -79,6 +79,22 @@ describe("dashboard wallet API client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("omits chains from add wallet requests when caller uses server defaults", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { addWallet } = await import("./wallets");
+
+    await addWallet({
+      address: "0xA100000000000000000000000000000000000001",
+      label: "Cold",
+    });
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
+      address: "0xa100000000000000000000000000000000000001",
+      label: "Cold",
+    });
+  });
+
   it("normalizes other dashboard address path wrappers", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => Response.json([]));
     vi.stubGlobal("fetch", fetchMock);

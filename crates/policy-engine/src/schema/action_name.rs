@@ -183,7 +183,7 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     // disambiguation lives in per_policy::RESOLVER_TABLE, keyed on (domain, tag)).
     "fulfill_order",
     "sign_order",
-    // Token (13) — `delegate` already listed above under Airdrop
+    // Token (14) — `delegate` already listed above under Airdrop
     "erc20_approve",
     "erc20_permit",
     "erc20_transfer",
@@ -195,6 +195,7 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     "permit2_sign_transfer",
     "permit2_transfer_from",
     "revoke_approval",
+    "refund_native",
     "unwrap_native",
     "wrap_native",
     // HyperliquidCore — thin off-chain L1 action model. `hl_`-prefixed so the
@@ -277,8 +278,9 @@ mod tests {
         // redeem/stake/cooldown), plus Marketplace (Seaport) sign_order +
         // fulfill_order (cancel_order dedups against Perp), plus bridge `send`,
         // MINUS the origin/main HL→Perp/Token/Staking migration (HL core 18→3).
-        // Build-determined merged count: origin/main 104 + bridge `send` = 105.
-        assert_eq!(REGISTERED_ACTIONS.len(), 105);
+        // Build-determined merged count: origin/main 104 + bridge `send` +
+        // token `refund_native` = 106.
+        assert_eq!(REGISTERED_ACTIONS.len(), 106);
     }
 
     #[test]

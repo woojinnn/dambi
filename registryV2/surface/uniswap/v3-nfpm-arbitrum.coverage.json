@@ -52,8 +52,8 @@
     },
     "0x12210e8a": {
       "name": "refundETH",
-      "decision": "exclude",
-      "reason": "periphery payment helper, callback, permit helper, or inherited helper not modeled as direct user AMM intent"
+      "decision": "cover",
+      "reason": "periphery native refund helper; model as token::refund_native so multicall refunds do not surface as unknown"
     },
     "0x42842e0e": {
       "name": "safeTransferFrom",

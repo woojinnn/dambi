@@ -4940,6 +4940,10 @@ const NFPM_COLLECT_V3: &str =
     include_str!("../../../registryV2/manifests/uniswap/v3-nfpm/collect@1.0.0.json");
 const NFPM_BURN_V3: &str =
     include_str!("../../../registryV2/manifests/uniswap/v3-nfpm/burn@1.0.0.json");
+const NFPM_MULTICALL_V3: &str =
+    include_str!("../../../registryV2/manifests/uniswap/v3-nfpm/multicall@1.0.0.json");
+const NFPM_REFUND_ETH_V3: &str =
+    include_str!("../../../registryV2/manifests/uniswap/v3-nfpm/refundETH@1.0.0.json");
 
 const NFPM_MAINNET: &str = "0xc36442b4a4522e871399cd717abdd847ab11fe88";
 const NFPM_TOKEN0: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
@@ -5016,6 +5020,86 @@ fn b1_nfpm_mint_concentrated_mint() {
     assert_eq!(body["params"]["amount_desired"][0], "0xf4240", "{parsed}"); // 1_000_000
     assert_eq!(body["params"]["amount_desired"][1], "0x1f4", "{parsed}"); // 500
     assert_eq!(body["params"]["recipient"], NFPM_SUBMITTER, "{parsed}");
+}
+
+#[test]
+fn b1_nfpm_refund_eth_decodes_to_native_refund() {
+    let install = install_ok(NFPM_REFUND_ETH_V3);
+    assert_eq!(
+        install["data"]["bundle_id"],
+        "uniswap/v3-nfpm/refundETH@1.0.0"
+    );
+
+    let calldata = encode_calldata("0x12210e8a", &[]);
+    let input = route_input(1, NFPM_MAINNET, "0x12210e8a", calldata, NFPM_SUBMITTER);
+
+    let parsed = route_ok(input);
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "token", "{parsed}");
+    assert_eq!(body["action"], "refund_native", "{parsed}");
+    assert_eq!(body["token"]["key"]["standard"], "native", "{parsed}");
+    assert_eq!(body["token"]["key"]["chain"], "eip155:1", "{parsed}");
+    assert_eq!(body["recipient"], NFPM_SUBMITTER, "{parsed}");
+    assert!(
+        body.get("amount").is_none(),
+        "refundETH carries no amount argument; decoder must not fabricate one: {parsed}"
+    );
+}
+
+#[test]
+fn b1_nfpm_multicall_mint_refund_eth_has_no_unknown_child() {
+    let multicall = install_ok(NFPM_MULTICALL_V3);
+    assert_eq!(
+        multicall["data"]["bundle_id"],
+        "uniswap/v3-nfpm/multicall@1.0.0"
+    );
+    let mint = install_ok(NFPM_MINT_V3);
+    assert_eq!(mint["data"]["bundle_id"], "uniswap/v3-nfpm/mint@1.0.0");
+    let refund = install_ok(NFPM_REFUND_ETH_V3);
+    assert_eq!(
+        refund["data"]["bundle_id"],
+        "uniswap/v3-nfpm/refundETH@1.0.0"
+    );
+
+    let mint_params = DynSolValue::Tuple(vec![
+        DynSolValue::Address(addr(NFPM_TOKEN0)),
+        DynSolValue::Address(addr(NFPM_TOKEN1)),
+        DynSolValue::Uint(AlloyU256::from(3000u64), 24),
+        DynSolValue::Int(alloy_primitives::I256::try_from(-887_220i64).unwrap(), 24),
+        DynSolValue::Int(alloy_primitives::I256::try_from(887_220i64).unwrap(), 24),
+        DynSolValue::Uint(AlloyU256::from(1_000_000u64), 256),
+        DynSolValue::Uint(AlloyU256::from(500u64), 256),
+        DynSolValue::Uint(AlloyU256::from(900_000u64), 256),
+        DynSolValue::Uint(AlloyU256::from(450u64), 256),
+        DynSolValue::Address(addr(NFPM_SUBMITTER)),
+        DynSolValue::Uint(AlloyU256::from(1_738_002_000u64), 256),
+    ]);
+    let mint_calldata = encode_calldata("0x88316456", &[mint_params]);
+    let refund_calldata = encode_calldata("0x12210e8a", &[]);
+    let child_calls = DynSolValue::Array(vec![
+        DynSolValue::Bytes(hex::decode(mint_calldata.trim_start_matches("0x")).unwrap()),
+        DynSolValue::Bytes(hex::decode(refund_calldata.trim_start_matches("0x")).unwrap()),
+    ]);
+    let calldata = encode_calldata("0xac9650d8", &[child_calls]);
+    let input = route_input(1, NFPM_MAINNET, "0xac9650d8", calldata, NFPM_SUBMITTER);
+
+    let parsed = route_ok(input);
+    assert_eq!(
+        parsed["data"]["decoder_id"],
+        "uniswap/v3-nfpm/multicall@1.0.0"
+    );
+    let body = &parsed["data"]["actions"][0]["body"];
+    assert_eq!(body["domain"], "multicall", "{parsed}");
+    let children = body["actions"].as_array().expect("multicall actions");
+    assert_eq!(children.len(), 2, "{parsed}");
+    assert_eq!(children[0]["domain"], "amm", "{parsed}");
+    assert_eq!(children[0]["action"], "add_liquidity", "{parsed}");
+    assert_eq!(children[1]["domain"], "token", "{parsed}");
+    assert_eq!(children[1]["action"], "refund_native", "{parsed}");
+    assert!(
+        children.iter().all(|child| child["domain"] != "unknown"),
+        "refundETH must be known so orchestrator does not add partial_decode: {parsed}"
+    );
 }
 
 // ---------------------------------------------------------------------------

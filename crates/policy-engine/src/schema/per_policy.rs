@@ -59,11 +59,11 @@ use super::{
     TOKEN_ERC20_TRANSFER_SCHEMA, TOKEN_NFT_APPROVE_SCHEMA, TOKEN_NFT_SET_APPROVAL_FOR_ALL_SCHEMA,
     TOKEN_NFT_TRANSFER_SCHEMA, TOKEN_PERMIT2_APPROVE_SCHEMA, TOKEN_PERMIT2_SIGN_ALLOWANCE_SCHEMA,
     TOKEN_PERMIT2_SIGN_TRANSFER_SCHEMA, TOKEN_PERMIT2_TRANSFER_FROM_SCHEMA,
-    TOKEN_REVOKE_APPROVAL_SCHEMA, TOKEN_UNWRAP_NATIVE_SCHEMA, TOKEN_WRAP_NATIVE_SCHEMA,
-    YIELD_ADD_MARKET_LIQUIDITY_SCHEMA, YIELD_CANCEL_LIMIT_ORDER_SCHEMA, YIELD_CLAIM_YIELD_SCHEMA,
-    YIELD_MINT_PY_SCHEMA, YIELD_MINT_SY_SCHEMA, YIELD_PT_SWAP_SCHEMA, YIELD_REDEEM_PY_SCHEMA,
-    YIELD_REDEEM_SY_SCHEMA, YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA, YIELD_SIGN_LIMIT_ORDER_SCHEMA,
-    YIELD_YT_SWAP_SCHEMA,
+    TOKEN_REFUND_NATIVE_SCHEMA, TOKEN_REVOKE_APPROVAL_SCHEMA, TOKEN_UNWRAP_NATIVE_SCHEMA,
+    TOKEN_WRAP_NATIVE_SCHEMA, YIELD_ADD_MARKET_LIQUIDITY_SCHEMA, YIELD_CANCEL_LIMIT_ORDER_SCHEMA,
+    YIELD_CLAIM_YIELD_SCHEMA, YIELD_MINT_PY_SCHEMA, YIELD_MINT_SY_SCHEMA, YIELD_PT_SWAP_SCHEMA,
+    YIELD_REDEEM_PY_SCHEMA, YIELD_REDEEM_SY_SCHEMA, YIELD_REMOVE_MARKET_LIQUIDITY_SCHEMA,
+    YIELD_SIGN_LIMIT_ORDER_SCHEMA, YIELD_YT_SWAP_SCHEMA,
 };
 
 /// One row of the action resolver: the `(domain, action_tag)` a trigger can
@@ -731,6 +731,12 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
     },
     ActionEntry {
         domain: "token",
+        action_tag: Some("refund_native"),
+        schema_text: TOKEN_REFUND_NATIVE_SCHEMA,
+        pascal_stub: "RefundNative",
+    },
+    ActionEntry {
+        domain: "token",
         action_tag: Some("unwrap_native"),
         schema_text: TOKEN_UNWRAP_NATIVE_SCHEMA,
         pascal_stub: "UnwrapNative",
@@ -1288,11 +1294,11 @@ mod tests {
         // Guards against a row being dropped or duplicated. (+3 Marketplace
         // rows — sign_order / fulfill_order / cancel_order — keyed by
         // (domain, action_tag), so cancel_order is a distinct row from perp's;
-        // +1 bridge `send` row.)
+        // +1 bridge `send` row; +1 token `refund_native` row.)
         assert_eq!(
             RESOLVER_TABLE.len(),
-            117,
-            "resolver table must have 117 rows"
+            118,
+            "resolver table must have 118 rows"
         );
     }
 

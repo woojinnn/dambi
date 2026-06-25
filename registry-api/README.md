@@ -5,13 +5,16 @@ the **private** ScopeBall adapter-registry GCS bucket and serves it to the brows
 extension over anonymous HTTPS.
 
 The extension cannot read the bucket directly: the bucket has **Public Access Prevention
-enforced** and no `allUsers` binding, so every read requires the proxy's service-account
-OAuth token. `registry-api` is the only identity allowed to read the bucket, and it
-relays a **fixed allowlist** of object paths to the public internet with CORS, cache
-headers, and three independent denial-of-wallet / DoS mitigations in front of every read.
+enforced** and no `allUsers` binding, so anonymous browser reads must go through the
+proxy's runtime service-account OAuth token. Other administrative identities can still
+exist on the bucket (for example the CI signer/publisher and project owners); the public
+serving boundary is that only `registry-api` exposes a **fixed allowlist** of object paths
+to the internet with CORS, cache headers, and three independent denial-of-wallet / DoS
+mitigations in front of every read.
 
-It is a single Node 20 process (raw `node:http`, one runtime dependency:
-`@google-cloud/storage`) deployed to **Cloud Run**.
+It is a single Node 20 process deployed to **Cloud Run**. Runtime code uses raw
+`node:http`, `google-auth-library` for ADC access tokens, `fetch` against the GCS JSON
+media endpoint, and `canonicalize` for 3-ref materialization integrity checks.
 
 ```
                     ┌──────────────────────────────────────────────────────────┐
@@ -50,8 +53,8 @@ unit-tested with fakes).
 | `server.ts` | The raw `node:http` request router + the proxy request lifecycle, CORS, status mapping, and 3-ref bundle materialization. |
 | `config.ts` | Reads/validates every environment variable into a typed `Config` with safe fallbacks. |
 | `validation.ts` | The **path allowlist**: maps an incoming URL path to a concrete GCS object key, or rejects it. |
-| `gcs-client.ts` | The only thing that talks to GCS. Authenticates via ADC, downloads an object, classifies errors. |
-| `cache.ts` | In-process LRU + TTL object cache (positive **and** negative/404). |
+| `gcs-client.ts` | The only thing that talks to GCS. Authenticates via ADC, reads objects through the GCS JSON media endpoint, classifies errors. |
+| `cache.ts` | In-process LRU + TTL object cache for positive objects and cacheable negative/404 misses. |
 | `single-flight.ts` | Coalesces concurrent identical reads into one upstream fetch. |
 | `rate-limiter.ts` | Per-IP token-bucket rate limiter with an LRU-bounded IP table. |
 | `log-store.ts` | Fixed-capacity ring buffer of recent requests for `/debug/recent`. |
@@ -88,7 +91,7 @@ For every proxied path the steps run in this exact order — the ordering is del
 4. **Single-flight GCS read** — on a miss, the object is read through the single-flight map
    so N concurrent identical misses collapse to **one** GCS download.
 5. **Respond** — `found` → cache + 200 with the right `Cache-Control`; `not_found` →
-   negative-cache + 404; `upstream_error` → 502 (**not** cached).
+   404 with path-dependent negative-cache behavior; `upstream_error` → 502 (**not** cached).
 
 Every response (except the 204 preflight) carries the CORS headers
 (`access-control-allow-origin: *`, methods `GET, OPTIONS`). Every request appends a record
@@ -119,20 +122,26 @@ allowlist is the seven prefixes above.)
 ### Caching (`cache.ts`)
 
 An in-process insertion-ordered `Map` acting as an **LRU with lazy per-entry TTL**. A
-cache value is either a `200` object (body + content-type) or a `404` miss. `get()` evicts
-expired entries on read and re-inserts live ones at the MRU end; `set()` evicts from the
-front (oldest) when over `CACHE_MAX_ENTRIES`. TTLs differ by polarity:
+cache value is either a `200` object (body + content-type) or a cacheable `404` miss.
+`get()` evicts expired entries on read and re-inserts live ones at the MRU end; `set()`
+evicts from the front (oldest) when over `CACHE_MAX_ENTRIES`. TTLs differ by polarity:
 
-- positive entries (index / tokens, *mutable* pointers) → `CACHE_TTL_MS` (default **5 min**)
-- negative `404` entries → `CACHE_NEGATIVE_TTL_MS` (default **60 s**) — the extension's
-  negative-cache logic depends on a *real* 404 status here.
+- positive entries (index / tokens / contexts and other mutable served paths) →
+  `CACHE_TTL_MS` (default **5 min**)
+- cacheable negative `404` entries → `CACHE_NEGATIVE_TTL_MS` (default **60 s**) — the
+  extension's negative-cache logic depends on a *real* 404 status here.
+- content-addressed leaf misses (`/bundles/<sha>`, `/signatures/<sha>`) are **not**
+  stored in the in-process negative cache and respond with `Cache-Control: no-store`.
+  A missing leaf can be a publish window race; caching it would make a newly-published
+  signature or bundle remain invisible until the negative TTL expires.
 
 The response `Cache-Control` is chosen by content type, not by the cache TTL:
 
 - content-addressed leaves (`/bundles/<sha>`, `/signatures/<sha>`) → `CACHE_CONTROL_IMMUTABLE`
   (default `public, max-age=31536000, immutable`) — safe because they can never change.
-- everything else (mutable pointers) → `CACHE_CONTROL` (default `public, max-age=300`).
-- 404 → a derived `public, max-age=<negative-ttl-seconds>`.
+- everything else (mutable served paths) → `CACHE_CONTROL` (default `public, max-age=300`).
+- cacheable 404s → a derived `public, max-age=<negative-ttl-seconds>`.
+- content-addressed 404s → `no-store`.
 
 > The cache does **hard** TTL expiry with no background revalidation. It is a cost/latency
 > optimization, **not** a correctness device — each Cloud Run instance has its own cache,
@@ -169,12 +178,14 @@ left entries are client-spoofable and the rightmost is whatever the trusted edge
 
 ### GCS client & authentication (`gcs-client.ts`)
 
-`new Storage()` with **no key file**: it relies on **Application Default Credentials**,
-which on Cloud Run resolve to the service's **runtime service account** via the metadata
-server. That SA (`registry-api-v3-sa@…`) has only `roles/storage.objectViewer` on the
-bucket — read-only, least privilege. `read()` does
-`bucket(name).file(key).download()` and **hard-codes** `content-type: application/json`
-(stored object metadata is not trusted — registry objects are always JSON).
+`new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/devstorage.read_only"] })`
+with **no key file** relies on **Application Default Credentials**, which on Cloud Run
+resolve to the service's **runtime service account** via the metadata server. That SA
+(`registry-api-v3-sa@…`) has `roles/storage.objectViewer` on the bucket — read-only,
+least privilege for the serving path. `read()` obtains an OAuth access token and fetches
+`https://storage.googleapis.com/storage/v1/b/<bucket>/o/<object>?alt=media`, then
+**hard-codes** `content-type: application/json` (stored object metadata is not trusted —
+registry objects are always JSON).
 
 Error classification is deliberate: a GCS `404` → `not_found` → HTTP **404**; everything
 else (403 IAM, 5xx, network) → `upstream_error` → HTTP **502** and is **not cached**.
@@ -226,7 +237,8 @@ off them.
 | Situation | Response |
 |---|---|
 | object found | `200` + body + `Cache-Control` + CORS |
-| object missing | **`404`** (real status; drives the extension's negative cache) |
+| object missing, mutable pointer path | **`404`** + derived negative `Cache-Control` (real status; drives the extension's negative cache) |
+| object missing, content-addressed leaf path | **`404`** + `Cache-Control: no-store` |
 | GCS upstream / IAM / 5xx error | `502 upstream_error` (not cached) |
 | 3-ref sub-read or placeholder failure | `502 ref_materialization_failed` (not cached) |
 | per-IP rate exceeded | `429` + `retry-after: 1` |
@@ -277,6 +289,11 @@ The live deployment shape (from `_common.sh`, verified against the running servi
 | ingress | `all` | |
 | auth | `--no-allow-unauthenticated` **then** `allUsers → roles/run.invoker` | the *service* is public-invokable (anonymous extension fetch) but the **bucket stays private** |
 
+The currently deployed image tag can lag the checked-out source until a
+`registry-proxy-v*` release or manual default-branch proxy deploy runs. Treat the table
+above as the live **runtime shape**; verify the exact image with `gcloud run services
+describe registry-api-v3 --region asia-northeast3 --project dambi-registry`.
+
 There is **no external load balancer** — the Compute Engine API isn't even enabled in the
 project. "Load balancing" is Cloud Run's built-in: the Google Front End terminates TLS and
 spreads requests across the 1–3 autoscaled instances at concurrency 80. (This is why
@@ -323,8 +340,9 @@ objects is not enough.
 
 ## Security model (summary)
 
-- Bucket is private (PAP enforced); the proxy's runtime SA is the only reader, and it is
-  read-only.
+- Bucket is private to anonymous users (PAP enforced, no `allUsers` bucket binding). The
+  proxy's runtime SA is read-only and is the only identity used for public serving; CI and
+  project-admin identities may still have bucket permissions for publish/ops.
 - Fixed path allowlist with `..`/`%` rejection and per-prefix regexes — no arbitrary object
   access, no traversal.
 - `--ignore-scripts` on install, digest-pinned base image, non-root runtime.

@@ -3,6 +3,7 @@
  * editor save path. See docs/design/editor-manifest-autogen.md.
  */
 export { generateManifest, collectCustomFields } from "./generate";
+export { normalizeCustomType, userFieldsFromManifest } from "./restore";
 export type {
   GeneratedManifest,
   GenError,

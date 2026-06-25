@@ -152,6 +152,24 @@ paths:
                   user_id: { type: string, example: "user_8f1a2b3c4d5e6f70" }
                   email:   { type: string, example: "alice@gmail.com" }
 
+  /capabilities/sync-chains:
+    get:
+      tags: [meta]
+      summary: Runtime chain ids with configured wallet sync RPC providers
+      responses:
+        "200":
+          description: Sync-capable CAIP-2 chain ids
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chains]
+                properties:
+                  chains:
+                    type: array
+                    items: { type: string, example: eip155:1 }
+        "401": { description: Missing or invalid bearer token }
+
   /evaluate:
     post:
       tags: [meta]

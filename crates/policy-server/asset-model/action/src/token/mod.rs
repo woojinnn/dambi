@@ -22,6 +22,8 @@ pub mod permit2_approve;
 pub mod permit2_sign;
 /// `Uniswap` `Permit2` SignatureTransfer actions.
 pub mod permit2_transfer;
+/// Native-currency refund from a protocol/router balance back to the caller.
+pub mod refund_native;
 /// Revoke-approval action and its scope enum.
 pub mod revoke;
 /// Native-currency unwrap (`withdraw`) — WETH-style 1:1 wrapper → native.
@@ -38,6 +40,7 @@ pub use self::nft_transfer::*;
 pub use self::permit2_approve::*;
 pub use self::permit2_sign::*;
 pub use self::permit2_transfer::*;
+pub use self::refund_native::*;
 pub use self::revoke::*;
 pub use self::unwrap_native::*;
 pub use self::wrap_native::*;
@@ -69,6 +72,8 @@ pub enum TokenAction {
     NftTransfer(NftTransferAction),
     /// Revoke a previously granted approval (any scope).
     RevokeApproval(RevokeApprovalAction),
+    /// Native-currency refund from a protocol/router balance back to the caller.
+    RefundNative(RefundNativeAction),
     /// Native-currency wrap (e.g. WETH `deposit()`) — native → 1:1 ERC20 wrapper.
     WrapNative(WrapNativeAction),
     /// Native-currency unwrap (e.g. WETH `withdraw()`) — 1:1 ERC20 wrapper → native.
@@ -93,6 +98,7 @@ impl TokenAction {
             Self::NftSetApprovalForAll(_) => "nft_set_approval_for_all",
             Self::NftTransfer(_) => "nft_transfer",
             Self::RevokeApproval(_) => "revoke_approval",
+            Self::RefundNative(_) => "refund_native",
             Self::WrapNative(_) => "wrap_native",
             Self::UnwrapNative(_) => "unwrap_native",
         }

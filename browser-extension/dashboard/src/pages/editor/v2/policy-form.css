@@ -490,6 +490,22 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
   overflow: hidden;
 }
+.fc-pop.portal {
+  position: fixed;
+  z-index: 1200;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+}
+.fc-pop.portal .fc-valbox {
+  flex: none;
+}
+.fc-pop.portal .fc-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
 .fc-search {
   width: 100%;
   border: none;
