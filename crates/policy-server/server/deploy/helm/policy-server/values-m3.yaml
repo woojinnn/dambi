@@ -16,7 +16,7 @@ api:
   # slash included). First = local-unpacked dev build (stable id via manifest
   # key); second = Chrome Web Store build (store-assigned id).
   oauthAllowedRedirectUris: "https://fbadoakiikjmgdpdhpcohaddifhaggki.chromiumapp.org/,https://licmpapbfngdlpbkbmbelldnkgefgbpi.chromiumapp.org/"
-  marketAdminEmails: "dandi@upside.center"
+  marketAdminEmails: "teamwalletguardians@gmail.com"
   corsAllowedOrigins:
     - https://dambi-policy.duckdns.org
     - chrome-extension://fbadoakiikjmgdpdhpcohaddifhaggki
