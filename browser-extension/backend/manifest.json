@@ -3,7 +3,7 @@
   "__firefox__manifest_version": 2,
   "name": "Dambi",
   "description": "서명 직전 모든 Web3 트랜잭션을 정책으로 검사하는 보안 가드",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "__chrome__key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtAb2dH2va37/sCLa2itAkAf1fNrbfyybdqbVbuv4huy1sF5f63zkMp0lb8HABW1ox+dxvWFQkk1tkrJkcqG6mkU8li1sLn3okbx0hP1MDshuP4+NUgnV2/3qnk6tc8UzGKn/GsOhs+JS/iBD0AKeOPRpJStWJy7gUOkvGONzF10769FkPY9WDsSdxkAxA2G1mxogNhHJhGOOE2uBeKFeKhQk4M1V0F6csEtnoNyyJWRgQC6cZQC1iwpKNluXH2QPMjT+8J1hkF4eSx5O05x/K1FTReYuxDLFmlz+NOgamq++vQRmY1gi+XM/km9Uni/7G9EGedWaBy/1kbnxM6Y5uQIDAQAB",
   "icons": {
     "48": "picture/icon-48.png",
