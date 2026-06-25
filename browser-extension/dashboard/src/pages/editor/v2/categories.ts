@@ -31,16 +31,16 @@ interface CategoryDef {
 }
 
 export const CAT: Record<CategoryKey, CategoryDef> = {
-  swap: { ko: "스왑", en: "Swap", hex: "#688186", soft: "#DCEAED", ink: "#2B3639" },
-  amm: { ko: "AMM·LP", en: "AMM·LP", hex: "#85A4AB", soft: "#EDF4F6", ink: "#2B3639" },
-  perp: { ko: "퍼프", en: "Perp", hex: "#485A5E", soft: "#CAE0E4", ink: "#2B3639" },
-  bridge: { ko: "브릿지", en: "Bridge", hex: "#A4C9D1", soft: "#EDF4F6", ink: "#485A5E" },
-  security: { ko: "보안", en: "Security", hex: "#637E59", soft: "#EBF3E8", ink: "#283523" },
-  airdrop: { ko: "에어드랍", en: "Airdrop", hex: "#44583D", soft: "#D9E9D3", ink: "#283523" },
-  lending: { ko: "렌딩", en: "Lending", hex: "#384455", soft: "#D7DBDF", ink: "#0D1118" },
-  nft: { ko: "NFT", en: "NFT", hex: "#697485", soft: "#EFF0F2", ink: "#1B222C" },
-  core: { ko: "코어", en: "Core", hex: "#2A3441", soft: "#D7DBDF", ink: "#0D1118" },
-  token: { ko: "토큰", en: "Token", hex: "#9099A5", soft: "#EFF0F2", ink: "#2A3441" },
+  swap: { ko: "스왑", en: "Swap", hex: "#8F959F", soft: "#EBEDEF", ink: "#5C6169" },
+  amm: { ko: "AMM·LP", en: "AMM·LP", hex: "#6257C7", soft: "#EDF4F6", ink: "#5C6169" },
+  perp: { ko: "퍼프", en: "Perp", hex: "#4E45A9", soft: "#CAE0E4", ink: "#5C6169" },
+  bridge: { ko: "브릿지", en: "Bridge", hex: "#9B94DB", soft: "#EDF4F6", ink: "#4E45A9" },
+  security: { ko: "보안", en: "Security", hex: "#06203F", soft: "#F1F3F6", ink: "#041222" },
+  airdrop: { ko: "에어드랍", en: "Airdrop", hex: "#1B3F90", soft: "#D9E9D3", ink: "#041222" },
+  lending: { ko: "렌딩", en: "Lending", hex: "#8F959F", soft: "#D7D9DC", ink: "#0D1118" },
+  nft: { ko: "NFT", en: "NFT", hex: "#2457C9", soft: "#EFF0F2", ink: "#1B222C" },
+  core: { ko: "코어", en: "Core", hex: "#24282E", soft: "#D7D9DC", ink: "#0D1118" },
+  token: { ko: "토큰", en: "Token", hex: "#204BAD", soft: "#EFF0F2", ink: "#24282E" },
 };
 
 export const CAT_ORDER: CategoryKey[] = [
