@@ -219,7 +219,7 @@ function groupHoldings(
         sym: h.symbol || "?",
         kind: kind === "other" ? "erc20" : kind,
         chain: ch ? chainName(ch) : "",
-        cc: ch ? chainColor(ch) : "#9099A5",
+        cc: ch ? chainColor(ch) : "#AEB6C2", // stone-300 (DEEP fallback)
         walletsSet: new Set<string>(),
         balUnits: 0,
         unit: kind === "nft" ? "" : h.symbol || "",
