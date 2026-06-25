@@ -164,3 +164,6 @@ browser-extension/package-lock.json
 # local byte-perfect mirror of the GitBook "Docs" space (walletguardians/pasu-docs@main).
 # Refreshed manually; never tracked.
 gitbook/
+
+# Local read-only GCP project inventory helper.
+scripts/gcp-inventory.local.sh
