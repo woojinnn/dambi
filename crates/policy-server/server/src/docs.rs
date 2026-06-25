@@ -168,6 +168,7 @@ mod tests {
         for path in [
             "  /readyz:",
             "  /auth/refresh:",
+            "  /capabilities/sync-chains:",
             "  /wallets/{address}/permits:",
             "  /wallets/{address}/positions:",
             "  /wallets/{address}/pending:",

@@ -32,6 +32,7 @@
 
 pub mod app;
 pub mod auth;
+pub mod capabilities_handlers;
 pub mod config;
 pub mod coordination;
 pub mod dashboard_handlers;

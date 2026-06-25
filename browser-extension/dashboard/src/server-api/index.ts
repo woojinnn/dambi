@@ -25,6 +25,11 @@ export {
 } from "./auth";
 
 export {
+  listSyncChains,
+  type SyncChainsResp,
+} from "./capabilities";
+
+export {
   listWallets,
   addWallet,
   syncWallet,

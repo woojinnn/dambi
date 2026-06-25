@@ -74,6 +74,9 @@
   display: grid; grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
+.chain-chip-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
 .chain-chip {
   display: flex; align-items: center; gap: 8px;
   font-size: 12.5px; padding: 8px 10px;
@@ -83,3 +86,6 @@
 .chain-chip:hover { background: var(--fog-200); }
 .chain-chip input { margin: 0; }
 .chain-chip.checked { background: var(--sage-50); border-color: var(--sage-400); color: var(--slate-900); }
+.chain-chip-row .chain-chip { cursor: default; }
+.chain-chip-row .chain-chip:hover { background: var(--surface); }
+.chain-chip.muted { color: var(--slate-400); }

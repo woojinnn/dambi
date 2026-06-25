@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { addWallet, ServerError, type AddWalletResp } from "../server-api";
+import { addWallet, listSyncChains, ServerError, type AddWalletResp } from "../server-api";
 
 import { Modal } from "./Modal";
 
@@ -13,17 +13,19 @@ interface AddWalletModalProps {
   onAdded?: (resp: AddWalletResp) => void;
 }
 
-/** Chains tracked for a newly added wallet. The UI tracks ALL of these (no
- *  per-chain toggle) — the list is shown read-only and sent verbatim. */
-const CHAIN_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: "eip155:1", label: "Ethereum" },
-  { id: "eip155:42161", label: "Arbitrum" },
-  { id: "eip155:8453", label: "Base" },
-  { id: "eip155:10", label: "Optimism" },
-  { id: "eip155:137", label: "Polygon" },
-];
-
 const ADDR_RX = /^0x[0-9a-fA-F]{40}$/;
+
+const CHAIN_LABELS: Record<string, string> = {
+  "eip155:1": "Ethereum",
+  "eip155:10": "Optimism",
+  "eip155:137": "Polygon",
+  "eip155:8453": "Base",
+  "eip155:42161": "Arbitrum",
+};
+
+function chainLabel(chain: string): string {
+  return CHAIN_LABELS[chain] ?? chain;
+}
 
 export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) {
   const { t } = useTranslation("common");
@@ -31,6 +33,12 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
   const [address, setAddress] = useState("");
   const [label, setLabel] = useState("");
   const [touched, setTouched] = useState(false);
+  const syncChainsQ = useQuery({
+    queryKey: ["capabilities", "sync-chains"],
+    queryFn: listSyncChains,
+    enabled: open,
+    staleTime: 60_000,
+  });
 
   const reset = () => {
     setAddress("");
@@ -45,7 +53,6 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
     mutationFn: () =>
       addWallet({
         address: address.trim().toLowerCase(),
-        chains: CHAIN_OPTIONS.map((c) => c.id),
         label: label.trim(),
       }),
     onSuccess: (resp) => {
@@ -110,6 +117,26 @@ export function AddWalletModal({ open, onClose, onAdded }: AddWalletModalProps) 
           {touched && !addressOk && (
             <div className="err">{t("wallet.addressInvalid")}</div>
           )}
+        </div>
+
+        <div className="form-row">
+          <label>{t("wallet.chainsLabel")}</label>
+          <div className="chain-chip-row" aria-live="polite">
+            {syncChainsQ.data?.chains.length ? (
+              syncChainsQ.data.chains.map((chain) => (
+                <span key={chain} className="chain-chip">
+                  {chainLabel(chain)}
+                </span>
+              ))
+            ) : (
+              <span className="chain-chip muted">
+                {syncChainsQ.isLoading ? t("loading") : t("wallet.chainsServerDefault")}
+              </span>
+            )}
+          </div>
+          <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+            {t("wallet.chainsHint")}
+          </div>
         </div>
 
         <div className="form-row">
