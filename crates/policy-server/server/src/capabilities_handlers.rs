@@ -50,7 +50,7 @@ mod tests {
                 etherscan: None,
                 coingecko: policy_sync::CoinGeckoClient::new(),
                 coordinator: Arc::new(crate::coordination::NoopCoordinator),
-                sync_lock_ttl: std::time::Duration::from_secs(120),
+                sync_lock_ttl: std::time::Duration::from_mins(2),
             },
             tmp,
         )

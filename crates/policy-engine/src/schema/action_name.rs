@@ -278,8 +278,9 @@ mod tests {
         // redeem/stake/cooldown), plus Marketplace (Seaport) sign_order +
         // fulfill_order (cancel_order dedups against Perp), plus bridge `send`,
         // MINUS the origin/main HL→Perp/Token/Staking migration (HL core 18→3).
-        // Build-determined merged count: origin/main 104 + bridge `send` = 105.
-        assert_eq!(REGISTERED_ACTIONS.len(), 105);
+        // Build-determined merged count: origin/main 104 + bridge `send` +
+        // token `refund_native` = 106.
+        assert_eq!(REGISTERED_ACTIONS.len(), 106);
     }
 
     #[test]

@@ -1294,11 +1294,11 @@ mod tests {
         // Guards against a row being dropped or duplicated. (+3 Marketplace
         // rows — sign_order / fulfill_order / cancel_order — keyed by
         // (domain, action_tag), so cancel_order is a distinct row from perp's;
-        // +1 bridge `send` row.)
+        // +1 bridge `send` row; +1 token `refund_native` row.)
         assert_eq!(
             RESOLVER_TABLE.len(),
-            117,
-            "resolver table must have 117 rows"
+            118,
+            "resolver table must have 118 rows"
         );
     }
 
