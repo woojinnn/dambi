@@ -27,14 +27,15 @@ use policy_db::market::{
     delete_listing as db_delete_listing, get_latest_version as db_get_latest_version,
     get_listing_by_id as db_get_listing_by_id, get_listing_by_slug as db_get_listing_by_slug,
     get_version as db_get_version, install_activity_since as db_install_activity_since,
-    list_listings as db_list_listings, list_reports as db_list_reports,
-    list_reports_by_reporter as db_list_reports_by_reporter, list_reviews as db_list_reviews,
-    list_watches as db_list_watches,
-    record_install_and_get_version as db_record_install_and_get_version, unwatch as db_unwatch,
+    list_listings as db_list_listings, list_publishers as db_list_publishers,
+    list_reports as db_list_reports, list_reports_by_reporter as db_list_reports_by_reporter,
+    list_reviews as db_list_reviews, list_watches as db_list_watches,
+    record_install_and_get_version as db_record_install_and_get_version,
+    set_publisher_tier as db_set_publisher_tier, unwatch as db_unwatch,
     update_report_status as db_update_report_status, upsert_review as db_upsert_review,
     validate_semver, vote_helpful as db_vote_helpful, watch as db_watch, ListingFilter, ListingRow,
-    ListingSort as DbListingSort, NewListing, ReportRow, ReviewRow, VersionBody, VersionRow,
-    LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX,
+    ListingSort as DbListingSort, NewListing, PublisherRow, ReportRow, ReviewRow, VersionBody,
+    VersionRow, LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX,
 };
 use policy_db::DbError;
 
@@ -561,6 +562,72 @@ pub async fn update_report_status(
         Ok(None) => (StatusCode::NOT_FOUND, "report not found").into_response(),
         Err(e) => server_error(&e.to_string()),
     }
+}
+
+/// `GET /market/publishers` — admin: list publisher accounts with their
+/// account-level tier + published-listing count (drives the verify UI).
+pub async fn list_publishers(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    match db_list_publishers(state.global_db.pool()).await {
+        Ok(rows) => {
+            Json(rows.iter().map(publisher_row_to_json).collect::<Vec<_>>()).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SetPublisherTierReq {
+    pub tier: String,
+}
+
+/// `PATCH /market/publishers/:id` — admin: set an account's publisher tier to
+/// `verified` or `community`. `official` (the Wallet Guardians brand) is reserved
+/// and set out of band, so it is intentionally NOT grantable through this API.
+pub async fn set_publisher_tier(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(target_user_id): Path<String>,
+    Json(req): Json<SetPublisherTierReq>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let tier = match req.tier.as_str() {
+        "verified" => "verified",
+        "community" => "community",
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "tier must be 'verified' or 'community'",
+            )
+                .into_response()
+        }
+    };
+    match db_set_publisher_tier(state.global_db.pool(), &target_user_id, tier).await {
+        Ok(Some(email)) => Json(serde_json::json!({
+            "user_id": target_user_id,
+            "email": email,
+            "publisher_tier": tier,
+        }))
+        .into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "user not found").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+fn publisher_row_to_json(r: &PublisherRow) -> Value {
+    serde_json::json!({
+        "user_id": r.user_id,
+        "email": r.email,
+        "publisher_tier": r.publisher_tier,
+        "listing_count": r.listing_count,
+    })
 }
 
 /// `POST /market/reviews/:id/helpful` — vote helpful (idempotent per user).
