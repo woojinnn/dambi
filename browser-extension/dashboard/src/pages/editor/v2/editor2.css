@@ -294,10 +294,11 @@
 .e2 .pb-empty { color:var(--mut); text-align:center; font-size:11.5px; padding:22px 12px; }
 .e2 .pb-foot { padding:8px 11px; border-top:1px solid var(--line-2); display:flex; align-items:center; gap:8px; }
 
-.e2 .ox { width:23px; height:23px; border-radius:50%; border:1.5px solid var(--line); background:var(--surface); cursor:pointer;
+.e2 .ox { width:24px; height:24px; border-radius:7px; border:1.5px solid var(--line); background:var(--surface); cursor:pointer;
   display:grid; place-items:center; color:#BABCC0; transition:all .16s; flex:none; }
 .e2 .ox:hover { border-color:var(--slate-soft); }
-.e2 .ox.on { border-color:var(--sage); color:var(--sage); background:var(--sage-soft); }
+/* 자동 차단(방패 채움): on = navy 채운 둥근사각 + 흰 방패 */
+.e2 .ox.on { border-color:var(--navy-500); color:#fff; background:var(--navy-500); }
 .e2 .ox .ic { width:12px; height:12px; stroke-width:2.4; }
 
 .e2 .addpkg { height:258px; border:1.5px dashed #D7D9DC; border-radius:16px; display:flex; flex-direction:column; gap:7px;
