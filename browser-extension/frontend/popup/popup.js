@@ -768,8 +768,10 @@ async function onbDoLogin() {
     const st = await S.loadState();
     state.account = st.account || { email: res.email };
     state.appliedServer = st.appliedServer || [];
-    if (!res.isFirstLogin && st.wallets && st.wallets.length) {
-      // 기존 사용자 → 온보딩 건너뛰고 정책 화면으로 (§1.1 / §5-3)
+    if (st.wallets && st.wallets.length) {
+      // 서버에 지갑이 있으면 = 기존 사용자 → 온보딩 건너뛰고 정책 화면으로.
+      // (isFirstLogin 은 로컬 프로필 기준이라, 서버 이전/로컬 초기화 후엔 서버에
+      //  지갑이 있어도 true 가 되어 지갑추가 단계로 잘못 떨어졌다. 서버가 진실.)
       state.wallets = st.wallets;
       state.activeAddress = st.activeAddress || st.wallets[0].address;
       state.appliedByAddress = st.appliedByAddress || {};
