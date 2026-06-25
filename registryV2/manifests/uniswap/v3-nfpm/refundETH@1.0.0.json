@@ -1,0 +1,47 @@
+{
+  "type": "adapter_action",
+  "id": "uniswap/v3-nfpm/refundETH@1.0.0",
+  "publisher": "uniswap.eth",
+  "schema_version": "3",
+  "_note": "Uniswap V3 periphery refundETH() refunds the contract's remaining native balance to msg.sender. The calldata carries no amount, so this decodes to token::refund_native instead of fabricating an erc20_transfer amount.",
+  "match": {
+    "selector": "0x12210e8a",
+    "chain_to_addresses": {
+      "1":     ["0xC36442b4a4522E871399CD717aBDD847Ab11FE88"],
+      "10":    ["0xC36442b4a4522E871399CD717aBDD847Ab11FE88"],
+      "42161": ["0xC36442b4a4522E871399CD717aBDD847Ab11FE88"],
+      "8453":  ["0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"]
+    }
+  },
+  "abi_fragment": {
+    "function_name": "refundETH",
+    "abi": {
+      "name": "refundETH",
+      "type": "function",
+      "stateMutability": "payable",
+      "inputs": [],
+      "outputs": []
+    }
+  },
+  "emit": {
+    "strategy": "single_emit",
+    "body": {
+      "domain": "token",
+      "token": {
+        "action": "refund_native",
+        "refund_native": {
+          "token": {
+            "key": { "standard": "native", "chain": "$chain" }
+          },
+          "recipient": "$tx.from"
+        }
+      }
+    }
+  },
+  "requires": {
+    "imperative": [],
+    "adapter_capabilities": [],
+    "host_capabilities": [],
+    "extension": ">=0.1.0"
+  }
+}

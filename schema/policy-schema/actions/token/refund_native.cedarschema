@@ -1,0 +1,28 @@
+// Token::RefundNative — native-currency refund from a protocol/router balance.
+//
+// Some periphery helpers, notably Uniswap V3 `refundETH()`, refund the
+// contract's remaining native balance to the caller but carry no amount
+// argument. This action is intentionally amountless: policies can reason about
+// the recipient and asset without relying on a fabricated quantity.
+
+namespace Token {
+  type RefundNativeContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // Native gas asset being refunded.
+    token: Core::TokenRef,
+    // Address receiving the refund.
+    recipient: String,
+    // Manifest-extensible slot.
+    custom?: RefundNativeCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type RefundNativeCustomContext = {};
+
+  action "RefundNative" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: RefundNativeContext,
+  };
+}

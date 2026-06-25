@@ -20,6 +20,7 @@ mod permit2_approve;
 mod permit2_sign_allowance;
 mod permit2_sign_transfer;
 mod permit2_transfer_from;
+mod refund_native;
 mod revoke_approval;
 mod unwrap_native;
 mod wrap_native;
@@ -43,6 +44,7 @@ pub(crate) fn lower(action: &TokenAction, ctx: &LowerCtx<'_>) -> Result<LoweredA
         TokenAction::NftSetApprovalForAll(a) => nft_set_approval_for_all::lower(a, ctx),
         TokenAction::NftTransfer(a) => nft_transfer::lower(a, ctx),
         TokenAction::RevokeApproval(a) => revoke_approval::lower(a, ctx),
+        TokenAction::RefundNative(a) => refund_native::lower(a, ctx),
         TokenAction::WrapNative(a) => wrap_native::lower(a, ctx),
         TokenAction::UnwrapNative(a) => unwrap_native::lower(a, ctx),
     }
