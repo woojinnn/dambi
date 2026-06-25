@@ -71,7 +71,7 @@
   min-height: 200px;
 }
 .ev3 .hero-card:hover {
-  border-color: var(--cyan-500, #688186);
+  border-color: var(--cyan-500, #8F959F);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
   transform: translateY(-1px);
 }
@@ -307,8 +307,8 @@
   gap: 6px;
   padding: 5px 10px;
   border-radius: 16px;
-  background: var(--cyan-100, #dceaed);
-  color: var(--cyan-800, #2b3639);
+  background: var(--cyan-100, #EBEDEF);
+  color: var(--cyan-800, #5C6169);
   font-size: 12px;
   font-weight: 500;
 }
@@ -357,7 +357,7 @@
 .ev3 .market-tab:last-child { border-right: none; }
 .ev3 .market-tab:hover { background: var(--slate-50); }
 .ev3 .market-tab.is-active {
-  background: var(--cyan-500, #688186);
+  background: var(--cyan-500, #8F959F);
   color: white;
 }
 .ev3 .market-search {
@@ -378,7 +378,7 @@
 .ev3 .market-search input:focus {
   outline: none;
   border-color: var(--cyan-500);
-  box-shadow: 0 0 0 2px var(--cyan-100, #dceaed);
+  box-shadow: 0 0 0 2px var(--cyan-100, #EBEDEF);
 }
 .ev3 .market-search-clear {
   position: absolute;
@@ -431,7 +431,7 @@
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 .ev3 .market-card:hover {
-  border-color: var(--cyan-500, #688186);
+  border-color: var(--cyan-500, #8F959F);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 .ev3 .mc-head {
@@ -483,7 +483,7 @@
   letter-spacing: 0.04em;
 }
 .ev3 .mc-kind.kind-policy { background: var(--slate-100); color: var(--slate-700); }
-.ev3 .mc-kind.kind-set { background: var(--cyan-100, #dceaed); color: var(--cyan-800, #2b3639); }
+.ev3 .mc-kind.kind-set { background: var(--cyan-100, #EBEDEF); color: var(--cyan-800, #5C6169); }
 .ev3 .mc-sev {
   font-size: 10.5px;
   font-weight: 600;
@@ -497,8 +497,8 @@
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 10px;
-  background: var(--sage-100, #ebf3e8);
-  color: var(--sage-800, #283523);
+  background: var(--sage-100, #F1F3F6);
+  color: var(--sage-800, #041222);
 }
 .ev3 .mc-name {
   margin: 0 0 6px;
@@ -577,13 +577,13 @@
   font-weight: 600;
   padding: 3px 10px;
   border-radius: 12px;
-  background: var(--cyan-100, #dceaed);
-  color: var(--cyan-800, #2b3639);
+  background: var(--cyan-100, #EBEDEF);
+  color: var(--cyan-800, #5C6169);
   border: 1px solid var(--cyan-200, transparent);
 }
 .ev3 .mc-install-badge.is-installed {
-  background: var(--sage-100, #ebf3e8);
-  color: var(--sage-800, #283523);
+  background: var(--sage-100, #F1F3F6);
+  color: var(--sage-800, #041222);
   border-color: var(--sage-200, transparent);
 }
 .ev3 /* Detail page */
@@ -681,7 +681,7 @@
   transition: border-color 0.12s, background 0.12s;
 }
 .ev3 .md-member-link:hover {
-  border-color: var(--cyan-500, #688186);
+  border-color: var(--cyan-500, #8F959F);
   background: var(--slate-50);
 }
 .ev3 .md-member-arrow {
@@ -690,7 +690,7 @@
   flex-shrink: 0;
 }
 .ev3 .md-member-link:hover .md-member-arrow {
-  color: var(--cyan-500, #688186);
+  color: var(--cyan-500, #8F959F);
 }
 .ev3 .md-reviews { display: flex; flex-direction: column; gap: 12px; }
 .ev3 .md-review {
@@ -763,7 +763,7 @@
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 .ev3 .market-hero-search:focus-within {
-  border-color: var(--cyan-500, #688186);
+  border-color: var(--cyan-500, #8F959F);
   box-shadow: 0 0 0 3px rgba(104, 129, 134, 0.14);
 }
 .ev3 .market-hero-search svg {
@@ -829,13 +829,13 @@
   border-radius: 16px;
   background:
     radial-gradient(120% 140% at 100% 0%, rgba(104, 129, 134, 0.16), transparent 60%),
-    linear-gradient(180deg, var(--sage-50, #f1f6ee), var(--bg-base, #fff));
+    linear-gradient(180deg, var(--sage-50, #F1F3F6), var(--bg-base, #fff));
   padding: 26px 28px;
   margin-bottom: 16px;
   transition: border-color 0.12s, box-shadow 0.12s, transform 0.12s;
 }
 .ev3 .featured-pkg:hover {
-  border-color: var(--sage-500, #637e59);
+  border-color: var(--sage-500, #06203F);
   box-shadow: 0 6px 20px rgba(40, 53, 35, 0.08);
   transform: translateY(-1px);
 }
@@ -848,12 +848,12 @@
   gap: 4px;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--sage-700, #44583d);
+  color: var(--sage-700, #1B3F90);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .ev3 .featured-pkg-official {
-  color: var(--sage-600, #637e59);
+  color: var(--sage-600, #06203F);
   font-weight: 600;
 }
 .ev3 .featured-pkg-name {
@@ -955,11 +955,11 @@
   color: inherit;
   background:
     radial-gradient(130% 150% at 100% 0%, rgba(104, 129, 134, 0.16), transparent 58%),
-    linear-gradient(180deg, var(--sage-50, #f1f6ee), var(--bg-base, #fff));
+    linear-gradient(180deg, var(--sage-50, #F1F3F6), var(--bg-base, #fff));
   transition: border-color 0.12s;
 }
 .ev3 .featured-card:hover {
-  border-color: var(--sage-500, #637e59);
+  border-color: var(--sage-500, #06203F);
 }
 .ev3 .featured-card-glyph {
   position: absolute;
@@ -979,10 +979,10 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--sage-700, #44583d);
+  color: var(--sage-700, #1B3F90);
 }
 .ev3 .featured-card-official {
-  color: var(--sage-600, #637e59);
+  color: var(--sage-600, #06203F);
 }
 .ev3 .featured-card-name {
   margin: 12px 0 10px;
@@ -1032,7 +1032,7 @@
   background: var(--slate-400);
 }
 .ev3 .carousel-dot.is-active {
-  background: var(--sage-600, #637e59);
+  background: var(--sage-600, #06203F);
   transform: scale(1.25);
 }
 @media (max-width: 760px) {
@@ -1045,8 +1045,8 @@
 }
 .ev3 /* ── Detail page v2: summary box / coverage / member accordion / code ───── */
 .md-summary {
-  border: 1px solid var(--sage-200, #d9e9d3);
-  background: linear-gradient(180deg, var(--sage-50, #f1f6ee), var(--bg-base, #fff));
+  border: 1px solid var(--sage-200, #DCE2EA);
+  background: linear-gradient(180deg, var(--sage-50, #F1F3F6), var(--bg-base, #fff));
   border-radius: 14px;
   padding: 20px 22px;
   margin-top: 18px;
@@ -1056,7 +1056,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--sage-700, #44583d);
+  color: var(--sage-700, #1B3F90);
 }
 .ev3 .md-summary-why {
   margin: 8px 0 14px;
@@ -1179,7 +1179,7 @@
   display: inline-block;
   margin-top: 10px;
   font-size: 12px;
-  color: var(--cyan-700, #485a5e);
+  color: var(--cyan-700, #4E45A9);
   text-decoration: none;
 }
 .ev3 .md-member-source:hover { text-decoration: underline; }
@@ -1228,12 +1228,12 @@
 }
 .ev3 .cv code { white-space: pre; }
 .ev3 .cv-comment { color: #94a3b8; font-style: italic; }
-.ev3 .cv-string { color: #3f7d4e; }
+.ev3 .cv-string { color: #294970; }
 .ev3 .cv-annot { color: #9333ea; }
 .ev3 .cv-num { color: #b45309; }
 .ev3 .cv-kw { color: #1d4ed8; font-weight: 600; }
 .ev3 .cv-builtin { color: #0e7490; }
-.ev3 .cv-type { color: #0f766e; }
+.ev3 .cv-type { color: #8F959F; }
 .ev3 .cv-op { color: #64748b; }
 .ev3 .cv-key { color: #0e7490; }
 .ev3 .cv-lit { color: #b45309; }
@@ -1284,7 +1284,7 @@
   color: var(--slate-900);
   background: var(--surface);
 }
-.ev3 .md-review-input:focus { outline: none; border-color: var(--cyan-500, #688186); }
+.ev3 .md-review-input:focus { outline: none; border-color: var(--cyan-500, #8F959F); }
 .ev3 .md-review-submit { flex: none; }
 .ev3 .md-reviews-empty {
   color: var(--slate-500);
@@ -1485,7 +1485,7 @@
 .ev3 .lv-installs { display: inline-flex; align-items: center; gap: 4px; color: var(--slate-500); }
 .ev3 .lv-installs svg { color: var(--slate-400); }
 .ev3 .mc-install-btn { border: none; cursor: pointer; font: inherit; }
-.ev3 .mc-verified { color: var(--sage-600, #637e59); font-weight: 700; }
+.ev3 .mc-verified { color: var(--sage-600, #06203F); font-weight: 700; }
 .ev3 /* ── Install ("받기") modal ─────────────────────────────────────────────── */
 .im-overlay {
   position: fixed;
@@ -1523,14 +1523,14 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--sage-700, #44583d);
+  color: var(--sage-700, #1B3F90);
 }
 .ev3 .im-title { margin: 6px 0 8px; font-size: 20px; font-weight: 700; color: var(--slate-900); line-height: 1.25; }
 .ev3 .im-sub { margin: 0 0 8px; font-size: 14px; color: var(--slate-700); line-height: 1.5; }
 .ev3 .im-note { margin: 0 0 18px; font-size: 12.5px; color: var(--slate-500); line-height: 1.5; }
 .ev3 .im-ok {
   width: 44px; height: 44px; border-radius: 50%;
-  background: var(--sage-100, #d9e9d3); color: var(--sage-700, #44583d);
+  background: var(--sage-100, #DCE2EA); color: var(--sage-700, #1B3F90);
   display: flex; align-items: center; justify-content: center;
   font-size: 24px; font-weight: 700; margin-bottom: 12px;
 }
@@ -2322,7 +2322,7 @@
 .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--slate-500); text-decoration: none; }
 .ev3 .back-link:hover { color: var(--slate-900); }
 .ev3 /* 검증 발행자 칩 모디파이어 (.mc-tier 베이스 + verified 강조). */
-.mc-tier.tier-verified { background: var(--sage-200, #d7e7d0); color: var(--sage-900, #1c2718); }
+.mc-tier.tier-verified { background: var(--sage-200, #D7D9DC); color: var(--sage-900, #041222); }
 .ev3 /* ════════════════════════════════════════════════════════════════
    Market 리디자인 — 프로토타입 누락분 보강 (Market.html inline <style>
    + market-redesign.css L52 의 .rm-page 박스모델). 페이지 프레임/모달/
@@ -2453,7 +2453,7 @@
 .ev3 .im-actions .pri:hover:not(:disabled) { background: var(--slate-900); }
 .ev3 /* success */
     .im-success { padding: 36px 26px 24px; text-align: center; }
-.ev3 .im-ok { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; background: var(--pass-100, #dcefe0); color: var(--pass-600, #2f8a4e); display: grid; place-items: center; animation: imPop 0.3s 0.05s both; }
+.ev3 .im-ok { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; background: var(--pass-100, #DCE2EA); color: var(--pass-600, #294970); display: grid; place-items: center; animation: imPop 0.3s 0.05s both; }
 .ev3 .im-success-t { margin: 0; font-size: 19px; font-weight: 800; color: var(--slate-900); }
 .ev3 .im-success-s { margin: 7px 0 0; font-size: 13.5px; color: var(--slate-500); line-height: 1.55; }
 .ev3 .im-success-s b { color: var(--slate-800); }

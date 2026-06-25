@@ -445,7 +445,7 @@ function CategoryCoverage({
 
 function PackageGlyphSm() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--warn-700)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--blue-700)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8" />
     </svg>
   );
@@ -460,7 +460,7 @@ function Chevron() {
 }
 
 /** Pulse/activity glyph used in the recommendation hero reason. */
-function PulseGlyph({ size = 14, color = "var(--warn-400)" }: { size?: number; color?: string }) {
+function PulseGlyph({ size = 14, color = "var(--navy-400)" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 12h4l3 8 4-16 3 8h4" />
@@ -1206,7 +1206,7 @@ function PackageListCard({
             style={
               matchColor
                 ? { background: matchColor.soft, color: matchColor.ink }
-                : { background: "var(--warn-50)", color: "var(--warn-700)" }
+                : { background: "var(--blue-50)", color: "var(--blue-700)" }
             }
           >
             {matchLabel}

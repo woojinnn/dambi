@@ -160,7 +160,7 @@ export function MarketInstallModal({
   };
 
   const icon = isSet ? (
-    <Glyph d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8" size={22} color="var(--warn-700)" sw={1.7} />
+    <Glyph d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8" size={22} color="var(--blue-700)" sw={1.7} />
   ) : (
     <CategoryGlyph category={cat} size={22} color={catColor.hex} />
   );

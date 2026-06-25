@@ -10,15 +10,15 @@
 .alert-strip {
   position: relative; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   border: 1px solid var(--hairline); border-radius: var(--r-md);
-  padding: 13px 16px 13px 18px; margin-bottom: 14px; background: var(--surface); overflow: hidden;
+  padding: 13px 16px 13px 18px; margin-bottom: 14px; background: var(--neutral-50); overflow: hidden; /* ③-1 step3 BASE(알림 띠) */
 }
 .alert-strip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
 .alert-strip.has-risk::before { background: var(--warn-500); }
-.alert-strip.is-calm::before  { background: var(--pass-500); }
+.alert-strip.is-calm::before  { background: var(--neutral-400); }
 .as-ic { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; }
 .as-ic svg { width: 17px; height: 17px; }
 .alert-strip.has-risk .as-ic { background: var(--warn-50); color: var(--warn-700); }
-.alert-strip.is-calm  .as-ic { background: var(--pass-50); color: var(--pass-700); }
+.alert-strip.is-calm  .as-ic { background: var(--neutral-50); color: var(--neutral-600); }
 .as-lead {
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 13px; font-weight: 700; color: var(--slate-800);
@@ -46,7 +46,7 @@
 .as-dot.slate { background: var(--slate-400); }
 .as-go { display: inline-flex; color: var(--slate-300); transition: color 0.14s ease, transform 0.14s ease; }
 .as-item:hover .as-go { color: var(--slate-500); transform: translateX(2px); }
-.as-calm-txt { font-size: 13px; color: var(--pass-800); font-weight: 600; }
+.as-calm-txt { font-size: 13px; color: var(--neutral-700); font-weight: 600; }
 
 /* ── segment mode ───────────────────────────────────────────────────────── */
 .seg-bar {
@@ -194,7 +194,7 @@
 .acc-sum-flag.warn  { background: var(--warn-50); color: var(--warn-700); border-color: var(--warn-200); }
 .acc-sum-flag.fail  { background: var(--fail-50); color: var(--fail-700); border-color: var(--fail-200); }
 .acc-sum-flag.slate { background: var(--fog-200); color: var(--slate-600); }
-.acc-sum-flag.calm  { background: var(--pass-50); color: var(--pass-700); border-color: var(--pass-200); }
+.acc-sum-flag.calm  { background: var(--neutral-50); color: var(--neutral-600); border-color: var(--neutral-200); }
 /* show the live summary only when collapsed; hide the static tools/meta then
    (a collapsed Holdings must not show its token-search box) */
 .mod-sec.acc.collapsed > .sec-head > .acc-sum { display: flex; }
@@ -205,7 +205,7 @@
 .tw-panel {
   position: fixed; right: 20px; bottom: 20px; z-index: 200;
   width: 312px; max-height: calc(100vh - 40px); overflow-y: auto;
-  background: var(--surface); border: 1px solid var(--hairline);
+  background: var(--neutral-50); border: 1px solid var(--hairline); /* ③-1 step3 BASE(도구 패널) */
   border-radius: var(--r-lg);
   box-shadow: 0 18px 48px rgba(13, 17, 24, 0.20);
   font-family: var(--ff-sans);
@@ -373,6 +373,7 @@
 }
 .oed-k { font-size: 11px; font-weight: 700; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.05em; }
 .oed-v {
+  font-family: var(--font-mono); /* STEP2 mono: 대시보드 큰수치 */
   font-size: 38px; font-weight: 700; color: var(--slate-900);
   font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; margin: 2px 0;
 }
