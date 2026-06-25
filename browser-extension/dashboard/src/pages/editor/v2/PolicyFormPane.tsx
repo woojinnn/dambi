@@ -53,6 +53,7 @@ import {
 import {
   ENRICHMENT_FIELDS,
   generateManifest,
+  userFieldsFromManifest,
   type CustomType,
   type EnrichmentRegistry,
 } from "../../../editor-v9/manifest-gen";
@@ -274,52 +275,6 @@ const KIND_BY_TYPE: Record<CustomType, FieldOption["fieldKind"]> = {
 function actionTagOf(trigger: FormTrigger): string | null {
   if (trigger.kind !== "actionEq") return null;
   return trigger.id.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-}
-
-/** 저장된 manifest에서 사용자 정의 보강 필드(기본 레지스트리에 없는
- *  policy_rpc 출력)를 복원한다. 형태가 어긋나는 항목은 조용히 건너뜀.
- *
- *  `context.custom.<X>`는 rpc.id가 아니라 출력의 `field`(=context 출력 이름)에
- *  매인다 — rpc.id는 호출 식별자일 뿐이라 필드 이름과 다를 수 있다(예:
- *  id "session-fill-stats" → field "lossStreak"). 그래서 rpc.id가 아니라 각
- *  출력의 `field`를 키로 등록하고, 한 호출이 여러 context 필드를 내보내면
- *  필드마다 따로 등록한다. */
-function userFieldsFromManifest(manifest: unknown, actionTag: string | null): EnrichmentRegistry {
-  const out: EnrichmentRegistry = {};
-  const m = manifest as
-    | {
-        policy_rpc?: unknown;
-        custom_context?: { fields?: Record<string, string> };
-      }
-    | null
-    | undefined;
-  if (!m || !Array.isArray(m.policy_rpc)) return out;
-  const types = m.custom_context?.fields ?? {};
-  for (const raw of m.policy_rpc) {
-    const rpc = raw as {
-      method?: unknown;
-      params?: unknown;
-      outputs?: { kind?: unknown; field?: unknown; type?: unknown; from?: unknown }[];
-    };
-    if (typeof rpc?.method !== "string" || !Array.isArray(rpc.outputs)) continue;
-    for (const o of rpc.outputs) {
-      if (o?.kind !== "context" || typeof o.field !== "string") continue;
-      const field = o.field;
-      if (field in ENRICHMENT_FIELDS) continue; // 내장 필드는 레지스트리가 원본
-      // 타입은 출력에 박힌 값을 우선하고, 없으면 custom_context.fields에서 찾는다.
-      const type = typeof o.type === "string" ? o.type : types[field];
-      if (type !== "decimal" && type !== "Long" && type !== "Bool" && type !== "String") continue;
-      out[field] = {
-        type,
-        label: { ko: field, en: field },
-        appliesTo: actionTag ? [actionTag] : [],
-        method: rpc.method,
-        projection: typeof o.from === "string" ? o.from : "$.result.value",
-        params: (rpc.params ?? {}) as EnrichmentRegistry[string]["params"],
-      };
-    }
-  }
-  return out;
 }
 
 /** 폼↔다이어그램 동기화의 선택 단위: 행/묶음 노드, 또는 상황 카드(머리 노드). */
