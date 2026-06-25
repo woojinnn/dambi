@@ -859,6 +859,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fontsource-variable/jetbrains-mono@npm:^5.2.8":
+  version: 5.2.8
+  resolution: "@fontsource-variable/jetbrains-mono@npm:5.2.8"
+  checksum: 10/c18676abf332e9d6ed2558a7c96756cad1af777054fdf66a7192e6f7dc52bcbdce51dfc6160ad79a21664d53d26787cbdaad180c193c42366a82efbd870c6dd7
+  languageName: node
+  linkType: hard
+
 "@fregante/relaxed-json@npm:2.0.0":
   version: 2.0.0
   resolution: "@fregante/relaxed-json@npm:2.0.0"
@@ -3279,6 +3286,7 @@ __metadata:
     "@dnd-kit/core": "npm:^6.3.1"
     "@dnd-kit/sortable": "npm:^8.0.0"
     "@dnd-kit/utilities": "npm:^3.2.2"
+    "@fontsource-variable/jetbrains-mono": "npm:^5.2.8"
     "@tanstack/react-query": "npm:^5.59.0"
     "@testing-library/dom": "npm:^10"
     "@testing-library/react": "npm:^16"
@@ -3301,6 +3309,7 @@ __metadata:
     typescript: "npm:^5.4.0"
     vite: "npm:7.3.5"
     vitest: "npm:4.1.9"
+    wanted-sans: "npm:^1.0.3"
   languageName: unknown
   linkType: soft
 
@@ -7396,6 +7405,13 @@ __metadata:
   dependencies:
     xml-name-validator: "npm:^5.0.0"
   checksum: 10/d78f59e6b4f924aa53b6dfc56949959229cae7fe05ea9374eb38d11edcec01398b7f5d7a12576bd5acc57ff446abb5c9115cd83b9d882555015437cf858d42f0
+  languageName: node
+  linkType: hard
+
+"wanted-sans@npm:^1.0.3":
+  version: 1.0.3
+  resolution: "wanted-sans@npm:1.0.3"
+  checksum: 10/9f91c49619d395047e9f533403952a1ce505b62a184f319337cbec79d1df829afa1dfe94af5799516e9eeb98be4cabd1a83f4c0320a86dea0af0323bbd3f887a
   languageName: node
   linkType: hard
 

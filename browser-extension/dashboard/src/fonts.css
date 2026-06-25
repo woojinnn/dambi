@@ -1,0 +1,37 @@
+/* ============================================================================
+ * DEEP 웹폰트 로딩 — self-host @font-face (STEP 1)
+ *
+ * 방식: (A) self-host. 파일은 OFL npm 패키지에서 가족당 Variable woff2 1개씩만
+ *   추출(src/assets/fonts/) → Vite가 해시·base:"./" 상대경로 재작성 → dist 번들.
+ *   각 패키지의 기본 CSS(정적 다weight·dynamic-subset 수백 파일)는 import 하지 않는다.
+ *
+ * 단일 폰트 시스템(STEP 3): head 전용 폰트 없음. 제목도 본문(Wanted) weight로 위계.
+ *   Pretendard는 self-host 제거 — 이름만 --font-body 폴백 스택에 남김(파일 0).
+ *
+ * 출처(전부 OFL-1.1, 웹폰트 임베드 허용):
+ *   · WantedSansVariable.woff2          ← npm wanted-sans@1.0.3
+ *       (fonts/webfonts/variable/complete/woff2/WantedSansVariable.woff2, ~1.23MB, 풀-KR)
+ *   · JetBrainsMonoVariable-latin.woff2 ← npm @fontsource-variable/jetbrains-mono@5.2.8
+ *       (files/jetbrains-mono-latin-wght-normal.woff2, ~40KB, Latin only)
+ *       주소/ID/수치=ASCII 전용이라 Latin 서브셋으로 충분. 비-Latin 글리프는 폴백.
+ *
+ * Variable 보존: 세 서체 모두 font-weight:100 900 으로 전 weight 축 유지.
+ * font-display: swap — FOIT 대신 FOUT(폴백 즉시 → 로드 후 교체). 텍스트 가림 방지.
+ * unicode-range: 가족당 1파일(풀셋/단일 서브셋)이라 생략.
+ * ==========================================================================*/
+
+@font-face {
+  font-family: "Wanted Sans Variable";
+  src: url("./assets/fonts/WantedSansVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./assets/fonts/JetBrainsMonoVariable-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}

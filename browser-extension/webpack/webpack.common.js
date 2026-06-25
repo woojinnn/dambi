@@ -75,6 +75,11 @@ const sharedModule = {
       test: /\.wasm$/,
       type: "asset/resource",
     },
+    {
+      /* DEEP 폰트(woff2) — CSS url()을 번들·해시 (Wanted Sans / JetBrains Mono) */
+      test: /\.(woff2?|ttf|otf|eot)$/i,
+      type: "asset/resource",
+    },
   ],
 };
 
