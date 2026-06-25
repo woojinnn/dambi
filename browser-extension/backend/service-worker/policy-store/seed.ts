@@ -28,7 +28,7 @@ const builtinIdOf = (defId: string): string => defId.replace(/^def::builtin\./, 
 
 /** builtin 시드 버전 — 제목/심각도 등 builtin 정의가 바뀌면 올린다. 기존 사용자는
  *  버전이 다르면 재시드(같은 def id로 다시 심어 바인딩은 유지하고 내용만 갱신). */
-const BUILTIN_SEED_VERSION = 3;
+const BUILTIN_SEED_VERSION = 4;
 const seedVerKey = (uid: string): string => `ps2-builtin-seed-version:${uid}`;
 
 /** 계정당 한 번만 시드 (SW 수명 내 캐시 + 버전 비교로 멱등). */
@@ -105,7 +105,7 @@ export async function ensureSeeded(uid: string): Promise<void> {
     }
     d.library.packages[BUILTIN_PKG] = {
       id: BUILTIN_PKG,
-      displayName: "기본 안전팩",
+      displayName: "기본 안전팩 템플릿",
       source: "builtin",
       updatedAtMs: Date.now(),
     };

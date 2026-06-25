@@ -438,7 +438,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
       .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko") || a.id.localeCompare(b.id))
       .map((p) => ({ id: p.id, displayName: p.displayName }));
     // 개별(미분류)은 비어 있어도 항상 표시 — 끌어다 놓을 고정 영역으로 둔다.
-    list.push({ id: UNCAT, displayName: "개별", locked: true });
+    list.push({ id: UNCAT, displayName: "개별 템플릿", locked: true });
     return list;
   }, [snap, defsByFolder]);
 
