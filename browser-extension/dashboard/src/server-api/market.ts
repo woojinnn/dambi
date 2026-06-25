@@ -423,6 +423,35 @@ export async function voteHelpful(
   );
 }
 
+// ---- Market admin: publisher tiers --------------------------------------
+
+/** A publisher account in the market-admin view. */
+export interface MarketPublisher {
+  user_id: string;
+  email: string;
+  /** Account-level tier — drives the "Wallet Guardians"/verified badges. */
+  publisher_tier: PublisherTier;
+  /** Published listings owned by this account. */
+  listing_count: number;
+}
+
+/** `GET /market/publishers` — admin only (throws `ServerError` 403 otherwise). */
+export async function listPublishers(): Promise<MarketPublisher[]> {
+  return request<MarketPublisher[]>("/market/publishers");
+}
+
+/** `PATCH /market/publishers/:id` — admin: grant/revoke verified.
+ * `official` is reserved (the Wallet Guardians brand) and not settable here. */
+export async function setPublisherTier(
+  userId: string,
+  tier: "verified" | "community",
+): Promise<MarketPublisher> {
+  return request<MarketPublisher>(
+    `/market/publishers/${pathSegment(userId, "user id")}`,
+    { method: "PATCH", body: { tier } },
+  );
+}
+
 /** `POST /market/listings/id/:id/watch` — subscribe to new-version events. */
 export async function watchListing(listingId: string): Promise<void> {
   await request<void>(

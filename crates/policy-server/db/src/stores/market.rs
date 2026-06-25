@@ -208,7 +208,7 @@ pub async fn list_listings(
     };
 
     let sql = format!(
-        "SELECT l.id, l.slug, l.kind, l.publisher_id, l.publisher_tier,
+        "SELECT l.id, l.slug, l.kind, l.publisher_id, COALESCE(u.publisher_tier, 'community') AS publisher_tier,
                 l.display_name, l.description, l.domain, l.category, l.doc, l.intents, l.severity,
                 l.status, l.current_version, l.forked_from, l.created_at, l.updated_at,
                 stats.install_count, stats.rating_avg, stats.rating_count,
@@ -231,7 +231,7 @@ pub async fn list_listings(
            AND ($2::text IS NULL OR l.domain = $2)
            AND ($3::text IS NULL OR l.category = $3)
            AND ($4::text IS NULL OR l.publisher_id = $4)
-           AND ($5::text IS NULL OR l.publisher_tier = $5)
+           AND ($5::text IS NULL OR COALESCE(u.publisher_tier, 'community') = $5)
            AND ($6::text IS NULL OR
                 l.display_name->>'en' ILIKE '%' || $6 || '%' OR
                 l.display_name->>'ko' ILIKE '%' || $6 || '%')
@@ -262,7 +262,7 @@ pub async fn get_listing_by_slug(
     viewer_id: Option<&str>,
 ) -> DbResult<Option<ListingRow>> {
     let row = query(
-        "SELECT l.id, l.slug, l.kind, l.publisher_id, l.publisher_tier,
+        "SELECT l.id, l.slug, l.kind, l.publisher_id, COALESCE(u.publisher_tier, 'community') AS publisher_tier,
                 l.display_name, l.description, l.domain, l.category, l.doc, l.intents, l.severity,
                 l.status, l.current_version, l.forked_from, l.created_at, l.updated_at,
                 stats.install_count, stats.rating_avg, stats.rating_count,
@@ -296,7 +296,7 @@ pub async fn get_listing_by_id(
     viewer_id: Option<&str>,
 ) -> DbResult<Option<ListingRow>> {
     let row = query(
-        "SELECT l.id, l.slug, l.kind, l.publisher_id, l.publisher_tier,
+        "SELECT l.id, l.slug, l.kind, l.publisher_id, COALESCE(u.publisher_tier, 'community') AS publisher_tier,
                 l.display_name, l.description, l.domain, l.category, l.doc, l.intents, l.severity,
                 l.status, l.current_version, l.forked_from, l.created_at, l.updated_at,
                 stats.install_count, stats.rating_avg, stats.rating_count,
@@ -1062,7 +1062,7 @@ pub async fn delete_listing(pool: &PgPool, listing_id: Uuid, publisher_id: &str)
 
 pub async fn list_watches(pool: &PgPool, user_id: &str) -> DbResult<Vec<ListingRow>> {
     let rows = query(
-        "SELECT l.id, l.slug, l.kind, l.publisher_id, l.publisher_tier,
+        "SELECT l.id, l.slug, l.kind, l.publisher_id, COALESCE(u.publisher_tier, 'community') AS publisher_tier,
                 l.display_name, l.description, l.domain, l.category, l.doc, l.intents, l.severity,
                 l.status, l.current_version, l.forked_from, l.created_at, l.updated_at,
                 stats.install_count, stats.rating_avg, stats.rating_count,
@@ -1176,4 +1176,59 @@ mod tests {
         assert!(sql.contains("RETURNING listing_id, version"));
         assert!(sql.contains("FROM target\nJOIN inserted"));
     }
+}
+
+/// One publisher account for the market-admin view.
+#[derive(Debug, Clone)]
+pub struct PublisherRow {
+    pub user_id: String,
+    pub email: String,
+    /// Account-level tier — `official` | `verified` | `community`.
+    pub publisher_tier: String,
+    /// Published listings owned by this account.
+    pub listing_count: i64,
+}
+
+/// Admin: list publisher accounts — anyone who owns a listing OR has a
+/// non-community tier — with their account tier and published-listing count.
+pub async fn list_publishers(pool: &PgPool) -> DbResult<Vec<PublisherRow>> {
+    let rows = query(
+        "SELECT u.user_id, u.email, u.publisher_tier,
+                COUNT(l.id) FILTER (WHERE l.status = 'published') AS listing_count
+         FROM users u
+         LEFT JOIN market_listings l ON l.publisher_id = u.user_id
+         GROUP BY u.user_id, u.email, u.publisher_tier
+         HAVING COUNT(l.id) > 0 OR u.publisher_tier <> 'community'
+         ORDER BY (u.publisher_tier <> 'community') DESC,
+                  COUNT(l.id) DESC, u.email ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(rows
+        .iter()
+        .map(|r| PublisherRow {
+            user_id: r.get("user_id"),
+            email: r.get("email"),
+            publisher_tier: r.get("publisher_tier"),
+            listing_count: r.get("listing_count"),
+        })
+        .collect())
+}
+
+/// Admin: set an account's publisher tier. Returns the account email on success,
+/// `None` when no such user. The caller must restrict `tier` (e.g. reject
+/// `official`, which is reserved for the brand account and set out of band).
+pub async fn set_publisher_tier(
+    pool: &PgPool,
+    user_id: &str,
+    tier: &str,
+) -> DbResult<Option<String>> {
+    let row = query("UPDATE users SET publisher_tier = $1 WHERE user_id = $2 RETURNING email")
+        .bind(tier)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(row.map(|r| r.get("email")))
 }

@@ -151,6 +151,9 @@
 .nav-rail:not(:hover):not(:focus-within) .nav-item,
 .nav-rail:not(:hover):not(:focus-within) .nav-user,
 .nav-rail:not(:hover):not(:focus-within) .nav-logo { justify-content: center; padding-left: 0; padding-right: 0; }
+/* 접힘: 아바타↔메타 사이 12px gap이 0폭 메타와의 사이에 남아 아바타를 좌측으로
+ * ~6px 밀어낸다(아이콘은 gap:0이라 멀쩡). 접힘에선 gap을 없애 정확히 가운데로. */
+.nav-rail:not(:hover):not(:focus-within) .nav-user { gap: 0; }
 
 /* ── TOPBAR ── */
 .topbar {

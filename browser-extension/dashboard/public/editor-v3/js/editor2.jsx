@@ -117,6 +117,8 @@ function Editor2View({ onNewPolicy }) {
   const onDropApply = (pkgId) => {
     const d = e2Drag; e2Drag = null;
     if (!d) return;
+    // 기본 안전팩(pkg::builtin.*)은 읽기 전용 — 정책을 끌어다 넣을 수 없다.
+    if (typeof pkgId === "string" && pkgId.indexOf("pkg::builtin.") === 0) return pushToast("기본 안전팩은 읽기 전용이에요");
     if (d.kind === "folder") return setDropApply({ kind: "folder", pkgId, name: d.name, defs: d.defs });
     if (dropInPkg(d.def.id, pkgId)) return pushToast("이미 이 패키지에 들어 있어요");
     setDropApply({ kind: "def", pkgId, def: d.def });
@@ -438,7 +440,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
       .sort((a, b) => a.displayName.localeCompare(b.displayName, "ko") || a.id.localeCompare(b.id))
       .map((p) => ({ id: p.id, displayName: p.displayName }));
     // 개별(미분류)은 비어 있어도 항상 표시 — 끌어다 놓을 고정 영역으로 둔다.
-    list.push({ id: UNCAT, displayName: "개별", locked: true });
+    list.push({ id: UNCAT, displayName: "개별 템플릿", locked: true });
     return list;
   }, [snap, defsByFolder]);
 
@@ -552,6 +554,8 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const moveDefToLibFolder = (defId, folderId) => {
     const d = snap.library.defs[defId];
     if (!d) return;
+    // 기본 안전팩 템플릿(builtin)은 읽기 전용 — 정책을 끌어다 넣을 수 없다.
+    if (snap.library.packages[folderId]?.source === "builtin") return pushToast("기본 안전팩은 읽기 전용이에요");
     const next = folderId === UNCAT ? undefined : folderId;
     if ((d.defaults.packageId ?? undefined) === next) return;
     const folderName = folderId === UNCAT ? "개별" : snap.library.packages[folderId]?.displayName ?? folderId;
@@ -606,6 +610,8 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
     e2Drag = null;
     dragRef.current = null;
     if (!d) return;
+    // 기본 안전팩(pkg::builtin.*)은 읽기 전용 — 정책 추가 금지.
+    if (typeof pkgId === "string" && pkgId.indexOf("pkg::builtin.") === 0) return pushToast("기본 안전팩은 읽기 전용이에요");
     if (d.kind === "folder") return setFolderApply({ pkgId, name: d.name, defs: d.defs });
     if (isInPackage(d.def.id, pkgId)) return pushToast("이미 이 패키지에 들어 있어요");
     setApply({ pkgId, def: d.def });
@@ -844,7 +850,9 @@ function E2PackageCard({ pkg, wallet, snap, members, address, highlighted, pinne
   React.useEffect(() => setDraftDesc(pkg.desc ?? ""), [pkg.desc]);
 
   const locked = pkg.id === UNCAT;
-  const isDefaultPack = pkg.displayName === "기본 안전팩"; // 기본값 안전팩 — 읽기 전용(눈 아이콘만)
+  // 기본 안전팩 = 읽기 전용. id(pkg::builtin.*)로 판별 — 표시명("기본 안전팩"/
+  // "기본 안전팩 템플릿")에 의존하면 신규 지갑(라이브러리명 상속)에서 감지가 깨진다.
+  const isDefaultPack = typeof pkg.id === "string" && pkg.id.indexOf("pkg::builtin.") === 0;
   const empty = members.length === 0;
   const activeN = members.filter((b) => PS.isEffectiveOn(wallet, b)).length;
   const displayedOn = packageDisplayOn(wallet.packageEnabled[pkg.id] ?? true, members.filter((b) => b.enabled).length);

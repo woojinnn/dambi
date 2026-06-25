@@ -70,7 +70,14 @@ export function MarketInstallModal({
     }));
   }, [walletsQ.data, snap, summaryQ.data]);
   const libPackages = useMemo(
-    () => Object.values(snap?.library.packages ?? {}).map((p) => ({ id: p.id, displayName: p.displayName })),
+    () =>
+      Object.values(snap?.library.packages ?? {}).map((p) => ({
+        id: p.id,
+        // 마켓 다운로드 = 라이브러리 "템플릿" 폴더 선택. UNCAT은 "개별 템플릿"으로
+        // 표시해 패키지 컨텍스트의 "미분류"와 구분한다. 일반 폴더는 데이터 그대로
+        // (builtin은 재시드로 "기본 안전팩 템플릿").
+        displayName: p.id === UNCATEGORIZED_PKG ? "개별 템플릿" : p.displayName,
+      })),
     [snap],
   );
 

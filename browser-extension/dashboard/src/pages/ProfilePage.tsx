@@ -13,6 +13,7 @@ import {
 } from "../server-api";
 import { deleteDef, deletePackage, getOverview, UNCATEGORIZED_PKG } from "../server-api/policy-store";
 import { getSettings, putOpenaiKey } from "../server-api/settings";
+import { listPublishers, setPublisherTier } from "../server-api/market";
 import { useAuth } from "../hooks/useAuth";
 import { Topbar } from "../shell/Topbar";
 
@@ -117,6 +118,21 @@ export function ProfilePage() {
       setBanner(t("settings.openaiSaveError", { error: e instanceof Error ? e.message : String(e) })),
   });
 
+  // 마켓 관리자 — publisher 인증(verified) 관리. 비관리자는 GET이 403 → 섹션 숨김.
+  const publishersQ = useQuery({
+    queryKey: ["market-publishers"],
+    queryFn: listPublishers,
+    retry: false,
+    enabled: !!user?.user_id,
+  });
+  const isMarketAdmin = publishersQ.isSuccess;
+  const tierMut = useMutation({
+    mutationFn: (v: { userId: string; tier: "verified" | "community" }) =>
+      setPublisherTier(v.userId, v.tier),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["market-publishers"] }),
+    onError: (e: unknown) => setBanner(e instanceof Error ? e.message : String(e)),
+  });
+
   // 올린 게시물 — 정책/패키지 탭 + 페이지네이션.
   const [listTab, setListTab] = useState<"policy" | "set">("policy");
   const [listPage, setListPage] = useState(1);
@@ -205,6 +221,62 @@ export function ProfilePage() {
             {t("profile.signOut")}
           </button>
         </section>
+
+        {/* market admin — publisher verification (hidden for non-admins: GET 403) */}
+        {isMarketAdmin && (
+          <section className="pp-card">
+            <div className="pp-sec-head">
+              <h2>{ko ? "마켓 publisher 관리" : "Market publishers"}</h2>
+              <span className="pp-count">{publishersQ.data?.length ?? 0}</span>
+            </div>
+            <p className="pp-muted">
+              {ko
+                ? "인증(verified)하면 그 계정 정책에 체크표시가 붙어요. ‘공식’(Wallet Guardians)은 여기서 바꿀 수 없습니다."
+                : "Verifying an account adds a checkmark to its listings. ‘Official’ (Wallet Guardians) can’t be changed here."}
+            </p>
+            <ul className="pp-pub-list">
+              {(publishersQ.data ?? []).map((p) => (
+                <li key={p.user_id} className="pp-pub-row">
+                  <span className="pp-pub-email">{p.email}</span>
+                  <span className="pp-pub-meta">
+                    {p.publisher_tier === "official"
+                      ? ko
+                        ? "공식"
+                        : "Official"
+                      : p.publisher_tier === "verified"
+                        ? ko
+                          ? "인증됨 ✓"
+                          : "Verified ✓"
+                        : ko
+                          ? "일반"
+                          : "Community"}
+                    {" · "}
+                    {ko ? `리스팅 ${p.listing_count}` : `${p.listing_count} listings`}
+                  </span>
+                  {p.publisher_tier === "official" ? null : p.publisher_tier === "verified" ? (
+                    <button
+                      type="button"
+                      className="pp-btn ghost"
+                      disabled={tierMut.isPending}
+                      onClick={() => tierMut.mutate({ userId: p.user_id, tier: "community" })}
+                    >
+                      {ko ? "인증 해제" : "Unverify"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="pp-btn"
+                      disabled={tierMut.isPending}
+                      onClick={() => tierMut.mutate({ userId: p.user_id, tier: "verified" })}
+                    >
+                      {ko ? "인증 부여" : "Verify"}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {/* published posts */}
         <section className="pp-card">
