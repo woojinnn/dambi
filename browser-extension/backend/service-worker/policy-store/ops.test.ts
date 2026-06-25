@@ -87,11 +87,27 @@ describe("policy-store ops", () => {
 
   it("기본 안전팩은 지갑에서 빼기(removePackageFromWallet)도 막힌다", async () => {
     await putPackage("u", { id: "pkg::builtin.day1-safety", displayName: "기본 안전팩", source: "builtin", updatedAtMs: 1 });
-    await putDef("u", { ...def("def::b1"), source: "builtin" });
-    await bind("u", { defId: "def::b1", packageId: "pkg::builtin.day1-safety", addresses: ["0xa100000000000000000000000000000000000001"] });
+    // builtin 정의는 기본 안전팩 폴더에 들어간다(시드와 동일). 사용자 bind()로는
+    // 더 이상 기본 안전팩에 추가할 수 없으므로(읽기 전용), 시드/프로비저닝 경로로 적용.
+    await putDef("u", { ...def("def::b1"), source: "builtin", defaults: { enabled: true, params: { cap: 1 }, packageId: "pkg::builtin.day1-safety" } });
+    await provisionWallets("u", ["0xa100000000000000000000000000000000000001"]);
     await expect(removePackageFromWallet("u", { address: "0xa100000000000000000000000000000000000001", packageId: "pkg::builtin.day1-safety" })).rejects.toThrow();
     const s = await readStore("u");
     expect(Object.values(s.wallets.byAddress["0xa100000000000000000000000000000000000001"].bindings).length).toBe(1);
+  });
+
+  it("기본 안전팩은 추가도 막힌다 — bind/putDef(내 정의)/duplicate 모두 거부 (읽기 전용)", async () => {
+    await putPackage("u", { id: "pkg::builtin.day1-safety", displayName: "기본 안전팩", source: "builtin", updatedAtMs: 1 });
+    await putDef("u", def("def::mine"));
+    const addr = "0xa100000000000000000000000000000000000001";
+    // 기본 안전팩 패키지에 바인딩(적용) 금지
+    await expect(bind("u", { defId: "def::mine", packageId: "pkg::builtin.day1-safety", addresses: [addr] })).rejects.toThrow();
+    // 내 정의를 기본 안전팩 템플릿 폴더에 넣기 금지
+    await expect(putDef("u", { ...def("def::mine"), defaults: { enabled: true, params: { cap: 1 }, packageId: "pkg::builtin.day1-safety" } })).rejects.toThrow();
+    // 기본 안전팩 폴더로 복제 금지
+    await expect(duplicateDef("u", "def::mine", "pkg::builtin.day1-safety")).rejects.toThrow();
+    // 미분류(pkg::uncategorized)는 영향 없음 — 정상 바인딩
+    await expect(bind("u", { defId: "def::mine", packageId: UNCATEGORIZED_PKG, addresses: [addr] })).resolves.toBeUndefined();
   });
 
   it("builtin을 duplicateDef하면 source:'mine' 사본이 생겨 편집할 수 있다", async () => {

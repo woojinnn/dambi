@@ -29,6 +29,17 @@ function assertNotBuiltinPackage(d: StoreSnapshot, pkgId: string): void {
   }
 }
 
+/** 기본 안전팩(팩·템플릿)은 사실상 읽기 전용 — 삭제·수정뿐 아니라 "추가"도 막는다.
+ *  즉 def를 기본 안전팩 라이브러리 폴더(템플릿)에 넣거나, 기본 안전팩 패키지에
+ *  바인딩(적용)하는 것도 금지. 시드는 mutate를 직접 쓰므로 영향받지 않는다. */
+function assertBuiltinPackageReadonly(pkgId: string | undefined): void {
+  // 잠그는 건 기본 안전팩(pkg::builtin.*)뿐. 미분류(pkg::uncategorized)나 그 외
+  // builtin-source 패키지는 추가 허용 — 에디터 UI 가드와 동일한 prefix 기준.
+  if (pkgId !== undefined && pkgId.startsWith("pkg::builtin.")) {
+    throw new Error("기본 안전팩은 읽기 전용이에요 — 정책을 추가할 수 없어요");
+  }
+}
+
 function assertNotBuiltinNamespace(value: string, label: string): void {
   if (value.startsWith("def::builtin.") || value.startsWith("pkg::builtin.")) {
     throw new Error(`${label} cannot use the builtin safety-pack namespace`);
@@ -130,6 +141,9 @@ export function putDef(uid: string, def: PolicyDef): Promise<void> {
   return mutate(uid, (d) => {
     assertSafeRecordKey(def.id, "def id");
     assertNotBuiltinDef(d, def.id); // 기존 builtin 덮어쓰기(=수정) 금지
+    // 내 정의(또는 마켓 정의)를 기본 안전팩 템플릿 폴더에 넣는 것 금지. builtin 정의
+    // 자체는 그 폴더가 제자리라 예외(시드가 mutate로 만든 콘텐츠).
+    if (def.source !== "builtin") assertBuiltinPackageReadonly(def.defaults.packageId);
     d.library.defs[def.id] = def;
   });
 }
@@ -155,6 +169,7 @@ export function duplicateDef(uid: string, defId: string, packageId?: string): Pr
   return mutate(uid, (d) => {
     assertSafeRecordKey(defId, "def id");
     if (packageId !== undefined) assertSafeRecordKey(packageId, "package id");
+    assertBuiltinPackageReadonly(packageId); // 기본 안전팩 템플릿 폴더로 복제 금지
     const src = d.library.defs[defId];
     if (!src) throw new Error(`정의가 없습니다: ${defId}`);
     const newId = `def::${crypto.randomUUID()}`;
@@ -284,6 +299,7 @@ export function bind(
   return mutate(uid, (d) => {
     assertSafeRecordKey(opts.defId, "def id");
     assertSafeRecordKey(opts.packageId, "package id");
+    assertBuiltinPackageReadonly(opts.packageId); // 기본 안전팩에 바인딩(추가) 금지
     assertHolesFilled(d.library.defs[opts.defId], opts.params);
     for (const address of opts.addresses) {
       const w = walletAt(d, address);
@@ -310,6 +326,7 @@ export function updateBinding(
   return mutate(uid, (d) => {
     assertSafeRecordKey(opts.bindingId, "binding id");
     if (opts.patch.packageId !== undefined) assertSafeRecordKey(opts.patch.packageId, "package id");
+    assertBuiltinPackageReadonly(opts.patch.packageId); // 기본 안전팩으로 이동(추가) 금지
     const w = d.wallets.byAddress[normalizeWalletAddress(opts.address)];
     const b = w?.bindings[opts.bindingId];
     if (!b) throw new Error(`바인딩이 없습니다: ${opts.bindingId}`);

@@ -112,6 +112,7 @@ function Editor2View({ onNewPolicy }) {
     const d = e2Drag;
     e2Drag = null;
     if (!d) return;
+    if (typeof pkgId === "string" && pkgId.indexOf("pkg::builtin.") === 0) return pushToast("\uAE30\uBCF8 \uC548\uC804\uD329\uC740 \uC77D\uAE30 \uC804\uC6A9\uC774\uC5D0\uC694");
     if (d.kind === "folder") return setDropApply({ kind: "folder", pkgId, name: d.name, defs: d.defs });
     if (dropInPkg(d.def.id, pkgId)) return pushToast("\uC774\uBBF8 \uC774 \uD328\uD0A4\uC9C0\uC5D0 \uB4E4\uC5B4 \uC788\uC5B4\uC694");
     setDropApply({ kind: "def", pkgId, def: d.def });
@@ -364,7 +365,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const folders = React.useMemo(() => {
     const seen = /* @__PURE__ */ new Set();
     const list = Object.values(snap.library.packages).filter((p) => p.id !== UNCAT && !seen.has(p.id) && seen.add(p.id)).sort((a, b) => a.displayName.localeCompare(b.displayName, "ko") || a.id.localeCompare(b.id)).map((p) => ({ id: p.id, displayName: p.displayName }));
-    list.push({ id: UNCAT, displayName: "\uAC1C\uBCC4", locked: true });
+    list.push({ id: UNCAT, displayName: "\uAC1C\uBCC4 \uD15C\uD50C\uB9BF", locked: true });
     return list;
   }, [snap, defsByFolder]);
   const matchQuery = (d) => !searching || d.displayName.toLowerCase().includes(query.trim().toLowerCase());
@@ -394,7 +395,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const packages = React.useMemo(() => {
     const list = [
       // 개별(미분류) 카드는 비어 있어도 항상 표시 — 고정 드롭 영역.
-      { id: UNCAT, displayName: "\uAC1C\uBCC4 \uD15C\uD50C\uB9BF" },
+      { id: UNCAT, displayName: "\uAC1C\uBCC4" },
       ...Object.values(wallet.packages || {}).slice().sort((a, b) => a.displayName.localeCompare(b.displayName, "ko")).map((p) => ({ id: p.id, displayName: p.displayName, desc: p.desc }))
     ];
     const pins = pinnedPkgs || /* @__PURE__ */ new Set();
@@ -474,6 +475,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const moveDefToLibFolder = (defId, folderId) => {
     const d = snap.library.defs[defId];
     if (!d) return;
+    if (snap.library.packages[folderId]?.source === "builtin") return pushToast("\uAE30\uBCF8 \uC548\uC804\uD329\uC740 \uC77D\uAE30 \uC804\uC6A9\uC774\uC5D0\uC694");
     const next = folderId === UNCAT ? void 0 : folderId;
     if ((d.defaults.packageId ?? void 0) === next) return;
     const folderName = folderId === UNCAT ? "\uAC1C\uBCC4" : snap.library.packages[folderId]?.displayName ?? folderId;
@@ -524,6 +526,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
     e2Drag = null;
     dragRef.current = null;
     if (!d) return;
+    if (typeof pkgId === "string" && pkgId.indexOf("pkg::builtin.") === 0) return pushToast("\uAE30\uBCF8 \uC548\uC804\uD329\uC740 \uC77D\uAE30 \uC804\uC6A9\uC774\uC5D0\uC694");
     if (d.kind === "folder") return setFolderApply({ pkgId, name: d.name, defs: d.defs });
     if (isInPackage(d.def.id, pkgId)) return pushToast("\uC774\uBBF8 \uC774 \uD328\uD0A4\uC9C0\uC5D0 \uB4E4\uC5B4 \uC788\uC5B4\uC694");
     setApply({ pkgId, def: d.def });
@@ -665,7 +668,7 @@ function E2PackageCard({ pkg, wallet, snap, members, address, highlighted, pinne
   const [draftDesc, setDraftDesc] = React.useState(pkg.desc ?? "");
   React.useEffect(() => setDraftDesc(pkg.desc ?? ""), [pkg.desc]);
   const locked = pkg.id === UNCAT;
-  const isDefaultPack = pkg.displayName === "\uAE30\uBCF8 \uC548\uC804\uD329";
+  const isDefaultPack = typeof pkg.id === "string" && pkg.id.indexOf("pkg::builtin.") === 0;
   const empty = members.length === 0;
   const activeN = members.filter((b) => PS.isEffectiveOn(wallet, b)).length;
   const displayedOn = packageDisplayOn(wallet.packageEnabled[pkg.id] ?? true, members.filter((b) => b.enabled).length);
