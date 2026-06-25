@@ -19,7 +19,11 @@ export function DeleteWalletModal({ open, onClose, address, label }: Props) {
   const mut = useMutation({
     mutationFn: () => deleteWallet(address),
     onSuccess: () => {
+      // 홈 요약뿐 아니라 지갑 목록을 읽는 다른 페이지(프로필·시뮬레이션·에디터·
+      // 마켓 설치)도 갱신해야 삭제가 어디서든 즉시 반영된다. ["dashboard"]만
+      // 무효화하면 ["wallets"] 쿼리는 그대로라 그 페이지들에 지갑이 남는다.
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["wallets"] });
       onClose();
     },
   });
