@@ -1,5 +1,6 @@
 import Browser from "webextension-polyfill";
 import "./styles.css";
+import "../tokens.css"; // DEEP 토큰: 마지막 import → :root DEEP 값이 styles.css 옛값을 덮음
 
 // Sentinel guard mark (B 드로어 GuardFace). 이 빌드의 webpack 은 png import
 // (asset/resource) 룰이 .wasm 에만 걸려 있어 `import x from "*.png"` 를 못 쓴다.

@@ -21,9 +21,9 @@ body { font-family: var(--ff-sans); }
 .ob-brand .wd { font-size: 13px; font-weight: 700; letter-spacing: 0.16em; color: #fff; }
 .ob-dots { margin-left: auto; display: flex; align-items: center; gap: 7px; }
 .ob-dots .dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.22); transition: background .2s, box-shadow .2s; }
-.ob-dots .dot.on { background: #6FE0AC; box-shadow: 0 0 0 3px rgba(111,224,172,0.16); }
+.ob-dots .dot.on { background: #6F91B8; box-shadow: 0 0 0 3px rgba(111,224,172,0.16); }
 
-.ob-eyebrow { font-family: var(--ff-mono); font-size: 11px; letter-spacing: 0.16em; color: #6FE0AC; text-transform: uppercase; margin-top: 22px; transition: color .2s; }
+.ob-eyebrow { font-family: var(--ff-mono); font-size: 11px; letter-spacing: 0.16em; color: #6F91B8; text-transform: uppercase; margin-top: 22px; transition: color .2s; }
 .ob h1 { font-size: 24px; font-weight: 700; color: #fff; letter-spacing: -0.02em; line-height: 1.2; margin: 10px 0 0; text-wrap: balance; }
 .ob-lede { font-size: 13.5px; color: var(--brand-200); line-height: 1.55; margin: 10px 0 0; text-wrap: pretty; }
 
