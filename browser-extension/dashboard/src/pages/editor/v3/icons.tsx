@@ -100,16 +100,16 @@ export function CatIcon({ cat, ...p }) {
 }
 
 export const CAT = {
-  swap: { ko: "스왑", hex: "#688186", soft: "#DCEAED", ink: "#2B3639" },
-  amm: { ko: "AMM·LP", hex: "#85A4AB", soft: "#EDF4F6", ink: "#2B3639" },
-  perp: { ko: "퍼프", hex: "#485A5E", soft: "#CAE0E4", ink: "#2B3639" },
-  bridge: { ko: "브릿지", hex: "#A4C9D1", soft: "#EDF4F6", ink: "#485A5E" },
-  security: { ko: "보안", hex: "#637E59", soft: "#EBF3E8", ink: "#283523" },
-  airdrop: { ko: "에어드랍", hex: "#44583D", soft: "#D9E9D3", ink: "#283523" },
-  lending: { ko: "렌딩", hex: "#384455", soft: "#D7DBDF", ink: "#0D1118" },
-  nft: { ko: "NFT", hex: "#697485", soft: "#EFF0F2", ink: "#1B222C" },
-  core: { ko: "코어", hex: "#2A3441", soft: "#D7DBDF", ink: "#0D1118" },
-  token: { ko: "토큰", hex: "#9099A5", soft: "#EFF0F2", ink: "#2A3441" },
+  swap: { ko: "스왑", hex: "#8F959F", soft: "#EBEDEF", ink: "#5C6169" },
+  amm: { ko: "AMM·LP", hex: "#6257C7", soft: "#EDF4F6", ink: "#5C6169" },
+  perp: { ko: "퍼프", hex: "#4E45A9", soft: "#CAE0E4", ink: "#5C6169" },
+  bridge: { ko: "브릿지", hex: "#9B94DB", soft: "#EDF4F6", ink: "#4E45A9" },
+  security: { ko: "보안", hex: "#06203F", soft: "#F1F3F6", ink: "#041222" },
+  airdrop: { ko: "에어드랍", hex: "#1B3F90", soft: "#D9E9D3", ink: "#041222" },
+  lending: { ko: "렌딩", hex: "#8F959F", soft: "#D7D9DC", ink: "#0D1118" },
+  nft: { ko: "NFT", hex: "#2457C9", soft: "#EFF0F2", ink: "#1B222C" },
+  core: { ko: "코어", hex: "#24282E", soft: "#D7D9DC", ink: "#0D1118" },
+  token: { ko: "토큰", hex: "#204BAD", soft: "#EFF0F2", ink: "#24282E" },
 };
 export const CAT_ORDER = ["security", "swap", "lending", "airdrop", "perp", "bridge", "nft", "amm", "core", "token"];
 export const catKey = (cat) => (cat && cat in CAT ? cat : "core");
@@ -121,8 +121,8 @@ export function catStyle(cat) {
 
 const FAM = {
   gold:  { ko: "자산",               icon: "#A9781F", soft: "#F3E7CE", ink: "#4A330F" },
-  cyan:  { ko: "거래",               icon: "#4E6468", soft: "#D3E3E6", ink: "#2B3639" },
-  slate: { ko: "스테이킹·인프라·기타", icon: "#44516A", soft: "#E2E6EA", ink: "#1B222C" },
+  cyan:  { ko: "거래 · 이동",         icon: "#4E6468", soft: "#D3E3E6", ink: "#5C6169" },
+  slate: { ko: "스테이킹 · 기타", icon: "#44516A", soft: "#E2E6EA", ink: "#1B222C" },
 };
 const EDITOR_CAT_TO_MARKET = {
   token: "Token", swap: "DEX", amm: "DEX", perp: "Perp",

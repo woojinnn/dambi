@@ -18,6 +18,7 @@ import {
   type Position,
   type TokenHolding,
 } from "../../server-api";
+import { CHART_CATEGORICAL, catColor } from "../../chart-palette";
 /** Donut legend/segment item — derived from live data by buildDonutData.
  *  (Self-contained here; the ASS_v2 donut script consumes the same shape.) */
 export interface DonutItem {
@@ -37,13 +38,14 @@ import {
 
 // ── Chain / venue naming + colors ───────────────────────────────────────
 
+// DEEP categorical (차트 세그먼트색 — 무지개 제거). 체인 '로고'는 별도 SVG에서 브랜드색 유지.
 export const CHAIN_COLORS: Record<string, string> = {
-  "eip155:1": "#627EEA",
-  "eip155:42161": "#2D9BF0",
-  "eip155:8453": "#0052FF",
-  "eip155:10": "#FF0420",
-  "eip155:137": "#8247E5",
-  "eip155:56": "#F0B90B",
+  "eip155:1": "#6F91B8",     // navy-300
+  "eip155:42161": "#294970", // navy-400
+  "eip155:8453": "#B6C5D8",  // navy-200
+  "eip155:10": "#E4948B",    // red-300
+  "eip155:137": "#AEB6C2",   // stone-300
+  "eip155:56": "#F0DB7F",    // lemon-300
 };
 export const CHAIN_NAMES: Record<string, string> = {
   "eip155:1": "Ethereum",
@@ -54,31 +56,28 @@ export const CHAIN_NAMES: Record<string, string> = {
   "eip155:56": "BNB",
 };
 export const VENUE_COLORS: Record<string, string> = {
-  hyperliquid: "#0EA5A6",
+  hyperliquid: "#7F8C9E", // stone-400
 };
 export const VENUE_NAMES: Record<string, string> = {
   hyperliquid: "Hyperliquid",
 };
 export function chainColor(chain: string): string {
-  return CHAIN_COLORS[chain] ?? "#9099A5";
+  return CHAIN_COLORS[chain] ?? "#AEB6C2"; // stone-300 fallback
 }
 export function chainName(chain: string): string {
   return CHAIN_NAMES[chain] ?? chain;
 }
 export function venueColor(venue: string): string {
-  return VENUE_COLORS[venue] ?? "#6366F1";
+  return VENUE_COLORS[venue] ?? "#7F8C9E"; // stone-400 fallback
 }
 export function venueName(venue: string): string {
   return VENUE_NAMES[venue] ?? venue;
 }
 
 // ── Wallet palette (donut 지갑별 자산 비율 segments) ─────────────────────
-export const WALLET_COLORS = [
-  "#0EA5A6", "#7C9CFF", "#F59E0B", "#EC4899", "#6366F1",
-  "#10B981", "#F97316", "#06B6D4", "#A855F7", "#EF4444",
-];
+export const WALLET_COLORS = CHART_CATEGORICAL; // DEEP categorical (무지개 제거)
 export function walletColor(i: number): string {
-  return WALLET_COLORS[i % WALLET_COLORS.length];
+  return catColor(i);
 }
 
 // ── TokenHolding key extraction (opaque `key` → chain/address/standard) ──

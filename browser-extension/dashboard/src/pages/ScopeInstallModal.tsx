@@ -505,7 +505,7 @@ export function ScopeInstallModal(props: {
               <p className="im-sub">{ko ? "라이브러리 설정을 골라주세요." : "Library options."}</p>
               {libraryIsSet ? (
                 <div className="im-infocard">
-                  <Glyph d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8" size={20} color="var(--warn-700)" sw={1.7} />
+                  <Glyph d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8" size={20} color="var(--blue-700)" sw={1.7} />
                   <div className="im-infocard-tx">
                     <b>{ko ? "패키지로 묶여 저장" : "Saved as a package"}</b>
                     <span>{ko ? "정책들이 하나의 패키지로 라이브러리에 저장돼요." : "Policies are saved as one library package."}</span>

@@ -133,7 +133,7 @@ function DetailBody({
   return (
     <div className="rm-detail">
       <div className="rm-md-head">
-        <div className="rm-md-icon" style={catColor ? { background: catColor.soft } : { background: "var(--warn-100)" }}>
+        <div className="rm-md-icon" style={catColor ? { background: catColor.soft } : { background: "var(--blue-100)" }}>
           {isSet ? (
             <PackageGlyphLg />
           ) : cat ? (
@@ -642,7 +642,7 @@ function usePackagesContaining(
 
 function PackageGlyphSm() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--warn-600)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--blue-600)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 8l9-5 9 5-9 5-9-5zM3 8v8l9 5 9-5V8" />
     </svg>
   );

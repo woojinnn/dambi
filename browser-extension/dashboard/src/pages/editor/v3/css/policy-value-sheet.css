@@ -273,7 +273,7 @@
 .ev3 .pv-reason-input:hover { border-color: var(--hairline, #d7dbe0); }
 .ev3 .pv-reason-input:focus {
   outline: none;
-  border-color: var(--sage-400, var(--sage-300, #86c79a));
+  border-color: var(--sage-400, var(--sage-300, #6F91B8));
   background: var(--surface, #fff);
   color: var(--slate-800, #1e293b);
 }

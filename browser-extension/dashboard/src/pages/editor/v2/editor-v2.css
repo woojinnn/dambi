@@ -211,8 +211,8 @@
   flex-shrink: 0;
 }
 .ev2-pkgtip-row.on .ev2-pkgtip-dot {
-  background: var(--pass-500, #22c55e);
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  background: var(--pass-500, #06203F);
+  box-shadow: 0 0 0 3px rgba(6,32,63, 0.18);
 }
 .ev2-pkgtip-nm {
   flex: 1;
@@ -229,7 +229,7 @@
   flex-shrink: 0;
 }
 .ev2-pkgtip-row.on .ev2-pkgtip-st {
-  color: var(--pass-400, #4ade80);
+  color: var(--pass-400, #294970);
 }
 .ev2-trow {
   cursor: grab;
@@ -1327,7 +1327,7 @@
 .ev2-doc-input:focus {
   outline: none;
   border-color: var(--sage-400, var(--sage-300));
-  box-shadow: 0 0 0 3px var(--sage-100, rgba(122,176,140,0.18));
+  box-shadow: 0 0 0 3px var(--sage-100, rgba(6,32,63,0.18));
 }
 /* 읽기 전용(파라미터 변경 모드) — 입력칸 대신 내용만 표시 */
 .ev2-doc-input.ro {
@@ -1555,7 +1555,7 @@
   flex-shrink: 0;
   border-radius: 11px;
   color: #fff;
-  background: linear-gradient(135deg, var(--sage-500, #6f9a76), var(--cyan-600, #3f7d8a));
+  background: linear-gradient(135deg, var(--sage-500, #294970), var(--cyan-600, #3f7d8a));
   box-shadow: 0 6px 16px -8px rgba(72, 90, 94, 0.6);
 }
 .ev2-llm-badge svg { width: 20px; height: 20px; }
@@ -1581,8 +1581,8 @@
   overflow: hidden;
 }
 .ev2-llm-field:focus-within {
-  border-color: var(--sage-400, #9bb29b);
-  box-shadow: 0 0 0 3px var(--sage-100, #e8f0e8), 0 12px 28px -22px rgba(72, 90, 94, 0.5);
+  border-color: var(--sage-400, #6F91B8);
+  box-shadow: 0 0 0 3px var(--sage-100, #F1F3F6), 0 12px 28px -22px rgba(72, 90, 94, 0.5);
 }
 .ev2-llm-textarea {
   display: block;
@@ -2478,7 +2478,7 @@
   transition: transform 120ms ease;
 }
 .pm-switch input:checked + .trk {
-  background: var(--sage-500, #4c7a5e);
+  background: var(--sage-500, #06203F);
 }
 .pm-switch input:checked + .trk::after {
   transform: translateX(12px);
@@ -2746,8 +2746,8 @@
   opacity: 0.45;
 }
 .ev2-pkgrow.wd-scope.droptarget {
-  background: var(--sage-100, #eaf3ee);
-  border-left-color: var(--sage-500, #4c7a5e);
+  background: var(--sage-100, #F1F3F6);
+  border-left-color: var(--sage-500, #06203F);
   opacity: 1;
 }
 .wd-cards {
@@ -2791,8 +2791,8 @@
   overflow: hidden;
 }
 .ld-folder.droptarget {
-  border-color: var(--sage-500, #4c7a5e);
-  background: var(--sage-100, #eaf3ee);
+  border-color: var(--sage-500, #06203F);
+  background: var(--sage-100, #F1F3F6);
 }
 .ld-folderhead {
   display: flex;
@@ -2838,8 +2838,8 @@
 }
 /* 지갑 전용 폴더 헤더에 템플릿을 드래그해 폴더 이동 */
 .ld-folderhead.droptarget {
-  background: var(--sage-100, #eaf3ee);
-  outline: 1.5px dashed var(--sage-500, #4c7a5e);
+  background: var(--sage-100, #F1F3F6);
+  outline: 1.5px dashed var(--sage-500, #06203F);
   outline-offset: -1.5px;
 }
 .ld-folderhead:hover .acts {
@@ -2921,8 +2921,8 @@
   color: var(--slate-600);
 }
 .ld-defaultchip.on {
-  border-color: var(--pass-500, #22c55e);
-  color: var(--pass-700, #15803d);
+  border-color: var(--pass-500, #06203F);
+  color: var(--pass-700, #041222);
 }
 .ld-def .acts {
   display: none;
@@ -3038,8 +3038,8 @@
   width: 160px;
 }
 .pm-count.on {
-  border-color: var(--sage-500, #4c7a5e);
-  color: var(--sage-600, #3c6a4e);
+  border-color: var(--sage-500, #06203F);
+  color: var(--sage-600, #05182E);
 }
 .wt-params {
   padding: 6px 14px 10px 72px;
@@ -3072,9 +3072,9 @@
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 .ev2-ox.on {
-  border-color: var(--pass-300, #86efac);
-  background: var(--pass-50, #f0fdf4);
-  color: var(--pass-600, #16a34a);
+  border-color: var(--pass-300, #6F91B8);
+  background: var(--pass-50, #F1F3F6);
+  color: var(--pass-600, #05182E);
 }
 .ev2-ox:hover {
   border-color: var(--slate-400);

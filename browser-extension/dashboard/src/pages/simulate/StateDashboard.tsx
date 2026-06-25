@@ -28,7 +28,8 @@ interface WidgetDef {
   empty: string;
 }
 
-const ALLOC_COLORS = ["#0ea5e9", "#22c55e", "#a855f7", "#f59e0b", "#ec4899", "#64748b"];
+// DEEP categorical (무지개 제거): navy-300/lemon-300/red-300/stone-300/navy-200/navy-400
+const ALLOC_COLORS = ["#6F91B8", "#F0DB7F", "#E4948B", "#AEB6C2", "#B6C5D8", "#294970"];
 
 /** Relevance predicates that drive the collapse/highlight in step 2. */
 export interface StateFilter {

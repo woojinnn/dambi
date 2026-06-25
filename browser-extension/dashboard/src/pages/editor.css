@@ -106,7 +106,7 @@
   font-size: 12px; font-family: var(--ff-mono);
   padding: 4px 10px; border-radius: var(--r-pill);
 }
-.editor-card .ec-foot .status.ok { background: var(--pass-100); color: var(--pass-800); }
+.editor-card .ec-foot .status.ok { background: var(--neutral-100); color: var(--neutral-700); }
 .editor-card .ec-foot .status.err {
   background: var(--fail-100); color: var(--fail-800);
   max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -132,7 +132,7 @@
   border-radius: var(--r-sm);
   font-size: 13px;
 }
-.test-card .verdict-result.pass { background: var(--pass-50); border: 1px solid var(--pass-300); }
+.test-card .verdict-result.pass { background: var(--neutral-50); border: 1px solid var(--neutral-300); }
 .test-card .verdict-result.warn { background: var(--warn-50); border: 1px solid var(--warn-300); }
 .test-card .verdict-result.fail { background: var(--fail-50); border: 1px solid var(--fail-300); }
 .test-card .verdict-result .v-head {

@@ -14,7 +14,7 @@ export type DomainKey =
   | "security" | "portfolio" | "staking" | "airdrop"
   | "lending" | "nft" | "sale" | "gov";
 
-export type ColorFamily = "cyan" | "sage" | "slate" | "gold";
+export type ColorFamily = "blue" | "violet" | "stone" | "navy";
 
 export interface DomainColor {
   family: ColorFamily;
@@ -28,22 +28,23 @@ export const DOMAIN_ORDER: DomainKey[] = [
   "portfolio", "ammlp", "bridge", "sale", "staking", "gov",
 ];
 
+// 핸드오프 그룹: 거래·이동=violet · 자산=blue · 스테이킹/기타=stone (보안=navy)
 export const DOMAIN_COLOR: Record<DomainKey, DomainColor> = {
-  // Cyan family — trading
-  swap:      { family: "cyan",  hex: "#688186", soft: "#DCEAED", ink: "#2B3639" },
-  perp:      { family: "cyan",  hex: "#485A5E", soft: "#CAE0E4", ink: "#2B3639" },
-  ammlp:     { family: "cyan",  hex: "#85A4AB", soft: "#EDF4F6", ink: "#2B3639" },
-  bridge:    { family: "cyan",  hex: "#A4C9D1", soft: "#EDF4F6", ink: "#485A5E" },
-  // Sage family — safety / holding
-  security:  { family: "sage",  hex: "#637E59", soft: "#EBF3E8", ink: "#283523" },
-  portfolio: { family: "sage",  hex: "#7FA172", soft: "#EBF3E8", ink: "#283523" },
-  staking:   { family: "sage",  hex: "#9CC58D", soft: "#F8F9F6", ink: "#44583D" },
-  airdrop:   { family: "sage",  hex: "#44583D", soft: "#D9E9D3", ink: "#283523" },
-  // Slate family — assets / infra
-  lending:   { family: "slate", hex: "#384455", soft: "#D7DBDF", ink: "#0D1118" },
-  nft:       { family: "slate", hex: "#697485", soft: "#EFF0F2", ink: "#1B222C" },
-  sale:      { family: "slate", hex: "#2A3441", soft: "#D7DBDF", ink: "#0D1118" },
-  gov:       { family: "slate", hex: "#9099A5", soft: "#EFF0F2", ink: "#2A3441" },
+  // violet — 거래·이동
+  swap:      { family: "violet", hex: "#4E45A9", soft: "#E7E6F4", ink: "#342F6F" },
+  perp:      { family: "violet", hex: "#5B4FC4", soft: "#E7E6F4", ink: "#262453" },
+  ammlp:     { family: "violet", hex: "#6257C7", soft: "#F4F4F9", ink: "#342F6F" },
+  bridge:    { family: "violet", hex: "#9B94DB", soft: "#F4F4F9", ink: "#413A8C" },
+  // blue — 자산
+  nft:       { family: "blue",   hex: "#2457C9", soft: "#E3E9F7", ink: "#163372" },
+  airdrop:   { family: "blue",   hex: "#1B3F90", soft: "#E3E9F7", ink: "#122654" },
+  sale:      { family: "blue",   hex: "#204BAD", soft: "#E3E9F7", ink: "#122654" },
+  portfolio: { family: "blue",   hex: "#4171DD", soft: "#F3F5F9", ink: "#163372" },
+  // stone/navy — 스테이킹·기타
+  security:  { family: "navy",   hex: "#06203F", soft: "#F1F3F6", ink: "#041222" },
+  lending:   { family: "stone",  hex: "#757B84", soft: "#EBEDEF", ink: "#42474E" },
+  staking:   { family: "stone",  hex: "#8F959F", soft: "#EBEDEF", ink: "#42474E" },
+  gov:       { family: "stone",  hex: "#5C6169", soft: "#EBEDEF", ink: "#2A2E35" },
 };
 
 export const DOMAIN_ICON: Record<DomainKey, string> = {
@@ -134,7 +135,7 @@ export function DomainGlyph({ domain, size = 16, color, className }: DomainGlyph
 // ─────────────────────────────────────────────────────────────────────────
 
 // MK_v2 핸드오프 기준 — 프로토콜·자산 유형 12종 (색 = 3그룹: 자산=gold /
-// 거래=cyan / 스테이킹·인프라=slate). 라벨은 프로토타입대로 영문 그대로 노출.
+// 거래 · 이동=cyan / 스테이킹 · 기타=slate). 라벨은 프로토타입대로 영문 그대로 노출.
 export type CategoryKey =
   | "Token" | "DEX" | "Lending" | "Perp" | "Bridge" | "LiquidStaking"
   | "Staking" | "Restaking" | "NFT" | "Airdrop" | "Launchpad" | "Others";
@@ -144,22 +145,23 @@ export const CATEGORY_ORDER: CategoryKey[] = [
   "Staking", "Restaking", "NFT", "Airdrop", "Launchpad", "Others",
 ];
 
+// 핸드오프 카테고리 칩: 자산=blue · 거래·이동=violet · 스테이킹·기타=stone
 export const CATEGORY_COLOR: Record<CategoryKey, DomainColor> = {
-  // gold — 자산
-  Token:         { family: "gold",  hex: "#A9781F", soft: "#F3E7CE", ink: "#4A330F" },
-  NFT:           { family: "gold",  hex: "#C99B45", soft: "#F8F0DD", ink: "#5C421A" },
-  Airdrop:       { family: "gold",  hex: "#7E591E", soft: "#EEE0C5", ink: "#3D2A0E" },
-  Launchpad:     { family: "gold",  hex: "#B97E2A", soft: "#F5EAD2", ink: "#4F360F" },
-  // cyan — 거래
-  DEX:           { family: "cyan",  hex: "#688186", soft: "#DCEAED", ink: "#2B3639" },
-  Perp:          { family: "cyan",  hex: "#4E6468", soft: "#D3E3E6", ink: "#2B3639" },
-  Bridge:        { family: "cyan",  hex: "#3E7C82", soft: "#D7E9EA", ink: "#234044" },
-  // slate — 스테이킹 · 인프라 · 기타
-  Lending:       { family: "slate", hex: "#384455", soft: "#D7DBDF", ink: "#0D1118" },
-  LiquidStaking: { family: "slate", hex: "#586273", soft: "#E2E6EA", ink: "#1B222C" },
-  Staking:       { family: "slate", hex: "#697485", soft: "#EFF0F2", ink: "#1B222C" },
-  Restaking:     { family: "slate", hex: "#2A3441", soft: "#D7DBDF", ink: "#0D1118" },
-  Others:        { family: "slate", hex: "#9099A5", soft: "#EFF0F2", ink: "#2A3441" },
+  // blue — 자산
+  Token:         { family: "blue",   hex: "#204BAD", soft: "#E3E9F7", ink: "#163372" },
+  NFT:           { family: "blue",   hex: "#2457C9", soft: "#E3E9F7", ink: "#163372" },
+  Airdrop:       { family: "blue",   hex: "#1B3F90", soft: "#E3E9F7", ink: "#122654" },
+  Launchpad:     { family: "blue",   hex: "#4171DD", soft: "#E3E9F7", ink: "#163372" },
+  // violet — 거래·이동
+  DEX:           { family: "violet", hex: "#5B4FC4", soft: "#E7E6F4", ink: "#342F6F" },
+  Perp:          { family: "violet", hex: "#4E45A9", soft: "#E7E6F4", ink: "#262453" },
+  Bridge:        { family: "violet", hex: "#6257C7", soft: "#F4F4F9", ink: "#342F6F" },
+  // stone — 스테이킹·기타
+  Lending:       { family: "stone",  hex: "#757B84", soft: "#EBEDEF", ink: "#42474E" },
+  LiquidStaking: { family: "stone",  hex: "#8F959F", soft: "#EBEDEF", ink: "#42474E" },
+  Staking:       { family: "stone",  hex: "#5C6169", soft: "#EBEDEF", ink: "#2A2E35" },
+  Restaking:     { family: "stone",  hex: "#757B84", soft: "#EBEDEF", ink: "#42474E" },
+  Others:        { family: "stone",  hex: "#8F959F", soft: "#EBEDEF", ink: "#42474E" },
 };
 
 export const CATEGORY_ICON: Record<CategoryKey, string> = {

@@ -33,7 +33,7 @@ export function AuthCallbackPage() {
   if (tokenMissing) {
     return (
       <div style={{ padding: 32 }}>
-        <h1>{t("login.failedTitle")}</h1>
+        <h1 className="t-h1">{t("login.failedTitle")}</h1>
         <p>{t("login.noToken")}</p>
       </div>
     );

@@ -28,7 +28,7 @@
 
 /* severity dot */
 .pr-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.pr-dot.pass { background: var(--pass-500); box-shadow: 0 0 0 3px rgba(124,176,105,0.16); }
+.pr-dot.pass { background: var(--neutral-400); box-shadow: 0 0 0 3px rgba(150,153,157,0.16); }
 .pr-dot.warn { background: var(--warn-500); box-shadow: 0 0 0 3px rgba(214,146,56,0.16); }
 .pr-dot.fail { background: var(--fail-500); box-shadow: 0 0 0 3px rgba(199,114,104,0.16); }
 
@@ -61,15 +61,15 @@
   color: var(--slate-900); overflow: hidden;
   display: flex; flex-direction: column; justify-content: space-between;
   background: linear-gradient(162deg, var(--wc-tint) 0%, #FFFFFF 60%);
-  --wc-tint: #E2EEF0; --wc-accent: var(--cyan-600);
+  --wc-tint: var(--blue-100); --wc-accent: var(--blue-500); /* 기본 calm → blue(자산) · 옆에서 violet 교대 */
   border: 1px solid var(--hairline-soft);
   box-shadow: 0 12px 28px rgba(72,90,94,0.13);
   will-change: transform, opacity;
   cursor: pointer;
 }
-.wcard[data-tone="fail"] { --wc-tint: #CFE6EA; --wc-accent: var(--cyan-700); }
-.wcard[data-tone="warn"] { --wc-tint: #D6EBCE; --wc-accent: var(--sage-700); }
-.wcard[data-tone="calm"] { --wc-tint: #DCE2E8; --wc-accent: var(--slate-500); }
+.wcard:nth-of-type(2n) { --wc-tint: var(--violet-100); --wc-accent: var(--violet-500); } /* 교대로 violet */
+.wcard[data-tone="fail"] { --wc-tint: var(--red-100); --wc-accent: var(--red-600); }
+.wcard[data-tone="warn"] { --wc-tint: var(--lemon-100); --wc-accent: var(--lemon-700); }
 /* tone glow (top-right) under the white sheen */
 /* left tone accent bar */
 .wcard::before {
@@ -84,7 +84,7 @@
 .wd-stage.wd-ready .wcard { transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms ease, box-shadow 340ms ease; }
 .wd-stage.dragging .wcard { transition: none; }
 .wcard.is-active {
-  box-shadow: 0 20px 40px rgba(72,90,94,0.26), 0 0 0 3px var(--surface), 0 0 0 5px var(--cyan-500);
+  box-shadow: 0 20px 40px rgba(6,32,63,0.26), 0 0 0 3px var(--surface), 0 0 0 5px var(--navy-500);
 }
 
 /* card chrome */
@@ -175,9 +175,9 @@
   font-family: var(--ff-mono); font-size: 15px; font-weight: 700; color: #fff;
   background: var(--cyan-600);
 }
-.dp-coin[data-tone="fail"] { background: var(--cyan-700); }
-.dp-coin[data-tone="warn"] { background: var(--sage-700); }
-.dp-coin[data-tone="calm"] { background: var(--slate-500); }
+.dp-coin[data-tone="fail"] { background: var(--red-600); }
+.dp-coin[data-tone="warn"] { background: var(--lemon-700); }
+.dp-coin[data-tone="calm"] { background: var(--neutral-500); }
 
 .dp-id { min-width: 0; flex: 1; }
 .dp-id .nr { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -198,7 +198,7 @@
 .dp-ib.spinning { color: var(--cyan-700); }
 .dp-ib.spinning svg { animation: dpSpin 0.85s linear infinite; }
 @keyframes dpSpin { to { transform: rotate(360deg); } }
-.dp-bal b { font-size: 16px; font-weight: 700; color: var(--slate-900); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.dp-bal b { font-family: var(--font-mono); /* STEP2 mono: 지갑 잔액 */ font-size: 16px; font-weight: 700; color: var(--slate-900); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .dp-bal .open { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 11px; font-weight: 600; color: var(--slate-500); }
 .dp-bal .open svg { width: 12px; height: 12px; }
 .dp-bal .open:hover { color: var(--slate-900); }
@@ -294,7 +294,7 @@
 .pkc-fmeta { margin-top: 14px; font-size: 12px; color: var(--slate-400); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
 .pkc-fmeta b { color: var(--slate-700); font-weight: 700; }
 .pkc-dot { color: var(--slate-300); }
-.pkc-active { color: var(--pass-600, #16a34a); font-weight: 650; }
+.pkc-active { color: var(--navy-600); font-weight: 650; }
 .pkc.off .pkc-active { color: var(--slate-400); }
 .pkc-ffoot { margin-top: auto; display: flex; align-items: center; gap: 8px; }
 .pkc-pub {
@@ -330,14 +330,14 @@
   flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
   padding: 2px 6px; border-radius: 999px; background: var(--fog-200); color: var(--slate-400);
 }
-.pkc-pol-state.on { background: var(--pass-50, #f0fdf4); color: var(--pass-600, #16a34a); }
+.pkc-pol-state.on { background: var(--navy-50); color: var(--navy-600); }
 .pkc-ox {
   flex-shrink: 0; width: 23px; height: 23px; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface); color: var(--slate-400);
   font-size: 12.5px; font-weight: 700; line-height: 1; cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
-.pkc-ox.on { border-color: var(--pass-300, #86efac); background: var(--pass-50, #f0fdf4); color: var(--pass-600, #16a34a); }
+.pkc-ox.on { border-color: var(--navy-300); background: var(--navy-50); color: var(--navy-600); }
 .pkc-ox:hover { border-color: var(--slate-400); }
 .pkc-pol.off .pkc-ox { opacity: 1; }
 button.pkc-edit { border: 0; background: none; padding: 0; }
@@ -434,8 +434,8 @@ button.pol2-edit { border: 0; background: none; cursor: pointer; padding: 0; }
   color: var(--slate-400);
 }
 .pol2-state.on {
-  background: var(--pass-50, #f0fdf4);
-  color: var(--pass-600, #16a34a);
+  background: var(--navy-50);
+  color: var(--navy-600);
 }
 
 /* 정책별 o/x 포함 토글 (binding.enabled) */
@@ -457,9 +457,9 @@ button.pol2-edit { border: 0; background: none; cursor: pointer; padding: 0; }
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 .pol2-ox.on {
-  border-color: var(--pass-300, #86efac);
-  background: var(--pass-50, #f0fdf4);
-  color: var(--pass-600, #16a34a);
+  border-color: var(--navy-300);
+  background: var(--navy-50);
+  color: var(--navy-600);
 }
 .pol2-ox:hover { border-color: var(--slate-400); }
 /* 제외(x)로 행이 dim 돼도 토글은 또렷하게 — 다시 켤 수 있게 */
@@ -508,11 +508,11 @@ button.pol2-edit { border: 0; background: none; cursor: pointer; padding: 0; }
 .wv-coin {
   width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
   font-family: var(--ff-mono); font-size: 13px; font-weight: 600; color: var(--slate-800);
-  background: linear-gradient(150deg, #EDF4F6, #C9E0E5);
+  background: linear-gradient(150deg, var(--navy-50), var(--navy-100)); /* cyan-soft → navy 틴트 */
 }
-.wv-coin[data-tone="fail"] { background: linear-gradient(150deg, #EAF4F6, #A9CDD4); }
-.wv-coin[data-tone="warn"] { background: linear-gradient(150deg, #EDF4E8, #B5D3AA); }
-.wv-coin[data-tone="calm"] { background: linear-gradient(150deg, #F2F3F5, #C2CBD3); }
+.wv-coin[data-tone="fail"] { background: linear-gradient(150deg, var(--red-50), var(--red-200)); }
+.wv-coin[data-tone="warn"] { background: linear-gradient(150deg, var(--lemon-50), var(--lemon-200)); }
+.wv-coin[data-tone="calm"] { background: linear-gradient(150deg, var(--neutral-50), var(--neutral-200)); }
 .wv-chains { display: flex; }
 .wv-chains img { width: 17px; height: 17px; border-radius: 50%; margin-left: -5px; border: 1.5px solid var(--surface); }
 .wv-chains img:first-child { margin-left: 0; }
@@ -548,3 +548,6 @@ button.pol2-edit { border: 0; background: none; cursor: pointer; padding: 0; }
 .split-resize:hover { background: var(--fog-300); }
 .split-resize:hover .grip, .split-resize.dragging .grip { background: var(--cyan-600); width: 64px; }
 
+
+/* ── STEP 4-B 타입스케일 매핑 (append-override) ── */
+.wc-name, .dp-id .name, .wv-title { font-size: var(--text-subhead-size); font-weight: var(--text-subhead-weight); line-height: var(--text-subhead-lh); letter-spacing: var(--text-subhead-ls); }

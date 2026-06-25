@@ -8,7 +8,7 @@
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .modal-panel {
-  background: var(--surface);
+  background: var(--surface-raised);
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
   box-shadow: 0 20px 60px rgba(15,23,42,0.18);
@@ -89,3 +89,6 @@
 .chain-chip-row .chain-chip { cursor: default; }
 .chain-chip-row .chain-chip:hover { background: var(--surface); }
 .chain-chip.muted { color: var(--slate-400); }
+
+/* ── STEP 4-B 타입스케일 매핑 (append-override) ── */
+.modal-head h3 { font-size: var(--text-subhead-size); font-weight: var(--text-subhead-weight); line-height: var(--text-subhead-lh); letter-spacing: var(--text-subhead-ls); }

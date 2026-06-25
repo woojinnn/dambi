@@ -230,7 +230,7 @@
 .B .b-top .bw { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 0.06em; }
 .B .b-top .bnet { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px;
   font-weight: 600; color: var(--brand-100); background: rgba(255,255,255,0.10); border-radius: var(--r-pill); padding: 4px 9px; }
-.B .b-top .bnet .nd { width: 6px; height: 6px; border-radius: 50%; background: #6FE0AC; }
+.B .b-top .bnet .nd { width: 6px; height: 6px; border-radius: 50%; background: #6F91B8; }
 
 /* guardian hero */
 .B .b-hero { padding: calc(20px * var(--d)) 16px calc(14px * var(--d)); text-align: center; position: relative;
@@ -304,11 +304,11 @@
 .C .c-head .cm { width: 22px; height: 22px; object-fit: contain; }
 .C .c-head .cw { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 0.12em; }
 .C .c-head .cnet { margin-left: auto; font-family: var(--ff-mono); font-size: 10px; color: var(--brand-200); }
-.C .c-head .cnet .nd { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #6FE0AC; margin-right: 5px; }
+.C .c-head .cnet .nd { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #6F91B8; margin-right: 5px; }
 
 .C .c-eyebrow { font-family: var(--ff-mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
   padding: calc(10px * var(--d)) 18px 0; }
-.C .c-eyebrow.pass { color: #6FE0AC; }
+.C .c-eyebrow.pass { color: #6F91B8; }
 .C .c-eyebrow.warn { color: #F3C969; }
 .C .c-eyebrow.fail { color: #F58E80; }
 .C .c-display { padding: 4px 18px calc(12px * var(--d)); font-size: 30px; font-weight: 700; line-height: 1.05;
@@ -335,7 +335,7 @@
 .C .c-check { display: flex; align-items: center; gap: 10px; }
 .C .c-check .cc { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; flex: 0 0 auto; }
 .C .c-check .cc svg { width: 12px; height: 12px; }
-.C .c-check.ok .cc { background: rgba(34,160,107,0.18); color: #6FE0AC; }
+.C .c-check.ok .cc { background: rgba(34,160,107,0.18); color: #6F91B8; }
 .C .c-check.warn .cc { background: rgba(220,160,44,0.18); color: #F3C969; }
 .C .c-check.fail .cc { background: rgba(221,74,60,0.18); color: #F58E80; }
 .C .c-check .cn { font-size: 12.5px; color: #D4DCEC; font-weight: 500; }
@@ -397,7 +397,7 @@
 
 /* C-home (dark) */
 .C .hc-hero { padding: calc(16px * var(--d)) 18px calc(10px * var(--d)); }
-.C .hc-hero .eyebrow { font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.16em; color: #6FE0AC; text-transform: uppercase; }
+.C .hc-hero .eyebrow { font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.16em; color: #6F91B8; text-transform: uppercase; }
 .C .hc-hero .big { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: -0.02em; margin-top: 6px; }
 .C .hc-hero .big .mono { font-family: var(--ff-mono); }
 .C .hc-hero .sub { font-size: 12px; color: var(--brand-200); margin-top: 6px; }

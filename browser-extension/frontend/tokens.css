@@ -1,0 +1,71 @@
+/* ============================================================================
+ * Dambi DEEP — 프론트(팝업·confirm·온보딩) 공유 토큰
+ * 대시보드 src/tokens.css 의 동결 DEEP primitive 를 그대로 포팅하고,
+ * 프론트가 쓰던 기존 변수명(--navy/--brand/--slate/--warn/--fail/--ink…)을
+ * DEEP 로 재배선한다(셀렉터는 무수정 — 값만 DEEP). 폰트도 DEEP(Wanted/JetBrains).
+ * ==========================================================================*/
+
+@font-face {
+  font-family: "Wanted Sans Variable";
+  src: url("./assets/fonts/WantedSansVariable.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./assets/fonts/JetBrainsMonoVariable-latin.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+
+:root {
+  /* ════ DEEP primitive ramps (FROZEN — 대시보드와 동일값) ════ */
+  --navy-50:#F1F3F6; --navy-100:#DCE2EA; --navy-200:#B6C5D8; --navy-300:#6F91B8;
+  --navy-400:#294970; --navy-500:#06203F; --navy-600:#05182E; --navy-700:#041222;
+  --navy-800:#030C17; --navy-900:#03080F; --navy-950:#020508;
+  --lemon-50:#FAF8F2; --lemon-100:#F8F4E2; --lemon-200:#F5EBBC; --lemon-300:#F0DB7F;
+  --lemon-400:#E7C637; --lemon-500:#E7C636; --lemon-600:#C5AA30; --lemon-700:#A28C2A;
+  --lemon-800:#7E6E24; --lemon-900:#5A501E; --lemon-950:#383318;
+  --red-50:#F9F4F3; --red-100:#F6E6E4; --red-200:#EFC7C2; --red-300:#E4948B;
+  --red-400:#D55649; --red-500:#C73D2E; --red-600:#AA352A; --red-700:#8B2D25;
+  --red-800:#6D2520; --red-900:#4E1D1B; --red-950:#311517;
+  --neutral-50:#F4F6F8; --neutral-100:#E9EBED; --neutral-200:#D7D9DC; --neutral-300:#BABCC0;
+  --neutral-400:#96999D; --neutral-500:#797C81; --neutral-600:#606369; --neutral-700:#4A4D53;
+  --neutral-800:#363940; --neutral-900:#24282E; --neutral-950:#14181F;
+  --white:#FFFFFF;
+
+  /* ════ 프론트 기존 변수명 → DEEP (값만 교체, 셀렉터 무수정) ════ */
+  /* navy: 이름 동일 → 위 DEEP 값이 곧 적용. 프론트 전용 별칭만 보강 */
+  --navy-600x: var(--navy-600);
+  /* brand(=primary 인터랙티브) → navy */
+  --brand-50: var(--navy-50);   --brand-100: var(--navy-100); --brand-200: var(--navy-200);
+  --brand-300: var(--navy-300); --brand-400: var(--navy-400); --brand-500: var(--navy-500);
+  --brand-600: var(--navy-600); --brand-600x: var(--navy-600);
+  --brand-700: var(--navy-700); --brand-800: var(--navy-800); --brand-900: var(--navy-900);
+  /* ink / slate / mist / fog / hair → neutral */
+  --ink: var(--neutral-950);
+  --slate-300: var(--neutral-400); --slate-400: var(--neutral-500); --slate-500: var(--neutral-700);
+  --slate-600: var(--neutral-700); --slate-700: var(--neutral-800); --slate-800: var(--neutral-900);
+  --mist-100: var(--neutral-100); --mist-200: var(--neutral-200); --mist-300: var(--neutral-300);
+  --fog: var(--neutral-50); --fog-2: var(--white);
+  --hair: var(--neutral-300); --hair-soft: var(--neutral-100);
+  /* pass(성공/안전 그린) → DEEP에 success 토큰 없음 → 대시보드와 동일 green 유지 */
+  --pass-50:#F4F9F3; --pass-100:#E4EFE1; --pass-200:#CDE1C5; --pass-300:#B2D1A8;
+  --pass-400:#96C087; --pass-500:#7CB069; --pass-600:#648F55; --pass-700:#4E7041;
+  --pass-800:#354E2C; --pass-900:#1E2E18;
+  /* warn → lemon · fail → red (verdict 색 체계) */
+  --warn-50: var(--lemon-50);   --warn-100: var(--lemon-100); --warn-200: var(--lemon-200);
+  --warn-300: var(--lemon-300); --warn-400: var(--lemon-400); --warn-500: var(--lemon-500);
+  --warn-600: var(--lemon-600); --warn-700: var(--lemon-700); --warn-800: var(--lemon-800);
+  --warn-900: var(--lemon-900);
+  --fail-50: var(--red-50);     --fail-100: var(--red-100);   --fail-200: var(--red-200);
+  --fail-300: var(--red-300);   --fail-400: var(--red-400);   --fail-500: var(--red-500);
+  --fail-600: var(--red-600);   --fail-700: var(--red-700);   --fail-800: var(--red-800);
+  --fail-900: var(--red-900);
+
+  /* ════ shape · density · type · shadow ════ */
+  --r-pop: 20px; --r-lg: 16px; --r-md: 12px; --r-sm: 8px; --r-pill: 999px;
+  --d: 1;
+  --ff-sans: "Wanted Sans Variable", Pretendard, system-ui, -apple-system, sans-serif;
+  --ff-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --shadow-pop: 0 24px 60px -20px rgba(6,32,63,0.30), 0 2px 8px rgba(6,32,63,0.06);
+  --shadow-card: 0 1px 2px rgba(6,32,63,0.05), 0 4px 14px -8px rgba(6,32,63,0.12);
+}
