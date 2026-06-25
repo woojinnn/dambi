@@ -394,7 +394,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   const packages = React.useMemo(() => {
     const list = [
       // 개별(미분류) 카드는 비어 있어도 항상 표시 — 고정 드롭 영역.
-      { id: UNCAT, displayName: "\uAC1C\uBCC4" },
+      { id: UNCAT, displayName: "\uAC1C\uBCC4 \uD15C\uD50C\uB9BF" },
       ...Object.values(wallet.packages || {}).slice().sort((a, b) => a.displayName.localeCompare(b.displayName, "ko")).map((p) => ({ id: p.id, displayName: p.displayName, desc: p.desc }))
     ];
     const pins = pinnedPkgs || /* @__PURE__ */ new Set();
