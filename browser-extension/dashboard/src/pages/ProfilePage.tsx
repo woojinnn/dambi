@@ -137,6 +137,12 @@ export function ProfilePage() {
     enabled: !!user?.user_id,
   });
   const isMarketAdmin = publishersQ.isSuccess;
+  // 공식(official) 등급 계정인지 — 서버가 /auth/me 로 tier 를 안 주므로, 관리자만
+  // 받는 publisher 목록에서 본인 행의 tier 로 판별한다. 공식 계정은 official 등급이라
+  // 항상 이 목록에 포함된다(관리자를 늘려도 official 아닌 계정은 false).
+  const isOfficialAccount =
+    (publishersQ.data ?? []).find((p) => p.user_id === user?.user_id)
+      ?.publisher_tier === "official";
   const tiersQ = useQuery({
     queryKey: ["market-tiers"],
     queryFn: listTiers,
@@ -559,7 +565,9 @@ export function ProfilePage() {
           )}
         </section>
 
-        {/* settings — server environment */}
+        {/* settings — server environment (공식 계정만: 서버 전환은 위험한 dev 도구라
+            일반 사용자에게는 숨긴다) */}
+        {isOfficialAccount && (
         <section className="pp-card">
           <div className="pp-sec-head">
             <h2>{t("settings.title")}</h2>
@@ -608,6 +616,7 @@ export function ProfilePage() {
             )}
           </div>
         </section>
+        )}
 
         {/* settings — OpenAI API key (browser-local, used for LLM drafting) */}
         <section className="pp-card">
