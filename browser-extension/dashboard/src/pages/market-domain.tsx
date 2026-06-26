@@ -320,6 +320,12 @@ export function categoryNameOf(c: string | undefined, locale: "en" | "ko"): stri
   return c ?? "";
 }
 
+/** Category rendered as a lowercase hashtag chip, e.g. "Token" → "#token",
+ *  "Airdrop" → "#airdrop". Empty string when there's no category. */
+export function categoryHashtag(c: string | undefined): string {
+  return c ? `#${c.toLowerCase()}` : "";
+}
+
 /** 24x24 line glyph for a category. */
 export function CategoryGlyph({
   category,

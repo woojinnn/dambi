@@ -97,7 +97,12 @@ function ConfirmHost() {
     ask._resolve(ok);
     setAsk(null);
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "e2-ov", onMouseDown: () => close(false) }, /* @__PURE__ */ React.createElement("div", { className: "modal e2cf", onMouseDown: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-body" }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-title" }, ask.title), ask.body && /* @__PURE__ */ React.createElement("div", { className: "e2cf-text" }, ask.body)), /* @__PURE__ */ React.createElement("div", { className: "e2cf-foot" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "e2cf-btn cancel", onClick: () => close(false) }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { type: "button", className: `e2cf-btn ok${ask.danger ? " danger" : ""}`, autoFocus: true, onClick: () => close(true) }, ask.confirmLabel || "\uD655\uC778"))));
+  return (
+    // `e2` 클래스 필수 — ConfirmHost 는 `.e2` 루트 밖(listpage)에 마운트되므로,
+    // `.e2 .e2cf-*` 스타일이 먹으려면 오버레이 자체가 `.e2` 여야 한다. (없으면
+    // 버튼이 스타일 없이 "취소제거"로 붙어 보인다.)
+    /* @__PURE__ */ React.createElement("div", { className: "e2 e2-ov", onMouseDown: () => close(false) }, /* @__PURE__ */ React.createElement("div", { className: "modal e2cf", onMouseDown: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-body" }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-title" }, ask.title), ask.body && /* @__PURE__ */ React.createElement("div", { className: "e2cf-text" }, ask.body)), /* @__PURE__ */ React.createElement("div", { className: "e2cf-foot" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "e2cf-btn cancel", onClick: () => close(false) }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { type: "button", className: `e2cf-btn ok${ask.danger ? " danger" : ""}`, autoFocus: true, onClick: () => close(true) }, ask.confirmLabel || "\uD655\uC778"))))
+  );
 }
 const navStroke = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
 function NavRail() {
