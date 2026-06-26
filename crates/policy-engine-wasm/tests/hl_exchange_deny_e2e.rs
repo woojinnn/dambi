@@ -12,6 +12,8 @@
 //! Run: `cargo test -p policy-engine-wasm --test hl_exchange_deny_e2e`
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 
 use policy_engine_wasm::evaluate_action_v2_json;
@@ -43,6 +45,42 @@ fn order_action(is_buy: bool, size: &str) -> Value {
         "size": { "kind": "base_decimal", "amount": size },
         "reduce_only": false,
         "order_type": { "kind": "limit", "price": "60000", "time_in_force": { "kind": "gtc" } }
+    })
+}
+
+/// A HyperEVM CoreWriter raw limit order JSON — the structured
+/// `ActionBody::HyperliquidCore::HlCoreLimitOrder` shape emitted by the
+/// declarative CoreWriter decoder. It carries exact raw HL integers, not a
+/// human market symbol/price/size, but `is_buy` and `reduce_only` are enough for
+/// no-new-short policies.
+fn corewriter_limit_order_action(is_buy: bool, reduce_only: bool) -> Value {
+    json!({
+        "domain": "hyperliquid_core",
+        "action": "hl_core_limit_order",
+        "asset": 110076,
+        "is_buy": is_buy,
+        "limit_px": "62653000",
+        "sz": "1000",
+        "reduce_only": reduce_only,
+        "encoded_tif": 2,
+        "cloid": "42"
+    })
+}
+
+/// A Hyperliquid approveAgent typed-data body after declarative typed-data
+/// routing: `Permission::ProtocolAuthorization` with `permission == "agent"`.
+fn approve_agent_action(is_authorized: bool) -> Value {
+    json!({
+        "domain": "permission",
+        "action": "protocol_authorization",
+        "chain": "eip155:42161",
+        "protocol": "0x0000000000000000000000000000000000000000",
+        "protocol_name": "hyperliquid",
+        "permission": "agent",
+        "permission_label": "my-api-agent",
+        "authorizer": "0x676fa5b94067c2be14bc025df6c5c80dedf49a54",
+        "authorized": "0x00000000000000000000000000000000a9e47a9e",
+        "is_authorized": is_authorized
     })
 }
 
@@ -107,8 +145,10 @@ fn run(action: Value, bundles: Value) -> Value {
         .expect("entry point returns JSON")
 }
 
-/// Read a shipped seed bundle (`policy.cedar` + `manifest.json`) verbatim — the
-/// SAME artifact `copy-default-policies.js` ships into the extension.
+/// Read a canonical `default_policies_v2` fixture (`policy.cedar` +
+/// `manifest.json`) verbatim. The current baked `day1-safety` extension bundle
+/// is a curated subset, so tests that need the actual marketplace/dashboard
+/// install source read phase1 seed JSON below instead.
 fn seed_bundle(id: &str) -> Value {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -122,6 +162,43 @@ fn seed_bundle(id: &str) -> Value {
         serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
             .expect("seed manifest.json parses");
     json!({ "policy": policy, "manifest": manifest })
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// Read a market/dashboard seed entry (`{ id, cedar, manifest }`) as the
+/// `{ policy, manifest }` bundle shape the extension/WASM entry point consumes.
+fn json_seed_bundle(relative_path: &str, id: &str) -> Value {
+    let path = repo_root().join(relative_path);
+    let entries: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read seed json"))
+            .expect("seed json parses");
+    let entry = entries
+        .iter()
+        .find(|entry| entry.get("id").and_then(Value::as_str) == Some(id))
+        .unwrap_or_else(|| panic!("{id} exists in {}", path.display()));
+    json!({
+        "policy": entry
+            .get("cedar")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("{id} seed has cedar text")),
+        "manifest": entry
+            .get("manifest")
+            .unwrap_or_else(|| panic!("{id} seed has manifest"))
+    })
+}
+
+fn phase1_market_seed_bundle(id: &str) -> Value {
+    json_seed_bundle("crates/policy-server/server/src/bin/phase1-seed.json", id)
+}
+
+fn dashboard_phase1a_seed_bundle(id: &str) -> Value {
+    json_seed_bundle(
+        "browser-extension/dashboard/src/pages/editor/phase1A-seed.json",
+        id,
+    )
 }
 
 /// THE PROOF (entry point): a Hyperliquid SHORT order returns a `fail` verdict.
@@ -204,6 +281,116 @@ fn shipped_seed_policy_allows_hyperliquid_long() {
         parsed["data"]["verdict"]["kind"], "pass",
         "the shipped short-deny must let a long order PASS: {parsed}"
     );
+}
+
+/// DEFAULT-FIXTURE PROOF: the canonical CoreWriter short-deny fixture DENIES a
+/// raw HyperEVM CoreWriter order through the literal extension/WASM entry point.
+#[test]
+fn default_fixture_policy_denies_corewriter_short() {
+    let parsed = run(
+        corewriter_limit_order_action(false, false),
+        json!([seed_bundle("hl-corewriter-no-short-perp")]),
+    );
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["kind"], "fail",
+        "the default fixture CoreWriter short-deny must DENY an opening short: {parsed}"
+    );
+    assert_eq!(
+        parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl-corewriter-no-short-perp",
+        "matched policy must be the default fixture CoreWriter seed id: {parsed}"
+    );
+}
+
+/// DEFAULT-FIXTURE CONTROLS: the CoreWriter short-deny is conditional, not a
+/// blanket block. Long opens and reduce-only shorts pass.
+#[test]
+fn default_fixture_policy_allows_corewriter_long_and_reduce_only_short() {
+    for (name, action) in [
+        ("long open", corewriter_limit_order_action(true, false)),
+        (
+            "reduce-only short",
+            corewriter_limit_order_action(false, true),
+        ),
+    ] {
+        let parsed = run(action, json!([seed_bundle("hl-corewriter-no-short-perp")]));
+        assert_eq!(parsed["ok"], true, "{name}: {parsed}");
+        assert_eq!(
+            parsed["data"]["verdict"]["kind"], "pass",
+            "the default fixture CoreWriter short-deny must let {name} PASS: {parsed}"
+        );
+    }
+}
+
+/// MARKET-SEED PROOF: the policy-server phase1 marketplace seed that users
+/// install from the dashboard denies the CoreWriter short at the literal
+/// extension/WASM entry point.
+#[test]
+fn phase1_market_seed_policy_denies_corewriter_short() {
+    let parsed = run(
+        corewriter_limit_order_action(false, false),
+        json!([phase1_market_seed_bundle("hl-corewriter-no-short-perp")]),
+    );
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(parsed["data"]["verdict"]["kind"], "fail", "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl-corewriter-no-short-perp",
+        "{parsed}"
+    );
+}
+
+/// DASHBOARD-SEED PROOF: the local dashboard seed carries the same functional
+/// CoreWriter policy as the server seed.
+#[test]
+fn dashboard_phase1a_seed_policy_denies_corewriter_short() {
+    let parsed = run(
+        corewriter_limit_order_action(false, false),
+        json!([dashboard_phase1a_seed_bundle("hl-corewriter-no-short-perp")]),
+    );
+    assert_eq!(parsed["ok"], true, "{parsed}");
+    assert_eq!(parsed["data"]["verdict"]["kind"], "fail", "{parsed}");
+    assert_eq!(
+        parsed["data"]["verdict"]["matched"][0]["policy_id"], "hl-corewriter-no-short-perp",
+        "{parsed}"
+    );
+}
+
+/// MARKET-SEED PROOF: approveAgent is no longer an obsolete
+/// `hl_approve_agent` action. The phase1 seed gates the actual typed-data
+/// decoder output (`Permission::ProtocolAuthorization`) and only warns on a
+/// grant.
+#[test]
+fn phase1_market_seed_policy_confirms_approve_agent_grant_only() {
+    let bundle = phase1_market_seed_bundle("hl-confirm-approve-agent");
+    let grant = run(approve_agent_action(true), json!([bundle.clone()]));
+    assert_eq!(grant["ok"], true, "{grant}");
+    assert_eq!(grant["data"]["verdict"]["kind"], "warn", "{grant}");
+    assert_eq!(
+        grant["data"]["verdict"]["matched"][0]["policy_id"], "hl-confirm-approve-agent",
+        "{grant}"
+    );
+
+    let revoke = run(approve_agent_action(false), json!([bundle]));
+    assert_eq!(revoke["ok"], true, "{revoke}");
+    assert_eq!(revoke["data"]["verdict"]["kind"], "pass", "{revoke}");
+}
+
+/// DASHBOARD-SEED PROOF: the dashboard seed matches the server seed for
+/// approveAgent typed-data grants.
+#[test]
+fn dashboard_phase1a_seed_policy_confirms_approve_agent_grant_only() {
+    let bundle = dashboard_phase1a_seed_bundle("hl-confirm-approve-agent");
+    let grant = run(approve_agent_action(true), json!([bundle.clone()]));
+    assert_eq!(grant["ok"], true, "{grant}");
+    assert_eq!(grant["data"]["verdict"]["kind"], "warn", "{grant}");
+    assert_eq!(
+        grant["data"]["verdict"]["matched"][0]["policy_id"], "hl-confirm-approve-agent",
+        "{grant}"
+    );
+
+    let revoke = run(approve_agent_action(false), json!([bundle]));
+    assert_eq!(revoke["ok"], true, "{revoke}");
+    assert_eq!(revoke["data"]["verdict"]["kind"], "pass", "{revoke}");
 }
 
 /// D4 SHIPPED-SEED PROOF: the shipped `hl-confirm-withdraw` bundle FLAGS a

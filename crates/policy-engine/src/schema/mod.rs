@@ -280,6 +280,9 @@ const TOKEN_WRAP_NATIVE_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/token/wrap_native.cedarschema");
 
 // hyperliquid_core (alphabetical) — the thin off-chain L1 action model.
+const HL_CORE_LIMIT_ORDER_SCHEMA: &str = include_str!(
+    "../../../../schema/policy-schema/actions/hyperliquid_core/core_limit_order.cedarschema"
+);
 const HL_WITHDRAW_SCHEMA: &str =
     include_str!("../../../../schema/policy-schema/actions/hyperliquid_core/withdraw.cedarschema");
 const HL_SEND_ASSET_SCHEMA: &str = include_str!(
@@ -400,6 +403,7 @@ const SHIPPED_SCHEMA_FILES: &[&str] = &[
     TOKEN_REFUND_NATIVE_SCHEMA,
     TOKEN_UNWRAP_NATIVE_SCHEMA,
     TOKEN_WRAP_NATIVE_SCHEMA,
+    HL_CORE_LIMIT_ORDER_SCHEMA,
     HL_WITHDRAW_SCHEMA,
     HL_SEND_ASSET_SCHEMA,
     HL_TOKEN_DELEGATE_SCHEMA,
@@ -903,6 +907,7 @@ const ACTION_CONTEXT_TYPES: &[(&str, &str)] = &[
     ("wrap_native", "WrapNativeContext"),
     // hyperliquid_core (alphabetical) — `hl_`-prefixed tags keep these globally
     // unique (notably `withdraw` is already a Lending tag).
+    ("hl_core_limit_order", "HlCoreLimitOrderContext"),
     ("hl_send_asset", "HlSendAssetContext"),
     ("hl_token_delegate", "HlTokenDelegateContext"),
     ("hl_withdraw", "HlWithdrawContext"),

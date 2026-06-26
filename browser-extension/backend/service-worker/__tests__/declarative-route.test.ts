@@ -460,6 +460,9 @@ describe("tryDeclarativeRouteV3", () => {
 });
 
 const STETH = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
+const HYPE_SYSTEM_ADDRESS = "0x2222222222222222222222222222222222222222";
+const HL_CORE_WRITER = "0x3333333333333333333333333333333333333333";
+const HL_WHYPE = "0x5555555555555555555555555555555555555555";
 const stethStakeEthBundle: V3Bundle = {
   type: "adapter_action",
   id: "lido/steth/stake-eth@1.0.0",
@@ -478,6 +481,33 @@ const stethStakeEthBundle: V3Bundle = {
     body: { domain: "liquid_staking" },
   },
 };
+
+function simpleHlBundle(id: string, selector: string, to: string): V3Bundle {
+  return {
+    type: "adapter_action",
+    id,
+    publisher: "hyperliquid",
+    schema_version: "3",
+    match: {
+      selector,
+      chain_to_addresses: { "999": [to] },
+    },
+    abi_fragment: {
+      function_name: "noop",
+      abi: {
+        name: "noop",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [],
+        outputs: [],
+      },
+    },
+    emit: {
+      strategy: "single_emit",
+      body: { domain: "unknown" },
+    },
+  };
+}
 
 describe("tryDeclarativeRouteV3 — selector-less native-ETH stake", () => {
   beforeEach(() => {
@@ -542,5 +572,143 @@ describe("tryDeclarativeRouteV3 — selector-less native-ETH stake", () => {
 
     expect(outcome).toEqual({ kind: "miss", reason: "no_selector" });
     expect(mocks.installDeclarativeBundleV3).not.toHaveBeenCalled();
+  });
+
+  it("routes HyperEVM HYPE system deposits through the native-transfer sentinel", async () => {
+    mocks.installDeclarativeBundleV3.mockImplementation(
+      async ({ selector }: { selector: string }) =>
+        selector === "0x00000000"
+          ? installed(
+              simpleHlBundle(
+                "hyperliquid/hype-system/native-transfer@1.0.0",
+                "0x00000000",
+                HYPE_SYSTEM_ADDRESS,
+              ),
+            )
+          : null,
+    );
+    mocks.declarativeRouteRequestV3.mockResolvedValue({
+      decoder_id: "hyperliquid/hype-system/native-transfer@1.0.0",
+      actions: [{ body: { domain: "unknown" } }],
+    });
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 999,
+      from: "0x31ca56db7d434bcb3a588149acf5d2b615aec477",
+      to: HYPE_SYSTEM_ADDRESS,
+      valueWei: "1000000000000000000",
+      calldataHex: "0x",
+    });
+
+    expect(outcome.kind).toBe("hit");
+    expect(mocks.installDeclarativeBundleV3).toHaveBeenCalledWith({
+      chainId: 999,
+      to: HYPE_SYSTEM_ADDRESS,
+      selector: "0x00000000",
+    });
+    expect(mocks.declarativeRouteRequestV3).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chain_id: 999,
+        to: HYPE_SYSTEM_ADDRESS,
+        selector: "0x00000000",
+        calldata: "0x",
+        value: "1000000000000000000",
+      }),
+    );
+  });
+
+  it("routes HyperEVM CoreWriter sendRawAction by exact chain-999 callkey", async () => {
+    mocks.installDeclarativeBundleV3.mockResolvedValue(
+      installed(
+        simpleHlBundle(
+          "hyperliquid/core-writer/sendRawAction@1.0.0",
+          "0x17938e13",
+          HL_CORE_WRITER,
+        ),
+      ),
+    );
+    mocks.declarativeRouteRequestV3.mockResolvedValue({
+      decoder_id: "hyperliquid/core-writer/sendRawAction@1.0.0",
+      actions: [{ body: { domain: "hyperliquid_core", action: "hl_unknown" } }],
+    });
+
+    const calldata = encodeFunctionData({
+      abi: [
+        {
+          name: "sendRawAction",
+          type: "function",
+          stateMutability: "nonpayable",
+          inputs: [{ name: "data", type: "bytes" }],
+          outputs: [],
+        },
+      ] as const,
+      functionName: "sendRawAction",
+      args: ["0x01000001" as Hex],
+    });
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 999,
+      from: "0x31ca56db7d434bcb3a588149acf5d2b615aec477",
+      to: HL_CORE_WRITER,
+      calldataHex: calldata,
+    });
+
+    expect(outcome.kind).toBe("hit");
+    expect(mocks.installDeclarativeBundleV3).toHaveBeenCalledWith({
+      chainId: 999,
+      to: HL_CORE_WRITER,
+      selector: "0x17938e13",
+    });
+  });
+
+  it("routes WHYPE transfer by explicit HyperEVM token manifest, not selector-only fallback", async () => {
+    mocks.installDeclarativeBundleV3.mockResolvedValue(
+      installed(
+        simpleHlBundle(
+          "hyperliquid/whype/transfer@1.0.0",
+          "0xa9059cbb",
+          HL_WHYPE,
+        ),
+      ),
+    );
+    mocks.declarativeRouteRequestV3.mockResolvedValue({
+      decoder_id: "hyperliquid/whype/transfer@1.0.0",
+      actions: [{ body: { domain: "token", action: "erc20_transfer" } }],
+    });
+
+    const calldata = encodeFunctionData({
+      abi: [
+        {
+          name: "transfer",
+          type: "function",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "amount", type: "uint256" },
+          ],
+          outputs: [{ name: "", type: "bool" }],
+        },
+      ] as const,
+      functionName: "transfer",
+      args: [
+        "0x000000000000000000000000000000000000dEaD",
+        1_000_000_000_000_000_000n,
+      ],
+    });
+
+    const outcome = await tryDeclarativeRouteV3({
+      chainId: 999,
+      from: "0x31ca56db7d434bcb3a588149acf5d2b615aec477",
+      to: HL_WHYPE,
+      calldataHex: calldata,
+    });
+
+    expect(outcome.kind).toBe("hit");
+    expect(mocks.installDeclarativeBundleV3).toHaveBeenCalledWith({
+      chainId: 999,
+      to: HL_WHYPE,
+      selector: "0xa9059cbb",
+    });
+    expect(mocks.installDeclarativeBundleV3BySelector).not.toHaveBeenCalled();
   });
 });

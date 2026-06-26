@@ -208,8 +208,11 @@ pub const REGISTERED_ACTIONS: &[&str] = &[
     // `hl_twap_order` now decode (TS) directly to `Perp::PlaceOrder` (off-chain
     // perp placement; orderType limit/stop/twap). `hl_update_leverage` →
     // `Perp::ChangeLeverage`, `hl_update_isolated_margin` → `Perp::AdjustMargin`
-    // (the perp leverage/margin actions). `hl_usd_class_transfer` (benign
-    // intra-account move) → `Core::Unknown`. All are therefore absent here.
+    // (the perp leverage/margin actions). CoreWriter action 1 keeps raw
+    // on-chain ints in `hl_core_limit_order`.
+    // `hl_usd_class_transfer` (benign intra-account move) → `Core::Unknown`.
+    // All other migrated aliases are therefore absent here.
+    "hl_core_limit_order",
     "hl_withdraw",
     "hl_send_asset",
     "hl_token_delegate",
@@ -279,8 +282,8 @@ mod tests {
         // fulfill_order (cancel_order dedups against Perp), plus bridge `send`,
         // MINUS the origin/main HL→Perp/Token/Staking migration (HL core 18→3).
         // Build-determined merged count: origin/main 104 + bridge `send` +
-        // token `refund_native` = 106.
-        assert_eq!(REGISTERED_ACTIONS.len(), 106);
+        // token `refund_native` + CoreWriter `hl_core_limit_order` = 107.
+        assert_eq!(REGISTERED_ACTIONS.len(), 107);
     }
 
     #[test]

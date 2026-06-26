@@ -1,4 +1,5 @@
 const { merge } = require("webpack-merge");
+const TerserPlugin = require("terser-webpack-plugin");
 process.env.NODE_ENV = process.env.NODE_ENV || "production";
 const common = require("./webpack.common.js");
 const {
@@ -57,10 +58,31 @@ if (
   );
 }
 
+const stripConsole = process.env.DAMBI_STRIP_CONSOLE === "1";
+
 const prodOverrides = {
   mode: "production",
   devtool: false,
-  optimization: { minimize: true },
+  optimization: {
+    minimize: true,
+    ...(stripConsole
+      ? {
+          minimizer: [
+            new TerserPlugin({
+              extractComments: false,
+              terserOptions: {
+                compress: {
+                  drop_console: true,
+                },
+                format: {
+                  comments: false,
+                },
+              },
+            }),
+          ],
+        }
+      : {}),
+  },
 };
 
 module.exports = common.map((cfg) => merge(cfg, prodOverrides));

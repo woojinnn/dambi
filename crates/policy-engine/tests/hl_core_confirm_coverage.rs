@@ -19,8 +19,8 @@ use policy_engine::schema::compose_per_policy;
 
 use policy_state::primitives::{Address, Decimal, Time};
 use policy_transition::action::hyperliquid_core::{
-    HlCWithdrawAction, HlSendAssetAction, HlSendToEvmWithDataAction, HlSpotSendAction,
-    HlTokenDelegateAction, HyperliquidCoreAction,
+    HlCWithdrawAction, HlCoreLimitOrderAction, HlSendAssetAction, HlSendToEvmWithDataAction,
+    HlSpotSendAction, HlTokenDelegateAction, HyperliquidCoreAction,
 };
 use policy_transition::action::{ActionBody, ActionMeta, ActionNature, Eip712Domain};
 
@@ -95,6 +95,42 @@ fn warned(v: &Verdict, id: &str) -> bool {
 }
 fn denied(v: &Verdict, id: &str) -> bool {
     matches!(v, Verdict::Fail(m) if m.iter().any(|x| x.policy_id == id))
+}
+
+// ── hl-corewriter-no-short-perp (deny iff short and not reduce-only) ──
+#[test]
+fn hl_corewriter_no_short_denies_short_allows_long_and_reduce_only() {
+    let mk = |is_buy: bool, reduce_only: bool| {
+        ActionBody::HyperliquidCore(HyperliquidCoreAction::CoreLimitOrder(
+            HlCoreLimitOrderAction {
+                asset: 110_076,
+                is_buy,
+                limit_px: "62653000".to_owned(),
+                sz: "1000".to_owned(),
+                reduce_only,
+                encoded_tif: 2,
+                cloid: "42".to_owned(),
+            },
+        ))
+    };
+    let cedar = fixture("hl-corewriter-no-short-perp");
+    let short_open = evaluate(&mk(false, false), "hl_core_limit_order", &cedar);
+    assert!(
+        denied(&short_open, "hl-corewriter-no-short-perp"),
+        "opening short must deny, got {short_open:?}"
+    );
+    let short_reduce_only = evaluate(&mk(false, true), "hl_core_limit_order", &cedar);
+    assert_eq!(
+        short_reduce_only,
+        Verdict::Pass,
+        "reduce-only sell must pass, got {short_reduce_only:?}"
+    );
+    let long_open = evaluate(&mk(true, false), "hl_core_limit_order", &cedar);
+    assert_eq!(
+        long_open,
+        Verdict::Pass,
+        "long/buy must pass, got {long_open:?}"
+    );
 }
 
 // ── hl-spot-send-confirm (static warn; SpotSend → Token::Erc20Transfer) ──

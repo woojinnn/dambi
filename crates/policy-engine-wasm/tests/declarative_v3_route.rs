@@ -9384,10 +9384,11 @@ fn b3_corewriter_action_11_cancel_cloid_structured_perp() {
     );
 }
 
-// b3.b — action 1 (Limit order) → Unknown (perp struct types don't fit HL
-// fixed-point uint fields; see plan §2). Raw call preserved via $calldata.
+// b3.b — action 1 (Limit order) → structured HyperliquidCore raw order.
+// Perp(PlaceOrder) would require human symbol/price/size units that the raw
+// CoreWriter calldata does not carry, so the decoder preserves exact HL ints.
 #[test]
-fn b3_corewriter_action_1_limit_unknown() {
+fn b3_corewriter_action_1_limit_structured_raw() {
     install_ok(HL_COREWRITER_FULL_MANIFEST);
 
     // Realistic limit order: asset=5, isBuy=true, limitPx=3750e8, sz=2e8,
@@ -9409,15 +9410,21 @@ fn b3_corewriter_action_1_limit_unknown() {
 
     let body = &parsed["data"]["actions"][0]["body"];
     assert_eq!(body["domain"], "hyperliquid_core", "{parsed}");
-    assert_eq!(body["action"], "hl_unknown", "{parsed}");
-    assert_eq!(body["action_type"], "limitOrder", "{parsed}");
+    assert_eq!(body["action"], "hl_core_limit_order", "{parsed}");
+    assert_eq!(body["asset"], 5, "{parsed}");
+    assert_eq!(body["is_buy"], true, "{parsed}");
+    assert_eq!(body["limit_px"], "375000000000", "{parsed}");
+    assert_eq!(body["sz"], "200000000", "{parsed}");
+    assert_eq!(body["reduce_only"], false, "{parsed}");
+    assert_eq!(body["encoded_tif"], 2, "{parsed}");
+    assert_eq!(body["cloid"], "57005", "{parsed}");
 }
 
-// b3.c — action 10 (Cancel by oid) → Unknown. Semantically identical to
-// action 11, BUT oid is uint64 (renders as a JSON NUMBER), which
-// `order_id: String` would reject — so it stays Unknown (contrast with b3.a).
+// b3.c — action 10 (Cancel by oid) → STRUCTURED `Perp(CancelOrder)`.
+// `oid` is uint64 and would render as a JSON number, so the manifest normalizes
+// it with `uint_to_string` before filling `order_id:String`.
 #[test]
-fn b3_corewriter_action_10_cancel_oid_unknown() {
+fn b3_corewriter_action_10_cancel_oid_structured_perp() {
     install_ok(HL_COREWRITER_FULL_MANIFEST);
 
     let calldata = hl_encode_send_raw_action(
@@ -9431,9 +9438,15 @@ fn b3_corewriter_action_10_cancel_oid_unknown() {
     let parsed = hl_route(calldata.clone());
 
     let body = &parsed["data"]["actions"][0]["body"];
-    assert_eq!(body["domain"], "hyperliquid_core", "{parsed}");
-    assert_eq!(body["action"], "hl_unknown", "{parsed}");
-    assert_eq!(body["action_type"], "cancelOrderByOid", "{parsed}");
+    assert_eq!(body["domain"], "perp", "{parsed}");
+    assert_eq!(body["action"], "cancel_order", "{parsed}");
+    assert_eq!(body["venue"]["name"], "hyperliquid", "{parsed}");
+    assert_eq!(
+        body["venue"]["chain"],
+        format!("eip155:{HL_HYPEREVM}"),
+        "{parsed}"
+    );
+    assert_eq!(body["order_id"], "123456", "{parsed}");
 }
 
 // b3.d — action 4 (Staking deposit) → Unknown. No matching ActionBody domain

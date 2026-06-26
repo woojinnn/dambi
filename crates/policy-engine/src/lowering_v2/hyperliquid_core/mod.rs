@@ -16,6 +16,7 @@ use super::dispatch::{LowerCtx, LowerError, LoweredAction};
 mod amount;
 mod c_deposit;
 mod c_withdraw;
+mod core_limit_order;
 mod send_asset;
 mod send_to_evm_with_data;
 mod spot_send;
@@ -38,6 +39,7 @@ pub(crate) fn lower(
     ctx: &LowerCtx<'_>,
 ) -> Result<LoweredAction, LowerError> {
     match action {
+        HyperliquidCoreAction::CoreLimitOrder(a) => core_limit_order::lower(a, ctx),
         HyperliquidCoreAction::Withdraw(a) => withdraw::lower(a, ctx),
         HyperliquidCoreAction::UsdSend(a) => usd_send::lower(a, ctx),
         HyperliquidCoreAction::SpotSend(a) => spot_send::lower(a, ctx),

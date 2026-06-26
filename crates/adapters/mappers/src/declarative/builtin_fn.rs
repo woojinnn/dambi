@@ -67,6 +67,7 @@ pub const WHITELIST: &[&str] = &[
     "seaport_basic_order",
     "tuple_array_field",
     "array_len",
+    "uint_to_string",
     "u64_saturating",
     "bytes_nonempty",
     "token_key_or_native_zero",
@@ -106,6 +107,7 @@ pub fn dispatch(name: &str, args: &[JsonValue]) -> Result<JsonValue, String> {
         "seaport_basic_order" => seaport_basic_order(args),
         "tuple_array_field" => tuple_array_field(args),
         "array_len" => array_len(args),
+        "uint_to_string" => uint_to_string(args),
         "u64_saturating" => u64_saturating(args),
         "bytes_nonempty" => bytes_nonempty(args),
         "token_key_or_native_zero" => token_key_or_native_zero(args),
@@ -1642,6 +1644,17 @@ fn unoswap_route_hash(args: &[JsonValue]) -> Result<JsonValue, String> {
     Ok(JsonValue::String(format!("{:#x}", keccak256(&bytes))))
 }
 
+/// `uint_to_string(uint) -> decimal string`. Normalizes a uint rendered as a JSON
+/// number, decimal string, or hex string into the string shape expected by
+/// ActionBody fields such as order ids.
+fn uint_to_string(args: &[JsonValue]) -> Result<JsonValue, String> {
+    if args.len() != 1 {
+        return Err(format!("uint_to_string expects 1 arg, got {}", args.len()));
+    }
+    let value = json_u256(&args[0], "uint_to_string: value")?;
+    Ok(JsonValue::String(value.to_string()))
+}
+
 /// `u64_saturating(uint) -> u64 number`. Clamps a (possibly >u64) uint-like
 /// value to `u64::MAX`. Used by Umbrella batch permit-deadline fields.
 fn u64_saturating(args: &[JsonValue]) -> Result<JsonValue, String> {
@@ -2083,6 +2096,17 @@ mod tests {
         assert!(u64_saturating(&[json!("not-a-number")]).is_err());
         assert!(u64_saturating(&[json!("-1")]).is_err());
         assert!(u64_saturating(&[json!(1.25)]).is_err());
+    }
+
+    #[test]
+    fn uint_to_string_normalizes_uint_like_values() {
+        assert_eq!(uint_to_string(&[json!(42u64)]).unwrap(), json!("42"));
+        assert_eq!(uint_to_string(&[json!("42")]).unwrap(), json!("42"));
+        assert_eq!(uint_to_string(&[json!("0x2a")]).unwrap(), json!("42"));
+
+        assert!(uint_to_string(&[]).is_err());
+        assert!(uint_to_string(&[json!("not-a-number")]).is_err());
+        assert!(uint_to_string(&[json!(1.25)]).is_err());
     }
 
     #[test]

@@ -27,7 +27,8 @@ impl Reducer for HyperliquidCoreAction {
             // does not call `Reducer::apply`, so a no-op delta here has zero
             // effect on policy decisions; it only under-reports the simulated
             // balance change, which the simulation track will fill in.
-            Self::SpotSend(_)
+            Self::CoreLimitOrder(_)
+            | Self::SpotSend(_)
             | Self::UsdClassTransfer(_)
             | Self::SendAsset(_)
             | Self::SendToEvmWithData(_)

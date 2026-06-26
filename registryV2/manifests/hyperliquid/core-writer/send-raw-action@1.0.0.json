@@ -26,7 +26,7 @@
     "version_byte": "0x01",
     "tag_offset": 1,
     "tag_size": 3,
-    "_note": "CoreWriter sendRawAction(bytes): data[0]=0x01 version, data[1:4]=action_id (uint24 BE), data[4:]=abi.encode(action args). action 11 (cancel by cloid) maps to a structured Perp(CancelOrder) body; every other action + default maps to hyperliquid_core::hl_unknown carrying a descriptive action_type (e.g. 'vaultTransfer') so a policy can gate the specific CoreWriter op by name. Structured-with-amounts is deferred: the args are HL uint64 fixed-point (token/asset are L1 ids, amounts need per-asset szDecimals/weiDecimals scaling) which the declarative grammar cannot scale without an HL meta snapshot; mislabeling a raw integer as a human amount would be worse than hl_unknown. See ~/.claude-web3/plans/hl-corewriter-cover.md for the grounded per-action decision (perp struct types vs HL raw uint fixed-point; no matching domain for vault/staking/delegate/transfer/permission ops).",
+    "_note": "CoreWriter sendRawAction(bytes): data[0]=0x01 version, data[1:4]=action_id (uint24 BE), data[4:]=abi.encode(action args). action 1 maps to a structured hyperliquid_core::hl_core_limit_order raw body (asset id, raw limitPx/sz, isBuy/side, reduceOnly, encodedTif, cloid) without pretending to know human symbol/price/size units. actions 10/11 (cancel by oid/cloid) map to structured Perp(CancelOrder) bodies. Other actions + default map to hyperliquid_core::hl_unknown carrying a descriptive action_type (e.g. 'vaultTransfer') so a policy can gate the specific CoreWriter op by name. Fully human-scaled amounts remain deferred: HL uint64 fixed-point values need per-asset szDecimals/weiDecimals scaling from an HL meta snapshot; mislabeling a raw integer as a human amount would be worse than a raw structured body.",
     "per_action_body": {
       "1": {
         "name": "limit_order",
@@ -34,11 +34,19 @@
         "body": {
           "domain": "hyperliquid_core",
           "hyperliquid_core": {
-            "action": "hl_unknown",
-            "hl_unknown": { "action_type": "limitOrder" }
+            "action": "hl_core_limit_order",
+            "hl_core_limit_order": {
+              "asset": "$inputs.asset",
+              "is_buy": "$inputs.isBuy",
+              "limit_px": "$inputs.limitPx",
+              "sz": "$inputs.sz",
+              "reduce_only": "$inputs.reduceOnly",
+              "encoded_tif": "$inputs.encodedTif",
+              "cloid": "$inputs.cloid"
+            }
           }
         },
-        "_note": "PlaceLimitOrderAction needs symbol:String (asset=uint32 number), side:PerpSide-enum (isBuy=bool), price:Decimal-String (limitPx=uint64 number), size.amount:U256-String (sz=uint64 number), time_in_force:TimeInForce-enum (encodedTif=uint8), plus live_inputs with no perp catalog default — none expressible declaratively from HL fixed-point ints. Unknown is the honest mapping."
+        "_note": "Structured as a HyperliquidCore raw limit-order action, not Perp(PlaceOrder): asset is an HL asset id, limitPx/sz are raw fixed-point uint64 values, and encodedTif is a raw byte. The decoder exposes side/reduceOnly for policy while preserving exact raw fields."
       },
       "2": {
         "name": "vault_transfer",
@@ -133,13 +141,19 @@
         "name": "cancel_order_by_oid",
         "inputs_abi": "(uint32 asset, uint64 oid)",
         "body": {
-          "domain": "hyperliquid_core",
-          "hyperliquid_core": {
-            "action": "hl_unknown",
-            "hl_unknown": { "action_type": "cancelOrderByOid" }
+          "domain": "perp",
+          "perp": {
+            "action": "cancel_order",
+            "cancel_order": {
+              "venue": { "name": "hyperliquid", "chain": "$chain" },
+              "order_id": {
+                "$fn": "uint_to_string",
+                "$args": ["$inputs.oid"]
+              }
+            }
           }
         },
-        "_note": "Same semantics as action 11 but oid is uint64 (renders as JSON number); CancelOrderAction.order_id is a String which rejects a number. Unknown. (action 11 cloid=uint128 renders as string and maps structurally.)"
+        "_note": "Structured Perp(CancelOrder): oid is uint64, so the manifest normalizes it to a decimal string with uint_to_string before filling order_id:String."
       },
       "11": {
         "name": "cancel_order_by_cloid",

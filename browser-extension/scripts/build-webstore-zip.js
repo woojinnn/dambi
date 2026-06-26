@@ -6,13 +6,14 @@ const path = require("node:path");
 
 const extRoot = path.resolve(__dirname, "..");
 const distDir = path.join(extRoot, "dist");
-const chromeDist = path.join(distDir, "chrome");
+const sourceTarget = process.env.DAMBI_WEBSTORE_SOURCE_TARGET || "chrome-webstore";
+const chromeDist = path.join(distDir, sourceTarget);
 const manifestPath = path.join(chromeDist, "manifest.json");
 const archiveName = "chrome-webstore.zip";
 
 if (!fs.existsSync(manifestPath)) {
   console.error(
-    `[build-webstore-zip] missing ${manifestPath}; run yarn build:chrome first.`,
+    `[build-webstore-zip] missing ${manifestPath}; run yarn build:chrome:webstore first.`,
   );
   process.exit(1);
 }

@@ -210,14 +210,14 @@
   },
   {
     "id": "hl-confirm-approve-agent",
-    "cedar": "@id(\"hl-confirm-approve-agent\")\n@severity(\"warn\")\n@reason(\"Authorizing an agent wallet to trade on your behalf — confirm before approving\")\nforbid(\n  principal,\n  action == HyperliquidCore::Action::\"HlApproveAgent\",\n  resource\n);\n",
+    "cedar": "@id(\"hl-confirm-approve-agent\")\n@severity(\"warn\")\n@reason(\"Authorizing an agent wallet to trade on your behalf — confirm before approving\")\nforbid(principal, action == Permission::Action::\"ProtocolAuthorization\", resource)\nwhen {\n  context.protocolName == \"hyperliquid\"\n    && context.permission == \"agent\"\n    && context.isAuthorized == true\n};\n",
     "manifest": {
       "id": "hl-confirm-approve-agent",
       "schema_version": 2,
       "trigger": {
         "where": {
           "action.tag": {
-            "eq": "hl_approve_agent"
+            "eq": "protocol_authorization"
           }
         }
       },
@@ -313,6 +313,25 @@
         "where": {
           "action.tag": {
             "eq": "place_order"
+          }
+        }
+      },
+      "policy_rpc": [],
+      "custom_context": {
+        "fields": {}
+      }
+    }
+  },
+  {
+    "id": "hl-corewriter-no-short-perp",
+    "cedar": "@id(\"hl-corewriter-no-short-perp\")\n@severity(\"deny\")\n@reason(\"Opening a new short perp through Hyperliquid CoreWriter is blocked by policy\")\nforbid(principal, action == HyperliquidCore::Action::\"HlCoreLimitOrder\", resource)\nwhen {\n  context.venue.name == \"hyperliquid\"\n    && context.side == \"short\"\n    && context.reduceOnly == false\n};\n",
+    "manifest": {
+      "id": "hl-corewriter-no-short-perp",
+      "schema_version": 2,
+      "trigger": {
+        "where": {
+          "action.tag": {
+            "eq": "hl_core_limit_order"
           }
         }
       },

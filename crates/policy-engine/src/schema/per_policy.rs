@@ -34,7 +34,7 @@ use super::{
     GOVERNANCE_CLOSE_VOTE_SCHEMA, GOVERNANCE_DELEGATE_SCHEMA, GOVERNANCE_EXECUTE_SCHEMA,
     GOVERNANCE_PROPOSE_SCHEMA, GOVERNANCE_QUEUE_SCHEMA, GOVERNANCE_REDEEM_CANCELLATION_FEE_SCHEMA,
     GOVERNANCE_START_VOTE_SCHEMA, GOVERNANCE_UPDATE_REPRESENTATIVE_SCHEMA, GOVERNANCE_VOTE_SCHEMA,
-    HL_SEND_ASSET_SCHEMA, HL_TOKEN_DELEGATE_SCHEMA, HL_WITHDRAW_SCHEMA,
+    HL_CORE_LIMIT_ORDER_SCHEMA, HL_SEND_ASSET_SCHEMA, HL_TOKEN_DELEGATE_SCHEMA, HL_WITHDRAW_SCHEMA,
     LAUNCHPAD_CLAIM_ALLOCATION_SCHEMA, LAUNCHPAD_CLAIM_VESTED_SCHEMA, LAUNCHPAD_COMMIT_SCHEMA,
     LAUNCHPAD_REFUND_SCHEMA, LAUNCHPAD_WITHDRAW_COMMIT_SCHEMA, LENDING_BORROW_SCHEMA,
     LENDING_BUY_COLLATERAL_SCHEMA, LENDING_DELEGATE_BORROW_SCHEMA,
@@ -750,6 +750,12 @@ const RESOLVER_TABLE: &[ActionEntry] = &[
     // hyperliquid_core — `hl_`-prefixed tags; namespace `HyperliquidCore`.
     ActionEntry {
         domain: "hyperliquid_core",
+        action_tag: Some("hl_core_limit_order"),
+        schema_text: HL_CORE_LIMIT_ORDER_SCHEMA,
+        pascal_stub: "HlCoreLimitOrder",
+    },
+    ActionEntry {
+        domain: "hyperliquid_core",
         action_tag: Some("hl_withdraw"),
         schema_text: HL_WITHDRAW_SCHEMA,
         pascal_stub: "HlWithdraw",
@@ -1294,11 +1300,12 @@ mod tests {
         // Guards against a row being dropped or duplicated. (+3 Marketplace
         // rows — sign_order / fulfill_order / cancel_order — keyed by
         // (domain, action_tag), so cancel_order is a distinct row from perp's;
-        // +1 bridge `send` row; +1 token `refund_native` row.)
+        // +1 bridge `send` row; +1 token `refund_native` row; +1 Hyperliquid
+        // CoreWriter `hl_core_limit_order` row.)
         assert_eq!(
             RESOLVER_TABLE.len(),
-            118,
-            "resolver table must have 118 rows"
+            119,
+            "resolver table must have 119 rows"
         );
     }
 

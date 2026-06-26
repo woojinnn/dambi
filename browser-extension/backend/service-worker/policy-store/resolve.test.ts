@@ -267,6 +267,32 @@ describe("trigger pre-filter", () => {
     // 메타를 읽지 못한 액션(tag unknown): 아무것도 드롭하지 않음
     expect(filterForAction(bundles, [{}])).toHaveLength(3);
   });
+
+  it("keeps the HL CoreWriter no-short bundle for hl_core_limit_order actions", () => {
+    const bundles: ResolvedBundle[] = [
+      {
+        id: "def::market.hl-corewriter-no-short-perp",
+        policy: "p",
+        manifest: undefined,
+        trigger: { tags: ["hl_core_limit_order"] },
+      },
+      {
+        id: "def::market.hl-no-short-perp",
+        policy: "p",
+        manifest: undefined,
+        trigger: { tags: ["place_order"] },
+      },
+    ];
+    const metas = collectActionMetas({
+      domain: "hyperliquid_core",
+      action: "hl_core_limit_order",
+      venue: { name: "hyperliquid" },
+    });
+
+    expect(filterForAction(bundles, metas).map((b) => b.id)).toEqual([
+      "def::market.hl-corewriter-no-short-perp",
+    ]);
+  });
 });
 
 describe("defRefForPolicyId", () => {

@@ -68,6 +68,11 @@ import {
   typedDataDomainChainId,
 } from "./sig-routing";
 
+declare const DAMBI_STRIP_CONSOLE: boolean | undefined;
+
+const SHOULD_STRIP_CONSOLE =
+  typeof DAMBI_STRIP_CONSOLE !== "undefined" && DAMBI_STRIP_CONSOLE;
+
 /**
  * Submission-shape classifier. Maps the SW `Message` envelope onto the
  * `ActionNature` discriminator:
@@ -326,39 +331,41 @@ async function decideInner(
             stack: err.stack,
           }
         : { raw: String(err) };
-    // route_failed is a known no-op outcome (we pass it through in
-    // engineErrorVerdict), so log at warn to avoid noisy red counters
-    // on chrome://extensions. Other errors stay at error.
-    const logAt =
-      err instanceof EngineError && err.kind === "route_failed"
-        ? console.warn
-        : console.error;
-    // Surface `to`/`chainId`/`selector` so `route_failed` logs let us
-    // tell at a glance whether the unknown router was a new UR deployment,
-    // an off-chain settlement contract, or a different chain entirely.
-    const txCtx = isTransaction(message)
-      ? {
-          to: message.data.transaction.to,
-          chainId: message.data.chainId,
-          selector:
-            typeof message.data.transaction.data === "string"
-              ? message.data.transaction.data.slice(0, 10)
-              : undefined,
-          dataLen:
-            typeof message.data.transaction.data === "string"
-              ? message.data.transaction.data.length
-              : undefined,
-          data: message.data.transaction.data,
-        }
-      : undefined;
-    logAt("[Dambi] decideMessage threw", {
-      requestId: message.requestId,
-      hostname: message.data.hostname,
-      type: pending.type,
-      ...(txCtx ?? {}),
-      ...errInfo,
-      err,
-    });
+    if (!SHOULD_STRIP_CONSOLE) {
+      // route_failed is a known no-op outcome (we pass it through in
+      // engineErrorVerdict), so log at warn to avoid noisy red counters
+      // on chrome://extensions. Other errors stay at error.
+      const logAt =
+        err instanceof EngineError && err.kind === "route_failed"
+          ? console.warn
+          : console.error;
+      // Surface `to`/`chainId`/`selector` so `route_failed` logs let us
+      // tell at a glance whether the unknown router was a new UR deployment,
+      // an off-chain settlement contract, or a different chain entirely.
+      const txCtx = isTransaction(message)
+        ? {
+            to: message.data.transaction.to,
+            chainId: message.data.chainId,
+            selector:
+              typeof message.data.transaction.data === "string"
+                ? message.data.transaction.data.slice(0, 10)
+                : undefined,
+            dataLen:
+              typeof message.data.transaction.data === "string"
+                ? message.data.transaction.data.length
+                : undefined,
+            data: message.data.transaction.data,
+          }
+        : undefined;
+      logAt("[Dambi] decideMessage threw", {
+        requestId: message.requestId,
+        hostname: message.data.hostname,
+        type: pending.type,
+        ...(txCtx ?? {}),
+        ...errInfo,
+        err,
+      });
+    }
     const verdict = engineErrorVerdict(err);
     await appendAudit(message, pending.type, verdict);
     // `engineErrorVerdict` may downgrade some failures (e.g. route_failed)

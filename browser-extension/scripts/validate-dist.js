@@ -19,7 +19,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const target = process.env.TARGET_BROWSER || "chrome";
+const target =
+  process.env.DAMBI_EXTENSION_DIST_TARGET ||
+  process.env.TARGET_BROWSER ||
+  "chrome";
 const distDir = path.resolve(__dirname, "..", "dist", target);
 const manifestPath = path.join(distDir, "manifest.json");
 
@@ -227,6 +230,47 @@ if (releaseViolations.length > 0) {
     console.error(`    - ${violation}`);
   }
   process.exit(1);
+}
+
+if (process.env.DAMBI_STRIP_CONSOLE === "1") {
+  const sensitiveLogPatterns = [
+    /\[Dambi\]/,
+    /Dambi SW alive/,
+    /decoded ActionBody/,
+    /wasm\.lowered-context/,
+    /wasm\.evaluate-action-v2/,
+    /tx\.incoming/,
+    /typed-sig\.incoming/,
+    /personal-sign\.incoming/,
+    /registry-fetch/,
+    /declarative-route-v3/,
+    /declarative-verdict/,
+    /HL \/exchange parsed/,
+  ];
+  const consoleCallPattern = /\bconsole\s*(?:\.|\[)[A-Za-z0-9_'"]+\s*\(/;
+  const consoleViolations = [];
+  for (const abs of allFiles) {
+    if (path.extname(abs) !== ".js") continue;
+    const rel = relPath(abs);
+    const source = fs.readFileSync(abs, "utf8");
+    if (consoleCallPattern.test(source)) {
+      consoleViolations.push(`${rel}: console call survived stripped build`);
+      continue;
+    }
+    const pattern = sensitiveLogPatterns.find((p) => p.test(source));
+    if (pattern) {
+      consoleViolations.push(`${rel}: sensitive debug log survived (${pattern})`);
+    }
+  }
+  if (consoleViolations.length > 0) {
+    console.error(
+      `[validate-dist] ${target}: stripped-console violation(s) survived DAMBI_STRIP_CONSOLE=1 -`,
+    );
+    for (const violation of consoleViolations) {
+      console.error(`    - ${violation}`);
+    }
+    process.exit(1);
+  }
 }
 
 console.error(
