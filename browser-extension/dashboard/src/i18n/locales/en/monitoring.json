@@ -243,6 +243,7 @@
       "cond": "Condition",
       "posEmpty": "No positions",
       "ordEmpty": "No open orders",
+      "noActivity": "No Hyperliquid positions or open orders",
       "buy": "Buy",
       "sell": "Sell",
       "tp": "TP",

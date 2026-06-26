@@ -7,11 +7,13 @@
  * `window.PASU_DATA.donut` (the live DonutData from useAssetsData). A small
  * fallback keeps the prototype rendering standalone when PASU_DATA is absent.
  *
- * KEEP: window.PASU_CHAIN_LOGOS / window.PASU_TOKEN_LOGOS (consumed by
- * assets-app's chain chips + token avatars) are still seeded here.
+ * KEEP: window.PASU_CHAIN_LOGOS (inline SVG) / window.PASU_TOKEN_LOGO_FILES
+ * (symbol→local bundled filename) are seeded here, consumed by assets-app's
+ * chain chips + token avatars.
  *
- * Privacy/CSP: extension pages do not fetch third-party logo images; chain
- * legends use only local inline SVG logos, with text fallback.
+ * Privacy/CSP: extension pages never fetch logos from third-party CDNs (that
+ * would leak viewed holdings). Chain legends use local inline SVG; token
+ * avatars use locally-bundled SVG files (public/picture/tokens/), same-origin.
  */
 
 import {
@@ -55,7 +57,8 @@ export function initDonuts(root: HTMLElement): () => void {
 
   // 실제 체인 로고 (브랜드 마크) — 자산 분포 도넛 범례 + Holdings 체인 칩 공용
   const LOGOS: Record<string, string> = {
-    eth: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#627EEA"/><g fill="#fff"><path d="M12 3.2 7 12l5 2.95z" fill-opacity=".62"/><path d="M12 3.2 17 12l-5 2.95z"/><path d="M12 16.05 7 13.1l5 7.7z" fill-opacity=".62"/><path d="M12 16.05 17 13.1l-5 7.7z"/></g></svg>',
+    // Ethereum: ETH 토큰 로고(레포 eth.svg)와 동일한 그레이 다이아 — 작은 배지/범례가 토큰과 일치하도록.
+    eth: '<svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"><polygon fill="#2F3030" points="249.982,6.554 397.98,251.112 250.53,188.092 "/><polygon fill="#828384" points="102.39,251.112 249.982,6.554 250.53,188.092 "/><polygon fill="#343535" points="249.982,341.285 102.39,251.112 250.53,188.092 "/><polygon fill="#131313" points="397.98,251.112 250.53,188.092 249.982,341.285 "/><polygon fill="#2F3030" points="249.982,372.329 397.98,284.597 249.982,493.13 "/><polygon fill="#828384" points="249.982,372.329 102.39,284.597 249.982,493.13 "/></svg>',
     base: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#0052FF"/><path d="M14.2 6.4A6.9 6.9 0 1 0 14.2 17.6Z" fill="#fff"/></svg>',
     arb: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#2D374B"/><path d="M12 5.6 6.7 17.4 9.6 17.4z" fill="#28A0F0"/><path d="M12 5.6 17.3 17.4 14.4 17.4z" fill="#fff"/><path d="M12 5.6 13.2 8.2 10.8 8.2z" fill="#fff"/></svg>',
     hl: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#173E37"/><g stroke="#98FCE4" stroke-width="2.3" stroke-linecap="round" fill="none"><path d="M7.7 7v10"/><path d="M16.3 7v10"/><path d="M7.7 12.2c1.6-2.3 7-2.3 8.6 0"/></g></svg>',
@@ -65,15 +68,20 @@ export function initDonuts(root: HTMLElement): () => void {
     byName: { Ethereum: LOGOS.eth, Base: LOGOS.base, Arbitrum: LOGOS.arb, Hyperliquid: LOGOS.hl },
   };
 
-  // 토큰 아바타 (실제 로고 마크) — Holdings 표 자산 아이콘에서 재사용
-  const DIAMOND =
-    '<g fill="#fff"><path d="M12 3.2 7 12l5 2.95z" fill-opacity=".62"/><path d="M12 3.2 17 12l-5 2.95z"/><path d="M12 16.05 7 13.1l5 7.7z" fill-opacity=".62"/><path d="M12 16.05 17 13.1l-5 7.7z"/></g>';
-  window.PASU_TOKEN_LOGOS = {
-    ETH: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#627EEA"/>' + DIAMOND + "</svg>",
-    WETH: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#5A6B8C"/>' + DIAMOND + "</svg>",
-    cbETH: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#0052FF"/>' + DIAMOND + "</svg>",
-    USDC: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#2775CA"/><path d="M12 5.5v13M9.6 9.3c0-1.3 1-2.1 2.4-2.1s2.4.7 2.4 2c0 2.6-4.9 1.4-4.9 4 0 1.3 1 2.1 2.5 2.1s2.5-.8 2.5-2.1" fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    ARB: LOGOS.arb,
+  // 토큰 아바타 — 실제 브랜드 로고를 로컬 번들에서 <img>로 로드(Holdings 표 자산 아이콘).
+  // 출처: Pymmdrza/Cryptocurrency_Logos → public/picture/tokens/<name>.svg 로 사전 번들.
+  // 외부 CDN 미사용(보유자산 유출 없음). 심볼→파일명(소문자) 맵; 변형 심볼은 대표 로고
+  // 재사용(WETH/cbETH→eth, USDC.e·USDbC→usdc, POL/WMATIC→matic, wstETH→steth). 미수록
+  // 심볼은 글자 아바타로 폴백.
+  window.PASU_TOKEN_LOGO_FILES = {
+    ETH: "eth", WETH: "eth", cbETH: "eth",
+    USDC: "usdc", "USDC.e": "usdc", USDbC: "usdc",
+    USDT: "usdt", DAI: "dai", FRAX: "frax", TUSD: "tusd", BUSD: "busd", GUSD: "gusd",
+    WBTC: "wbtc", cbBTC: "wbtc", BTC: "btc",
+    LINK: "link", UNI: "uni", AAVE: "aave", LDO: "ldo", MKR: "mkr",
+    MATIC: "matic", POL: "matic", WMATIC: "matic",
+    stETH: "steth", wstETH: "steth",
+    SNX: "snx", COMP: "comp", SUSHI: "sushi", GRT: "grt", SHIB: "shib", SOL: "sol", BNB: "bnb",
   };
 
   function chainImgByName(name: string | undefined): string {

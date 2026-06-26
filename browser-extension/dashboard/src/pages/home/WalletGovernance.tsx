@@ -48,9 +48,6 @@ interface Props {
 }
 
 // ── tiny icons ────────────────────────────────────────────────────────────
-const Folder = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-);
 const Sync = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M3 21v-5h5" /></svg>
 );
@@ -59,6 +56,9 @@ const Rename = () => (
 );
 const Trash = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+);
+const Palette = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r=".8" fill="currentColor" stroke="none" /><circle cx="17.5" cy="10.5" r=".8" fill="currentColor" stroke="none" /><circle cx="8.5" cy="7.5" r=".8" fill="currentColor" stroke="none" /><circle cx="6.5" cy="12.5" r=".8" fill="currentColor" stroke="none" /><path d="M12 2C6.5 2 2 6 2 11c0 4 3 7 7 7 1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H14c3.3 0 6-2.4 6-5.5C20 4.9 16.4 2 12 2z" /></svg>
 );
 const ArrowOut = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -71,6 +71,31 @@ const Back = () => (
 );
 
 const initialOf = (w: DialWallet) => (w.label ?? w.address).slice(0, 1).toUpperCase();
+
+/** 지갑 색 = 주소 해시 기반 3색 순환(blue/violet/navy). 같은 지갑은 좌측 카드·우측 패널·
+ *  패키지 아이콘에서 동일 색을 쓴다(위치별 색 불일치 방지). risk(fail/warn) tone 은 별도 우선. */
+const WALLET_HUES = ["blue", "violet", "navy"] as const;
+// 주소는 소문자로 정규화 — 홈/에디터(iframe)가 같은 키·해시로 같은 색을 내도록.
+function hueOf(addr: string): (typeof WALLET_HUES)[number] {
+  const s = addr.toLowerCase();
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return WALLET_HUES[h % WALLET_HUES.length];
+}
+
+/** 사용자가 지갑별로 고르는 색 팔레트(프론트 쿨 계열) — home-dial.css 의 --wallet-* 와 1:1. */
+export const WALLET_PALETTE = ["navy", "blue", "violet", "slate", "teal"] as const;
+export type WalletHue = (typeof WALLET_PALETTE)[number];
+const COLOR_KEY = "dambi:wallet-colors"; // { [address]: hue } — 계정 무관 로컬 취향, 백엔드 미변경
+function loadWalletColors(): Record<string, WalletHue> {
+  try {
+    const r = JSON.parse(localStorage.getItem(COLOR_KEY) || "{}") as unknown;
+    return r && typeof r === "object" ? (r as Record<string, WalletHue>) : {};
+  } catch { return {}; }
+}
+function saveWalletColors(m: Record<string, WalletHue>): void {
+  try { localStorage.setItem(COLOR_KEY, JSON.stringify(m)); } catch { /* best-effort */ }
+}
 const usd = (n: number) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 
 // ════════════════════════════════════════════════════════════════════════
@@ -88,6 +113,12 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
 
   const { t } = useTranslation("home");
   const activeWallet = wallets[activeIdx];
+
+  // 지갑별 사용자 지정 색(localStorage). 없으면 주소-해시 기본값. 좌측 카드·우측 패널·패키지 공유.
+  const [walletColors, setWalletColors] = useState<Record<string, WalletHue>>(loadWalletColors);
+  const hueFor = (addr: string): string => walletColors[addr.toLowerCase()] ?? hueOf(addr);
+  const setWalletColor = (addr: string, hue: WalletHue) =>
+    setWalletColors((m) => { const next = { ...m, [addr.toLowerCase()]: hue }; saveWalletColors(next); return next; });
 
   if (wallets.length === 0) {
     return (
@@ -108,6 +139,7 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
         <WalletDial
           wallets={wallets}
           active={activeIdx}
+          hueFor={hueFor}
           onSelect={(i) => { setOverview(false); setActive(i); }}
           onActiveClick={() => setOverview((v) => !v)}
           onAddWallet={onAddWallet}
@@ -126,6 +158,8 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
               key={activeWallet.address}
               wallet={activeWallet}
               snap={snap}
+              hue={hueFor(activeWallet.address)}
+              onSetColor={(h) => setWalletColor(activeWallet.address, h)}
               onOpenOverview={() => setOverview(true)}
               onSync={onSync}
               syncing={syncingAddress === activeWallet.address}
@@ -156,12 +190,14 @@ function DialHead() {
 function WalletDial({
   wallets,
   active,
+  hueFor,
   onSelect,
   onActiveClick,
   onAddWallet,
 }: {
   wallets: DialWallet[];
   active: number;
+  hueFor: (addr: string) => string;
   onSelect: (i: number) => void;
   onActiveClick: () => void;
   onAddWallet: () => void;
@@ -273,6 +309,7 @@ function WalletDial({
             key={w.address}
             className="wcard"
             data-tone={w.tone}
+            data-hue={hueFor(w.address)}
             ref={(el) => { if (el) cardRefs.current[i] = el; }}
           >
             <div className="wc-top">
@@ -305,6 +342,8 @@ function WalletDial({
 function WalletPanel({
   wallet,
   snap,
+  hue,
+  onSetColor,
   onOpenOverview,
   onSync,
   syncing,
@@ -313,6 +352,8 @@ function WalletPanel({
 }: {
   wallet: DialWallet;
   snap: StoreSnapshot | null;
+  hue: string;
+  onSetColor: (h: WalletHue) => void;
   onOpenOverview: () => void;
   onSync: (address: string) => void;
   syncing: boolean;
@@ -333,11 +374,12 @@ function WalletPanel({
   const bindMut = useMutation({ mutationFn: updateBinding, onSettled: invalidate });
 
   const toggleFlip = (id: string) => setFlipped((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const [colorOpen, setColorOpen] = useState(false); // 색 선택 팝오버
 
   return (
     <div className="dp-fade">
-      <div className="dp-head">
-        <button className="dp-coin" type="button" data-tone={wallet.tone} title={t("panel.viewAllWallets")} onClick={onOpenOverview}>
+      <div className="dp-head" data-hue={hue}>
+        <button className="dp-coin" type="button" data-tone={wallet.tone} data-hue={hue} title={t("panel.viewAllWallets")} onClick={onOpenOverview}>
           {initialOf(wallet)}
         </button>
         <div className="dp-id">
@@ -348,6 +390,20 @@ function WalletPanel({
         </div>
         <div className="dp-bal">
           <div className="dp-acts">
+            <div className="dp-color-wrap">
+              <button className="dp-ib" type="button" title={t("panel.walletColor", "지갑 색")} aria-haspopup="true" aria-expanded={colorOpen} onClick={() => setColorOpen((v) => !v)}><Palette /></button>
+              {colorOpen && (
+                <>
+                  <div className="dp-color-backdrop" onClick={() => setColorOpen(false)} />
+                  <div className="dp-color-pop" role="menu">
+                    {WALLET_PALETTE.map((h) => (
+                      <button key={h} type="button" className={`dp-sw${h === hue ? " on" : ""}`} data-hue={h} title={h} aria-label={h} role="menuitemradio" aria-checked={h === hue}
+                        onClick={() => { onSetColor(h); setColorOpen(false); }} />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <button className={`dp-ib${syncing ? " spinning" : ""}`} type="button" title={t("panel.syncNow")} onClick={() => onSync(wallet.address)}><Sync /></button>
             <button className="dp-ib" type="button" title={t("panel.rename")} onClick={onRename}><Rename /></button>
             <button className="dp-ib danger" type="button" title={t("panel.deleteWallet")} onClick={onDelete}><Trash /></button>
@@ -374,6 +430,7 @@ function WalletPanel({
             <FolderCard
               key={f.packageId}
               folder={f}
+              hue={hue}
               flipped={flipped.has(f.packageId)}
               onFlip={() => toggleFlip(f.packageId)}
               onTogglePackage={(on) => pkgMut.mutate({ address: wallet.address, packageId: f.packageId, enabled: on })}
@@ -390,14 +447,36 @@ function WalletPanel({
 
 /** 패키지(폴더) = 뒤집기 카드. 앞: 아이콘·이름·요약·패키지 on/off 토글. 뒤(클릭
  *  하면 뒤집힘): 내부 정책 목록(각 정책 o/x 만 — 게시·수정 없음). */
+/** 보호 도장 토글 — OFF=점선 빈 틀, ON=발자국(paw-navy.png)이 스프링으로 꾹 찍힘. controlled. */
+function PawStampToggle({ on, onChange, label, title }: { on: boolean; onChange: (next: boolean) => void; label: string; title?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      title={title}
+      className="paw-tog"
+      onClick={(e) => { e.stopPropagation(); onChange(!on); }}
+    >
+      <span className="paw-glyph">
+        <span className="paw-ring" />
+        <img className="paw-img" src="picture/paw-navy.png" alt="" />
+      </span>
+    </button>
+  );
+}
+
 function FolderCard({
   folder,
+  hue,
   flipped,
   onFlip,
   onTogglePackage,
   onToggleEnabled,
 }: {
   folder: FolderVM;
+  hue: string;
   flipped: boolean;
   onFlip: () => void;
   onTogglePackage: (on: boolean) => void;
@@ -410,17 +489,33 @@ function FolderCard({
       <div className="pkc-in">
         {/* front */}
         <div className="pkc-face pkc-front" onClick={onFlip}>
+          {/* 담비 실루엣 워터마크 — 앞면 전용, 지갑 색 tint(opacity .06) */}
+          <span className="pkc-ghost" data-hue={hue} aria-hidden="true"><i /></span>
           <div className="pkc-ftop">
-            <span className="pkc-ic"><Folder /></span>
             <span className="pkc-name">{folder.name}</span>
+            <span className="pkc-tag">{t("folder.tag")}</span>
             <Switch checked={folder.on} onChange={onTogglePackage} className="pkc-sw" />
           </div>
-          <div className="pkc-fmeta">
-            <span className="pkc-mline"><b>{folder.policies.length}</b> {t("folder.policies")}</span>
-            <span className="pkc-dot">·</span>
-            <span className="pkc-active">{t("folder.activeCount", { count: activeN })}</span>
+          <div className="pkc-stat">
+            <span className="pkc-statnum">{activeN}</span>
+            <span className="pkc-statlbl">/ {folder.policies.length} {t("folder.protecting")}</span>
+          </div>
+          <div className="pkc-strip">
+            {(folder.policies.length > 6 ? folder.policies.slice(0, 5) : folder.policies).map((p) => (
+              <span className={`pkc-stamp${p.enabled ? " on" : ""}`} key={p.bindingId} aria-hidden="true">
+                <img className="pkc-stamp-paw" src="picture/paw-navy.png" alt="" />
+              </span>
+            ))}
+            {folder.policies.length > 6 && (
+              <span className="pkc-more">+{folder.policies.length - 5}</span>
+            )}
           </div>
           <div className="pkc-ffoot">
+            <span className="pkc-fmeta">
+              <b>{folder.policies.length}</b> {t("folder.policies")}
+              <span className="pkc-dot">·</span>
+              <span className="pkc-active">{t("folder.activeCount", { count: activeN })}</span>
+            </span>
             <span className="pkc-fliphint"><Flip /> {t("folder.flip")}</span>
           </div>
         </div>
@@ -436,6 +531,7 @@ function FolderCard({
               <Back />
             </button>
             <span className="pkc-bname">{folder.name}</span>
+            <span className="pkc-bcount"><b>{activeN}</b> / {folder.policies.length} {t("folder.applied")}</span>
           </div>
           <div className="pkc-blist">
             {folder.policies.length === 0 ? (
@@ -448,15 +544,12 @@ function FolderCard({
                   <span className={`pkc-pol-state${p.effective ? " on" : ""}`}>
                     {p.effective ? t("policy.active") : t("policy.off")}
                   </span>
-                  <button
-                    type="button"
-                    className={`pkc-ox${p.enabled ? " on" : ""}`}
+                  <PawStampToggle
+                    on={p.enabled}
+                    onChange={(next) => onToggleEnabled(p, next)}
+                    label={p.enabled ? t("policy.exclude") : t("policy.include")}
                     title={p.enabled ? t("policy.excludeTitle") : t("policy.includeTitle")}
-                    aria-label={p.enabled ? t("policy.exclude") : t("policy.include")}
-                    onClick={(e) => { e.stopPropagation(); onToggleEnabled(p, !p.enabled); }}
-                  >
-                    {p.enabled ? "○" : "✕"}
-                  </button>
+                  />
                 </div>
               ))
             )}

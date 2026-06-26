@@ -303,10 +303,17 @@ export function initAssetsApp(root: HTMLElement): () => void {
   window.PASU_badgeFail = badgeFail;
 
   function tokenBase(r: AggRow): string {
-    const T = window.PASU_TOKEN_LOGOS || {};
-    return Object.prototype.hasOwnProperty.call(T, r.sym)
-      ? '<span class="asset-logo">' + T[r.sym] + "</span>"
-      : '<span class="asset-ic ' + safeClassToken(r.kind) + '">' + escapeHtml(r.sym.slice(0, 1).toUpperCase()) + "</span>";
+    const F = window.PASU_TOKEN_LOGO_FILES || {};
+    if (Object.prototype.hasOwnProperty.call(F, r.sym)) {
+      // 로컬 번들 브랜드 로고(public/picture/tokens/, same-origin). 실패 시 글자 아바타 폴백.
+      return (
+        '<span class="asset-logo"><img src="picture/tokens/' + escapeAttr(F[r.sym]) +
+        '.svg" alt="" loading="lazy" data-sym="' + escapeAttr(r.sym) +
+        '" data-kind="' + escapeAttr(r.kind) +
+        '" onerror="window.PASU_imgFail&&window.PASU_imgFail(this)"></span>'
+      );
+    }
+    return '<span class="asset-ic ' + safeClassToken(r.kind) + '">' + escapeHtml(r.sym.slice(0, 1).toUpperCase()) + "</span>";
   }
 
   // ── holdings table ───────────────────────────────────────────────────────
@@ -334,10 +341,11 @@ export function initAssetsApp(root: HTMLElement): () => void {
     );
   }
 
-  // 자산 아바타 + 체인 배지(우하단). Extension pages must not fetch token or
+  // 자산 아바타 + 체인 배지(우하단). Extension pages must never fetch token or
   // chain logos from third-party CDNs because those image requests leak the
-  // user's viewed holdings to the remote host. Use only inline local SVG logos
-  // seeded by donuts.ts; unknown chains get no badge.
+  // user's viewed holdings to the remote host. Token logos load from locally
+  // bundled SVG files (public/picture/tokens/, same-origin); chain badges use
+  // inline SVG seeded by donuts.ts. Unknown symbols/chains fall back (letter / no badge).
   function assetAvatar(r: AggRow): string {
     const base = tokenBase(r);
     const L = (window.PASU_CHAIN_LOGOS && window.PASU_CHAIN_LOGOS.byName) || {};
@@ -646,14 +654,25 @@ export function initAssetsApp(root: HTMLElement): () => void {
           .join("")
       : '<tr><td colspan="4" class="empty-cell">' + escapeHtml(T("assets.hl.ordEmpty")) + "</td></tr>";
 
-    return (
+    const head =
       '<div class="hl-card-head">' +
       '<span class="hl-wallet"><span class="hl-venue">HL</span>' + escapeHtml(a.walletLabel) + "</span>" +
       '<div class="hl-meta">' +
       '<span class="hl-bal"><span class="bk">Perp</span><span class="bv">' + escapeHtml(money2dec(a.perpUsd)) + "</span></span>" +
       '<span class="hl-bal"><span class="bk">Spot</span><span class="bv">' + escapeHtml(money2dec(a.spotUsd)) + "</span></span>" +
-      "</div>" +
-      "</div>" +
+      "</div></div>";
+    // 활동(포지션·오픈오더) 전무 → 헤더만 달린 빈 테이블 2개(스캐폴드 느낌) 대신 단일 정돈된 빈 상태.
+    if (!a.positions.length && !a.orders.length) {
+      return (
+        head +
+        '<div class="hl-empty">' +
+        '<span class="hl-empty-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14h14"/><path d="M8.5 13h8" stroke-opacity=".4"/></svg></span>' +
+        '<span class="hl-empty-txt">' + escapeHtml(T("assets.hl.noActivity")) + "</span>" +
+        "</div>"
+      );
+    }
+    return (
+      head +
       '<div class="hl-cols">' +
       '<div class="hl-col">' +
       '<div class="hl-block-label">' + escapeHtml(T("assets.hl.positions")) + ' <span class="hl-n">' + escapeHtml(a.positions.length) + "</span></div>" +

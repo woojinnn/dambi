@@ -33,7 +33,10 @@
     "uncategorized": "미분류",
     "activeCount": "활성 {{count}}",
     "emptyPackage": "이 패키지에 정책이 없어요",
-    "flip": "뒤집기"
+    "flip": "뒤집기",
+    "tag": "기본 제공",
+    "protecting": "정책이 이 지갑을 보호 중",
+    "applied": "적용"
   },
   "policy": {
     "active": "적용중",
