@@ -48,9 +48,6 @@ interface Props {
 }
 
 // ── tiny icons ────────────────────────────────────────────────────────────
-const Folder = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-);
 const Sync = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M3 21v-5h5" /></svg>
 );
@@ -492,17 +489,33 @@ function FolderCard({
       <div className="pkc-in">
         {/* front */}
         <div className="pkc-face pkc-front" onClick={onFlip}>
+          {/* 담비 실루엣 워터마크 — 앞면 전용, 지갑 색 tint(opacity .06) */}
+          <span className="pkc-ghost" data-hue={hue} aria-hidden="true"><i /></span>
           <div className="pkc-ftop">
-            <span className="pkc-ic" data-hue={hue}><Folder /></span>
             <span className="pkc-name">{folder.name}</span>
+            <span className="pkc-tag">{t("folder.tag")}</span>
             <Switch checked={folder.on} onChange={onTogglePackage} className="pkc-sw" />
           </div>
-          <div className="pkc-fmeta">
-            <span className="pkc-mline"><b>{folder.policies.length}</b> {t("folder.policies")}</span>
-            <span className="pkc-dot">·</span>
-            <span className="pkc-active">{t("folder.activeCount", { count: activeN })}</span>
+          <div className="pkc-stat">
+            <span className="pkc-statnum">{activeN}</span>
+            <span className="pkc-statlbl">/ {folder.policies.length} {t("folder.protecting")}</span>
+          </div>
+          <div className="pkc-strip">
+            {(folder.policies.length > 6 ? folder.policies.slice(0, 5) : folder.policies).map((p) => (
+              <span className={`pkc-stamp${p.enabled ? " on" : ""}`} key={p.bindingId} aria-hidden="true">
+                <img className="pkc-stamp-paw" src="picture/paw-navy.png" alt="" />
+              </span>
+            ))}
+            {folder.policies.length > 6 && (
+              <span className="pkc-more">+{folder.policies.length - 5}</span>
+            )}
           </div>
           <div className="pkc-ffoot">
+            <span className="pkc-fmeta">
+              <b>{folder.policies.length}</b> {t("folder.policies")}
+              <span className="pkc-dot">·</span>
+              <span className="pkc-active">{t("folder.activeCount", { count: activeN })}</span>
+            </span>
             <span className="pkc-fliphint"><Flip /> {t("folder.flip")}</span>
           </div>
         </div>
@@ -518,6 +531,7 @@ function FolderCard({
               <Back />
             </button>
             <span className="pkc-bname">{folder.name}</span>
+            <span className="pkc-bcount"><b>{activeN}</b> / {folder.policies.length} {t("folder.applied")}</span>
           </div>
           <div className="pkc-blist">
             {folder.policies.length === 0 ? (
