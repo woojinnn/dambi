@@ -18,8 +18,8 @@ output**, never hand-edited.
    (authored)              (RPC: pools/vaults/markets)            EC_SIGN_P256_SHA256
        │                            │                                    │
        ▼                            ▼                                    │ sign(bundle_sha256)
-   ┌──────────────────────────────────────────────┐                     │
-   │ scripts/build-index.ts                       │                     ▼
+   ┌──────────────────────────────────────────────┐                      │
+   │ scripts/build-index.ts                       │                      ▼
    │  walk → validate → resolve → canonicalize    │     scripts/sign-bundles.ts
    │  → sha256 → write 3 index trees + dedup store│ ──► signatures/<sha>.sig
    └──────────────────────────────────────────────┘     (detached P1363 r||s, base64)

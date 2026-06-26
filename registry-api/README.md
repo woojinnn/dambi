@@ -18,12 +18,12 @@ media endpoint, and `canonicalize` for 3-ref materialization integrity checks.
 
 ```
                     ┌──────────────────────────────────────────────────────────┐
-  browser           │  Cloud Run service:  registry-api-v3   (THIS repo)         │
-  extension         │  Google Front End (GFE) + autoscaler                       │
-  (anonymous   ───► │    min 1 / max 3 instances · concurrency 80 · 15s timeout  │ ──► GCS bucket
-   HTTPS GET)       │  per request:                                              │     dambi-registry-v3-seoul
-                    │    rate-limit → path allowlist → LRU+TTL cache →           │     (PRIVATE, PAP enforced)
-                    │    single-flight → GCS read (runtime SA via ADC)           │ ◄── object bytes
+  browser           │  Cloud Run service:  registry-api-v3   (THIS repo)       │
+  extension         │  Google Front End (GFE) + autoscaler                     │
+  (anonymous   ───► │    min 1 / max 3 instances · concurrency 80 · 15s timeout│ ──► GCS bucket
+   HTTPS GET)       │  per request:                                            │     dambi-registry-v3-seoul
+                    │    rate-limit → path allowlist → LRU+TTL cache →         │     (PRIVATE, PAP enforced)
+                    │    single-flight → GCS read (runtime SA via ADC)          │ ◄── object bytes
                     └──────────────────────────────────────────────────────────┘
                                   ▲                                                      ▲
                                   │ serves                                               │ built & signed by
