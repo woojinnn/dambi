@@ -8,7 +8,11 @@ metadata:
     app.kubernetes.io/component: migrate
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # hook-failed 포함: 마이그레이션 Job 이 실패하거나(예: 노드 부족으로 Pod 이
+    # 스케줄 안 돼 helm timeout) 멈추면 즉시 삭제한다. 안 그러면 Pending Pod 이
+    # 남아 cluster-autoscaler 가 "scale-up 필요" 상태로 고착돼 유휴 노드를
+    # scale-down 도 못 하는 교착에 빠진다(실측 사례).
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 1
   template:
@@ -29,6 +33,17 @@ spec:
           image: {{ include "policy-server.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["policy-server-migrate"]
+          # 명시적 소량 요청 — 안 적으면 GKE Autopilot 이 기본값(cpu 500m /
+          # memory 2Gi)을 적용해, 가벼운 sqlx 마이그레이션인데도 2Gi 를 요구하며
+          # 기존 노드에 안 들어가 새 노드를 띄우려다 쿼터에 막힐 수 있다. 512Mi 면
+          # 충분하고, 기존 노드 여유에 들어갈 확률이 훨씬 높다.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 250m
+              memory: 512Mi
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
