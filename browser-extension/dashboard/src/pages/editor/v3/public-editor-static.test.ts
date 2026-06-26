@@ -1,9 +1,16 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-const publicJsDir = join(process.cwd(), "dashboard/public/editor-v3/js");
+// Resolve relative to THIS file, not process.cwd(): the suite must pass whether
+// vitest runs from the browser-extension root or from dashboard/ (cwd-based
+// paths doubled to dashboard/dashboard/… and failed when run from dashboard/).
+const publicJsDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../public/editor-v3/js",
+);
 
 function readPublicJs(name: string): string {
   return readFileSync(join(publicJsDir, name), "utf8");
