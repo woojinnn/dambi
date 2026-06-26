@@ -57,6 +57,21 @@ export interface PublishModalProps {
 const SEMVER = "1.0.0";
 const SLUG_RE = /^[A-Za-z0-9_.()-]{1,120}$/;
 
+/** Coerce any id/name into a valid market slug (server allows only ASCII
+ *  letters/digits/`_.-()`, 1–120 chars). Korean (and any other non-ASCII)
+ *  becomes a dash, so a policy named "무제한 USDC 승인" with a Korean-laden id
+ *  still publishes. Falls back to a random slug when nothing ASCII survives. */
+function toPublishSlug(raw: string): string {
+  const s = (raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.()-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 120);
+  return s || `policy-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /** A policy being published, with its de-identification analysis. */
 interface PublishRule {
   ruleId: string;
@@ -156,7 +171,7 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
   const publishMut = useMutation({
     mutationFn: async (): Promise<{ slug: string; kind: ListingKind }> => {
       if (!source) throw new Error("no source");
-      const slug = source.suggestedSlug.trim();
+      const slug = toPublishSlug(source.suggestedSlug);
       const trimName = name.trim() || source.suggestedDisplayName;
       if (!SLUG_RE.test(slug)) {
         throw new Error(t("publish.badSlug"));
@@ -199,11 +214,12 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
       for (const r of rules) {
         const cedar = redactCedar(r.cedarText, r.holes, kept);
         const shipped = await computeShippedHoles(cedar, blankedOf(r), textToBlocks);
+        const memberSlug = toPublishSlug(r.ruleId);
         members.push({
-          slug: r.ruleId,
+          slug: memberSlug,
           display_name: r.title,
           cedar_text: cedar,
-          manifest: manifestWithHoles(r.manifest, shipped, r.ruleId),
+          manifest: manifestWithHoles(r.manifest, shipped, memberSlug),
         });
       }
       if (members.length === 0) throw new Error(t("publish.noMembersError"));

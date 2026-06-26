@@ -555,10 +555,12 @@ function LlmPane({ onModel }) {
 
 /* helpers */
 function slugify(s) {
+  // ASCII 전용 — 마켓 슬러그는 서버가 ASCII(영숫자·_.-())만 허용한다. 한글은
+  // 보존하지 않고 '-'로 떨군다(예전엔 가-힣 보존 → publish 시 "슬러그 형식 오류").
   return (
     (s || "policy")
       .toLowerCase()
-      .replace(/[^a-z0-9가-힣]+/g, "-")
+      .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "policy"
   ) + "-" + Math.random().toString(36).slice(2, 6);

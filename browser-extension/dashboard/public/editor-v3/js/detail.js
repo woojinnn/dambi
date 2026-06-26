@@ -422,7 +422,7 @@ function LlmPane({ onModel }) {
   ), /* @__PURE__ */ React.createElement("div", { className: "ev2-llm-inputbar" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "ev2-llm-gen", onClick: submit, disabled: busy || !intent.trim() }, busy ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { className: "ev2-llm-spin" }), "\uBCC0\uD658 \uC911\u2026") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.9", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" })), "\uC815\uCC45 \uC0DD\uC131")))), error && /* @__PURE__ */ React.createElement("div", { className: "ev2-llm-error" }, /* @__PURE__ */ React.createElement(WarnIcon, null), error)));
 }
 function slugify(s) {
-  return ((s || "policy").toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "policy") + "-" + Math.random().toString(36).slice(2, 6);
+  return ((s || "policy").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "policy") + "-" + Math.random().toString(36).slice(2, 6);
 }
 function mkDef({ id, name, cat, model, manifest, doc, hidden, homeWallet, walletFolderId, enabled, packageId }) {
   return {

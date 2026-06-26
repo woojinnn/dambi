@@ -152,6 +152,10 @@ export interface DenyView {
   severity: "deny" | "warn";
   /** Step index (1-based) this deny first occurred — drives cumulative order. */
   step: number;
+  /** All step indices (1-based) this policy blocked at, up to the cursor. The
+   *  same policy can trigger on several txs; the cumulative card shows them all
+   *  (S1·S2·S3) instead of only the first. Populated by `cumulativeDenies`. */
+  steps?: number[];
   /** Parsed policy for the structure diagram. */
   ir: PolicyIR;
   /** Canonical node paths to trace red ("어디가 막혔는지"). */

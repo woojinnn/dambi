@@ -130,7 +130,7 @@ export function ScopeInstallModal(props: {
   const walletNameOf = (a: string) => wallets.find((w) => w.address === a)?.label?.trim() || shortAddr(a);
   const pkgLabelOf = (a: string, key: string) => {
     if (key === "__new__") return (walletNewName[a] ?? "").trim() || (ko ? "새 패키지" : "New package");
-    if (key === UNCATEGORIZED_PKG) return ko ? "미분류" : "Uncategorized";
+    if (key === UNCATEGORIZED_PKG) return ko ? "개별 템플릿" : "Individual templates";
     return wallets.find((w) => w.address === a)?.packages.find((p) => p.id === key)?.displayName ?? key;
   };
 
@@ -375,18 +375,25 @@ export function ScopeInstallModal(props: {
                                 className={`im-pkgchip${sels.includes(UNCATEGORIZED_PKG) ? " on" : ""}`}
                                 onClick={() => toggleWalletPkg(w.address, UNCATEGORIZED_PKG)}
                               >
-                                {ko ? "미분류" : "Uncategorized"}
+                                {ko ? "개별 템플릿" : "Individual templates"}
                               </button>
-                              {w.packages.map((p) => (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  className={`im-pkgchip${sels.includes(p.id) ? " on" : ""}`}
-                                  onClick={() => toggleWalletPkg(w.address, p.id)}
-                                >
-                                  {p.displayName}
-                                </button>
-                              ))}
+                              {w.packages.map((p) => {
+                                // 기본 안전팩(pkg::builtin.*)은 읽기 전용 — 이 템플릿
+                                // 폴더엔 설치할 수 없다(라이브러리의 기본 안전팩과 동일).
+                                const builtin = p.id.startsWith("pkg::builtin.");
+                                return (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    disabled={builtin}
+                                    title={builtin ? (ko ? "기본 안전팩은 읽기 전용이에요" : "Built-in safe pack is read-only") : undefined}
+                                    className={`im-pkgchip${sels.includes(p.id) ? " on" : ""}${builtin ? " ro" : ""}`}
+                                    onClick={builtin ? undefined : () => toggleWalletPkg(w.address, p.id)}
+                                  >
+                                    {p.displayName}
+                                  </button>
+                                );
+                              })}
                               <button
                                 type="button"
                                 className={`im-pkgchip new${sels.includes("__new__") ? " on" : ""}`}
@@ -515,16 +522,22 @@ export function ScopeInstallModal(props: {
                 <div className="im-folderrow">
                   <span className="im-foldlabel">{ko ? "폴더" : "Folder"}</span>
                   <div className="im-pkgchips">
-                    {libPackages.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        className={`im-pkgchip${packageId === p.id ? " on" : ""}`}
-                        onClick={() => setPackageId(p.id)}
-                      >
-                        {p.displayName}
-                      </button>
-                    ))}
+                    {libPackages.map((p) => {
+                      // 기본 안전팩 템플릿(pkg::builtin.*)은 읽기 전용.
+                      const builtin = p.id.startsWith("pkg::builtin.");
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          disabled={builtin}
+                          title={builtin ? (ko ? "기본 안전팩 템플릿은 읽기 전용이에요" : "Built-in safe pack template is read-only") : undefined}
+                          className={`im-pkgchip${packageId === p.id ? " on" : ""}${builtin ? " ro" : ""}`}
+                          onClick={builtin ? undefined : () => setPackageId(p.id)}
+                        >
+                          {p.displayName}
+                        </button>
+                      );
+                    })}
                     <button
                       type="button"
                       className={`im-pkgchip new${packageId === "__new__" ? " on" : ""}`}

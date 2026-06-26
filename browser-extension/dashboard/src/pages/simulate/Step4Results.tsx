@@ -122,7 +122,11 @@ function DenyCard({ d }: { d: DenyView }) {
       <div className="sw-denycard-head">
         <span className={`sw-sev ${d.severity}`}>{t(`wizard.step4.severity.${d.severity}`)}</span>
         <b>{d.policyName}</b>
-        <span className="sw-step-badge">S{d.step}</span>
+        <span className="sw-step-badges">
+          {(d.steps ?? [d.step]).map((s) => (
+            <span key={s} className="sw-step-badge">S{s}</span>
+          ))}
+        </span>
       </div>
       <p className="sw-deny-reason">{d.reason}</p>
       <div className="sw-deny-note">{t("wizard.step4.blockedTraceNote")}</div>
