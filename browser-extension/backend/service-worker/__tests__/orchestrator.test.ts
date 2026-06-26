@@ -1068,6 +1068,38 @@ describe("orchestrator", () => {
       );
     });
 
+    it("deny-closes instead of guessing when multiple synced wallets exist and wallet_id is absent", async () => {
+      seedSyncedWallets(
+        MASTER,
+        "0x7777777777777777777777777777777777777777",
+        "0x8888888888888888888888888888888888888888",
+      );
+
+      const result = await decideMessage(
+        venueMessage("venue-ambiguous-master-1"),
+        {
+          onAwaitingUser: vi.fn(),
+        },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.verdict.kind).toBe("fail");
+      expect(result.verdict.matched?.[0]?.policy_id).toBe(
+        "__venue::deny_closed",
+      );
+      expect(mocks.auditAppend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          verdictSource: "fail_closed",
+          declarativeV3: expect.objectContaining({
+            outcome: "fault",
+            reason: "ambiguous_hl_master",
+          }),
+        }),
+      );
+      expect(mocks.resolveBundlesForWallet).not.toHaveBeenCalled();
+      expect(mocks.planActionRpcV2).not.toHaveBeenCalled();
+    });
+
     it("uses the wallet_id master as the v2 eval principal and meta submitter", async () => {
       await decideMessage(venueMessage("venue-master-principal-1", MASTER), {
         onAwaitingUser: vi.fn(),

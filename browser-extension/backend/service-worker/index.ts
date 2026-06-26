@@ -929,12 +929,16 @@ Browser.runtime.onMessage.addListener(
       const r = req as DambiAddWalletRequest;
       void bootReady
         .then(() => {
-          const addBody: { address: string; chains: string[]; label?: string } = {
-            address: normalizeServerWalletAddress(r.address),
-            chains: ["eip155:1", "eip155:42161", "eip155:8453"],
-          };
+          const addBody: { address: string; chains: string[]; label?: string } =
+            {
+              address: normalizeServerWalletAddress(r.address),
+              chains: ["eip155:1", "eip155:42161", "eip155:8453"],
+            };
           if (r.label) addBody.label = r.label;
-          return addWallet(addBody);
+          return addWallet(addBody).then(async (resp) => {
+            await provisionFromWalletSync([resp.wallet_id.address]);
+            return resp;
+          });
         })
         .then((resp: AddWalletResp) => sendResponse({ ok: true, data: resp }))
         .catch((err: unknown) =>
@@ -953,7 +957,9 @@ Browser.runtime.onMessage.addListener(
       const patch: { label?: string | null } = {};
       if (r.label !== undefined) patch.label = r.label === "" ? null : r.label;
       void bootReady
-        .then(() => updateWallet(normalizeServerWalletAddress(r.address), patch))
+        .then(() =>
+          updateWallet(normalizeServerWalletAddress(r.address), patch),
+        )
         .then(() => sendResponse({ ok: true, data: null }))
         .catch((err: unknown) =>
           sendResponse({
