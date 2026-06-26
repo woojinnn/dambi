@@ -13,7 +13,16 @@ import {
 } from "../server-api";
 import { deleteDef, deletePackage, getOverview, UNCATEGORIZED_PKG } from "../server-api/policy-store";
 import { getSettings, putOpenaiKey } from "../server-api/settings";
-import { listPublishers, setPublisherTier } from "../server-api/market";
+import {
+  createTier,
+  deleteTier,
+  grantTierByEmail,
+  listPublishers,
+  listTiers,
+  setPublisherTier,
+  type MarketTier,
+  type PublisherTier,
+} from "../server-api/market";
 import { useAuth } from "../hooks/useAuth";
 import { Topbar } from "../shell/Topbar";
 
@@ -62,7 +71,7 @@ export function ProfilePage() {
 
   const myListingsQ = useQuery({
     queryKey: ["my-listings", user?.user_id],
-    queryFn: () => listListings({ publisher_id: user!.user_id, limit: 100 }),
+    queryFn: () => listListings({ publisher_id: user!.user_id, limit: 500 }),
     enabled: !!user?.user_id,
   });
   const walletsQ = useQuery({ queryKey: ["wallets"], queryFn: listWallets });
@@ -126,11 +135,50 @@ export function ProfilePage() {
     enabled: !!user?.user_id,
   });
   const isMarketAdmin = publishersQ.isSuccess;
+  const tiersQ = useQuery({
+    queryKey: ["market-tiers"],
+    queryFn: listTiers,
+    enabled: isMarketAdmin,
+  });
+  const invalidateTiering = () => {
+    void qc.invalidateQueries({ queryKey: ["market-publishers"] });
+    void qc.invalidateQueries({ queryKey: ["market-tiers"] });
+  };
+  const onTierErr = (e: unknown) => setBanner(e instanceof Error ? e.message : String(e));
   const tierMut = useMutation({
-    mutationFn: (v: { userId: string; tier: "verified" | "community" }) =>
-      setPublisherTier(v.userId, v.tier),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["market-publishers"] }),
-    onError: (e: unknown) => setBanner(e instanceof Error ? e.message : String(e)),
+    mutationFn: (v: { userId: string; tier: PublisherTier }) => setPublisherTier(v.userId, v.tier),
+    onSuccess: invalidateTiering,
+    onError: onTierErr,
+  });
+  const createTierMut = useMutation({
+    mutationFn: createTier,
+    onSuccess: () => {
+      invalidateTiering();
+      setNewTier({ label: "", checkmark: true, color: "#2457C9" });
+    },
+    onError: onTierErr,
+  });
+  const deleteTierMut = useMutation({
+    mutationFn: deleteTier,
+    onSuccess: invalidateTiering,
+    onError: onTierErr,
+  });
+  const grantByEmailMut = useMutation({
+    mutationFn: (v: { email: string; tier: PublisherTier }) => grantTierByEmail(v.email, v.tier),
+    onSuccess: (r) => {
+      invalidateTiering();
+      setBanner(`${r.email} → ${r.publisher_tier} 부여됨`);
+      setGrant((s) => ({ ...s, email: "" }));
+    },
+    onError: onTierErr,
+  });
+  // 이메일로 등급 부여 폼 상태 (tier 는 첫 비-official 등급으로 초기화)
+  const [grant, setGrant] = useState<{ email: string; tier: string }>({ email: "", tier: "verified" });
+  // 새 등급 생성 폼 상태
+  const [newTier, setNewTier] = useState<{ label: string; checkmark: boolean; color: string }>({
+    label: "",
+    checkmark: true,
+    color: "#2457C9",
   });
 
   // 올린 게시물 — 정책/패키지 탭 + 페이지네이션.
@@ -222,58 +270,174 @@ export function ProfilePage() {
           </button>
         </section>
 
-        {/* market admin — publisher verification (hidden for non-admins: GET 403) */}
+        {/* market admin — publisher tier management (hidden for non-admins: GET 403) */}
         {isMarketAdmin && (
           <section className="pp-card">
             <div className="pp-sec-head">
-              <h2>{ko ? "마켓 publisher 관리" : "Market publishers"}</h2>
+              <h2>{ko ? "마켓 publisher 등급 관리" : "Market publisher tiers"}</h2>
               <span className="pp-count">{publishersQ.data?.length ?? 0}</span>
             </div>
             <p className="pp-muted">
               {ko
-                ? "인증(verified)하면 그 계정 정책에 체크표시가 붙어요. ‘공식’(Wallet Guardians)은 여기서 바꿀 수 없습니다."
-                : "Verifying an account adds a checkmark to its listings. ‘Official’ (Wallet Guardians) can’t be changed here."}
+                ? "등급을 만들어(이름·체크표시·색) publisher에 지정하세요. ‘공식’(Wallet Guardians)은 예약이라 여기서 바꿀 수 없어요."
+                : "Create tiers (label · checkmark · color) and assign them to publishers. ‘Official’ (Wallet Guardians) is reserved and can’t be changed here."}
             </p>
-            <ul className="pp-pub-list">
-              {(publishersQ.data ?? []).map((p) => (
-                <li key={p.user_id} className="pp-pub-row">
-                  <span className="pp-pub-email">{p.email}</span>
-                  <span className="pp-pub-meta">
-                    {p.publisher_tier === "official"
-                      ? ko
-                        ? "공식"
-                        : "Official"
-                      : p.publisher_tier === "verified"
-                        ? ko
-                          ? "인증됨 ✓"
-                          : "Verified ✓"
-                        : ko
-                          ? "일반"
-                          : "Community"}
-                    {" · "}
-                    {ko ? `리스팅 ${p.listing_count}` : `${p.listing_count} listings`}
+
+            {/* 등급 정의 — 목록 + 추가/삭제 */}
+            <div className="pp-subhead">{ko ? "등급" : "Tiers"}</div>
+            <ul className="pp-tier-list">
+              {(tiersQ.data ?? []).map((tr: MarketTier) => (
+                <li key={tr.id} className="pp-tier-row">
+                  <span
+                    className="pp-tier-badge"
+                    style={{ background: tr.color }}
+                    title={tr.checkmark ? "checkmark" : "no checkmark"}
+                  >
+                    {tr.checkmark ? "✓" : ""}
                   </span>
-                  {p.publisher_tier === "official" ? null : p.publisher_tier === "verified" ? (
-                    <button
-                      type="button"
-                      className="pp-btn ghost"
-                      disabled={tierMut.isPending}
-                      onClick={() => tierMut.mutate({ userId: p.user_id, tier: "community" })}
-                    >
-                      {ko ? "인증 해제" : "Unverify"}
-                    </button>
+                  <span className="pp-tier-label">{tr.label}</span>
+                  <span className="pp-muted">
+                    {ko ? `${tr.member_count}개 계정` : `${tr.member_count} accounts`}
+                  </span>
+                  {tr.reserved ? (
+                    <span className="pp-tier-tag">{ko ? "기본" : "built-in"}</span>
                   ) : (
                     <button
                       type="button"
-                      className="pp-btn"
-                      disabled={tierMut.isPending}
-                      onClick={() => tierMut.mutate({ userId: p.user_id, tier: "verified" })}
+                      className="pp-btn ghost danger"
+                      disabled={deleteTierMut.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            ko
+                              ? `등급 "${tr.label}"을(를) 삭제할까요? 이 등급의 계정은 일반(community)으로 내려갑니다.`
+                              : `Delete tier "${tr.label}"? Its accounts move to community.`,
+                          )
+                        )
+                          deleteTierMut.mutate(tr.id);
+                      }}
                     >
-                      {ko ? "인증 부여" : "Verify"}
+                      {ko ? "삭제" : "Delete"}
                     </button>
                   )}
                 </li>
               ))}
+            </ul>
+            <div className="pp-tier-new">
+              <input
+                className="pp-input"
+                placeholder={ko ? "새 등급 이름" : "New tier label"}
+                value={newTier.label}
+                maxLength={40}
+                onChange={(e) => setNewTier((s) => ({ ...s, label: e.target.value }))}
+              />
+              <label className="pp-tier-check">
+                <input
+                  type="checkbox"
+                  checked={newTier.checkmark}
+                  onChange={(e) => setNewTier((s) => ({ ...s, checkmark: e.target.checked }))}
+                />
+                {ko ? "체크표시" : "Checkmark"}
+              </label>
+              <input
+                type="color"
+                className="pp-color"
+                value={newTier.color}
+                onChange={(e) => setNewTier((s) => ({ ...s, color: e.target.value }))}
+                title={ko ? "뱃지 색" : "Badge color"}
+              />
+              <button
+                type="button"
+                className="pp-btn"
+                disabled={!newTier.label.trim() || createTierMut.isPending}
+                onClick={() =>
+                  createTierMut.mutate({
+                    id: `tier-${Math.random().toString(36).slice(2, 8)}`,
+                    label: newTier.label.trim(),
+                    checkmark: newTier.checkmark,
+                    color: newTier.color,
+                    rank: 10,
+                  })
+                }
+              >
+                {ko ? "등급 추가" : "Add tier"}
+              </button>
+            </div>
+
+            {/* 이메일로 등급 부여 — 아직 정책을 안 올려 목록에 없는 계정도 */}
+            <div className="pp-subhead">{ko ? "이메일로 등급 부여" : "Grant by email"}</div>
+            <div className="pp-tier-new">
+              <input
+                className="pp-input"
+                type="email"
+                placeholder={ko ? "계정 이메일" : "account email"}
+                value={grant.email}
+                onChange={(e) => setGrant((s) => ({ ...s, email: e.target.value }))}
+              />
+              <select
+                className="pp-input"
+                value={grant.tier}
+                onChange={(e) => setGrant((s) => ({ ...s, tier: e.target.value }))}
+              >
+                {(tiersQ.data ?? [])
+                  .filter((tr) => tr.id !== "official")
+                  .map((tr) => (
+                    <option key={tr.id} value={tr.id}>
+                      {tr.label}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                className="pp-btn"
+                disabled={!grant.email.trim() || grantByEmailMut.isPending}
+                onClick={() =>
+                  grantByEmailMut.mutate({ email: grant.email.trim(), tier: grant.tier })
+                }
+              >
+                {ko ? "부여" : "Grant"}
+              </button>
+            </div>
+            <p className="pp-muted">
+              {ko
+                ? "아직 정책을 안 올려 아래 목록에 없는 계정도 부여 가능 — 단 그 계정이 한 번은 로그인해야 해요."
+                : "Works even for accounts not in the list below (no listings yet) — they must have logged in once."}
+            </p>
+
+            {/* publisher별 등급 지정 */}
+            <div className="pp-subhead">{ko ? "publisher 등급 지정" : "Assign tiers"}</div>
+            <ul className="pp-pub-list">
+              {(publishersQ.data ?? []).map((p) => {
+                const isOfficial = p.publisher_tier === "official";
+                return (
+                  <li key={p.user_id} className="pp-pub-row">
+                    <span className="pp-pub-email">{p.email}</span>
+                    <span className="pp-pub-meta">
+                      {ko ? `리스팅 ${p.listing_count}` : `${p.listing_count} listings`}
+                    </span>
+                    {isOfficial ? (
+                      <span className="pp-tier-tag">{ko ? "공식 (잠금)" : "Official (locked)"}</span>
+                    ) : (
+                      <select
+                        className="pp-input"
+                        value={p.publisher_tier}
+                        disabled={tierMut.isPending}
+                        onChange={(e) =>
+                          tierMut.mutate({ userId: p.user_id, tier: e.target.value })
+                        }
+                      >
+                        {(tiersQ.data ?? [])
+                          .filter((tr) => tr.id !== "official")
+                          .map((tr) => (
+                            <option key={tr.id} value={tr.id}>
+                              {tr.label}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         )}

@@ -269,6 +269,15 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
             "/market/publishers/:id",
             patch(market_handlers::set_publisher_tier),
         )
+        .route(
+            "/market/tiers",
+            get(market_handlers::list_tiers).post(market_handlers::create_tier),
+        )
+        .route("/market/tiers/:id", delete(market_handlers::delete_tier))
+        .route(
+            "/market/grant-tier",
+            post(market_handlers::grant_tier_by_email),
+        )
         .route("/market/watches", get(market_handlers::list_watches))
         // Selector decode + revoke calldata builder + Cedar sequence sim
         // all moved to the dashboard (apps/web/src/tools/* + cedar/).

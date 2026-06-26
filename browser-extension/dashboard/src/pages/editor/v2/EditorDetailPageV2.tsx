@@ -51,6 +51,10 @@ import { PublishModal, type PublishSource } from "../PublishModal";
 // authored in market.css; pull it in so the modal renders with a solid
 // background when launched from the v2 editor.
 import "../../market.css";
+// ev2-* editor styling lived in the (now-removed) v2 list components; import it
+// here so the policy editor is styled when opened standalone via /editor/:id.
+import "./editor2.css";
+import "./editor-v2.css";
 
 import { catLabel, catStyle } from "./categories";
 import { CatIcon, ShieldIcon, WarnIcon } from "./icons";

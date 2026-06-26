@@ -92,11 +92,14 @@
 }
 .nav-rail:hover .nav-item .dot-badge, .nav-rail:focus-within .nav-item .dot-badge { opacity: 0; }
 
-.nav-bottom { margin-top: auto; padding-top: 8px; position: relative; }
+/* §5 계정 영역. display:flex 로 .nav-user(button)가 폭을 꽉 채워 팝오버와 좌우 정렬되게 한다
+   (button 은 기본 content-width 라 안 하면 계정 바가 팝오버보다 좁아진다). */
+.nav-bottom { margin-top: auto; padding-top: 8px; position: relative; display: flex; flex-direction: column; }
 /* §5 계정 바: 흰 면 + 테두리 모델. 기본 border-default, 팝오버 열림 border-strong, 접힘 투명. */
 .nav-user {
-  display: flex; align-items: center; gap: 12px;
-  margin: 0 10px; padding: 8px 10px; border-radius: 14px;
+  display: flex; align-items: center; gap: 10px;
+  /* 칩 높이를 메뉴 행(48px)과 맞춘다: 아바타 34 + 패딩 6*2 + 테두리 2 = 48. */
+  margin: 0 10px; padding: 6px 10px; border-radius: 14px;
   background: var(--surface-raised);
   border: 1px solid var(--border-default);
   transition: border-color .16s ease; cursor: pointer;
@@ -134,9 +137,9 @@
 .nav-usermenu-divider { height: 1px; background: var(--divider); } /* §5 프로필/로그아웃 사이 구분선 */
 .nav-rail:not(:hover):not(:focus-within) .nav-usermenu { display: none; }
 .nav-user .av {
-  width: 40px; height: 40px; border-radius: 50%;
+  width: 34px; height: 34px; border-radius: 50%;
   background: var(--interactive-default); color: var(--white);
-  display: grid; place-items: center; font-size: 14px; font-weight: 700; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 13px; font-weight: 700; flex-shrink: 0;
 }
 .nav-user .meta {
   flex: 1; opacity: 0; max-width: 0; overflow: hidden;
@@ -151,9 +154,20 @@
 .nav-rail:not(:hover):not(:focus-within) .nav-item,
 .nav-rail:not(:hover):not(:focus-within) .nav-user,
 .nav-rail:not(:hover):not(:focus-within) .nav-logo { justify-content: center; padding-left: 0; padding-right: 0; }
-/* 접힘: 아바타↔메타 사이 12px gap이 0폭 메타와의 사이에 남아 아바타를 좌측으로
- * ~6px 밀어낸다(아이콘은 gap:0이라 멀쩡). 접힘에선 gap을 없애 정확히 가운데로. */
-.nav-rail:not(:hover):not(:focus-within) .nav-user { gap: 0; }
+/* 접힘: 아바타만 남기고 정확히 가운데로. gap을 0으로, 메타(이메일)는 display:none
+ * 으로 레이아웃에서 완전히 빼서 flex:1 잔여폭이 아바타를 왼쪽으로 미는 걸 막는다.
+ * (max-width:0 만으로는 flex-grow 때문에 중앙정렬이 어긋났다.) */
+/* 접힘: 아바타를 확실히 가운데로. flex justify-content가 (이유 불명) 안 먹어서
+ * grid place-items로 바꾸고, 버튼을 레일 전체폭으로 강제(align-self:stretch)한 뒤
+ * 메타·캐럿은 레이아웃에서 완전히 뺀다 → 아바타만 남아 정확히 중앙. */
+.nav-rail:not(:hover):not(:focus-within) .nav-user {
+  gap: 0;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+}
+.nav-rail:not(:hover):not(:focus-within) .nav-user .meta,
+.nav-rail:not(:hover):not(:focus-within) .nav-user .nav-user-caret { display: none; }
 
 /* ── TOPBAR ── */
 .topbar {

@@ -1232,3 +1232,137 @@ pub async fn set_publisher_tier(
         .map_err(|e| DbError::Invariant(e.to_string()))?;
     Ok(row.map(|r| r.get("email")))
 }
+
+/// A publisher tier definition (admin-CRUD-able). `member_count` is how many
+/// accounts are currently in this tier.
+#[derive(Debug, Clone)]
+pub struct TierRow {
+    pub id: String,
+    pub label: String,
+    pub checkmark: bool,
+    pub color: String,
+    pub rank: i32,
+    pub reserved: bool,
+    pub member_count: i64,
+}
+
+/// List all publisher tier definitions with their member counts (highest rank
+/// first). Drives both the market badge rendering and the admin tier manager.
+pub async fn list_tiers(pool: &PgPool) -> DbResult<Vec<TierRow>> {
+    let rows = query(
+        "SELECT t.id, t.label, t.checkmark, t.color, t.rank, t.reserved,
+                COUNT(u.user_id) AS member_count
+         FROM market_publisher_tiers t
+         LEFT JOIN users u ON u.publisher_tier = t.id
+         GROUP BY t.id, t.label, t.checkmark, t.color, t.rank, t.reserved
+         ORDER BY t.rank DESC, t.id ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(rows
+        .iter()
+        .map(|r| TierRow {
+            id: r.get("id"),
+            label: r.get("label"),
+            checkmark: r.get("checkmark"),
+            color: r.get("color"),
+            rank: r.get("rank"),
+            reserved: r.get("reserved"),
+            member_count: r.get("member_count"),
+        })
+        .collect())
+}
+
+/// True if a tier id exists.
+pub async fn tier_exists(pool: &PgPool, id: &str) -> DbResult<bool> {
+    let row = query("SELECT 1 AS one FROM market_publisher_tiers WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(row.is_some())
+}
+
+/// Admin: create a new (non-reserved) tier. Returns `None` if the id already
+/// exists.
+pub async fn create_tier(
+    pool: &PgPool,
+    id: &str,
+    label: &str,
+    checkmark: bool,
+    color: &str,
+    rank: i32,
+    created_at: i64,
+) -> DbResult<Option<String>> {
+    let row = query(
+        "INSERT INTO market_publisher_tiers (id, label, checkmark, color, rank, reserved, created_at)
+         VALUES ($1, $2, $3, $4, $5, FALSE, $6)
+         ON CONFLICT (id) DO NOTHING
+         RETURNING id",
+    )
+    .bind(id)
+    .bind(label)
+    .bind(checkmark)
+    .bind(color)
+    .bind(rank)
+    .bind(created_at)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(row.map(|r| r.get("id")))
+}
+
+/// Admin: delete a tier. Reassigns its members to `community` first (so the FK
+/// never blocks), then deletes — only if the tier is NOT reserved. Returns
+/// `None` when the tier is missing or reserved (undeletable built-in).
+pub async fn delete_tier(pool: &PgPool, id: &str) -> DbResult<Option<String>> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+    // Reassign members to community before removing the tier.
+    query("UPDATE users SET publisher_tier = 'community' WHERE publisher_tier = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| DbError::Invariant(e.to_string()))?;
+    let deleted =
+        query("DELETE FROM market_publisher_tiers WHERE id = $1 AND reserved = FALSE RETURNING id")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+    if deleted.is_some() {
+        tx.commit()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        Ok(deleted.map(|r| r.get("id")))
+    } else {
+        // Reserved or missing — roll back the (no-op) reassign.
+        tx.rollback()
+            .await
+            .map_err(|e| DbError::Invariant(e.to_string()))?;
+        Ok(None)
+    }
+}
+
+/// Admin: set a tier by account EMAIL (case-insensitive). Lets an admin grade an
+/// account that hasn't published anything yet (so it isn't in the publisher
+/// list), as long as it exists (logged in at least once). Returns the user_id on
+/// success, `None` when no account has that email.
+pub async fn set_publisher_tier_by_email(
+    pool: &PgPool,
+    email: &str,
+    tier: &str,
+) -> DbResult<Option<String>> {
+    let row = query(
+        "UPDATE users SET publisher_tier = $1 WHERE lower(email) = lower($2) RETURNING user_id",
+    )
+    .bind(tier)
+    .bind(email)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(row.map(|r| r.get("user_id")))
+}

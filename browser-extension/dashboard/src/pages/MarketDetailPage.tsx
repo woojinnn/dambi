@@ -11,6 +11,7 @@ import {
   type SetMember,
 } from "../server-api";
 import { formatYmd, publisherDisplay } from "../server-api/market";
+import { TierBadge } from "../components/TierBadge";
 import { MarketPagehead, useMarketContentClass } from "./MarketPagehead";
 
 import {
@@ -125,9 +126,14 @@ function DetailBody({
   const name = pickI18n(detail.display_name) || detail.slug;
   const isSet = detail.kind === "set";
   const members = isSet ? detail.latest_version?.members ?? [] : [];
-  // Prefer the server-stored category (authoritative for DB listings); fall
-  // back to the slug map only for seeds without one. (List view does the same.)
-  const cat = !isSet ? (isCategoryKey(detail.category) ? detail.category : categoryOf(detail.slug)) : null;
+  // Prefer the server-stored category (authoritative for DB listings, including
+  // packages which carry a single category); fall back to the slug map only for
+  // policies without one. (List view does the same.)
+  const cat = isCategoryKey(detail.category)
+    ? detail.category
+    : !isSet
+      ? categoryOf(detail.slug)
+      : null;
   const catColor = cat ? CATEGORY_COLOR[cat] : null;
 
   return (
@@ -145,13 +151,8 @@ function DetailBody({
           <div className="rm-md-pub">
             <span className="name">
               {publisherDisplay(detail.publisher_tier, detail.publisher_email, locale)}
-              {detail.publisher_tier === "official" && (
-                <span className="rm-vf" title="Verified" aria-label="verified">✓</span>
-              )}
             </span>
-            {detail.publisher_tier === "verified" && (
-              <span className="mc-tier tier-verified">{ko ? "검증" : "Verified"}</span>
-            )}
+            <TierBadge tier={detail.publisher_tier} />
             <span>·</span>
             <span>
               {ko ? `${formatYmd(detail.created_at)} 발행` : `Published ${formatYmd(detail.created_at)}`}
@@ -227,7 +228,7 @@ function DetailBody({
       {isSet ? (
         <>
           <SetSummary detail={detail} members={members} locale={locale} />
-          <IncludedPolicies members={members} locale={locale} />
+          <IncludedPolicies members={members} locale={locale} packageCat={cat} />
         </>
       ) : (
         <PolicyDetailBody detail={detail} locale={locale} />
@@ -421,9 +422,12 @@ function SetSummary({
   const ko = locale === "ko";
   const why = pickI18n(detail.description);
   const copy = packageCopy(detail.slug);
+  // 패키지는 단일 카테고리(서버 category)를 가진다 — 멤버는 그걸 상속한다.
+  // (멤버 slug 는 패키지 내부용이라 categoryOf 슬러그 맵에 없어 Others 로 떨어졌다.)
+  const packageCat: CategoryKey | null = isCategoryKey(detail.category) ? detail.category : null;
   const counts = new Map<CategoryKey, number>();
   members.forEach((m) => {
-    const c = categoryOf(m.slug);
+    const c = packageCat ?? categoryOf(m.slug);
     counts.set(c, (counts.get(c) ?? 0) + 1);
   });
   const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
@@ -467,7 +471,15 @@ function SetSummary({
   );
 }
 
-function IncludedPolicies({ members, locale }: { members: SetMember[]; locale: MarketLocale }) {
+function IncludedPolicies({
+  members,
+  locale,
+  packageCat,
+}: {
+  members: SetMember[];
+  locale: MarketLocale;
+  packageCat: CategoryKey | null;
+}) {
   const ko = locale === "ko";
   return (
     <div className="rm-sec">
@@ -480,7 +492,7 @@ function IncludedPolicies({ members, locale }: { members: SetMember[]; locale: M
       </div>
       <div className="rm-members" style={{ marginTop: 11 }}>
         {members.map((m, i) => (
-          <MemberRow key={`${m.slug}-${i}`} member={m} locale={locale} />
+          <MemberRow key={`${m.slug}-${i}`} member={m} locale={locale} packageCat={packageCat} />
         ))}
       </div>
     </div>
@@ -650,10 +662,18 @@ function PackageGlyphSm() {
 
 /** A package member — MK_v3 detailPkg 의 펼침(accordion) 행(rm-member). 헤더를
  * 누르면 한 줄 소개가 펼쳐지고, "자세히 살펴보기 →"로 그 정책 상세로 이동한다. */
-function MemberRow({ member, locale }: { member: SetMember; locale: MarketLocale }) {
+function MemberRow({
+  member,
+  locale,
+  packageCat,
+}: {
+  member: SetMember;
+  locale: MarketLocale;
+  packageCat: CategoryKey | null;
+}) {
   const ko = locale === "ko";
   const sev = severityFromCedar(member.cedar_text);
-  const cat = categoryOf(member.slug);
+  const cat = packageCat ?? categoryOf(member.slug);
   const color = CATEGORY_COLOR[cat];
   const copy = policyCopy(member.slug);
   const oneLine = copy?.title || leadingComment(member.cedar_text);
