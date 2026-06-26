@@ -329,7 +329,6 @@ function LandingView({ locale }: { locale: MarketLocale }) {
                 key={pk.id}
                 listing={pk}
                 meta={officialMetaFor(i)}
-                categories={[]}
                 locale={locale}
                 onInstall={setInstallTarget}
               />
@@ -958,7 +957,6 @@ function ListView({
                       key={l.id}
                       listing={l}
                       meta={metaFor(sets.indexOf(l))}
-                      categories={selected}
                       locale={locale}
                       onInstall={setInstallTarget}
                     />
@@ -1149,28 +1147,21 @@ function PolicyListCard({
 function PackageListCard({
   listing,
   meta,
-  categories,
   locale,
   onInstall,
 }: {
   listing: ListingSummary;
   meta: { count: number; catCount: Map<CategoryKey, number>; ready: boolean };
-  categories: CategoryKey[];
   locale: MarketLocale;
   onInstall: (l: ListingSummary) => void;
 }) {
   const ko = locale === "ko";
   const name = pickI18n(listing.display_name) || listing.slug;
-  // How many of this package's policies match the active category filter.
-  const match = categories.reduce((s, c) => s + (meta.catCount.get(c) ?? 0), 0);
-  const matchColor = categories.length === 1 ? CATEGORY_COLOR[categories[0]] : null;
-  const matchLabel =
-    categories.length === 1
-      ? `${categoryNameOf(categories[0], locale)} ${match}${ko ? "개 포함" : ""}`
-      : ko ? `관련 ${match}개 포함` : `${match} matching`;
   const official = listing.publisher_tier === "official";
-  // 멤버 카테고리 상위 2개 → #태그.
-  const topCats = [...meta.catCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([c]) => c);
+  // 패키지는 단일 카테고리 — 그 카테고리로 #태그. (멤버 slug 기반 catCount 는
+  // 패키지 내부 slug 라 Others 로 떨어져 홈 카드가 #Others 로 보였다.)
+  const pkgCat = listingCategoryKey(listing);
+  const topCats = pkgCat ? [pkgCat] : [];
   return (
     <Link
       to={`/market/${encodeURIComponent(listing.slug)}`}
@@ -1201,18 +1192,6 @@ function PackageListCard({
         {topCats.map((c) => (
           <span key={c} className="rm-rtag">#{categoryNameOf(c, locale)}</span>
         ))}
-        {match > 0 && (
-          <span
-            className="rm-rmatch"
-            style={
-              matchColor
-                ? { background: matchColor.soft, color: matchColor.ink }
-                : { background: "var(--blue-50)", color: "var(--blue-700)" }
-            }
-          >
-            {matchLabel}
-          </span>
-        )}
       </div>
       <div className="rm-rfoot">
         <InstallCount n={listing.install_count} />
