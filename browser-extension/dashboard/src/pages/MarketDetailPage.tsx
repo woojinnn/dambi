@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
@@ -34,9 +34,17 @@ import { useMarketLocale, type MarketLocale } from "./market-locale";
 
 import "./market.css";
 
-/** A package member's category: its own (by slug), falling back to the
- *  package's category only when the slug is unmapped (would be `Others`). */
-function memberCategory(slug: string, packageCat: CategoryKey | null): CategoryKey {
+/** A package member's category. The server stores no per-member category, so we
+ *  resolve it from the same-slug standalone policy listing (authoritative —
+ *  e.g. Permit2 = `Token` even inside an Airdrop package). Falls back to the
+ *  slug map, then the package's own category, only when unresolved. */
+function memberCategory(
+  slug: string,
+  packageCat: CategoryKey | null,
+  catBySlug?: Map<string, CategoryKey>,
+): CategoryKey {
+  const fromListing = catBySlug?.get(slug);
+  if (fromListing) return fromListing;
   const own = categoryOf(slug);
   return own !== "Others" ? own : (packageCat ?? own);
 }
@@ -133,6 +141,21 @@ function DetailBody({
   const name = pickI18n(detail.display_name) || detail.slug;
   const isSet = detail.kind === "set";
   const members = isSet ? detail.latest_version?.members ?? [] : [];
+  // 멤버별 카테고리는 DB에 따로 없으니, 같은 slug의 단독 정책 listing 카테고리로
+  // 조회한다(서버 category 가 정확). 그래야 Airdrop 패키지 안의 토큰 정책도 #token.
+  const policyCatsQ = useQuery({
+    queryKey: ["market-policy-cats"],
+    queryFn: () => listListings({ kind: "policy", limit: 500 }),
+    enabled: isSet,
+    staleTime: 60_000,
+  });
+  const catBySlug = useMemo(() => {
+    const m = new Map<string, CategoryKey>();
+    for (const l of policyCatsQ.data ?? []) {
+      if (isCategoryKey(l.category)) m.set(l.slug, l.category);
+    }
+    return m;
+  }, [policyCatsQ.data]);
   // Prefer the server-stored category (authoritative for DB listings, including
   // packages which carry a single category); fall back to the slug map only for
   // policies without one. (List view does the same.)
@@ -234,8 +257,8 @@ function DetailBody({
 
       {isSet ? (
         <>
-          <SetSummary detail={detail} members={members} locale={locale} />
-          <IncludedPolicies members={members} locale={locale} packageCat={cat} />
+          <SetSummary detail={detail} members={members} locale={locale} catBySlug={catBySlug} />
+          <IncludedPolicies members={members} locale={locale} packageCat={cat} catBySlug={catBySlug} />
         </>
       ) : (
         <PolicyDetailBody detail={detail} locale={locale} />
@@ -421,10 +444,12 @@ function SetSummary({
   detail,
   members,
   locale,
+  catBySlug,
 }: {
   detail: ListingDetail;
   members: SetMember[];
   locale: MarketLocale;
+  catBySlug: Map<string, CategoryKey>;
 }) {
   const ko = locale === "ko";
   const why = pickI18n(detail.description);
@@ -435,7 +460,7 @@ function SetSummary({
   const packageCat: CategoryKey | null = isCategoryKey(detail.category) ? detail.category : null;
   const counts = new Map<CategoryKey, number>();
   members.forEach((m) => {
-    const c = memberCategory(m.slug, packageCat);
+    const c = memberCategory(m.slug, packageCat, catBySlug);
     counts.set(c, (counts.get(c) ?? 0) + 1);
   });
   const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
@@ -483,10 +508,12 @@ function IncludedPolicies({
   members,
   locale,
   packageCat,
+  catBySlug,
 }: {
   members: SetMember[];
   locale: MarketLocale;
   packageCat: CategoryKey | null;
+  catBySlug: Map<string, CategoryKey>;
 }) {
   const ko = locale === "ko";
   return (
@@ -500,7 +527,7 @@ function IncludedPolicies({
       </div>
       <div className="rm-members" style={{ marginTop: 11 }}>
         {members.map((m, i) => (
-          <MemberRow key={`${m.slug}-${i}`} member={m} locale={locale} packageCat={packageCat} />
+          <MemberRow key={`${m.slug}-${i}`} member={m} locale={locale} packageCat={packageCat} catBySlug={catBySlug} />
         ))}
       </div>
     </div>
@@ -691,14 +718,16 @@ function MemberRow({
   member,
   locale,
   packageCat,
+  catBySlug,
 }: {
   member: SetMember;
   locale: MarketLocale;
   packageCat: CategoryKey | null;
+  catBySlug: Map<string, CategoryKey>;
 }) {
   const ko = locale === "ko";
   const sev = severityFromCedar(member.cedar_text);
-  const cat = memberCategory(member.slug, packageCat);
+  const cat = memberCategory(member.slug, packageCat, catBySlug);
   const color = CATEGORY_COLOR[cat];
   const copy = policyCopy(member.slug);
   const oneLine = copy?.title || leadingComment(member.cedar_text);
