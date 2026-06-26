@@ -487,7 +487,8 @@
 .asset-av { position: relative; width: 30px; height: 30px; flex-shrink: 0; }
 .asset-logo { width: 30px; height: 30px; border-radius: 50%; display: block; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(13,17,24,0.06); }
 .asset-logo svg { width: 100%; height: 100%; display: block; }
-.asset-logo img { width: 100%; height: 100%; display: block; object-fit: cover; background: var(--surface); }
+/* contain: 원형 배지 로고는 가장자리까지 채우고, 육각/다이아 등 마크형은 안 잘리게 중앙 정렬(흰 칩 위). */
+.asset-logo img { width: 100%; height: 100%; display: block; object-fit: contain; background: var(--surface); }
 .asset-ic {
   width: 30px; height: 30px; border-radius: 50%;
   display: grid; place-items: center;
@@ -495,7 +496,7 @@
   background: var(--slate-100); color: var(--slate-700);
 }
 .asset-ic.native { background: var(--cyan-100); color: var(--cyan-800); }
-.asset-ic.erc20 { background: var(--sage-100); color: var(--sage-800); }
+.asset-ic.erc20 { background: var(--neutral-100); color: var(--slate-700); }
 .asset-ic.nft { background: var(--blue-50); border: 1px solid var(--blue-200); color: var(--blue-700); } /* ③-2A 카테고리 톤 50/200/700 */
 /* 체인 배지 — 아바타 우하단 */
 .chain-badge {
@@ -578,7 +579,9 @@
 /* ── Hyperliquid section ──────────────────────────────────────────────── */
 /* ── Hyperliquid — light trading blotter ── */
 /* 지갑별 탭 (Hyperliquid 패널) — 알약 탭으로 한 지갑만 골라 본다 */
-.hl-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 12px; }
+/* 지갑 선택 = 세그먼트 컨트롤: 회색 트랙 + 흰 활성 pill (배경과 확실히 구분). */
+.hl-tabs { display: inline-flex; gap: 2px; flex-wrap: wrap; margin: 4px 0 12px;
+  background: var(--neutral-100); padding: 3px; border-radius: 999px; }
 .hl-tab {
   font: inherit;
   font-size: 13px;
@@ -587,13 +590,13 @@
   border-radius: 999px;
   border: none;
   background: transparent;
-  color: var(--slate-400);
+  color: var(--slate-500);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color .15s ease, color .15s ease;
+  transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
 }
-.hl-tab:hover { color: var(--slate-600); }
-.hl-tab.on { background: var(--fog-500, #eef1f5); color: var(--slate-900); }
+.hl-tab:hover { color: var(--slate-700); }
+.hl-tab.on { background: var(--surface); color: var(--slate-900); box-shadow: 0 1px 2px rgba(13,17,24,0.12); }
 
 .hl-card {
   border: 1px solid var(--hairline);
@@ -606,8 +609,20 @@
 .hl-venue {
   display: inline-grid; place-items: center; min-width: 24px; height: 18px;
   padding: 0 5px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
-  background: var(--cyan-800); color: var(--cyan-100); font-family: var(--ff-mono);
+  /* Hyperliquid 브랜드(체인 로고와 동일): 딥그린 + 민트. */
+  background: #173E37; color: #98FCE4; font-family: var(--ff-mono);
 }
+/* 활동 없는 HL 계정 — 빈 테이블 스캐폴드 대신 단일 정돈된 빈 상태 */
+.hl-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 11px;
+  padding: 34px 20px 36px; text-align: center;
+}
+.hl-empty-ic {
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%;
+  background: var(--fog-200); color: var(--slate-400);
+}
+.hl-empty-ic svg { width: 22px; height: 22px; display: block; }
+.hl-empty-txt { font-size: 13px; color: var(--slate-500); }
 
 /* account head — light strip with Perp/Spot figures */
 .hl-card-head {

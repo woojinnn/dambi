@@ -265,6 +265,7 @@ pub fn build_router_with_config(state: AppState, config: &ServerConfig) -> Route
         )
         // Market-admin: list publisher accounts + set their tier (verify/unverify).
         .route("/market/publishers", get(market_handlers::list_publishers))
+        .route("/market/users/search", get(market_handlers::search_users))
         .route(
             "/market/publishers/:id",
             patch(market_handlers::set_publisher_tier),

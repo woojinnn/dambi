@@ -32,7 +32,7 @@ use policy_db::market::{
     list_reports as db_list_reports, list_reports_by_reporter as db_list_reports_by_reporter,
     list_reviews as db_list_reviews, list_tiers as db_list_tiers, list_watches as db_list_watches,
     record_install_and_get_version as db_record_install_and_get_version,
-    set_publisher_tier as db_set_publisher_tier,
+    search_users_by_email as db_search_users_by_email, set_publisher_tier as db_set_publisher_tier,
     set_publisher_tier_by_email as db_set_publisher_tier_by_email, tier_exists as db_tier_exists,
     unwatch as db_unwatch, update_report_status as db_update_report_status,
     upsert_review as db_upsert_review, validate_semver, vote_helpful as db_vote_helpful,
@@ -577,6 +577,38 @@ pub async fn list_publishers(
         return resp;
     }
     match db_list_publishers(state.global_db.pool()).await {
+        Ok(rows) => {
+            Json(rows.iter().map(publisher_row_to_json).collect::<Vec<_>>()).into_response()
+        }
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SearchUsersQuery {
+    pub q: String,
+}
+
+const USER_SEARCH_LIMIT: i64 = 30;
+
+/// `GET /market/users/search?q=<email-substring>` — admin: search EVERY
+/// registered account (logged-in at least once) by email substring, so an admin
+/// can grade accounts that aren't in the publisher list yet (no listings,
+/// community tier). Returns the same shape as `/market/publishers`. A blank
+/// query returns `[]` rather than the whole user table.
+pub async fn search_users(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Query(params): Query<SearchUsersQuery>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let q = params.q.trim();
+    if q.is_empty() {
+        return Json(Vec::<Value>::new()).into_response();
+    }
+    match db_search_users_by_email(state.global_db.pool(), q, USER_SEARCH_LIMIT).await {
         Ok(rows) => {
             Json(rows.iter().map(publisher_row_to_json).collect::<Vec<_>>()).into_response()
         }
