@@ -16,6 +16,7 @@ import { getSettings, putOpenaiKey } from "../server-api/settings";
 import {
   createTier,
   deleteTier,
+  grantTierByEmail,
   listPublishers,
   listTiers,
   setPublisherTier,
@@ -162,6 +163,17 @@ export function ProfilePage() {
     onSuccess: invalidateTiering,
     onError: onTierErr,
   });
+  const grantByEmailMut = useMutation({
+    mutationFn: (v: { email: string; tier: PublisherTier }) => grantTierByEmail(v.email, v.tier),
+    onSuccess: (r) => {
+      invalidateTiering();
+      setBanner(`${r.email} → ${r.publisher_tier} 부여됨`);
+      setGrant((s) => ({ ...s, email: "" }));
+    },
+    onError: onTierErr,
+  });
+  // 이메일로 등급 부여 폼 상태 (tier 는 첫 비-official 등급으로 초기화)
+  const [grant, setGrant] = useState<{ email: string; tier: string }>({ email: "", tier: "verified" });
   // 새 등급 생성 폼 상태
   const [newTier, setNewTier] = useState<{ label: string; checkmark: boolean; color: string }>({
     label: "",
@@ -351,6 +363,46 @@ export function ProfilePage() {
                 {ko ? "등급 추가" : "Add tier"}
               </button>
             </div>
+
+            {/* 이메일로 등급 부여 — 아직 정책을 안 올려 목록에 없는 계정도 */}
+            <div className="pp-subhead">{ko ? "이메일로 등급 부여" : "Grant by email"}</div>
+            <div className="pp-tier-new">
+              <input
+                className="pp-input"
+                type="email"
+                placeholder={ko ? "계정 이메일" : "account email"}
+                value={grant.email}
+                onChange={(e) => setGrant((s) => ({ ...s, email: e.target.value }))}
+              />
+              <select
+                className="pp-input"
+                value={grant.tier}
+                onChange={(e) => setGrant((s) => ({ ...s, tier: e.target.value }))}
+              >
+                {(tiersQ.data ?? [])
+                  .filter((tr) => tr.id !== "official")
+                  .map((tr) => (
+                    <option key={tr.id} value={tr.id}>
+                      {tr.label}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                className="pp-btn"
+                disabled={!grant.email.trim() || grantByEmailMut.isPending}
+                onClick={() =>
+                  grantByEmailMut.mutate({ email: grant.email.trim(), tier: grant.tier })
+                }
+              >
+                {ko ? "부여" : "Grant"}
+              </button>
+            </div>
+            <p className="pp-muted">
+              {ko
+                ? "아직 정책을 안 올려 아래 목록에 없는 계정도 부여 가능 — 단 그 계정이 한 번은 로그인해야 해요."
+                : "Works even for accounts not in the list below (no listings yet) — they must have logged in once."}
+            </p>
 
             {/* publisher별 등급 지정 */}
             <div className="pp-subhead">{ko ? "publisher 등급 지정" : "Assign tiers"}</div>

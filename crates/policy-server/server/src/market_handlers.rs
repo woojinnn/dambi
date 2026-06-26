@@ -32,7 +32,8 @@ use policy_db::market::{
     list_reports as db_list_reports, list_reports_by_reporter as db_list_reports_by_reporter,
     list_reviews as db_list_reviews, list_tiers as db_list_tiers, list_watches as db_list_watches,
     record_install_and_get_version as db_record_install_and_get_version,
-    set_publisher_tier as db_set_publisher_tier, tier_exists as db_tier_exists,
+    set_publisher_tier as db_set_publisher_tier,
+    set_publisher_tier_by_email as db_set_publisher_tier_by_email, tier_exists as db_tier_exists,
     unwatch as db_unwatch, update_report_status as db_update_report_status,
     upsert_review as db_upsert_review, validate_semver, vote_helpful as db_vote_helpful,
     watch as db_watch, ListingFilter, ListingRow, ListingSort as DbListingSort, NewListing,
@@ -734,6 +735,57 @@ pub async fn delete_tier(
         Ok(None) => (
             StatusCode::BAD_REQUEST,
             "tier not found or reserved (built-in tiers cannot be deleted)",
+        )
+            .into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct GrantTierReq {
+    pub email: String,
+    pub tier: String,
+}
+
+/// `POST /market/grant-tier` — admin: set a tier on an account by EMAIL. Unlike
+/// `PATCH /market/publishers/:id`, this can grade an account that hasn't
+/// published yet (so it isn't in the publisher list) — it just has to exist
+/// (logged in once). `official` is reserved and not grantable here.
+pub async fn grant_tier_by_email(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<GrantTierReq>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let tier = req.tier.trim();
+    let email = req.email.trim();
+    if tier == "official" {
+        return (
+            StatusCode::BAD_REQUEST,
+            "'official' is reserved (Wallet Guardians) and cannot be granted here",
+        )
+            .into_response();
+    }
+    if email.is_empty() {
+        return (StatusCode::BAD_REQUEST, "email is required").into_response();
+    }
+    match db_tier_exists(state.global_db.pool(), tier).await {
+        Ok(false) => return (StatusCode::BAD_REQUEST, "unknown tier").into_response(),
+        Err(e) => return server_error(&e.to_string()),
+        Ok(true) => {}
+    }
+    match db_set_publisher_tier_by_email(state.global_db.pool(), email, tier).await {
+        Ok(Some(user_id)) => Json(serde_json::json!({
+            "user_id": user_id,
+            "email": email,
+            "publisher_tier": tier,
+        }))
+        .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            "그 이메일의 계정이 없어요 — 해당 계정으로 한 번 로그인해야 등급을 줄 수 있어요",
         )
             .into_response(),
         Err(e) => server_error(&e.to_string()),
