@@ -1227,11 +1227,12 @@ function PackageListCard({
 // Listing visuals — category-driven (sets get a package glyph)
 // ─────────────────────────────────────────────────────────────────────────
 
-/** A listing's category: server `category` if present, else slug-derived.
- * Sets (packages) span categories, so they have none. */
+/** A listing's category: server `category` if present (policies AND packages —
+ * packages carry a single category, e.g. Perp), else slug-derived for policies.
+ * A package without a valid server category has none (category-spanning). */
 function listingCategoryKey(l: ListingSummary): CategoryKey | null {
-  if (l.kind !== "policy") return null;
-  return isCategoryKey(l.category) ? l.category : categoryOf(l.slug);
+  if (isCategoryKey(l.category)) return l.category;
+  return l.kind === "policy" ? categoryOf(l.slug) : null;
 }
 
 function listingColor(l: ListingSummary) {
