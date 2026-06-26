@@ -86,7 +86,7 @@
 .pv-sev-select {
   font: inherit; font-weight: 700; cursor: pointer;
   border-radius: 8px; padding: 6px 11px;
-  color: #c98a2b; border: 1px solid #f0dcb4; background: #fff;
+  color: #A28C2A; border: 1px solid #F5EBBC; background: #fff;
 }
-.pv-sev-select.deny { color: #c2533f; border-color: #f7e7e3; }
+.pv-sev-select.deny { color: #AA352A; border-color: #F6E6E4; }
 .pv-sheet.compact { margin-top: 0; }

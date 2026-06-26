@@ -373,7 +373,7 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
                           aria-label={b.enabled ? "정책 끄기" : "정책 켜기"}
                           onClick={() => run("토글", () => PS.updateBinding({ address: activeAddr, bindingId: b.id, patch: { enabled: !b.enabled } }))}
                         >
-                          <Ic id={b.enabled ? "check" : "x"} />
+                          <Ic id={b.enabled ? "shield" : "x"} />
                         </button>
                         <button type="button" className="ib danger" title="이 패키지에서 제거" onClick={async () => { if (await e2Confirm({ title: `"${nm}" 정책을 이 패키지에서 뺄까요?`, body: "이 지갑에서 더는 적용되지 않아요. (정책 자체는 라이브러리에 남아요)", danger: true, confirmLabel: "제거" })) run("제거", () => PS.removeBinding({ address: activeAddr, bindingId: b.id })); }}><Ic id="trash" cls="sm" /></button>
                       </div>
