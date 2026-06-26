@@ -239,6 +239,7 @@
       "cond": "조건",
       "posEmpty": "포지션 없음",
       "ordEmpty": "오픈 오더 없음",
+      "noActivity": "이 지갑은 Hyperliquid 포지션·오픈 오더가 없어요",
       "buy": "매수",
       "sell": "매도",
       "tp": "익절",

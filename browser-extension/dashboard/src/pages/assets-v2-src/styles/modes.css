@@ -103,15 +103,16 @@
 
 /* ── sticky-accordion combo (sticky jump-nav + collapsible sections) ─────── */
 .jump-nav-acc { gap: 5px; }
-/* the open section reads as a filled tab — "you are viewing this" at a glance */
+/* the open section reads as a filled tab — "you are viewing this" at a glance.
+   밝은 navy 면(DEEP active 패턴): 어두운 pill 위 lemon 점이 라임처럼 보이던 문제 제거. */
 .jump-nav-acc .jump-link:not(.collapsed) {
-  background: var(--slate-700); color: var(--fog-50);
-  box-shadow: 0 1px 3px rgba(13, 17, 24, 0.14);
+  background: var(--navy-50); color: var(--navy-600);
+  box-shadow: inset 0 0 0 1px var(--navy-100);
 }
-.jump-nav-acc .jump-link:not(.collapsed):hover { background: var(--slate-800); color: var(--fog-50); }
-.jump-nav-acc .jump-link:not(.collapsed) .jl-count { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.jump-nav-acc .jump-link:not(.collapsed):hover { background: var(--navy-100); color: var(--navy-700); }
+.jump-nav-acc .jump-link:not(.collapsed) .jl-count { background: var(--navy-100); color: var(--navy-400); }
 .jump-nav-acc .jump-link:not(.collapsed) .jl-flag.warn,
-.jump-nav-acc .jump-link:not(.collapsed) .jl-flag.fail { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3); }
+.jump-nav-acc .jump-link:not(.collapsed) .jl-flag.fail { box-shadow: none; }
 /* live count badge on each jump-link — nav doubles as a status overview */
 .jl-count {
   font-family: var(--ff-mono); font-size: 11px; font-weight: 600;
