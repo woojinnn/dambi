@@ -26,7 +26,8 @@ import { AppShell } from "./shell/AppShell";
 import { LoginPage } from "./pages/LoginPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { HomePage } from "./pages/HomePage";
-import { EditorV3ListPage, EditorV3DetailPage } from "./pages/editor/v3/EditorV3Pages";
+import { EditorV3ListPage } from "./pages/editor/v3/EditorV3Pages";
+import { EditorDetailPageV2 } from "./pages/editor/v2/EditorDetailPageV2";
 import { SimulateWizardPage } from "./pages/simulate/SimulateWizardPage";
 import { Assets2Page } from "./pages/Assets2Page";
 import { HistoryPage } from "./pages/HistoryPage";
@@ -52,8 +53,11 @@ const router = createRouter([
         element: <AppShell />,
         children: [
           { index: true, element: <HomePage /> },
+          // 목록/워크스페이스는 v3 정적 에디터(iframe), 단일 정책 편집은 실제
+          // React 에디터(EditorDetailPageV2, ir 지원). iframe이 정책을 누르면
+          // 브리지가 /editor/:id 로 보내 이 에디터를 연다.
           { path: "editor", element: <EditorV3ListPage /> },
-          { path: "editor/:id", element: <EditorV3DetailPage /> },
+          { path: "editor/:id", element: <EditorDetailPageV2 /> },
           // 옛 editor2 경로 → editor 로 영구 리다이렉트(기존 북마크/링크 호환).
           { path: "editor2", element: <Navigate to="/editor" replace /> },
           { path: "editor2/:id", element: <Navigate to="/editor" replace /> },
