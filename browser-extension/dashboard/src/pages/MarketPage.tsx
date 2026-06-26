@@ -11,7 +11,6 @@ import {
   type ListingSummary,
 } from "../server-api";
 import { publisherDisplay } from "../server-api/market";
-import { TierBadge } from "../components/TierBadge";
 import { MarketInstallModal } from "./MarketInstallModal";
 import { MarketPagehead, useMarketContentClass } from "./MarketPagehead";
 
@@ -1030,29 +1029,6 @@ function SeveritySymbol({ sev, size = 18 }: { sev: "deny" | "warn"; size?: numbe
 }
 
 /** Compact rating: ★ avg (count). Shows "★ 신규" when there are no reviews. */
-function Rating({
-  avg,
-  count,
-  locale,
-  showCount = true,
-}: {
-  avg: number | null;
-  count: number;
-  locale: MarketLocale;
-  showCount?: boolean;
-}) {
-  const ko = locale === "ko";
-  if (!count || avg == null) {
-    return <span className="rm-rating none">{ko ? "★ 신규" : "★ New"}</span>;
-  }
-  return (
-    <span className="rm-rating" title={`${avg.toFixed(1)} / 5 · ${count}`}>
-      <span className="s">★</span> {avg.toFixed(1)}
-      {showCount && <> ({count})</>}
-    </span>
-  );
-}
-
 /** Install count as a download glyph + number (replaces "설치 N" text). */
 function InstallCount({ n }: { n: number }) {
   return (
@@ -1100,6 +1076,37 @@ function InstallBadge({
   );
 }
 
+// 핸드오프(dt-flow.jsx) 카드 푸터 아이콘 — layers/download/star.
+function LayersIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8l8.5-4.5z" /><path d="M3.5 13l8.5 4.5 8.5-4.5" />
+    </svg>
+  );
+}
+/** 다운로드 수 — download 글리프(neutral-500) + 수. */
+function StatDownload({ n }: { n: number }) {
+  return (
+    <span className="rm-pcard-stat" title="installs">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--neutral-500)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 4v11" /><path d="M7 11l5 4 5-4" /><path d="M5 20h14" />
+      </svg>
+      {n.toLocaleString()}
+    </span>
+  );
+}
+/** 별점 — star 글리프(lemon-500) + 평점(없으면 신규). */
+function StatStar({ avg, ko }: { avg: number | null; ko: boolean }) {
+  return (
+    <span className="rm-pcard-stat" title="rating">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--lemon-500)" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 3.3l2.6 5.7 6.1.7-4.5 4.2 1.2 6L12 17l-5.4 2.9 1.2-6L3.3 9.7l6.1-.7z" />
+      </svg>
+      {avg != null ? avg.toFixed(1) : ko ? "신규" : "New"}
+    </span>
+  );
+}
+
 function PolicyListCard({
   listing,
   locale,
@@ -1113,29 +1120,35 @@ function PolicyListCard({
   const name = pickI18n(listing.display_name) || listing.slug;
   const cat = listingCategoryKey(listing);
   const color = listingColor(listing);
-  const sev = listing.severity;
   const oneLine = policyCopy(listing.slug)?.title || pickI18n(listing.description) || "";
+  const ver = listing.current_version;
+  const author = publisherDisplay(listing.publisher_tier, listing.publisher_email, locale);
   return (
-    <Link
-      to={`/market/${encodeURIComponent(listing.slug)}`}
-      className="rm-rcard"
-      style={color ? { borderLeft: `3px solid ${color.hex}` } : undefined}
-    >
-      <div className="top">
-        {sev && (
-          <span className={`rm-rkind ${sev}`}>
-            <SeveritySymbol sev={sev} size={11} />
-            {" "}
-            {sev === "deny" ? (ko ? "차단" : "Deny") : ko ? "경고" : "Warn"}
+    <Link to={`/market/${encodeURIComponent(listing.slug)}`} className="rm-pcard">
+      <div className="rm-pcard-head">
+        {cat && color ? (
+          <span
+            className="rm-pcard-pill"
+            style={{ color: color.ink, background: color.soft, border: `1px solid color-mix(in srgb, ${color.hex} 30%, transparent)` }}
+          >
+            <CategoryGlyph category={cat} size={13} color={color.ink} />
+            {categoryNameOf(cat, locale)}
           </span>
+        ) : (
+          <span />
         )}
-        {cat && <span className="rm-rpub" style={{ marginLeft: "auto" }}>{categoryNameOf(cat, locale)}</span>}
+        <span className="rm-pcard-ver">
+          {ver ? `v${ver}` : ""}
+          {author && <b> · {author}</b>}
+        </span>
       </div>
-      <div className="rm-rname" style={{ fontSize: 15 }}>{name}</div>
-      {oneLine && <div className="rm-card-line">{oneLine}</div>}
-      <div className="rm-rfoot">
-        <InstallCount n={listing.install_count} />
-        <Rating avg={listing.rating_avg} count={listing.rating_count} locale={locale} showCount={false} />
+      <div className="rm-pcard-body">
+        <div className="rm-pcard-title">{name}</div>
+        {oneLine && <div className="rm-pcard-desc">{oneLine}</div>}
+      </div>
+      <div className="rm-pcard-foot">
+        <StatDownload n={listing.install_count} />
+        <StatStar avg={listing.rating_avg} ko={ko} />
         <InstallBadge installed={listing.is_installed} locale={locale} onClick={() => onInstall(listing)} />
       </div>
     </Link>
@@ -1158,45 +1171,43 @@ function PackageListCard({
   const ko = locale === "ko";
   const name = pickI18n(listing.display_name) || listing.slug;
   const official = listing.publisher_tier === "official";
+  const author = publisherDisplay(listing.publisher_tier, listing.publisher_email, locale);
   // 패키지는 단일 카테고리 — 그 카테고리로 #태그. (멤버 slug 기반 catCount 는
   // 패키지 내부 slug 라 Others 로 떨어져 홈 카드가 #Others 로 보였다.)
   const pkgCat = listingCategoryKey(listing);
   const topCats = pkgCat ? [pkgCat] : [];
+  const ver = listing.current_version;
   return (
-    <Link
-      to={`/market/${encodeURIComponent(listing.slug)}`}
-      className="rm-rcard"
-    >
-      <div className="top">
-        <span className={`rm-rkind ${official ? "official" : "community"}`}>
-          {official ? (
-            <>
-              <PackageGlyphSm />
-              {ko ? "공식 패키지" : "Official"}
-            </>
-          ) : (
-            ko ? "커뮤니티" : "Community"
-          )}
+    <Link to={`/market/${encodeURIComponent(listing.slug)}`} className="rm-pkgcard">
+      <div className="rm-pkgcard-bar">
+        <span className="rm-pkgcard-bar-l">
+          <LayersIcon />
+          {meta.ready
+            ? ko ? `패키지 · 정책 ${meta.count}개` : `Package · ${meta.count} policies`
+            : ko ? "패키지" : "Package"}
         </span>
-        <span className="rm-rpub">
-          {publisherDisplay(listing.publisher_tier, listing.publisher_email, locale)}
-          <TierBadge tier={listing.publisher_tier} />
-        </span>
-        <span className="rm-rmeta">
-          {meta.ready && <>{ko ? "정책" : ""} <b>{meta.count}</b></>}
-          {listing.current_version && <> · v<b>{listing.current_version}</b></>}
-        </span>
+        {ver && <span className="rm-pkgcard-bar-v">v{ver}</span>}
       </div>
-      <div className="rm-rname">{name}</div>
-      <div className="rm-rtags">
-        {topCats.map((c) => (
-          <span key={c} className="rm-rtag">#{categoryNameOf(c, locale)}</span>
-        ))}
-      </div>
-      <div className="rm-rfoot">
-        <InstallCount n={listing.install_count} />
-        <Rating avg={listing.rating_avg} count={listing.rating_count} locale={locale} showCount={false} />
-        <InstallBadge installed={listing.is_installed} locale={locale} onClick={() => onInstall(listing)} />
+      <div className="rm-pkgcard-body">
+        <div>
+          <div className="rm-pkgcard-title">{name}</div>
+          <div className="rm-pkgcard-author">
+            {author}
+            {official && <span className="rm-vf"> ✓</span>}
+          </div>
+        </div>
+        <div className="rm-pkgcard-tags">
+          {topCats.map((c) => (
+            <span key={c} className="rm-pkgcard-tag" style={{ color: CATEGORY_COLOR[c].ink }}>
+              #{categoryNameOf(c, locale)}
+            </span>
+          ))}
+        </div>
+        <div className="rm-pkgcard-foot">
+          <StatDownload n={listing.install_count} />
+          <StatStar avg={listing.rating_avg} ko={ko} />
+          <InstallBadge installed={listing.is_installed} locale={locale} onClick={() => onInstall(listing)} />
+        </div>
       </div>
     </Link>
   );
