@@ -69,9 +69,8 @@ export function NavRail() {
 
       <div className="nav-group">
         <RailItem to="/" end label={t("nav.home")} icon={<HomeIcon />} />
-        {/* 기존 '정책 관리'(/editor)는 탭에서 숨김 — 라우트/코드는 유지(상세 편집 진입에 계속 사용). */}
-        {/* 새 에디터가 '정책 관리'를 대체. 탭 라벨은 nav.editor("정책 관리")를 그대로 사용. */}
-        <RailItem to="/editor2" label={t("nav.editor")} icon={<EditorIcon />} activePrefixes={["/editor"]} />
+        {/* '정책 관리' = 새 에디터(/editor). 옛 레거시 에디터는 제거됨. */}
+        <RailItem to="/editor" label={t("nav.editor")} icon={<EditorIcon />} activePrefixes={["/editor"]} />
         <RailItem to="/simulation" label={t("nav.simulation")} icon={<SimIcon />} />
         <RailItem to="/assets" label={t("nav.assets")} icon={<MonIcon />} />
         <RailItem to="/market" label={t("nav.market")} icon={<MarketIcon />} />
