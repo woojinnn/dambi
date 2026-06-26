@@ -24,7 +24,10 @@ function pathSegment(value: string, label: string): string {
 }
 
 export type ListingKind = "policy" | "set";
-export type PublisherTier = "official" | "verified" | "community";
+/** A tier id. `official`/`verified`/`community` are built-in; admins can create
+ * more. Kept as an open string union so custom tier ids are valid while the
+ * built-ins still autocomplete. */
+export type PublisherTier = "official" | "verified" | "community" | (string & {});
 export type ListingStatus = "pending" | "published" | "archived" | "rejected";
 export type Severity = "deny" | "warn";
 export type ListingSort = "popular" | "new" | "rating";
@@ -440,15 +443,54 @@ export async function listPublishers(): Promise<MarketPublisher[]> {
   return request<MarketPublisher[]>("/market/publishers");
 }
 
-/** `PATCH /market/publishers/:id` — admin: grant/revoke verified.
- * `official` is reserved (the Wallet Guardians brand) and not settable here. */
+/** `PATCH /market/publishers/:id` — admin: set an account to any existing tier
+ * except `official` (the Wallet Guardians brand is reserved, set out of band). */
 export async function setPublisherTier(
   userId: string,
-  tier: "verified" | "community",
+  tier: PublisherTier,
 ): Promise<MarketPublisher> {
   return request<MarketPublisher>(
     `/market/publishers/${pathSegment(userId, "user id")}`,
     { method: "PATCH", body: { tier } },
+  );
+}
+
+// ---- Market admin: tier definitions (CRUD) ------------------------------
+
+/** A publisher tier definition. Minimal badge model: a checkmark toggle + color. */
+export interface MarketTier {
+  id: string;
+  label: string;
+  checkmark: boolean;
+  color: string;
+  rank: number;
+  /** Built-in (official/verified/community) — cannot be deleted. */
+  reserved: boolean;
+  /** How many accounts are in this tier. */
+  member_count: number;
+}
+
+/** `GET /market/tiers` — list tier definitions (any authed user; drives badges). */
+export async function listTiers(): Promise<MarketTier[]> {
+  return request<MarketTier[]>("/market/tiers");
+}
+
+/** `POST /market/tiers` — admin: create a new tier. */
+export async function createTier(input: {
+  id: string;
+  label: string;
+  checkmark: boolean;
+  color: string;
+  rank?: number;
+}): Promise<{ id: string }> {
+  return request<{ id: string }>("/market/tiers", { method: "POST", body: input });
+}
+
+/** `DELETE /market/tiers/:id` — admin: delete a non-reserved tier (members → community). */
+export async function deleteTier(id: string): Promise<{ deleted: string }> {
+  return request<{ deleted: string }>(
+    `/market/tiers/${pathSegment(id, "tier id")}`,
+    { method: "DELETE" },
   );
 }
 

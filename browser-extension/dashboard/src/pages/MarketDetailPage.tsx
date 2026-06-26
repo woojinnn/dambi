@@ -11,6 +11,7 @@ import {
   type SetMember,
 } from "../server-api";
 import { formatYmd, publisherDisplay } from "../server-api/market";
+import { TierBadge } from "../components/TierBadge";
 import { MarketPagehead, useMarketContentClass } from "./MarketPagehead";
 
 import {
@@ -145,13 +146,8 @@ function DetailBody({
           <div className="rm-md-pub">
             <span className="name">
               {publisherDisplay(detail.publisher_tier, detail.publisher_email, locale)}
-              {detail.publisher_tier === "official" && (
-                <span className="rm-vf" title="Verified" aria-label="verified">✓</span>
-              )}
             </span>
-            {detail.publisher_tier === "verified" && (
-              <span className="mc-tier tier-verified">{ko ? "검증" : "Verified"}</span>
-            )}
+            <TierBadge tier={detail.publisher_tier} />
             <span>·</span>
             <span>
               {ko ? `${formatYmd(detail.created_at)} 발행` : `Published ${formatYmd(detail.created_at)}`}

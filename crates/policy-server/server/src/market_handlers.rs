@@ -23,19 +23,21 @@ use uuid::Uuid;
 
 use policy_db::market::{
     create_listing as db_create_listing, create_listing_report as db_create_listing_report,
-    create_review_report as db_create_review_report, create_version as db_create_version,
-    delete_listing as db_delete_listing, get_latest_version as db_get_latest_version,
+    create_review_report as db_create_review_report, create_tier as db_create_tier,
+    create_version as db_create_version, delete_listing as db_delete_listing,
+    delete_tier as db_delete_tier, get_latest_version as db_get_latest_version,
     get_listing_by_id as db_get_listing_by_id, get_listing_by_slug as db_get_listing_by_slug,
     get_version as db_get_version, install_activity_since as db_install_activity_since,
     list_listings as db_list_listings, list_publishers as db_list_publishers,
     list_reports as db_list_reports, list_reports_by_reporter as db_list_reports_by_reporter,
-    list_reviews as db_list_reviews, list_watches as db_list_watches,
+    list_reviews as db_list_reviews, list_tiers as db_list_tiers, list_watches as db_list_watches,
     record_install_and_get_version as db_record_install_and_get_version,
-    set_publisher_tier as db_set_publisher_tier, unwatch as db_unwatch,
-    update_report_status as db_update_report_status, upsert_review as db_upsert_review,
-    validate_semver, vote_helpful as db_vote_helpful, watch as db_watch, ListingFilter, ListingRow,
-    ListingSort as DbListingSort, NewListing, PublisherRow, ReportRow, ReviewRow, VersionBody,
-    VersionRow, LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX,
+    set_publisher_tier as db_set_publisher_tier, tier_exists as db_tier_exists,
+    unwatch as db_unwatch, update_report_status as db_update_report_status,
+    upsert_review as db_upsert_review, validate_semver, vote_helpful as db_vote_helpful,
+    watch as db_watch, ListingFilter, ListingRow, ListingSort as DbListingSort, NewListing,
+    PublisherRow, ReportRow, ReviewRow, TierRow, VersionBody, VersionRow, LIST_LIMIT_DEFAULT,
+    LIST_LIMIT_MAX,
 };
 use policy_db::DbError;
 
@@ -586,9 +588,9 @@ pub struct SetPublisherTierReq {
     pub tier: String,
 }
 
-/// `PATCH /market/publishers/:id` — admin: set an account's publisher tier to
-/// `verified` or `community`. `official` (the Wallet Guardians brand) is reserved
-/// and set out of band, so it is intentionally NOT grantable through this API.
+/// `PATCH /market/publishers/:id` — admin: set an account's publisher tier to any
+/// EXISTING tier except `official`. `official` (the Wallet Guardians brand) is
+/// reserved and set out of band, so it is intentionally NOT grantable here.
 pub async fn set_publisher_tier(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -598,17 +600,19 @@ pub async fn set_publisher_tier(
     if let Some(resp) = require_market_admin(&state, &user).await {
         return resp;
     }
-    let tier = match req.tier.as_str() {
-        "verified" => "verified",
-        "community" => "community",
-        _ => {
-            return (
-                StatusCode::BAD_REQUEST,
-                "tier must be 'verified' or 'community'",
-            )
-                .into_response()
-        }
-    };
+    let tier = req.tier.trim();
+    if tier == "official" {
+        return (
+            StatusCode::BAD_REQUEST,
+            "'official' is reserved (Wallet Guardians) and cannot be granted here",
+        )
+            .into_response();
+    }
+    match db_tier_exists(state.global_db.pool(), tier).await {
+        Ok(false) => return (StatusCode::BAD_REQUEST, "unknown tier").into_response(),
+        Err(e) => return server_error(&e.to_string()),
+        Ok(true) => {}
+    }
     match db_set_publisher_tier(state.global_db.pool(), &target_user_id, tier).await {
         Ok(Some(email)) => Json(serde_json::json!({
             "user_id": target_user_id,
@@ -628,6 +632,112 @@ fn publisher_row_to_json(r: &PublisherRow) -> Value {
         "publisher_tier": r.publisher_tier,
         "listing_count": r.listing_count,
     })
+}
+
+fn tier_row_to_json(r: &TierRow) -> Value {
+    serde_json::json!({
+        "id": r.id,
+        "label": r.label,
+        "checkmark": r.checkmark,
+        "color": r.color,
+        "rank": r.rank,
+        "reserved": r.reserved,
+        "member_count": r.member_count,
+    })
+}
+
+/// `GET /market/tiers` — list publisher tier definitions. Authenticated (not
+/// admin-only): the market UI needs these to render each publisher's badge.
+pub async fn list_tiers(
+    State(state): State<AppState>,
+    Extension(_user): Extension<AuthUser>,
+) -> Response {
+    match db_list_tiers(state.global_db.pool()).await {
+        Ok(rows) => Json(rows.iter().map(tier_row_to_json).collect::<Vec<_>>()).into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CreateTierReq {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub checkmark: bool,
+    pub color: String,
+    #[serde(default)]
+    pub rank: i32,
+}
+
+/// `POST /market/tiers` — admin: create a new (non-reserved) tier.
+pub async fn create_tier(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(req): Json<CreateTierReq>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    let id = req.id.trim();
+    let label = req.label.trim();
+    let color = req.color.trim();
+    if !(2..=32).contains(&id.len())
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        || !id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "id must be 2–32 chars of [a-z0-9-], starting alphanumeric",
+        )
+            .into_response();
+    }
+    if label.is_empty() || label.chars().count() > 40 {
+        return (StatusCode::BAD_REQUEST, "label must be 1–40 chars").into_response();
+    }
+    if !(color.len() == 7
+        && color.starts_with('#')
+        && color[1..].chars().all(|c| c.is_ascii_hexdigit()))
+    {
+        return (StatusCode::BAD_REQUEST, "color must be a #RRGGBB hex").into_response();
+    }
+    match db_create_tier(
+        state.global_db.pool(),
+        id,
+        label,
+        req.checkmark,
+        color,
+        req.rank,
+        now_secs(),
+    )
+    .await
+    {
+        Ok(Some(id)) => Json(serde_json::json!({ "id": id })).into_response(),
+        Ok(None) => (StatusCode::CONFLICT, "tier id already exists").into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
+}
+
+/// `DELETE /market/tiers/:id` — admin: delete a non-reserved tier. Its members
+/// are reassigned to `community`.
+pub async fn delete_tier(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(id): Path<String>,
+) -> Response {
+    if let Some(resp) = require_market_admin(&state, &user).await {
+        return resp;
+    }
+    match db_delete_tier(state.global_db.pool(), &id).await {
+        Ok(Some(deleted)) => Json(serde_json::json!({ "deleted": deleted })).into_response(),
+        Ok(None) => (
+            StatusCode::BAD_REQUEST,
+            "tier not found or reserved (built-in tiers cannot be deleted)",
+        )
+            .into_response(),
+        Err(e) => server_error(&e.to_string()),
+    }
 }
 
 /// `POST /market/reviews/:id/helpful` — vote helpful (idempotent per user).
