@@ -56,11 +56,11 @@ export const PACKAGE_COPY: Record<string, PackageCopy> = {
   },
   "leverage-safety": {
     intro:
-      "Hyperliquid 선물은 자금이 즉시 빠지는 transfer가 아니라 ‘권한 위임·포지션 변경’ 서명이 많아 위험이 눈에 잘 안 띕니다. 위험 액션 6종을 확인 게이트로 잡고, 손실이 무한대인 숏 진입만 차단합니다.",
+      "Hyperliquid 선물은 자금이 즉시 빠지는 transfer가 아니라 ‘권한 위임·포지션 변경’ 서명이 많아 위험이 눈에 잘 안 띕니다. 위험 액션 7종을 확인 게이트로 잡고, 손실이 무한대인 숏 진입은 /exchange와 CoreWriter 양쪽에서 차단합니다.",
     blocks: [
       { t: "agent wallet 승인", d: "내 계정 거래권을 통째로 위임" },
       { t: "과도한 레버리지", d: "작은 역행에도 청산되는 설정" },
-      { t: "무한 손실 숏 진입", d: "손실 상한이 없는 숏 — 차단(DENY)" },
+      { t: "무한 손실 숏 진입", d: "/exchange·CoreWriter 숏 — 차단(DENY)" },
       { t: "HL 자금 송금·출금·미상 액션", d: "한 번 더 확인" },
     ],
   },

@@ -202,11 +202,11 @@
       ]
     },
     "leverage-safety": {
-      "intro": "Hyperliquid futures carry many \"permission delegation / position change\" signatures rather than transfers that drain funds instantly, so the risk is easy to miss. Catches 6 kinds of risky actions with confirmation gates, and blocks only short entries, where losses are unbounded.",
+      "intro": "Hyperliquid futures carry many \"permission delegation / position change\" signatures rather than transfers that drain funds instantly, so the risk is easy to miss. Catches 7 kinds of risky actions with confirmation gates, and blocks short entries on both /exchange and CoreWriter paths.",
       "blocks": [
         { "t": "Agent wallet approvals", "d": "Delegating your account's trading rights wholesale" },
         { "t": "Excessive leverage", "d": "Settings liquidated by even a small adverse move" },
-        { "t": "Unbounded-loss short entries", "d": "Shorts with no loss ceiling — blocked (DENY)" },
+        { "t": "Unbounded-loss short entries", "d": "/exchange and CoreWriter shorts — blocked (DENY)" },
         { "t": "HL fund sends, withdrawals & unknown actions", "d": "One more confirmation" }
       ]
     },
@@ -284,7 +284,7 @@
     "hl-confirm-approve-agent": {
       "title": "On Hyperliquid, warn for confirmation right before approving an agent wallet that trades on your behalf",
       "what": "Catches the transaction that authorizes an agent wallet to execute trades for your Hyperliquid account and, instead of blocking the signature, asks once more: \"do you really want to give this wallet trading rights?\". Severity is warn, so it's a Warn rather than a Fail — the user reviews the contents and decides whether to proceed.",
-      "why": "Approving an agent wallet on Hyperliquid delegates wholesale the right to place orders in your account's name. Once approved, that agent wallet can open and close your positions without you signing each time. The problem is that this signature is a \"permission grant\", not a transfer that drains funds on the spot, so the screen gives little sense of danger. If a phishing site registers its own controlled wallet as an agent under plausible labels like \"connect a trading bot\" or \"enable auto-trading\", the user approves what looks like a harmless setting while actually opening a path for the attacker's wallet to trade their account at will (the meta threat tags are confirm-gate and phishing-approval). So this policy unconditionally halts on every hl_approve_agent action, making sure the user realizes \"I am handing my trading rights to someone right now\" before moving on."
+      "why": "Approving an agent wallet on Hyperliquid delegates wholesale the right to place orders in your account's name. Once approved, that agent wallet can open and close your positions without you signing each time. The problem is that this signature is a \"permission grant\", not a transfer that drains funds on the spot, so the screen gives little sense of danger. If a phishing site registers its own controlled wallet as an agent under plausible labels like \"connect a trading bot\" or \"enable auto-trading\", the user approves what looks like a harmless setting while actually opening a path for the attacker's wallet to trade their account at will. This policy now gates Hyperliquid `protocol_authorization` grants where `permission == \"agent\"`, making sure the user realizes \"I am handing my trading rights to someone right now\" before moving on."
     },
     "hl-confirm-high-leverage": {
       "title": "Warn for confirmation before raising leverage past 20x on Hyperliquid",
@@ -310,6 +310,11 @@
       "title": "Hyperliquid perpetual (perp) short orders are blocked outright before signing",
       "what": "Blocks, right before signing, orders that open a perp (perpetual futures) position short (betting on a price fall) on Hyperliquid. The same hl_order passes if it's long (betting on a rise) or the venue isn't Hyperliquid — a pinpoint block that fires only when both \"Hyperliquid + short\" hold at once.",
       "why": "A perp short loses more the higher the price climbs, and unlike a long there's no price ceiling, so losses are theoretically unbounded. Short a token at 1x and watch it jump 5x, and you've lost 4x your principal (a long caps the maximum loss at 100%). On top of that, on-chain perp DEXs like Hyperliquid liquidate automatically and instantly — one overnight pump can force-liquidate you. For a user who has declared \"I never short on Hyperliquid\", this policy stops both their own mis-operation (a long/short toggle slip) and short orders a phishing dApp slips in, from ever reaching a wallet signature."
+    },
+    "hl-corewriter-no-short-perp": {
+      "title": "Hyperliquid CoreWriter short orders are blocked before the on-chain signature",
+      "what": "Blocks Hyperliquid limit orders submitted through HyperEVM CoreWriter `sendRawAction` when the order is short-side and not reduce-only. It has the same intent as `hl-no-short-perp`, but CoreWriter calldata decodes as the separate `hl_core_limit_order` action, so it needs its own policy.",
+      "why": "A CoreWriter transaction looks like on-chain calldata in the wallet, but its meaning is a Hyperliquid CORE order. In that raw order, `isBuy == false` is the short direction and `reduceOnly == false` can open or grow short exposure. If only the `/exchange` no-short policy is installed, this path does not match because it is `HyperliquidCore::HlCoreLimitOrder`, not `Perp::PlaceOrder`. This policy closes that bypass and blocks short orders submitted through CoreWriter before signing."
     },
     "holding-pct-outflow-warn": {
       "title": "Warn when a single send moves more than 90% of your holdings of one token",

@@ -8,6 +8,8 @@ import {
 
 const OWNER = "0x1111111111111111111111111111111111111111";
 const ROUTER = "0x2222222222222222222222222222222222222222";
+const HL_AGENT = "0x3333333333333333333333333333333333333333";
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 const mocks = vi.hoisted(() => {
   class MockEngineError extends Error {
@@ -1375,6 +1377,57 @@ describe("orchestrator", () => {
     },
   };
 
+  const hlApproveAgentTypedData = {
+    primaryType: "HyperliquidTransaction:ApproveAgent",
+    domain: {
+      name: "HyperliquidSignTransaction",
+      version: "1",
+      chainId: 42161,
+      verifyingContract: ZERO_ADDRESS,
+    },
+    types: {
+      "HyperliquidTransaction:ApproveAgent": [
+        { name: "hyperliquidChain", type: "string" },
+        { name: "agentAddress", type: "address" },
+        { name: "agentName", type: "string" },
+        { name: "nonce", type: "uint64" },
+      ],
+    },
+    message: {
+      hyperliquidChain: "Mainnet",
+      agentAddress: HL_AGENT,
+      agentName: "Dambi Trading Agent",
+      nonce: 1_782_400_000,
+    },
+  };
+
+  const hlApproveAgentAction = {
+    meta: {
+      submitted_at: { unix: 1_782_400_000 },
+      submitter: OWNER,
+      nature: {
+        kind: "offchain_sig",
+        domain: { name: "HyperliquidSignTransaction", version: "1" },
+      },
+    },
+    body: {
+      domain: "permission",
+      permission: {
+        action: "protocol_authorization",
+        protocol_authorization: {
+          chain: "eip155:42161",
+          protocol: ZERO_ADDRESS,
+          protocol_name: "hyperliquid",
+          permission: "agent",
+          permission_label: "Dambi Trading Agent",
+          authorizer: OWNER,
+          authorized: HL_AGENT,
+          is_authorized: true,
+        },
+      },
+    },
+  };
+
   it("typed sig: a routed hit drives the v2 verdict (verdictSource=declarative-v2, tx.to=verifyingContract)", async () => {
     mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
       actions: [sigPermitAction],
@@ -1550,6 +1603,75 @@ describe("orchestrator", () => {
     expect(decided.ok).toBe(true);
     expect(decided.verdict.kind).toBe("warn");
     expect(mocks.evaluateActionV2).toHaveBeenCalledOnce();
+    expect(mocks.auditAppend).toHaveBeenCalledWith(
+      expect.objectContaining({ verdictSource: "declarative-v2" }),
+    );
+  });
+
+  it("typed sig: Hyperliquid ApproveAgent drives the protocol-authorization warning policy", async () => {
+    mocks.routeTypedSignaturePayload.mockResolvedValueOnce({
+      actions: [hlApproveAgentAction],
+      decoderId: "hyperliquid/rest/approve-agent@1.0.0",
+    });
+    mocks.resolveBundlesForWallet.mockResolvedValueOnce([
+      {
+        id: "hl-confirm-approve-agent",
+        policy: "forbid(principal, action == Permission::Action::\"ProtocolAuthorization\", resource);",
+        manifest: {
+          id: "hl-confirm-approve-agent",
+          schema_version: 2,
+          trigger: {
+            where: {
+              "action.tag": { eq: "protocol_authorization" },
+            },
+          },
+        },
+      },
+    ]);
+    mocks.evaluateActionV2.mockResolvedValueOnce({
+      kind: "warn",
+      matched: [
+        {
+          policy_id: "hl-confirm-approve-agent",
+          reason:
+            "Authorizing an agent wallet to trade on your behalf — confirm before approving",
+          severity: "warn",
+          origin: "action",
+        },
+      ],
+    });
+
+    const decided = await decideAndApprove(
+      typedSigMessage("typed-hl-approve-agent", hlApproveAgentTypedData),
+      true,
+    );
+
+    expect(decided.ok).toBe(true);
+    expect(decided.verdict.kind).toBe("warn");
+    expect(mocks.resolveBundlesForWallet).toHaveBeenCalledWith("u-test", OWNER);
+
+    const planArgs = mocks.planActionRpcV2.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(planArgs.action).toEqual(hlApproveAgentAction.body);
+    expect(planArgs.meta).toEqual(hlApproveAgentAction.meta);
+    expect(planArgs.tx).toEqual({
+      chain_id: "eip155:42161",
+      from: OWNER,
+      to: ZERO_ADDRESS,
+    });
+
+    const evalArgs = mocks.evaluateActionV2.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(evalArgs.bundles).toEqual([
+      expect.objectContaining({
+        policy: expect.stringContaining("ProtocolAuthorization"),
+        manifest: expect.objectContaining({ id: "hl-confirm-approve-agent" }),
+      }),
+    ]);
     expect(mocks.auditAppend).toHaveBeenCalledWith(
       expect.objectContaining({ verdictSource: "declarative-v2" }),
     );

@@ -94,6 +94,60 @@ describe("ps2 message API", () => {
     }
   });
 
+  it("install-market binds the HL CoreWriter no-short market def to the selected wallet", async () => {
+    const wallet = "0x676fa5b94067c2be14bc025df6c5c80dedf49a54";
+    const marketDef: PolicyDef = {
+      id: "def::market.hl-corewriter-no-short-perp",
+      displayName: "HL CoreWriter no short",
+      skeleton: {
+        ir: {
+          kind: "policy",
+          annotations: [
+            { name: "id", value: "hl-corewriter-no-short-perp" },
+            { name: "severity", value: "deny" },
+          ],
+        },
+        manifest: {
+          id: "hl-corewriter-no-short-perp",
+          schema_version: 2,
+          trigger: { where: { "action.tag": { eq: "hl_core_limit_order" } } },
+          policy_rpc: [],
+          custom_context: { fields: {} },
+        },
+      },
+      holes: [],
+      defaults: { enabled: false, params: {}, packageId: "pkg::market.hl" },
+      source: "market",
+      sourceListingId: "seed-hl-corewriter-no-short-perp",
+      sourceVersion: "1.0.0",
+      updatedAtMs: 1,
+    };
+
+    await handlePs2Request({
+      type: "ps2:install-market",
+      defs: [marketDef],
+      pkg: {
+        id: "pkg::market.hl",
+        displayName: "Hyperliquid safety",
+        source: "market",
+        updatedAtMs: 1,
+      },
+      scope: { kind: "wallets", addresses: [wallet] },
+    });
+
+    const s = await readStore("u");
+    const stored = s.library.defs[marketDef.id];
+    expect(stored.skeleton.manifest).toEqual(marketDef.skeleton.manifest);
+
+    const bindings = Object.values(s.wallets.byAddress[wallet].bindings);
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]).toMatchObject({
+      defId: marketDef.id,
+      packageId: "pkg::market.hl",
+      enabled: true,
+    });
+  });
+
   it("install-market scope:library-only registers defs without bindings", async () => {
     await handlePs2Request({
       type: "ps2:install-market",

@@ -7,9 +7,9 @@
   <body>
     <h1>Dambi · Hyperliquid <code>/exchange</code> deny demo</h1>
     <p>
-      With the Dambi extension loaded, a <b>short</b> perp order is blocked
-      by the shipped <code>hl-no-short-perp</code> policy; a <b>long</b> order
-      passes. Open the service-worker console to see
+      With the Dambi extension loaded and a no-new-short Hyperliquid policy
+      installed for the tested wallet, a <b>short</b> perp order is blocked;
+      a <b>long</b> order passes. Open the service-worker console to see
       <code>[Dambi] venue-order-verdict … verdict: "fail"</code>.
     </p>
     <button id="short">POST short order (blocked)</button>

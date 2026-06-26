@@ -30,7 +30,9 @@ use policy_engine::schema::compose_per_policy;
 
 use policy_state::position::PerpSide;
 use policy_state::primitives::{Address, ChainId, Decimal, MarketRef, Time, VenueRef};
-use policy_transition::action::hyperliquid_core::{HlWithdrawAction, HyperliquidCoreAction};
+use policy_transition::action::hyperliquid_core::{
+    HlCoreLimitOrderAction, HlWithdrawAction, HyperliquidCoreAction,
+};
 use policy_transition::action::perp::{
     OrderType, PerpAction, PerpVenue, PlaceOrderAction, SizeSpec, TimeInForce,
 };
@@ -114,6 +116,22 @@ fn twap(is_buy: bool, reduce_only: bool) -> ActionBody {
     )
 }
 
+/// Build a raw HyperEVM CoreWriter action-1 limit order. CoreWriter calldata
+/// carries exact HL asset/raw-int fields, not human market symbol/price/size.
+fn core_writer_limit_order(is_buy: bool, reduce_only: bool) -> ActionBody {
+    ActionBody::HyperliquidCore(HyperliquidCoreAction::CoreLimitOrder(
+        HlCoreLimitOrderAction {
+            asset: 110_076,
+            is_buy,
+            limit_px: "62653000".to_owned(),
+            sz: "1000".to_owned(),
+            reduce_only,
+            encoded_tif: 2,
+            cloid: "42".to_owned(),
+        },
+    ))
+}
+
 /// A minimal v2 manifest triggering on the given action tag.
 fn manifest(tag: &str) -> ManifestV2 {
     serde_json::from_value(json!({
@@ -149,6 +167,11 @@ fn evaluate(body: &ActionBody, tag: &str, policy: &str) -> Verdict {
         .expect("evaluate")
 }
 
+fn default_policy(id: &str) -> String {
+    let path = format!("tests/fixtures/default_policies_v2/{id}/policy.cedar");
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"))
+}
+
 // The shipped no-new-short shape. One `Perp::PlaceOrder` action covers BOTH a
 // plain order and a TWAP, so a TWAP short cannot bypass it. Mirrors
 // default_policies_v2/hl-no-short-perp.
@@ -157,6 +180,16 @@ const DENY_SHORT: &str = "\
 @severity(\"deny\")\n\
 @reason(\"Opening a new short on Hyperliquid is blocked by policy\")\n\
 forbid(principal, action == Perp::Action::\"PlaceOrder\", resource)\n\
+when { context.venue.name == \"hyperliquid\" && context.side == \"short\" && context.reduceOnly == false };\n";
+
+// Equivalent no-new-short guard for the HyperEVM CoreWriter order surface. The
+// action is not `Perp::PlaceOrder` because the raw calldata does not carry
+// human price/size/symbol metadata, but `side` and `reduceOnly` are exact.
+const DENY_CORE_WRITER_SHORT: &str = "\
+@id(\"hl/corewriter-no-short\")\n\
+@severity(\"deny\")\n\
+@reason(\"Opening a new short through Hyperliquid CoreWriter is blocked by policy\")\n\
+forbid(principal, action == HyperliquidCore::Action::\"HlCoreLimitOrder\", resource)\n\
 when { context.venue.name == \"hyperliquid\" && context.side == \"short\" && context.reduceOnly == false };\n";
 
 // Reduce-only lockdown: only position-CLOSING (reduce-only) orders may pass —
@@ -221,6 +254,67 @@ fn hyperliquid_long_order_passes() {
         evaluate(&order(true, "0.1", false), "place_order", DENY_SHORT),
         Verdict::Pass,
         "a long order must pass the short-only deny"
+    );
+}
+
+#[test]
+fn hyperliquid_corewriter_opening_short_order_is_denied() {
+    match evaluate(
+        &core_writer_limit_order(false, false),
+        "hl_core_limit_order",
+        DENY_CORE_WRITER_SHORT,
+    ) {
+        Verdict::Fail(matched) => assert!(
+            matched
+                .iter()
+                .any(|m| m.policy_id == "hl/corewriter-no-short"),
+            "expected the hl/corewriter-no-short deny rule to match, got: {matched:?}"
+        ),
+        other => panic!("expected Verdict::Fail (blocked), got {other:?}"),
+    }
+}
+
+#[test]
+fn shipped_default_corewriter_no_short_policy_denies_short() {
+    let cedar = default_policy("hl-corewriter-no-short-perp");
+    match evaluate(
+        &core_writer_limit_order(false, false),
+        "hl_core_limit_order",
+        &cedar,
+    ) {
+        Verdict::Fail(matched) => assert!(
+            matched
+                .iter()
+                .any(|m| m.policy_id == "hl-corewriter-no-short-perp"),
+            "expected the shipped default CoreWriter deny rule to match, got: {matched:?}"
+        ),
+        other => panic!("expected Verdict::Fail (blocked), got {other:?}"),
+    }
+}
+
+#[test]
+fn hyperliquid_corewriter_reduce_only_short_passes() {
+    assert_eq!(
+        evaluate(
+            &core_writer_limit_order(false, true),
+            "hl_core_limit_order",
+            DENY_CORE_WRITER_SHORT,
+        ),
+        Verdict::Pass,
+        "a reduce-only CoreWriter sell must NOT be blocked by a no-new-short deny"
+    );
+}
+
+#[test]
+fn hyperliquid_corewriter_long_order_passes() {
+    assert_eq!(
+        evaluate(
+            &core_writer_limit_order(true, false),
+            "hl_core_limit_order",
+            DENY_CORE_WRITER_SHORT,
+        ),
+        Verdict::Pass,
+        "a CoreWriter buy/long order must pass the short-only deny"
     );
 }
 

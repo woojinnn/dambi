@@ -1,0 +1,42 @@
+// HyperliquidCore::HlCoreLimitOrder — CoreWriter action 1 `limit_order`.
+//
+// This is the raw on-chain CoreWriter representation. `asset` is an HL asset id;
+// `limitPx` and `sz` are raw uint64 fixed-point integers encoded as decimal
+// strings. Human symbol/price/size require venue metadata and are intentionally
+// not inferred here.
+
+namespace HyperliquidCore {
+  type HlCoreLimitOrderContext = {
+    // Common envelope.
+    meta: Core::ActionMeta,
+    // Always `{ name: "hyperliquid" }`.
+    venue: HlVenue,
+    // Hyperliquid asset id.
+    asset: Long,
+    // Raw direction flag from CoreWriter.
+    isBuy: Bool,
+    // Derived policy direction: "long" when isBuy, otherwise "short".
+    side: String,
+    // Raw uint64 limit price, decimal digits.
+    limitPx: String,
+    // Raw uint64 size, decimal digits.
+    sz: String,
+    // Whether the order can only reduce existing exposure.
+    reduceOnly: Bool,
+    // Raw encoded time-in-force byte.
+    encodedTif: Long,
+    // Raw client order id, decimal digits.
+    cloid: String,
+    // Manifest-extensible slot.
+    custom?: HlCoreLimitOrderCustomContext,
+  };
+
+  // Manifest-extensible slot. Placeholder (no fields).
+  type HlCoreLimitOrderCustomContext = {};
+
+  action "HlCoreLimitOrder" appliesTo {
+    principal: Wallet,
+    resource: Protocol,
+    context: HlCoreLimitOrderContext,
+  };
+}

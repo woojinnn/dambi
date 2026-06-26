@@ -2,8 +2,9 @@
 //! from the bundled phase1A Cedar seed JSON, plus three curated sets that
 //! group related policies.
 //!
-//! Idempotent: each listing is `INSERT … ON CONFLICT (slug) DO NOTHING`.
-//! Re-running the binary leaves an already-seeded DB unchanged.
+//! Idempotent: each official listing is upserted by `slug`, and its `1.0.0`
+//! version body is refreshed from this seed. Re-running the binary updates stale
+//! marketplace seed rows without changing install history.
 //!
 //! Run:
 //!   cargo run -p policy-server --bin seed_market
@@ -17,6 +18,7 @@ use std::collections::BTreeSet;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx_core::query::query;
+use sqlx_core::row::Row;
 use sqlx_postgres::PgPool;
 use uuid::Uuid;
 
@@ -78,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("loaded {} phase1 entries", entries.len());
 
     // ── Insert each policy as its own listing ────────────────────────────
-    let mut inserted_policies = 0usize;
+    let mut upserted_policies = 0usize;
     for entry in &entries {
         let domain = infer_domain(&entry.id);
         let category = infer_category(&entry.id, &entry.manifest);
@@ -99,10 +101,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
         if inserted {
-            inserted_policies += 1;
+            upserted_policies += 1;
         }
     }
-    tracing::info!("inserted {inserted_policies} new policy listings");
+    tracing::info!("upserted {upserted_policies} policy listings");
 
     // ── Insert three curated sets ────────────────────────────────────────
     let known: BTreeSet<&str> = entries.iter().map(|e| e.id.as_str()).collect();
@@ -186,6 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "hl-confirm-unknown",
                 "hl-confirm-usd-send",
                 "hl-confirm-withdraw",
+                "hl-corewriter-no-short-perp",
                 "hl-no-short-perp",
             ],
         },
@@ -209,7 +212,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let entries_by_id: std::collections::HashMap<&str, &SeedEntry> =
         entries.iter().map(|e| (e.id.as_str(), e)).collect();
 
-    let mut inserted_sets = 0usize;
+    let mut upserted_sets = 0usize;
     for cur in &curations {
         let members: Vec<Value> = cur
             .member_slugs
@@ -233,10 +236,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let inserted = insert_set_listing(&pool, cur, &members).await?;
         if inserted {
-            inserted_sets += 1;
+            upserted_sets += 1;
         }
     }
-    tracing::info!("inserted {inserted_sets} new set listings");
+    tracing::info!("upserted {upserted_sets} set listings");
 
     tracing::info!("marketplace seed complete");
     Ok(())
@@ -294,15 +297,29 @@ async fn insert_policy_listing(
     let intents_json = json!(intents);
 
     let mut tx = pool.begin().await?;
-    let inserted = query(
+    let row = query(
         "INSERT INTO market_listings (
            id, slug, kind, publisher_id, publisher_tier, display_name, description,
            domain, category, intents, severity, status, current_version, forked_from,
-           created_at, updated_at
-         ) VALUES ($1, $2, 'policy', $3, 'official', $4, NULL,
-                   $5, $6, $7, $8, 'published', '1.0.0', NULL,
-                   $9, $9)
-         ON CONFLICT (slug) DO NOTHING",
+         created_at, updated_at
+       ) VALUES ($1, $2, 'policy', $3, 'official', $4, NULL,
+                 $5, $6, $7, $8, 'published', '1.0.0', NULL,
+                 $9, $9)
+        ON CONFLICT (slug) DO UPDATE SET
+          kind = 'policy',
+          publisher_id = EXCLUDED.publisher_id,
+          publisher_tier = EXCLUDED.publisher_tier,
+          display_name = EXCLUDED.display_name,
+          description = EXCLUDED.description,
+          domain = EXCLUDED.domain,
+          category = EXCLUDED.category,
+          intents = EXCLUDED.intents,
+          severity = EXCLUDED.severity,
+          status = 'published',
+          current_version = '1.0.0',
+          forked_from = NULL,
+          updated_at = EXCLUDED.updated_at
+        RETURNING id",
     )
     .bind(id)
     .bind(slug)
@@ -313,22 +330,24 @@ async fn insert_policy_listing(
     .bind(&intents_json)
     .bind(severity)
     .bind(now)
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
-
-    if inserted.rows_affected() == 0 {
-        // Already present — leave as-is.
-        tx.commit().await?;
-        return Ok(false);
-    }
+    let listing_id: Uuid = row.get("id");
 
     query(
         "INSERT INTO market_listing_versions (
            listing_id, version, major, minor, patch,
            cedar_text, manifest, policy_tree, members, changelog, published_at
-         ) VALUES ($1, '1.0.0', 1, 0, 0, $2, $3, NULL, NULL, NULL, $4)",
+         ) VALUES ($1, '1.0.0', 1, 0, 0, $2, $3, NULL, NULL, NULL, $4)
+         ON CONFLICT (listing_id, version) DO UPDATE SET
+           cedar_text = EXCLUDED.cedar_text,
+           manifest = EXCLUDED.manifest,
+           policy_tree = NULL,
+           members = NULL,
+           changelog = NULL,
+           published_at = EXCLUDED.published_at",
     )
-    .bind(id)
+    .bind(listing_id)
     .bind(cedar_text)
     .bind(manifest)
     .bind(now)
@@ -356,15 +375,29 @@ async fn insert_set_listing(
     let members_json = Value::Array(members.to_vec());
 
     let mut tx = pool.begin().await?;
-    let inserted = query(
+    let row = query(
         "INSERT INTO market_listings (
            id, slug, kind, publisher_id, publisher_tier, display_name, description,
            domain, intents, severity, status, current_version, forked_from,
-           created_at, updated_at
-         ) VALUES ($1, $2, 'set', $3, 'official', $4, $5,
-                   NULL, NULL, NULL, 'published', '1.0.0', NULL,
-                   $6, $6)
-         ON CONFLICT (slug) DO NOTHING",
+         created_at, updated_at
+       ) VALUES ($1, $2, 'set', $3, 'official', $4, $5,
+                 NULL, NULL, NULL, 'published', '1.0.0', NULL,
+                 $6, $6)
+        ON CONFLICT (slug) DO UPDATE SET
+          kind = 'set',
+          publisher_id = EXCLUDED.publisher_id,
+          publisher_tier = EXCLUDED.publisher_tier,
+          display_name = EXCLUDED.display_name,
+          description = EXCLUDED.description,
+          domain = NULL,
+          category = NULL,
+          intents = NULL,
+          severity = NULL,
+          status = 'published',
+          current_version = '1.0.0',
+          forked_from = NULL,
+          updated_at = EXCLUDED.updated_at
+        RETURNING id",
     )
     .bind(id)
     .bind(cur.slug)
@@ -372,21 +405,24 @@ async fn insert_set_listing(
     .bind(&display_name)
     .bind(&description)
     .bind(now)
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
-
-    if inserted.rows_affected() == 0 {
-        tx.commit().await?;
-        return Ok(false);
-    }
+    let listing_id: Uuid = row.get("id");
 
     query(
         "INSERT INTO market_listing_versions (
            listing_id, version, major, minor, patch,
            cedar_text, manifest, policy_tree, members, changelog, published_at
-         ) VALUES ($1, '1.0.0', 1, 0, 0, NULL, NULL, NULL, $2, NULL, $3)",
+         ) VALUES ($1, '1.0.0', 1, 0, 0, NULL, NULL, NULL, $2, NULL, $3)
+         ON CONFLICT (listing_id, version) DO UPDATE SET
+           cedar_text = NULL,
+           manifest = NULL,
+           policy_tree = NULL,
+           members = EXCLUDED.members,
+           changelog = NULL,
+           published_at = EXCLUDED.published_at",
     )
-    .bind(id)
+    .bind(listing_id)
     .bind(&members_json)
     .bind(now)
     .execute(&mut *tx)
@@ -424,7 +460,15 @@ fn infer_category(slug: &str, manifest: &Value) -> &'static str {
             "claim" => "rewards",
             "delegate" => "governance",
             // perp split: position trading vs account ops
-            "hl_update_leverage" | "hl_order" | "hl_twap_order" | "hl_unknown" => "derivatives",
+            "place_order"
+            | "change_leverage"
+            | "adjust_margin"
+            | "hl_core_limit_order"
+            | "hl_update_leverage"
+            | "hl_order"
+            | "hl_twap_order"
+            | "hl_unknown" => "derivatives",
+            "protocol_authorization" if slug == "hl-confirm-approve-agent" => "perps",
             "hl_approve_agent" | "hl_usd_send" | "hl_withdraw" => "perps",
             _ => "others",
         };
@@ -481,6 +525,9 @@ fn infer_severity(slug: &str) -> &'static str {
     // Named "-warn" but actually a hard block (burn-address sends are permanent
     // loss). See policy-packages README.
     if slug == "send-first-time-or-burn-recipient-warn" {
+        return "deny";
+    }
+    if slug == "hl-no-short-perp" || slug == "hl-corewriter-no-short-perp" {
         return "deny";
     }
     if slug.ends_with("-deny") {
@@ -612,6 +659,71 @@ mod tests {
                 .all(|entry| entry.manifest.get("id").and_then(Value::as_str) == Some(&entry.id)),
             "each seed manifest id must match its listing id",
         );
+    }
+
+    #[test]
+    fn phase1_seed_covers_hl_corewriter_and_typed_agent_surfaces() {
+        let entries = seed_entries();
+        let by_id: std::collections::HashMap<&str, &SeedEntry> = entries
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect();
+
+        let approve_agent = by_id
+            .get("hl-confirm-approve-agent")
+            .expect("approve-agent seed exists");
+        assert!(
+            approve_agent
+                .cedar
+                .contains(r#"Permission::Action::"ProtocolAuthorization""#),
+            "approve-agent seed must match the typed-data decoder's permission action"
+        );
+        assert_eq!(
+            approve_agent
+                .manifest
+                .pointer("/trigger/where/action.tag/eq")
+                .and_then(Value::as_str),
+            Some("protocol_authorization"),
+            "approve-agent seed trigger must follow the typed-data action tag"
+        );
+
+        let corewriter = by_id
+            .get("hl-corewriter-no-short-perp")
+            .expect("CoreWriter no-short seed exists");
+        assert!(
+            corewriter
+                .cedar
+                .contains(r#"HyperliquidCore::Action::"HlCoreLimitOrder""#),
+            "CoreWriter no-short seed must target the CoreWriter limit-order action"
+        );
+        assert_eq!(
+            corewriter
+                .manifest
+                .pointer("/trigger/where/action.tag/eq")
+                .and_then(Value::as_str),
+            Some("hl_core_limit_order"),
+            "CoreWriter no-short seed trigger must route on hl_core_limit_order"
+        );
+    }
+
+    #[test]
+    fn hl_market_metadata_tracks_current_action_tags() {
+        assert_eq!(
+            infer_category(
+                "hl-confirm-approve-agent",
+                &json!({"trigger": {"where": {"action.tag": {"eq": "protocol_authorization"}}}}),
+            ),
+            "perps"
+        );
+        assert_eq!(
+            infer_category(
+                "hl-corewriter-no-short-perp",
+                &json!({"trigger": {"where": {"action.tag": {"eq": "hl_core_limit_order"}}}}),
+            ),
+            "derivatives"
+        );
+        assert_eq!(infer_severity("hl-no-short-perp"), "deny");
+        assert_eq!(infer_severity("hl-corewriter-no-short-perp"), "deny");
     }
 
     #[test]

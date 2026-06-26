@@ -78,7 +78,7 @@ export const POLICY_COPY: Record<string, PolicyCopy> = {
   "hl-confirm-approve-agent": {
     "title": "Hyperliquid에서 \"대리 거래 에이전트 지갑(agent wallet)\"을 승인하기 직전, 서명 전에 확인하라고 경고",
     "what": "Hyperliquid에서 내 계정 대신 거래를 실행할 수 있는 agent wallet(에이전트 지갑)을 인가하는 트랜잭션을 잡아내, 서명을 막진 않고 \"정말 이 지갑에 거래 권한을 줄 거냐\"고 한 번 더 확인을 요구합니다. severity가 warn이라 차단(Fail)이 아니라 경고(Warn)로, 사용자가 내용을 확인한 뒤 직접 진행 여부를 정하게 합니다.",
-    "why": "Hyperliquid의 agent wallet 승인은 그 지갑에 \"내 계정 명의로 주문을 낼 수 있는\" 거래 권한을 통째로 위임하는 행위입니다. 한 번 승인하면 그 에이전트 지갑은 내가 매번 서명하지 않아도 내 포지션을 열고 닫을 수 있게 됩니다. 문제는 이 서명이 자금이 즉시 빠져나가는 transfer가 아니라 \"권한 위임\"이라 화면만 봐서는 위험을 체감하기 어렵다는 점입니다. 피싱 사이트가 \"거래봇 연동\", \"자동매매 활성화\" 같은 그럴듯한 문구로 자기네 통제 지갑을 에이전트로 등록시키면, 사용자는 무해한 설정인 줄 알고 승인하지만 실제로는 공격자 지갑이 내 계정으로 마음대로 거래할 길을 열어주게 됩니다(meta의 위협 태그도 confirm-gate, phishing-approval). 그래서 이 정책은 hl_approve_agent 액션을 만나면 무조건 한 번 멈춰 세워, \"지금 누군가에게 내 거래 권한을 넘기는 중\"이라는 사실을 사용자가 인지하고 넘어가게 합니다."
+    "why": "Hyperliquid의 agent wallet 승인은 그 지갑에 \"내 계정 명의로 주문을 낼 수 있는\" 거래 권한을 통째로 위임하는 행위입니다. 한 번 승인하면 그 에이전트 지갑은 내가 매번 서명하지 않아도 내 포지션을 열고 닫을 수 있게 됩니다. 문제는 이 서명이 자금이 즉시 빠져나가는 transfer가 아니라 \"권한 위임\"이라 화면만 봐서는 위험을 체감하기 어렵다는 점입니다. 피싱 사이트가 \"거래봇 연동\", \"자동매매 활성화\" 같은 그럴듯한 문구로 자기네 통제 지갑을 에이전트로 등록시키면, 사용자는 무해한 설정인 줄 알고 승인하지만 실제로는 공격자 지갑이 내 계정으로 마음대로 거래할 길을 열어주게 됩니다. 그래서 이 정책은 Hyperliquid의 `protocol_authorization` 중 `permission == \"agent\"` 권한 부여를 만나면 한 번 멈춰 세워, \"지금 누군가에게 내 거래 권한을 넘기는 중\"이라는 사실을 사용자가 인지하고 넘어가게 합니다."
   },
   "hl-confirm-high-leverage": {
     "title": "Hyperliquid에서 레버리지를 20배 넘게 올릴 때 적용 전 확인 경고",
@@ -104,6 +104,11 @@ export const POLICY_COPY: Record<string, PolicyCopy> = {
     "title": "Hyperliquid 무기한 선물(perp) 숏 주문은 서명 전에 무조건 차단",
     "what": "Hyperliquid에서 perp(무기한 선물)을 short(가격 하락에 베팅) 방향으로 여는 주문을 서명 직전에 막습니다. 같은 hl_order라도 long(상승 베팅)이거나 거래소가 Hyperliquid가 아니면 통과합니다. 즉 \"Hyperliquid + 숏\" 두 조건이 동시에 맞을 때만 걸리는 핀포인트 차단입니다.",
     "why": "perp short는 가격이 오를수록 손실이 커지는데, 롱과 달리 가격 상한이 없으므로 손실이 이론상 무한대로 벌어집니다. 예를 들어 어떤 토큰을 1배 숏 쳤는데 그 토큰이 5배로 튀면 원금의 4배를 날립니다 (롱이었다면 최대 손실이 원금 100%로 제한). 게다가 Hyperliquid 같은 온체인 perp DEX는 청산이 자동·즉시라 한밤중 펌핑 한 번에 강제청산당하기 쉽습니다. 이 정책은 \"나는 Hyperliquid에서 숏은 절대 안 한다\"고 선언한 사용자를 위해, 본인의 오조작(롱/숏 토글 실수)이나 피싱 dApp이 몰래 끼워 넣은 숏 주문이 지갑 서명까지 도달하는 것을 원천 봉쇄합니다."
+  },
+  "hl-corewriter-no-short-perp": {
+    "title": "Hyperliquid CoreWriter 숏 주문은 온체인 서명 전에 무조건 차단",
+    "what": "HyperEVM CoreWriter `sendRawAction`으로 들어오는 Hyperliquid limit order 중 short 방향이고 reduce-only가 아닌 주문을 차단합니다. 일반 `/exchange` 주문을 막는 `hl-no-short-perp`와 같은 의도지만, CoreWriter calldata는 별도 `hl_core_limit_order` 액션으로 디코딩되므로 이 정책이 따로 필요합니다.",
+    "why": "CoreWriter 주문은 지갑 입장에서는 온체인 calldata처럼 보이지만, 실제 의미는 Hyperliquid CORE 주문입니다. 여기서 `isBuy == false`는 short 방향이고 `reduceOnly == false`면 새 short 노출을 열거나 키울 수 있습니다. 기존 `/exchange` 전용 no-short 정책만 설치되어 있으면 이 경로는 `Perp::PlaceOrder`가 아니라 `HyperliquidCore::HlCoreLimitOrder`라 매치되지 않습니다. 이 정책은 같은 no-short 의도를 CoreWriter 경로까지 확장해서, dApp이 HTTP `/exchange` 대신 온체인 CoreWriter로 숏 주문을 우회 제출하는 경우도 서명 전에 끊습니다."
   },
   "holding-pct-outflow-warn": {
     "title": "한 토큰을 한 번에 보유량의 90% 넘게 보내면 경고",
@@ -195,4 +200,3 @@ export const POLICY_COPY: Record<string, PolicyCopy> = {
 export function policyCopy(slug: string): PolicyCopy | undefined {
   return POLICY_COPY[slug];
 }
-

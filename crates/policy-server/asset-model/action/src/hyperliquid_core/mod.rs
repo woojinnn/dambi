@@ -16,7 +16,7 @@
 //! `withdraw` is already a Lending tag, and the engine's flat action registries
 //! require unique tags. Policies match on these prefixed tags.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tsify_next::Tsify;
 
 use policy_state::primitives::{Address, Decimal};
@@ -29,6 +29,9 @@ use policy_state::primitives::{Address, Decimal};
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "action")]
 pub enum HyperliquidCoreAction {
+    /// CoreWriter action 1: raw HyperCore limit-order intent.
+    #[serde(rename = "hl_core_limit_order")]
+    CoreLimitOrder(HlCoreLimitOrderAction),
     /// Withdraw USDC off the L1 to a destination (`{"type":"withdraw3"}`).
     #[serde(rename = "hl_withdraw")]
     Withdraw(HlWithdrawAction),
@@ -78,6 +81,7 @@ impl HyperliquidCoreAction {
     #[must_use]
     pub const fn action_tag(&self) -> &'static str {
         match self {
+            Self::CoreLimitOrder(_) => "hl_core_limit_order",
             Self::Withdraw(_) => "hl_withdraw",
             Self::UsdSend(_) => "hl_usd_send",
             Self::SpotSend(_) => "hl_spot_send",
@@ -99,6 +103,56 @@ impl HyperliquidCoreAction {
     pub const fn venue_name(&self) -> Option<&'static str> {
         Some("hyperliquid")
     }
+}
+
+fn raw_uint_string_from_str_or_num<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error as _;
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StrOrNum {
+        Num(serde_json::Number),
+        Str(String),
+    }
+
+    match StrOrNum::deserialize(deserializer)? {
+        StrOrNum::Num(n) => Ok(n.to_string()),
+        StrOrNum::Str(s) if s.parse::<u128>().is_ok() => Ok(s),
+        StrOrNum::Str(s) => Err(D::Error::custom(format!(
+            "raw Hyperliquid uint from string {s:?}: expected decimal digits"
+        ))),
+    }
+}
+
+/// CoreWriter action 1: raw HyperCore limit-order intent.
+///
+/// These fields intentionally preserve Hyperliquid's on-chain CoreWriter raw
+/// representation. `asset` is the HL asset id, while `limit_px` and `sz` are raw
+/// uint64 fixed-point integers whose human units require a venue metadata
+/// snapshot. They must not be mislabeled as decimal price/size.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+pub struct HlCoreLimitOrderAction {
+    /// Hyperliquid asset id (`asset`).
+    pub asset: u32,
+    /// `isBuy` — `true` ⇒ buy/long direction, `false` ⇒ sell/short direction.
+    pub is_buy: bool,
+    /// Raw uint64 limit price (`limitPx`) as decimal digits.
+    #[serde(deserialize_with = "raw_uint_string_from_str_or_num")]
+    pub limit_px: String,
+    /// Raw uint64 size (`sz`) as decimal digits.
+    #[serde(deserialize_with = "raw_uint_string_from_str_or_num")]
+    pub sz: String,
+    /// `reduceOnly` — when true the order may only reduce existing exposure.
+    pub reduce_only: bool,
+    /// Raw encoded time-in-force byte (`encodedTif`).
+    pub encoded_tif: u8,
+    /// Client order id (`cloid`) as decimal digits.
+    #[serde(deserialize_with = "raw_uint_string_from_str_or_num")]
+    pub cloid: String,
 }
 
 /// USDC withdrawal off the L1: `{"type":"withdraw3"}`.
@@ -260,6 +314,15 @@ mod tests {
     #[test]
     fn action_tag_matches_serde() {
         let cases: Vec<HyperliquidCoreAction> = vec![
+            HyperliquidCoreAction::CoreLimitOrder(HlCoreLimitOrderAction {
+                asset: 110_076,
+                is_buy: false,
+                limit_px: "62653000".to_owned(),
+                sz: "1000".to_owned(),
+                reduce_only: false,
+                encoded_tif: 2,
+                cloid: "42".to_owned(),
+            }),
             HyperliquidCoreAction::Withdraw(HlWithdrawAction {
                 destination: Address::from([0x11; 20]),
                 amount: Decimal::new("100"),

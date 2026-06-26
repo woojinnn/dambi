@@ -236,6 +236,7 @@ const CATEGORY_BY_SLUG: Record<string, CategoryKey> = {
   "hl-confirm-high-leverage": "Perp",
   "perp-leverage-cap-deny": "Perp",
   "hl-no-short-perp": "Perp",
+  "hl-corewriter-no-short-perp": "Perp",
   "hl-confirm-unknown": "Perp",
   "perp-leverage-increase-warn": "Perp",
   "perp-market-slippage-warn": "Perp",
