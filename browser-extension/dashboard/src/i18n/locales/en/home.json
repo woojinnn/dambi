@@ -35,7 +35,10 @@
     "uncategorized": "Uncategorized",
     "activeCount": "{{count}} active",
     "emptyPackage": "No policies in this package",
-    "flip": "Flip"
+    "flip": "Flip",
+    "tag": "Built-in",
+    "protecting": "policies protecting this wallet",
+    "applied": "applied"
   },
   "policy": {
     "active": "Active",

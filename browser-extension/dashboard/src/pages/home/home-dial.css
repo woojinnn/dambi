@@ -178,20 +178,11 @@
 @keyframes dpIn { from { transform: translateX(10px); } to { transform: none; } }
 
 /* 우측 패널 지갑 헤더 — 좌측 카드와 동일하게 지갑 틴트 + 흰색 그라데이션(data-hue 는 WalletGovernance). */
-.dp-head[data-hue="navy"]   { --wc-tint: var(--wallet-navy-tint); }
-.dp-head[data-hue="blue"]   { --wc-tint: var(--wallet-blue-tint); }
-.dp-head[data-hue="violet"] { --wc-tint: var(--wallet-violet-tint); }
-.dp-head[data-hue="slate"]  { --wc-tint: var(--wallet-slate-tint); }
-.dp-head[data-hue="teal"]   { --wc-tint: var(--wallet-teal-tint); }
 .dp-head {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 18px;
   border-bottom: 1px solid var(--hairline-soft);
-  background:
-    linear-gradient(170deg,
-      rgba(255,255,255,0.97) 0%, rgba(255,255,255,0.84) 60%,
-      rgba(255,255,255,0.4) 88%, rgba(255,255,255,0.05) 100%),
-    var(--wc-tint, var(--fog-200));
+  background: var(--surface);
 }
 .dp-coin {
   width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
@@ -314,7 +305,7 @@
   gap: 12px;
   align-content: start;
 }
-.pkc { height: 192px; perspective: 1400px; }
+.pkc { height: 236px; perspective: 1600px; }
 .pkc-in { position: relative; width: 100%; height: 100%; transition: transform 520ms cubic-bezier(.34,.9,.28,1); transform-style: preserve-3d; }
 .pkc.flip .pkc-in { transform: rotateY(180deg); }
 /* 보이는 면만 상호작용 가능하게 한다. pointer-events:none 만으로는 두 면이 3D
@@ -334,57 +325,77 @@
 .pkc.off { opacity: 0.62; }
 
 /* front */
-.pkc-front { padding: 15px 15px 13px; cursor: pointer; transition: transform 150ms ease, box-shadow 170ms ease, border-color 150ms ease, visibility 0s; }
-.pkc:not(.flip) .pkc-front:hover { transform: translateY(-2px); border-color: var(--cyan-300, #a9c8cf); box-shadow: 0 1px 2px rgba(72,90,94,0.05), 0 16px 30px -20px rgba(72,90,94,0.5); }
-.pkc-ftop { display: flex; align-items: center; gap: 9px; }
-.pkc-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--fog-200); color: var(--slate-500); flex-shrink: 0; }
-/* 패키지 폴더 아이콘 = 선택 지갑 색(좌측 카드·우측 아바타와 통일) */
-.pkc-ic[data-hue="blue"]   { background: var(--wallet-blue-tint);   color: var(--wallet-blue); }
-.pkc-ic[data-hue="violet"] { background: var(--wallet-violet-tint); color: var(--wallet-violet); }
-.pkc-ic[data-hue="navy"]   { background: var(--wallet-navy-tint);   color: var(--wallet-navy); }
-.pkc-ic[data-hue="slate"]  { background: var(--wallet-slate-tint);  color: var(--wallet-slate); }
-.pkc-ic[data-hue="teal"]   { background: var(--wallet-teal-tint);   color: var(--wallet-teal); }
-.pkc-ic svg { width: 16px; height: 16px; }
-.pkc-name { font-size: 14px; font-weight: 720; color: var(--slate-800); letter-spacing: -0.01em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pkc-sw { flex-shrink: 0; }
-.pkc-fmeta { margin-top: 14px; font-size: 12px; color: var(--slate-400); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
+.pkc-front { padding: 21px 24px 15px; cursor: pointer; position: relative; transition: transform 150ms ease, box-shadow 170ms ease, border-color 150ms ease, visibility 0s; }
+.pkc:not(.flip) .pkc-front:hover { transform: translateY(-2px); border-color: var(--navy-200); box-shadow: 0 1px 2px rgba(6,32,63,0.05), 0 14px 30px -20px rgba(6,32,63,0.45); }
+
+/* 담비 실루엣 워터마크 — 앞면 전용·지갑 색 tint. 얼굴(머리·코)은 카드 안, 하단(목/가슴)만 블리드. */
+.pkc-ghost { position: absolute; right: 14px; bottom: -24px; width: 162px; height: 162px; opacity: 0.06; pointer-events: none; z-index: 0; }
+.pkc-ghost i { display: block; width: 100%; height: 100%; background: var(--wallet-navy, #06203F);
+  /* CSS url()은 CSS 파일(assets/) 기준이라 루트절대 /picture/ 사용(확장 루트 = 도장 png와 동일 위치). */
+  -webkit-mask: url('/picture/dambi-glyph-navy.png') center bottom/contain no-repeat;
+          mask: url('/picture/dambi-glyph-navy.png') center bottom/contain no-repeat; }
+.pkc-ghost[data-hue="blue"] i   { background: var(--wallet-blue); }
+.pkc-ghost[data-hue="violet"] i { background: var(--wallet-violet); }
+.pkc-ghost[data-hue="navy"] i   { background: var(--wallet-navy); }
+.pkc-ghost[data-hue="slate"] i  { background: var(--wallet-slate); }
+.pkc-ghost[data-hue="teal"] i   { background: var(--wallet-teal); }
+
+/* 헤더: 제목 + 태그칩 + 마스터 pill */
+.pkc-ftop { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; }
+.pkc-name { font-size: 20px; font-weight: 800; color: var(--navy-600); letter-spacing: -0.025em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-tag { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--neutral-600, #606369); background: var(--neutral-100, #E9EBED); padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.pkc-sw { flex-shrink: 0; margin-left: auto; }
+.pkc-sw input:checked ~ .track { background: var(--navy-500); }
+
+/* 중앙: 큰 숫자 + 설명 */
+.pkc-stat { position: relative; z-index: 1; margin-top: 16px; display: flex; align-items: baseline; gap: 8px; }
+.pkc-statnum { font-family: var(--ff-mono); font-size: 38px; font-weight: 700; line-height: 1; color: var(--navy-500); font-variant-numeric: tabular-nums; }
+.pkc.off .pkc-statnum { color: var(--slate-400); }
+.pkc-statlbl { font-size: 13.5px; color: var(--slate-500); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 도장 스트립(앞면 — 읽기 전용 미리보기). 정책 1개=도장 1개, MAX 6(초과 시 5 + +N). */
+.pkc-strip { position: relative; z-index: 1; margin-top: 13px; display: flex; align-items: center; gap: 5px; }
+.pkc-stamp { position: relative; width: 23px; height: 23px; border-radius: 50%; border: 1.5px dashed var(--navy-400); background: transparent; flex: none; transition: background .25s ease, border-color .25s ease; }
+.pkc-stamp.on { border-color: var(--navy-200); background: var(--navy-50); }
+.pkc-stamp-paw { position: absolute; top: 15%; left: 15%; width: 70%; height: 70%; object-fit: contain; transform: scale(0.2); opacity: 0; transform-origin: center 64%; transition: transform .44s cubic-bezier(.34,1.7,.5,1), opacity .2s ease; pointer-events: none; }
+.pkc-stamp.on .pkc-stamp-paw { transform: scale(1); opacity: 1; }
+.pkc-more { display: inline-grid; place-items: center; min-width: 23px; height: 23px; padding: 0 6px; border-radius: 999px; background: var(--neutral-100, #E9EBED); color: var(--neutral-600, #606369); font-family: var(--ff-mono); font-size: 11px; font-weight: 700; flex: none; }
+
+/* 푸터: {총} 정책 · 활성 {N}  /  뒤집기 */
+.pkc-ffoot { position: relative; z-index: 1; margin-top: auto; padding-top: 12px; display: flex; align-items: center; gap: 8px; }
+.pkc-fmeta { font-size: 12px; color: var(--slate-400); font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 6px; }
 .pkc-fmeta b { color: var(--slate-700); font-weight: 700; }
 .pkc-dot { color: var(--slate-300); }
 .pkc-active { color: var(--navy-600); font-weight: 650; }
 .pkc.off .pkc-active { color: var(--slate-400); }
-.pkc-ffoot { margin-top: auto; display: flex; align-items: center; gap: 8px; }
-.pkc-pub {
-  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
-  border: 0; background: none; cursor: pointer; padding: 0; color: var(--slate-300); flex-shrink: 0;
-  transition: background 120ms ease, color 120ms ease;
-}
-.pkc-pub:hover { background: var(--fog-300); color: var(--slate-700); }
-.pkc-pub svg { width: 15px; height: 15px; }
 .pkc-fliphint { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--slate-400); opacity: 0; transition: opacity 150ms ease, color 150ms ease; }
 .pkc-fliphint svg { width: 14px; height: 14px; }
 .pkc:not(.flip) .pkc-front:hover .pkc-fliphint { opacity: 1; }
-.pkc-fliphint:hover { color: var(--cyan-600, var(--slate-700)); }
+.pkc-fliphint:hover { color: var(--navy-500); }
 
 /* back */
 .pkc-back { transform: rotateY(180deg); transition: visibility 0s; }
-.pkc-bhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--hairline-soft); }
-.pkc-bback { display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; cursor: pointer; padding: 0; color: var(--slate-400); flex-shrink: 0; }
+.pkc-bhead { display: flex; align-items: center; gap: 9px; padding: 13px 16px; border-bottom: 1px solid var(--neutral-100, #E9EBED); }
+.pkc-bback { display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; cursor: pointer; padding: 0; color: var(--neutral-500, #797C81); flex-shrink: 0; }
 .pkc-bback:hover { color: var(--slate-700); }
 .pkc-bback svg { width: 16px; height: 16px; }
-.pkc-bname { font-size: 13px; font-weight: 720; color: var(--slate-800); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pkc-blist { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
-.pkc-empty { color: var(--slate-400); font-size: 12px; text-align: center; padding: 18px 8px; }
+.pkc-bname { font-size: 15px; font-weight: 800; color: var(--navy-600); letter-spacing: -0.02em; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-bcount { flex-shrink: 0; font-size: 12.5px; color: var(--slate-500); font-variant-numeric: tabular-nums; }
+.pkc-bcount b { color: var(--navy-600); font-weight: 700; }
+.pkc-blist { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 10px; display: flex; flex-direction: column; }
+.pkc-empty { color: var(--slate-400); font-size: 12px; text-align: center; padding: 24px 8px; }
 .pkc-pol {
-  display: flex; align-items: center; gap: 7px;
-  padding: 6px 7px; border-radius: 8px; transition: background 120ms ease, opacity 120ms ease;
+  display: flex; align-items: center; gap: 9px; height: 35px; flex-shrink: 0;
+  transition: opacity 120ms ease;
 }
-.pkc-pol:hover { background: var(--fog-100); }
-.pkc-pol.off { opacity: 0.5; }
+.pkc-pol + .pkc-pol { border-top: 1px solid var(--neutral-100, #E9EBED); }
 .pkc-pol .pr-dot { width: 7px; height: 7px; }
-.pkc-pol-name { font-size: 12px; font-weight: 600; color: var(--slate-700); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-pol.off .pr-dot { opacity: 0.45; }
+.pkc-pol-name { font-size: 13.5px; font-weight: 600; color: var(--slate-800); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pkc-pol.off .pkc-pol-name { color: var(--neutral-500, #797C81); font-weight: 500; }
 .pkc-pol-state {
-  flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
-  padding: 2px 6px; border-radius: 999px; background: var(--fog-200); color: var(--slate-400);
+  flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 3px 8px; border-radius: 999px; background: var(--neutral-100, #E9EBED); color: var(--neutral-500, #797C81);
 }
 .pkc-pol-state.on { background: var(--navy-50); color: var(--navy-600); }
 .pkc-ox {
