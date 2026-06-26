@@ -84,6 +84,7 @@ body.pc-big { width: 800px; }
 .pc-pkg-meta b { font-family: var(--ff-mono); font-weight: 700; color: var(--slate-600); }
 
 /* toggle (master + member) */
+/* 패키지 마스터 토글 = 일반 pill (도장 아님 — 개별 정책 토글만 도장). */
 .pc-tog { width: 40px; height: 23px; border-radius: 999px; background: var(--brand-600x); position: relative; cursor: pointer; flex: 0 0 auto; border: 0; padding: 0; transition: background .15s; }
 .pc-tog::after { content: ""; position: absolute; top: 2.5px; left: 19.5px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
 .pc-tog.off { background: var(--mist-200); }
@@ -91,13 +92,23 @@ body.pc-big { width: 800px; }
 .pc-tog.mixed { background: var(--brand-300); }
 .pc-tog.mixed::after { left: 10.5px; }
 .pc-tog.mixed::before { content: ""; position: absolute; top: 10.5px; left: 7px; width: 7px; height: 2px; border-radius: 2px; background: var(--white); z-index: 1; }
-.pc-tog.sm { width: 36px; height: 21px; }
-.pc-tog.sm::after { width: 16px; height: 16px; top: 2.5px; left: 17.5px; }
-.pc-tog.sm.off::after { left: 2.5px; }
+
+/* 개별 정책 토글(.sm)만 = 보호 도장 — 24px 점선 원 + 발자국(비율 고정, 솔리드 navy). */
+.pc-tog.sm { width: 24px; height: 24px; border-radius: 999px; background: transparent; border: 1.5px dashed var(--navy-400); transition: background .25s ease, border-color .25s ease; }
+.pc-tog.sm::after, .pc-tog.sm::before { content: none; }
+.pc-tog.sm .pc-paw { position: absolute; top: 14%; left: 14%; width: 72%; height: 72%; object-fit: contain; pointer-events: none;
+  transform: scale(0.2); opacity: 0; transform-origin: center 64%; transition: transform .44s cubic-bezier(.34,1.7,.5,1), opacity .2s ease; }
+.pc-tog.sm:not(.off) { border-color: var(--navy-200); background: var(--navy-50); }
+.pc-tog.sm:not(.off) .pc-paw { transform: scale(1); opacity: 1; }
+.pc-tog.sm.off { border-color: var(--navy-400); background: transparent; }
+.pc-tog.sm.off .pc-paw { transform: scale(0.2); opacity: 0; }
 
 /* package members */
 .pc-pkg-members { border-top: 1px solid var(--hair-soft); padding: 4px 13px 8px 39px; }
-.pc-mem { display: flex; align-items: center; gap: 9px; padding: 9px 0; }
+/* 행 전체 클릭으로 정책 on/off (data-act=member 는 행에). 버튼은 a11y용 switch. */
+.pc-mem { display: flex; align-items: center; gap: 9px; padding: 9px 0; cursor: pointer; user-select: none; transition: background .12s ease; }
+.pc-mem:hover { background: rgba(13,17,24,0.035); }
+.pc-mem:active { background: rgba(13,17,24,0.06); }
 .pc-mem + .pc-mem { border-top: 1px solid var(--hair-soft); }
 .pc-mem-sev { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .pc-mem-sev.deny { background: var(--fail-500); } .pc-mem-sev.warn { background: var(--warn-500); } .pc-mem-sev.unknown { background: var(--slate-300); }

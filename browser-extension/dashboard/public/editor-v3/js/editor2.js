@@ -1,3 +1,11 @@
+// 지갑 색 — 홈(WalletGovernance)과 동일 규칙: localStorage 사용자지정 우선, 없으면 주소-해시.
+// 같은 지갑이 홈·정책관리에서 같은 색으로 보이게 한다(주소는 소문자 정규화).
+function walletHue(addr) {
+  const s = String(addr || "").toLowerCase();
+  try { const m = JSON.parse(localStorage.getItem("dambi:wallet-colors") || "{}"); if (m && m[s]) return m[s]; } catch (e) {}
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return ["blue", "violet", "navy"][h % 3];
+}
 const E2_ICONS = {
   search: /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("circle", { cx: "11", cy: "11", r: "7" }), /* @__PURE__ */ React.createElement("path", { d: "m21 21-4.3-4.3" })),
   chev: /* @__PURE__ */ React.createElement("path", { d: "m6 9 6 6 6-6" }),
@@ -213,6 +221,7 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
         key: r.address,
         type: "button",
         "data-address": r.address,
+        "data-hue": walletHue(r.address),
         "aria-pressed": on,
         title: on ? flipped ? "\uB2EB\uAE30" : "\uD55C \uBC88 \uB354 \uB204\uB974\uBA74 \uC774 \uC9C0\uAC11\uC758 \uD328\uD0A4\uC9C0 \uC694\uC57D" : "\uC774 \uC9C0\uAC11\uC73C\uB85C \uC804\uD658",
         className: `wrail-card${on ? " on" : ""}${on && flipped ? " flipped" : ""}`,

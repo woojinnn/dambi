@@ -530,6 +530,20 @@ function usePolicyIr(cedarText: string): PolicyIR | null | "loading" {
  * 흐름도·원문 모두 실제 컴포넌트(editor PolicyDiagram, market CodeTabs)에
  * getListing 의 cedar_text/manifest 를 그대로 연결 — mock 아님.
  */
+type DocIconName = "def" | "scope" | "audience" | "data";
+/** 정책 설명 항목 아이콘 — 정의(문서)·범위(타깃)·대상(유저)·데이터(레이어). */
+function DocIcon({ name }: { name: DocIconName }) {
+  const paths = {
+    def: <><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M8 13h8M8 17h6" /></>,
+    scope: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></>,
+    audience: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></>,
+    data: <><path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z" /><path d="M3.5 13l8.5 4.5 8.5-4.5" /></>,
+  }[name];
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths}</svg>
+  );
+}
+
 function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: MarketLocale }) {
   const ko = locale === "ko";
   const cedar = detail.latest_version?.cedar_text ?? "";
@@ -545,13 +559,13 @@ function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: M
   const docRows = (
     d
       ? [
-          { label: ko ? "정책 정의" : "Definition", value: d.definition },
-          { label: ko ? "적용 범위" : "Scope", value: d.scope },
-          { label: ko ? "대상 사용자" : "Audience", value: d.audience },
-          { label: ko ? "판정에 사용될 데이터" : "Used data", value: d.usedData },
+          { label: ko ? "정책 정의" : "Definition", value: d.definition, icon: "def" as const },
+          { label: ko ? "적용 범위" : "Scope", value: d.scope, icon: "scope" as const },
+          { label: ko ? "대상 사용자" : "Audience", value: d.audience, icon: "audience" as const },
+          { label: ko ? "판정에 사용될 데이터" : "Used data", value: d.usedData, icon: "data" as const },
         ]
       : []
-  ).filter((r): r is { label: string; value: string } => !!r.value && r.value.trim().length > 0);
+  ).filter((r): r is { label: string; value: string; icon: DocIconName } => !!r.value && r.value.trim().length > 0);
   return (
     <>
       <div className="rm-summary">
@@ -569,7 +583,10 @@ function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: M
           <div className="rm-doc">
             {docRows.map((r) => (
               <div className="rm-doc-field" key={r.label}>
-                <div className="rm-doc-label">{r.label}</div>
+                <div className="rm-doc-head">
+                  <span className="rm-doc-ic"><DocIcon name={r.icon} /></span>
+                  <div className="rm-doc-label">{r.label}</div>
+                </div>
                 <p className="rm-doc-body">{r.value}</p>
               </div>
             ))}

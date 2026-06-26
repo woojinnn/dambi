@@ -2412,15 +2412,19 @@
 .rm-sev { font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; }
 .rm-sev.deny { background: var(--fail-100); color: var(--fail-800); }
 .rm-sev.warn { background: var(--warn-100); color: var(--warn-800); }
-/* 정책 설명 — 흰 카드 + 행 구분선(스펙시트). .rm-summary 와 동일 카드 언어. */
+/* 정책 설명 — 흰 카드 + 항목별 navy 아이콘 칩 + 강조 라벨(스펙시트). */
 .rm-doc {
   display: flex; flex-direction: column; margin-top: 12px;
-  background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 4px 22px;
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; padding: 6px 24px;
+  box-shadow: 0 1px 2px rgba(6,32,63,.04), 0 10px 26px -18px rgba(6,32,63,.22);
 }
-.rm-doc-field { display: flex; flex-direction: column; gap: 6px; padding: 16px 0; }
+.rm-doc-field { display: flex; flex-direction: column; padding: 18px 0; }
 .rm-doc-field + .rm-doc-field { border-top: 1px solid var(--hairline); }
-.rm-doc-label { font-size: 12px; font-weight: 700; color: var(--slate-500); letter-spacing: 0.01em; }
-.rm-doc-body { margin: 0; font-size: 14px; line-height: 1.6; color: var(--slate-800); white-space: pre-wrap; }
+.rm-doc-head { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
+.rm-doc-ic { width: 28px; height: 28px; border-radius: 8px; background: var(--navy-50); color: var(--navy-600); display: grid; place-items: center; flex: none; }
+.rm-doc-ic svg { width: 15px; height: 15px; }
+.rm-doc-label { font-size: 14.5px; font-weight: 800; color: var(--navy-700); letter-spacing: -0.01em; }
+.rm-doc-body { margin: 0; font-size: 14px; line-height: 1.7; color: var(--slate-800); white-space: pre-wrap; }
 
 .rm-coverage { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .rm-cov { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px; }

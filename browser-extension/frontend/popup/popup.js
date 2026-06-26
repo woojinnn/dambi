@@ -270,10 +270,10 @@ function renderMain() {
       for (const id of pkg.members) {
         const p = S.POLICIES[id];
         const memOn = set.has(id);
-        html += '<div class="pc-mem">' +
+        html += '<div class="pc-mem" data-act="member" data-id="' + esc(id) + '">' +
                   '<span class="pc-mem-sev ' + cls(p && p.sev) + '"></span>' +
                   '<span class="pc-mem-name">' + esc(p && p.title) + '</span>' +
-                  '<button class="pc-tog sm ' + (memOn ? "" : "off") + '" data-act="member" data-id="' + esc(id) + '" role="switch" aria-checked="' + memOn + '"></button>' +
+                  '<button class="pc-tog sm ' + (memOn ? "" : "off") + '" role="switch" aria-checked="' + memOn + '" aria-label="' + esc(p && p.title) + ' 보호"><img class="pc-paw" src="picture/paw-navy.png" alt=""></button>' +
                 '</div>';
       }
       html += '</div>';

@@ -5,6 +5,14 @@
  * 카드에 끌어다 놓으면 별칭·값을 채워 적용(bindDef). 폴더를 통째로 끌면 일괄 적용.
  * ════════════════════════════════════════════════════════════════════════ */
 
+// 지갑 색 — 홈(WalletGovernance)과 동일 규칙(localStorage 우선, 없으면 주소-해시, 소문자 정규화).
+function walletHue(addr) {
+  const s = String(addr || "").toLowerCase();
+  try { const m = JSON.parse(localStorage.getItem("dambi:wallet-colors") || "{}"); if (m && m[s]) return m[s]; } catch (e) {}
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return ["blue", "violet", "navy"][h % 3];
+}
+
 /* ── 인라인 아이콘 (sprite 의존 없음) ── */
 const E2_ICONS = {
   search: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>,
@@ -258,6 +266,7 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
             key={r.address}
             type="button"
             data-address={r.address}
+            data-hue={walletHue(r.address)}
             aria-pressed={on}
             title={on ? (flipped ? "닫기" : "한 번 더 누르면 이 지갑의 패키지 요약") : "이 지갑으로 전환"}
             className={`wrail-card${on ? " on" : ""}${on && flipped ? " flipped" : ""}`}

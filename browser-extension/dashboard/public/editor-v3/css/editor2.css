@@ -170,7 +170,7 @@
 .e2 .wrail-card:nth-child(4){ animation-delay:.32s }
 .e2 .wrail-card:nth-child(n+5){ animation-delay:.4s }
 .e2 .wrail-card:hover .wrc-face { border-color:var(--slate-soft); box-shadow:var(--shadow-lift); }
-.e2 .wrail-card.on .wrc-face { border-color:var(--sage); box-shadow:0 0 0 3px var(--sage-soft), var(--shadow); }
+.e2 .wrail-card.on .wrc-face { border-color:var(--wc-hue, var(--sage)); box-shadow:0 0 0 3px color-mix(in srgb, var(--wc-hue, var(--sage)) 18%, transparent), var(--shadow); }
 /* 집중 모드: 작업 지갑만 또렷, 나머지는 흐림. 작업 지갑 한 번 더 누르면 목록(expanded). */
 .e2 .wrail.focused { cursor:pointer; width:calc(100% - 344px); max-width:none; margin-left:344px; }
 .e2 .wrail.expanded { cursor:grab; }
@@ -210,6 +210,15 @@
   background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); overflow:hidden;
   transition:border-color .15s, box-shadow .15s, background .15s;
   backface-visibility:hidden; -webkit-backface-visibility:hidden; }
+/* 홈 카드와 동일 그라데이션 — 흰색(170deg) 위 지갑 틴트가 하단 부드러운 액센트로. 앞면만(뒷면=패키지 목록은 흰색 유지). */
+.e2 .wrc-front {
+  background:
+    linear-gradient(170deg,
+      rgba(255,255,255,0.97) 0%, rgba(255,255,255,0.93) 55%, rgba(255,255,255,0.84) 70%,
+      rgba(255,255,255,0.66) 81%, rgba(255,255,255,0.4) 90%, rgba(255,255,255,0.16) 97%,
+      rgba(255,255,255,0.02) 100%),
+    var(--wc-tint, var(--surface));
+}
 .e2 .wrc-back { transform:rotateY(180deg); align-items:stretch; text-align:left; gap:0; }
 .e2 .wrc-back-head { display:flex; align-items:center; gap:6px; padding:2px 2px 8px; font-weight:720; font-size:12.5px; color:var(--ink); border-bottom:1px solid var(--line-2); }
 .e2 .wrc-back-head .ic { color:var(--cyan); }
@@ -278,14 +287,23 @@
 .e2 .wlens-rename { flex:1; min-width:0; max-width:260px; font:inherit; font-weight:700; font-size:14px; color:var(--ink);
   border:1px solid var(--sage); border-radius:8px; padding:4px 8px; background:var(--surface); outline:none; }
 .e2 .wrc-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-.e2 .wrc-av { width:40px; height:40px; border-radius:12px; background:var(--slate); color:#fff;
+/* 지갑 색 — 홈과 동일 팔레트. data-hue(walletHue, JS) → 카드별 --wc-hue → 아바타·선택 액센트 공유.
+   같은 지갑이 홈·정책관리에서 같은 색으로 보이게 한다. */
+.e2 .wrail-card { --wallet-navy:#06203F; --wallet-blue:#2B5088; --wallet-violet:#4C4684; --wallet-slate:#4F596B; --wallet-teal:#2D6B70;
+  --wallet-navy-tint:#A6B7CB; --wallet-blue-tint:#A7BAD2; --wallet-violet-tint:#B7B0CC; --wallet-slate-tint:#C1C8D2; --wallet-teal-tint:#A9CACC; }
+.e2 .wrail-card[data-hue="navy"]   { --wc-hue: var(--wallet-navy);   --wc-tint: var(--wallet-navy-tint); }
+.e2 .wrail-card[data-hue="blue"]   { --wc-hue: var(--wallet-blue);   --wc-tint: var(--wallet-blue-tint); }
+.e2 .wrail-card[data-hue="violet"] { --wc-hue: var(--wallet-violet); --wc-tint: var(--wallet-violet-tint); }
+.e2 .wrail-card[data-hue="slate"]  { --wc-hue: var(--wallet-slate);  --wc-tint: var(--wallet-slate-tint); }
+.e2 .wrail-card[data-hue="teal"]   { --wc-hue: var(--wallet-teal);   --wc-tint: var(--wallet-teal-tint); }
+.e2 .wrc-av { width:40px; height:40px; border-radius:12px; background:var(--wc-hue, var(--slate)); color:#fff;
   display:grid; place-items:center; font-weight:700; font-size:17px; flex:none; }
-.e2 .wrail-card.on .wrc-av { background:var(--sage); }
+.e2 .wrail-card.on .wrc-av { background:var(--wc-hue, var(--sage)); }
 .e2 .wrc-pill { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:650; color:var(--ink-2);
   background:#eef1ef; border-radius:999px; padding:4px 11px; }
-.e2 .wrc-pill .dot { width:7px; height:7px; border-radius:50%; background:var(--mut); }
-.e2 .wrail-card.on .wrc-pill { background:var(--sage-soft); color:var(--sage-ink); }
-.e2 .wrail-card.on .wrc-pill .dot { background:var(--sage); }
+.e2 .wrc-pill .dot { width:7px; height:7px; border-radius:50%; background:var(--wc-hue, var(--mut)); }
+.e2 .wrail-card.on .wrc-pill { background:color-mix(in srgb, var(--wc-hue, var(--sage)) 14%, transparent); color:var(--ink); }
+.e2 .wrail-card.on .wrc-pill .dot { background:var(--wc-hue, var(--sage)); }
 .e2 .wrc-name { display:block; font-size:19px; font-weight:740; letter-spacing:-.01em; color:var(--ink);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .e2 .wrc-addr { display:block; font-family:var(--mono); font-size:12.5px; color:var(--mut); letter-spacing:-.02em; margin-top:3px; }
