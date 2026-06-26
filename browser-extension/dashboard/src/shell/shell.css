@@ -92,7 +92,9 @@
 }
 .nav-rail:hover .nav-item .dot-badge, .nav-rail:focus-within .nav-item .dot-badge { opacity: 0; }
 
-.nav-bottom { margin-top: auto; padding-top: 8px; position: relative; }
+/* §5 계정 영역. display:flex 로 .nav-user(button)가 폭을 꽉 채워 팝오버와 좌우 정렬되게 한다
+   (button 은 기본 content-width 라 안 하면 계정 바가 팝오버보다 좁아진다). */
+.nav-bottom { margin-top: auto; padding-top: 8px; position: relative; display: flex; flex-direction: column; }
 /* §5 계정 바: 흰 면 + 테두리 모델. 기본 border-default, 팝오버 열림 border-strong, 접힘 투명. */
 .nav-user {
   display: flex; align-items: center; gap: 10px;
