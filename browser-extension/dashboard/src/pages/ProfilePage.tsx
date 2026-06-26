@@ -70,7 +70,7 @@ export function ProfilePage() {
 
   const myListingsQ = useQuery({
     queryKey: ["my-listings", user?.user_id],
-    queryFn: () => listListings({ publisher_id: user!.user_id, limit: 100 }),
+    queryFn: () => listListings({ publisher_id: user!.user_id, limit: 500 }),
     enabled: !!user?.user_id,
   });
   const walletsQ = useQuery({ queryKey: ["wallets"], queryFn: listWallets });
