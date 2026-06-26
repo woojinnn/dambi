@@ -26,8 +26,6 @@ import { AppShell } from "./shell/AppShell";
 import { LoginPage } from "./pages/LoginPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { HomePage } from "./pages/HomePage";
-import { EditorListPage } from "./pages/editor/EditorListPage";
-import { EditorDetailPage } from "./pages/editor/EditorDetailPage";
 import { EditorV3ListPage, EditorV3DetailPage } from "./pages/editor/v3/EditorV3Pages";
 import { SimulateWizardPage } from "./pages/simulate/SimulateWizardPage";
 import { Assets2Page } from "./pages/Assets2Page";
@@ -54,11 +52,11 @@ const router = createRouter([
         element: <AppShell />,
         children: [
           { index: true, element: <HomePage /> },
-          { path: "editor", element: <EditorListPage /> },
-          { path: "editor/new", element: <Navigate to="/editor" replace /> },
-          { path: "editor/:id", element: <EditorDetailPage /> },
-          { path: "editor2", element: <EditorV3ListPage /> },
-          { path: "editor2/:id", element: <EditorV3DetailPage /> },
+          { path: "editor", element: <EditorV3ListPage /> },
+          { path: "editor/:id", element: <EditorV3DetailPage /> },
+          // 옛 editor2 경로 → editor 로 영구 리다이렉트(기존 북마크/링크 호환).
+          { path: "editor2", element: <Navigate to="/editor" replace /> },
+          { path: "editor2/:id", element: <Navigate to="/editor" replace /> },
           { path: "simulation", element: <SimulateWizardPage /> },
           { path: "simulate", element: <Navigate to="/simulation" replace /> },
           { path: "assets", element: <Assets2Page /> },

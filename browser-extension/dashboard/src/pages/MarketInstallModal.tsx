@@ -198,7 +198,7 @@ export function MarketInstallModal({
           ? {
               message: done.message,
               primaryLabel: ko ? "지갑별 정책 보기" : "View wallet policies",
-              onPrimary: () => navigate("/editor2"),
+              onPrimary: () => navigate("/editor"),
             }
           : null
       }

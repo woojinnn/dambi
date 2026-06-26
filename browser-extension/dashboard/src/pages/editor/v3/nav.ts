@@ -1,8 +1,8 @@
 // @ts-nocheck
 /* Navigation shim bridging the prototype's hash-router helpers to react-router.
  * EditorV3Pages installs the live react-router navigate() via setRouterNavigate.
- * Routes the prototype built as "/editor" or "/editor/<id>" are rewritten to
- * "/editor2" here, since /editor2 is the new tab's base. */
+ * The editor base is "/editor", which matches the prototype's own paths — so no
+ * path rewriting is needed (prototype "/editor[/<id>]" maps 1:1). */
 import * as React from "react";
 
 let _routerNavigate = null;
@@ -13,21 +13,12 @@ export function setRouterNavigate(fn) {
 // in-memory nav state (newPolicy seed), matching the prototype's window.__navState.
 let _navState = null;
 
-function rewrite(to) {
-  // "/editor" → "/editor2", "/editor/<id>?..." → "/editor2/<id>?..."
-  if (to === "/editor") return "/editor2";
-  if (to.startsWith("/editor/")) return "/editor2/" + to.slice("/editor/".length);
-  if (to.startsWith("/editor?")) return "/editor2?" + to.slice("/editor?".length);
-  return to;
-}
-
 export function navigate(to, opts) {
   _navState = opts && opts.state ? opts.state : null;
-  const dest = rewrite(to);
   if (_routerNavigate) {
-    _routerNavigate(dest, { replace: !!(opts && opts.replace) });
+    _routerNavigate(to, { replace: !!(opts && opts.replace) });
   } else {
-    window.location.hash = dest;
+    window.location.hash = to;
   }
 }
 
