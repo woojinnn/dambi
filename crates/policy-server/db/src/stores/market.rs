@@ -1346,3 +1346,23 @@ pub async fn delete_tier(pool: &PgPool, id: &str) -> DbResult<Option<String>> {
         Ok(None)
     }
 }
+
+/// Admin: set a tier by account EMAIL (case-insensitive). Lets an admin grade an
+/// account that hasn't published anything yet (so it isn't in the publisher
+/// list), as long as it exists (logged in at least once). Returns the user_id on
+/// success, `None` when no account has that email.
+pub async fn set_publisher_tier_by_email(
+    pool: &PgPool,
+    email: &str,
+    tier: &str,
+) -> DbResult<Option<String>> {
+    let row = query(
+        "UPDATE users SET publisher_tier = $1 WHERE lower(email) = lower($2) RETURNING user_id",
+    )
+    .bind(tier)
+    .bind(email)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(row.map(|r| r.get("user_id")))
+}

@@ -494,6 +494,16 @@ export async function deleteTier(id: string): Promise<{ deleted: string }> {
   );
 }
 
+/** `POST /market/grant-tier` — admin: set a tier on an account by EMAIL. Works
+ * even if the account hasn't published yet (must exist — logged in once).
+ * `official` is reserved and rejected. */
+export async function grantTierByEmail(
+  email: string,
+  tier: PublisherTier,
+): Promise<{ user_id: string; email: string; publisher_tier: string }> {
+  return request("/market/grant-tier", { method: "POST", body: { email, tier } });
+}
+
 /** `POST /market/listings/id/:id/watch` — subscribe to new-version events. */
 export async function watchListing(listingId: string): Promise<void> {
   await request<void>(
