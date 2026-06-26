@@ -879,7 +879,7 @@ function E2PackageCard({ pkg, wallet, snap, members, address, highlighted, pinne
             onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { setDraftName(pkg.displayName); setRenaming(false); } }}
           />
         ) : (
-          <span className="prow-nm" title={pkg.displayName}>{pkg.displayName}</span>
+          <span className="prow-nm" title={isDefaultPack ? "기본 안전팩" : pkg.displayName}>{isDefaultPack ? "기본 안전팩" : pkg.displayName}</span>
         )}
         {locked && <span className="uncat-tag">패키지 없음</span>}
         {pinned && <span className="prow-pin" title="상단 고정됨"><Ic id="pin" cls="sm" /></span>}
