@@ -2635,8 +2635,9 @@
 
     /* footer */
     .im-actions { margin-top: 8px; padding: 15px 26px 20px; border-top: 1px solid var(--hairline-soft); flex: none; }
-    .im-actions .sec:hover { background: var(--fog-300); }
-    .im-actions .pri:hover:not(:disabled) { background: var(--slate-900); }
+    /* 다음(주 버튼)을 '이전'(.sec)과 완전히 동일하게 — 평/호버 색 모두 같게.
+     * (예전엔 .pri만 base가 채워지고 호버가 slate-900=거의 검정이라 어색했다.) */
+    .im-actions .sec:hover, .im-actions .pri:hover:not(:disabled) { background: var(--fog-300); }
 
     /* success */
     .im-success { padding: 36px 26px 24px; text-align: center; }
