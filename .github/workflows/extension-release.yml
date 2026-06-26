@@ -1,8 +1,9 @@
 # Build + package the browser extension on a release tag and attach the zips to
 # a GitHub Release. Store uploads stay MANUAL, so a human still gates what
-# reaches users. Chrome emits two packages from the same build:
-#   - chrome.zip: key-included unpacked/QA package for direct loading.
-#   - chrome-webstore.zip: key-stripped package for Chrome Web Store upload.
+# reaches users. Chrome emits two packages from separate builds:
+#   - chrome.zip: key-included dev/QA package for direct loading, with logs.
+#   - chrome-webstore.zip: key-stripped Chrome Web Store package, with console
+#     calls removed from bundled JS.
 #
 # Trigger: push a tag `ext-v*` (e.g. ext-v1.2.0), or run by hand from the
 # same ext-vX.Y.Z tag ref. Branch dispatches must not create release artifacts.
@@ -116,7 +117,7 @@ jobs:
           VERSION="$VERSION" node -e "const fs=require('fs');for(const p of ['package.json','backend/manifest.json']){let s=fs.readFileSync(p,'utf8');s=s.replace(/\"version\": \"[0-9][^\"]*\"/,'\"version\": \"'+process.env.VERSION+'\"');fs.writeFileSync(p,s)}"
           echo "baked extension version $VERSION from tag ${GITHUB_REF_NAME}"
 
-      - name: Build + zip Chrome and Firefox (prod-pinned)
+      - name: Build + zip Chrome dev/QA and Web Store packages (prod-pinned)
         working-directory: browser-extension
         env:
           REGISTRY_BASE_URL: ${{ vars.REGISTRY_BASE_URL }}
@@ -127,10 +128,9 @@ jobs:
           # wasm-pack toolchain installed above. A real fat-LTO build, not the
           # SKIP_WASM CI shortcut — the release artifact must be the true bundle.
           yarn build:chrome
-          yarn build:firefox
           yarn zip:chrome
+          yarn build:chrome:webstore
           yarn zip:chrome:webstore
-          yarn zip:firefox
 
       - name: Create GitHub Release with extension zips
         env:
@@ -139,7 +139,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             browser-extension/dist/chrome.zip \
             browser-extension/dist/chrome-webstore.zip \
-            browser-extension/dist/firefox.zip \
             --verify-tag \
             --title "${GITHUB_REF_NAME}" \
-            --notes "Reproducible extension build for ${GITHUB_REF_NAME}. Registry URL + pinned key baked at build time. Use chrome.zip for direct unpacked QA, upload chrome-webstore.zip → Chrome Web Store, and upload firefox.zip → AMO manually."
+            --notes "Reproducible extension build for ${GITHUB_REF_NAME}. Registry URL + pinned key baked at build time. Use chrome.zip for direct unpacked QA with verbose logs, and upload chrome-webstore.zip → Chrome Web Store. The Web Store package strips manifest.key and bundled console calls."

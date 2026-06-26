@@ -13,6 +13,7 @@ const {
 } = require("./env");
 
 const targetBrowser = process.env.TARGET_BROWSER || "chrome";
+const distTarget = process.env.DAMBI_EXTENSION_DIST_TARGET || targetBrowser;
 const extRoot = path.resolve(__dirname, "..");
 const mode = buildMode();
 
@@ -31,11 +32,12 @@ loadBuildEnv(extRoot, mode);
 
 const backendDir = path.join(extRoot, "backend");
 const frontendDir = path.join(extRoot, "frontend");
-const distDir = path.join(extRoot, "dist", targetBrowser);
+const distDir = path.join(extRoot, "dist", distTarget);
 const serverUrl = resolveServerUrl();
 const pinnedBundleKey = resolvePinnedBundleKey();
 const requireBundleSig = resolveRequireBundleSig();
 const isProductionBuild = mode === "production";
+const stripConsole = process.env.DAMBI_STRIP_CONSOLE === "1";
 
 // Shared bits of the webpack config — the actual exported configs differ
 // only in `entry`, `target`, and which build-time plugins they own.
@@ -101,11 +103,22 @@ const sharedPlugins = () => [
     // and the enforce flag ("true"/"false"). Read by adapter-loader/bundle-verify.ts.
     PINNED_BUNDLE_PUBLIC_KEY: JSON.stringify(pinnedBundleKey),
     DAMBI_REQUIRE_BUNDLE_SIGNATURE: JSON.stringify(requireBundleSig),
+    DAMBI_STRIP_CONSOLE: JSON.stringify(stripConsole),
   }),
   // ProvidePlugin for `process` so readable-stream's `process.nextTick` etc.
   // resolve at runtime even in code paths that don't import it explicitly.
   new webpack.ProvidePlugin({ process: "process/browser" }),
 ];
+
+async function stripCopiedJsConsole(content, absoluteFrom) {
+  if (!stripConsole || path.extname(absoluteFrom) !== ".js") return content;
+  const { minify } = require("terser");
+  const result = await minify(content.toString("utf8"), {
+    compress: { drop_console: true },
+    format: { comments: false },
+  });
+  return result.code ?? content;
+}
 
 class ProductionManifestHardeningPlugin {
   apply(compiler) {
@@ -232,7 +245,13 @@ const pageConfig = {
     new WextManifestWebpackPlugin(),
     ...(isProductionBuild ? [new ProductionManifestHardeningPlugin()] : []),
     new CopyPlugin({
-      patterns: [{ from: path.join(extRoot, "public"), to: distDir }],
+      patterns: [
+        {
+          from: path.join(extRoot, "public"),
+          to: distDir,
+          transform: stripConsole ? stripCopiedJsConsole : undefined,
+        },
+      ],
     }),
   ],
 };
