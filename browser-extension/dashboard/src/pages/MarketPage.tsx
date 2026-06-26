@@ -11,6 +11,7 @@ import {
   type ListingSummary,
 } from "../server-api";
 import { publisherDisplay } from "../server-api/market";
+import { TierBadge } from "../components/TierBadge";
 import { MarketInstallModal } from "./MarketInstallModal";
 import { MarketPagehead, useMarketContentClass } from "./MarketPagehead";
 
@@ -1188,7 +1189,7 @@ function PackageListCard({
         </span>
         <span className="rm-rpub">
           {publisherDisplay(listing.publisher_tier, listing.publisher_email, locale)}
-          {official && <span className="rm-vf"> ✓</span>}
+          <TierBadge tier={listing.publisher_tier} />
         </span>
         <span className="rm-rmeta">
           {meta.ready && <>{ko ? "정책" : ""} <b>{meta.count}</b></>}
