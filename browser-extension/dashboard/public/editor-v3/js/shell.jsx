@@ -115,7 +115,10 @@ function ConfirmHost() {
   if (!ask) return null;
   const close = (ok) => { ask._resolve(ok); setAsk(null); };
   return (
-    <div className="e2-ov" onMouseDown={() => close(false)}>
+    // `e2` 클래스 필수 — ConfirmHost 는 `.e2` 루트 밖(listpage)에 마운트되므로,
+    // `.e2 .e2cf-*` 스타일이 먹으려면 오버레이 자체가 `.e2` 여야 한다. (없으면
+    // 버튼이 스타일 없이 "취소제거"로 붙어 보인다.)
+    <div className="e2 e2-ov" onMouseDown={() => close(false)}>
       <div className="modal e2cf" onMouseDown={(e) => e.stopPropagation()}>
         <div className="e2cf-body">
           <div className="e2cf-title">{ask.title}</div>

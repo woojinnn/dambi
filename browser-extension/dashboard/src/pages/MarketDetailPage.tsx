@@ -17,7 +17,7 @@ import { MarketPagehead, useMarketContentClass } from "./MarketPagehead";
 import {
   CATEGORY_COLOR,
   CategoryGlyph,
-  categoryNameOf,
+  categoryHashtag,
   categoryOf,
   isCategoryKey,
   type CategoryKey,
@@ -33,6 +33,13 @@ import { severityFromCedar } from "./editor/policy-meta";
 import { useMarketLocale, type MarketLocale } from "./market-locale";
 
 import "./market.css";
+
+/** A package member's category: its own (by slug), falling back to the
+ *  package's category only when the slug is unmapped (would be `Others`). */
+function memberCategory(slug: string, packageCat: CategoryKey | null): CategoryKey {
+  const own = categoryOf(slug);
+  return own !== "Others" ? own : (packageCat ?? own);
+}
 
 /**
  * `/market/:slug` — detail page for a single listing.
@@ -168,7 +175,7 @@ function DetailBody({
           </div>
           <div className="rm-md-meta">
             <span>{isSet ? (ko ? "패키지" : "Package") : ko ? "정책" : "Policy"}</span>
-            {!isSet && cat && <span>{categoryNameOf(cat, locale)}</span>}
+            {!isSet && cat && <span>{categoryHashtag(cat)}</span>}
             {detail.current_version && <span>v{detail.current_version}</span>}
             <span className="rm-installs">
               <svg
@@ -422,12 +429,13 @@ function SetSummary({
   const ko = locale === "ko";
   const why = pickI18n(detail.description);
   const copy = packageCopy(detail.slug);
-  // 패키지는 단일 카테고리(서버 category)를 가진다 — 멤버는 그걸 상속한다.
-  // (멤버 slug 는 패키지 내부용이라 categoryOf 슬러그 맵에 없어 Others 로 떨어졌다.)
+  // 멤버는 각자의 카테고리(slug 매핑)로 표시한다 — 패키지가 'Airdrop'이어도 그 안의
+  // Permit2 정책은 '#token'. slug 가 맵에 없어 Others 로 떨어질 때만 패키지 카테고리로
+  // 폴백한다(생짜 #others 보다 패키지 분류가 더 유용).
   const packageCat: CategoryKey | null = isCategoryKey(detail.category) ? detail.category : null;
   const counts = new Map<CategoryKey, number>();
   members.forEach((m) => {
-    const c = packageCat ?? categoryOf(m.slug);
+    const c = memberCategory(m.slug, packageCat);
     counts.set(c, (counts.get(c) ?? 0) + 1);
   });
   const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
@@ -461,7 +469,7 @@ function SetSummary({
                 style={{ background: CATEGORY_COLOR[c].soft, color: CATEGORY_COLOR[c].ink }}
               >
                 <CategoryGlyph category={c} size={12} color={CATEGORY_COLOR[c].hex} />
-                {categoryNameOf(c, locale)} {n}
+                {categoryHashtag(c)} {n}
               </span>
             ))}
           </span>
@@ -573,7 +581,7 @@ function PolicyDetailBody({ detail, locale }: { detail: ListingDetail; locale: M
         {summary && <p className="why">{summary}</p>}
         <div className="rm-summary-stats">
           <span className={`rm-sev ${sev}`}>{sevLabel(sev, locale)}</span>
-          <span className="rm-stat">{categoryNameOf(cat, locale)}</span>
+          <span className="rm-stat">{categoryHashtag(cat)}</span>
         </div>
       </div>
 
@@ -690,7 +698,7 @@ function MemberRow({
 }) {
   const ko = locale === "ko";
   const sev = severityFromCedar(member.cedar_text);
-  const cat = packageCat ?? categoryOf(member.slug);
+  const cat = memberCategory(member.slug, packageCat);
   const color = CATEGORY_COLOR[cat];
   const copy = policyCopy(member.slug);
   const oneLine = copy?.title || leadingComment(member.cedar_text);
@@ -711,7 +719,7 @@ function MemberRow({
         <span className="rm-mmain">
           <span className="rm-mtitlerow">
             <span className="rm-mrow-name">{member.display_name || member.slug}</span>
-            <span className="rm-mchip">{categoryNameOf(cat, locale)}</span>
+            <span className="rm-mchip">{categoryHashtag(cat)}</span>
           </span>
           {oneLine && <span className="rm-moneline">{oneLine}</span>}
         </span>

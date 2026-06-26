@@ -259,7 +259,10 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
           e.stopPropagation();
           onTogglePin(p.id);
         } }, /* @__PURE__ */ React.createElement(Ic, { id: "pin", cls: "sm" })),
-        /* @__PURE__ */ React.createElement("label", { className: "sw sm wrc-back-sw", title: p.enabled ? "\uC774 \uC9C0\uAC11\uC5D0\uC11C \uB044\uAE30" : "\uC774 \uC9C0\uAC11\uC5D0\uC11C \uCF1C\uAE30", onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: p.enabled, onChange: () => run("\uD328\uD0A4\uC9C0 \uCF1C\uAE30/\uB044\uAE30", () => PS.setPackageEnabled({ address: activeAddr, packageId: p.id, enabled: !p.enabled })) }), /* @__PURE__ */ React.createElement("span", { className: "trk" }))
+        /* @__PURE__ */ React.createElement("label", { className: "sw sm wrc-back-sw", title: p.enabled ? "\uC774 \uC9C0\uAC11\uC5D0\uC11C \uB044\uAE30" : "\uC774 \uC9C0\uAC11\uC5D0\uC11C \uCF1C\uAE30", onMouseDown: (e) => e.stopPropagation(), onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: p.enabled, onClick: (e) => e.stopPropagation(), onChange: (e) => {
+          e.stopPropagation();
+          run("\uD328\uD0A4\uC9C0 \uCF1C\uAE30/\uB044\uAE30", () => PS.setPackageEnabled({ address: activeAddr, packageId: p.id, enabled: !p.enabled }));
+        } }), /* @__PURE__ */ React.createElement("span", { className: "trk" }))
       )))))
     );
   }), /* @__PURE__ */ React.createElement(

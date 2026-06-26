@@ -304,8 +304,11 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
                     >
                       <span className="nm">{p.name}</span>
                       <span role="button" tabIndex={0} className={`wrc-back-pin${pinnedPkgs.has(p.id) ? " on" : ""}`} title={pinnedPkgs.has(p.id) ? "고정 해제" : "아래 패키지에서 상단 고정"} onClick={(e) => { e.stopPropagation(); onTogglePin(p.id); }}><Ic id="pin" cls="sm" /></span>
-                      <label className="sw sm wrc-back-sw" title={p.enabled ? "이 지갑에서 끄기" : "이 지갑에서 켜기"} onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={p.enabled} onChange={() => run("패키지 켜기/끄기", () => PS.setPackageEnabled({ address: activeAddr, packageId: p.id, enabled: !p.enabled }))} />
+                      <label className="sw sm wrc-back-sw" title={p.enabled ? "이 지갑에서 끄기" : "이 지갑에서 켜기"} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+                        {/* input·label 양쪽 + mousedown 까지 전파 차단 — 안 그러면 스위치
+                            클릭이 카드 onClick(tap)으로 새서 onLens(null) 이 불려 아래
+                            패키지 순서가 바뀐다. 켜기/끄기는 순서와 무관해야 한다. */}
+                        <input type="checkbox" checked={p.enabled} onClick={(e) => e.stopPropagation()} onChange={(e) => { e.stopPropagation(); run("패키지 켜기/끄기", () => PS.setPackageEnabled({ address: activeAddr, packageId: p.id, enabled: !p.enabled })); }} />
                         <span className="trk" />
                       </label>
                     </span>
