@@ -127,9 +127,12 @@ export function buildFolders(snap: StoreSnapshot, address: string): FolderVM[] {
       const on = ws.packageEnabled[pid] ?? true;
       return {
         packageId: pid,
-        name:
-          ws.packages[pid]?.displayName ??
-          (pid === UNCATEGORIZED_PKG ? i18n.t("home:folder.uncategorized") : pid),
+        // 지갑 컨텍스트에선 기본 안전팩을 "기본 안전팩"으로(라이브러리 저장명은
+        // "기본 안전팩 템플릿"이지만 '템플릿'은 라이브러리 표기 전용).
+        name: pid.startsWith("pkg::builtin.")
+          ? "기본 안전팩"
+          : (ws.packages[pid]?.displayName ??
+            (pid === UNCATEGORIZED_PKG ? i18n.t("home:folder.uncategorized") : pid)),
         on,
         policies: bindings.map((b) => policyVM(snap, b, on)),
       };
