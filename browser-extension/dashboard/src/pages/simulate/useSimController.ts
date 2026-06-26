@@ -372,11 +372,22 @@ export function useSimController(provider: SimProvider): SimController {
     (cursor: number): DenyView[] => {
       if (!result) return [];
       const byPolicy = new Map<string, DenyView>();
+      const stepsByPolicy = new Map<string, number[]>();
       for (const s of result.steps) {
         if (s.index > cursor) break;
-        for (const d of s.denies) if (!byPolicy.has(d.policyId)) byPolicy.set(d.policyId, d);
+        for (const d of s.denies) {
+          if (!byPolicy.has(d.policyId)) byPolicy.set(d.policyId, d);
+          // 같은 정책이 여러 트랜잭션에서 막혔으면 그 단계들을 모두 모은다 — 카드가
+          // 첫 단계(S1)만이 아니라 막힌 단계 전부(S1·S2·S3)를 보여주도록.
+          const arr = stepsByPolicy.get(d.policyId) ?? [];
+          if (!arr.includes(d.step)) arr.push(d.step);
+          stepsByPolicy.set(d.policyId, arr);
+        }
       }
-      return [...byPolicy.values()];
+      return [...byPolicy.values()].map((d) => ({
+        ...d,
+        steps: stepsByPolicy.get(d.policyId) ?? [d.step],
+      }));
     },
     [result],
   );

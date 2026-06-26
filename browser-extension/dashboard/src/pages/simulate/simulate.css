@@ -283,7 +283,8 @@
 .sw-sev { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
 .sw-sev.deny { background: var(--fail-100); color: var(--fail-800); }
 .sw-sev.warn { background: var(--warn-100); color: var(--warn-800); }
-.sw-step-badge { margin-left: auto; font-family: var(--ff-mono); font-size: 11px; color: var(--slate-400);
+.sw-step-badges { margin-left: auto; display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.sw-step-badge { font-family: var(--ff-mono); font-size: 11px; color: var(--slate-400);
   background: var(--fog-200); padding: 1px 7px; border-radius: 5px; }
 .sw-deny-reason { margin: 8px 0 4px; font-size: 13px; color: var(--slate-700); }
 .sw-deny-note { font-size: 11.5px; color: var(--fail-700); margin-bottom: 6px; }
