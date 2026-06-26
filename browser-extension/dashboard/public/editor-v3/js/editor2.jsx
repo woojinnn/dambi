@@ -297,7 +297,15 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
                       className={`wrc-back-row${p.id === lensPkg ? " on" : ""}${backDrop === p.id ? " dropping" : ""}${pinnedPkgs.has(p.id) ? " pinned" : ""}`}
                       key={p.id}
                       title="누르면 아래 패키지에서 강조 · 정책·폴더를 끌어다 놓으면 이 패키지에 추가"
-                      onClick={(e) => { e.stopPropagation(); onLens(p.id); }}
+                      onClick={(e) => {
+                        // 항상 카드 flip(tap)으로의 전파는 막되, 클릭이 ON/OFF 스위치나
+                        // 핀에서 온 거면 순서(onLens)는 건드리지 않는다. (자식 stopPropagation
+                        // 만으로는 이 label+checkbox 조합에서 새서, 토글 누를 때마다 순서가
+                        // 바뀌던 버그를 타깃 검사로 확실히 차단.)
+                        e.stopPropagation();
+                        if (e.target.closest(".wrc-back-sw, .wrc-back-pin")) return;
+                        onLens(p.id);
+                      }}
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setBackDrop(p.id); }}
                       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setBackDrop((v) => (v === p.id ? null : v)); }}
                       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setBackDrop(null); onDropApply(p.id); }}

@@ -237,6 +237,7 @@ function WalletRail({ rows, snap, activeAddr, onSelect, lensPkg, onLens, pinnedP
           title: "\uB204\uB974\uBA74 \uC544\uB798 \uD328\uD0A4\uC9C0\uC5D0\uC11C \uAC15\uC870 \xB7 \uC815\uCC45\xB7\uD3F4\uB354\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC774 \uD328\uD0A4\uC9C0\uC5D0 \uCD94\uAC00",
           onClick: (e) => {
             e.stopPropagation();
+            if (e.target.closest(".wrc-back-sw, .wrc-back-pin")) return;
             onLens(p.id);
           },
           onDragOver: (e) => {
