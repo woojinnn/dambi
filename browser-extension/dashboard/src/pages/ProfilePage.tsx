@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trans, useTranslation } from "react-i18next";
@@ -19,7 +19,9 @@ import {
   grantTierByEmail,
   listPublishers,
   listTiers,
+  searchUsers,
   setPublisherTier,
+  type MarketPublisher,
   type MarketTier,
   type PublisherTier,
 } from "../server-api/market";
@@ -143,6 +145,7 @@ export function ProfilePage() {
   const invalidateTiering = () => {
     void qc.invalidateQueries({ queryKey: ["market-publishers"] });
     void qc.invalidateQueries({ queryKey: ["market-tiers"] });
+    void qc.invalidateQueries({ queryKey: ["market-user-search"] });
   };
   const onTierErr = (e: unknown) => setBanner(e instanceof Error ? e.message : String(e));
   const tierMut = useMutation({
@@ -172,6 +175,25 @@ export function ProfilePage() {
     },
     onError: onTierErr,
   });
+  // publisher 등급 지정 — 가입(로그인 1회+) 계정 전체를 이메일로 검색. 입력을
+  // 300ms 디바운스해서 서버 /market/users/search 를 친다. 비어 있으면 기본
+  // publisher 목록을 그대로 보여준다.
+  const [pubSearch, setPubSearch] = useState("");
+  const [pubSearchDebounced, setPubSearchDebounced] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setPubSearchDebounced(pubSearch.trim()), 300);
+    return () => clearTimeout(id);
+  }, [pubSearch]);
+  const userSearchQ = useQuery({
+    queryKey: ["market-user-search", pubSearchDebounced],
+    queryFn: () => searchUsers(pubSearchDebounced),
+    enabled: isMarketAdmin && pubSearchDebounced.length > 0,
+  });
+  const searching = pubSearchDebounced.length > 0;
+  const shownPublishers: MarketPublisher[] = searching
+    ? (userSearchQ.data ?? [])
+    : (publishersQ.data ?? []);
+
   // 이메일로 등급 부여 폼 상태 (tier 는 첫 비-official 등급으로 초기화)
   const [grant, setGrant] = useState<{ email: string; tier: string }>({ email: "", tier: "verified" });
   // 새 등급 생성 폼 상태
@@ -404,10 +426,29 @@ export function ProfilePage() {
                 : "Works even for accounts not in the list below (no listings yet) — they must have logged in once."}
             </p>
 
-            {/* publisher별 등급 지정 */}
+            {/* publisher별 등급 지정 — 가입 계정 전체를 이메일로 검색 가능 */}
             <div className="pp-subhead">{ko ? "publisher 등급 지정" : "Assign tiers"}</div>
+            <input
+              className="pp-input pp-pub-search"
+              type="search"
+              placeholder={
+                ko ? "이메일로 가입 계정 검색…" : "Search accounts by email…"
+              }
+              value={pubSearch}
+              onChange={(e) => setPubSearch(e.target.value)}
+            />
+            {searching && userSearchQ.isLoading && (
+              <p className="pp-muted">{ko ? "검색 중…" : "Searching…"}</p>
+            )}
+            {searching && !userSearchQ.isLoading && shownPublishers.length === 0 && (
+              <p className="pp-muted">
+                {ko
+                  ? "일치하는 가입 계정이 없어요 (그 계정이 한 번은 로그인해야 검색돼요)."
+                  : "No matching account (it must have logged in once)."}
+              </p>
+            )}
             <ul className="pp-pub-list">
-              {(publishersQ.data ?? []).map((p) => {
+              {shownPublishers.map((p) => {
                 const isOfficial = p.publisher_tier === "official";
                 return (
                   <li key={p.user_id} className="pp-pub-row">

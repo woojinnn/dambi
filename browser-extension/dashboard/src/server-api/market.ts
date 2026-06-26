@@ -443,6 +443,17 @@ export async function listPublishers(): Promise<MarketPublisher[]> {
   return request<MarketPublisher[]>("/market/publishers");
 }
 
+/** `GET /market/users/search?q=…` — admin: search EVERY registered account
+ * (logged-in once) by email substring, including non-publishers not in
+ * {@link listPublishers}. Blank query returns `[]`. */
+export async function searchUsers(q: string): Promise<MarketPublisher[]> {
+  const term = q.trim();
+  if (!term) return [];
+  return request<MarketPublisher[]>(
+    `/market/users/search?q=${encodeURIComponent(term)}`,
+  );
+}
+
 /** `PATCH /market/publishers/:id` — admin: set an account to any existing tier
  * except `official` (the Wallet Guardians brand is reserved, set out of band). */
 export async function setPublisherTier(

@@ -1216,6 +1216,44 @@ pub async fn list_publishers(pool: &PgPool) -> DbResult<Vec<PublisherRow>> {
         .collect())
 }
 
+/// Admin: search EVERY registered account (a `users` row exists for anyone who
+/// has logged in via OAuth at least once) by a case-insensitive email
+/// substring. Unlike [`list_publishers`] this is NOT filtered to publishers —
+/// it surfaces logged-in accounts that have no listings and a `community` tier,
+/// so an admin can grade them. `position(... in ...)` is a plain substring
+/// match (no LIKE wildcard semantics, so the query string is safe verbatim).
+pub async fn search_users_by_email(
+    pool: &PgPool,
+    query_str: &str,
+    limit: i64,
+) -> DbResult<Vec<PublisherRow>> {
+    let rows = query(
+        "SELECT u.user_id, u.email, u.publisher_tier,
+                COUNT(l.id) FILTER (WHERE l.status = 'published') AS listing_count
+         FROM users u
+         LEFT JOIN market_listings l ON l.publisher_id = u.user_id
+         WHERE position(lower($1) in lower(u.email)) > 0
+         GROUP BY u.user_id, u.email, u.publisher_tier
+         ORDER BY (u.publisher_tier <> 'community') DESC,
+                  COUNT(l.id) DESC, u.email ASC
+         LIMIT $2",
+    )
+    .bind(query_str)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::Invariant(e.to_string()))?;
+    Ok(rows
+        .iter()
+        .map(|r| PublisherRow {
+            user_id: r.get("user_id"),
+            email: r.get("email"),
+            publisher_tier: r.get("publisher_tier"),
+            listing_count: r.get("listing_count"),
+        })
+        .collect())
+}
+
 /// Admin: set an account's publisher tier. Returns the account email on success,
 /// `None` when no such user. The caller must restrict `tier` (e.g. reject
 /// `official`, which is reserved for the brand account and set out of band).
