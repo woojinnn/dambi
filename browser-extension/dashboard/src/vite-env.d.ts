@@ -25,7 +25,8 @@ interface Window {
   PASU_REBUILD_DONUTS?: () => void;
   PASU_getSummary?: () => unknown;
   PASU_CHAIN_LOGOS?: { byName?: Record<string, string> };
-  PASU_TOKEN_LOGOS?: Record<string, string>;
+  /** 토큰 심볼 → 로컬 번들 로고 파일명(소문자, public/picture/tokens/<name>.svg). */
+  PASU_TOKEN_LOGO_FILES?: Record<string, string>;
   PASU_imgFail?: (img: HTMLImageElement) => void;
   PASU_badgeFail?: (img: HTMLImageElement) => void;
   // i18n bridge: React sets this to a bound i18next `t` (monitoring namespace) so
