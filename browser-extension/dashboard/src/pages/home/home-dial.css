@@ -89,8 +89,7 @@
 .wcard[data-hue="navy"]   { --wc-tint: var(--wallet-navy-tint);   --wc-accent: var(--wallet-navy); }
 .wcard[data-hue="slate"]  { --wc-tint: var(--wallet-slate-tint);  --wc-accent: var(--wallet-slate); }
 .wcard[data-hue="teal"]   { --wc-tint: var(--wallet-teal-tint);   --wc-accent: var(--wallet-teal); }
-.wcard[data-tone="fail"] { --wc-tint: var(--red-100); --wc-accent: var(--red-600); }   /* risk 우선 */
-.wcard[data-tone="warn"] { --wc-tint: var(--lemon-100); --wc-accent: var(--lemon-700); }
+/* 지갑 색은 정체성(hue)만 유지 — 상태(tone fail/warn)로 카드 색을 바꾸지 않음(사용자 요청). */
 /* 좌측 컬러 액센트 바(::before)·흰색 광택 오버레이(::after) 제거 — 금지된 AI 슬롭 트로프 */
 /* enable motion only after first instant layout; never mid-drag */
 .wd-stage.wd-ready .wcard { transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms ease, box-shadow 340ms ease; }
@@ -195,8 +194,7 @@
 .dp-coin[data-hue="navy"]   { background: var(--wallet-navy); }
 .dp-coin[data-hue="slate"]  { background: var(--wallet-slate); }
 .dp-coin[data-hue="teal"]   { background: var(--wallet-teal); }
-.dp-coin[data-tone="fail"] { background: var(--red-600); }    /* risk 우선 */
-.dp-coin[data-tone="warn"] { background: var(--lemon-700); }
+/* 상태(tone)로 아바타 색 바꾸지 않음 — hue 유지. */
 
 .dp-id { min-width: 0; flex: 1; }
 .dp-id .nr { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -587,9 +585,12 @@ button.pol2-edit { border: 0; background: none; cursor: pointer; padding: 0; }
   font-family: var(--ff-mono); font-size: 13px; font-weight: 600; color: var(--slate-800);
   background: linear-gradient(150deg, var(--navy-50), var(--navy-100)); /* cyan-soft → navy 틴트 */
 }
-.wv-coin[data-tone="fail"] { background: linear-gradient(150deg, var(--red-50), var(--red-200)); }
-.wv-coin[data-tone="warn"] { background: linear-gradient(150deg, var(--lemon-50), var(--lemon-200)); }
-.wv-coin[data-tone="calm"] { background: linear-gradient(150deg, var(--neutral-50), var(--neutral-200)); }
+/* 개요 그리드 아바타도 상태(tone) 대신 정체성(hue) — 지갑별 색 유지. */
+.wv-coin[data-hue="navy"]   { background: linear-gradient(150deg, #F1F3F6, var(--wallet-navy-tint)); }
+.wv-coin[data-hue="blue"]   { background: linear-gradient(150deg, #F1F3F6, var(--wallet-blue-tint)); }
+.wv-coin[data-hue="violet"] { background: linear-gradient(150deg, #F1F3F6, var(--wallet-violet-tint)); }
+.wv-coin[data-hue="slate"]  { background: linear-gradient(150deg, #F1F3F6, var(--wallet-slate-tint)); }
+.wv-coin[data-hue="teal"]   { background: linear-gradient(150deg, #F1F3F6, var(--wallet-teal-tint)); }
 .wv-chains { display: flex; }
 .wv-chains img { width: 17px; height: 17px; border-radius: 50%; margin-left: -5px; border: 1.5px solid var(--surface); }
 .wv-chains img:first-child { margin-left: 0; }

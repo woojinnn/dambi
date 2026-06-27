@@ -157,6 +157,7 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
               active={activeIdx}
               onPick={(i) => { setActive(i); setOverview(false); }}
               onAddWallet={onAddWallet}
+              hueFor={hueFor}
             />
           ) : (
             <WalletPanel
@@ -572,12 +573,14 @@ function WalletOverview({
   active,
   onPick,
   onAddWallet,
+  hueFor,
 }: {
   wallets: DialWallet[];
   snap: StoreSnapshot | null;
   active: number;
   onPick: (i: number) => void;
   onAddWallet: () => void;
+  hueFor: (addr: string) => string;
 }) {
   const { t } = useTranslation("home");
   return (
@@ -592,7 +595,7 @@ function WalletOverview({
           const ap = snap ? appliedCount(snap, w.address) : 0;
           return (
             <button key={w.address} type="button" className={`wv-card${i === active ? " is-active" : ""}`} onClick={() => onPick(i)}>
-              <div className="wv-top"><span className="wv-coin" data-tone={w.tone}>{initialOf(w)}</span></div>
+              <div className="wv-top"><span className="wv-coin" data-hue={hueFor(w.address)}>{initialOf(w)}</span></div>
               <div className="wv-name">{w.label ?? "—"}</div>
               <div className="wv-addr">{w.address}</div>
               <div className="wv-foot">
