@@ -703,7 +703,12 @@ function EditorBody({
     setFormEntry({ kind: "loading" });
     try {
       let effectiveIr = ir ?? policy.initialIr ?? null;
-      if (!effectiveIr && cedarText.trim()) {
+      // 새 정책(seed)은 아직 편집 전이면(ir 없음) seed cedar 를 파싱하지 않는다.
+      // seed 는 조건 없는 `forbid(principal, action, resource)` 인데, 파서가 이
+      // 빈 forbid 를 폼으로 되돌리지 못해(irToForm→null) 새 정책을 열자마자
+      // '폼으로 열 수 없어요'가 떴다. 빈 폼으로 연다 — 편집을 시작하면 ir 이
+      // 생겨 이후엔 정상 파싱 경로를 탄다.
+      if (!effectiveIr && !isNew && cedarText.trim()) {
         effectiveIr = (await textToBlocks(cedarText))[0] ?? null;
       }
       const parsed = effectiveIr ? irToForm(effectiveIr) : emptyFormModel(stripDashboardId(policy.id));
