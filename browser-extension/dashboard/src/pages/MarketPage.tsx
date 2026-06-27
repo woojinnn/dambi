@@ -169,11 +169,18 @@ function LandingView({ locale }: { locale: MarketLocale }) {
       staleTime: 60_000,
     })),
   });
+  // 멤버 카테고리는 같은 slug 의 단독 정책 listing(서버 category)으로 조회 — 멤버 slug
+  // 는 카테고리 맵에 없어 categoryOf 만 쓰면 #others 로 퉁쳐진다(리스트 뷰와 동일 처리).
+  const catBySlug = useMemo(() => {
+    const m = new Map<string, CategoryKey>();
+    for (const l of all) if (l.kind === "policy" && isCategoryKey(l.category)) m.set(l.slug, l.category);
+    return m;
+  }, [all]);
   const officialMetaFor = (i: number) => {
     const members = officialDetailQs[i]?.data?.latest_version?.members ?? [];
     const catCount = new Map<CategoryKey, number>();
     members.forEach((m) => {
-      const c = categoryOf(m.slug);
+      const c = catBySlug.get(m.slug) ?? categoryOf(m.slug);
       catCount.set(c, (catCount.get(c) ?? 0) + 1);
     });
     return { count: members.length, catCount, ready: members.length > 0 };
