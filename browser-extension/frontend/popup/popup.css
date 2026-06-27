@@ -130,7 +130,7 @@ body.pc-big { width: 800px; }
   color: var(--slate-500); background: var(--fog); border: 1px solid var(--hair); border-radius: var(--r-pill); padding: 4px 8px; }
 .pc-only:hover { background: var(--mist-100); color: var(--brand-700); }
 .pc-mem.disabled .pc-only { opacity: .45; pointer-events: none; }
-.pc-foot-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.pc-foot-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
 .pc-link { appearance: none; cursor: pointer; font-family: var(--ff-sans); font-size: 11px; font-weight: 700; color: var(--slate-500);
   background: transparent; border: 0; border-radius: var(--r-sm); padding: 6px 9px; transition: background .12s, color .12s; }
 .pc-link:hover { background: var(--mist-100); color: var(--brand-700); }

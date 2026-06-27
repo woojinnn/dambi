@@ -342,13 +342,15 @@ function renderFooter() {
     const srv = [...(state.appliedServer || [])].sort().join(",");
     if (cur !== srv) { txt = "적용 중…"; cls = "busy"; busy = true; }
   }
+  // 전이 상태일 때만 좌측에 상태 텍스트. 평상시엔 좌측을 비우고 로그아웃·설정을
+  // 모두 우측 액션 그룹에 모아 오른쪽 정렬한다(알림 강도 버튼 제거 — 설정에서 봄).
   const left = busy
     ? '<span class="pc-status ' + cls + '"><span class="pc-dot"></span>' + esc(txt) + '</span>'
-    : '<button class="pc-link" id="footLogout">로그아웃</button>';
+    : '';
   f.innerHTML =
     left +
     '<div class="pc-foot-actions">' +
-      '<button class="pc-link" id="notifBtn" disabled>알림 강도</button>' +
+      (busy ? '' : '<button class="pc-link" id="footLogout">로그아웃</button>') +
       '<button class="pc-link accent" id="optBtn">설정 ' + I.ext + '</button>' +
     '</div>';
   const lo = document.getElementById("footLogout");

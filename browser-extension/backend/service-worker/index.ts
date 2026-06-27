@@ -329,6 +329,11 @@ interface WeeklySummaryRequest {
   type: "DAMBI_WEEKLY_SUMMARY";
   tabId?: number;
 }
+/** ⑤ 인페이지 토스트의 "대시보드 열기/확인하기/권한 취소" → 대시보드 열기.
+ *  content-script 는 탭을 직접 못 열어 SW 에 위임(표시 전용 — 결정 채널 아님). */
+interface OpenDashboardRequest {
+  type: "DAMBI_OPEN_DASHBOARD";
+}
 /** ② 마스코트 배지 — 팝업 열림 = 알람 확인. 발바닥/카운트를 초기화한다. */
 interface BadgeSeenRequest {
   type: "DAMBI_BADGE_SEEN";
@@ -460,6 +465,7 @@ type PopupRequest =
   | DambiUpdateWalletRequest
   | DambiDeleteWalletRequest
   | WeeklySummaryRequest
+  | OpenDashboardRequest
   | BadgeSeenRequest
   | CedarValidateRequest
   | CedarTestRequest
@@ -764,6 +770,14 @@ Browser.runtime.onMessage.addListener(
             error: { kind: "weekly_summary_failed", message: String(err) },
           }),
         );
+      return true;
+    }
+
+    // ⑤ 인페이지 토스트의 대시보드 열기/확인하기/권한 취소 → 대시보드(options.html)
+    // 새 탭으로 열기. content-script 는 탭을 직접 못 열어 여기로 위임한다.
+    if (req.type === "DAMBI_OPEN_DASHBOARD") {
+      openDashboardFromNotification();
+      sendResponse({ ok: true, data: null });
       return true;
     }
 

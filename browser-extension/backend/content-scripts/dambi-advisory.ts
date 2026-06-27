@@ -213,6 +213,17 @@ function showToast(scenario: string, data?: ToastMessage["data"]): void {
   box.querySelectorAll(".mn-actions button").forEach((b) =>
     b.addEventListener("click", (e) => {
       if (!(e as MouseEvent).isTrusted) return;
+      // primary/danger 버튼(대시보드 열기·확인하기·권한 취소)은 대시보드를 연다.
+      // content-script 는 탭을 직접 못 열어 SW 에 위임한다. 결정 액션(권한 취소)도
+      // 토스트가 직접 실행하지 않고 대시보드로 보낸다 — 표시 전용 원칙 유지.
+      const el = b as HTMLElement;
+      if (el.classList.contains("primary") || el.classList.contains("danger")) {
+        void Browser.runtime
+          .sendMessage({ type: "DAMBI_OPEN_DASHBOARD" })
+          .catch(() => {
+            /* SW 부재 등 — 무시 */
+          });
+      }
       removeToast();
     }),
   );
