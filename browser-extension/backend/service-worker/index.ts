@@ -540,8 +540,21 @@ async function pushToastToActiveTab(
     await ensureNotifySettings();
     if (!shouldRibbon()) return;
   }
-  // tabId 가 명시되면 그 탭으로(팝업이 활성 탭 id 를 직접 넘김 — 팝업이 떠
-  // 있을 때 lastFocusedWindow 가 팝업 창을 가리켜 어긋나는 문제 회피).
+  const msg = { type: "DAMBI_TOAST", scenario, ...(data ? { data } : {}) };
+
+  // (A) 확장 페이지(대시보드 options.html 등)는 content-script 가 못 들어가서
+  // tabs.sendMessage 로 못 닿는다. runtime 으로도 브로드캐스트해 대시보드의 인앱
+  // 토스트(AdvisoryToast)가 받게 한다. content-script 에는 안 가고(브로드캐스트는
+  // 확장 페이지 전용), 대시보드는 "보이는 탭일 때만" 렌더하므로 웹페이지의
+  // content-script 토스트와 중복되지 않는다. 받는 확장 페이지가 없으면 throw → 무시.
+  try {
+    await Browser.runtime.sendMessage(msg);
+  } catch {
+    /* 열린 확장 페이지 없음 */
+  }
+
+  // (B) 일반 웹페이지의 content-script 로 — tabId 가 명시되면 그 탭으로(팝업이 활성
+  // 탭 id 를 직접 넘김 — 팝업이 떠 있을 때 lastFocusedWindow 가 어긋나는 문제 회피),
   // 없으면(라이브 verdict) 활성 탭으로 폴백.
   let target = tabId;
   if (target === undefined) {
@@ -556,15 +569,13 @@ async function pushToastToActiveTab(
     }
   }
   if (target === undefined) return;
-
-  const msg = { type: "DAMBI_TOAST", scenario, ...(data ? { data } : {}) };
   try {
     await Browser.tabs.sendMessage(target, msg);
   } catch {
     // content-script 가 없거나(제한 페이지) 끊겼다(확장 리로드 후 그 탭을 아직
     // 새로고침 안 함). 후자는 흔하므로 content-script 를 즉석 주입한 뒤 재시도해
     // 자동 복구한다 — 사용자가 페이지를 새로고침할 필요가 없게. chrome:// 같은
-    // 제한 페이지는 주입도 실패하므로 조용히 스킵.
+    // 제한 페이지·확장 페이지는 주입도 실패하므로 조용히 스킵(대시보드는 위 (A)로 처리).
     try {
       await Browser.scripting.executeScript({
         target: { tabId: target },
@@ -572,7 +583,7 @@ async function pushToastToActiveTab(
       });
       await Browser.tabs.sendMessage(target, msg);
     } catch {
-      /* 주입 불가(제한 페이지 등) — 조용히 스킵 */
+      /* 주입 불가(제한/확장 페이지 등) — 조용히 스킵 */
     }
   }
 }
