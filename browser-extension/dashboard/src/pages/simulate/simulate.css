@@ -121,6 +121,7 @@
 .w1-trow.on { background: var(--sage-50); }
 .w1-trow-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; align-self: center; }
 .w1-trow-sym { font-size: 11px; font-weight: 700; color: var(--slate-800); flex: none; }
+.w1-trow-chain { font-size: 9.5px; font-weight: 600; color: var(--slate-400); background: var(--fog-200); padding: 0 5px; border-radius: 999px; flex: none; align-self: center; white-space: nowrap; }
 .w1-trow-pct { font-size: 10.5px; font-weight: 600; color: var(--slate-500); font-variant-numeric: tabular-nums; flex: none; }
 .w1-trow-usd { margin-left: auto; font-size: 10px; color: var(--slate-400); font-variant-numeric: tabular-nums; flex: none; white-space: nowrap; }
 .w1-arow-wrap, .w1-trow-wrap { display: flex; flex-direction: column; }
