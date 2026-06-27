@@ -151,6 +151,10 @@ export function ProfilePage() {
   const invalidateTiering = () => {
     void qc.invalidateQueries({ queryKey: ["market-publishers"] });
     void qc.invalidateQueries({ queryKey: ["market-tiers"] });
+    // 배지(TierBadge)가 쓰는 공개 등급 목록도 무효화 — 안 하면 새로 만든 등급
+    // (예: BlackList)이 staleTime(5분) 동안 배지에 안 잡혀, 게시자 옆 색 배지가
+    // 안 뜬다. 기존 등급(인증 등)은 캐시에 있어 떠서 비대칭으로 보였다.
+    void qc.invalidateQueries({ queryKey: ["market-tiers-public"] });
     void qc.invalidateQueries({ queryKey: ["market-user-search"] });
   };
   const onTierErr = (e: unknown) => setBanner(e instanceof Error ? e.message : String(e));
