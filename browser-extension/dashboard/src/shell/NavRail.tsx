@@ -86,6 +86,16 @@ export function NavRail() {
           badge={pendingCount > 0 ? String(pendingCount) : undefined}
           showDot={pendingCount > 0}
         />
+        {/* 외부 GitBook 문서 — 라우트가 아니라 새 탭으로 여는 링크. */}
+        <a
+          className="nav-item"
+          href="https://dambio.gitbook.io/wallet-guardians-docs/pasu"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span className="icon"><DocsIcon /></span>
+          <span className="label">{t("nav.docs")}</span>
+        </a>
       </div>
 
       <div className="nav-bottom" ref={menuRef}>
@@ -194,6 +204,13 @@ const HistoryIcon = () => (
   <svg viewBox="0 0 24 24" {...stroke}>
     <path d="M3 3v18h18" />
     <path d="m7 14 4-4 4 3 5-7" />
+  </svg>
+);
+const DocsIcon = () => (
+  <svg viewBox="0 0 24 24" {...stroke}>
+    <path d="M4 4h9l5 5v11H4z" />
+    <path d="M13 4v5h5" />
+    <path d="M8 13h6M8 16h6" />
   </svg>
 );
 const MarketIcon = () => (
