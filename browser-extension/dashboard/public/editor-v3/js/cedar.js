@@ -502,18 +502,37 @@
     return { manifest: { id, schema_version: 2, trigger: { where: { "action.tag": { eq: tag } } }, policy_rpc: policyRpc, custom_context: { fields: customFields } }, errors: [] };
   }
   // restore user-defined enrichment fields from a saved manifest.
+  function normalizeCustomType(raw) {
+    if (raw === "decimal" || raw === "Decimal") return "decimal";
+    if (raw === "Long" || raw === "Bool" || raw === "String") return raw;
+    return null;
+  }
   function userFieldsFromManifest(manifest, actionTag) {
     const out = {};
     const m = manifest;
     if (!m || !Array.isArray(m.policy_rpc)) return out;
     const types = (m.custom_context && m.custom_context.fields) || {};
+    // context.custom.<X> 는 policy_rpc.id 가 아니라 각 output 의 `field` 로 묶인다
+    // (editor-v9 manifest 모양). 타입은 custom_context.fields 가 정본이고 output.type
+    // (대문자 철자 등)도 허용. 옛 rpc.id 기반 리더는 v9 manifest 를 못 읽어 마켓에서
+    // 가져온 보강 필드(예: swapUsd)가 라벨 없이 원시 경로로 떴다.
     for (const rpc of m.policy_rpc) {
-      if (!rpc || typeof rpc.id !== "string" || typeof rpc.method !== "string") continue;
-      if (rpc.id in ENRICHMENT_FIELDS) continue;
-      const type = types[rpc.id];
-      if (type !== "decimal" && type !== "Long" && type !== "Bool" && type !== "String") continue;
-      const from = rpc.outputs && rpc.outputs[0] && rpc.outputs[0].from;
-      out[rpc.id] = { type, label: { ko: rpc.id, en: rpc.id }, appliesTo: actionTag ? [actionTag] : [], method: rpc.method, projection: typeof from === "string" ? from : "$.result.value", params: rpc.params || {} };
+      if (!rpc || typeof rpc.method !== "string" || !Array.isArray(rpc.outputs)) continue;
+      for (const output of rpc.outputs) {
+        if (!output || output.kind !== "context" || typeof output.field !== "string") continue;
+        const field = output.field;
+        if (field in ENRICHMENT_FIELDS) continue;
+        const type = normalizeCustomType(types[field]) || normalizeCustomType(output.type);
+        if (!type) continue;
+        out[field] = {
+          type,
+          label: { ko: field, en: field },
+          appliesTo: actionTag ? [actionTag] : [],
+          method: rpc.method,
+          projection: typeof output.from === "string" ? output.from : "$.result.value",
+          params: rpc.params && typeof rpc.params === "object" && !Array.isArray(rpc.params) ? rpc.params : {},
+        };
+      }
     }
     return out;
   }
