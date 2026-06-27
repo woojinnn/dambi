@@ -172,9 +172,14 @@ export function initDonuts(root: HTMLElement): () => void {
 
     const segEls: SVGElement[] = [];
     const legEls: HTMLElement[] = [];
+    // 세그먼트 길이는 서버 pct(반올림 → 합이 100을 살짝 넘거나 모자랄 수 있음)가
+    // 아니라 실제 usd 비율로 잰다. pct 합이 100을 넘으면 누적합 acc 가 원주 C 를
+    // 초과해, 12시에서 마지막 세그먼트가 첫 세그먼트 위를 덮어 어두운 노치가 생겼다.
+    // usd 비율은 항상 정확히 C 로 떨어져 12시 이음새에 깔끔한 GAP 만 남는다.
+    const sumUsd = cfg.items.reduce((s, it) => s + it.usd, 0) || 1;
     let acc = 0;
     cfg.items.forEach(function (it, i) {
-      const len = (it.pct / 100) * C;
+      const len = (it.usd / sumUsd) * C;
       const seg = document.createElementNS(NS, "circle");
       seg.setAttribute("class", "donut-seg");
       seg.setAttribute("cx", "60");
