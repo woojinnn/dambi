@@ -74,34 +74,50 @@ const ConfirmBus = /* @__PURE__ */ (() => {
 function e2Confirm(opts) {
   return new Promise((resolve) => ConfirmBus.request({ ...opts, _resolve: resolve }));
 }
+function e2Prompt(opts) {
+  return new Promise((resolve) => ConfirmBus.request({ ...opts, prompt: true, _resolve: resolve }));
+}
 function ConfirmHost() {
   const [ask, setAsk] = React.useState(null);
-  React.useEffect(() => ConfirmBus.subscribe((opts) => setAsk(opts)), []);
+  const [val, setVal] = React.useState("");
+  React.useEffect(() => ConfirmBus.subscribe((opts) => {
+    setAsk(opts);
+    setVal(opts.defaultValue || "");
+  }), []);
+  const close = (ok) => {
+    if (!ask) return;
+    if (ask.prompt) ask._resolve(ok ? val.trim() || null : null);
+    else ask._resolve(ok);
+    setAsk(null);
+  };
   React.useEffect(() => {
     if (!ask) return;
     const onKey = (e) => {
-      if (e.key === "Escape") {
-        ask._resolve(false);
-        setAsk(null);
-      }
-      if (e.key === "Enter") {
-        ask._resolve(true);
-        setAsk(null);
-      }
+      if (e.key === "Escape") close(false);
+      if (e.key === "Enter" && !ask.prompt) close(true);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [ask]);
+  }, [ask, val]);
   if (!ask) return null;
-  const close = (ok) => {
-    ask._resolve(ok);
-    setAsk(null);
-  };
+  const okDisabled = ask.prompt && !val.trim();
   return (
     // `e2` 클래스 필수 — ConfirmHost 는 `.e2` 루트 밖(listpage)에 마운트되므로,
     // `.e2 .e2cf-*` 스타일이 먹으려면 오버레이 자체가 `.e2` 여야 한다. (없으면
     // 버튼이 스타일 없이 "취소제거"로 붙어 보인다.)
-    /* @__PURE__ */ React.createElement("div", { className: "e2 e2-ov", onMouseDown: () => close(false) }, /* @__PURE__ */ React.createElement("div", { className: "modal e2cf", onMouseDown: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-body" }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-title" }, ask.title), ask.body && /* @__PURE__ */ React.createElement("div", { className: "e2cf-text" }, ask.body)), /* @__PURE__ */ React.createElement("div", { className: "e2cf-foot" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "e2cf-btn cancel", onClick: () => close(false) }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { type: "button", className: `e2cf-btn ok${ask.danger ? " danger" : ""}`, autoFocus: true, onClick: () => close(true) }, ask.confirmLabel || "\uD655\uC778"))))
+    /* @__PURE__ */ React.createElement("div", { className: "e2 e2-ov", onMouseDown: () => close(false) }, /* @__PURE__ */ React.createElement("div", { className: "modal e2cf", onMouseDown: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-body" }, /* @__PURE__ */ React.createElement("div", { className: "e2cf-title" }, ask.title), ask.body && /* @__PURE__ */ React.createElement("div", { className: "e2cf-text" }, ask.body), ask.prompt && /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        className: "e2cf-input",
+        autoFocus: true,
+        value: val,
+        placeholder: ask.placeholder || "",
+        onChange: (e) => setVal(e.target.value),
+        onKeyDown: (e) => {
+          if (e.key === "Enter" && val.trim()) close(true);
+        }
+      }
+    )), /* @__PURE__ */ React.createElement("div", { className: "e2cf-foot" }, /* @__PURE__ */ React.createElement("button", { type: "button", className: "e2cf-btn cancel", onClick: () => close(false) }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { type: "button", className: `e2cf-btn ok${ask.danger ? " danger" : ""}`, autoFocus: !ask.prompt, disabled: okDisabled, onClick: () => close(true) }, ask.confirmLabel || "\uD655\uC778"))))
   );
 }
 const navStroke = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
@@ -156,4 +172,4 @@ function Topbar({ here, subtitle, right }) {
   const hits = needle ? Object.values(snap.library.defs).filter((d) => !d.hidden && (d.displayName.toLowerCase().includes(needle) || d.id.toLowerCase().includes(needle))) : [];
   return /* @__PURE__ */ React.createElement("div", { className: "topbar" }, /* @__PURE__ */ React.createElement("div", { className: "crumb" }, /* @__PURE__ */ React.createElement("span", { className: "here" }, here), subtitle != null && /* @__PURE__ */ React.createElement("span", { className: "sep" }, "/"), subtitle != null && /* @__PURE__ */ React.createElement("span", { className: "addr" }, subtitle)), /* @__PURE__ */ React.createElement("div", { className: "search-wrap", ref: wrapRef, style: { display: "none" } }), /* @__PURE__ */ React.createElement("div", { className: "dots" }, right));
 }
-Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, e2Confirm, ConfirmHost, NavRail, Topbar });
+Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, e2Confirm, e2Prompt, ConfirmHost, NavRail, Topbar });

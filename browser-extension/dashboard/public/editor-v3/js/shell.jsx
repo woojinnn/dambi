@@ -100,20 +100,33 @@ const ConfirmBus = (() => {
 function e2Confirm(opts) {
   return new Promise((resolve) => ConfirmBus.request({ ...opts, _resolve: resolve }));
 }
+/** 이름 등 한 줄 입력을 받는 인앱 모달. 확인 시 입력 문자열(trim), 취소·빈값이면
+ *  null 을 resolve 한다. window.prompt 대신 앱 스타일 모달을 쓰고 싶을 때. */
+function e2Prompt(opts) {
+  return new Promise((resolve) => ConfirmBus.request({ ...opts, prompt: true, _resolve: resolve }));
+}
 function ConfirmHost() {
   const [ask, setAsk] = React.useState(null);
-  React.useEffect(() => ConfirmBus.subscribe((opts) => setAsk(opts)), []);
+  const [val, setVal] = React.useState("");
+  React.useEffect(() => ConfirmBus.subscribe((opts) => { setAsk(opts); setVal(opts.defaultValue || ""); }), []);
+  const close = (ok) => {
+    if (!ask) return;
+    if (ask.prompt) ask._resolve(ok ? (val.trim() || null) : null);
+    else ask._resolve(ok);
+    setAsk(null);
+  };
   React.useEffect(() => {
     if (!ask) return;
     const onKey = (e) => {
-      if (e.key === "Escape") { ask._resolve(false); setAsk(null); }
-      if (e.key === "Enter") { ask._resolve(true); setAsk(null); }
+      if (e.key === "Escape") close(false);
+      // 입력 모달에서 Enter 는 input 의 onKeyDown 이 처리한다(빈값 가드 포함).
+      if (e.key === "Enter" && !ask.prompt) close(true);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [ask]);
+  }, [ask, val]);
   if (!ask) return null;
-  const close = (ok) => { ask._resolve(ok); setAsk(null); };
+  const okDisabled = ask.prompt && !val.trim();
   return (
     // `e2` 클래스 필수 — ConfirmHost 는 `.e2` 루트 밖(listpage)에 마운트되므로,
     // `.e2 .e2cf-*` 스타일이 먹으려면 오버레이 자체가 `.e2` 여야 한다. (없으면
@@ -123,10 +136,20 @@ function ConfirmHost() {
         <div className="e2cf-body">
           <div className="e2cf-title">{ask.title}</div>
           {ask.body && <div className="e2cf-text">{ask.body}</div>}
+          {ask.prompt && (
+            <input
+              className="e2cf-input"
+              autoFocus
+              value={val}
+              placeholder={ask.placeholder || ""}
+              onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && val.trim()) close(true); }}
+            />
+          )}
         </div>
         <div className="e2cf-foot">
           <button type="button" className="e2cf-btn cancel" onClick={() => close(false)}>취소</button>
-          <button type="button" className={`e2cf-btn ok${ask.danger ? " danger" : ""}`} autoFocus onClick={() => close(true)}>{ask.confirmLabel || "확인"}</button>
+          <button type="button" className={`e2cf-btn ok${ask.danger ? " danger" : ""}`} autoFocus={!ask.prompt} disabled={okDisabled} onClick={() => close(true)}>{ask.confirmLabel || "확인"}</button>
         </div>
       </div>
     </div>
@@ -230,4 +253,4 @@ function Topbar({ here, subtitle, right }) {
   );
 }
 
-Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, e2Confirm, ConfirmHost, NavRail, Topbar });
+Object.assign(window, { useRoute, navigate, consumeNavState, useOverview, ToastStack, pushToast, e2Confirm, e2Prompt, ConfirmHost, NavRail, Topbar });

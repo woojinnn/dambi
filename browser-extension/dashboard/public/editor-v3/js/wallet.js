@@ -91,9 +91,13 @@ function WalletWorkspace({ snap, address }) {
       () => PS.bindDef({ defId, packageId: pkgId, addresses: [address], ...Object.keys(def.defaults.params).length ? { params: def.defaults.params } : {} })
     ).then((ok) => ok && pushToast(`${def.displayName} \u2192 ${walletPkgName(pkgId)}`));
   };
-  const createPackage = () => run("\uD328\uD0A4\uC9C0 \uC0DD\uC131", () => PS.putWalletPackage({ address, pkg: { id: `pkg::${crypto.randomUUID()}`, displayName: "\uC0C8 \uD328\uD0A4\uC9C0" } })).then(
-    (ok) => ok && pushToast("\uD328\uD0A4\uC9C0\uB97C \uB9CC\uB4E4\uC5C8\uC5B4\uC694 \u2014 \uC774\uB984\uC744 \uBC14\uAFD4\uBCF4\uC138\uC694")
-  );
+  const createPackage = async () => {
+    const name = await e2Prompt({ title: "\uC0C8 \uD328\uD0A4\uC9C0 \uB9CC\uB4E4\uAE30", body: "\uC0C8\uB85C\uC6B4 \uD328\uD0A4\uC9C0 \uC774\uB984\uC744 \uC815\uD558\uC138\uC694.", placeholder: "\uC608: DeFi \uBCF4\uD638\uD329", confirmLabel: "\uB9CC\uB4E4\uAE30" });
+    if (!name) return;
+    run("\uD328\uD0A4\uC9C0 \uC0DD\uC131", () => PS.putWalletPackage({ address, pkg: { id: `pkg::${crypto.randomUUID()}`, displayName: name } })).then(
+      (ok) => ok && pushToast(`"${name}" \uD328\uD0A4\uC9C0\uB97C \uB9CC\uB4E4\uC5C8\uC5B4\uC694`)
+    );
+  };
   const renamePackage = (pkgId) => {
     const pkg = wallet.packages?.[pkgId];
     const name = draftName.trim();
