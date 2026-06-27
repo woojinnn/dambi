@@ -116,7 +116,12 @@ export function WalletGovernance({ wallets, snap, onSync, syncingAddress, onRena
 
   // 지갑별 사용자 지정 색(localStorage). 없으면 주소-해시 기본값. 좌측 카드·우측 패널·패키지 공유.
   const [walletColors, setWalletColors] = useState<Record<string, WalletHue>>(loadWalletColors);
-  const hueFor = (addr: string): string => walletColors[addr.toLowerCase()] ?? hueOf(addr);
+  // 저장값은 현재 팔레트 안에 있을 때만 신뢰 — 옛 버전이 남긴 orphan 색(예: "red",
+  // 무지개 제거 전 값)은 무시하고 주소-해시 색으로 폴백(에디터 walletHue 와 동일 규칙).
+  const hueFor = (addr: string): string => {
+    const saved = walletColors[addr.toLowerCase()];
+    return saved && (WALLET_PALETTE as readonly string[]).includes(saved) ? saved : hueOf(addr);
+  };
   const setWalletColor = (addr: string, hue: WalletHue) =>
     setWalletColors((m) => { const next = { ...m, [addr.toLowerCase()]: hue }; saveWalletColors(next); return next; });
 

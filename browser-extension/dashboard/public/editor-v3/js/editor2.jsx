@@ -6,9 +6,16 @@
  * ════════════════════════════════════════════════════════════════════════ */
 
 // 지갑 색 — 홈(WalletGovernance)과 동일 규칙(localStorage 우선, 없으면 주소-해시, 소문자 정규화).
+// 저장값은 현재 팔레트(navy/blue/violet/slate/teal) 안에 있을 때만 신뢰한다. 팔레트에서
+// 빠진 옛 값("red" 등 — 무지개 제거 전 버전이 남긴 orphan)은 무시하고 해시 색으로 폴백해,
+// 피커로는 못 고르는 색이 아바타에 박혀 있는 일을 막는다.
+const WALLET_HUES = ["navy", "blue", "violet", "slate", "teal"];
 function walletHue(addr) {
   const s = String(addr || "").toLowerCase();
-  try { const m = JSON.parse(localStorage.getItem("dambi:wallet-colors") || "{}"); if (m && m[s]) return m[s]; } catch (e) {}
+  try {
+    const m = JSON.parse(localStorage.getItem("dambi:wallet-colors") || "{}");
+    if (m && WALLET_HUES.indexOf(m[s]) !== -1) return m[s];
+  } catch (e) {}
   let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return ["blue", "violet", "navy"][h % 3];
 }

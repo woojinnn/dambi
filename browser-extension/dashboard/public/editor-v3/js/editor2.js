@@ -1,8 +1,9 @@
+const WALLET_HUES = ["navy", "blue", "violet", "slate", "teal"];
 function walletHue(addr) {
   const s = String(addr || "").toLowerCase();
   try {
     const m = JSON.parse(localStorage.getItem("dambi:wallet-colors") || "{}");
-    if (m && m[s]) return m[s];
+    if (m && WALLET_HUES.indexOf(m[s]) !== -1) return m[s];
   } catch (e) {
   }
   let h = 0;
