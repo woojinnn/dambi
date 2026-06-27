@@ -306,7 +306,6 @@ export function ValueSheet({ model, ctx, triggerLabel, triggerAny, severity, onS
             <b className={`pv-trigchip${triggerAny ? " any" : ""}`}>{triggerAny ? "모든 거래" : triggerLabel}</b>
             <span className="pv-top-lk">{triggerAny ? "마다" : "거래에서"}</span>
             <span className="pv-spacer" />
-            <span className="pv-ro-pill">뼈대 · 읽기전용</span>
           </div>
           <div className="pv-when">{whenRuns.length === 0 ? <div className="pv-empty">조건이 없어 이 거래는 항상 적용돼요.</div> : renderSituations(model.when)}</div>
           <div className={`pv-verb ${severity}`}>

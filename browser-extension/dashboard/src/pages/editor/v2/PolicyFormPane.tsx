@@ -956,7 +956,6 @@ function ValueSheet({
           </b>
           <span className="pv-top-lk">{triggerAny ? t("sheet.every") : t("sheet.inTx")}</span>
           <span className="pv-spacer" />
-          <span className="pv-ro-pill">{t("sheet.skeletonReadonly")}</span>
         </div>
 
         <div className="pv-when">
