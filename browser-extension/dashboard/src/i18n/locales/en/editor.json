@@ -569,6 +569,8 @@
     "addrCount_one": "{{count}} address",
     "addrCount_other": "{{count}} addresses",
     "badSlug": "Invalid slug format (letters/digits/_.-() only, 1-120 chars)",
+    "nameRequired": "Enter a name.",
+    "nameTaken": "A listing with this name already exists on Policy Hub. Use a different name.",
     "noMembersError": "No member policies to publish.",
     "title": "Publish to Policy Hub",
     "subtitle": "Make your curated package public so other users can install it.",

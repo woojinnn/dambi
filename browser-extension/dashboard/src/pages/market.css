@@ -1876,6 +1876,9 @@
   background: var(--surface); font-family: inherit;
 }
 .pub-input:focus, .pub-textarea:focus { outline: none; border-color: var(--sage-400, var(--sage-300)); }
+.pub-input.error { border-color: var(--fail-500, #dc2626); background: var(--fail-50, #fef2f2); }
+.pub-input.error:focus { border-color: var(--fail-600, #b91c1c); }
+.pub-name-err { margin-top: 6px; font-size: 12.5px; color: var(--fail-600, #b91c1c); }
 .pub-textarea { resize: vertical; }
 .pub-cat-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .pub-cat-chip {
