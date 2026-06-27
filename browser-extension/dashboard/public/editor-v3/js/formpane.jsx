@@ -263,9 +263,10 @@ function ValueSheet({ model, ctx, triggerLabel, triggerAny, severity, onSeverity
     const field = ctx.fieldByPath.get(cond.fieldPath);
     const subject = field?.label ?? cond.fieldPath ?? "값";
     const rhsOptions = compatibleRhsFields(ctx.rhsFields, field);
-    const canField = SCALAR_OPS.has(cond.op) && rhsOptions.length > 0;
     const fieldMode = cond.value.kind === "field";
     const invalid = cond.value.kind === "decimal" && badDecimals.has(cond.value.value);
+    // 값 시트(적용·설치)는 "값만 바꿀 수 있어요" — 값↔필드 전환(필드로/값으로)은
+    // 구조 변경이라 여기선 노출하지 않는다(라이브러리 정책 편집기에서만).
     return (
       <span className="pv-line">
         <span className="pv-subj">{subject}이(가)</span>
@@ -273,9 +274,6 @@ function ValueSheet({ model, ctx, triggerLabel, triggerAny, severity, onSeverity
           <span className="pv-blank field"><FieldCombobox value={cond.value.kind === "field" ? cond.value.path : ""} fields={rhsOptions} onChange={(p) => onValue(cond, { kind: "field", path: p })} /></span>
         ) : (
           <span className={`pv-blank${invalid ? " invalid" : ""}`}><ValueInput value={cond.value} field={field} invalid={invalid} onChange={(v) => onValue(cond, v)} /></span>
-        )}
-        {canField && (
-          <button type="button" className="pv-mode" onClick={() => onValue(cond, fieldMode ? defaultValueOfKind(valueKindFor(field, cond.op)) : { kind: "field", path: rhsOptions[0]?.path ?? "principal.address" })} title={fieldMode ? "고정 값(주소·숫자)으로 바꾸기" : "다른 필드와 비교"}>{fieldMode ? "값으로" : "필드로"}</button>
         )}
         <span className="pv-word">{SUFFIX_KO[cond.op]}</span>
       </span>
