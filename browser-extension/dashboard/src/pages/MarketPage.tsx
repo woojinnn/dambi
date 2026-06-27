@@ -18,6 +18,7 @@ import {
   CATEGORY_COLOR,
   CATEGORY_ORDER,
   CategoryGlyph,
+  categoryHashtag,
   categoryNameOf,
   categoryOf,
   isCategoryKey,
@@ -823,21 +824,22 @@ function ListView({
       staleTime: 60_000,
     })),
   });
+  // 멤버별 카테고리는 같은 slug 의 단독 정책 listing 카테고리(서버 category, 정확)로
+  // 조회한다 — 패키지의 단일 카테고리/intents 보다 정확. (Airdrop 패키지 안의 토큰
+  // 정책도 #token 으로 집계돼 카드에 #token·#airdrop 이 같이 뜬다.)
+  const catBySlug = useMemo(() => {
+    const m = new Map<string, CategoryKey>();
+    for (const p of allPolicies) if (isCategoryKey(p.category)) m.set(p.slug, p.category);
+    return m;
+  }, [allPolicies]);
   const metaFor = (i: number) => {
     const members = setDetailQs[i]?.data?.latest_version?.members ?? [];
     const catCount = new Map<CategoryKey, number>();
-    // 서버가 저장한 멤버 카테고리(intents) 우선 — pasu 카탈로그 슬러그까지 정확.
-    // 없으면(구 패키지) 멤버 슬러그 기반 추정으로 폴백.
-    const intents = (sets[i]?.intents ?? []).filter(isCategoryKey);
-    if (intents.length) {
-      intents.forEach((c) => catCount.set(c, catCount.get(c) ?? 1));
-    } else {
-      members.forEach((m) => {
-        const c = categoryOf(m.slug);
-        catCount.set(c, (catCount.get(c) ?? 0) + 1);
-      });
-    }
-    return { count: members.length, catCount, ready: members.length > 0 || intents.length > 0 };
+    members.forEach((m) => {
+      const c = catBySlug.get(m.slug) ?? categoryOf(m.slug);
+      catCount.set(c, (catCount.get(c) ?? 0) + 1);
+    });
+    return { count: members.length, catCount, ready: members.length > 0 };
   };
 
   const polList =
@@ -1172,10 +1174,12 @@ function PackageListCard({
   const name = pickI18n(listing.display_name) || listing.slug;
   const official = listing.publisher_tier === "official";
   const author = publisherDisplay(listing.publisher_tier, listing.publisher_email, locale);
-  // 패키지는 단일 카테고리 — 그 카테고리로 #태그. (멤버 slug 기반 catCount 는
-  // 패키지 내부 slug 라 Others 로 떨어져 홈 카드가 #Others 로 보였다.)
+  // 멤버 카테고리(catCount, 단독 listing 으로 정확 집계)를 #태그로 — 상세 페이지처럼
+  // 한 패키지가 여러 카테고리면 다 보여준다(#token·#airdrop). 아직 멤버 로드 전이면
+  // 패키지의 단일 카테고리로 폴백.
+  const memberCats = [...meta.catCount.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
   const pkgCat = listingCategoryKey(listing);
-  const topCats = pkgCat ? [pkgCat] : [];
+  const topCats = memberCats.length ? memberCats : pkgCat ? [pkgCat] : [];
   const ver = listing.current_version;
   return (
     <Link to={`/market/${encodeURIComponent(listing.slug)}`} className="rm-pkgcard">
@@ -1199,7 +1203,7 @@ function PackageListCard({
         <div className="rm-pkgcard-tags">
           {topCats.map((c) => (
             <span key={c} className="rm-pkgcard-tag" style={{ color: CATEGORY_COLOR[c].ink }}>
-              #{categoryNameOf(c, locale)}
+              {categoryHashtag(c)}
             </span>
           ))}
         </div>

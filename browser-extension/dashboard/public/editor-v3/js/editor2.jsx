@@ -502,13 +502,24 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   }, [wallet, lensPkg, lensOrder, pinnedPkgs]);
 
   /* 동작 */
-  // FLIP — 패키지 순서가 바뀌면 모든 카드가 새 위치로 부드럽게 미끄러진다(띡 끊김 제거).
+  // FLIP — 패키지 "순서"가 바뀔 때만 카드가 새 위치로 부드럽게 미끄러진다.
+  // 토글로 카드 높이만 바뀌어 아래 카드가 밀리는 경우엔 애니메이션을 건너뛴다
+  // (순서는 그대로인데 슬라이드가 뜨던 버그). 순서 동일 여부는 id 시퀀스로 판정.
   const gridRef = React.useRef(null);
   const prevRects = React.useRef(new Map());
+  const prevOrderKey = React.useRef("");
   React.useLayoutEffect(() => {
     const grid = gridRef.current;
     if (!grid) return;
-    const cards = grid.querySelectorAll(".prow[data-pkgid]");
+    const cards = [...grid.querySelectorAll(".prow[data-pkgid]")];
+    const orderKey = cards.map((row) => row.getAttribute("data-pkgid")).join(",");
+    if (orderKey === prevOrderKey.current) {
+      // 순서 그대로(높이/내용만 변함) → 애니메이션 없이 위치만 갱신.
+      const same = new Map();
+      cards.forEach((row) => same.set(row.getAttribute("data-pkgid"), row.getBoundingClientRect()));
+      prevRects.current = same;
+      return;
+    }
     cards.forEach((row) => {
       const id = row.getAttribute("data-pkgid");
       const prev = prevRects.current.get(id);
@@ -527,6 +538,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
     const m = new Map();
     cards.forEach((row) => m.set(row.getAttribute("data-pkgid"), row.getBoundingClientRect()));
     prevRects.current = m;
+    prevOrderKey.current = orderKey;
   }, [packages]);
 
   const togglePackage = (pkgId, members, displayedOn) =>
