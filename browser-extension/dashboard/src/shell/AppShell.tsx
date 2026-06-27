@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import "./shell.css";
 
 import { NavRail } from "./NavRail";
+import { AdvisoryToast } from "../components/AdvisoryToast";
 
 /**
  * Two-column app frame: persistent NavRail + content slot. Pages own
@@ -15,6 +16,8 @@ export function AppShell() {
       <main className="app-content">
         <Outlet />
       </main>
+      {/* SW 가 브로드캐스트하는 advisory 토스트를 대시보드 화면에 직접 렌더. */}
+      <AdvisoryToast />
     </div>
   );
 }
