@@ -160,7 +160,11 @@ export async function listingToDefs(
       displayName: it.name,
       cat: meta.cat,
       ...(it.doc ? { doc: it.doc } : {}),
-      skeleton: { ir: skeletonIr, manifest },
+      // model 도 캐시한다 — 정적 에디터(editor-v3)의 패키지 적용·미리보기 화면은
+      // skeleton.model 을 읽고(거기엔 irToForm 이 없다), 없으면 빈 폼('모든 거래 ·
+      // 조건 없음')으로 떨어진다. skeletonIr 은 이미 v1..vN 리터럴을 가진 ir 이라
+      // irToForm 이 값까지 채운 모델을 돌려준다.
+      skeleton: { ir: skeletonIr, model: irToForm(skeletonIr) ?? undefined, manifest },
       holes,
       defaults: { enabled: false, params, packageId: undefined }, // 설치 선택이 채움
       source: "market",

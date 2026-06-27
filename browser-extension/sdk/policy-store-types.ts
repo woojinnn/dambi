@@ -48,7 +48,10 @@ export interface PolicyDef {
   /** Authoring docs shown on the policy and carried to Policy Hub on publish.
    *  Plain single-language text; every field optional. */
   doc?: PolicyDoc;
-  skeleton: { ir: unknown; manifest?: unknown };
+  // `model` 은 폼 모델(FormModel) 캐시 — 정적 에디터(editor-v3)의 적용·미리보기
+  // 화면이 ir 대신 이 모델을 읽는다(거기엔 irToForm 이 없다). 마켓 import 도 이걸
+  // 채워야 트리거·조건이 보인다. 없을 수도 있어 optional.
+  skeleton: { ir: unknown; model?: unknown; manifest?: unknown };
   holes: HoleSpec[];
   defaults: { enabled: boolean; params: Record<string, HoleValue>; packageId?: string };
   source: "builtin" | "mine" | "market";
