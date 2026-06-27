@@ -426,10 +426,18 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
   }, [wallet, lensPkg, lensOrder, pinnedPkgs]);
   const gridRef = React.useRef(null);
   const prevRects = React.useRef(/* @__PURE__ */ new Map());
+  const prevOrderKey = React.useRef("");
   React.useLayoutEffect(() => {
     const grid = gridRef.current;
     if (!grid) return;
-    const cards = grid.querySelectorAll(".prow[data-pkgid]");
+    const cards = [...grid.querySelectorAll(".prow[data-pkgid]")];
+    const orderKey = cards.map((row) => row.getAttribute("data-pkgid")).join(",");
+    if (orderKey === prevOrderKey.current) {
+      const same = /* @__PURE__ */ new Map();
+      cards.forEach((row) => same.set(row.getAttribute("data-pkgid"), row.getBoundingClientRect()));
+      prevRects.current = same;
+      return;
+    }
     cards.forEach((row) => {
       const id = row.getAttribute("data-pkgid");
       const prev = prevRects.current.get(id);
@@ -448,6 +456,7 @@ function E2Workspace({ snap, address, onNewPolicy, lensPkg, lensOrder, pinnedPkg
     const m = /* @__PURE__ */ new Map();
     cards.forEach((row) => m.set(row.getAttribute("data-pkgid"), row.getBoundingClientRect()));
     prevRects.current = m;
+    prevOrderKey.current = orderKey;
   }, [packages]);
   const togglePackage = (pkgId, members, displayedOn) => run("\uD328\uD0A4\uC9C0 \uD1A0\uAE00", async () => {
     if (displayedOn) return PS.setPackageEnabled({ address, packageId: pkgId, enabled: false });
