@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 
 import {
   createListing,
+  listListings,
+  pickI18n,
   type CreateListingBody,
   type ListingKind,
   type MarketSeverity,
@@ -168,11 +170,42 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
       return n;
     });
 
+  // 모달이 열리면 기본 이름(제안명)으로 채운다 — 단, 사용자가 전부 지우면 다시
+  // 채워 넣지 않는다(예전엔 입력 value 가 `name || 제안명` 이라 지우면 되돌아갔다).
+  useEffect(() => {
+    if (open) setName(source?.suggestedDisplayName ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, source?.suggestedDisplayName]);
+
+  // Policy Hub 에 이미 올라간 이름과 중복인지 검사 — 같은 종류(정책/패키지)의
+  // 공개 listing 표시 이름들(en·ko)을 모아 둔다.
+  const listingKind: ListingKind = source?.kind === "policy" ? "policy" : "set";
+  const existingNamesQ = useQuery({
+    queryKey: ["market-existing-names", listingKind],
+    queryFn: () => listListings({ kind: listingKind, limit: 500 }),
+    enabled: open && !!source,
+    staleTime: 60_000,
+  });
+  const existingNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const l of existingNamesQ.data ?? []) {
+      for (const n of [l.display_name?.en, l.display_name?.ko, pickI18n(l.display_name)]) {
+        if (n && n.trim()) s.add(n.trim().toLowerCase());
+      }
+    }
+    return s;
+  }, [existingNamesQ.data]);
+  const trimmedName = name.trim();
+  const nameTaken = trimmedName.length > 0 && existingNames.has(trimmedName.toLowerCase());
+  const nameInvalid = trimmedName.length === 0 || nameTaken;
+
   const publishMut = useMutation({
     mutationFn: async (): Promise<{ slug: string; kind: ListingKind }> => {
       if (!source) throw new Error("no source");
       const slug = toPublishSlug(source.suggestedSlug);
-      const trimName = name.trim() || source.suggestedDisplayName;
+      const trimName = name.trim();
+      if (!trimName) throw new Error(t("publish.nameRequired"));
+      if (existingNames.has(trimName.toLowerCase())) throw new Error(t("publish.nameTaken"));
       if (!SLUG_RE.test(slug)) {
         throw new Error(t("publish.badSlug"));
       }
@@ -244,7 +277,6 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
 
   if (!open || !source) return null;
 
-  const seededName = name || source.suggestedDisplayName;
   const loadingMembers = false;
 
   return (
@@ -281,7 +313,10 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
             />
           ) : (
             <Step2
-              name={seededName}
+              name={name}
+              nameError={
+                nameTaken ? t("publish.nameTaken") : trimmedName.length === 0 ? t("publish.nameRequired") : null
+              }
               onName={setName}
               description={description}
               onDescription={setDescription}
@@ -333,7 +368,8 @@ export function PublishModal({ open, onClose, source }: PublishModalProps) {
                 type="button"
                 className="pub-btn publish"
                 onClick={() => publishMut.mutate()}
-                disabled={publishMut.isPending}
+                disabled={publishMut.isPending || nameInvalid}
+                title={nameInvalid ? (nameTaken ? t("publish.nameTaken") : t("publish.nameRequired")) : undefined}
               >
                 <ShieldIcon />
                 {publishMut.isPending ? t("publish.publishing") : t("publish.publishBtn")}
@@ -551,6 +587,7 @@ function Step1(props: {
 function Step2(props: {
   name: string;
   onName: (v: string) => void;
+  nameError: string | null;
   description: string;
   onDescription: (v: string) => void;
   category: CategoryKey | "";
@@ -565,6 +602,7 @@ function Step2(props: {
   const {
     name,
     onName,
+    nameError,
     description,
     onDescription,
     category,
@@ -581,11 +619,12 @@ function Step2(props: {
     <>
       <label className="pub-l">{t("publish.nameLabel")}</label>
       <input
-        className="pub-input"
+        className={`pub-input${nameError ? " error" : ""}`}
         value={name}
         onChange={(e) => onName(e.target.value)}
         maxLength={120}
       />
+      {nameError && <div className="pub-name-err">{nameError}</div>}
 
       {showCategory && (
         <>

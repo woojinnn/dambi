@@ -562,6 +562,8 @@
     },
     "addrCount": "주소 {{count}}개",
     "badSlug": "슬러그 형식이 잘못됐습니다 (영문/숫자/_.-() 만, 1-120자)",
+    "nameRequired": "이름을 입력하세요.",
+    "nameTaken": "이미 Policy Hub에 같은 이름이 있어요. 다른 이름을 쓰세요.",
     "noMembersError": "발행할 멤버 정책이 없습니다.",
     "title": "Policy Hub에 올리기",
     "subtitle": "내가 큐레이션한 패키지를 공개해 다른 사용자가 담을 수 있게 합니다.",
