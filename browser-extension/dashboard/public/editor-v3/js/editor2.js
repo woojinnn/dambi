@@ -1,9 +1,12 @@
-// 지갑 색 — 홈(WalletGovernance)과 동일 규칙: localStorage 사용자지정 우선, 없으면 주소-해시.
-// 같은 지갑이 홈·정책관리에서 같은 색으로 보이게 한다(주소는 소문자 정규화).
 function walletHue(addr) {
   const s = String(addr || "").toLowerCase();
-  try { const m = JSON.parse(localStorage.getItem("dambi:wallet-colors") || "{}"); if (m && m[s]) return m[s]; } catch (e) {}
-  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  try {
+    const m = JSON.parse(localStorage.getItem("dambi:wallet-colors") || "{}");
+    if (m && m[s]) return m[s];
+  } catch (e) {
+  }
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = h * 31 + s.charCodeAt(i) >>> 0;
   return ["blue", "violet", "navy"][h % 3];
 }
 const E2_ICONS = {
