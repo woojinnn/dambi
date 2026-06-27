@@ -79,11 +79,28 @@ function caipToDecimal(caip: string): number {
 
 // ── Phase 1 + 1b: wallet state (tokens / positions / approvals) ──────────────
 
+/** Pull the CAIP-2 chain out of an opaque TokenKey. The key is either flat
+ *  (`{ chain, address }`) or a tagged enum (`{ Erc20: { chain, address } }` /
+ *  `{ Native: { chain } }`); try both so same-symbol holdings on different
+ *  chains can be told apart. Returns undefined when absent. */
+function chainOfKey(key: unknown): string | undefined {
+  if (!key || typeof key !== "object") return undefined;
+  const k = key as Record<string, unknown>;
+  if (typeof k.chain === "string") return k.chain;
+  for (const v of Object.values(k)) {
+    if (v && typeof v === "object" && typeof (v as Record<string, unknown>).chain === "string") {
+      return (v as Record<string, string>).chain;
+    }
+  }
+  return undefined;
+}
+
 function mapHolding(h: {
   symbol: string;
   decimals: number;
   balance: { amount?: string };
   value_usd?: string;
+  key?: unknown;
 }): TokenHolding {
   const bal = toHuman(Number(h.balance.amount ?? "0"), h.decimals);
   const usdNum = h.value_usd ? Number(h.value_usd) : undefined;
@@ -93,6 +110,7 @@ function mapHolding(h: {
     balance: fmtAmount(bal),
     usd: fmtUsd(h.value_usd),
     usdNum: usdNum !== undefined && isFinite(usdNum) ? usdNum : undefined,
+    chain: chainOfKey(h.key),
   };
 }
 
