@@ -114,10 +114,13 @@ function WalletWorkspace({ snap, address }) {
       PS.bindDef({ defId, packageId: pkgId, addresses: [address], ...(Object.keys(def.defaults.params).length ? { params: def.defaults.params } : {}) }),
     ).then((ok) => ok && pushToast(`${def.displayName} → ${walletPkgName(pkgId)}`));
   };
-  const createPackage = () =>
-    run("패키지 생성", () => PS.putWalletPackage({ address, pkg: { id: `pkg::${crypto.randomUUID()}`, displayName: "새 패키지" } })).then(
-      (ok) => ok && pushToast("패키지를 만들었어요 — 이름을 바꿔보세요"),
+  const createPackage = async () => {
+    const name = await e2Prompt({ title: "새 패키지 만들기", body: "새로운 패키지 이름을 정하세요.", placeholder: "예: DeFi 보호팩", confirmLabel: "만들기" });
+    if (!name) return; // 취소하거나 이름이 비어 있으면 만들지 않음
+    run("패키지 생성", () => PS.putWalletPackage({ address, pkg: { id: `pkg::${crypto.randomUUID()}`, displayName: name } })).then(
+      (ok) => ok && pushToast(`"${name}" 패키지를 만들었어요`),
     );
+  };
   const renamePackage = (pkgId) => {
     const pkg = wallet.packages?.[pkgId];
     const name = draftName.trim();

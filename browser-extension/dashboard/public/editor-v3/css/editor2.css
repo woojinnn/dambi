@@ -532,6 +532,9 @@
 .e2 .e2cf-body { padding:22px 22px 18px; }
 .e2 .e2cf-title { font-size:16px; font-weight:740; letter-spacing:-.01em; color:var(--ink); line-height:1.45; text-wrap:pretty; }
 .e2 .e2cf-text { margin-top:9px; font-size:13px; line-height:1.6; color:var(--ink-2); text-wrap:pretty; }
+.e2 .e2cf-input { margin-top:14px; width:100%; box-sizing:border-box; font:inherit; font-size:14px; color:var(--ink); padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); outline:none; transition:border-color .14s, box-shadow .14s; }
+.e2 .e2cf-input:focus { border-color:var(--sage); box-shadow:0 0 0 3px color-mix(in srgb, var(--sage) 16%, transparent); }
+.e2 .e2cf-btn.ok:disabled { opacity:.4; cursor:default; }
 .e2 .e2cf-foot { display:flex; justify-content:flex-end; gap:9px; padding:0 18px 18px; }
 .e2 .e2cf-btn { font:inherit; font-size:13px; font-weight:680; padding:9px 18px; border-radius:10px; cursor:pointer; border:1px solid var(--line); transition:background .14s, border-color .14s, opacity .14s; }
 .e2 .e2cf-btn.cancel { background:var(--surface); color:var(--ink-2); }
