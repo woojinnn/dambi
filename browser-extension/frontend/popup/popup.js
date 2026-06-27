@@ -317,25 +317,42 @@ function renderMain() {
 /* ============================================================
    FOOTER
    ============================================================ */
+/** 로그아웃 — 설정 오버레이와 푸터 버튼이 공유. */
+async function doLogout(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "로그아웃 중…"; }
+  try { if (S.signOut) await S.signOut(); } catch (e) {}
+  state.account = null; state.wallets = []; state.activeAddress = null; state.appliedByAddress = {};
+  state.onb = null;
+  closeSettings();
+  route(); // → 온보딩 스텝1(로그인)
+}
+
 function renderFooter() {
   const f = document.getElementById("footer");
   if (!f) return;
-  let txt = "변경 즉시 이 주소에 적용";
+  // 좌측은 평상시 로그아웃 버튼. 적용 중·실패 같은 전이 상태일 때만 상태 텍스트로
+  // 잠깐 바뀐다(피드백 유지). "변경 즉시 이 주소에 적용" 안내문은 제거.
+  let txt = "";
   let cls = "";
-  if (state.applyStatus === "applying") { txt = "적용 중…"; cls = "busy"; }
-  else if (state.applyStatus === "error") { txt = "적용 실패: " + state.applyError; cls = "error"; }
+  let busy = false;
+  if (state.applyStatus === "applying") { txt = "적용 중…"; cls = "busy"; busy = true; }
+  else if (state.applyStatus === "error") { txt = "적용 실패: " + state.applyError; cls = "error"; busy = true; }
   else {
     const cur = [...enabledSet()].sort().join(",");
     const srv = [...(state.appliedServer || [])].sort().join(",");
-    if (cur !== srv) { txt = "적용 중…"; cls = "busy"; }
+    if (cur !== srv) { txt = "적용 중…"; cls = "busy"; busy = true; }
   }
+  const left = busy
+    ? '<span class="pc-status ' + cls + '"><span class="pc-dot"></span>' + esc(txt) + '</span>'
+    : '<button class="pc-link" id="footLogout">로그아웃</button>';
   f.innerHTML =
-    '<span class="pc-status ' + cls + '"><span class="pc-dot"></span>' + esc(txt) + '</span>' +
+    left +
     '<div class="pc-foot-actions">' +
-      '<button class="pc-link" id="notifBtn">알림 강도</button>' +
+      '<button class="pc-link" id="notifBtn" disabled>알림 강도</button>' +
       '<button class="pc-link accent" id="optBtn">설정 ' + I.ext + '</button>' +
     '</div>';
-  document.getElementById("notifBtn").addEventListener("click", () => toggleSheet(true));
+  const lo = document.getElementById("footLogout");
+  if (lo) lo.addEventListener("click", () => doLogout(lo));
   document.getElementById("optBtn").addEventListener("click", openOptions);
 }
 
@@ -406,15 +423,7 @@ function renderSettingsOverlay() {
     state.settings.preset = currentPreset();
     S.saveSettings(state.settings); renderSettingsOverlay();
   }));
-  ovl.querySelector("#setLogout").addEventListener("click", async () => {
-    const btn = ovl.querySelector("#setLogout");
-    btn.disabled = true; btn.textContent = "로그아웃 중…";
-    try { if (S.signOut) await S.signOut(); } catch (e) {}
-    state.account = null; state.wallets = []; state.activeAddress = null; state.appliedByAddress = {};
-    state.onb = null;
-    closeSettings();
-    route(); // → 온보딩 스텝1(로그인)
-  });
+  ovl.querySelector("#setLogout").addEventListener("click", () => doLogout(ovl.querySelector("#setLogout")));
   ovl.querySelector("#setReset").addEventListener("click", () => { openConfirmReset(); });
 }
 

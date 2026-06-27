@@ -135,6 +135,8 @@ body.pc-big { width: 800px; }
   background: transparent; border: 0; border-radius: var(--r-sm); padding: 6px 9px; transition: background .12s, color .12s; }
 .pc-link:hover { background: var(--mist-100); color: var(--brand-700); }
 .pc-link.accent { color: var(--brand-600x); }
+.pc-link:disabled { cursor: default; opacity: .4; }
+.pc-link:disabled:hover { background: transparent; color: var(--slate-500); }
 
 /* ============================================================
    지갑 스위처 — 전체 오버레이
