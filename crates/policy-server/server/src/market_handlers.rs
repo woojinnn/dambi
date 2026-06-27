@@ -1256,7 +1256,9 @@ fn listing_row_to_summary(r: &ListingRow) -> ListingSummary {
         slug: r.slug.clone(),
         kind: parse_kind(&r.kind),
         publisher_id: r.publisher_id.clone(),
-        publisher_tier: parse_tier(&r.publisher_tier),
+        // raw 등급 id 그대로 — parse_tier 로 enum 화하면 커스텀 등급이 전부
+        // community 로 뭉개져 배지가 안 떴다(빌트인만 살아남음).
+        publisher_tier: r.publisher_tier.clone(),
         display_name: json_to_i18n(&r.display_name),
         description: r.description.as_ref().map(json_to_i18n),
         domain: r.domain.clone(),
@@ -1388,14 +1390,6 @@ const fn serde_tier(t: PublisherTier) -> &'static str {
         PublisherTier::Official => "official",
         PublisherTier::Verified => "verified",
         PublisherTier::Community => "community",
-    }
-}
-
-fn parse_tier(s: &str) -> PublisherTier {
-    match s {
-        "official" => PublisherTier::Official,
-        "verified" => PublisherTier::Verified,
-        _ => PublisherTier::Community,
     }
 }
 
@@ -1604,7 +1598,7 @@ mod tests {
             slug: "safe-policy".to_owned(),
             kind: ListingKind::Policy,
             publisher_id: sensitive_user_id.to_owned(),
-            publisher_tier: PublisherTier::Community,
+            publisher_tier: "community".to_owned(),
             display_name: i18n("Safe policy"),
             description: None,
             domain: Some("token".to_owned()),

@@ -95,7 +95,11 @@ pub struct ListingSummary {
     /// not serialized to public marketplace clients.
     #[serde(skip_serializing)]
     pub publisher_id: String,
-    pub publisher_tier: PublisherTier,
+    /// Raw tier id (built-in `official`/`verified`/`community` *or* a custom
+    /// admin-created tier id). Kept as a free string — collapsing it into the
+    /// 3-variant `PublisherTier` enum would map every custom tier to
+    /// `community`, so custom-tier badges never rendered.
+    pub publisher_tier: String,
     pub display_name: I18nText,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<I18nText>,
