@@ -488,3 +488,29 @@ export function provisionWallets(uid: string, addresses: string[]): Promise<void
     }
   });
 }
+
+/** 지갑 1개를 스토어에서 제거 — 홈/팝업에서 지갑을 삭제할 때 정책 스토어(ps2)도
+ *  같이 비워, 에디터(정책 관리)에 삭제된 지갑이 남지 않게 한다. 지갑 상태는 전부
+ *  byAddress[addr]에 들어있어 그 항목만 지우면 바인딩·패키지까지 함께 사라진다. */
+export function removeWallet(uid: string, address: string): Promise<void> {
+  return mutate(uid, (d) => {
+    delete d.wallets.byAddress[normalizeWalletAddress(address)];
+  });
+}
+
+/** 서버 지갑 "전체 목록"과 스토어를 동기화 — 목록에 새로 생긴 주소는 defaults로
+ *  프로비저닝하고, 목록에 없는(=다른 화면에서 삭제된) 주소는 제거한다. 반드시
+ *  전체 목록 sync 경로에서만 호출할 것: 단일 주소(지갑 추가) 경로에서 부르면
+ *  나머지 지갑이 전부 삭제된다. */
+export function reconcileWallets(uid: string, addresses: string[]): Promise<void> {
+  return mutate(uid, (d) => {
+    const keep = new Set(addresses.map((a) => normalizeWalletAddress(a)));
+    for (const addr of Object.keys(d.wallets.byAddress)) {
+      if (!keep.has(addr)) delete d.wallets.byAddress[addr];
+    }
+    for (const addr of keep) {
+      if (d.wallets.byAddress[addr]) continue;
+      walletAt(d, addr, { provisionDefaults: true });
+    }
+  });
+}

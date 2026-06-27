@@ -9,6 +9,8 @@ import {
   duplicateDef,
   installMarket,
   provisionWallets,
+  reconcileWallets,
+  removeWallet,
   putDef,
   putPackage,
   putWalletFolder,
@@ -145,11 +147,30 @@ export async function handlePs2Request(req: Ps2Request): Promise<unknown> {
   }
 }
 
-/** 지갑 동기화 프로비저닝 훅 — dambi-list-wallets 응답 직전에 호출된다.
- *  로그인 상태에서만(서버 지갑 목록이 있을 때만) 의미가 있다. */
+/** 지갑 동기화 프로비저닝 훅 — 지갑 "추가" 직후 단일 주소로 호출된다.
+ *  add-only(멱등): 다른 지갑은 건드리지 않는다. */
 export async function provisionFromWalletSync(addresses: string[]): Promise<void> {
   const uid = await getCurrentUserId();
   if (!uid || addresses.length === 0) return;
   await ensureSeeded(uid);
   await provisionWallets(uid, addresses);
+}
+
+/** 지갑 "전체 목록" 동기화 훅 — dambi-list-wallets 응답 직전에 호출된다. 서버
+ *  목록에 새로 생긴 지갑은 프로비저닝하고, 목록에 없는(=홈/팝업에서 삭제된)
+ *  지갑은 스토어에서 제거한다. 빈 목록(=지갑 0개)도 정상 동기화 대상이라 length
+ *  가드를 두지 않는다 — 마지막 지갑 삭제도 반영해야 한다. */
+export async function reconcileFromWalletSync(addresses: string[]): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) return;
+  await ensureSeeded(uid);
+  await reconcileWallets(uid, addresses);
+}
+
+/** 지갑 삭제 훅 — dambi-delete-wallet 성공 직후 정책 스토어에서도 즉시 제거한다.
+ *  (전체 목록 sync 를 기다리지 않고 에디터가 바로 갱신되도록) */
+export async function removeWalletFromSync(address: string): Promise<void> {
+  const uid = await getCurrentUserId();
+  if (!uid) return;
+  await removeWallet(uid, address);
 }

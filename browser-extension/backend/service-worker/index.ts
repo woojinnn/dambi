@@ -11,6 +11,8 @@ import {
   handlePs2Request,
   isPs2Request,
   provisionFromWalletSync,
+  reconcileFromWalletSync,
+  removeWalletFromSync,
   type Ps2Request,
 } from "./policy-store/api";
 import { decideMessage } from "./orchestrator";
@@ -110,13 +112,14 @@ export const bootReady: Promise<void> = bootSequence().catch((err) => {
 
 async function listWalletsAndProvision(reason: string): Promise<WalletId[]> {
   const wallets = await listWallets();
-  // 정책 스토리지 v2 프로비저닝 훅: 서버 지갑 목록과 동기화되는 이
-  // 경로에서 새 지갑에 defaults를 바인딩한다(멱등). 실패해도 지갑
-  // 목록 응답이나 로그인/current-user sync는 막지 않는다.
+  // 정책 스토리지 v2 동기화 훅: 서버 지갑 "전체 목록"과 맞춘다 — 새 지갑은
+  // defaults로 프로비저닝하고, 목록에 없는(=다른 화면에서 삭제된) 지갑은
+  // 스토어에서 제거한다. 실패해도 지갑 목록 응답이나 로그인/current-user
+  // sync는 막지 않는다.
   try {
-    await provisionFromWalletSync(wallets.map((w) => w.address));
+    await reconcileFromWalletSync(wallets.map((w) => w.address));
   } catch (err) {
-    console.warn(`[Dambi] ps2 wallet provisioning failed (${reason}):`, err);
+    console.warn(`[Dambi] ps2 wallet sync failed (${reason}):`, err);
   }
   return wallets;
 }
@@ -975,6 +978,10 @@ Browser.runtime.onMessage.addListener(
       const r = req as DambiDeleteWalletRequest;
       void bootReady
         .then(() => deleteWallet(normalizeServerWalletAddress(r.address)))
+        // 서버 삭제 성공 후 정책 스토어(ps2)에서도 즉시 제거 — 에디터(정책 관리)에
+        // 삭제된 지갑이 남지 않게 한다. 실패해도 삭제 응답은 막지 않는다(다음
+        // 전체 목록 sync가 reconcile로 정리).
+        .then(() => removeWalletFromSync(r.address).catch(() => undefined))
         .then(() => sendResponse({ ok: true, data: null }))
         .catch((err: unknown) =>
           sendResponse({
