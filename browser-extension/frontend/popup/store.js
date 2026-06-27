@@ -407,6 +407,25 @@
     }
   }
 
+  // ⑤ 주간 요약 수동 트리거 — SW 가 최근 7일 카운트로 토스트+OS 알림을 띄운다
+  // (사용자가 직접 눌렀으므로 알림 강도 설정 무시). 응답으로 카운트를 돌려준다.
+  // 팝업이 떠 있으면 SW 의 lastFocusedWindow 가 팝업 창을 가리켜 토스트가 엉뚱한
+  // 곳으로 갈 수 있어, 지금 보고 있는 탭 id 를 직접 실어 보낸다(없으면 SW 폴백).
+  async function weeklySummary() {
+    let tabId;
+    try {
+      const tabs = await new Promise((res) => {
+        if (chrome && chrome.tabs && chrome.tabs.query) {
+          chrome.tabs.query({ active: true, currentWindow: true }, res);
+        } else res([]);
+      });
+      tabId = tabs && tabs[0] ? tabs[0].id : undefined;
+    } catch (e) {
+      /* tabs 권한/환경 없음 — SW 폴백 */
+    }
+    return send("DAMBI_WEEKLY_SUMMARY", { tabId });
+  }
+
   /* ---------- defaults (loadState 실패 시 폴백) ---------- */
   function defaults() {
     const zero = "0x0000000000000000000000000000000000000000";
@@ -543,6 +562,7 @@
     loadSettings,
     saveSettings,
     onSettingsChange,
+    weeklySummary,
     shortAddr,
     isAddressShape,
     checksumWarn,

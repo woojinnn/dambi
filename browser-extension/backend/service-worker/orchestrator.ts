@@ -11,6 +11,7 @@ import {
   type PendingRequest,
 } from "./storage";
 import { appendVerdict, type VerdictInsert } from "./verdict-storage";
+import { ensureLoaded as ensureNotifySettings, shouldWarnModal } from "./notify-settings";
 import { refreshBadge } from "./mascot-badge";
 import { appendStateDelta } from "./state-delta-storage";
 import { appendDiagnosisContext } from "./diagnosis-context-storage";
@@ -111,8 +112,14 @@ interface DecisionOptions {
    *  (index.ts)가 소유 — orchestrator 는 추상 이벤트만 방출(순환 import 회피). */
   onRiskyVerdict?: (args: {
     scenario: "tx" | "approval";
+    /** 데스크톱 알림 desk 단계·토스트 게이팅에 쓰는 심각도. */
+    severity: "fail" | "warn";
     title?: string | undefined;
     message?: string | undefined;
+    /** 알림 컨텍스트 줄(네트워크 이름)용 체인 ID. tx 메시지에만 존재. */
+    chainId?: number | string | undefined;
+    /** 상호작용한 컨트랙트 주소(컨텍스트 줄·본문용). */
+    address?: string | undefined;
   }) => void;
 }
 
@@ -264,8 +271,13 @@ async function decideInner(
         const scenario = matched?.origin === "action" ? "approval" : "tx";
         const addr = inferContractSelector(message).contract?.addr;
         const reason = matched?.reason ?? null;
+        // chainId 는 tx 메시지에만 있음(typed-sig/venue 는 없을 수 있어 안전 추출).
+        const chainId = (message.data as { chainId?: number | string }).chainId;
         options.onRiskyVerdict?.({
           scenario,
+          severity: verdict.kind,
+          chainId,
+          address: addr,
           // 둘 다 optional — 없으면 시나리오 기본 카피로 폴백.
           message:
             reason ??
@@ -297,15 +309,26 @@ async function decideInner(
         confirmDetailsForMessage(message),
       );
     } else {
-      // Warn: open the modal and await the user's Trust-and-proceed / Cancel.
-      ok = await openVerdictWindowAndAwait(
-        message.requestId,
-        message.data.hostname,
-        verdict,
-        confirmDetailsForMessage(message),
-        options.onAwaitingUser,
-      );
-      userDecision = ok ? "trusted" : "cancelled";
+      // Warn: 설정(modal)에 따라 인터셉트 모달을 띄울지 결정. modal="both" 면
+      // 모달을 열어 사용자 Trust/Cancel 을 기다리고, modal="block"(차단만) 이면
+      // 경고로 흐름을 막지 않고 자동 진행한다(ok=true) — advisory 데스크톱 알림 ·
+      // 토스트는 onRiskyVerdict 경로에서 별도로 발사되므로 사용자는 여전히 통지받음.
+      // FAIL 차단에는 영향 없음(위 분기에서 항상 모달+차단).
+      await ensureNotifySettings();
+      if (shouldWarnModal()) {
+        ok = await openVerdictWindowAndAwait(
+          message.requestId,
+          message.data.hostname,
+          verdict,
+          confirmDetailsForMessage(message),
+          options.onAwaitingUser,
+        );
+        userDecision = ok ? "trusted" : "cancelled";
+      } else {
+        // 모달 생략 → 사용자 입력 없이 자동 진행. 결정이 없었으므로 audit 의
+        // user_decision 은 null 로 둔다(quiet 모드 자동 통과를 정확히 기록).
+        ok = true;
+      }
     }
 
     await appendAudit(

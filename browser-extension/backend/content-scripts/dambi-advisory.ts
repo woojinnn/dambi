@@ -33,8 +33,11 @@ interface AnnotMessage {
 interface ToastMessage {
   type: "DAMBI_TOAST";
   scenario?: string;
-  /** SW 가 채워 보내는 실제 데이터(예: 주간요약 fail/warn 카운트). */
-  data?: { fail?: number; warn?: number };
+  /** SW 가 채워 보내는 실제 데이터.
+   *  - fail/warn: 주간요약 카운트
+   *  - body: 본문 override(실제 위반 사유) — 라이브 verdict 에서 전달
+   *  - context: 흐린 컨텍스트 줄 override("백그라운드 모니터링 · Ethereum Mainnet") */
+  data?: { fail?: number; warn?: number; body?: string; context?: string };
 }
 type AdvisoryMessage =
   | AnnotMessage
@@ -166,8 +169,8 @@ function toastSpec(scenario: string, data?: ToastMessage["data"]): ToastSpec {
         time: "지금",
         title: "승인 권한이 위험해졌어요",
         bodyHtml:
-          '<div class="mn-text">방금 한 토큰 <b>무제한 승인</b>이 위험 컨트랙트로 표시됐어요.</div>' +
-          '<div class="mn-ctx">백그라운드 모니터링</div>',
+          `<div class="mn-text">${data?.body ? escapeHtml(data.body) : "방금 한 토큰 <b>무제한 승인</b>이 위험 컨트랙트로 표시됐어요."}</div>` +
+          `<div class="mn-ctx">${escapeHtml(data?.context ?? "백그라운드 모니터링")}</div>`,
         actions: [{ label: "나중에" }, { label: "권한 취소", kind: "danger" }],
       };
     case "tx":
@@ -177,8 +180,8 @@ function toastSpec(scenario: string, data?: ToastMessage["data"]): ToastSpec {
         time: "방금",
         title: "의심 거래가 감지됐어요",
         bodyHtml:
-          '<div class="mn-text">상호작용한 주소가 위험 목록과 일치해요.</div>' +
-          '<div class="mn-ctx">백그라운드 모니터링</div>',
+          `<div class="mn-text">${data?.body ? escapeHtml(data.body) : "상호작용한 주소가 위험 목록과 일치해요."}</div>` +
+          `<div class="mn-ctx">${escapeHtml(data?.context ?? "백그라운드 모니터링")}</div>`,
         actions: [{ label: "무시" }, { label: "확인하기", kind: "primary" }],
       };
   }
