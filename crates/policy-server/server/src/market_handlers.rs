@@ -1272,10 +1272,17 @@ fn listing_row_to_summary(r: &ListingRow) -> ListingSummary {
         rating_avg: r.rating_avg,
         rating_count: r.rating_count,
         is_installed: r.is_installed,
-        publisher_email: r
-            .publisher_email
-            .as_deref()
-            .map(|_| public_user_handle("publisher", &r.publisher_id)),
+        publisher_email: r.publisher_email.as_deref().map(publisher_public_label),
+    }
+}
+
+/// 마켓 공개용 게시자 라벨 — 이메일의 local part(@ 앞부분)만 노출한다. 전체 주소
+/// (도메인 포함)는 마켓 응답에 싣지 않는다: 모든 게시자의 메일 주소가 공개·스크래핑
+/// 되는 걸 막기 위함. @ 가 없으면(이미 가공된 값 등) 통째로 사용한다.
+fn publisher_public_label(email: &str) -> String {
+    match email.split_once('@') {
+        Some((local, _domain)) if !local.is_empty() => local.to_owned(),
+        _ => email.to_owned(),
     }
 }
 
