@@ -31,6 +31,7 @@ use policy_db::market::{
     list_listings as db_list_listings, list_publishers as db_list_publishers,
     list_reports as db_list_reports, list_reports_by_reporter as db_list_reports_by_reporter,
     list_reviews as db_list_reviews, list_tiers as db_list_tiers, list_watches as db_list_watches,
+    record_install as db_record_install,
     record_install_and_get_version as db_record_install_and_get_version,
     search_users_by_email as db_search_users_by_email, set_publisher_tier as db_set_publisher_tier,
     set_publisher_tier_by_email as db_set_publisher_tier_by_email, tier_exists as db_tier_exists,
@@ -434,19 +435,31 @@ pub async fn create_install(
     Json(req): Json<CreateInstallReq>,
 ) -> Response {
     let pool = state.global_db.pool();
-    let version = match db_record_install_and_get_version(
-        pool,
-        listing_id,
-        &req.version,
-        &user.user_id,
-        now_secs(),
-    )
-    .await
-    {
-        Ok(Some(v)) => v,
-        Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
-        Err(e) => return server_error(&e.to_string()),
-    };
+    let now = now_secs();
+    let version =
+        match db_record_install_and_get_version(pool, listing_id, &req.version, &user.user_id, now)
+            .await
+        {
+            Ok(Some(v)) => v,
+            Ok(None) => return (StatusCode::NOT_FOUND, "version not found").into_response(),
+            Err(e) => return server_error(&e.to_string()),
+        };
+
+    // 패키지(set) 설치면 그 안에 든 멤버 정책도 각각 install 로 기록한다 — 멤버가
+    // 마켓에 개별 등재돼 있으면 그 listing 의 다운로드 수도 +1 된다. members 는
+    // set 버전에만 들어있어(cedar_text 와 상호배타) 이 블록이 자연히 set 에만 탄다.
+    // 다운로드 집계는 user_id DISTINCT 라 같은 사용자가 또 받아도 중복되지 않는다.
+    // 멤버 한 건이 실패해도(미등재/언퍼블리시) 패키지 설치 응답은 막지 않는다.
+    if let Some(members) = version.members.clone().and_then(json_to_members) {
+        for m in members {
+            if let Ok(Some(member)) = db_get_listing_by_slug(pool, &m.slug, None).await {
+                if let Some(ver) = member.current_version.as_deref() {
+                    let _ = db_record_install(pool, member.id, ver, &user.user_id, now).await;
+                }
+            }
+        }
+    }
+
     Json(version_row_to_dto(version)).into_response()
 }
 
