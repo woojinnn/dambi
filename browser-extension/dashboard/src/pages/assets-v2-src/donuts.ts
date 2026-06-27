@@ -82,6 +82,8 @@ export function initDonuts(root: HTMLElement): () => void {
     MATIC: "matic", POL: "matic", WMATIC: "matic",
     stETH: "steth", wstETH: "steth",
     SNX: "snx", COMP: "comp", SUSHI: "sushi", GRT: "grt", SHIB: "shib", SOL: "sol", BNB: "bnb",
+    ARB: "arb", ENS: "ens", BAL: "bal", CVX: "cvx", MANA: "mana", PENDLE: "pendle",
+    SAND: "sand", YFI: "yfi", "1INCH": "1inch",
   };
 
   function chainImgByName(name: string | undefined): string {

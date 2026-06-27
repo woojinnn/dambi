@@ -503,7 +503,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
       ? rows
           .map(function (r) {
             const action = r.revoke
-              ? '<button class="btn danger">revoke</button>'
+              ? '<a class="btn danger" href="https://revoke.cash" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">revoke</a>'
               : '<span style="font-size:11px; color:var(--slate-400);">—</span>';
             return (
               "<tr>" +
@@ -656,7 +656,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
 
     const head =
       '<div class="hl-card-head">' +
-      '<span class="hl-wallet"><span class="hl-venue">HL</span>' + escapeHtml(a.walletLabel) + "</span>" +
+      '<span class="hl-wallet">' + escapeHtml(a.walletLabel) + "</span>" +
       '<div class="hl-meta">' +
       '<span class="hl-bal"><span class="bk">Perp</span><span class="bv">' + escapeHtml(money2dec(a.perpUsd)) + "</span></span>" +
       '<span class="hl-bal"><span class="bk">Spot</span><span class="bv">' + escapeHtml(money2dec(a.spotUsd)) + "</span></span>" +

@@ -579,9 +579,9 @@
 /* ── Hyperliquid section ──────────────────────────────────────────────── */
 /* ── Hyperliquid — light trading blotter ── */
 /* 지갑별 탭 (Hyperliquid 패널) — 알약 탭으로 한 지갑만 골라 본다 */
-/* 지갑 선택 = 세그먼트 컨트롤: 회색 트랙 + 흰 활성 pill (배경과 확실히 구분). */
-.hl-tabs { display: inline-flex; gap: 2px; flex-wrap: wrap; margin: 4px 0 12px;
-  background: var(--neutral-100); padding: 3px; border-radius: 999px; }
+/* 지갑 선택 = 흰 바(배경 회색과 확실히 구분) + 활성 탭 navy 채움. */
+.hl-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px;
+  background: var(--surface); padding: 9px 14px; border-radius: 10px; border: 1px solid var(--hairline); }
 .hl-tab {
   font: inherit;
   font-size: 13px;
@@ -596,7 +596,7 @@
   transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
 }
 .hl-tab:hover { color: var(--slate-700); }
-.hl-tab.on { background: var(--surface); color: var(--slate-900); box-shadow: 0 1px 2px rgba(13,17,24,0.12); }
+.hl-tab.on { background: var(--navy-500); color: #fff; box-shadow: none; }
 
 .hl-card {
   border: 1px solid var(--hairline);
@@ -605,6 +605,8 @@
   background: var(--surface);
   overflow: hidden;
   display: flex; flex-direction: column;
+  /* 배경(회색)과 확실히 구분되는 흰 패널로. */
+  box-shadow: 0 1px 2px rgba(6,32,63,0.05), 0 6px 18px -12px rgba(6,32,63,0.14);
 }
 .hl-venue {
   display: inline-grid; place-items: center; min-width: 24px; height: 18px;
@@ -628,7 +630,7 @@
 .hl-card-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 13px 16px; flex-wrap: wrap;
-  background: var(--fog-100); border-bottom: 1px solid var(--hairline-soft);
+  background: var(--surface); border-bottom: 1px solid var(--hairline-soft);
 }
 .hl-card-head .hl-wallet {
   display: inline-flex; align-items: center; gap: 9px;
@@ -674,7 +676,7 @@
 .hl-tbl td { padding: 11px 8px; font-size: 13.5px; color: var(--slate-700); vertical-align: middle; }
 .hl-tbl td.sym { font-weight: 700; font-size: 14.5px; color: var(--slate-900); white-space: nowrap; }
 /* directional left tick on the symbol cell */
-.hl-tbl tbody tr.long td.sym { box-shadow: inset 3px 0 0 var(--pass-500); padding-left: 13px; }
+.hl-tbl tbody tr.long td.sym { box-shadow: inset 3px 0 0 var(--navy-400); padding-left: 13px; }
 .hl-tbl tbody tr.short td.sym { box-shadow: inset 3px 0 0 var(--fail-500); padding-left: 13px; }
 .hl-tbl td.num { font-family: var(--ff-mono); font-weight: 600; color: var(--slate-700); white-space: nowrap; font-size: 13.5px; }
 .hl-tbl td.num b { color: var(--slate-900); font-weight: 700; }
@@ -686,7 +688,8 @@
   display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 4px;
   font-size: 11px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap;
 }
-.hl-side.long { background: var(--pass-100); color: var(--pass-800); }
+/* DEEP 듀오톤: 롱/익절 = navy(브랜드), 숏/손절 = red. 초록 제거(사용자 요청). */
+.hl-side.long { background: var(--navy-100); color: var(--navy-600); }
 .hl-side.short { background: var(--fail-100); color: var(--fail-800); }
 .hl-lev {
   font-family: var(--ff-mono); font-size: 11.5px; font-weight: 600; white-space: nowrap;
@@ -695,9 +698,8 @@
 .hl-tp, .hl-sl {
   margin-left: 7px; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; white-space: nowrap;
 }
-.hl-tp { background: var(--pass-100); color: var(--pass-800); }
+.hl-tp { background: var(--navy-100); color: var(--navy-600); }
 .hl-sl { background: var(--fail-100); color: var(--fail-800); }
-.hl-empty { font-size: 12px; color: var(--slate-400); padding: 4px 0; }
 
 @media (max-width: 720px) {
   .hl-cols { grid-template-columns: 1fr; }

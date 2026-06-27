@@ -512,12 +512,13 @@
 .e2 .ox.on { border-color:var(--sage); color:#fff; background:var(--sage); }
 .e2 .ox .ic { width:12px; height:12px; stroke-width:2.4; }
 
-.e2 .addpkg { width:100%; padding:16px; border:1.5px dashed #d6ddd9; border-radius:14px; display:flex; flex-direction:row; gap:9px;
-  align-items:center; justify-content:center; color:var(--mut); cursor:pointer; transition:all .16s; background:transparent; }
-.e2 .addpkg:hover { border-color:var(--sage); color:var(--sage); background:linear-gradient(180deg,var(--sage-soft),transparent); }
-.e2 .addpkg .pl { width:30px; height:30px; border-radius:9px; background:#eef1ef; display:grid; place-items:center; transition:background .16s; }
-.e2 .addpkg:hover .pl { background:#fff; }
-.e2 .addpkg .t { font-size:12px; font-weight:640; }
+/* 새 패키지 추가 = 눈에 띄게(navy 면+점선+플러스원). 초록 hover 제거. */
+.e2 .addpkg { width:100%; padding:17px; border:1.6px dashed #B6C5D8; border-radius:14px; display:flex; flex-direction:row; gap:11px;
+  align-items:center; justify-content:center; color:#294970; cursor:pointer; transition:all .16s; background:#F1F3F6; }
+.e2 .addpkg:hover { border-color:#294970; color:#05182E; background:#E4EAF1; box-shadow:0 4px 14px -8px rgba(6,32,63,.4); }
+.e2 .addpkg .pl { width:32px; height:32px; border-radius:9px; background:#06203F; color:#fff; display:grid; place-items:center; transition:background .16s; }
+.e2 .addpkg:hover .pl { background:#05182E; }
+.e2 .addpkg .t { font-size:13.5px; font-weight:750; }
 
 /* ── DROP MODAL ── */
 .e2-ov { position:fixed; inset:0; background:rgba(18,26,22,.42); display:flex; align-items:center; justify-content:center; z-index:50;

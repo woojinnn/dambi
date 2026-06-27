@@ -82,9 +82,9 @@
   cursor: pointer;
 }
 .ev2-pkg-add:hover {
-  background: var(--sage-100);
-  border-color: var(--sage-300);
-  color: var(--sage-800);
+  background: #F1F3F6;
+  border-color: #B6C5D8;
+  color: #05182E;
 }
 .ev2-pkg-add svg {
   width: 12px;
