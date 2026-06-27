@@ -16,6 +16,12 @@ import {
   type Ps2Request,
 } from "./policy-store/api";
 import { decideMessage } from "./orchestrator";
+import {
+  ensureLoaded as ensureNotifySettings,
+  shouldDesktop,
+  shouldRibbon,
+  type NotifySeverity,
+} from "./notify-settings";
 import { markBadgeSeen, refreshBadge } from "./mascot-badge";
 import { reportExecutionOutcome } from "./execution-report";
 import {
@@ -240,10 +246,24 @@ async function handleMessage(
         /* dApp tab gone */
       }
     },
-    // 라이브 위험 verdict → OS 데스크톱 알림(표시 전용). 이 콜백은 라이브
-    // 호출부인 여기서만 주입되므로 시뮬레이션 경로에선 발사되지 않는다.
-    onRiskyVerdict: ({ scenario, title, message }) => {
-      void pushDesktopNotification(scenario, undefined, { title, message });
+    // 라이브 위험 verdict → OS 데스크톱 알림 + 인페이지 토스트("상단 리본 배너")
+    // 병행(둘 다 표시 전용). desk/ribbon 설정으로 각각 게이팅된다. 이 콜백은
+    // 라이브 호출부인 여기서만 주입되므로 시뮬레이션 경로에선 발사되지 않는다.
+    onRiskyVerdict: ({ scenario, severity, title, message, chainId, address }) => {
+      // 컨텍스트 줄: "백그라운드 모니터링 · <네트워크 or 주소>" — 목업의 흐린 줄.
+      const net = chainName(chainId);
+      const tail = net ?? (address ? shortAddr(address) : null);
+      const context = tail ? `백그라운드 모니터링 · ${tail}` : "백그라운드 모니터링";
+      void pushDesktopNotification(scenario, severity, undefined, {
+        title,
+        message,
+        contextMessage: context,
+      });
+      // 토스트도 같은 사유·컨텍스트로 — OS 알림과 1:1.
+      void pushToastToActiveTab(scenario, {
+        ...(message ? { body: message } : {}),
+        context,
+      });
     },
   });
   if (!message.data.bypassed) {
@@ -303,9 +323,16 @@ interface DambiDeleteWalletRequest {
   type: "dambi-delete-wallet";
   address: string;
 }
-/** ⑤ 주간 요약 토스트 수동 트리거 (advisory 표시 전용 — 결정 채널 아님). */
+/** ⑤ 주간 요약 토스트 수동 트리거 (advisory 표시 전용 — 결정 채널 아님).
+ *  tabId: 팝업이 자기 활성 탭 id 를 함께 보냄 → 토스트를 그 탭에 정확히 띄움. */
 interface WeeklySummaryRequest {
   type: "DAMBI_WEEKLY_SUMMARY";
+  tabId?: number;
+}
+/** ⑤ 인페이지 토스트의 "대시보드 열기/확인하기/권한 취소" → 대시보드 열기.
+ *  content-script 는 탭을 직접 못 열어 SW 에 위임(표시 전용 — 결정 채널 아님). */
+interface OpenDashboardRequest {
+  type: "DAMBI_OPEN_DASHBOARD";
 }
 /** ② 마스코트 배지 — 팝업 열림 = 알람 확인. 발바닥/카운트를 초기화한다. */
 interface BadgeSeenRequest {
@@ -438,6 +465,7 @@ type PopupRequest =
   | DambiUpdateWalletRequest
   | DambiDeleteWalletRequest
   | WeeklySummaryRequest
+  | OpenDashboardRequest
   | BadgeSeenRequest
   | CedarValidateRequest
   | CedarTestRequest
@@ -471,24 +499,81 @@ type PopupRequest =
  * content-script 가 없는 페이지(chrome:// 등)면 sendMessage 가 reject 되므로
  * 조용히 무시(best-effort). 결정 채널 아님 — 표시 전용.
  */
+/** chainId(숫자/hex) → 사람이 읽는 네트워크 이름. 미지원 체인이면 "체인 N",
+ *  값이 없으면 null(컨텍스트 줄에서 생략). */
+function chainName(id: number | string | undefined): string | null {
+  if (id === undefined || id === null) return null;
+  const n =
+    typeof id === "string"
+      ? parseInt(id, id.toLowerCase().startsWith("0x") ? 16 : 10)
+      : id;
+  if (!Number.isFinite(n)) return null;
+  const names: Record<number, string> = {
+    1: "Ethereum Mainnet",
+    10: "Optimism",
+    56: "BNB Chain",
+    137: "Polygon",
+    8453: "Base",
+    42161: "Arbitrum One",
+    43114: "Avalanche",
+    11155111: "Sepolia",
+  };
+  return names[n] ?? `체인 ${n}`;
+}
+
+/** 0x주소 → "0x7a3f…9c21" 축약(컨텍스트 줄용). 모양이 아니면 그대로 반환. */
+function shortAddr(addr: string): string {
+  return /^0x[0-9a-fA-F]{8,}$/.test(addr)
+    ? `${addr.slice(0, 6)}…${addr.slice(-4)}`
+    : addr;
+}
+
 async function pushToastToActiveTab(
   scenario: string,
-  data?: { fail?: number; warn?: number },
+  data?: { fail?: number; warn?: number; body?: string; context?: string },
+  force = false,
+  tabId?: number,
 ): Promise<void> {
+  // force=false 면 "상단 리본 배너"(ribbon) 설정을 존중. 수동 트리거(주간요약
+  // 버튼)는 force=true 로 게이팅을 건너뛴다(사용자가 직접 눌렀으므로).
+  if (!force) {
+    await ensureNotifySettings();
+    if (!shouldRibbon()) return;
+  }
+  // tabId 가 명시되면 그 탭으로(팝업이 활성 탭 id 를 직접 넘김 — 팝업이 떠
+  // 있을 때 lastFocusedWindow 가 팝업 창을 가리켜 어긋나는 문제 회피).
+  // 없으면(라이브 verdict) 활성 탭으로 폴백.
+  let target = tabId;
+  if (target === undefined) {
+    try {
+      const tabs = await Browser.tabs.query({
+        active: true,
+        lastFocusedWindow: true,
+      });
+      target = tabs[0]?.id;
+    } catch {
+      /* tabs 조회 실패 */
+    }
+  }
+  if (target === undefined) return;
+
+  const msg = { type: "DAMBI_TOAST", scenario, ...(data ? { data } : {}) };
   try {
-    const tabs = await Browser.tabs.query({
-      active: true,
-      lastFocusedWindow: true,
-    });
-    const tabId = tabs[0]?.id;
-    if (tabId === undefined) return;
-    await Browser.tabs.sendMessage(tabId, {
-      type: "DAMBI_TOAST",
-      scenario,
-      ...(data ? { data } : {}),
-    });
+    await Browser.tabs.sendMessage(target, msg);
   } catch {
-    /* content-script 부재/제한 페이지 — 조용히 스킵 */
+    // content-script 가 없거나(제한 페이지) 끊겼다(확장 리로드 후 그 탭을 아직
+    // 새로고침 안 함). 후자는 흔하므로 content-script 를 즉석 주입한 뒤 재시도해
+    // 자동 복구한다 — 사용자가 페이지를 새로고침할 필요가 없게. chrome:// 같은
+    // 제한 페이지는 주입도 실패하므로 조용히 스킵.
+    try {
+      await Browser.scripting.executeScript({
+        target: { tabId: target },
+        files: ["js/content-scripts/dambi-advisory.js"],
+      });
+      await Browser.tabs.sendMessage(target, msg);
+    } catch {
+      /* 주입 불가(제한 페이지 등) — 조용히 스킵 */
+    }
   }
 }
 
@@ -501,9 +586,21 @@ async function pushToastToActiveTab(
  */
 async function pushDesktopNotification(
   scenario: string,
+  sev: NotifySeverity,
   data?: { fail?: number; warn?: number },
-  override?: { title?: string | undefined; message?: string | undefined },
+  override?: {
+    title?: string | undefined;
+    message?: string | undefined;
+    contextMessage?: string | undefined;
+  },
+  force = false,
 ): Promise<void> {
+  // force=false 면 데스크톱 알림 강도(desk) 설정을 존중. summary 는 desk="all"
+  // 에서만, fail/warn 은 단계별, system(세션만료)은 항상. 수동 트리거는 force=true.
+  if (!force) {
+    await ensureNotifySettings();
+    if (!shouldDesktop(sev)) return;
+  }
   const fail = data?.fail ?? 0;
   const warn = data?.warn ?? 0;
 
@@ -548,11 +645,16 @@ async function pushDesktopNotification(
   // 지원하므로 spread 로 얹고 타입만 우회한다. Firefox 에선 무시되어 본체
   // 클릭(onClicked)만 동작 — advisory 표시 전용이라 기능 저하 없음.
   // 버튼 0 = 무시(닫기만), 1 = 확인하기(대시보드 열기). onButtonClicked 에서 분기.
+  // contextMessage = macOS/Chrome 알림의 세 번째 흐린 줄("백그라운드 모니터링 ·
+  // Ethereum Mainnet" 등). 있으면 추가해 인페이지 토스트의 mn-ctx 와 1:1.
   const options = {
     type: "basic",
     iconUrl: Browser.runtime.getURL(iconFile),
     title,
     message,
+    ...(override?.contextMessage
+      ? { contextMessage: override.contextMessage }
+      : {}),
     buttons: [{ title: "무시" }, { title: "확인하기" }],
   } as Browser.Notifications.CreateNotificationOptions;
 
@@ -593,7 +695,47 @@ Browser.notifications.onButtonClicked.addListener(
 // "확인하기"/본체 클릭 → 대시보드 열기(= 재로그인 도착지). 전환당 1회만(가드는
 // client 쪽). 모듈 로드 시 1회 등록.
 setOnSessionExpired(() => {
-  void pushDesktopNotification("session-expired");
+  // 보호가 멈췄다는 안전·시스템 통지 — desk 설정과 무관하게 항상 표시(sev="system").
+  void pushDesktopNotification("session-expired", "system");
+});
+
+/**
+ * ⑤ 주간 요약 — 최근 7일 verdict 카운트를 인페이지 토스트 + OS 알림으로 표시.
+ * force=true(팝업 "이번 주 요약 보기" 버튼)면 설정 게이팅을 무시하고 항상 표시,
+ * force=false(주 1회 alarm)면 ribbon(토스트)·desk=all(OS) 설정을 존중한다.
+ */
+async function runWeeklySummary(force: boolean, tabId?: number) {
+  const counts = await countVerdicts({ range: "7d" });
+  const data = { fail: counts.fail, warn: counts.warn };
+  await pushToastToActiveTab("summary", data, force, tabId);
+  await pushDesktopNotification("summary", "summary", data, undefined, force);
+  return counts;
+}
+
+// ⑤ 주간 요약 자동화 — 주 1회(10080분) alarm. 설치/브라우저 시작 시 없을 때만
+// 생성(이미 있으면 get 으로 확인해 타이머 리셋 회피). 발사 시 force=false 로
+// 설정 게이팅(ribbon·desk=all)을 존중. alarms 권한/지원 없으면 조용히 스킵.
+const WEEKLY_SUMMARY_ALARM = "dambi-weekly-summary";
+async function ensureWeeklySummaryAlarm(): Promise<void> {
+  try {
+    const existing = await Browser.alarms.get(WEEKLY_SUMMARY_ALARM);
+    if (!existing) {
+      await Browser.alarms.create(WEEKLY_SUMMARY_ALARM, {
+        periodInMinutes: 10080,
+      });
+    }
+  } catch {
+    /* alarms 미지원/권한 없음 — best-effort */
+  }
+}
+Browser.runtime.onInstalled.addListener(() => {
+  void ensureWeeklySummaryAlarm();
+});
+Browser.runtime.onStartup.addListener(() => {
+  void ensureWeeklySummaryAlarm();
+});
+Browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === WEEKLY_SUMMARY_ALARM) void runWeeklySummary(false);
 });
 
 Browser.runtime.onMessage.addListener(
@@ -616,28 +758,26 @@ Browser.runtime.onMessage.addListener(
       return true;
     }
 
-    // ⑤ 주간 요약 토스트 (수동 트리거). 최근 7일 verdict 카운트를 모아
-    // 현재 활성 탭의 advisory content-script 에 DAMBI_TOAST 로 push 한다.
-    // advisory 전용 — 서명 결정과 무관(표시만).
+    // ⑤ 주간 요약 (수동 트리거 — 팝업 "이번 주 요약 보기"). 최근 7일 verdict
+    // 카운트를 토스트 + OS 알림으로 표시한다. 사용자가 직접 눌렀으므로 force=true
+    // 로 설정 게이팅을 건너뛴다. advisory 전용 — 서명 결정과 무관(표시만).
     if (req.type === "DAMBI_WEEKLY_SUMMARY") {
-      void countVerdicts({ range: "7d" })
-        .then(async (counts) => {
-          await pushToastToActiveTab("summary", {
-            fail: counts.fail,
-            warn: counts.warn,
-          });
-          await pushDesktopNotification("summary", {
-            fail: counts.fail,
-            warn: counts.warn,
-          });
-          sendResponse({ ok: true, data: counts });
-        })
+      void runWeeklySummary(true, req.tabId)
+        .then((counts) => sendResponse({ ok: true, data: counts }))
         .catch((err: unknown) =>
           sendResponse({
             ok: false,
             error: { kind: "weekly_summary_failed", message: String(err) },
           }),
         );
+      return true;
+    }
+
+    // ⑤ 인페이지 토스트의 대시보드 열기/확인하기/권한 취소 → 대시보드(options.html)
+    // 새 탭으로 열기. content-script 는 탭을 직접 못 열어 여기로 위임한다.
+    if (req.type === "DAMBI_OPEN_DASHBOARD") {
+      openDashboardFromNotification();
+      sendResponse({ ok: true, data: null });
       return true;
     }
 

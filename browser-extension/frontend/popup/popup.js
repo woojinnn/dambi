@@ -342,13 +342,15 @@ function renderFooter() {
     const srv = [...(state.appliedServer || [])].sort().join(",");
     if (cur !== srv) { txt = "적용 중…"; cls = "busy"; busy = true; }
   }
+  // 전이 상태일 때만 좌측에 상태 텍스트. 평상시엔 좌측을 비우고 로그아웃·설정을
+  // 모두 우측 액션 그룹에 모아 오른쪽 정렬한다(알림 강도 버튼 제거 — 설정에서 봄).
   const left = busy
     ? '<span class="pc-status ' + cls + '"><span class="pc-dot"></span>' + esc(txt) + '</span>'
-    : '<button class="pc-link" id="footLogout">로그아웃</button>';
+    : '';
   f.innerHTML =
     left +
     '<div class="pc-foot-actions">' +
-      '<button class="pc-link" id="notifBtn" disabled>알림 강도</button>' +
+      (busy ? '' : '<button class="pc-link" id="footLogout">로그아웃</button>') +
       '<button class="pc-link accent" id="optBtn">설정 ' + I.ext + '</button>' +
     '</div>';
   const lo = document.getElementById("footLogout");
@@ -396,6 +398,12 @@ function renderSettingsOverlay() {
         '<div class="pc-set-row"><div class="rl"><div class="rt">상단 리본 배너</div><div class="rs">위험 사이트 경고</div></div>' + tog("ribbon") + '</div>' +
         '<div class="pc-set-row"><div class="rl"><div class="rt">알림음</div><div class="rs">차단 시 소리</div></div>' + tog("sound") + '</div>' +
       '</div>' +
+      '<div class="pc-set-sec">알림 테스트</div>' +
+      '<div class="pc-set-rows">' +
+        '<div class="pc-set-row"><div class="rl"><div class="rt">이번 주 요약</div><div class="rs">최근 7일 위험 요약 알림 보내기</div></div>' +
+          '<button class="pc-mini" id="setWeekly">보내기</button></div>' +
+        '<div class="pc-set-row"><div class="rl"><div class="rt">알림이 안 떠요?</div><div class="rs">macOS <b>시스템 설정 › 알림 › Google Chrome</b>이 켜져 있는지 확인하세요(목록에 “Google Chrome”이 둘이면 둘 다 켜기). 집중 모드(방해금지)도 끄고, Chrome 업데이트 직후엔 <b>⌘Q</b>로 완전히 종료한 뒤 다시 열면 해결돼요.</div></div></div>' +
+      '</div>' +
       '<div class="pc-set-sec">계정</div>' +
       '<div class="pc-set-acct">' +
         '<span class="av">' + S.identiconSVG(state.account ? state.account.email : "0x", 32) + '</span>' +
@@ -423,6 +431,16 @@ function renderSettingsOverlay() {
     state.settings.preset = currentPreset();
     S.saveSettings(state.settings); renderSettingsOverlay();
   }));
+  ovl.querySelector("#setWeekly").addEventListener("click", async () => {
+    const btn = ovl.querySelector("#setWeekly");
+    const prev = btn.textContent;
+    btn.disabled = true; btn.textContent = "보내는 중…";
+    try {
+      if (S.weeklySummary) await S.weeklySummary();
+      btn.textContent = "보냄 ✓";
+    } catch (e) { btn.textContent = "실패"; }
+    setTimeout(() => { btn.disabled = false; btn.textContent = prev; }, 1600);
+  });
   ovl.querySelector("#setLogout").addEventListener("click", () => doLogout(ovl.querySelector("#setLogout")));
   ovl.querySelector("#setReset").addEventListener("click", () => { openConfirmReset(); });
 }

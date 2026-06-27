@@ -84,10 +84,9 @@
 .jump-nav {
   position: sticky; top: 0; z-index: 22;
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-  background: color-mix(in srgb, var(--page) 88%, transparent);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  /* 페이지색과 완전히 동일(불투명) — color-mix/blur가 만들던 '이상한 띠' 제거, 배경과 합쳐짐. */
+  background: var(--page);
   padding: 9px 0; margin-bottom: 8px;
-  border-bottom: 1px solid var(--hairline-soft);
 }
 .jump-link {
   display: inline-flex; align-items: center; gap: 8px;
