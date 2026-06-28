@@ -15,6 +15,7 @@ const {
 const targetBrowser = process.env.TARGET_BROWSER || "chrome";
 const distTarget = process.env.DAMBI_EXTENSION_DIST_TARGET || targetBrowser;
 const extRoot = path.resolve(__dirname, "..");
+const repoRoot = path.resolve(extRoot, "..");
 const mode = buildMode();
 
 // Load the mode-specific env file into Node's `process.env` BEFORE config-time
@@ -250,6 +251,16 @@ const pageConfig = {
           from: path.join(extRoot, "public"),
           to: distDir,
           transform: stripConsole ? stripCopiedJsConsole : undefined,
+        },
+        {
+          from: path.join(repoRoot, "LICENSE"),
+          to: "LICENSE",
+          toType: "file",
+        },
+        {
+          from: path.join(repoRoot, "NOTICE"),
+          to: "NOTICE",
+          toType: "file",
         },
       ],
     }),

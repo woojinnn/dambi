@@ -86,6 +86,18 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+const licenseNoticeViolations = ["LICENSE", "NOTICE"].filter((file) => {
+  const abs = path.join(distDir, file);
+  return !fs.existsSync(abs) || !fs.statSync(abs).isFile();
+});
+if (licenseNoticeViolations.length > 0) {
+  console.error(
+    `[validate-dist] ${target}: Apache-2.0 distribution notice file(s) missing from dist/${target} —`,
+  );
+  for (const file of licenseNoticeViolations) console.error(`    - ${file}`);
+  process.exit(1);
+}
+
 function resourcePatternsFromWebAccessibleResources(entries) {
   const patterns = [];
   for (const entry of entries || []) {
