@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "description": "Dambi Adapter Loader registry v3 — PDF FSM spec (hierarchical emit.body + live_inputs.source)",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "build": "tsx scripts/build-index.ts",

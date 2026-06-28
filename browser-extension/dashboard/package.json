@@ -2,6 +2,7 @@
   "name": "dambi-dashboard",
   "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Policy management UI for the dambi browser extension. Standalone Vite app, communicates with the extension SW through the SDK at ../sdk/extension-client.ts.",
   "scripts": {

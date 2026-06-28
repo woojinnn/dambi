@@ -2,6 +2,7 @@
   "name": "registry-api",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Caching authenticated reverse-proxy for the Dambi private adapter registry bucket",
   "scripts": {
