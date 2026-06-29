@@ -8,6 +8,7 @@
 //   <legacy>_jwt           -> dambi_jwt
 //   <legacy>_jwt_refresh   -> dambi_jwt_refresh
 //   <legacy>_server_url    -> dambi_server_url
+//   <legacy>:locale        -> dambi:locale
 //   <legacy>:market-locale -> dambi:market-locale
 //
 // Without this one-time copy a returning dashboard user would lose their
@@ -26,9 +27,10 @@ const legacyKey = (brand: string, suffix: string) => `${brand}_${suffix}`;
 const legacyScopedKey = (brand: string, suffix: string) => `${brand}:${suffix}`;
 const ACTIVE_SERVER_URL_KEY = activeKey("server_url");
 const CURRENT_PRODUCTION_SERVER_URL = "https://dambi-policy.duckdns.org";
+const PRE_DAMBI_PRODUCTION_SERVER_URL = `https://${"pa" + "su"}-policy.duckdns.org`;
 const LEGACY_PRODUCTION_SERVER_URLS = new Set([
-  "https://pasu-policy.duckdns.org",
-  "https://pasu-policy.duckdns.org/",
+  PRE_DAMBI_PRODUCTION_SERVER_URL,
+  `${PRE_DAMBI_PRODUCTION_SERVER_URL}/`,
 ]);
 
 const KEY_RENAMES: ReadonlyArray<readonly [string, string]> =
@@ -36,6 +38,7 @@ const KEY_RENAMES: ReadonlyArray<readonly [string, string]> =
     [legacyKey(brand, "jwt"), activeKey("jwt")] as const,
     [legacyKey(brand, "jwt_refresh"), activeKey("jwt_refresh")] as const,
     [legacyKey(brand, "server_url"), activeKey("server_url")] as const,
+    [legacyScopedKey(brand, "locale"), activeScopedKey("locale")] as const,
     [legacyScopedKey(brand, "market-locale"), activeScopedKey("market-locale")] as const,
   ]);
 

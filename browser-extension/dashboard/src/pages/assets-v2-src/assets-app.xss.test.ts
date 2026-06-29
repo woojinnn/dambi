@@ -72,12 +72,12 @@ describe("Assets2 prototype renderer escaping", () => {
   afterEach(() => {
     if (globalThis.window) {
       document.body.innerHTML = "";
-      window.PASU_DATA = undefined;
-      window.PASU_TWEAKS = undefined;
-      window.PASU_T = undefined;
-      window.PASU_RENDER = undefined;
-      window.PASU_RENDER_STATIC = undefined;
-      window.PASU_getSummary = undefined;
+      window.DAMBI_DATA = undefined;
+      window.DAMBI_TWEAKS = undefined;
+      window.DAMBI_T = undefined;
+      window.DAMBI_RENDER = undefined;
+      window.DAMBI_RENDER_STATIC = undefined;
+      window.DAMBI_getSummary = undefined;
     }
     dom?.window.close();
     dom = null;
@@ -85,8 +85,8 @@ describe("Assets2 prototype renderer escaping", () => {
 
   it("does not parse live wallet/token/HL fields as HTML", () => {
     const wallet = `0x${"1".repeat(40)}">${BAD}`;
-    window.PASU_T = (key, vars) => (vars && "label" in vars ? `${key}:${String(vars.label)}` : key);
-    window.PASU_DATA = {
+    window.DAMBI_T = (key, vars) => (vars && "label" in vars ? `${key}:${String(vars.label)}` : key);
+    window.DAMBI_DATA = {
       sel: "all",
       WLABEL: { [wallet]: BAD },
       WMETA: {
@@ -181,7 +181,7 @@ describe("Assets2 prototype renderer escaping", () => {
   });
 
   it("does not parse live donut item labels or colors as HTML", () => {
-    window.PASU_DATA = {
+    window.DAMBI_DATA = {
       donut: {
         wallets: {
           centerLabel: BAD,
@@ -218,9 +218,9 @@ describe("Assets2 prototype renderer escaping", () => {
   });
 
   it("does not reparse layout summary values as HTML", () => {
-    window.PASU_TWEAKS = { layoutMode: "overview", overviewStyle: "cards" };
-    window.PASU_T = (key, vars) => (vars && "amount" in vars ? `${key}:${String(vars.amount)}` : key);
-    window.PASU_getSummary = () => ({
+    window.DAMBI_TWEAKS = { layoutMode: "overview", overviewStyle: "cards" };
+    window.DAMBI_T = (key, vars) => (vars && "amount" in vars ? `${key}:${String(vars.amount)}` : key);
+    window.DAMBI_getSummary = () => ({
       holdingsCount: 1,
       apprCount: 1,
       pending: 1,

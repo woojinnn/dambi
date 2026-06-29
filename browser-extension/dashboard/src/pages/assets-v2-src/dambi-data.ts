@@ -1,8 +1,8 @@
-/* pasu-data.ts — adapter: useAssetsData() live data → the ASS_v2 PASU_DATA shape.
+/* dambi-data.ts — adapter: useAssetsData() live data → the ASS_v2 DAMBI_DATA shape.
  *
  * The ASS_v2 prototype (assets-app.ts / donuts.ts / layout-modes.ts) reads six
  * data definitions (WLABEL/WMETA/AGG/PW/APPR/PEND) + sel + donut + HL from
- * window.PASU_DATA. This builds that object from the live server DTOs, reusing
+ * window.DAMBI_DATA. This builds that object from the live server DTOs, reusing
  * the shared data/risk helpers so numbers match the rest of the dashboard.
  *
  * Wallet key = the wallet's real address (no id↔address alias). Every transform
@@ -39,8 +39,8 @@ import {
   type ApprovalIndex,
 } from "../monitoring/risk";
 
-// ── PASU_DATA shape (matches the prototype's var definitions) ────────────────
-export interface PasuWMeta {
+// ── DAMBI_DATA shape (matches the prototype's var definitions) ────────────────
+export interface DambiWMeta {
   label: string;
   full: string;
   totalUsd: string;
@@ -50,7 +50,7 @@ export interface PasuWMeta {
   varUsd: string;
   unlimited: number;
 }
-export interface PasuAggRow {
+export interface DambiAggRow {
   sym: string;
   kind: string;
   chain: string;
@@ -65,7 +65,7 @@ export interface PasuAggRow {
   varCls: string;
   varNum: number;
 }
-export interface PasuApprRow {
+export interface DambiApprRow {
   w: string;
   type: string;
   token: string;
@@ -75,7 +75,7 @@ export interface PasuApprRow {
   risk: string[];
   revoke: boolean;
 }
-export interface PasuPendRow {
+export interface DambiPendRow {
   w: string;
   kind: string;
   type: string;
@@ -87,7 +87,7 @@ export interface PasuPendRow {
   spender?: string;
   at: string;
 }
-export interface PasuHlPos {
+export interface DambiHlPos {
   sym: string;
   side: string;
   size: number;
@@ -95,7 +95,7 @@ export interface PasuHlPos {
   value: number;
   leverage: string;
 }
-export interface PasuHlOrder {
+export interface DambiHlOrder {
   sym: string;
   side: string;
   kind: string;
@@ -103,22 +103,22 @@ export interface PasuHlOrder {
   limit: string;
   cond: string;
 }
-export interface PasuHlAccount {
+export interface DambiHlAccount {
   wallet: string;
   walletLabel: string;
   perpUsd: number;
   spotUsd: number;
-  positions: PasuHlPos[];
-  orders: PasuHlOrder[];
+  positions: DambiHlPos[];
+  orders: DambiHlOrder[];
 }
-export interface PasuData {
+export interface DambiData {
   WLABEL: Record<string, string>;
-  WMETA: Record<string, PasuWMeta>;
-  AGG: PasuAggRow[];
-  PW: Record<string, PasuAggRow[]>;
-  APPR: PasuApprRow[];
-  PEND: PasuPendRow[];
-  HL: Record<string, PasuHlAccount>;
+  WMETA: Record<string, DambiWMeta>;
+  AGG: DambiAggRow[];
+  PW: Record<string, DambiAggRow[]>;
+  APPR: DambiApprRow[];
+  PEND: DambiPendRow[];
+  HL: Record<string, DambiHlAccount>;
   donut: DonutData | null;
   sel: string;
 }
@@ -206,7 +206,7 @@ function decimalsOf(h: TokenHolding): number {
 function groupHoldings(
   pairs: Array<{ walletAddr: string; h: TokenHolding; apIdx?: ApprovalIndex }>,
   includeWallets: boolean,
-): PasuAggRow[] {
+): DambiAggRow[] {
   const groups = new Map<string, GroupAcc>();
   pairs.forEach(({ walletAddr, h, apIdx }) => {
     const key = groupKeyOf(h);
@@ -238,7 +238,7 @@ function groupHoldings(
 
   return Array.from(groups.values()).map((g) => {
     const risk = Array.from(g.riskSet);
-    const row: PasuAggRow = {
+    const row: DambiAggRow = {
       sym: g.sym,
       kind: g.kind,
       chain: g.chain,
@@ -269,9 +269,9 @@ function buildDecLookup(holdings: TokenHolding[]): Map<string, number> {
   return m;
 }
 
-function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, decLookup: Map<string, number>): PasuApprRow[] {
+function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, decLookup: Map<string, number>): DambiApprRow[] {
   if (!ap) return [];
-  const out: PasuApprRow[] = [];
+  const out: DambiApprRow[] = [];
   ap.erc20.forEach((a) => {
     const dec = decLookup.get(`${a.chain}|${a.token.toLowerCase()}`) ?? 0;
     // 무제한 승인은 서버 is_unlimited 플래그뿐 아니라 원시 금액 크기로도 판정한다.
@@ -330,7 +330,7 @@ function apprRowsFor(walletAddr: string, ap: ClassifiedApprovals | undefined, de
 }
 
 // ── pending → PEND rows ─────────────────────────────────────────────────────
-function pendRowsFor(walletAddr: string, pending: PendingTx[] | undefined): PasuPendRow[] {
+function pendRowsFor(walletAddr: string, pending: PendingTx[] | undefined): DambiPendRow[] {
   if (!pending) return [];
   const locale = i18n.language === "en" ? "en-US" : "ko-KR";
   return pending.map((pt) => {
@@ -383,7 +383,7 @@ function pendRowsFor(walletAddr: string, pending: PendingTx[] | undefined): Pasu
   });
 }
 
-// ── HL → PASU_DATA.HL ───────────────────────────────────────────────────────
+// ── HL → DAMBI_DATA.HL ───────────────────────────────────────────────────────
 function levForFactory(hl: HlAccount): (assetIndex: number) => string {
   const map = new Map<number, { is_cross: boolean; leverage: number }>();
   (hl.leverage_settings ?? []).forEach((s) => map.set(s.asset_index, { is_cross: s.is_cross, leverage: s.leverage }));
@@ -394,9 +394,9 @@ function levForFactory(hl: HlAccount): (assetIndex: number) => string {
   };
 }
 
-function hlAccountView(walletAddr: string, walletLabel: string, hl: HlAccount): PasuHlAccount {
+function hlAccountView(walletAddr: string, walletLabel: string, hl: HlAccount): DambiHlAccount {
   const levFor = levForFactory(hl);
-  const positions: PasuHlPos[] = (hl.positions ?? []).map((p) => {
+  const positions: DambiHlPos[] = (hl.positions ?? []).map((p) => {
     const size = num(p.size);
     const entry = num(p.entry_price);
     return {
@@ -408,7 +408,7 @@ function hlAccountView(walletAddr: string, walletLabel: string, hl: HlAccount): 
       leverage: levFor(p.asset_index),
     };
   });
-  const orders: PasuHlOrder[] = (hl.open_orders ?? []).map((o) => {
+  const orders: DambiHlOrder[] = (hl.open_orders ?? []).map((o) => {
     const trig = o.trigger_price ? num(o.trigger_price) : num(o.price);
     const limit = num(o.price);
     // TP/SL classification: a reduce-only trigger ≈ take-profit, else stop-loss.
@@ -440,13 +440,13 @@ function hlAccountView(walletAddr: string, walletLabel: string, hl: HlAccount): 
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
-export function toPasuData(d: AssetsDataLike): PasuData {
+export function toDambiData(d: AssetsDataLike): DambiData {
   const WLABEL: Record<string, string> = {};
-  const WMETA: Record<string, PasuWMeta> = {};
-  const APPR: PasuApprRow[] = [];
-  const PEND: PasuPendRow[] = [];
-  const HL: Record<string, PasuHlAccount> = {};
-  const PW: Record<string, PasuAggRow[]> = {};
+  const WMETA: Record<string, DambiWMeta> = {};
+  const APPR: DambiApprRow[] = [];
+  const PEND: DambiPendRow[] = [];
+  const HL: Record<string, DambiHlAccount> = {};
+  const PW: Record<string, DambiAggRow[]> = {};
   const aggPairs: Array<{ walletAddr: string; h: TokenHolding; apIdx?: ApprovalIndex }> = [];
 
   // The wallet switcher must ALWAYS show every tracked wallet (L1 and L2 alike),

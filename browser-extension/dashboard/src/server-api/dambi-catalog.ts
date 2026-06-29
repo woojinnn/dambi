@@ -1,6 +1,6 @@
 /**
- * ⚠️ GENERATED — slug → category / code lookup from wallet-guardians/pasu-docs.
- * 생성: scripts/import-pasu-docs/import.mjs. The dashboard uses these to
+ * ⚠️ GENERATED — slug → category / code lookup from wallet-guardians/dambi-docs.
+ * 생성: scripts/import-dambi-docs/import.mjs. The dashboard uses these to
  * classify and label any listing by its slug, so server-provided listings
  * (whose category may be null/server-taxonomy) still map to the dashboard
  * category and show their catalog code.

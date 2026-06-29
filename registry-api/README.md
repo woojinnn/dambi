@@ -1,7 +1,7 @@
 # registry-api
 
 A small, dependency-light **caching, authenticated reverse-proxy** that sits in front of
-the **private** ScopeBall adapter-registry GCS bucket and serves it to the browser
+the **private** Dambi adapter-registry GCS bucket and serves it to the browser
 extension over anonymous HTTPS.
 
 The extension cannot read the bucket directly: the bucket has **Public Access Prevention

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const legacyPolicyBase = `https://${"pa" + "su"}-policy.duckdns.org`;
+
 const tokenStore = vi.hoisted(() => ({
   getAccessToken: vi.fn<() => Promise<string | null>>(),
   getRefreshToken: vi.fn<() => Promise<string | null>>(),
@@ -33,7 +35,7 @@ describe("dambi-auth client", () => {
     expect(normalizeServerBaseUrl("https://dambi-policy.duckdns.org/")).toBe(
       "https://dambi-policy.duckdns.org",
     );
-    expect(normalizeServerBaseUrl("https://pasu-policy.duckdns.org/")).toBe(
+    expect(normalizeServerBaseUrl(`${legacyPolicyBase}/`)).toBe(
       "https://dambi-policy.duckdns.org",
     );
     expect(normalizeServerBaseUrl("http://127.0.0.1:8788")).toBe(

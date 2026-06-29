@@ -35,7 +35,7 @@ if (!workspaceCargoToml.includes('"crates/integration-tests"')) {
   process.exit(1);
 }
 
-const tmpRoot = mkdtempSync(join(tmpdir(), "scopeball-v3-harness-"));
+const tmpRoot = mkdtempSync(join(tmpdir(), "dambi-v3-harness-"));
 try {
   writeFileSync(join(tmpRoot, "Cargo.toml"), workspaceCargoToml);
   for (const name of ["Cargo.lock", "crates", "registryV2", "schema"]) {

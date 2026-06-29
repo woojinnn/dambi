@@ -239,7 +239,7 @@ thread_local! {
 /// registry `build-index` already restricts `address_agnostic` to this, but the
 /// WASM install is the TRUST BOUNDARY: a compromised/MITM'd registry response
 /// could otherwise install an agnostic decoder for a high-value fungible
-/// selector (e.g. erc20 `approve` `0x095ea7b3`), forcing ScopeBall to decode
+/// selector (e.g. erc20 `approve` `0x095ea7b3`), forcing Dambi to decode
 /// EVERY such call on ANY contract via an attacker-chosen bundle. Enforce here.
 const AGNOSTIC_SELECTOR_ALLOWLIST: &[&str] = &["0xa22cb465"];
 

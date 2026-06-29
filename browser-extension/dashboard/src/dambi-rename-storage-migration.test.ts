@@ -7,6 +7,7 @@ const olderLegacyKey = (suffix: string) => `${"scope" + "ball"}_${suffix}`;
 const newerLegacyScopedKey = (suffix: string) => `${"pa" + "su"}:${suffix}`;
 const activeKey = (suffix: string) => `dambi_${suffix}`;
 const activeScopedKey = (suffix: string) => `dambi:${suffix}`;
+const legacyPolicyBase = `https://${"pa" + "su"}-policy.duckdns.org`;
 
 describe("migrateDambiRenameLocalStorage", () => {
   // Self-mocked localStorage so the test behaves identically under the
@@ -69,10 +70,7 @@ describe("migrateDambiRenameLocalStorage", () => {
   });
 
   it("rewrites the legacy production server URL to the current dambi host", () => {
-    window.localStorage.setItem(
-      newerLegacyKey("server_url"),
-      "https://pasu-policy.duckdns.org",
-    );
+    window.localStorage.setItem(newerLegacyKey("server_url"), legacyPolicyBase);
 
     const result = migrateDambiRenameLocalStorage();
 
@@ -83,7 +81,7 @@ describe("migrateDambiRenameLocalStorage", () => {
   });
 
   it("repairs an already-migrated legacy production server URL", () => {
-    window.localStorage.setItem(activeKey("server_url"), "https://pasu-policy.duckdns.org");
+    window.localStorage.setItem(activeKey("server_url"), legacyPolicyBase);
 
     const result = migrateDambiRenameLocalStorage();
 

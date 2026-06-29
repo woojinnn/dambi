@@ -202,7 +202,7 @@ export const CATEGORY_NAME: Record<CategoryKey, { en: string; ko: string }> = {
  */
 const CATEGORY_BY_SLUG: Record<string, CategoryKey> = {
   // MK_v2 핸드오프 기준 — 프로토콜·자산 유형 매핑.
-  // ⚠️ 임시 시드(PASU Beginner Pack V1) 멤버 slug — market-seed-beginner.ts 제거 시 함께 삭제.
+  // ⚠️ 임시 시드(Dambi Beginner Pack V1) 멤버 slug — market-seed-beginner.ts 제거 시 함께 삭제.
   "unapproved-contract-token-max-approval": "Token",
   "unapproved-marketplace-delegation": "NFT",
   "swap-asset-redirect": "DEX",

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Seed the LOCAL marketplace DB (docker scopeball-pg) from the pasu-docs import.
+// Seed the LOCAL marketplace DB (docker dambi-pg) from the dambi-docs import.
 // Replaces existing market_listings with the doc catalog as an OFFICIAL publisher,
 // with dashboard-taxonomy categories so the browse grid classifies them.
 //
 // Emits out/seed.sql; apply with:
-//   node seed-local-db.mjs && docker exec -i scopeball-pg psql -U scopeball -d scopeball < out/seed.sql
+//   node seed-local-db.mjs && docker exec -i dambi-pg psql -U dambi -d dambi < out/seed.sql
 
 import fs from "node:fs";
 import path from "node:path";

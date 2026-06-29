@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ScopeBall RPC Hook
-// @namespace    scopeball.local
+// @name         Dambi RPC Hook
+// @namespace    dambi.local
 // @version      0.1.0
-// @description  Hook window.ethereum.request, extract RPC fields, and stream them to the ScopeBall web-server (Phase 1).
+// @description  Hook window.ethereum.request, extract RPC fields, and stream them to the Dambi policy server (Phase 1).
 // @author       you
 // @match        *://*/*
 // @run-at       document-start
@@ -19,7 +19,7 @@
   // Sandbox-side liveness log. If you see this in the dApp page Console,
   // the userscript is at least running. If you don't, Tampermonkey isn't
   // injecting it (developer mode / @match / extension disabled).
-  console.log('[scopeball] userscript loaded @', location.href);
+  console.log('[dambi] userscript loaded @', location.href);
 
   // Backend listens here. Override by editing this constant.
   const ENDPOINT = 'http://127.0.0.1:8080/api/event';
@@ -110,7 +110,7 @@
 
     function hookProvider(provider) {
       if (!provider || typeof provider.request !== 'function') return false;
-      if (provider.__scopeballHooked) return true;
+      if (provider.__dambiHooked) return true;
       const originalRequest = provider.request.bind(provider);
 
       let cachedChainId = null;
@@ -118,7 +118,7 @@
       function patchedRequest(args) {
         // Loud log so we can see in Console exactly when interception fires.
         try {
-          console.log('[scopeball] intercept', (args && args.method) || '?');
+          console.log('[dambi] intercept', (args && args.method) || '?');
         } catch (_) {}
         try {
           if (cachedChainId == null) {
@@ -132,7 +132,7 @@
             currentChainId: cachedChainId || undefined,
           });
           window.postMessage(
-            { source: 'scopeball', payload: extracted },
+            { source: 'dambi', payload: extracted },
             location.origin,
           );
           if (args && (args.method === 'wallet_switchEthereumChain'
@@ -140,7 +140,7 @@
             cachedChainId = null;
           }
         } catch (e) {
-          console.warn('[scopeball] hook error', e);
+          console.warn('[dambi] hook error', e);
         }
         return originalRequest(args);
       }
@@ -181,20 +181,20 @@
             writable: true,
             configurable: true,
           });
-          installed = true;``
-          console.log('[scopeball] installed via Proxy wrap on window.ethereum');
+          installed = true;
+          console.log('[dambi] installed via Proxy wrap on window.ethereum');
         } catch (e) {
-          console.warn('[scopeball] proxy wrap failed', e);
+          console.warn('[dambi] proxy wrap failed', e);
         }
       }
 
       if (!installed) {
-        console.warn('[scopeball] FAILED to install patched request on', provider);
+        console.warn('[dambi] FAILED to install patched request on', provider);
         return false;
       }
 
-      provider.__scopeballHooked = true;
-      console.log('[scopeball] hooked', provider);
+      provider.__dambiHooked = true;
+      console.log('[dambi] hooked', provider);
       return true;
     }
 
@@ -228,7 +228,7 @@
   //   2. <script src=blob:...> — works on some CSPs that allow blob:
   //   3. unsafeWindow.ethereum patch from sandbox — last resort, no inject
   const pageWorldCode =
-    'console.log("[scopeball] page-world inject running");' +
+    'console.log("[dambi] page-world inject running");' +
     '(' + pageWorldHook.toString() + ')();';
 
   let injected = false;
@@ -237,9 +237,9 @@
     try {
       GM_addElement('script', { textContent: pageWorldCode });
       injected = true;
-      console.log('[scopeball] injected via GM_addElement');
+      console.log('[dambi] injected via GM_addElement');
     } catch (e) {
-      console.warn('[scopeball] GM_addElement failed', e);
+      console.warn('[dambi] GM_addElement failed', e);
     }
   }
 
@@ -252,9 +252,9 @@
       s.onload = function () { URL.revokeObjectURL(url); s.remove(); };
       (document.head || document.documentElement).appendChild(s);
       injected = true;
-      console.log('[scopeball] injected via blob URL');
+      console.log('[dambi] injected via blob URL');
     } catch (e) {
-      console.warn('[scopeball] blob inject failed', e);
+      console.warn('[dambi] blob inject failed', e);
     }
   }
 
@@ -264,9 +264,9 @@
     try {
       const w = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       hookProviderFromSandbox(w);
-      console.log('[scopeball] hooked via unsafeWindow fallback');
+      console.log('[dambi] hooked via unsafeWindow fallback');
     } catch (e) {
-      console.warn('[scopeball] all inject strategies failed', e);
+      console.warn('[dambi] all inject strategies failed', e);
     }
   }
 
@@ -274,9 +274,9 @@
   function hookProviderFromSandbox(w) {
     function tryHook() {
       const eth = w.ethereum;
-      if (!eth || typeof eth.request !== 'function' || eth.__scopeballHooked) return false;
+      if (!eth || typeof eth.request !== 'function' || eth.__dambiHooked) return false;
       const original = eth.request.bind(eth);
-      eth.__scopeballHooked = true;
+      eth.__dambiHooked = true;
       eth.request = function patched(args) {
         try {
           // Re-use the same extractor we ship via the inline page-world code
@@ -295,13 +295,13 @@
             _sandboxFallback: true,
           };
           window.postMessage(
-            { source: 'scopeball', payload: payload },
+            { source: 'dambi', payload: payload },
             location.origin,
           );
         } catch (_) {}
         return original(args);
       };
-      console.log('[scopeball] sandbox-hooked', eth);
+      console.log('[dambi] sandbox-hooked', eth);
       return true;
     }
     if (!tryHook()) {
@@ -318,8 +318,8 @@
   // window object than the sandbox listens on.
   function onScopeballMessage(e) {
     const d = e && e.data;
-    if (!d || d.source !== 'scopeball' || !d.payload) return;
-    console.log('[scopeball] sandbox got message', d.payload.method);
+    if (!d || d.source !== 'dambi' || !d.payload) return;
+    console.log('[dambi] sandbox got message', d.payload.method);
 
     GM_xmlhttpRequest({
       method: 'POST',
@@ -328,16 +328,16 @@
       data: JSON.stringify(d.payload),
       onload: function (res) {
         if (res.status >= 200 && res.status < 300) {
-          console.log('[scopeball] POST ok', res.status);
+          console.log('[dambi] POST ok', res.status);
         } else {
-          console.warn('[scopeball] POST non-2xx', res.status, res.responseText);
+          console.warn('[dambi] POST non-2xx', res.status, res.responseText);
         }
       },
       onerror: function (err) {
-        console.warn('[scopeball] POST failed', err);
+        console.warn('[dambi] POST failed', err);
       },
       ontimeout: function () {
-        console.warn('[scopeball] POST timeout');
+        console.warn('[dambi] POST timeout');
       },
       timeout: 3000,
     });
@@ -347,7 +347,7 @@
   try {
     if (typeof unsafeWindow !== 'undefined' && unsafeWindow !== window) {
       unsafeWindow.addEventListener('message', onScopeballMessage);
-      console.log('[scopeball] sandbox listening on both window and unsafeWindow');
+      console.log('[dambi] sandbox listening on both window and unsafeWindow');
     }
   } catch (_) {}
 })();

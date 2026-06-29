@@ -1,4 +1,4 @@
-# ScopeBall Registry — Operator Runbook
+# Dambi Registry — Operator Runbook
 
 The **how-to-operate** companion to `REGISTRY_ARCHITECTURE.md` (the what/why). Every
 identifier (project, bucket, KMS key, SA, proxy URL, pins) lives in

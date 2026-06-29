@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Import pasu-docs (GitBook markdown) → marketplace seed JSON + validation report.
+// Import dambi-docs (GitBook markdown) → marketplace seed JSON + validation report.
 //
-// Reads the wallet-guardians/pasu-docs checkout and extracts, for every policy
+// Reads the wallet-guardians/dambi-docs checkout and extracts, for every policy
 // page, the canonical slug (@id), Cedar source, manifest, severity, names and
 // category. For every package page it extracts name/description/category and the
 // member-policy codes (e.g. AMM-001), then resolves those codes back to policy
@@ -11,7 +11,7 @@
 //   - report.html          human-readable mapping / validation report
 //
 // Usage: node import.mjs [DOCS_DIR] [OUT_DIR]
-//   DOCS_DIR defaults to /tmp/pasu-docs/docs
+//   DOCS_DIR defaults to /tmp/dambi-docs/docs
 //   OUT_DIR  defaults to ./out (next to this script)
 
 import fs from "node:fs";
@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "../..");
-const DOCS = process.argv[2] || "/tmp/pasu-docs/docs";
+const DOCS = process.argv[2] || "/tmp/dambi-docs/docs";
 const OUT = process.argv[3] || path.join(__dirname, "out");
 
 const POLICY_DIRS = [
@@ -334,7 +334,7 @@ fs.writeFileSync(path.join(OUT, "packages.seed.json"), JSON.stringify(packages, 
 fs.writeFileSync(path.join(OUT, "report.html"), renderHtml(sum, policies, packages));
 
 // ── frontend demo seed: emitted at the end (after CAT_* consts are defined) ──
-const seedTsPath = path.join(REPO, "browser-extension/dashboard/src/server-api/market-seed-pasu.ts");
+const seedTsPath = path.join(REPO, "browser-extension/dashboard/src/server-api/market-seed-dambi.ts");
 
 // policy code prefix → dashboard CategoryKey
 const CAT_BY_PREFIX = {
@@ -378,8 +378,8 @@ function renderCatalogTs(policies) {
     if (p.code) code[p.slug] = p.code;
   }
   return `/**
- * ⚠️ GENERATED — slug → category / code lookup from wallet-guardians/pasu-docs.
- * 생성: scripts/import-pasu-docs/import.mjs. The dashboard uses these to
+ * ⚠️ GENERATED — slug → category / code lookup from wallet-guardians/dambi-docs.
+ * 생성: scripts/import-dambi-docs/import.mjs. The dashboard uses these to
  * classify and label any listing by its slug, so server-provided listings
  * (whose category may be null/server-taxonomy) still map to the dashboard
  * category and show their catalog code.
@@ -439,8 +439,8 @@ function renderSeedTs(policies, packages) {
   });
 
   return `/**
- * ⚠️ GENERATED — wallet-guardians/pasu-docs 전체 임포트 데모 시드.
- * 생성: scripts/import-pasu-docs/import.mjs (직접 수정 금지, 재생성하세요).
+ * ⚠️ GENERATED — wallet-guardians/dambi-docs 전체 임포트 데모 시드.
+ * 생성: scripts/import-dambi-docs/import.mjs (직접 수정 금지, 재생성하세요).
  * 로컬에서 마켓 화면을 채우기 위한 폴백. 실데이터 올라오면 market.ts 의
  * import 를 "./market-seed-beginner" 로 되돌리면 됩니다.
  */
@@ -526,7 +526,7 @@ console.log("→ wrote", seedTsPath);
 // label ANY listing by slug, regardless of whether it came from the server or
 // the seed — so remote listings (whose `category` field doesn't match the
 // dashboard taxonomy) still resolve to the right category + show their code.
-const catalogPath = path.join(REPO, "browser-extension/dashboard/src/server-api/pasu-catalog.ts");
+const catalogPath = path.join(REPO, "browser-extension/dashboard/src/server-api/dambi-catalog.ts");
 fs.writeFileSync(catalogPath, renderCatalogTs(policies));
 console.log("→ wrote", catalogPath);
 
@@ -583,7 +583,7 @@ function renderHtml(sum, policies, packages) {
 
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>pasu-docs → 마켓 임포트 리포트</title>
+<title>dambi-docs → 마켓 임포트 리포트</title>
 <style>
   :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
   body{margin:0;background:#f6f7f9;color:#1b222c}
@@ -604,8 +604,8 @@ function renderHtml(sum, policies, packages) {
   tr.st-broken td,tr.st-empty td{background:#fffafa}
   details{margin:8px 0}
 </style></head><body><div class="wrap">
-<h1>pasu-docs → 마켓플레이스 임포트 리포트</h1>
-<div class="sub">소스: wallet-guardians/pasu-docs · 생성 스크립트: scripts/import-pasu-docs/import.mjs</div>
+<h1>dambi-docs → 마켓플레이스 임포트 리포트</h1>
+<div class="sub">소스: wallet-guardians/dambi-docs · 생성 스크립트: scripts/import-dambi-docs/import.mjs</div>
 
 <h2>정책 (Policies)</h2>
 <div class="cards">

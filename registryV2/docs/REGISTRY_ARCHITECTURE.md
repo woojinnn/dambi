@@ -1,4 +1,4 @@
-# ScopeBall Registry Architecture — Proxy + GCS + KMS (Signed Bundles)
+# Dambi Registry Architecture — Proxy + GCS + KMS (Signed Bundles)
 
 > Production architecture for the decode-rule registry: how the browser extension
 > fetches "v3 bundles" (calldata decode rules), and how **bundle signing** makes the
@@ -13,7 +13,7 @@
 
 ## 1. Why this exists
 
-ScopeBall decodes a wallet's *pending* action into a normalized `ActionBody`, evaluates
+Dambi decodes a wallet's *pending* action into a normalized `ActionBody`, evaluates
 Cedar policies, and returns **pass / warn / fail** *before the wallet signs*. The decode
 rules are not shipped in the extension — they are **JIT-fetched** from a registry so new
 protocols can be onboarded without an extension release.

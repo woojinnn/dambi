@@ -89,7 +89,7 @@ export function NavRail() {
         {/* 외부 GitBook 문서 — 라우트가 아니라 새 탭으로 여는 링크. */}
         <a
           className="nav-item"
-          href="https://dambio.gitbook.io/wallet-guardians-docs/pasu"
+          href="https://dambio.gitbook.io/wallet-guardians-docs/dambi"
           target="_blank"
           rel="noopener noreferrer"
         >

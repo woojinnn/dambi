@@ -3,7 +3,7 @@
  * (no http backend — extension pages must work under CSP and offline).
  *
  * Init is a function, NOT a module-level side effect: it must run AFTER
- * migratePasuRenameLocalStorage() in main.tsx, and static imports would hoist
+ * migrateDambiRenameLocalStorage() in main.tsx, and static imports would hoist
  * an auto-init above that call.
  */
 
@@ -53,9 +53,15 @@ export const NAMESPACES = [
   "diagnosis",
 ] as const;
 
-const LOCALE_KEY = "pasu:locale";
-/** Pre-i18n market-only locale toggle; used once as a seed, never written. */
-const LEGACY_MARKET_LOCALE_KEY = "pasu:market-locale";
+const LOCALE_KEY = "dambi:locale";
+/** Pre-Dambi locale keys; used once as a seed, never written. */
+const LEGACY_LOCALE_KEYS = [
+  "dambi:market-locale",
+  `${"pa" + "su"}:locale`,
+  `${"scope" + "ball"}:locale`,
+  `${"pa" + "su"}:market-locale`,
+  `${"scope" + "ball"}:market-locale`,
+] as const;
 
 function readInitialLocale(): AppLocale {
   // try/catch: under Node >=22 the experimental WebStorage global can shadow
@@ -63,7 +69,9 @@ function readInitialLocale(): AppLocale {
   try {
     const v =
       window.localStorage.getItem(LOCALE_KEY) ??
-      window.localStorage.getItem(LEGACY_MARKET_LOCALE_KEY);
+      LEGACY_LOCALE_KEYS.map((key) => window.localStorage.getItem(key)).find(
+        (candidate): candidate is string => candidate !== null,
+      );
     return v === "en" ? "en" : "ko";
   } catch {
     return "ko";

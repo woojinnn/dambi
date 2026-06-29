@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publish the pasu-docs catalog to a policy-server via the public API
+// Publish the dambi-docs catalog to a policy-server via the public API
 // (POST /market/listings). Listings land as publisher_tier=community owned by
 // the token's account (the API forces community; official needs DB-direct).
 //

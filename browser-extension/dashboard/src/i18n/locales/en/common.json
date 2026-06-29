@@ -36,7 +36,7 @@
   },
   "settings": {
     "title": "Settings — Server environment",
-    "desc": "The policy-server address the dashboard and the service worker will call. Leave empty to use the build default (<code>PASU_SERVER_URL</code>).",
+    "desc": "The policy-server address the dashboard and the service worker will call. Leave empty to use the build default (<code>DAMBI_SERVER_URL</code>).",
     "presetLocal": "Local (test)",
     "presetProd": "Production",
     "urlPlaceholder": "http://127.0.0.1:8788  (empty = build default)",

@@ -1,8 +1,8 @@
 # registryV2
 
-The **source of truth** for the ScopeBall adapter registry.
+The **source of truth** for the Dambi adapter registry.
 
-ScopeBall is a pre-sign permission-scope analyzer (a browser extension). To decode a
+Dambi is a pre-sign permission-scope analyzer (a browser extension). To decode a
 pending wallet action it needs a *decoder bundle* for the `(chain, contract, selector)` or
 `(chain, verifyingContract, EIP-712 primaryType)` it is about to evaluate. Those bundles
 are authored here as **manifests**, compiled into a content-addressed, signed, statically
