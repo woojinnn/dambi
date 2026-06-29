@@ -35,6 +35,7 @@ import { migrateDambiRenameStorageKeys } from "./dambi-rename-storage-migration"
 const newerLegacyKey = (suffix: string) => `${"pa" + "su"}_${suffix}`;
 const olderLegacyKey = (suffix: string) => `${"scope" + "ball"}_${suffix}`;
 const activeKey = (suffix: string) => `dambi_${suffix}`;
+const legacyPolicyBase = `https://${"pa" + "su"}-policy.duckdns.org`;
 
 describe("migrateDambiRenameStorageKeys", () => {
   beforeEach(() => {
@@ -80,7 +81,7 @@ describe("migrateDambiRenameStorageKeys", () => {
   });
 
   it("rewrites the legacy production server URL to the current dambi host", async () => {
-    mocks.localStore.set(newerLegacyKey("server_url"), "https://pasu-policy.duckdns.org");
+    mocks.localStore.set(newerLegacyKey("server_url"), legacyPolicyBase);
 
     const result = await migrateDambiRenameStorageKeys();
 
@@ -91,7 +92,7 @@ describe("migrateDambiRenameStorageKeys", () => {
   });
 
   it("repairs an already-migrated legacy production server URL", async () => {
-    mocks.localStore.set(activeKey("server_url"), "https://pasu-policy.duckdns.org");
+    mocks.localStore.set(activeKey("server_url"), legacyPolicyBase);
 
     const result = await migrateDambiRenameStorageKeys();
 

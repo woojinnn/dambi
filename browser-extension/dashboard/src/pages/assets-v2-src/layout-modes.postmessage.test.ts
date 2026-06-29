@@ -51,16 +51,16 @@ describe("layout edit-host postMessage boundary", () => {
     vi.restoreAllMocks();
     if (globalThis.window) {
       document.body.innerHTML = "";
-      window.PASU_EDIT_HOST = undefined;
-      window.PASU_TWEAKS = undefined;
-      window.PASU_getSummary = undefined;
+      window.DAMBI_EDIT_HOST = undefined;
+      window.DAMBI_TWEAKS = undefined;
+      window.DAMBI_getSummary = undefined;
     }
     dom?.window.close();
     dom = null;
   });
 
   it("posts edit-host availability to the same origin only", () => {
-    window.PASU_EDIT_HOST = true;
+    window.DAMBI_EDIT_HOST = true;
     const postMessage = vi.spyOn(window.parent, "postMessage").mockImplementation(() => undefined);
 
     const teardown = initLayoutModes(host());
@@ -74,7 +74,7 @@ describe("layout edit-host postMessage boundary", () => {
   });
 
   it("accepts edit-host control messages only from the same-origin parent", () => {
-    window.PASU_EDIT_HOST = true;
+    window.DAMBI_EDIT_HOST = true;
     vi.spyOn(window.parent, "postMessage").mockImplementation(() => undefined);
 
     const teardown = initLayoutModes(host());

@@ -4,9 +4,9 @@
 //! Hyperliquid official endpoint snapshots from `/tmp`, because the source of
 //! truth under verification is the published GitBook page, not checked-in test
 //! fixtures. Generate these files before running:
-//! - `/tmp/scopeball-gitbook-perp/perp-policies.json`
-//! - `/tmp/scopeball-hl-meta.json`
-//! - `/tmp/scopeball-hl-allmids.json`
+//! - `/tmp/dambi-gitbook-perp/perp-policies.json`
+//! - `/tmp/dambi-hl-meta.json`
+//! - `/tmp/dambi-hl-allmids.json`
 //!
 //! The verdict path is the literal extension/WASM boundary:
 //! `evaluate_action_v2_json({ action, meta, tx, bundles, results, ... })`.
@@ -25,9 +25,9 @@ use policy_engine_wasm::evaluate_action_v2_json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-const POLICIES_PATH: &str = "/tmp/scopeball-gitbook-perp/perp-policies.json";
-const HL_META_PATH: &str = "/tmp/scopeball-hl-meta.json";
-const HL_MIDS_PATH: &str = "/tmp/scopeball-hl-allmids.json";
+const POLICIES_PATH: &str = "/tmp/dambi-gitbook-perp/perp-policies.json";
+const HL_META_PATH: &str = "/tmp/dambi-hl-meta.json";
+const HL_MIDS_PATH: &str = "/tmp/dambi-hl-allmids.json";
 
 #[derive(Debug, Deserialize)]
 struct GitbookPolicy {

@@ -431,7 +431,7 @@ async fn google_redirect_when_env_configured() {
     assert!(location.contains("client_id=test-client-id"));
     let set_cookie = resp.headers().get("set-cookie").unwrap().to_str().unwrap();
     assert!(
-        set_cookie.contains("scopeball_oauth_state="),
+        set_cookie.contains("dambi_oauth_state="),
         "cookie={set_cookie}"
     );
     assert!(set_cookie.contains("HttpOnly"), "cookie={set_cookie}");

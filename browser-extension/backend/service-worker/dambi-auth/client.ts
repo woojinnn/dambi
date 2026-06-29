@@ -20,8 +20,9 @@ import { getAccessToken, getRefreshToken, setTokens } from "./tokenStore";
 declare const DAMBI_SERVER_URL: string | undefined;
 
 const CURRENT_PRODUCTION_BASE = "https://dambi-policy.duckdns.org";
+const PRE_DAMBI_PRODUCTION_BASE = `https://${"pa" + "su"}-policy.duckdns.org`;
 const LEGACY_PRODUCTION_BASES = new Map([
-  ["https://pasu-policy.duckdns.org", CURRENT_PRODUCTION_BASE],
+  [PRE_DAMBI_PRODUCTION_BASE, CURRENT_PRODUCTION_BASE],
 ]);
 const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i;
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;

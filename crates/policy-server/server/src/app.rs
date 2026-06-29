@@ -919,7 +919,7 @@ const GOPLUS_MALICIOUS_FLAGS: &[&str] = &[
     "blackmail_activities",
 ];
 
-/// EIP-155 chain ids where `GoPlus` `token_security` is supported AND `ScopeBall`
+/// EIP-155 chain ids where `GoPlus` `token_security` is supported AND `Dambi`
 /// collects token enrichment. Outside this set `token.security_flags` stays dormant
 /// rather than calling and mis-keying on an unsupported chain. Widen by adding ids.
 const TOKEN_SECURITY_CHAINS: &[i64] = &[1, 10, 8453, 42161];

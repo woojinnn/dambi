@@ -1,11 +1,21 @@
-# dambi
+# Dambi
 
-Wallet-side transaction & signature policy engine. **dambi** intercepts wallet
-RPC in the browser, decodes each transaction or EIP-712 signature into a typed
-semantic **action**, and evaluates that action against a Cedar policy set —
-warning or blocking before the user signs.
+[![CI](https://github.com/woojinnn/dambi/actions/workflows/ci.yml/badge.svg)](https://github.com/woojinnn/dambi/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/woojinnn/dambi?sort=semver)](https://github.com/woojinnn/dambi/releases/latest)
 
-The repo is a hybrid Rust + TypeScript monorepo:
+**Dambi** is an open-source wallet-side transaction and signature policy engine
+for Web3 signing safety. It maintains a reusable Rust/WASM policy evaluator,
+declarative EVM calldata and EIP-712 decoder registry, protocol coverage tests,
+and browser enforcement surfaces so wallet actions can be decoded, reviewed,
+and evaluated before the user signs.
+
+At runtime, Dambi intercepts wallet RPC in the browser, decodes each transaction,
+typed signature, or supported venue order into a semantic **action**, and
+evaluates that action against a Cedar policy set — warning or blocking before
+the signature leaves the wallet.
+
+The repository is a hybrid Rust + TypeScript monorepo:
 
 - a **Rust/Cedar policy engine** compiled to WASM and embedded in the extension,
 - a **browser extension** (Chrome MV3 / Firefox MV2) that hosts that WASM and a
@@ -14,6 +24,34 @@ The repo is a hybrid Rust + TypeScript monorepo:
   state deltas,
 - a **registry** (`registryV2`) of adapter manifests + token metadata that drives
   decoding.
+
+## OSS Maintainer Workflows
+
+Dambi's public contribution surface is the decoder and policy infrastructure,
+not just the packaged browser extension. Useful contributions include:
+
+- adding or correcting declarative protocol manifests under `registryV2/`,
+- expanding EVM calldata, EIP-712, and venue-order decoder coverage,
+- adding real/synthetic regression fixtures for high-risk wallet actions,
+- improving Cedar policy schemas and `ActionBody` lowering,
+- hardening fail-closed behavior in the extension service worker and WASM bridge,
+- improving release, registry, and security automation.
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). Security-sensitive reports should
+follow [SECURITY.md](SECURITY.md). Maintainer roles and merge/release ownership
+are documented in [GOVERNANCE.md](GOVERNANCE.md).
+
+## Roadmap
+
+Current near-term OSS work is tracked through public GitHub issues and
+milestones. The active focus areas are:
+
+- decoder registry hardening and protocol onboarding review automation,
+- policy regression generation for wallet-draining and signature-risk cases,
+- Codex-assisted PR review for manifest, schema, and lowering changes,
+- release checks for Chrome Web Store and registry bundle publication,
+- security review of wallet interception, typed-data normalization, and
+  fail-closed paths.
 
 ## Architecture
 

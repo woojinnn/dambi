@@ -4,10 +4,10 @@
      · wrapped in initLayoutModes(root) with DOM access scoped to `root`
        (document.body classes stay on body — the modes CSS keys on `body.*`),
      · the Tweaks panel (buildPanel/renderPanel/persist/postMessage) is gated
-       behind window.PASU_EDIT_HOST so no panel DOM leaks into the dashboard,
+       behind window.DAMBI_EDIT_HOST so no panel DOM leaks into the dashboard,
      · listeners are tracked and removed in teardown.
-   Reads live wallet-risk summary from assets-app (window.PASU_getSummary + the
-   `pasu:render` event). */
+   Reads live wallet-risk summary from assets-app (window.DAMBI_getSummary + the
+   `dambi:render` event). */
 
 import {
   escapeAttr,
@@ -40,11 +40,11 @@ interface ModeSummary {
 export function initLayoutModes(root: HTMLElement): () => void {
   "use strict";
 
-  const TW: ModeTweaks = (window.PASU_TWEAKS as ModeTweaks) || { layoutMode: "segment", alertStrip: true, segmentDefault: "holdings" };
+  const TW: ModeTweaks = (window.DAMBI_TWEAKS as ModeTweaks) || { layoutMode: "segment", alertStrip: true, segmentDefault: "holdings" };
 
   // i18n bridge (read at render time; falls back to key in standalone prototype).
   const Tr = (k: string, vars?: Record<string, unknown>): string =>
-    window.PASU_T ? window.PASU_T(k, vars) : k;
+    window.DAMBI_T ? window.DAMBI_T(k, vars) : k;
 
   const SECTIONS: Array<{ key: string; labelKey?: string; label?: string }> = [
     { key: "holdings", labelKey: "assets.sections.holdings" },
@@ -64,7 +64,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
 
   let activeSeg = TW.segmentDefault || "holdings";
   let currentMode = TW.layoutMode || "stack";
-  let lastSummary: ModeSummary | null = typeof window.PASU_getSummary === "function" ? (window.PASU_getSummary() as ModeSummary) : null;
+  let lastSummary: ModeSummary | null = typeof window.DAMBI_getSummary === "function" ? (window.DAMBI_getSummary() as ModeSummary) : null;
   let scrollSpy: (() => void) | null = null;
 
   // ── helpers ───────────────────────────────────────────────────────────────
@@ -555,10 +555,10 @@ export function initLayoutModes(root: HTMLElement): () => void {
     applyMode();
     syncPanel();
   };
-  document.addEventListener("pasu:render", renderHandler);
+  document.addEventListener("dambi:render", renderHandler);
 
   // ════════════════════════════════════════════════════════════════════════
-  //  Tweaks panel — gated behind PASU_EDIT_HOST (dashboard never enables it)
+  //  Tweaks panel — gated behind DAMBI_EDIT_HOST (dashboard never enables it)
   // ════════════════════════════════════════════════════════════════════════
   let panel: HTMLElement | null = null;
 
@@ -567,7 +567,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
   }
 
   function postEditHostMessage(message: Record<string, unknown>): void {
-    if (!window.PASU_EDIT_HOST) return;
+    if (!window.DAMBI_EDIT_HOST) return;
     window.parent.postMessage(message, editHostTargetOrigin());
   }
 
@@ -576,7 +576,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
   }
 
   function persist(edits: Record<string, unknown>): void {
-    if (!window.PASU_EDIT_HOST) return;
+    if (!window.DAMBI_EDIT_HOST) return;
     try {
       postEditHostMessage({ type: "__edit_mode_set_keys", edits: edits });
     } catch (err) {
@@ -585,7 +585,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
   }
 
   function buildPanel(): void {
-    if (!window.PASU_EDIT_HOST) return;
+    if (!window.DAMBI_EDIT_HOST) return;
     panel = document.createElement("div");
     panel.className = "tw-panel";
     panel.id = "tw-panel";
@@ -737,7 +737,7 @@ export function initLayoutModes(root: HTMLElement): () => void {
   }
   function hidePanel(dismiss: boolean): void {
     if (panel) panel.hidden = true;
-    if (dismiss && window.PASU_EDIT_HOST) {
+    if (dismiss && window.DAMBI_EDIT_HOST) {
       try {
         postEditHostMessage({ type: "__edit_mode_dismissed" });
       } catch (err) {
@@ -746,19 +746,19 @@ export function initLayoutModes(root: HTMLElement): () => void {
     }
   }
 
-  // ── Tweaks host protocol — only when PASU_EDIT_HOST ────────────────────────
+  // ── Tweaks host protocol — only when DAMBI_EDIT_HOST ────────────────────────
   const messageHandler = function (e: MessageEvent) {
     if (!isTrustedEditHostMessage(e)) return;
     const d = e.data || {};
     if (d.type === "__activate_edit_mode") showPanel();
     else if (d.type === "__deactivate_edit_mode") hidePanel(false);
   };
-  if (window.PASU_EDIT_HOST) window.addEventListener("message", messageHandler);
+  if (window.DAMBI_EDIT_HOST) window.addEventListener("message", messageHandler);
 
   // ── boot ──────────────────────────────────────────────────────────────────
   buildPanel();
   applyMode();
-  if (window.PASU_EDIT_HOST) {
+  if (window.DAMBI_EDIT_HOST) {
     try {
       postEditHostMessage({ type: "__edit_mode_available" });
     } catch (err) {
@@ -768,8 +768,8 @@ export function initLayoutModes(root: HTMLElement): () => void {
 
   return function teardown() {
     root.removeEventListener("click", clickHandler);
-    document.removeEventListener("pasu:render", renderHandler);
-    if (window.PASU_EDIT_HOST) window.removeEventListener("message", messageHandler);
+    document.removeEventListener("dambi:render", renderHandler);
+    if (window.DAMBI_EDIT_HOST) window.removeEventListener("message", messageHandler);
     if (scrollSpy) {
       window.removeEventListener("scroll", scrollSpy);
       scrollSpy = null;

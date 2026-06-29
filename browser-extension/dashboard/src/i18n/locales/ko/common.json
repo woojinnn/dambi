@@ -36,7 +36,7 @@
   },
   "settings": {
     "title": "설정 — 서버 환경",
-    "desc": "대시보드 + 서비스워커가 호출할 policy-server 주소. 비우면 빌드 기본값 (<code>PASU_SERVER_URL</code>)을 사용합니다.",
+    "desc": "대시보드 + 서비스워커가 호출할 policy-server 주소. 비우면 빌드 기본값 (<code>DAMBI_SERVER_URL</code>)을 사용합니다.",
     "presetLocal": "로컬 (테스트)",
     "presetProd": "프로덕션",
     "urlPlaceholder": "http://127.0.0.1:8788  (비우면 빌드 기본값)",

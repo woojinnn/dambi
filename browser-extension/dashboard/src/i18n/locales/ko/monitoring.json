@@ -124,7 +124,7 @@
     "action": "철회",
     "title": "ERC-20 approve 철회",
     "copyJson": "JSON 복사",
-    "desc": "아래는 <code>approve(spender, 0)</code> 호출에 필요한 calldata입니다. 지갑(MetaMask 등)에서 직접 트랜잭션으로 보내야 실제로 철회됩니다. Pasu 백엔드는 절대 자동 전송하지 않습니다.",
+    "desc": "아래는 <code>approve(spender, 0)</code> 호출에 필요한 calldata입니다. 지갑(MetaMask 등)에서 직접 트랜잭션으로 보내야 실제로 철회됩니다. Dambi 백엔드는 절대 자동 전송하지 않습니다.",
     "target": "대상",
     "building": "calldata 빌드 중…",
     "failed": "실패: {{error}}"

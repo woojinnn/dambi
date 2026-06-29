@@ -1,6 +1,6 @@
 /**
- * ⚠️ GENERATED — wallet-guardians/pasu-docs 전체 임포트 데모 시드.
- * 생성: scripts/import-pasu-docs/import.mjs (직접 수정 금지, 재생성하세요).
+ * ⚠️ GENERATED — wallet-guardians/dambi-docs 전체 임포트 데모 시드.
+ * 생성: scripts/import-dambi-docs/import.mjs (직접 수정 금지, 재생성하세요).
  * 로컬에서 마켓 화면을 채우기 위한 폴백. 실데이터 올라오면 market.ts 의
  * import 를 "./market-seed-beginner" 로 되돌리면 됩니다.
  */
@@ -3622,7 +3622,7 @@ const POLICIES: SeedPol[] = [
     "name_en": "Unsupported Protocol Signature Request",
     "category": "Others",
     "severity": "warn",
-    "cedar": "@id(\"unknown-blind-sign-warn\")\n@severity(\"warn\")\n@reason(\"이 트랜잭션은 PASU의 해석 범위 밖에 있습니다. 안전한 프로토콜인지 서명 전 검토하세요.\")\nforbid(principal, action == Core::Action::\"Unknown\", resource);",
+    "cedar": "@id(\"unknown-blind-sign-warn\")\n@severity(\"warn\")\n@reason(\"이 트랜잭션은 DAMBI의 해석 범위 밖에 있습니다. 안전한 프로토콜인지 서명 전 검토하세요.\")\nforbid(principal, action == Core::Action::\"Unknown\", resource);",
     "manifest": {
       "id": "unknown-blind-sign-warn",
       "schema_version": 2,

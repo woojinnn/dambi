@@ -1,16 +1,16 @@
-/* Pasu Assets — wallet drilldown (L1 ↔ L2) + lens toggle (assets/risk).
+/* Dambi Assets — wallet drilldown (L1 ↔ L2) + lens toggle (assets/risk).
    Ported from the ASS_v2 prototype (assets-app.js). The render functions are
    UNCHANGED — same output HTML (class names / structure / text). Only:
      · the six data definitions (WLABEL/WMETA/AGG/PW/APPR/PEND + sel) read from
-       window.PASU_DATA (live data), falling back to the original demo literals
+       window.DAMBI_DATA (live data), falling back to the original demo literals
        so the prototype still runs standalone,
      · renderWalletChips() rebuilds the wallet switcher from WLABEL/WMETA,
-     · renderHl() fills the HL card body from window.PASU_DATA.HL,
+     · renderHl() fills the HL card body from window.DAMBI_DATA.HL,
      · the HL gate is capability-based (any wallet may have an HL account),
      · DOM access is scoped to `root` (no document.getElementById),
      · inline onerror= is removed (CSP) in favor of a delegated capture listener,
      · render/buildSummary are exposed on window for the React wrapper + layout-modes,
-     · wallet-chip clicks bridge to window.PASU_SET_SEL (URL-driven reselection). */
+     · wallet-chip clicks bridge to window.DAMBI_SET_SEL (URL-driven reselection). */
 
 import {
   escapeAttr,
@@ -18,7 +18,7 @@ import {
   safeClassToken,
 } from "./html-safe";
 
-// ── PASU_DATA shapes (the adapter fills these; demo literals share the shape) ──
+// ── DAMBI_DATA shapes (the adapter fills these; demo literals share the shape) ──
 type RiskTagArr = string[];
 interface AggRow {
   sym: string;
@@ -95,7 +95,7 @@ interface HlAccountView {
   positions: HlPos[];
   orders: HlOrder[];
 }
-interface PasuDataShape {
+interface DambiDataShape {
   WLABEL?: Record<string, string>;
   WMETA?: Record<string, WMetaEntry>;
   AGG?: AggRow[];
@@ -110,13 +110,13 @@ interface PasuDataShape {
 export function initAssetsApp(root: HTMLElement): () => void {
   "use strict";
 
-  let D: PasuDataShape = (window.PASU_DATA as PasuDataShape) || {};
+  let D: DambiDataShape = (window.DAMBI_DATA as DambiDataShape) || {};
 
   // i18n bridge (set by Assets2Page before boot). Read at render time so language
   // switches reflect without re-init. Falls back to the key in the standalone
-  // prototype (PASU_T absent).
+  // prototype (DAMBI_T absent).
   const T = (k: string, vars?: Record<string, unknown>): string =>
-    window.PASU_T ? window.PASU_T(k, vars) : k;
+    window.DAMBI_T ? window.DAMBI_T(k, vars) : k;
 
   let WLABEL: Record<string, string> =
     D.WLABEL || { main: "메인 지갑", trade: "트레이딩", cold: "콜드 스토리지", savings: "적립 지갑", airdrop: "에어드랍" };
@@ -299,18 +299,18 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (span) span.style.display = "none";
   }
   // window 노출(원본 호환) — 다른 코드/디버그용.
-  window.PASU_imgFail = imgFail;
-  window.PASU_badgeFail = badgeFail;
+  window.DAMBI_imgFail = imgFail;
+  window.DAMBI_badgeFail = badgeFail;
 
   function tokenBase(r: AggRow): string {
-    const F = window.PASU_TOKEN_LOGO_FILES || {};
+    const F = window.DAMBI_TOKEN_LOGO_FILES || {};
     if (Object.prototype.hasOwnProperty.call(F, r.sym)) {
       // 로컬 번들 브랜드 로고(public/picture/tokens/, same-origin). 실패 시 글자 아바타 폴백.
       return (
         '<span class="asset-logo"><img src="picture/tokens/' + escapeAttr(F[r.sym]) +
         '.svg" alt="" loading="lazy" data-sym="' + escapeAttr(r.sym) +
         '" data-kind="' + escapeAttr(r.kind) +
-        '" onerror="window.PASU_imgFail&&window.PASU_imgFail(this)"></span>'
+        '" onerror="window.DAMBI_imgFail&&window.DAMBI_imgFail(this)"></span>'
       );
     }
     return '<span class="asset-ic ' + safeClassToken(r.kind) + '">' + escapeHtml(r.sym.slice(0, 1).toUpperCase()) + "</span>";
@@ -348,7 +348,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
   // inline SVG seeded by donuts.ts. Unknown symbols/chains fall back (letter / no badge).
   function assetAvatar(r: AggRow): string {
     const base = tokenBase(r);
-    const L = (window.PASU_CHAIN_LOGOS && window.PASU_CHAIN_LOGOS.byName) || {};
+    const L = (window.DAMBI_CHAIN_LOGOS && window.DAMBI_CHAIN_LOGOS.byName) || {};
     const badge = Object.prototype.hasOwnProperty.call(L, r.chain) ? '<span class="chain-badge">' + L[r.chain] + "</span>" : "";
     return '<span class="asset-av">' + base + badge + "</span>";
   }
@@ -608,7 +608,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
 
   // ── Hyperliquid (capability-gated: any wallet may hold an HL account) ──────
   function hlMap(): Record<string, HlAccountView> {
-    return ((window.PASU_DATA as PasuDataShape | undefined)?.HL) || {};
+    return ((window.DAMBI_DATA as DambiDataShape | undefined)?.HL) || {};
   }
   function hlList(): HlAccountView[] {
     const HL = hlMap();
@@ -958,12 +958,12 @@ export function initAssetsApp(root: HTMLElement): () => void {
   }
 
   // ── live-data sync ────────────────────────────────────────────────────────
-  // React re-injects window.PASU_DATA on every data/selection change and then
-  // calls PASU_RENDER(). Re-read the injected data into our locals each render so
+  // React re-injects window.DAMBI_DATA on every data/selection change and then
+  // calls DAMBI_RENDER(). Re-read the injected data into our locals each render so
   // the prototype's render fns (which read these vars) reflect the live model —
   // including `sel` (URL-driven wallet selection → L1↔L2 drilldown).
   function syncData(): void {
-    const next = window.PASU_DATA as PasuDataShape | undefined;
+    const next = window.DAMBI_DATA as DambiDataShape | undefined;
     if (!next) return;
     D = next;
     if (next.WLABEL) WLABEL = next.WLABEL;
@@ -986,7 +986,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     renderApprovals();
     renderHl();
     renderPending();
-    document.dispatchEvent(new CustomEvent("pasu:render", { detail: buildSummary() }));
+    document.dispatchEvent(new CustomEvent("dambi:render", { detail: buildSummary() }));
   }
 
   function setSel(next: string): void {
@@ -1007,7 +1007,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     const chip = (e.target as HTMLElement).closest(".ws-chip");
     if (chip) {
       const key = chip.getAttribute("data-wallet") || "all";
-      if (window.PASU_SET_SEL) window.PASU_SET_SEL(key);
+      if (window.DAMBI_SET_SEL) window.DAMBI_SET_SEL(key);
       else setSel(key);
     }
   };
@@ -1019,7 +1019,7 @@ export function initAssetsApp(root: HTMLElement): () => void {
     const j = (e.target as HTMLElement).closest(".wallet-jump");
     if (j && j.getAttribute("data-jump")) {
       const key = j.getAttribute("data-jump") || "all";
-      if (window.PASU_SET_SEL) window.PASU_SET_SEL(key);
+      if (window.DAMBI_SET_SEL) window.DAMBI_SET_SEL(key);
       else setSel(key);
     }
   };
@@ -1048,13 +1048,13 @@ export function initAssetsApp(root: HTMLElement): () => void {
   root.addEventListener("error", errHandler, true);
 
   // ── window exposure for the React wrapper + layout-modes.ts ───────────────
-  window.PASU_RENDER = render;
-  window.PASU_RENDER_STATIC = function () {
+  window.DAMBI_RENDER = render;
+  window.DAMBI_RENDER_STATIC = function () {
     syncData();
     renderWalletChips();
-    if (window.PASU_REBUILD_DONUTS) window.PASU_REBUILD_DONUTS();
+    if (window.DAMBI_REBUILD_DONUTS) window.DAMBI_REBUILD_DONUTS();
   };
-  window.PASU_getSummary = buildSummary;
+  window.DAMBI_getSummary = buildSummary;
 
   render();
 
@@ -1064,8 +1064,8 @@ export function initAssetsApp(root: HTMLElement): () => void {
     if (holdingsHostEl) holdingsHostEl.removeEventListener("click", holdingsHandler);
     if (filterEl) filterEl.removeEventListener("input", filterHandler);
     root.removeEventListener("error", errHandler, true);
-    window.PASU_RENDER = undefined;
-    window.PASU_RENDER_STATIC = undefined;
-    window.PASU_getSummary = undefined;
+    window.DAMBI_RENDER = undefined;
+    window.DAMBI_RENDER_STATIC = undefined;
+    window.DAMBI_getSummary = undefined;
   };
 }

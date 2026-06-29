@@ -10,8 +10,8 @@ import { resolveOrderSymbol } from "../venue/resolve-order-symbol";
 
 const ENDPOINT = "https://api.hyperliquid.xyz/exchange";
 const HOSTNAME = "app.hyperliquid.xyz";
-const HL_META_PATH = "/tmp/scopeball-hl-meta.json";
-const HL_MIDS_PATH = "/tmp/scopeball-hl-allmids.json";
+const HL_META_PATH = "/tmp/dambi-hl-meta.json";
+const HL_MIDS_PATH = "/tmp/dambi-hl-allmids.json";
 // Local-only fixtures (HL meta/allMids snapshots). Absent in CI -> skip the suite.
 const HAS_FIXTURES = fs.existsSync(HL_META_PATH) && fs.existsSync(HL_MIDS_PATH);
 

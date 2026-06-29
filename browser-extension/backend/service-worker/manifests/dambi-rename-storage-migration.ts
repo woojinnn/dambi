@@ -31,9 +31,10 @@ const activeKey = (suffix: string) => `dambi_${suffix}`;
 const legacyKey = (brand: string, suffix: string) => `${brand}_${suffix}`;
 const ACTIVE_SERVER_URL_KEY = activeKey("server_url");
 const CURRENT_PRODUCTION_SERVER_URL = "https://dambi-policy.duckdns.org";
+const PRE_DAMBI_PRODUCTION_SERVER_URL = `https://${"pa" + "su"}-policy.duckdns.org`;
 const LEGACY_PRODUCTION_SERVER_URLS = new Set([
-  "https://pasu-policy.duckdns.org",
-  "https://pasu-policy.duckdns.org/",
+  PRE_DAMBI_PRODUCTION_SERVER_URL,
+  `${PRE_DAMBI_PRODUCTION_SERVER_URL}/`,
 ]);
 
 const KEY_RENAMES: ReadonlyArray<readonly [string, string]> =

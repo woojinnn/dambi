@@ -4,10 +4,10 @@
  * center, hover preview, and the two-way cross-link controller are unchanged.
  * Only the data source changed — instead of the hardcoded WALLETS/PLACES/
  * HOLDINGS demo, the two donut configs (+ adjacency) come from
- * `window.PASU_DATA.donut` (the live DonutData from useAssetsData). A small
- * fallback keeps the prototype rendering standalone when PASU_DATA is absent.
+ * `window.DAMBI_DATA.donut` (the live DonutData from useAssetsData). A small
+ * fallback keeps the prototype rendering standalone when DAMBI_DATA is absent.
  *
- * KEEP: window.PASU_CHAIN_LOGOS (inline SVG) / window.PASU_TOKEN_LOGO_FILES
+ * KEEP: window.DAMBI_CHAIN_LOGOS (inline SVG) / window.DAMBI_TOKEN_LOGO_FILES
  * (symbol→local bundled filename) are seeded here, consumed by assets-app's
  * chain chips + token avatars.
  *
@@ -35,16 +35,16 @@ interface DonutCfg {
   total: number;
   items: DonutCfgItem[];
 }
-interface PasuDonutGroup {
+interface DambiDonutGroup {
   centerLabel: string;
   total: number;
   items: Array<{ key: string; name: string; color: string; usd: number; pct: number; chainName?: string }>;
 }
-interface PasuDonut {
-  wallets: PasuDonutGroup;
-  assets: PasuDonutGroup;
+interface DambiDonut {
+  wallets: DambiDonutGroup;
+  assets: DambiDonutGroup;
   /** Per-wallet asset distribution (자산 분포 scoped to one wallet). */
-  walletAssets?: Record<string, PasuDonutGroup>;
+  walletAssets?: Record<string, DambiDonutGroup>;
   adjacency: { walletToAsset: Record<string, string[]>; assetToWallet: Record<string, string[]> };
 }
 
@@ -53,7 +53,7 @@ export function initDonuts(root: HTMLElement): () => void {
   const GAP = 3; // dash gap between segments
   // i18n bridge (read at render time; falls back to key in standalone prototype).
   const T = (k: string, vars?: Record<string, unknown>): string =>
-    window.PASU_T ? window.PASU_T(k, vars) : k;
+    window.DAMBI_T ? window.DAMBI_T(k, vars) : k;
 
   // 실제 체인 로고 (브랜드 마크) — 자산 분포 도넛 범례 + Holdings 체인 칩 공용
   const LOGOS: Record<string, string> = {
@@ -64,7 +64,7 @@ export function initDonuts(root: HTMLElement): () => void {
     hl: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#173E37"/><g stroke="#98FCE4" stroke-width="2.3" stroke-linecap="round" fill="none"><path d="M7.7 7v10"/><path d="M16.3 7v10"/><path d="M7.7 12.2c1.6-2.3 7-2.3 8.6 0"/></g></svg>',
   };
   // assets-app.js(체인 칩)에서 재사용
-  window.PASU_CHAIN_LOGOS = {
+  window.DAMBI_CHAIN_LOGOS = {
     byName: { Ethereum: LOGOS.eth, Base: LOGOS.base, Arbitrum: LOGOS.arb, Hyperliquid: LOGOS.hl },
   };
 
@@ -73,7 +73,7 @@ export function initDonuts(root: HTMLElement): () => void {
   // 외부 CDN 미사용(보유자산 유출 없음). 심볼→파일명(소문자) 맵; 변형 심볼은 대표 로고
   // 재사용(WETH/cbETH→eth, USDC.e·USDbC→usdc, POL/WMATIC→matic, wstETH→steth). 미수록
   // 심볼은 글자 아바타로 폴백.
-  window.PASU_TOKEN_LOGO_FILES = {
+  window.DAMBI_TOKEN_LOGO_FILES = {
     ETH: "eth", WETH: "eth", cbETH: "eth",
     USDC: "usdc", "USDC.e": "usdc", USDbC: "usdc",
     USDT: "usdt", DAI: "dai", FRAX: "frax", TUSD: "tusd", BUSD: "busd", GUSD: "gusd",
@@ -88,7 +88,7 @@ export function initDonuts(root: HTMLElement): () => void {
 
   function chainImgByName(name: string | undefined): string {
     if (!name) return "";
-    const L = (window.PASU_CHAIN_LOGOS && window.PASU_CHAIN_LOGOS.byName) || {};
+    const L = (window.DAMBI_CHAIN_LOGOS && window.DAMBI_CHAIN_LOGOS.byName) || {};
     return Object.prototype.hasOwnProperty.call(L, name) ? L[name] : "";
   }
 
@@ -96,7 +96,7 @@ export function initDonuts(root: HTMLElement): () => void {
   // build() reads cfg.{centerK,total,items[].{key,name,color,usd,pct,logo}}.
   // DonutData groups carry {centerLabel,total,items[].{...,chainName}} — map
   // centerLabel→centerK and chainName→logo (chain brand image / inline svg).
-  function toCfg(g: PasuDonutGroup | null | undefined, fallback: DonutCfg): DonutCfg {
+  function toCfg(g: DambiDonutGroup | null | undefined, fallback: DonutCfg): DonutCfg {
     if (!g) return fallback;
     return {
       centerK: g.centerLabel,
@@ -112,13 +112,13 @@ export function initDonuts(root: HTMLElement): () => void {
     };
   }
 
-  // Standalone fallback (PASU_DATA absent) — empty donuts, no demo data.
+  // Standalone fallback (DAMBI_DATA absent) — empty donuts, no demo data.
   const FALLBACK: DonutCfg = { centerK: T("assets.donut.assetCenter"), total: 0, items: [] };
 
-  function readDonut(): PasuDonut | null {
-    return (window.PASU_DATA as { donut?: PasuDonut } | undefined)?.donut ?? null;
+  function readDonut(): DambiDonut | null {
+    return (window.DAMBI_DATA as { donut?: DambiDonut } | undefined)?.donut ?? null;
   }
-  let dd: PasuDonut | null = readDonut();
+  let dd: DambiDonut | null = readDonut();
 
   const DONUTS: Record<string, DonutCfg> = {
     "donut-wallets": dd ? toCfg(dd.wallets, FALLBACK) : FALLBACK,
@@ -485,7 +485,7 @@ export function initDonuts(root: HTMLElement): () => void {
     });
   }
 
-  window.PASU_REBUILD_DONUTS = function () {
+  window.DAMBI_REBUILD_DONUTS = function () {
     dd = readDonut();
     DONUTS["donut-wallets"] = dd ? toCfg(dd.wallets, FALLBACK) : FALLBACK;
     DONUTS["donut-assets"] = dd ? toCfg(dd.assets, FALLBACK) : FALLBACK;
@@ -511,7 +511,7 @@ export function initDonuts(root: HTMLElement): () => void {
 
   return function teardown() {
     root.removeEventListener("error", onError, true);
-    window.PASU_REBUILD_DONUTS = undefined;
+    window.DAMBI_REBUILD_DONUTS = undefined;
   };
 }
 

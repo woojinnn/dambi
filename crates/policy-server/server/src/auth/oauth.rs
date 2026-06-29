@@ -39,7 +39,7 @@ use crate::auth::jwt::{self, TokenType};
 
 const OAUTH_STATE_SUBJECT: &str = "oauth-state";
 const OAUTH_STATE_TTL_SECS: i64 = jwt::OAUTH_STATE_TTL_SECS;
-const OAUTH_STATE_COOKIE: &str = "scopeball_oauth_state";
+const OAUTH_STATE_COOKIE: &str = "dambi_oauth_state";
 const OAUTH_STATE_COOKIE_PATH: &str = "/auth/google";
 const OAUTH_HTTP_TIMEOUT_SECS: u64 = 10;
 
@@ -218,7 +218,7 @@ pub async fn google_callback(
     response.headers_mut().insert(
         header::SET_COOKIE,
         HeaderValue::from_static(
-            "scopeball_oauth_state=; Max-Age=0; Path=/auth/google; HttpOnly; SameSite=Lax",
+            "dambi_oauth_state=; Max-Age=0; Path=/auth/google; HttpOnly; SameSite=Lax",
         ),
     );
     response
@@ -1049,7 +1049,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
-            HeaderValue::from_static("other=value; scopeball_oauth_state=nonce-123"),
+            HeaderValue::from_static("other=value; dambi_oauth_state=nonce-123"),
         );
         assert_eq!(
             oauth_state_nonce_from_headers(&headers).as_deref(),

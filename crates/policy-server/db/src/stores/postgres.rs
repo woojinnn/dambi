@@ -1320,7 +1320,7 @@ mod tests {
         db.migrate().await.unwrap();
 
         let temp_dir = std::env::temp_dir().join(format!(
-            "scopeball-policy-db-migrations-{}",
+            "dambi-policy-db-migrations-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();

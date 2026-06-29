@@ -248,7 +248,7 @@ mod tests {
         let previous = std::env::var_os("DAMBI_SYNC_CONFIG");
         std::env::set_var(
             "DAMBI_SYNC_CONFIG",
-            "/tmp/scopeball-readiness-missing-sync-config.toml",
+            "/tmp/dambi-readiness-missing-sync-config.toml",
         );
         let mut config = ServerConfig::for_tests();
         config.require_sync_config = true;
